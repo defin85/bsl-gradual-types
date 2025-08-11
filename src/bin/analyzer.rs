@@ -2,10 +2,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use bsl_gradual_types::core::{
-    resolution::{BasicTypeResolver, TypeResolver},
-    context::Context,
-};
+use bsl_gradual_types::core::resolution::BasicTypeResolver;
 use tracing::info;
 
 #[derive(Parser)]

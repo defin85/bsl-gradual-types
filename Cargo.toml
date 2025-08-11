@@ -1,6 +1,6 @@
 [package]
 name = "bsl-gradual-types"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["BSL Type System Team"]
 description = "Gradual type system for 1C:Enterprise BSL with evolutionary architecture"
@@ -32,6 +32,7 @@ quick-xml = { version = "0.31", features = ["serialize", "overlapped-lists"] }
 roxmltree = "0.19"
 encoding_rs = "0.8"
 encoding_rs_io = "0.1"
+nom = "7.1"
 
 # File system
 walkdir = "2.4"
@@ -50,6 +51,9 @@ lsp-types = "0.95"
 lru = "0.12"
 bincode = "1.3"
 sha2 = "0.10"
+
+# CLI output
+colored = "2.0"
 
 # Optional ML support (for future)
 # candle = { version = "0.3", optional = true }
@@ -71,6 +75,14 @@ path = "src/bin/build_index.rs"
 [[bin]]
 name = "lsp-server"
 path = "src/bin/lsp_server.rs"
+
+[[bin]]
+name = "type-check"
+path = "src/bin/type_check.rs"
+
+[[bin]]
+name = "demo"
+path = "src/bin/demo.rs"
 
 [profile.dev]
 opt-level = 0

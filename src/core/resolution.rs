@@ -48,7 +48,7 @@ impl BasicTypeResolver {
 }
 
 impl TypeResolver for BasicTypeResolver {
-    fn resolve(&self, expression: &str, context: Option<&Context>) -> TypeResolution {
+    fn resolve(&self, expression: &str, _context: Option<&Context>) -> TypeResolution {
         // MVP: Simple direct resolution
         
         // Try to parse expression
@@ -118,6 +118,7 @@ impl BasicTypeResolver {
 enum Expression {
     GlobalProperty(String, String),
     Constructor(String, Vec<String>),
+    #[allow(dead_code)] // TODO: Implement method call resolution in Phase 2
     MethodCall(String, String, Vec<String>),
 }
 

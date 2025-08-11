@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check:*)",
+      "Bash(cargo:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rm:*)",
+      "Bash(del \"C:\\1CProject\\bsl-gradual-types\\src\\adapters\\config_parser.rs\")",
+      "Bash(set RUST_BACKTRACE=1)"
+    ],
+    "deny": []
+  }
+}

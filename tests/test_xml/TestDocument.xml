@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<Document>
+		<Properties>
+			<Name>ТестовыйДокумент</Name>
+		</Properties>
+		<ChildObjects>
+			<Attribute>
+				<Properties>
+					<Name>СоставноеПоле</Name>
+					<Type>
+						<v8:Type>cfg:CatalogRef.Контрагенты</v8:Type>
+						<v8:Type>cfg:CatalogRef.Организации</v8:Type>
+						<v8:Type>xs:string</v8:Type>
+					</Type>
+				</Properties>
+			</Attribute>
+			<Attribute>
+				<Properties>
+					<Name>ПростоеПоле</Name>
+					<Type>
+						<v8:Type>xs:decimal</v8:Type>
+					</Type>
+				</Properties>
+			</Attribute>
+		</ChildObjects>
+	</Document>
+</MetaDataObject>

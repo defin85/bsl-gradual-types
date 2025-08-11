@@ -5,11 +5,14 @@
 
 pub mod core;
 pub mod adapters;
+pub mod parser;
 
 pub use core::{
     types::{UnifiedBslType, TypeResolution, Certainty, Contract},
     resolution::TypeResolver,
 };
+
+pub use parser::{BslParser, Statement, Expression};
 
 /// Version of the type system
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

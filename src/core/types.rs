@@ -17,6 +17,12 @@ pub struct TypeResolution {
     
     /// Metadata for debugging and diagnostics
     pub metadata: ResolutionMetadata,
+    
+    /// Active facet for configuration objects
+    pub active_facet: Option<FacetKind>,
+    
+    /// Available facets for this type
+    pub available_facets: Vec<FacetKind>,
 }
 
 /// Confidence levels for type resolution
@@ -59,7 +65,7 @@ pub struct WeightedType {
 }
 
 /// Concrete BSL type
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ConcreteType {
     /// Platform type (Array, Map, etc.)
     Platform(PlatformType),
@@ -75,7 +81,7 @@ pub enum ConcreteType {
 }
 
 /// Platform-provided types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlatformType {
     pub name: String,
     pub methods: Vec<Method>,
@@ -83,11 +89,12 @@ pub struct PlatformType {
 }
 
 /// Configuration-specific types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConfigurationType {
     pub kind: MetadataKind,
     pub name: String,
     pub attributes: Vec<Attribute>,
+    pub tabular_sections: Vec<TabularSection>,
 }
 
 /// Metadata kinds in 1C
@@ -121,7 +128,7 @@ pub enum SpecialType {
 }
 
 /// Method definition
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Method {
     pub name: String,
     pub parameters: Vec<Parameter>,
@@ -129,7 +136,7 @@ pub struct Method {
 }
 
 /// Property definition
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Property {
     pub name: String,
     pub type_: String,
@@ -137,7 +144,7 @@ pub struct Property {
 }
 
 /// Method parameter
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Parameter {
     pub name: String,
     pub type_: Option<String>,
@@ -145,10 +152,20 @@ pub struct Parameter {
 }
 
 /// Configuration attribute
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Attribute {
     pub name: String,
-    pub type_: String,
+    pub type_: String,  // Can be composite like "СправочникСсылка.Контрагенты,СправочникСсылка.Организации,Строка(10)"
+    pub is_composite: bool,  // True if type contains multiple types
+    pub types: Vec<String>,  // Individual types if composite
+}
+
+/// Tabular section of a configuration object
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TabularSection {
+    pub name: String,
+    pub synonym: Option<String>,
+    pub attributes: Vec<Attribute>,
 }
 
 /// Conditional type that depends on runtime conditions
@@ -250,7 +267,7 @@ pub struct Facet {
 }
 
 /// Gradual typing information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GradualInfo {
     pub static_type: Option<StaticType>,
     pub dynamic_contract: Option<Contract>,
@@ -272,7 +289,7 @@ pub struct Contract {
 }
 
 /// Version information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VersionInfo {
     pub platform_version: String,
     pub last_modified: u64,
@@ -287,6 +304,8 @@ impl TypeResolution {
             result: ResolutionResult::Concrete(concrete),
             source: ResolutionSource::Static,
             metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
         }
     }
     
@@ -297,6 +316,8 @@ impl TypeResolution {
             result: ResolutionResult::Dynamic,
             source: ResolutionSource::Static,
             metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
         }
     }
     

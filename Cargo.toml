@@ -1,0 +1,92 @@
+[package]
+name = "bsl-gradual-types"
+version = "0.1.0"
+edition = "2021"
+authors = ["BSL Type System Team"]
+description = "Gradual type system for 1C:Enterprise BSL with evolutionary architecture"
+license = "MIT"
+repository = "https://github.com/yourusername/bsl-gradual-types"
+keywords = ["1c", "bsl", "type-system", "gradual-typing", "static-analysis"]
+categories = ["development-tools", "parser-implementations"]
+
+[workspace]
+members = []
+
+[dependencies]
+# Core dependencies
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+clap = { version = "4.4", features = ["derive"] }
+
+# Data structures
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+indexmap = "2.0"
+dashmap = "6.0"
+arc-swap = "1.6"
+
+# Parsing
+quick-xml = { version = "0.31", features = ["serialize", "overlapped-lists"] }
+roxmltree = "0.19"
+encoding_rs = "0.8"
+encoding_rs_io = "0.1"
+
+# File system
+walkdir = "2.4"
+notify = "6.1"
+globset = "0.4"
+
+# Async runtime (for LSP/MCP)
+tokio = { version = "1.35", features = ["full"] }
+async-trait = "0.1"
+
+# LSP support
+tower-lsp = "0.20"
+lsp-types = "0.95"
+
+# Caching
+lru = "0.12"
+bincode = "1.3"
+sha2 = "0.10"
+
+# Optional ML support (for future)
+# candle = { version = "0.3", optional = true }
+
+[dev-dependencies]
+criterion = "0.5"
+pretty_assertions = "1.4"
+tempfile = "3.8"
+insta = "1.34"
+
+[[bin]]
+name = "bsl-analyzer"
+path = "src/bin/analyzer.rs"
+
+[[bin]]
+name = "build-index"
+path = "src/bin/build_index.rs"
+
+[[bin]]
+name = "lsp-server"
+path = "src/bin/lsp_server.rs"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 1
+
+[features]
+default = ["lsp", "mcp"]
+lsp = []
+mcp = []
+ml-predictions = []  # Future feature

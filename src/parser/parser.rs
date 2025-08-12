@@ -1,15 +1,5 @@
 //! Парсер BSL на основе nom
 
-use nom::{
-    IResult,
-    branch::alt,
-    bytes::complete::{tag, tag_no_case},
-    character::complete::{multispace0, multispace1},
-    combinator::{map, opt, value},
-    multi::{many0, many1, separated_list0},
-    sequence::{preceded, terminated, tuple, delimited},
-};
-
 use super::lexer::{Token, tokenize};
 use super::ast::*;
 

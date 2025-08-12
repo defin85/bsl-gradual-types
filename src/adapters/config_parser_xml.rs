@@ -358,4 +358,59 @@ impl ConfigParserXml {
             ],
         }
     }
+    
+    /// Get metadata object by qualified name (e.g., "Справочник.Контрагенты")
+    pub fn get_metadata(&self, qualified_name: &str) -> Option<&MetadataObject> {
+        self.metadata_cache.get(qualified_name)
+    }
+    
+    /// Get catalog metadata
+    pub fn get_catalog(&self, name: &str) -> Option<&MetadataObject> {
+        let qualified_name = format!("Справочник.{}", name);
+        self.get_metadata(&qualified_name)
+    }
+    
+    /// Get document metadata
+    pub fn get_document(&self, name: &str) -> Option<&MetadataObject> {
+        let qualified_name = format!("Документ.{}", name);
+        self.get_metadata(&qualified_name)
+    }
+    
+    /// Get register metadata
+    pub fn get_register(&self, reg_type: &str, name: &str) -> Option<&MetadataObject> {
+        let qualified_name = format!("{}.{}", reg_type, name);
+        self.get_metadata(&qualified_name)
+    }
+    
+    /// Get all metadata objects
+    pub fn get_all_metadata(&self) -> Vec<&MetadataObject> {
+        self.metadata_cache.values().collect()
+    }
+    
+    /// Load all metadata types from configuration
+    pub fn load_all_types(&mut self) -> Result<Vec<TypeResolution>> {
+        let mut all_resolutions = Vec::new();
+        
+        // Load catalogs
+        if let Ok(resolutions) = self.parse_metadata_objects("Catalogs", MetadataKind::Catalog) {
+            all_resolutions.extend(resolutions);
+        }
+        
+        // Load documents
+        if let Ok(resolutions) = self.parse_metadata_objects("Documents", MetadataKind::Document) {
+            all_resolutions.extend(resolutions);
+        }
+        
+        // Load registers
+        if let Ok(resolutions) = self.parse_metadata_objects("InformationRegisters", MetadataKind::InformationRegister) {
+            all_resolutions.extend(resolutions);
+        }
+        
+        // Load enums
+        if let Ok(resolutions) = self.parse_metadata_objects("Enums", MetadataKind::Enum) {
+            all_resolutions.extend(resolutions);
+        }
+        
+        Ok(all_resolutions)
+    }
 }

@@ -3,7 +3,7 @@
 use crate::core::types::{
     TypeResolution, Certainty, ResolutionResult, ConcreteType, 
     PrimitiveType as CorePrimitiveType, SpecialType, PlatformType,
-    ResolutionSource, Method, Property
+    ResolutionSource
 };
 
 /// Создание примитивного типа

@@ -70,7 +70,7 @@ mod tests {
         let generator = ContractGenerator::new(0.8, ContractMode::Assert);
         
         // Создаём Union тип
-        let mut resolution = TypeResolution {
+        let resolution = TypeResolution {
             certainty: Certainty::Inferred(0.6), // Низкая уверенность
             result: ResolutionResult::Union(vec![
                 bsl_gradual_types::core::types::WeightedType {

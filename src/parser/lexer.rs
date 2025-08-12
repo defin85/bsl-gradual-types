@@ -3,11 +3,11 @@
 use nom::{
     IResult,
     branch::alt,
-    bytes::complete::{tag, tag_no_case, take_while, take_while1},
-    character::complete::{char, multispace0, multispace1, digit1, alphanumeric1},
-    combinator::{map, opt, recognize, value},
-    multi::{many0, many1},
-    sequence::{preceded, tuple, delimited, terminated},
+    bytes::complete::{tag, take_while, take_while1},
+    character::complete::{char, multispace0, digit1},
+    combinator::{opt, recognize, value},
+    multi::many0,
+    sequence::{preceded, tuple},
 };
 
 /// Токены BSL

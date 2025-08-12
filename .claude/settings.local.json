@@ -7,7 +7,15 @@
       "Bash(grep:*)",
       "Bash(rm:*)",
       "Bash(del \"C:\\1CProject\\bsl-gradual-types\\src\\adapters\\config_parser.rs\")",
-      "Bash(set RUST_BACKTRACE=1)"
+      "Bash(set RUST_BACKTRACE=1)",
+      "Bash(rustc:*)",
+      "Bash(del test_query.rs)",
+      "Bash(./target/debug/test-parse-steps.exe)",
+      "Bash(./target/debug/test-simple-query.exe:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(unzip:*)"
     ],
     "deny": []
   }

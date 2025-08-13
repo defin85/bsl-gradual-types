@@ -25,7 +25,9 @@
       "Bash(start type_hierarchy_report.html)",
       "Bash(./target/debug/examples/syntax_helper_parser_demo.exe)",
       "Bash(del \"C:\\1CProject\\bsl-gradual-types\\src\\adapters\\platform_docs.rs\")",
-      "Bash(jq:*)"
+      "Bash(jq:*)",
+      "Bash(touch:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

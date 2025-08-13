@@ -1,6 +1,6 @@
 //! Platform types resolver using syntax helper data
 //! 
-//! Replaces hardcoded platform types with real data from 1C syntax helper
+//! Uses optimized syntax helper parser to extract platform types from documentation
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -10,363 +10,262 @@ use crate::core::types::{
     ResolutionResult, ResolutionSource, TypeResolution, ResolutionMetadata,
     FacetKind,
 };
-use super::syntax_helper_parser::{SyntaxHelperParser, SyntaxHelperDatabase};
+use super::syntax_helper_parser::{
+    SyntaxHelperParser, OptimizationSettings,
+    SyntaxNode, TypeInfo, TypeIndex, SyntaxHelperDatabase,
+};
 
 /// Enhanced platform types resolver using syntax helper data
 pub struct PlatformTypesResolverV2 {
-    syntax_database: Option<SyntaxHelperDatabase>,
+    /// Парсер документации
+    parser: SyntaxHelperParser,
+    /// База данных типов
+    database: Option<SyntaxHelperDatabase>,
+    /// Индексы для быстрого поиска
+    type_index: Option<TypeIndex>,
 }
 
 impl PlatformTypesResolverV2 {
-    /// Creates new resolver
+    /// Creates new resolver with default settings
     pub fn new() -> Self {
         Self {
-            syntax_database: None,
+            parser: SyntaxHelperParser::new(),
+            database: None,
+            type_index: None,
         }
     }
     
-    /// Loads syntax helper data from archives
+    /// Creates resolver with custom optimization settings
+    pub fn with_settings(settings: OptimizationSettings) -> Self {
+        Self {
+            parser: SyntaxHelperParser::with_settings(settings),
+            database: None,
+            type_index: None,
+        }
+    }
+    
+    /// Loads syntax helper data from directory
+    pub fn load_from_directory<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
+        // Парсим директорию с документацией
+        self.parser.parse_directory(path)?;
+        
+        // Экспортируем базу данных и индексы
+        self.database = Some(self.parser.export_database());
+        self.type_index = Some(self.parser.export_index());
+        
+        Ok(())
+    }
+    
+    /// Loads syntax helper data from archives (для совместимости)
     pub fn load_from_archives<P1: AsRef<Path>, P2: AsRef<Path>>(
         &mut self, 
-        context_path: P1, 
-        lang_path: P2
+        _context_path: P1, 
+        _lang_path: P2
     ) -> Result<()> {
-        let mut parser = SyntaxHelperParser::new()
-            .with_context_archive(context_path)
-            .with_lang_archive(lang_path);
-            
-        parser.parse()?;
-        self.syntax_database = Some(parser.database().clone());
-        Ok(())
+        // Для обратной совместимости - теперь нужно указывать директорию
+        anyhow::bail!("load_from_archives is deprecated. Use load_from_directory with extracted archives instead")
     }
     
     /// Loads syntax helper data from saved JSON file
     pub fn load_from_file<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
-        let database = SyntaxHelperParser::load_from_file(path)?;
-        self.syntax_database = Some(database);
+        let json_str = std::fs::read_to_string(path)?;
+        let database: SyntaxHelperDatabase = serde_json::from_str(&json_str)?;
+        self.database = Some(database);
+        
+        // Перестраиваем индексы
+        self.rebuild_indexes();
+        
         Ok(())
+    }
+    
+    /// Saves database to JSON file
+    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        if let Some(ref database) = self.database {
+            let json_str = serde_json::to_string_pretty(database)?;
+            std::fs::write(path, json_str)?;
+        }
+        Ok(())
+    }
+    
+    /// Rebuilds indexes from database
+    fn rebuild_indexes(&mut self) {
+        if let Some(ref database) = self.database {
+            let mut index = TypeIndex::default();
+            
+            for (path, node) in &database.nodes {
+                if let SyntaxNode::Type(type_info) = node {
+                    // Индекс по русскому имени
+                    index.by_russian.insert(
+                        type_info.identity.russian_name.clone(),
+                        path.clone()
+                    );
+                    
+                    // Индекс по английскому имени
+                    if !type_info.identity.english_name.is_empty() {
+                        index.by_english.insert(
+                            type_info.identity.english_name.clone(),
+                            path.clone()
+                        );
+                    }
+                    
+                    // Индекс по фасетам
+                    for facet in &type_info.metadata.available_facets {
+                        index.by_facet
+                            .entry(*facet)
+                            .or_default()
+                            .push(path.clone());
+                    }
+                }
+            }
+            
+            self.type_index = Some(index);
+        }
     }
     
     /// Returns global functions from syntax helper
     pub fn get_global_functions(&self) -> HashMap<String, TypeResolution> {
         let mut functions = HashMap::new();
         
-        if let Some(ref db) = self.syntax_database {
-            for (name, func_info) in &db.global_functions {
-                // Convert syntax helper function to TypeResolution
-                let platform_type = PlatformType {
-                    name: format!("GlobalFunction_{}", name),
-                    methods: vec![], // Global functions are not methods
-                    properties: vec![],
-                };
-                
-                functions.insert(name.clone(), TypeResolution {
-                    certainty: Certainty::Known,
-                    result: ResolutionResult::Concrete(ConcreteType::Platform(platform_type)),
-                    source: ResolutionSource::Static,
-                    metadata: ResolutionMetadata {
-                        file: Some("syntax_helper:global_functions".to_string()),
-                        line: None,
-                        column: None,
-                        notes: vec![
-                            format!("Global function from syntax helper: {}", name),
-                            func_info.description.clone().unwrap_or_default(),
-                        ],
-                    },
-                    active_facet: None,
-                    available_facets: vec![],
-                });
-                
-                // Also register by English name if available
-                if let Some(ref eng_name) = func_info.english_name {
-                    functions.insert(eng_name.clone(), functions[name].clone());
-                }
+        if let Some(ref database) = self.database {
+            for method in database.methods.values() {
+                let resolution = self.method_to_resolution(method.name.clone());
+                functions.insert(method.name.clone(), resolution);
             }
         }
         
         functions
     }
     
-    /// Returns enhanced platform globals (still includes hardcoded ones for compatibility)
-    pub fn get_platform_globals(&self) -> HashMap<String, TypeResolution> {
-        let mut globals = HashMap::new();
+    /// Returns global objects/types
+    pub fn get_global_objects(&self) -> HashMap<String, TypeResolution> {
+        let mut objects = HashMap::new();
         
-        // Add hardcoded fallback platform globals
-        globals.extend(self.get_fallback_platform_globals());
-        
-        // Add global functions from syntax helper
-        globals.extend(self.get_global_functions());
-        
-        globals
-    }
-    
-    /// Returns primitive types (enhanced with syntax helper data)
-    pub fn get_primitive_types(&self) -> HashMap<String, TypeResolution> {
-        let mut types = HashMap::new();
-        
-        // Start with fallback primitives for compatibility
-        types.extend(self.get_fallback_primitive_types());
-        
-        // TODO: Enhance with syntax helper enum types
-        if let Some(ref db) = self.syntax_database {
-            for (name, enum_info) in &db.system_enums {
-                let platform_type = PlatformType {
-                    name: format!("SystemEnum_{}", name),
-                    methods: vec![],
-                    properties: vec![], // TODO: Convert enum values to properties
-                };
-                
-                types.insert(name.clone(), TypeResolution {
-                    certainty: Certainty::Known,
-                    result: ResolutionResult::Concrete(ConcreteType::Platform(platform_type)),
-                    source: ResolutionSource::Static,
-                    metadata: ResolutionMetadata {
-                        file: Some("syntax_helper:system_enums".to_string()),
-                        line: None,
-                        column: None,
-                        notes: vec![
-                            format!("System enum from syntax helper: {}", name),
-                            enum_info.description.clone().unwrap_or_default(),
-                        ],
-                    },
-                    active_facet: None,
-                    available_facets: vec![],
-                });
+        if let Some(ref database) = self.database {
+            for (_, node) in &database.nodes {
+                if let SyntaxNode::Type(type_info) = node {
+                    let resolution = self.type_to_resolution(type_info);
+                    
+                    // Добавляем по русскому имени
+                    if !type_info.identity.russian_name.is_empty() {
+                        objects.insert(
+                            type_info.identity.russian_name.clone(), 
+                            resolution.clone()
+                        );
+                    }
+                    
+                    // Добавляем по английскому имени
+                    if !type_info.identity.english_name.is_empty() {
+                        objects.insert(
+                            type_info.identity.english_name.clone(), 
+                            resolution
+                        );
+                    }
+                }
             }
         }
         
-        types
+        objects
     }
     
-    /// Returns collection types (enhanced with syntax helper data)
-    pub fn get_collection_types(&self) -> HashMap<String, TypeResolution> {
-        let mut types = HashMap::new();
+    /// Resolves type by name
+    pub fn resolve(&self, type_name: &str) -> TypeResolution {
+        // Ищем тип в индексе
+        if let Some(type_info) = self.find_type(type_name) {
+            return self.type_to_resolution(type_info);
+        }
         
-        // Start with fallback collections for compatibility  
-        types.extend(self.get_fallback_collection_types());
+        // Проверяем стандартные типы
+        match type_name {
+            "Строка" | "String" => self.create_standard_type("String"),
+            "Число" | "Number" => self.create_standard_type("Number"),
+            "Булево" | "Boolean" => self.create_standard_type("Boolean"),
+            "Дата" | "Date" => self.create_standard_type("Date"),
+            _ => {
+                let mut resolution = TypeResolution::unknown();
+                resolution.metadata.notes.push(format!("Unknown type: {}", type_name));
+                resolution
+            }
+        }
+    }
+    
+    /// Finds type in database
+    fn find_type(&self, name: &str) -> Option<&TypeInfo> {
+        let index = self.type_index.as_ref()?;
+        let database = self.database.as_ref()?;
         
-        // Дополняем типами коллекций из синтакс-помощника
-        if let Some(ref db) = self.syntax_database {
-            // Обрабатываем объекты-коллекции (Массив, Структура, Соответствие и т.д.)
-            for (name, object_info) in &db.global_objects {
-                if name == "Массив" || name == "Array" ||
-                   name == "Структура" || name == "Structure" ||
-                   name == "Соответствие" || name == "Map" ||
-                   name == "СписокЗначений" || name == "ValueList" ||
-                   name == "ТаблицаЗначений" || name == "ValueTable" {
-                    
-                    // Создаём методы и свойства из данных синтакс-помощника
-                    let mut methods = Vec::new();
-                    let mut properties = Vec::new();
-                    
-                    // Добавляем методы объекта
-                    for method_name in &object_info.methods {
-                        let key = format!("{}.{}", name, method_name);
-                        if let Some(method_info) = db.object_methods.get(&key) {
-                            methods.push(Method {
-                                name: method_info.name.clone(),
-                                parameters: method_info.parameters.iter().map(|p| Parameter {
-                                    name: p.name.clone(),
-                                    type_: p.type_ref.as_ref().map(|t| t.name_ru.clone()),
-                                    optional: p.is_optional,
-                                }).collect(),
-                                return_type: method_info.return_type.as_ref().map(|t| t.name_ru.clone()),
-                            });
-                        }
-                    }
-                    
-                    // Добавляем свойства объекта
-                    for property_name in &object_info.properties {
-                        let key = format!("{}.{}", name, property_name);
-                        if let Some(property_info) = db.object_properties.get(&key) {
-                            properties.push(Property {
-                                name: property_info.name.clone(),
-                                type_: property_info.property_type.as_ref()
-                                    .map(|t| t.name_ru.clone())
-                                    .unwrap_or_else(|| "Произвольный".to_string()),
-                                readonly: property_info.is_readonly,
-                            });
-                        }
-                    }
-                    
-                    let platform_type = PlatformType {
-                        name: name.clone(),
-                        methods,
-                        properties,
-                    };
-                    
-                    types.insert(name.clone(), TypeResolution {
-                        certainty: Certainty::Known,
-                        result: ResolutionResult::Concrete(ConcreteType::Platform(platform_type)),
-                        source: ResolutionSource::Static,
-                        metadata: ResolutionMetadata {
-                            file: Some("syntax_helper:collection_types".to_string()),
-                            line: None,
-                            column: None,
-                            notes: vec![
-                                format!("Collection type from syntax helper: {}", name),
-                                object_info.description.clone().unwrap_or_default(),
-                            ],
-                        },
-                        active_facet: Some(FacetKind::Constructor),
-                        available_facets: vec![FacetKind::Constructor, FacetKind::Collection],
+        // Ищем по русскому имени
+        if let Some(path) = index.by_russian.get(name) {
+            if let Some(SyntaxNode::Type(type_info)) = database.nodes.get(path) {
+                return Some(type_info);
+            }
+        }
+        
+        // Ищем по английскому имени  
+        if let Some(path) = index.by_english.get(name) {
+            if let Some(SyntaxNode::Type(type_info)) = database.nodes.get(path) {
+                return Some(type_info);
+            }
+        }
+        
+        None
+    }
+    
+    /// Converts TypeInfo to TypeResolution
+    fn type_to_resolution(&self, type_info: &TypeInfo) -> TypeResolution {
+        let platform_type = PlatformType {
+            name: type_info.identity.russian_name.clone(),
+            methods: self.extract_methods(type_info),
+            properties: self.extract_properties(type_info),
+        };
+        
+        TypeResolution {
+            certainty: Certainty::Known,
+            result: ResolutionResult::Concrete(ConcreteType::Platform(platform_type)),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata {
+                file: None,
+                line: None,
+                column: None,
+                notes: vec![format!("From syntax helper: {}", type_info.identity.catalog_path)],
+            },
+            active_facet: type_info.metadata.default_facet,
+            available_facets: type_info.metadata.available_facets.clone(),
+        }
+    }
+    
+    /// Extracts methods from TypeInfo
+    fn extract_methods(&self, type_info: &TypeInfo) -> Vec<Method> {
+        let mut methods = Vec::new();
+        
+        for method_name in &type_info.structure.methods {
+            if let Some(ref database) = self.database {
+                let key = format!("method_{}", method_name);
+                if let Some(method_info) = database.methods.get(&key) {
+                    methods.push(Method {
+                        name: method_info.name.clone(),
+                        parameters: self.extract_parameters(&method_info.parameters),
+                        return_type: method_info.return_type.clone(),
                     });
                 }
             }
         }
         
-        types
-    }
-    
-    /// Returns keywords from syntax helper
-    pub fn get_keywords(&self) -> Vec<String> {
-        if let Some(ref db) = self.syntax_database {
-            // Возвращаем русские названия ключевых слов
-            db.keywords.iter()
-                .map(|k| k.russian.clone())
-                .collect()
-        } else {
-            vec![]
-        }
-    }
-    
-    /// Returns operators from syntax helper
-    pub fn get_operators(&self) -> Vec<String> {
-        if let Some(ref db) = self.syntax_database {
-            db.operators.iter().map(|op| op.symbol.clone()).collect()
-        } else {
-            vec![]
-        }
-    }
-    
-    /// Returns statistics about loaded syntax helper data
-    pub fn get_statistics(&self) -> HashMap<String, usize> {
-        let mut stats = HashMap::new();
-        
-        if let Some(ref db) = self.syntax_database {
-            stats.insert("global_functions".to_string(), db.global_functions.len());
-            stats.insert("global_objects".to_string(), db.global_objects.len());
-            stats.insert("object_methods".to_string(), db.object_methods.len());
-            stats.insert("object_properties".to_string(), db.object_properties.len());
-            stats.insert("system_enums".to_string(), db.system_enums.len());
-            stats.insert("keywords".to_string(), db.keywords.len());
-            stats.insert("operators".to_string(), db.operators.len());
-        } else {
-            stats.insert("status".to_string(), 0); // Not loaded
-        }
-        
-        stats
-    }
-    
-    /// Checks if syntax helper data is loaded
-    pub fn is_loaded(&self) -> bool {
-        self.syntax_database.is_some()
-    }
-    
-    /// Заполняет FacetRegistry данными из синтакс-помощника
-    pub fn populate_facet_registry(&self, registry: &mut crate::core::facets::FacetRegistry) {
-        if let Some(ref db) = self.syntax_database {
-            // Обрабатываем все объекты
-            for (object_name, object_info) in &db.global_objects {
-                // Определяем фасет по имени объекта
-                if let Some(facet_kind) = self.detect_facet_from_object_name(object_name) {
-                    // Создаём методы для фасета
-                    let mut methods = Vec::new();
-                    for method_name in &object_info.methods {
-                        let key = format!("{}.{}", object_name, method_name);
-                        if let Some(method_info) = db.object_methods.get(&key) {
-                            methods.push(Method {
-                                name: method_info.name.clone(),
-                                parameters: method_info.parameters.iter().map(|p| Parameter {
-                                    name: p.name.clone(),
-                                    type_: p.type_ref.as_ref().map(|t| t.name_ru.clone()),
-                                    optional: p.is_optional,
-                                }).collect(),
-                                return_type: method_info.return_type.as_ref().map(|t| t.name_ru.clone()),
-                            });
-                        }
-                    }
-                    
-                    // Создаём свойства для фасета
-                    let mut properties = Vec::new();
-                    for property_name in &object_info.properties {
-                        let key = format!("{}.{}", object_name, property_name);
-                        if let Some(property_info) = db.object_properties.get(&key) {
-                            properties.push(Property {
-                                name: property_info.name.clone(),
-                                type_: property_info.property_type.as_ref()
-                                    .map(|t| t.name_ru.clone())
-                                    .unwrap_or_else(|| "Произвольный".to_string()),
-                                readonly: property_info.is_readonly,
-                            });
-                        }
-                    }
-                    
-                    // Извлекаем базовый тип из имени объекта
-                    // Например: СправочникМенеджер.Контрагенты -> Контрагенты
-                    let base_type = if object_name.contains('.') {
-                        object_name.split('.').nth(1).unwrap_or(object_name).to_string()
-                    } else {
-                        object_name.clone()
-                    };
-                    
-                    // Регистрируем фасет в registry
-                    registry.register_facet(&base_type, facet_kind, methods, properties);
-                }
-            }
-        }
-    }
-    
-    /// Возвращает методы для объекта
-    pub fn get_object_methods(&self, object_name: &str) -> Vec<Method> {
-        let mut methods = Vec::new();
-        
-        if let Some(ref db) = self.syntax_database {
-            // Проверяем глобальные объекты
-            if let Some(object_info) = db.global_objects.get(object_name) {
-                for method_name in &object_info.methods {
-                    let key = format!("{}.{}", object_name, method_name);
-                    if let Some(method_info) = db.object_methods.get(&key) {
-                        methods.push(Method {
-                            name: method_info.name.clone(),
-                            parameters: method_info.parameters.iter().map(|p| Parameter {
-                                name: p.name.clone(),
-                                type_: p.type_ref.as_ref().map(|t| t.name_ru.clone()),
-                                optional: p.is_optional,
-                            }).collect(),
-                            return_type: method_info.return_type.as_ref().map(|t| t.name_ru.clone()),
-                        });
-                    }
-                }
-            }
-        }
-        
-        // Если методы не найдены в синтакс-помощнике, возвращаем fallback методы
-        if methods.is_empty() {
-            methods.extend(self.get_fallback_object_methods(object_name));
-        }
-        
         methods
     }
     
-    /// Возвращает свойства для объекта
-    pub fn get_object_properties(&self, object_name: &str) -> Vec<Property> {
+    /// Extracts properties from TypeInfo
+    fn extract_properties(&self, type_info: &TypeInfo) -> Vec<Property> {
         let mut properties = Vec::new();
         
-        if let Some(ref db) = self.syntax_database {
-            // Проверяем глобальные объекты
-            if let Some(object_info) = db.global_objects.get(object_name) {
-                for property_name in &object_info.properties {
-                    let key = format!("{}.{}", object_name, property_name);
-                    if let Some(property_info) = db.object_properties.get(&key) {
-                        properties.push(Property {
-                            name: property_info.name.clone(),
-                            type_: property_info.property_type.as_ref()
-                                .map(|t| t.name_ru.clone())
-                                .unwrap_or_else(|| "Произвольный".to_string()),
-                            readonly: property_info.is_readonly,
-                        });
-                    }
+        for prop_name in &type_info.structure.properties {
+            if let Some(ref database) = self.database {
+                let key = format!("property_{}", prop_name);
+                if let Some(prop_info) = database.properties.get(&key) {
+                    properties.push(Property {
+                        name: prop_info.name.clone(),
+                        type_: prop_info.property_type.clone().unwrap_or_else(|| "Unknown".to_string()),
+                        readonly: prop_info.is_readonly,
+                    });
                 }
             }
         }
@@ -374,23 +273,110 @@ impl PlatformTypesResolverV2 {
         properties
     }
     
-    /// Определяет фасет по имени объекта из синтакс-помощника
-    fn detect_facet_from_object_name(&self, object_name: &str) -> Option<FacetKind> {
-        if object_name.contains("Manager") || object_name.contains("Менеджер") {
-            Some(FacetKind::Manager)
-        } else if object_name.contains("Object") || object_name.contains("Объект") {
-            Some(FacetKind::Object)
-        } else if object_name.contains("Ref") || object_name.contains("Ссылка") {
-            Some(FacetKind::Reference)
-        } else if object_name.contains("Metadata") || object_name.contains("Метаданные") {
-            Some(FacetKind::Metadata)
-        } else if object_name == "Array" || object_name == "Массив" ||
-                  object_name == "Structure" || object_name == "Структура" ||
-                  object_name == "Map" || object_name == "Соответствие" {
-            Some(FacetKind::Constructor)
-        } else {
-            None
+    /// Extracts parameters
+    fn extract_parameters(&self, params: &[super::syntax_helper_parser::ParameterInfo]) -> Vec<Parameter> {
+        params.iter().map(|p| Parameter {
+            name: p.name.clone(),
+            type_: p.type_name.clone(),
+            optional: p.is_optional,
+        }).collect()
+    }
+    
+    /// Creates resolution for method
+    fn method_to_resolution(&self, name: String) -> TypeResolution {
+        let platform_type = PlatformType {
+            name: name.clone(),
+            methods: Vec::new(),
+            properties: Vec::new(),
+        };
+        
+        TypeResolution {
+            certainty: Certainty::Known,
+            result: ResolutionResult::Concrete(ConcreteType::Platform(platform_type)),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata {
+                file: None,
+                line: None,
+                column: None,
+                notes: vec![format!("Global function: {}", name)],
+            },
+            active_facet: None,
+            available_facets: vec![],
         }
+    }
+    
+    /// Creates standard type resolution
+    fn create_standard_type(&self, type_name: &str) -> TypeResolution {
+        use crate::core::types::PrimitiveType;
+        
+        let primitive = match type_name {
+            "String" | "Строка" => PrimitiveType::String,
+            "Number" | "Число" => PrimitiveType::Number,
+            "Boolean" | "Булево" => PrimitiveType::Boolean,
+            "Date" | "Дата" => PrimitiveType::Date,
+            _ => PrimitiveType::String, // Default to string
+        };
+        
+        TypeResolution {
+            certainty: Certainty::Known,
+            result: ResolutionResult::Concrete(ConcreteType::Primitive(primitive)),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata {
+                file: None,
+                line: None,
+                column: None,
+                notes: vec![format!("Standard type: {}", type_name)],
+            },
+            active_facet: None,
+            available_facets: vec![],
+        }
+    }
+    
+    /// Gets object methods by type name
+    pub fn get_object_methods(&self, type_name: &str) -> Vec<Method> {
+        if let Some(type_info) = self.find_type(type_name) {
+            return self.extract_methods(type_info);
+        }
+        Vec::new()
+    }
+    
+    /// Gets object properties by type name
+    pub fn get_object_properties(&self, type_name: &str) -> Vec<Property> {
+        if let Some(type_info) = self.find_type(type_name) {
+            return self.extract_properties(type_info);
+        }
+        Vec::new()
+    }
+    
+    /// Gets platform globals (for compatibility)
+    pub fn get_platform_globals(&self) -> HashMap<String, TypeResolution> {
+        let mut globals = self.get_global_functions();
+        let objects = self.get_global_objects();
+        globals.extend(objects);
+        globals
+    }
+    
+    /// Gets resolver statistics
+    pub fn get_stats(&self) -> HashMap<String, usize> {
+        let mut stats = HashMap::new();
+        
+        if let Some(ref database) = self.database {
+            stats.insert("total_nodes".to_string(), database.nodes.len());
+            stats.insert("methods".to_string(), database.methods.len());
+            stats.insert("properties".to_string(), database.properties.len());
+            
+            let types_count = database.nodes.values()
+                .filter(|n| matches!(n, SyntaxNode::Type(_)))
+                .count();
+            stats.insert("types".to_string(), types_count);
+        }
+        
+        if let Some(ref index) = self.type_index {
+            stats.insert("indexed_russian".to_string(), index.by_russian.len());
+            stats.insert("indexed_english".to_string(), index.by_english.len());
+        }
+        
+        stats
     }
 }
 
@@ -400,368 +386,38 @@ impl Default for PlatformTypesResolverV2 {
     }
 }
 
-/// Helper function to create resolver with syntax helper data loaded
-/// Returns fallback to hardcoded types if syntax helper files not found
-pub fn create_platform_resolver_with_syntax_helper() -> PlatformTypesResolverV2 {
-    let mut resolver = PlatformTypesResolverV2::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
     
-    // Try to load from saved JSON file first (faster)
-    let json_path = "examples/syntax_helper/syntax_database.json";
-    if Path::new(json_path).exists() {
-        if let Err(e) = resolver.load_from_file(json_path) {
-            eprintln!("Warning: Failed to load syntax database from {}: {}", json_path, e);
-        }
-    } else {
-        // Try to load from archives
-        let context_path = "examples/syntax_helper/rebuilt.shcntx_ru.zip";
-        let lang_path = "examples/syntax_helper/rebuilt.shlang_ru.zip";
-        
-        if Path::new(context_path).exists() && Path::new(lang_path).exists() {
-            if let Err(e) = resolver.load_from_archives(context_path, lang_path) {
-                eprintln!("Warning: Failed to load syntax helper from archives: {}", e);
-            }
-        } else {
-            eprintln!("Warning: Syntax helper files not found, using hardcoded types only");
-        }
+    #[test]
+    fn test_resolver_creation() {
+        let resolver = PlatformTypesResolverV2::new();
+        assert!(resolver.database.is_none());
+        assert!(resolver.type_index.is_none());
     }
     
-    resolver
-}
-
-// ====== Fallback функции (заменяют platform_types.rs) ======
-
-impl PlatformTypesResolverV2 {
-    /// Fallback platform globals for when syntax helper is not loaded
-    fn get_fallback_platform_globals(&self) -> HashMap<String, TypeResolution> {
-        let mut globals = HashMap::new();
+    #[test]
+    fn test_standard_types() {
+        let resolver = PlatformTypesResolverV2::new();
         
-        // Справочники (Catalogs manager)
-        globals.insert("Справочники".to_string(), self.create_catalogs_manager());
-        globals.insert("Catalogs".to_string(), self.create_catalogs_manager());
+        let string_type = resolver.resolve("Строка");
+        assert_eq!(string_type.certainty, Certainty::Known);
         
-        // Документы (Documents manager)
-        globals.insert("Документы".to_string(), self.create_documents_manager());
-        globals.insert("Documents".to_string(), self.create_documents_manager());
-        
-        // Перечисления (Enums manager)
-        globals.insert("Перечисления".to_string(), self.create_enums_manager());
-        globals.insert("Enums".to_string(), self.create_enums_manager());
-        
-        // РегистрыСведений (Information registers manager)
-        globals.insert("РегистрыСведений".to_string(), self.create_info_registers_manager());
-        globals.insert("InformationRegisters".to_string(), self.create_info_registers_manager());
-        
-        globals
+        let number_type = resolver.resolve("Number");
+        assert_eq!(number_type.certainty, Certainty::Known);
     }
     
-    fn create_catalogs_manager(&self) -> TypeResolution {
-        let platform_type = PlatformType {
-            name: "CatalogsManager".to_string(),
-            methods: vec![
-                Method {
-                    name: "НайтиПоНаименованию".to_string(),
-                    parameters: vec![
-                        Parameter {
-                            name: "Наименование".to_string(),
-                            type_: Some("Строка".to_string()),
-                            optional: false,
-                        },
-                    ],
-                    return_type: Some("СправочникСсылка".to_string()),
-                },
-                Method {
-                    name: "НайтиПоКоду".to_string(),
-                    parameters: vec![
-                        Parameter {
-                            name: "Код".to_string(),
-                            type_: Some("Строка,Число".to_string()),
-                            optional: false,
-                        },
-                    ],
-                    return_type: Some("СправочникСсылка".to_string()),
-                },
-            ],
-            properties: vec![],
+    #[test]
+    fn test_custom_settings() {
+        let settings = OptimizationSettings {
+            max_threads: Some(2),
+            batch_size: 10,
+            show_progress: false,
+            ..Default::default()
         };
         
-        TypeResolution {
-            certainty: Certainty::Known,
-            result: ResolutionResult::Concrete(ConcreteType::Platform(platform_type)),
-            source: ResolutionSource::Static,
-            metadata: ResolutionMetadata {
-                file: Some("platform:globals".to_string()),
-                line: None,
-                column: None,
-                notes: vec!["Fallback platform type".to_string()],
-            },
-            active_facet: None,
-            available_facets: vec![],
-        }
-    }
-    
-    fn create_documents_manager(&self) -> TypeResolution {
-        let platform_type = PlatformType {
-            name: "DocumentsManager".to_string(),
-            methods: vec![
-                Method {
-                    name: "НайтиПоНомеру".to_string(),
-                    parameters: vec![
-                        Parameter {
-                            name: "Номер".to_string(),
-                            type_: Some("Строка".to_string()),
-                            optional: false,
-                        },
-                        Parameter {
-                            name: "Дата".to_string(),
-                            type_: Some("Дата".to_string()),
-                            optional: true,
-                        },
-                    ],
-                    return_type: Some("ДокументСсылка".to_string()),
-                },
-            ],
-            properties: vec![],
-        };
-        
-        TypeResolution {
-            certainty: Certainty::Known,
-            result: ResolutionResult::Concrete(ConcreteType::Platform(platform_type)),
-            source: ResolutionSource::Static,
-            metadata: ResolutionMetadata {
-                file: Some("platform:globals".to_string()),
-                line: None,
-                column: None,
-                notes: vec!["Fallback platform type".to_string()],
-            },
-            active_facet: None,
-            available_facets: vec![],
-        }
-    }
-    
-    fn create_enums_manager(&self) -> TypeResolution {
-        let platform_type = PlatformType {
-            name: "EnumsManager".to_string(),
-            methods: vec![],
-            properties: vec![],
-        };
-        
-        TypeResolution {
-            certainty: Certainty::Known,
-            result: ResolutionResult::Concrete(ConcreteType::Platform(platform_type)),
-            source: ResolutionSource::Static,
-            metadata: ResolutionMetadata {
-                file: Some("platform:globals".to_string()),
-                line: None,
-                column: None,
-                notes: vec!["Fallback platform type".to_string()],
-            },
-            active_facet: None,
-            available_facets: vec![],
-        }
-    }
-    
-    fn create_info_registers_manager(&self) -> TypeResolution {
-        let platform_type = PlatformType {
-            name: "InformationRegistersManager".to_string(),
-            methods: vec![
-                Method {
-                    name: "СоздатьМенеджерЗаписи".to_string(),
-                    parameters: vec![],
-                    return_type: Some("РегистрСведенийМенеджерЗаписи".to_string()),
-                },
-                Method {
-                    name: "СоздатьНаборЗаписей".to_string(),
-                    parameters: vec![],
-                    return_type: Some("РегистрСведенийНаборЗаписей".to_string()),
-                },
-            ],
-            properties: vec![],
-        };
-        
-        TypeResolution {
-            certainty: Certainty::Known,
-            result: ResolutionResult::Concrete(ConcreteType::Platform(platform_type)),
-            source: ResolutionSource::Static,
-            metadata: ResolutionMetadata {
-                file: Some("platform:globals".to_string()),
-                line: None,
-                column: None,
-                notes: vec!["Fallback platform type".to_string()],
-            },
-            active_facet: None,
-            available_facets: vec![],
-        }
-    }
-    
-    /// Fallback primitive types
-    fn get_fallback_primitive_types(&self) -> HashMap<String, TypeResolution> {
-        let mut types = HashMap::new();
-        
-        for (name, eng_name) in &[
-            ("Строка", "String"),
-            ("Число", "Number"),
-            ("Булево", "Boolean"),
-            ("Дата", "Date"),
-            ("Неопределено", "Undefined"),
-            ("Null", "Null"),
-            ("Тип", "Type"),
-        ] {
-            let platform_type = PlatformType {
-                name: eng_name.to_string(),
-                methods: vec![],
-                properties: vec![],
-            };
-            
-            types.insert(name.to_string(), TypeResolution {
-                certainty: Certainty::Known,
-                result: ResolutionResult::Concrete(ConcreteType::Platform(platform_type)),
-                source: ResolutionSource::Static,
-                metadata: ResolutionMetadata {
-                    file: Some("platform:primitives".to_string()),
-                    line: None,
-                    column: None,
-                    notes: vec!["Fallback primitive type".to_string()],
-                },
-                active_facet: None,
-                available_facets: vec![],
-            });
-        }
-        
-        types
-    }
-    
-    /// Fallback методы для объектов
-    fn get_fallback_object_methods(&self, object_name: &str) -> Vec<Method> {
-        match object_name {
-            "Массив" | "Array" => vec![
-                Method {
-                    name: "Добавить".to_string(),
-                    parameters: vec![
-                        Parameter {
-                            name: "Значение".to_string(),
-                            type_: None,
-                            optional: false,
-                        },
-                    ],
-                    return_type: None,
-                },
-                Method {
-                    name: "Вставить".to_string(),
-                    parameters: vec![
-                        Parameter {
-                            name: "Индекс".to_string(),
-                            type_: Some("Число".to_string()),
-                            optional: false,
-                        },
-                        Parameter {
-                            name: "Значение".to_string(),
-                            type_: None,
-                            optional: false,
-                        },
-                    ],
-                    return_type: None,
-                },
-                Method {
-                    name: "Количество".to_string(),
-                    parameters: vec![],
-                    return_type: Some("Число".to_string()),
-                },
-                Method {
-                    name: "Очистить".to_string(),
-                    parameters: vec![],
-                    return_type: None,
-                },
-                Method {
-                    name: "Удалить".to_string(),
-                    parameters: vec![
-                        Parameter {
-                            name: "Индекс".to_string(),
-                            type_: Some("Число".to_string()),
-                            optional: false,
-                        },
-                    ],
-                    return_type: None,
-                },
-                Method {
-                    name: "Найти".to_string(),
-                    parameters: vec![
-                        Parameter {
-                            name: "Значение".to_string(),
-                            type_: None,
-                            optional: false,
-                        },
-                    ],
-                    return_type: Some("Число".to_string()),
-                },
-            ],
-            "Строка" | "String" => vec![
-                Method {
-                    name: "Длина".to_string(),
-                    parameters: vec![],
-                    return_type: Some("Число".to_string()),
-                },
-                Method {
-                    name: "НайтиПервое".to_string(),
-                    parameters: vec![
-                        Parameter {
-                            name: "Подстрока".to_string(),
-                            type_: Some("Строка".to_string()),
-                            optional: false,
-                        },
-                    ],
-                    return_type: Some("Число".to_string()),
-                },
-            ],
-            _ => vec![],
-        }
-    }
-    
-    /// Fallback collection types
-    fn get_fallback_collection_types(&self) -> HashMap<String, TypeResolution> {
-        let mut types = HashMap::new();
-        
-        let array_type = PlatformType {
-            name: "Array".to_string(),
-            methods: vec![
-                Method {
-                    name: "Добавить".to_string(),
-                    parameters: vec![
-                        Parameter {
-                            name: "Значение".to_string(),
-                            type_: None,
-                            optional: false,
-                        },
-                    ],
-                    return_type: None,
-                },
-                Method {
-                    name: "Количество".to_string(),
-                    parameters: vec![],
-                    return_type: Some("Число".to_string()),
-                },
-                Method {
-                    name: "Очистить".to_string(),
-                    parameters: vec![],
-                    return_type: None,
-                },
-            ],
-            properties: vec![],
-        };
-        
-        types.insert("Массив".to_string(), TypeResolution {
-            certainty: Certainty::Known,
-            result: ResolutionResult::Concrete(ConcreteType::Platform(array_type)),
-            source: ResolutionSource::Static,
-            metadata: ResolutionMetadata {
-                file: Some("platform:collections".to_string()),
-                line: None,
-                column: None,
-                notes: vec!["Fallback collection type".to_string()],
-            },
-            active_facet: None,
-            available_facets: vec![],
-        });
-        
-        types
+        let resolver = PlatformTypesResolverV2::with_settings(settings);
+        assert!(resolver.database.is_none());
     }
 }

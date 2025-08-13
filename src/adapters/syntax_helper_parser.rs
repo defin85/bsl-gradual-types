@@ -1,1089 +1,1281 @@
 //! Парсер синтакс-помощника 1С для извлечения информации о типах платформы
 //! 
-//! Работает с файлами:
-//! - rebuilt.shcntx_ru.zip - контекстная справка (методы, объекты, свойства)
-//! - rebuilt.shlang_ru.zip - справка по языку (операторы, ключевые слова)
-//!
-//! Использует потоковый парсинг для минимизации потребления памяти
+//! Единственная актуальная версия парсера с поддержкой:
+//! - Многопоточной обработки через rayon
+//! - Lock-free структур данных через DashMap
+//! - Полной информации о типах, методах, свойствах
+//! - Двуязычности (русский/английский)
+//! - Построения индексов для быстрого поиска
 
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{Read, BufReader};
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use anyhow::{Result, Context};
+use rayon::prelude::*;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
-use zip::ZipArchive;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, error};
+use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
+use dashmap::DashMap;
 
-const MAX_HTML_SIZE: usize = 10 * 1024 * 1024; // 10MB лимит для HTML файла
-const BUFFER_SIZE: usize = 8192; // 8KB буфер для чтения
+use crate::core::types::{
+    Certainty, ConcreteType, PlatformType, Method, Property,
+    ResolutionResult, ResolutionSource, TypeResolution, ResolutionMetadata,
+    FacetKind,
+};
 
-/// База знаний синтакс-помощника
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SyntaxHelperDatabase {
-    /// Глобальные функции (Сообщить, Тип, XMLСтрока и т.д.)
-    pub global_functions: HashMap<String, FunctionInfo>,
-    
-    /// Глобальные объекты (Справочники, Документы, РегистрыСведений и т.д.)
-    pub global_objects: HashMap<String, ObjectInfo>,
-    
-    /// Методы объектов (ключ: "ОбъектТип.МетодИмя")
-    pub object_methods: HashMap<String, MethodInfo>,
-    
-    /// Свойства объектов (ключ: "ОбъектТип.СвойствоИмя")
-    pub object_properties: HashMap<String, PropertyInfo>,
-    
-    /// Системные перечисления (РежимЗаписиДокумента, ВидДвиженияНакопления и т.д.)
-    pub system_enums: HashMap<String, EnumInfo>,
-    
-    /// Ключевые слова языка
-    pub keywords: Vec<KeywordInfo>,
-    
-    /// Операторы языка
-    pub operators: Vec<OperatorInfo>,
+// ============================================================================
+// Структуры данных
+// ============================================================================
+
+/// Узел в иерархии синтакс-помощника
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SyntaxNode {
+    /// Категория типов (например "Таблица значений")
+    Category(CategoryInfo),
+    /// Конкретный тип данных (например "ТаблицаЗначений")
+    Type(TypeInfo),
+    /// Метод типа
+    Method(MethodInfo),
+    /// Свойство типа  
+    Property(PropertyInfo),
+    /// Конструктор типа
+    Constructor(ConstructorInfo),
 }
 
-/// Информация о функции
+/// Информация о категории типов
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FunctionInfo {
+pub struct CategoryInfo {
     pub name: String,
-    pub english_name: Option<String>,
-    pub description: Option<String>,
-    pub syntax: Vec<String>,
-    pub parameters: Vec<ParameterInfo>,
-    pub return_type: Option<TypeRef>,  // Изменено на TypeRef
-    pub return_description: Option<String>,
-    pub examples: Vec<String>,
-    pub availability: Vec<String>, // Клиент, Сервер, МобильноеПриложение и т.д.
+    pub catalog_path: String,
+    pub description: String,
+    pub related_links: Vec<String>,
+    pub types: Vec<String>,
 }
 
-/// Ссылка на тип (нормализованная)
+/// Полная информация о типе
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TypeRef {
-    pub id: String,              // "language:def_String" или "context:objects/catalog234/Array.html"
-    pub name_ru: String,         // "Строка"
-    pub name_en: Option<String>, // "String"
-    pub kind: TypeRefKind,       // language, context, metadata_ref
+pub struct TypeInfo {
+    pub identity: TypeIdentity,
+    pub documentation: TypeDocumentation,
+    pub structure: TypeStructure,
+    pub metadata: TypeMetadata,
 }
 
-/// Вид ссылки на тип
+/// Идентификация типа
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TypeRefKind {
-    Language,       // Языковые типы (Строка, Число, Булево)
-    Context,        // Платформенные типы (Массив, СправочникСсылка)
-    MetadataRef,    // Ссылки на метаданные (СправочникСсылка.Контрагенты)
+pub struct TypeIdentity {
+    pub russian_name: String,
+    pub english_name: String,
+    pub catalog_path: String,
+    pub aliases: Vec<String>,
+    pub category_path: String,
 }
 
-/// Информация о параметре
+/// Документация типа
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ParameterInfo {
-    pub name: String,
-    pub type_ref: Option<TypeRef>,  // Изменено на TypeRef
-    pub is_optional: bool,
-    pub default_value: Option<String>,
-    pub description: Option<String>,
+pub struct TypeDocumentation {
+    pub category_description: Option<String>,
+    pub type_description: String,
+    pub examples: Vec<CodeExample>,
+    pub availability: Vec<String>,
+    pub since_version: String,
 }
 
-/// Информация об объекте
+/// Структура типа
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ObjectInfo {
-    pub name: String,
-    pub object_type: String, // Manager, Object, Reference, Metadata
-    pub description: Option<String>,
+pub struct TypeStructure {
+    pub collection_element: Option<String>,
     pub methods: Vec<String>,
     pub properties: Vec<String>,
     pub constructors: Vec<String>,
+    pub iterable: bool,
+    pub indexable: bool,
+}
+
+/// Метаданные типа
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypeMetadata {
+    pub available_facets: Vec<FacetKind>,
+    pub default_facet: Option<FacetKind>,
+    pub serializable: bool,
+    pub exchangeable: bool,
+    pub xdto_namespace: Option<String>,
+    pub xdto_type: Option<String>,
+}
+
+/// Пример кода
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeExample {
+    pub description: Option<String>,
+    pub code: String,
+    pub language: String,
 }
 
 /// Информация о методе
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MethodInfo {
     pub name: String,
-    pub object_type: String,
     pub english_name: Option<String>,
     pub description: Option<String>,
-    pub syntax: Vec<String>,
     pub parameters: Vec<ParameterInfo>,
-    pub return_type: Option<TypeRef>,  // Изменено на TypeRef
+    pub return_type: Option<String>,
     pub return_description: Option<String>,
-    pub examples: Vec<String>,
-    pub availability: Vec<String>,
-    pub facet: Option<FacetKind>,  // Добавлено для определения фасета
 }
 
 /// Информация о свойстве
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PropertyInfo {
     pub name: String,
-    pub object_type: String,
-    pub property_type: Option<TypeRef>,  // Изменено на TypeRef
+    pub property_type: Option<String>,
     pub is_readonly: bool,
     pub description: Option<String>,
-    pub availability: Vec<String>,
-    pub facet: Option<FacetKind>,  // Добавлено для определения фасета
 }
 
-/// Вид фасета (для связи с основной системой типов)
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum FacetKind {
-    Manager,     // CatalogManager, DocumentManager
-    Object,      // CatalogObject, DocumentObject
-    Reference,   // CatalogRef, DocumentRef
-    Selection,   // CatalogSelection, DocumentSelection
-    Metadata,    // ОбъектМетаданных
-    Constructor, // Конструируемые типы (Массив, Структура)
-}
-
-/// Информация о перечислении
+/// Информация о конструкторе
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnumInfo {
+pub struct ConstructorInfo {
     pub name: String,
+    pub parameters: Vec<ParameterInfo>,
     pub description: Option<String>,
-    pub values: Vec<EnumValueInfo>,
 }
 
-/// Значение перечисления
+/// Информация о параметре
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnumValueInfo {
+pub struct ParameterInfo {
     pub name: String,
+    pub type_name: Option<String>,
+    pub is_optional: bool,
+    pub default_value: Option<String>,
     pub description: Option<String>,
 }
 
-/// Информация о ключевом слове
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KeywordInfo {
-    pub russian: String,
-    pub english: String,
-    pub category: KeywordCategory,
-    pub description: Option<String>,
+/// База данных синтакс-помощника
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SyntaxHelperDatabase {
+    pub nodes: HashMap<String, SyntaxNode>,
+    pub methods: HashMap<String, MethodInfo>,
+    pub properties: HashMap<String, PropertyInfo>,
+    pub categories: HashMap<String, CategoryInfo>,
 }
 
-/// Категория ключевого слова
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum KeywordCategory {
-    Structure,     // struct_ - управляющие конструкции (Если, Для, Пока)
-    Definition,    // def_ - определения (Процедура, Функция, Перем)
-    Root,          // root_ - корневые элементы (Новый, Выполнить)
-    Operator,      // operator_ - операторы
-    Instruction,   // Instructions_ - инструкции
-    Other,         // Прочее
+/// Индексы для поиска типов
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TypeIndex {
+    pub by_russian: HashMap<String, String>,
+    pub by_english: HashMap<String, String>,
+    pub by_any_name: HashMap<String, Vec<String>>,
+    pub by_category: HashMap<String, Vec<String>>,
+    pub by_facet: HashMap<FacetKind, Vec<String>>,
 }
 
-/// Информация об операторе
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OperatorInfo {
-    pub symbol: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub precedence: i32,
+/// Настройки оптимизации
+#[derive(Debug, Clone)]
+pub struct OptimizationSettings {
+    /// Максимальное количество потоков
+    pub max_threads: Option<usize>,
+    /// Размер батча для параллельной обработки
+    pub batch_size: usize,
+    /// Показывать прогресс-бар
+    pub show_progress: bool,
+    /// Лимит файлов для обработки (для тестирования)
+    pub file_limit: Option<usize>,
+    /// Пропускать определённые каталоги
+    pub skip_dirs: Vec<String>,
+    /// Использовать параллельное построение индексов
+    pub parallel_indexing: bool,
 }
 
-/// Парсер синтакс-помощника (потоковый)
+impl Default for OptimizationSettings {
+    fn default() -> Self {
+        Self {
+            max_threads: None, // Использовать все доступные ядра
+            batch_size: 50,    // Оптимальный размер батча
+            show_progress: true,
+            file_limit: None,
+            skip_dirs: vec![
+                "tables".to_string(),  // Большие таблицы можно пропустить
+                "IndexPackLookup".to_string(),
+            ],
+            parallel_indexing: true,
+        }
+    }
+}
+
+/// Парсер синтакс-помощника с поддержкой многопоточности
 pub struct SyntaxHelperParser {
-    context_archive_path: Option<String>,
-    lang_archive_path: Option<String>,
-    database: SyntaxHelperDatabase,
-    processed_files: usize,
-    skipped_files: usize,
+    /// База данных с узлами (lock-free concurrent hashmap)
+    pub(crate) nodes: Arc<DashMap<String, SyntaxNode>>,
+    /// Методы (lock-free)
+    methods: Arc<DashMap<String, MethodInfo>>,
+    /// Свойства (lock-free)
+    properties: Arc<DashMap<String, PropertyInfo>>,
+    /// Категории (lock-free)
+    categories: Arc<DashMap<String, CategoryInfo>>,
+    
+    /// Индексы для поиска (собираются после парсинга)
+    type_index: Arc<DashMap<String, TypeIndex>>,
+    
+    /// Настройки оптимизации
+    settings: OptimizationSettings,
+    
+    /// Счётчик обработанных файлов
+    processed_files: Arc<AtomicUsize>,
+    /// Счётчик ошибок парсинга
+    error_count: Arc<AtomicUsize>,
+    /// Общее количество файлов
+    total_files: Arc<AtomicUsize>,
 }
 
 impl SyntaxHelperParser {
-    /// Создаёт новый парсер
+    /// Создаёт новый оптимизированный парсер
     pub fn new() -> Self {
+        Self::with_settings(OptimizationSettings::default())
+    }
+    
+    /// Создаёт парсер с настройками
+    pub fn with_settings(settings: OptimizationSettings) -> Self {
+        // Настраиваем rayon thread pool
+        if let Some(threads) = settings.max_threads {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build_global()
+                .ok();
+        }
+        
         Self {
-            context_archive_path: None,
-            lang_archive_path: None,
-            database: SyntaxHelperDatabase {
-                global_functions: HashMap::new(),
-                global_objects: HashMap::new(),
-                object_methods: HashMap::new(),
-                object_properties: HashMap::new(),
-                system_enums: HashMap::new(),
-                keywords: Vec::new(),
-                operators: Vec::new(),
-            },
-            processed_files: 0,
-            skipped_files: 0,
+            nodes: Arc::new(DashMap::new()),
+            methods: Arc::new(DashMap::new()),
+            properties: Arc::new(DashMap::new()),
+            categories: Arc::new(DashMap::new()),
+            type_index: Arc::new(DashMap::new()),
+            settings,
+            processed_files: Arc::new(AtomicUsize::new(0)),
+            error_count: Arc::new(AtomicUsize::new(0)),
+            total_files: Arc::new(AtomicUsize::new(0)),
         }
     }
     
-    /// Устанавливает путь к архиву контекстной справки
-    pub fn with_context_archive<P: AsRef<Path>>(mut self, path: P) -> Self {
-        self.context_archive_path = Some(path.as_ref().to_string_lossy().to_string());
-        self
-    }
-    
-    /// Устанавливает путь к архиву справки по языку
-    pub fn with_lang_archive<P: AsRef<Path>>(mut self, path: P) -> Self {
-        self.lang_archive_path = Some(path.as_ref().to_string_lossy().to_string());
-        self
-    }
-    
-    /// Парсит все доступные архивы и строит базу знаний (потоково)
-    pub fn parse(&mut self) -> Result<()> {
-        info!("Начинаем потоковый парсинг синтакс-помощника");
+    /// Парсит каталог с прогресс-баром
+    pub fn parse_directory<P: AsRef<Path>>(&mut self, base_path: P) -> Result<()> {
+        let base_path = base_path.as_ref();
+        info!("🚀 Начинаем оптимизированный парсинг из {:?}", base_path);
         
-        // Парсим контекстную справку
-        if let Some(ref path) = self.context_archive_path.clone() {
-            info!("Парсинг контекстной справки: {}", path);
-            self.parse_context_archive(path)?;
-        }
+        // Фаза 1: Собираем все HTML файлы
+        let start = std::time::Instant::now();
+        let html_files = self.collect_html_files(base_path)?;
+        let file_count = html_files.len();
+        self.total_files.store(file_count, Ordering::Relaxed);
         
-        // Парсим справку по языку
-        if let Some(ref path) = self.lang_archive_path.clone() {
-            info!("Парсинг справки по языку: {}", path);
-            self.parse_lang_archive(path)?;
-        }
+        info!("📊 Найдено {} HTML файлов за {:?}", file_count, start.elapsed());
         
-        info!("Парсинг завершён. Найдено:");
-        info!("  - Глобальных функций: {}", self.database.global_functions.len());
-        info!("  - Глобальных объектов: {}", self.database.global_objects.len());
-        info!("  - Методов объектов: {}", self.database.object_methods.len());
-        info!("  - Свойств объектов: {}", self.database.object_properties.len());
-        info!("  - Системных перечислений: {}", self.database.system_enums.len());
-        info!("  - Ключевых слов: {}", self.database.keywords.len());
-        info!("  Обработано файлов: {}, пропущено: {}", self.processed_files, self.skipped_files);
-        
-        Ok(())
-    }
-    
-    /// Парсит архив контекстной справки потоково
-    fn parse_context_archive(&mut self, path: &str) -> Result<()> {
-        let file = File::open(path)
-            .with_context(|| format!("Не удалось открыть файл: {}", path))?;
-            
-        let reader = BufReader::new(file);
-        let mut archive = ZipArchive::new(reader)?;
-        
-        debug!("Потоковый парсинг архива: {} файлов", archive.len());
-        
-        // Ищем только нужные файлы
-        for i in 0..archive.len() {
-            let mut file = archive.by_index(i)?;
-            let name = file.name().to_string();
-            
-            // Обрабатываем только нужные файлы
-            if name == "objects/Global context.html" {
-                info!("Найден файл глобального контекста");
-                self.parse_html_file(&mut file, &name)?;
-                self.processed_files += 1;
-            } else if name.contains("/properties/") && name.ends_with(".html") {
-                // Обрабатываем свойства объектов
-                debug!("Обрабатываем свойство: {}", name);
-                self.parse_property_file(&mut file, &name)?;
-                self.processed_files += 1;
-            } else if name.contains("/methods/") && name.ends_with(".html") {
-                // Обрабатываем методы объектов  
-                debug!("Обрабатываем метод: {}", name);
-                self.parse_method_file(&mut file, &name)?;
-                self.processed_files += 1;
-            } else if name.starts_with("objects/") && name.ends_with(".html") && !name.contains("Global context") {
-                // Обрабатываем объекты по необходимости
-                if self.should_process_object_file(&name) {
-                    debug!("Обрабатываем объект: {}", name);
-                    self.parse_object_file(&mut file, &name)?;
-                    self.processed_files += 1;
-                } else {
-                    self.skipped_files += 1;
-                }
-            } else {
-                self.skipped_files += 1;
-            }
-        }
-        
-        Ok(())
-    }
-    
-    /// Определяет, нужно ли обрабатывать файл объекта
-    fn should_process_object_file(&self, name: &str) -> bool {
-        // Обрабатываем все catalog файлы (содержат глобальные объекты и перечисления)
-        // А также файлы с типами данных из catalog234
-        if name.contains("catalog") && name.ends_with(".html") {
-            return true;
-        }
-        
-        // Также обрабатываем известные типы объектов
-        let important_objects = [
-            "String", "Number", "Date", "Boolean", "Array", "Structure", "Map",
-            "Строка", "Число", "Дата", "Булево", "Массив", "Структура", "Соответствие",
-            "ValueTable", "ValueList", "ValueTree", "ТаблицаЗначений", "СписокЗначений", "ДеревоЗначений",
-            "Query", "QueryBuilder", "Запрос", "ПостроительЗапроса",
-            "XMLReader", "XMLWriter", "ЧтениеXML", "ЗаписьXML",
-            "TextDocument", "ТекстовыйДокумент"
-        ];
-        
-        important_objects.iter().any(|obj| name.contains(obj))
-    }
-    
-    /// Парсит HTML файл потоково с ограничением памяти
-    fn parse_html_file<R: Read>(&mut self, reader: &mut R, filename: &str) -> Result<()> {
-        // Читаем файл по частям с ограничением размера
-        let mut content = Vec::new();
-        let mut buffer = [0; BUFFER_SIZE];
-        let mut total_read = 0;
-        
-        loop {
-            let bytes_read = reader.read(&mut buffer)?;
-            if bytes_read == 0 {
-                break;
-            }
-            
-            total_read += bytes_read;
-            if total_read > MAX_HTML_SIZE {
-                warn!("Файл {} слишком большой ({}MB), пропускаем", filename, total_read / 1024 / 1024);
-                return Ok(());
-            }
-            
-            content.extend_from_slice(&buffer[..bytes_read]);
-        }
-        
-        // Конвертируем в строку и парсим
-        let html_content = String::from_utf8_lossy(&content);
-        let document = Html::parse_document(&html_content);
-        
-        if filename == "objects/Global context.html" {
-            self.extract_global_functions(&document)?;
-        }
-        
-        Ok(())
-    }
-    
-    /// Парсит файл объекта
-    fn parse_object_file<R: Read>(&mut self, reader: &mut R, filename: &str) -> Result<()> {
-        let content = self.read_html_content(reader, filename)?;
-        if content.is_empty() {
-            return Ok(());
-        }
-        
-        let document = Html::parse_document(&content);
-        
-        // Проверяем, является ли это catalog файлом
-        if filename.starts_with("objects/catalog") {
-            if filename.matches('/').count() == 1 {
-                // Это корневой catalog файл (objects/catalog2.html)
-                // catalog2.html - Системные перечисления
-                // catalog234.html - Основные типы данных
-                // catalog125.html - Прикладные объекты
-                return self.parse_catalog_file(&document, filename);
-            } else if filename.contains("catalog234/") {
-                // Это объект из catalog234 - основные типы данных
-                // objects/catalog234/Array.html, objects/catalog234/String.html и т.д.
-                return self.parse_core_type_file(&document, filename);
-            } else if filename.contains("catalog2/") {
-                // Это системное перечисление из catalog2
-                return self.parse_system_enum_file(&document, filename);
-            }
-        }
-        
-        // Извлекаем имя объекта из пути: objects/СправочникМенеджер.Контрагенты.html
-        let object_name = self.extract_object_name_from_path(filename);
-        
-        // Определяем фасет
-        let facet = self.detect_facet(&object_name);
-        
-        // Создаём ObjectInfo
-        let mut object_info = ObjectInfo {
-            name: object_name.clone(),
-            object_type: object_name.clone(),
-            description: self.extract_description(&document),
-            methods: vec![],
-            properties: vec![],
-            constructors: vec![],
+        // Применяем лимит если установлен
+        let files_to_process = if let Some(limit) = self.settings.file_limit {
+            &html_files[..limit.min(file_count)]
+        } else {
+            &html_files
         };
         
-        // Извлекаем ссылки на методы и свойства
-        let link_selector = Selector::parse("a").unwrap();
-        for element in document.select(&link_selector) {
-            if let Some(href) = element.value().attr("href") {
-                let text = element.text().collect::<String>();
-                
-                if href.contains("/methods/") {
-                    object_info.methods.push(text);
-                } else if href.contains("/properties/") {
-                    object_info.properties.push(text);
-                }
-            }
-        }
+        info!("⚡ Обрабатываем {} файлов с {} потоками", 
+            files_to_process.len(),
+            rayon::current_num_threads()
+        );
         
-        self.database.global_objects.insert(object_name, object_info);
-        Ok(())
-    }
-    
-    /// Парсит файл свойства
-    fn parse_property_file<R: Read>(&mut self, reader: &mut R, filename: &str) -> Result<()> {
-        let content = self.read_html_content(reader, filename)?;
-        if content.is_empty() {
-            return Ok(());
-        }
-        
-        let document = Html::parse_document(&content);
-        
-        // Извлекаем имя объекта и свойства из пути: objects/Array/properties/Count.html
-        let (object_type, property_name) = self.extract_object_and_member_from_path(filename, "properties");
-        
-        // Определяем фасет
-        let facet = self.detect_facet(&object_type);
-        
-        // Извлекаем тип свойства
-        let property_type = self.extract_type_ref(&document, "Тип:");
-        
-        // Проверяем, является ли свойство readonly (ищем текст "Только чтение")
-        let is_readonly = document.html().contains("Только чтение") || 
-                          document.html().contains("Доступ: Чтение");
-        
-        let property_info = PropertyInfo {
-            name: property_name.clone(),
-            object_type: object_type.clone(),
-            property_type,
-            is_readonly,
-            description: self.extract_description(&document),
-            availability: self.extract_availability(&document),
-            facet,
-        };
-        
-        let key = format!("{}.{}", object_type, property_name);
-        self.database.object_properties.insert(key, property_info);
-        
-        Ok(())
-    }
-    
-    /// Парсит файл метода
-    fn parse_method_file<R: Read>(&mut self, reader: &mut R, filename: &str) -> Result<()> {
-        let content = self.read_html_content(reader, filename)?;
-        if content.is_empty() {
-            return Ok(());
-        }
-        
-        let document = Html::parse_document(&content);
-        
-        // Извлекаем имя объекта и метода из пути: objects/Array/methods/Add.html
-        let (object_type, method_name) = self.extract_object_and_member_from_path(filename, "methods");
-        
-        // Определяем фасет
-        let facet = self.detect_facet(&object_type);
-        
-        // Извлекаем параметры и возвращаемый тип
-        let parameters = self.extract_parameters(&document);
-        let return_type = self.extract_type_ref(&document, "Возвращаемое значение:");
-        
-        // Извлекаем синтаксис
-        let syntax = self.extract_syntax(&document);
-        
-        let method_info = MethodInfo {
-            name: method_name.clone(),
-            object_type: object_type.clone(),
-            english_name: self.extract_english_name(&document),
-            description: self.extract_description(&document),
-            syntax,
-            parameters,
-            return_type,
-            return_description: self.extract_return_description(&document),
-            examples: self.extract_examples(&document),
-            availability: self.extract_availability(&document),
-            facet,
-        };
-        
-        let key = format!("{}.{}", object_type, method_name);
-        self.database.object_methods.insert(key, method_info);
-        
-        Ok(())
-    }
-    
-    /// Читает HTML контент с ограничением размера
-    fn read_html_content<R: Read>(&mut self, reader: &mut R, filename: &str) -> Result<String> {
-        let mut content = Vec::new();
-        let mut buffer = [0; BUFFER_SIZE];
-        let mut total_read = 0;
-        
-        loop {
-            let bytes_read = reader.read(&mut buffer)?;
-            if bytes_read == 0 {
-                break;
-            }
-            
-            total_read += bytes_read;
-            if total_read > MAX_HTML_SIZE {
-                warn!("Файл {} слишком большой ({}MB), пропускаем", filename, total_read / 1024 / 1024);
-                return Ok(String::new());
-            }
-            
-            content.extend_from_slice(&buffer[..bytes_read]);
-        }
-        
-        Ok(String::from_utf8_lossy(&content).to_string())
-    }
-    
-    /// Парсит файл основного типа данных из catalog234
-    fn parse_core_type_file(&mut self, document: &Html, filename: &str) -> Result<()> {
-        // Извлекаем имя типа из пути: objects/catalog234/Array.html -> Array
-        let type_name = filename
-            .replace("objects/catalog234/", "")
-            .replace(".html", "");
-        
-        info!("Найден основной тип данных: {}", type_name);
-        
-        // Создаём ObjectInfo для типа
-        let mut object_info = ObjectInfo {
-            name: type_name.clone(),
-            object_type: type_name.clone(),
-            description: self.extract_description(document),
-            methods: vec![],
-            properties: vec![],
-            constructors: vec![],
-        };
-        
-        // Извлекаем ссылки на методы и свойства
-        let link_selector = Selector::parse("a").unwrap();
-        for element in document.select(&link_selector) {
-            if let Some(href) = element.value().attr("href") {
-                let text = element.text().collect::<String>();
-                
-                if href.contains("/methods/") {
-                    object_info.methods.push(text);
-                } else if href.contains("/properties/") {
-                    object_info.properties.push(text);
-                }
-            }
-        }
-        
-        self.database.global_objects.insert(type_name, object_info);
-        Ok(())
-    }
-    
-    /// Парсит файл системного перечисления из catalog2
-    fn parse_system_enum_file(&mut self, document: &Html, filename: &str) -> Result<()> {
-        // Извлекаем имя перечисления из пути
-        let enum_name = filename
-            .replace("objects/catalog2/", "")
-            .replace(".html", "");
-        
-        info!("Найдено системное перечисление: {}", enum_name);
-        
-        // Создаём EnumInfo
-        let mut enum_info = EnumInfo {
-            name: enum_name.clone(),
-            description: self.extract_description(document),
-            values: vec![],
-        };
-        
-        // Извлекаем значения перечисления
-        // В 1С значения перечислений обычно представлены как ссылки или элементы списка
-        let link_selector = Selector::parse("a").unwrap();
-        for element in document.select(&link_selector) {
-            let text = element.text().collect::<String>();
-            // Фильтруем только значения перечисления (не служебные ссылки)
-            if !text.contains("Методическая") && !text.is_empty() {
-                enum_info.values.push(EnumValueInfo {
-                    name: text,
-                    description: None,
-                });
-            }
-        }
-        
-        self.database.system_enums.insert(enum_name, enum_info);
-        Ok(())
-    }
-    
-    /// Парсит catalog файл с описанием категории объектов
-    fn parse_catalog_file(&mut self, document: &Html, filename: &str) -> Result<()> {
-        // Извлекаем заголовок для определения типа catalog
-        let title_selector = Selector::parse("h1.V8SH_pagetitle, p.V8SH_title").unwrap();
-        let title = document.select(&title_selector).next()
-            .map(|e| e.text().collect::<String>())
-            .unwrap_or_default();
-        
-        debug!("Парсинг catalog файла: {}, заголовок: {}", filename, title);
-        
-        // Определяем тип по заголовку
-        if title.contains("Системные перечисления") {
-            // catalog2.html - системные перечисления
-            info!("Найден каталог системных перечислений");
-            // TODO: Извлечь список перечислений из содержимого
-            // Пока просто помечаем, что это системные перечисления
-            let enum_info = EnumInfo {
-                name: "SystemEnumerations".to_string(),
-                description: Some(title),
-                values: vec![],
-            };
-            self.database.system_enums.insert("SystemEnumerations".to_string(), enum_info);
-        } else if title.contains("Прикладные объекты") {
-            // catalog125.html - прикладные объекты
-            info!("Найден каталог прикладных объектов");
-        } else if title.contains("Универсальные объекты") || title.contains("Universal objects") {
-            // catalog234.html и подобные - основные типы данных
-            info!("Найден каталог универсальных объектов");
-        }
-        
-        Ok(())
-    }
-    
-    /// Извлекает имя объекта из пути файла
-    fn extract_object_name_from_path(&self, path: &str) -> String {
-        // objects/СправочникМенеджер.Контрагенты.html -> СправочникМенеджер.Контрагенты
-        path.replace("objects/", "")
-            .replace(".html", "")
-            .split('/')
-            .next()
-            .unwrap_or("")
-            .to_string()
-    }
-    
-    /// Извлекает имя объекта и члена из пути
-    fn extract_object_and_member_from_path(&self, path: &str, member_type: &str) -> (String, String) {
-        // objects/Array/properties/Count.html -> (Array, Count)
-        let parts: Vec<&str> = path.split('/').collect();
-        
-        let object_type = parts.get(1).unwrap_or(&"").to_string();
-        let member_name = parts.last()
-            .unwrap_or(&"")
-            .replace(".html", "");
-        
-        (object_type, member_name)
-    }
-    
-    /// Извлекает описание из HTML
-    fn extract_description(&self, document: &Html) -> Option<String> {
-        let p_selector = Selector::parse("p").unwrap();
-        
-        // Берём первый параграф как описание
-        document.select(&p_selector)
-            .next()
-            .map(|elem| elem.text().collect::<String>().trim().to_string())
-            .filter(|s| !s.is_empty())
-    }
-    
-    /// Извлекает параметры метода
-    fn extract_parameters(&self, document: &Html) -> Vec<ParameterInfo> {
-        let parameters = Vec::new();
-        
-        // Ищем секцию "Параметры:"
-        let text = document.html();
-        if let Some(params_start) = text.find("Параметры:") {
-            // TODO: Более детальный парсинг параметров из таблицы
-            // Пока возвращаем пустой вектор
-        }
-        
-        parameters
-    }
-    
-    /// Извлекает синтаксис метода
-    fn extract_syntax(&self, document: &Html) -> Vec<String> {
-        let mut syntax = Vec::new();
-        
-        // Ищем элементы с классом syntax или code
-        let code_selector = Selector::parse("code, .syntax, .code").unwrap();
-        
-        for element in document.select(&code_selector) {
-            let text = element.text().collect::<String>().trim().to_string();
-            if !text.is_empty() {
-                syntax.push(text);
-            }
-        }
-        
-        syntax
-    }
-    
-    /// Извлекает английское название
-    fn extract_english_name(&self, document: &Html) -> Option<String> {
-        // Ищем в заголовке паттерн "Русское (English)"
-        let h1_selector = Selector::parse("h1").unwrap();
-        
-        if let Some(h1) = document.select(&h1_selector).next() {
-            let text = h1.text().collect::<String>();
-            let (_, english) = self.parse_function_name(&text);
-            return english;
-        }
-        
-        None
-    }
-    
-    /// Извлекает описание возвращаемого значения
-    fn extract_return_description(&self, document: &Html) -> Option<String> {
-        // Ищем текст после "Возвращаемое значение:"
-        let text = document.html();
-        if let Some(ret_start) = text.find("Возвращаемое значение:") {
-            // TODO: Более точный парсинг
-            None
+        // Создаём мульти-прогресс для детального отображения
+        let multi_progress = if self.settings.show_progress {
+            Some(MultiProgress::new())
         } else {
             None
+        };
+        
+        // Основной прогресс-бар
+        let main_progress = if let Some(ref mp) = multi_progress {
+            let pb = mp.add(ProgressBar::new(files_to_process.len() as u64));
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]")?
+                    .progress_chars("##-")
+            );
+            pb.set_message("Парсинг HTML файлов");
+            Some(pb)
+        } else {
+            None
+        };
+        
+        // Фаза 2: Параллельная обработка файлов
+        let parse_start = std::time::Instant::now();
+        
+        files_to_process
+            .par_chunks(self.settings.batch_size)
+            .for_each(|batch| {
+                self.process_batch(batch, &main_progress);
+            });
+        
+        if let Some(pb) = main_progress {
+            pb.finish_with_message(format!(
+                "✅ Парсинг завершён за {:?}", 
+                parse_start.elapsed()
+            ));
+        }
+        
+        // Фаза 3: Связываем типы с категориями
+        info!("🔗 Связываем типы с категориями...");
+        self.link_types_to_categories();
+        
+        // Фаза 4: Параллельное построение индексов
+        let index_start = std::time::Instant::now();
+        
+        if self.settings.parallel_indexing {
+            self.build_indexes_parallel();
+        } else {
+            self.build_indexes();
+        }
+        
+        info!("📚 Индексы построены за {:?}", index_start.elapsed());
+        
+        // Выводим финальную статистику
+        let processed = self.processed_files.load(Ordering::Relaxed);
+        let errors = self.error_count.load(Ordering::Relaxed);
+        let total_time = start.elapsed();
+        
+        info!("✨ Обработано {} файлов за {:?}", processed, total_time);
+        info!("📈 Скорость: {:.2} файлов/сек", processed as f64 / total_time.as_secs_f64());
+        
+        if errors > 0 {
+            warn!("⚠️ Произошло {} ошибок при парсинге", errors);
+        }
+        
+        Ok(())
+    }
+    
+    /// Собирает все HTML файлы рекурсивно (параллельно)
+    fn collect_html_files(&self, base_path: &Path) -> Result<Vec<PathBuf>> {
+        use walkdir::WalkDir;
+        
+        let files: Vec<PathBuf> = WalkDir::new(base_path)
+            .into_iter()
+            .par_bridge()  // Параллельный обход
+            .filter_map(|entry| {
+                entry.ok().and_then(|e| {
+                    let path = e.path();
+                    
+                    // Проверяем, нужно ли пропустить директорию
+                    if path.is_dir() {
+                        if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                            if self.settings.skip_dirs.contains(&dir_name.to_string()) {
+                                return None;
+                            }
+                        }
+                    }
+                    
+                    // Фильтруем только HTML файлы
+                    if path.extension().and_then(|s| s.to_str()) == Some("html") {
+                        Some(path.to_path_buf())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+        
+        Ok(files)
+    }
+    
+    /// Обрабатывает батч файлов
+    fn process_batch(&self, batch: &[PathBuf], progress: &Option<ProgressBar>) {
+        // Параллельная обработка внутри батча
+        batch.par_iter().for_each(|file_path| {
+            match self.parse_html_file(file_path) {
+                Ok(node) => {
+                    self.save_node(node);
+                    self.processed_files.fetch_add(1, Ordering::Relaxed);
+                }
+                Err(e) => {
+                    debug!("Ошибка парсинга {:?}: {}", file_path, e);
+                    self.error_count.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            
+            if let Some(pb) = progress {
+                pb.inc(1);
+            }
+        });
+    }
+    
+    /// Парсит один HTML файл
+    fn parse_html_file(&self, path: &Path) -> Result<SyntaxNode> {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Не удалось прочитать файл {:?}", path))?;
+        let document = Html::parse_document(&content);
+        
+        // Определяем тип файла по содержимому и пути
+        let file_type = self.detect_file_type(path, &document);
+        
+        match file_type {
+            FileType::Type => {
+                let type_info = self.parse_type_from_document(path, &document)?;
+                Ok(SyntaxNode::Type(type_info))
+            }
+            FileType::Method => {
+                let method_info = self.parse_method_from_document(&document)?;
+                Ok(SyntaxNode::Method(method_info))
+            }
+            FileType::Property => {
+                let property_info = self.parse_property_from_document(&document)?;
+                Ok(SyntaxNode::Property(property_info))
+            }
+            FileType::Category => {
+                let category_info = self.parse_category_from_document(path, &document)?;
+                Ok(SyntaxNode::Category(category_info))
+            }
+            FileType::Constructor => {
+                let constructor_info = self.parse_constructor_from_document(&document)?;
+                Ok(SyntaxNode::Constructor(constructor_info))
+            }
         }
     }
     
-    /// Извлекает примеры кода
-    fn extract_examples(&self, document: &Html) -> Vec<String> {
+    /// Определяет тип файла
+    fn detect_file_type(&self, path: &Path, document: &Html) -> FileType {
+        // Проверяем, является ли это файлом категории catalog*.html
+        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+            if file_name.starts_with("catalog") && file_name.ends_with(".html") {
+                // Проверяем, есть ли одноименная директория
+                if let Some(parent) = path.parent() {
+                    let catalog_name = file_name.trim_end_matches(".html");
+                    let catalog_dir = parent.join(catalog_name);
+                    if catalog_dir.exists() && catalog_dir.is_dir() {
+                        return FileType::Category;
+                    }
+                }
+            }
+        }
+        
+        // Проверяем по пути
+        if let Some(parent) = path.parent() {
+            if let Some(dir_name) = parent.file_name().and_then(|n| n.to_str()) {
+                match dir_name {
+                    "methods" => return FileType::Method,
+                    "properties" => return FileType::Property,
+                    "constructors" => return FileType::Constructor,
+                    _ => {}
+                }
+            }
+        }
+        
+        // Проверяем по содержимому
+        let title_selector = Selector::parse("h1.V8SH_pagetitle").unwrap_or_else(|_| {
+            Selector::parse("h1").unwrap()
+        });
+        
+        if let Some(title_elem) = document.select(&title_selector).next() {
+            let title = title_elem.text().collect::<String>();
+            
+            // Если в заголовке есть скобки - это тип
+            if title.contains('(') && title.contains(')') {
+                return FileType::Type;
+            }
+            
+            // Если заголовок содержит "." - это метод
+            if title.contains('.') && !title.contains("...") {
+                return FileType::Method;
+            }
+        }
+        
+        // По умолчанию считаем типом
+        FileType::Type
+    }
+    
+    /// Связывает типы с категориями на основе путей файлов
+    fn link_types_to_categories(&self) {
+        // Получаем все категории
+        let categories_snapshot: Vec<(String, CategoryInfo)> = self.categories.iter()
+            .map(|entry| (entry.key().clone(), entry.value().clone()))
+            .collect();
+        
+        for (catalog_id, category) in categories_snapshot {
+            debug!("Обработка категории {}: {}", catalog_id, category.name);
+            
+            // Обновляем типы, которые находятся в директории этой категории
+            let pattern = format!("/{}/", catalog_id);
+            
+            // Находим все типы в этой категории
+            for mut entry in self.nodes.iter_mut() {
+                let path = entry.key();
+                if path.contains(&pattern) {
+                    if let SyntaxNode::Type(ref mut type_info) = entry.value_mut() {
+                        type_info.identity.category_path = category.name.clone();
+                        debug!("  Связал тип {} с категорией {}", 
+                            type_info.identity.russian_name, category.name);
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Парсит тип из документа
+    fn parse_type_from_document(&self, path: &Path, document: &Html) -> Result<TypeInfo> {
+        let title = self.extract_title(document);
+        let (russian, english) = self.parse_title(&title);
+        let description = self.extract_description(document);
+        
+        Ok(TypeInfo {
+            identity: TypeIdentity {
+                russian_name: russian.clone(),
+                english_name: english,
+                catalog_path: self.build_path(path),
+                category_path: self.extract_category_path(path),
+                aliases: self.extract_aliases(document),
+            },
+            documentation: TypeDocumentation {
+                category_description: None,
+                type_description: description.clone(),
+                examples: self.extract_examples(document),
+                availability: self.extract_availability(document),
+                since_version: self.extract_version(document),
+            },
+            structure: TypeStructure {
+                collection_element: self.extract_collection_element(document),
+                methods: Vec::new(), // Будут заполнены позже
+                properties: Vec::new(), // Будут заполнены позже
+                constructors: Vec::new(), // Будут заполнены позже
+                iterable: self.is_iterable(&description),
+                indexable: self.is_indexable(&description),
+            },
+            metadata: TypeMetadata {
+                available_facets: self.detect_facets(&russian, &description),
+                default_facet: None,
+                serializable: self.is_serializable(document),
+                exchangeable: self.is_exchangeable(document),
+                xdto_namespace: None,
+                xdto_type: None,
+            },
+        })
+    }
+    
+    /// Парсит метод из документа
+    fn parse_method_from_document(&self, document: &Html) -> Result<MethodInfo> {
+        let name = self.extract_title(document);
+        let description = self.extract_description(document);
+        let parameters = self.extract_parameters(document);
+        let (return_type, return_description) = self.extract_return_info(document);
+        
+        Ok(MethodInfo {
+            name: name.clone(),
+            english_name: self.extract_english_name(document),
+            description: Some(description),
+            parameters,
+            return_type,
+            return_description,
+        })
+    }
+    
+    /// Парсит свойство из документа
+    fn parse_property_from_document(&self, document: &Html) -> Result<PropertyInfo> {
+        let name = self.extract_title(document);
+        let description = self.extract_description(document);
+        let property_type = self.extract_property_type(document);
+        let is_readonly = self.is_readonly(document);
+        
+        Ok(PropertyInfo {
+            name,
+            property_type,
+            is_readonly,
+            description: Some(description),
+        })
+    }
+    
+    /// Парсит категорию из документа
+    fn parse_category_from_document(&self, path: &Path, document: &Html) -> Result<CategoryInfo> {
+        let name = self.extract_title(document);
+        let description = self.extract_description(document);
+        let related_links = self.extract_links(document);
+        let types = self.extract_type_list(document);
+        
+        // Извлекаем catalog ID из имени файла
+        let catalog_id = path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        
+        Ok(CategoryInfo {
+            name,
+            catalog_path: catalog_id,
+            description,
+            related_links,
+            types,
+        })
+    }
+    
+    /// Парсит конструктор из документа
+    fn parse_constructor_from_document(&self, document: &Html) -> Result<ConstructorInfo> {
+        let description = self.extract_description(document);
+        let parameters = self.extract_parameters(document);
+        
+        Ok(ConstructorInfo {
+            name: self.extract_title(document),
+            description: Some(description),
+            parameters,
+        })
+    }
+    
+    /// Сохраняет узел в базу данных (lock-free)
+    fn save_node(&self, node: SyntaxNode) {
+        match node {
+            SyntaxNode::Category(cat) => {
+                let path = cat.catalog_path.clone();
+                self.categories.insert(path.clone(), cat.clone());
+                self.nodes.insert(path, SyntaxNode::Category(cat));
+            },
+            SyntaxNode::Type(type_info) => {
+                let path = type_info.identity.catalog_path.clone();
+                self.nodes.insert(path, SyntaxNode::Type(type_info));
+            },
+            SyntaxNode::Method(method) => {
+                let key = format!("method_{}", method.name);
+                self.methods.insert(key.clone(), method.clone());
+                self.nodes.insert(key, SyntaxNode::Method(method));
+            },
+            SyntaxNode::Property(prop) => {
+                let key = format!("property_{}", prop.name);
+                self.properties.insert(key.clone(), prop.clone());
+                self.nodes.insert(key, SyntaxNode::Property(prop));
+            },
+            SyntaxNode::Constructor(cons) => {
+                let key = format!("constructor_{}", self.nodes.len());
+                self.nodes.insert(key, SyntaxNode::Constructor(cons));
+            },
+        }
+    }
+    
+    /// Строит индексы после парсинга (однопоточно)
+    fn build_indexes(&self) {
+        let mut index = TypeIndex::default();
+        
+        for entry in self.nodes.iter() {
+            let (path, node) = entry.pair();
+            
+            if let SyntaxNode::Type(type_info) = node {
+                // Индекс по русскому имени
+                index.by_russian.insert(
+                    type_info.identity.russian_name.clone(),
+                    path.clone()
+                );
+                
+                // Индекс по английскому имени
+                if !type_info.identity.english_name.is_empty() {
+                    index.by_english.insert(
+                        type_info.identity.english_name.clone(),
+                        path.clone()
+                    );
+                }
+                
+                // Индекс по фасетам
+                for facet in &type_info.metadata.available_facets {
+                    index.by_facet
+                        .entry(*facet)
+                        .or_default()
+                        .push(path.clone());
+                }
+                
+                // Индекс по категориям
+                if !type_info.identity.category_path.is_empty() {
+                    index.by_category
+                        .entry(type_info.identity.category_path.clone())
+                        .or_default()
+                        .push(path.clone());
+                }
+            }
+        }
+        
+        self.type_index.insert("main".to_string(), index);
+    }
+    
+    /// Параллельное построение индексов
+    fn build_indexes_parallel(&self) {
+        use dashmap::DashMap;
+        
+        // Создаём параллельные индексы
+        let by_russian = Arc::new(DashMap::new());
+        let by_english = Arc::new(DashMap::new());
+        let by_facet = Arc::new(DashMap::new());
+        let by_category = Arc::new(DashMap::new());
+        
+        // Параллельно обрабатываем все узлы
+        self.nodes.iter().par_bridge().for_each(|entry| {
+            let (path, node) = entry.pair();
+            
+            if let SyntaxNode::Type(type_info) = node {
+                // Индекс по русскому имени
+                by_russian.insert(
+                    type_info.identity.russian_name.clone(),
+                    path.clone()
+                );
+                
+                // Индекс по английскому имени
+                if !type_info.identity.english_name.is_empty() {
+                    by_english.insert(
+                        type_info.identity.english_name.clone(),
+                        path.clone()
+                    );
+                }
+                
+                // Индекс по фасетам
+                for facet in &type_info.metadata.available_facets {
+                    by_facet
+                        .entry(*facet)
+                        .or_insert_with(Vec::new)
+                        .push(path.clone());
+                }
+                
+                // Индекс по категориям
+                if !type_info.identity.category_path.is_empty() {
+                    by_category
+                        .entry(type_info.identity.category_path.clone())
+                        .or_insert_with(Vec::new)
+                        .push(path.clone());
+                }
+            }
+        });
+        
+        // Конвертируем в обычный индекс
+        let mut index = TypeIndex::default();
+        
+        for entry in by_russian.iter() {
+            index.by_russian.insert(entry.key().clone(), entry.value().clone());
+        }
+        
+        for entry in by_english.iter() {
+            index.by_english.insert(entry.key().clone(), entry.value().clone());
+        }
+        
+        for entry in by_facet.iter() {
+            index.by_facet.insert(entry.key().clone(), entry.value().clone());
+        }
+        
+        for entry in by_category.iter() {
+            index.by_category.insert(entry.key().clone(), entry.value().clone());
+        }
+        
+        self.type_index.insert("main".to_string(), index);
+    }
+    
+    // =========================================================================
+    // Вспомогательные методы для извлечения данных
+    // =========================================================================
+    
+    fn extract_title(&self, document: &Html) -> String {
+        self.extract_element_text(document, "h1.V8SH_pagetitle")
+            .or_else(|| self.extract_element_text(document, "h1"))
+            .unwrap_or_default()
+    }
+    
+    fn parse_title(&self, title: &str) -> (String, String) {
+        if let Some(open) = title.find('(') {
+            if let Some(close) = title.find(')') {
+                let russian = title[..open].trim().to_string();
+                let english = title[open+1..close].trim().to_string();
+                return (russian, english);
+            }
+        }
+        (title.trim().to_string(), String::new())
+    }
+    
+    fn extract_element_text(&self, document: &Html, selector_str: &str) -> Option<String> {
+        Selector::parse(selector_str).ok().and_then(|selector| {
+            document.select(&selector)
+                .next()
+                .map(|e| e.text().collect::<String>().trim().to_string())
+        })
+    }
+    
+    fn extract_description(&self, document: &Html) -> String {
+        if let Ok(selector) = Selector::parse("div.V8SH_descr p, p") {
+            document.select(&selector)
+                .map(|e| e.text().collect::<String>().trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            String::new()
+        }
+    }
+    
+    fn extract_examples(&self, document: &Html) -> Vec<CodeExample> {
         let mut examples = Vec::new();
         
-        // Ищем элементы с примерами кода
-        let example_selector = Selector::parse("pre, .example").unwrap();
-        
-        for element in document.select(&example_selector) {
-            let text = element.text().collect::<String>().trim().to_string();
-            if !text.is_empty() {
-                examples.push(text);
+        if let Ok(selector) = Selector::parse("pre.V8SH_code, pre, code") {
+            for elem in document.select(&selector) {
+                let code = elem.text().collect::<String>().trim().to_string();
+                if !code.is_empty() {
+                    examples.push(CodeExample {
+                        description: None,
+                        code,
+                        language: "bsl".to_string(),
+                    });
+                }
             }
         }
         
         examples
     }
     
-    /// Извлекает доступность (Клиент, Сервер и т.д.)
+    fn extract_parameters(&self, document: &Html) -> Vec<ParameterInfo> {
+        let mut parameters = Vec::new();
+        
+        // Ищем таблицу параметров
+        if let Ok(selector) = Selector::parse("table.V8SH_params tr, table tr") {
+            for row in document.select(&selector).skip(1) { // Пропускаем заголовок
+                let cells: Vec<String> = Selector::parse("td").ok()
+                    .map(|s| row.select(&s).map(|cell| {
+                        cell.text().collect::<String>().trim().to_string()
+                    }).collect())
+                    .unwrap_or_default();
+                
+                if cells.len() >= 2 {
+                    parameters.push(ParameterInfo {
+                        name: cells[0].clone(),
+                        type_name: Some(cells[1].clone()),
+                        is_optional: cells.get(2)
+                            .map(|s| s.contains("Необязательный") || s.contains("Optional"))
+                            .unwrap_or(false),
+                        default_value: cells.get(3).cloned(),
+                        description: cells.get(4).cloned(),
+                    });
+                }
+            }
+        }
+        
+        parameters
+    }
+    
+    fn extract_return_info(&self, document: &Html) -> (Option<String>, Option<String>) {
+        // Ищем информацию о возвращаемом значении
+        if let Ok(selector) = Selector::parse("div.V8SH_return, div.return") {
+            if let Some(return_div) = document.select(&selector).next() {
+                let text = return_div.text().collect::<String>();
+                // Разделяем тип и описание
+                if let Some(colon) = text.find(':') {
+                    let return_type = text[..colon].trim().to_string();
+                    let return_desc = text[colon+1..].trim().to_string();
+                    return (Some(return_type), Some(return_desc));
+                }
+                return (Some(text.trim().to_string()), None);
+            }
+        }
+        (None, None)
+    }
+    
+    fn extract_return_type(&self, document: &Html) -> String {
+        self.extract_return_info(document).0.unwrap_or_default()
+    }
+    
+    fn extract_property_type(&self, document: &Html) -> Option<String> {
+        self.extract_element_text(document, "span.V8SH_type, span.type")
+    }
+    
+    fn extract_english_name(&self, document: &Html) -> Option<String> {
+        self.extract_element_text(document, "span.V8SH_english, span.english")
+    }
+    
     fn extract_availability(&self, document: &Html) -> Vec<String> {
         let mut availability = Vec::new();
         
-        let text = document.html();
+        if let Ok(selector) = Selector::parse("div.V8SH_availability, div.availability") {
+            if let Some(avail_div) = document.select(&selector).next() {
+                let text = avail_div.text().collect::<String>();
+                if text.contains("Сервер") || text.contains("Server") {
+                    availability.push("Сервер".to_string());
+                }
+                if text.contains("Клиент") || text.contains("Client") {
+                    availability.push("Клиент".to_string());
+                }
+                if text.contains("Мобильный") || text.contains("Mobile") {
+                    availability.push("Мобильный".to_string());
+                }
+            }
+        }
         
-        // Проверяем наличие ключевых слов
-        if text.contains("Сервер") || text.contains("Server") {
-            availability.push("Сервер".to_string());
-        }
-        if text.contains("Клиент") || text.contains("Client") {
-            availability.push("Клиент".to_string());
-        }
-        if text.contains("МобильноеПриложение") || text.contains("MobileApp") {
-            availability.push("МобильноеПриложение".to_string());
-        }
-        if text.contains("ВнешнееСоединение") || text.contains("ExternalConnection") {
-            availability.push("ВнешнееСоединение".to_string());
-        }
-        
-        // Если ничего не нашли, предполагаем что доступно везде
         if availability.is_empty() {
-            availability.push("Клиент".to_string());
-            availability.push("Сервер".to_string());
+            availability = vec!["Сервер".to_string(), "Клиент".to_string()];
         }
         
         availability
     }
     
-    /// Извлекает глобальные функции из HTML документа
-    fn extract_global_functions(&mut self, document: &Html) -> Result<()> {
-        let link_selector = Selector::parse("a").unwrap();
+    fn extract_version(&self, document: &Html) -> String {
+        self.extract_element_text(document, "span.V8SH_version, span.version")
+            .unwrap_or_else(|| "8.3.0+".to_string())
+    }
+    
+    fn extract_aliases(&self, document: &Html) -> Vec<String> {
+        // Извлекаем альтернативные имена из текста
+        Vec::new() // TODO: Implement alias extraction
+    }
+    
+    fn extract_collection_element(&self, document: &Html) -> Option<String> {
+        // Извлекаем тип элемента коллекции
+        None // TODO: Implement collection element extraction
+    }
+    
+    fn extract_links(&self, document: &Html) -> Vec<String> {
+        let mut links = Vec::new();
         
-        // Извлекаем ссылки на методы
-        for element in document.select(&link_selector) {
-            if let Some(href) = element.value().attr("href") {
-                if href.starts_with("Global context/methods/") {
-                    let text = element.text().collect::<String>();
-                    let (russian_name, english_name) = self.parse_function_name(&text);
-                    
-                    if !russian_name.is_empty() {
-                        self.database.global_functions.insert(
-                            russian_name.clone(),
-                            FunctionInfo {
-                                name: russian_name.clone(),
-                                english_name,
-                                description: Some(format!("Глобальная функция {}", russian_name)),
-                                syntax: vec![],
-                                parameters: vec![],
-                                return_type: None,  // TODO: парсить из methods/*.html
-                                return_description: None,
-                                examples: vec![],
-                                availability: vec!["Клиент".to_string(), "Сервер".to_string()],
-                            }
-                        );
+        if let Ok(selector) = Selector::parse("a.V8SH_link, a") {
+            for link in document.select(&selector) {
+                if let Some(href) = link.value().attr("href") {
+                    links.push(href.to_string());
+                }
+            }
+        }
+        
+        links
+    }
+    
+    fn extract_type_list(&self, document: &Html) -> Vec<String> {
+        let mut types = Vec::new();
+        
+        if let Ok(selector) = Selector::parse("ul.V8SH_types li, ul li") {
+            for item in document.select(&selector) {
+                let text = item.text().collect::<String>().trim().to_string();
+                if !text.is_empty() {
+                    types.push(text);
+                }
+            }
+        }
+        
+        types
+    }
+    
+    fn extract_category_path(&self, path: &Path) -> String {
+        path.parent()
+            .and_then(|p| p.to_str())
+            .unwrap_or("")
+            .to_string()
+    }
+    
+    fn is_readonly(&self, document: &Html) -> bool {
+        let text = document.root_element().text().collect::<String>();
+        text.contains("Только чтение") || text.contains("Read only")
+    }
+    
+    fn is_iterable(&self, description: &str) -> bool {
+        description.contains("Для каждого") || 
+        description.contains("For each") ||
+        description.contains("итерация") ||
+        description.contains("iteration")
+    }
+    
+    fn is_indexable(&self, description: &str) -> bool {
+        description.contains("индекс") || 
+        description.contains("index") ||
+        description.contains("[]")
+    }
+    
+    fn is_serializable(&self, document: &Html) -> bool {
+        let text = document.root_element().text().collect::<String>();
+        text.contains("Сериализуемый") || 
+        text.contains("Serializable") ||
+        text.contains("XML") ||
+        text.contains("JSON")
+    }
+    
+    fn is_exchangeable(&self, document: &Html) -> bool {
+        let text = document.root_element().text().collect::<String>();
+        text.contains("Обмен данными") || 
+        text.contains("Data exchange") ||
+        text.contains("XDTO")
+    }
+    
+    fn detect_facets(&self, type_name: &str, description: &str) -> Vec<FacetKind> {
+        let mut facets = vec![];
+        
+        // Определяем фасеты по имени типа
+        if type_name.ends_with("Manager") || type_name.contains("Менеджер") {
+            facets.push(FacetKind::Manager);
+        }
+        
+        if type_name.ends_with("Object") || type_name.contains("Объект") {
+            facets.push(FacetKind::Object);
+        }
+        
+        if type_name.ends_with("Ref") || type_name.contains("Ссылка") {
+            facets.push(FacetKind::Reference);
+        }
+        
+        // Определяем фасеты по описанию
+        if description.contains("коллекция") || 
+           description.contains("collection") ||
+           description.contains("Для каждого") ||
+           type_name.contains("Таблица") || 
+           type_name.contains("Table") ||
+           type_name.contains("Массив") ||
+           type_name.contains("Array") {
+            facets.push(FacetKind::Collection);
+        }
+        
+        if description.contains("создать") || 
+           description.contains("create") ||
+           description.contains("конструктор") {
+            facets.push(FacetKind::Constructor);
+        }
+        
+        facets
+    }
+    
+    fn build_path(&self, path: &Path) -> String {
+        // Строим путь относительно корня синтакс-помощника
+        path.components()
+            .filter_map(|c| {
+                if let std::path::Component::Normal(name) = c {
+                    name.to_str()
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+    
+    // =========================================================================
+    // Публичный API
+    // =========================================================================
+    
+    /// Получить статистику парсинга
+    pub fn get_stats(&self) -> ParsingStats {
+        ParsingStats {
+            total_files: self.total_files.load(Ordering::Relaxed),
+            processed_files: self.processed_files.load(Ordering::Relaxed),
+            error_count: self.error_count.load(Ordering::Relaxed),
+            total_nodes: self.nodes.len(),
+            types_count: self.nodes.iter()
+                .filter(|entry| matches!(entry.value(), SyntaxNode::Type(_)))
+                .count(),
+            methods_count: self.methods.len(),
+            properties_count: self.properties.len(),
+            categories_count: self.categories.len(),
+            index_size: self.type_index.get("main")
+                .map(|idx| idx.by_russian.len() + idx.by_english.len())
+                .unwrap_or(0),
+        }
+    }
+    
+    /// Экспортировать базу данных
+    pub fn export_database(&self) -> SyntaxHelperDatabase {
+        let mut db = SyntaxHelperDatabase::default();
+        
+        // Копируем все узлы
+        for entry in self.nodes.iter() {
+            db.nodes.insert(entry.key().clone(), entry.value().clone());
+        }
+        
+        // Копируем методы
+        for entry in self.methods.iter() {
+            db.methods.insert(entry.key().clone(), entry.value().clone());
+        }
+        
+        // Копируем свойства
+        for entry in self.properties.iter() {
+            db.properties.insert(entry.key().clone(), entry.value().clone());
+        }
+        
+        // Копируем категории
+        for entry in self.categories.iter() {
+            db.categories.insert(entry.key().clone(), entry.value().clone());
+        }
+        
+        db
+    }
+    
+    /// Экспортировать индексы
+    pub fn export_index(&self) -> TypeIndex {
+        self.type_index
+            .get("main")
+            .map(|idx| idx.clone())
+            .unwrap_or_default()
+    }
+    
+    /// Поиск типа по имени
+    pub fn find_type(&self, name: &str) -> Option<TypeInfo> {
+        // Сначала ищем в индексе
+        if let Some(index) = self.type_index.get("main") {
+            // Ищем по русскому имени
+            if let Some(path) = index.by_russian.get(name) {
+                if let Some(node) = self.nodes.get(path) {
+                    if let SyntaxNode::Type(type_info) = node.value() {
+                        return Some(type_info.clone());
+                    }
+                }
+            }
+            
+            // Ищем по английскому имени
+            if let Some(path) = index.by_english.get(name) {
+                if let Some(node) = self.nodes.get(path) {
+                    if let SyntaxNode::Type(type_info) = node.value() {
+                        return Some(type_info.clone());
                     }
                 }
             }
         }
         
-        debug!("Извлечено {} глобальных функций", self.database.global_functions.len());
-        
-        Ok(())
-    }
-    
-    /// Парсит название функции в формате "Русское (English)"
-    fn parse_function_name(&self, text: &str) -> (String, Option<String>) {
-        let text = text.trim();
-        
-        if let Some(paren_start) = text.find('(') {
-            if let Some(paren_end) = text.find(')') {
-                let russian = text[..paren_start].trim().to_string();
-                let english = text[paren_start + 1..paren_end].trim();
-                
-                if !english.is_empty() && english != russian {
-                    return (russian, Some(english.to_string()));
-                }
-            }
-        }
-        
-        (text.to_string(), None)
-    }
-    
-    /// Извлекает тип из HTML элемента после "Тип:"
-    fn extract_type_ref(&self, document: &Html, start_text: &str) -> Option<TypeRef> {
-        // Ищем текст "Тип:" и следующую за ним ссылку
-        let text_selector = Selector::parse("p, div").unwrap();
-        let link_selector = Selector::parse("a").unwrap();
-        
-        for element in document.select(&text_selector) {
-            let text = element.text().collect::<String>();
-            if text.contains(start_text) {
-                // Ищем ссылку внутри этого элемента
-                if let Some(link) = element.select(&link_selector).next() {
-                    if let Some(href) = link.value().attr("href") {
-                        let link_text = link.text().collect::<String>();
-                        return Some(self.parse_type_ref(href, &link_text));
-                    }
-                }
-                // Если нет ссылки, пытаемся распарсить текст после "Тип:"
-                if let Some(type_text) = text.split("Тип:").nth(1) {
-                    let type_name = type_text.split('.').next()?.trim();
-                    return Some(self.parse_type_by_name(type_name));
-                }
-            }
-        }
         None
     }
     
-    /// Парсит TypeRef из href и текста ссылки
-    fn parse_type_ref(&self, href: &str, text: &str) -> TypeRef {
-        let (name_ru, name_en) = self.parse_function_name(text);
+    /// Получить все типы с определённым фасетом
+    pub fn get_types_by_facet(&self, facet: FacetKind) -> Vec<TypeInfo> {
+        let mut types = Vec::new();
         
-        let (id, kind) = if href.contains("SyntaxHelperLanguage") {
-            // Языковые типы: v8help://SyntaxHelperLanguage/def_String
-            let id = href.replace("v8help://SyntaxHelperLanguage/", "language:");
-            (id, TypeRefKind::Language)
-        } else if href.contains("SyntaxHelperContext") {
-            // Контекстные типы: v8help://SyntaxHelperContext/objects/...
-            let id = href.replace("v8help://SyntaxHelperContext/", "context:");
-            (id, TypeRefKind::Context)
-        } else {
-            // Неизвестный тип
-            (format!("unknown:{}", text), TypeRefKind::MetadataRef)
-        };
-        
-        TypeRef {
-            id,
-            name_ru,
-            name_en,
-            kind,
-        }
-    }
-    
-    /// Парсит тип по имени (для случаев без ссылки)
-    fn parse_type_by_name(&self, name: &str) -> TypeRef {
-        // Словарь для базовых типов
-        let (id, name_en) = match name {
-            "Строка" => ("language:def_String", Some("String")),
-            "Число" => ("language:def_Number", Some("Number")),
-            "Булево" => ("language:def_Boolean", Some("Boolean")),
-            "Дата" => ("language:def_Date", Some("Date")),
-            "Неопределено" => ("language:def_Undefined", Some("Undefined")),
-            "Null" => ("language:def_Null", Some("Null")),
-            "Тип" => ("language:def_Type", Some("Type")),
-            "Массив" => ("context:objects/Array", Some("Array")),
-            "Структура" => ("context:objects/Structure", Some("Structure")),
-            "Соответствие" => ("context:objects/Map", Some("Map")),
-            _ => {
-                // Если содержит точку - это metadata ref
-                if name.contains('.') {
-                    return TypeRef {
-                        id: format!("metadata_ref:{}", name),
-                        name_ru: name.to_string(),
-                        name_en: None,
-                        kind: TypeRefKind::MetadataRef,
-                    };
-                }
-                ("unknown", None)
-            }
-        };
-        
-        TypeRef {
-            id: id.to_string(),
-            name_ru: name.to_string(),
-            name_en: name_en.map(|s| s.to_string()),
-            kind: if id.starts_with("language:") {
-                TypeRefKind::Language
-            } else if id.starts_with("context:") {
-                TypeRefKind::Context
-            } else {
-                TypeRefKind::MetadataRef
-            },
-        }
-    }
-    
-    /// Определяет фасет по имени типа объекта
-    fn detect_facet(&self, object_type: &str) -> Option<FacetKind> {
-        if object_type.contains("Manager") {
-            Some(FacetKind::Manager)
-        } else if object_type.contains("Object") && !object_type.contains("Metadata") {
-            Some(FacetKind::Object)
-        } else if object_type.contains("Ref") || object_type.contains("Reference") {
-            Some(FacetKind::Reference)
-        } else if object_type.contains("Selection") {
-            Some(FacetKind::Selection)
-        } else if object_type.contains("Metadata") {
-            Some(FacetKind::Metadata)
-        } else if object_type == "Array" || object_type == "Structure" || object_type == "Map" {
-            Some(FacetKind::Constructor)
-        } else {
-            None
-        }
-    }
-    
-    /// Парсит архив справки по языку
-    fn parse_lang_archive(&mut self, path: &str) -> Result<()> {
-        let file = File::open(path)
-            .with_context(|| format!("Не удалось открыть файл: {}", path))?;
-            
-        let reader = BufReader::new(file);
-        let mut archive = ZipArchive::new(reader)?;
-        
-        // Собираем информацию о ключевых словах
-        let mut keyword_map: HashMap<String, KeywordInfo> = HashMap::new();
-        
-        // Сначала собираем английские названия из .st файлов
-        for i in 0..archive.len() {
-            let file = archive.by_index(i)?;
-            let name = file.name().to_string();
-            
-            if name.ends_with(".st") {
-                // Определяем категорию по префиксу
-                let (category, keyword) = if name.starts_with("struct_") {
-                    (KeywordCategory::Structure, name.replace("struct_", "").replace(".st", ""))
-                } else if name.starts_with("def_") {
-                    (KeywordCategory::Definition, name.replace("def_", "").replace(".st", ""))
-                } else if name.starts_with("root_") {
-                    (KeywordCategory::Root, name.replace("root_", "").replace(".st", ""))
-                } else if name.starts_with("operator_") {
-                    (KeywordCategory::Operator, name.replace("operator_", "").replace(".st", ""))
-                } else if name.starts_with("Instructions_") {
-                    (KeywordCategory::Instruction, name.replace("Instructions_", "").replace(".st", ""))
-                } else {
-                    continue; // Пропускаем файлы без известного префикса
-                };
-                
-                // Временно создаём с одинаковыми русским и английским названиями
-                keyword_map.insert(keyword.clone(), KeywordInfo {
-                    russian: keyword.clone(),
-                    english: keyword.clone(),
-                    category,
-                    description: None,
-                });
-            }
-        }
-        
-        // Теперь парсим HTML файлы для получения русских названий
-        for i in 0..archive.len() {
-            let mut file = archive.by_index(i)?;
-            let name = file.name().to_string();
-            
-            // Ищем HTML файлы с описаниями ключевых слов
-            // Обрабатываем все префиксы: struct_, def_, root_, operator_, Instructions_
-            let is_keyword_html = (name.starts_with("struct_") || 
-                                   name.starts_with("def_") || 
-                                   name.starts_with("root_") || 
-                                   name.starts_with("operator_") || 
-                                   name.starts_with("Instructions_")) 
-                                   && !name.ends_with(".st");
-            
-            if is_keyword_html {
-                // Извлекаем английское название из имени файла
-                let english_keyword = if name.starts_with("struct_") {
-                    name.replace("struct_", "")
-                } else if name.starts_with("def_") {
-                    name.replace("def_", "")
-                } else if name.starts_with("root_") {
-                    name.replace("root_", "")
-                } else if name.starts_with("operator_") {
-                    name.replace("operator_", "")
-                } else if name.starts_with("Instructions_") {
-                    name.replace("Instructions_", "")
-                } else {
-                    continue;
-                };
-                
-                if keyword_map.contains_key(&english_keyword) {
-                    // Читаем содержимое HTML файла
-                    let mut content = String::new();
-                    if file.size() <= MAX_HTML_SIZE as u64 {
-                        if let Ok(_) = file.read_to_string(&mut content) {
-                            // Ищем паттерн: <H1 class=V8SH_pagetitle> или <h1 class="V8SH_pagetitle">
-                            let title = if let Some(start) = content.find("V8SH_pagetitle>") {
-                                // Формат без кавычек: <H1 class=V8SH_pagetitle>
-                                let content_after = &content[start + 15..];
-                                content_after.split("</").next().map(|s| s.to_string())
-                            } else if let Some(start) = content.find("V8SH_pagetitle\">") {
-                                // Формат с кавычками: <h1 class="V8SH_pagetitle">
-                                let content_after = &content[start + 16..];
-                                content_after.split("</").next().map(|s| s.to_string())
-                            } else {
-                                None
-                            };
-                            
-                            if let Some(title) = title {
-                                // Извлекаем русское и английское названия
-                                if let Some(paren_pos) = title.find('(') {
-                                    let russian = title[..paren_pos]
-                                        .replace("&nbsp;", " ")
-                                        .trim()
-                                        .to_string();
-                                    
-                                    let english = title[paren_pos + 1..]
-                                        .replace(')', "")
-                                        .trim()
-                                        .to_string();
-                                    
-                                    if !russian.is_empty() && !english.is_empty() {
-                                        // Обновляем информацию о ключевом слове, сохраняя категорию
-                                        if let Some(existing) = keyword_map.get(&english_keyword) {
-                                            let category = existing.category.clone();
-                                            keyword_map.insert(english_keyword.clone(), KeywordInfo {
-                                                russian: russian.clone(),
-                                                english: english.clone(),
-                                                category: category.clone(),
-                                                description: None,
-                                            });
-                                            info!("Найдено ключевое слово: {} / {} (категория: {:?})", russian, english, category);
-                                        }
-                                    }
-                                }
-                            }
+        if let Some(index) = self.type_index.get("main") {
+            if let Some(paths) = index.by_facet.get(&facet) {
+                for path in paths {
+                    if let Some(node) = self.nodes.get(path) {
+                        if let SyntaxNode::Type(type_info) = node.value() {
+                            types.push(type_info.clone());
                         }
                     }
                 }
             }
         }
         
-        // Добавляем все ключевые слова в базу
-        for (_, keyword_info) in keyword_map {
-            // Проверяем, нет ли уже такого ключевого слова
-            let exists = self.database.keywords.iter()
-                .any(|k| k.russian == keyword_info.russian || k.english == keyword_info.english);
-            
-            if !exists {
-                self.database.keywords.push(keyword_info);
-            }
-        }
-        
-        debug!("Извлечено {} ключевых слов", self.database.keywords.len());
-        
-        Ok(())
+        types
     }
-    
-    /// Возвращает базу знаний
-    pub fn database(&self) -> &SyntaxHelperDatabase {
-        &self.database
-    }
-    
-    /// Сохраняет базу знаний в файл
-    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let json = serde_json::to_string_pretty(&self.database)?;
-        std::fs::write(path, json)?;
-        Ok(())
-    }
-    
-    /// Загружает базу знаний из файла
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<SyntaxHelperDatabase> {
-        let json = std::fs::read_to_string(path)?;
-        let database = serde_json::from_str(&json)?;
-        Ok(database)
-    }
+}
+
+/// Статистика парсинга
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParsingStats {
+    pub total_files: usize,
+    pub processed_files: usize,
+    pub error_count: usize,
+    pub total_nodes: usize,
+    pub types_count: usize,
+    pub methods_count: usize,
+    pub properties_count: usize,
+    pub categories_count: usize,
+    pub index_size: usize,
+}
+
+/// Тип файла для парсинга
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileType {
+    Type,
+    Method,
+    Property,
+    Category,
+    Constructor,
 }
 
 impl Default for SyntaxHelperParser {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    use std::fs;
+    
+    #[test]
+    fn test_parallel_parsing() {
+        // Создаём временную директорию с тестовыми HTML файлами
+        let temp_dir = TempDir::new().unwrap();
+        let test_dir = temp_dir.path().join("test");
+        fs::create_dir(&test_dir).unwrap();
+        
+        // Создаём несколько тестовых HTML файлов
+        for i in 0..10 {
+            let html = format!(r#"
+                <html>
+                <body>
+                    <h1 class="V8SH_pagetitle">TestType{} (TestType{})</h1>
+                    <p>Test description {}</p>
+                </body>
+                </html>
+            "#, i, i, i);
+            
+            let file_path = test_dir.join(format!("type_{}.html", i));
+            fs::write(file_path, html).unwrap();
+        }
+        
+        // Парсим с многопоточностью
+        let settings = OptimizationSettings {
+            max_threads: Some(4),
+            batch_size: 2,
+            show_progress: false,
+            ..Default::default()
+        };
+        
+        let mut parser = SyntaxHelperParser::with_settings(settings);
+        parser.parse_directory(&test_dir).unwrap();
+        
+        // Проверяем результаты
+        let stats = parser.get_stats();
+        assert_eq!(stats.processed_files, 10);
+        assert_eq!(stats.types_count, 10);
+        assert_eq!(stats.error_count, 0);
+    }
+    
+    #[test]
+    fn test_concurrent_access() {
+        use std::thread;
+        use std::sync::Arc;
+        
+        let parser = Arc::new(SyntaxHelperParser::new());
+        let mut handles = vec![];
+        
+        // Создаём несколько потоков для одновременного доступа
+        for i in 0..10 {
+            let parser_clone = Arc::clone(&parser);
+            let handle = thread::spawn(move || {
+                // Симулируем сохранение узла
+                let type_info = TypeInfo {
+                    identity: TypeIdentity {
+                        russian_name: format!("Тип{}", i),
+                        english_name: format!("Type{}", i),
+                        catalog_path: format!("path_{}", i),
+                        category_path: String::new(),
+                        aliases: Vec::new(),
+                    },
+                    documentation: TypeDocumentation {
+                        category_description: None,
+                        type_description: format!("Description {}", i),
+                        examples: Vec::new(),
+                        availability: vec!["Сервер".to_string()],
+                        since_version: "8.3.0".to_string(),
+                    },
+                    structure: TypeStructure {
+                        collection_element: None,
+                        methods: Vec::new(),
+                        properties: Vec::new(),
+                        constructors: Vec::new(),
+                        iterable: false,
+                        indexable: false,
+                    },
+                    metadata: TypeMetadata {
+                        available_facets: vec![],
+                        default_facet: None,
+                        serializable: true,
+                        exchangeable: true,
+                        xdto_namespace: None,
+                        xdto_type: None,
+                    },
+                };
+                
+                parser_clone.save_node(SyntaxNode::Type(type_info));
+            });
+            
+            handles.push(handle);
+        }
+        
+        // Ждём завершения всех потоков
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        
+        // Проверяем, что все узлы сохранены
+        assert_eq!(parser.nodes.len(), 10);
     }
 }

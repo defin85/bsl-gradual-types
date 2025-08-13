@@ -35,7 +35,7 @@ encoding_rs_io = "0.1"
 nom = "7.1"
 
 # File system
-walkdir = "2.4"
+walkdir = "2.5"
 notify = "6.1"
 globset = "0.4"
 
@@ -50,6 +50,10 @@ lsp-types = "0.95"
 # HTML parsing (for syntax helper)
 scraper = "0.18"
 zip = "0.6"
+
+# Parallel processing
+rayon = "1.8"
+indicatif = "0.17"
 
 # Caching
 lru = "0.12"
@@ -108,6 +112,11 @@ path = "examples/generate_html_report.rs"
 [[example]]
 name = "generate_1c_style_tree"
 path = "examples/generate_1c_style_tree.rs"
+
+# Benchmarks
+[[bench]]
+name = "syntax_helper_parser_bench"
+harness = false
 
 [profile.dev]
 opt-level = 0

@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BSL Type System - Правильная иерархия</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+        }
+        
+        /* Левая панель с деревом */
+        .sidebar {
+            width: 450px;
+            background: white;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        
+        .sidebar-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .sidebar-header h1 {
+            font-size: 1.6em;
+            margin-bottom: 10px;
+        }
+        
+        .sidebar-subtitle {
+            opacity: 0.9;
+            font-size: 0.95em;
+        }
+        
+        .search-box {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-top: 15px;
+            background: rgba(255,255,255,0.9);
+        }
+        
+        .search-box:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(255,255,255,0.3);
+        }
+        
+        /* Древовидная структура */
+        .tree {
+            padding: 15px;
+        }
+        
+        .tree-node {
+            user-select: none;
+            margin-bottom: 5px;
+        }
+        
+        .tree-node-header {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s;
+            background: #f8f9fa;
+            margin-bottom: 5px;
+        }
+        
+        .tree-node-header:hover {
+            background: #e9ecef;
+            transform: translateX(3px);
+        }
+        
+        .tree-node-header.selected {
+            background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+            border-left: 3px solid #667eea;
+        }
+        
+        /* Разные уровни вложенности */
+        .tree-node-level-0 > .tree-node-header {
+            font-weight: bold;
+            font-size: 1.1em;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        }
+        
+        .tree-node-level-1 > .tree-node-header {
+            margin-left: 20px;
+            font-weight: 600;
+        }
+        
+        .tree-node-level-2 > .tree-node-header {
+            margin-left: 40px;
+            font-size: 0.95em;
+        }
+        
+        .tree-icon {
+            width: 24px;
+            height: 24px;
+            margin-right: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s;
+        }
+        
+        .tree-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+        
+        .tree-label {
+            flex: 1;
+            color: #2c3e50;
+        }
+        
+        .tree-count {
+            color: #6c757d;
+            font-size: 0.85em;
+            background: #e9ecef;
+            padding: 2px 8px;
+            border-radius: 12px;
+            margin-left: 10px;
+        }
+        
+        .tree-children {
+            overflow: hidden;
+            transition: max-height 0.3s ease-out, opacity 0.3s;
+        }
+        
+        .tree-children.collapsed {
+            max-height: 0;
+            opacity: 0;
+        }
+        
+        .tree-leaf {
+            padding: 8px 12px;
+            margin-left: 60px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+            font-size: 0.95em;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .tree-leaf:hover {
+            background: #f8f9fa;
+            transform: translateX(3px);
+        }
+        
+        .tree-leaf.selected {
+            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+            color: #667eea;
+        }
+        
+        .tree-leaf-name {
+            flex: 1;
+            color: #495057;
+        }
+        
+        .tree-leaf-english {
+            color: #6c757d;
+            font-size: 0.9em;
+            font-style: italic;
+        }
+        
+        /* Правая панель с деталями */
+        .content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+            background: white;
+        }
+        
+        .content-header {
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 20px;
+            margin-bottom: 25px;
+        }
+        
+        .content-title {
+            font-size: 2.2em;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .content-breadcrumb {
+            color: #6c757d;
+            font-size: 0.95em;
+            margin-bottom: 15px;
+        }
+        
+        .content-breadcrumb span {
+            color: #667eea;
+        }
+        
+        .detail-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .detail-section h3 {
+            color: #495057;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .code-block {
+            background: #2c3e50;
+            color: #ecf0f1;
+            border-radius: 6px;
+            padding: 20px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .code-keyword {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        
+        .code-comment {
+            color: #95a5a6;
+            font-style: italic;
+        }
+        
+        .code-string {
+            color: #2ecc71;
+        }
+        
+        /* Welcome screen */
+        .welcome {
+            text-align: center;
+            padding: 60px 40px;
+        }
+        
+        .welcome h2 {
+            font-size: 2.5em;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 20px;
+        }
+        
+        .welcome p {
+            font-size: 1.2em;
+            color: #6c757d;
+            line-height: 1.6;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 40px;
+        }
+        
+        .feature-card {
+            padding: 25px;
+            background: linear-gradient(135deg, #f8f9fa 0%, white 100%);
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            transition: all 0.3s;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+        
+        .feature-icon {
+            font-size: 2.5em;
+            margin-bottom: 15px;
+        }
+        
+        .feature-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .feature-desc {
+            color: #6c757d;
+            font-size: 0.95em;
+        }
+    </style>
+</head>
+<body>
+    <!-- Левая панель с деревом -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h1>📚 BSL Type System</h1>
+            <div class="sidebar-subtitle">Правильная иерархия языковых конструкций</div>
+            <input type="text" class="search-box" id="searchBox" placeholder="🔍 Поиск..." onkeyup="filterTree(this.value)">
+        </div>
+        
+        <div class="tree" id="tree">
+            <!-- Корневой узел: Общее описание встроенного языка -->
+            <div class="tree-node tree-node-level-0">
+                <div class="tree-node-header" onclick="toggleNode(this)">
+                    <span class="tree-icon">▼</span>
+                    <span class="tree-label">📚 Общее описание встроенного языка</span>
+                </div>
+                <div class="tree-children">
+                    
+                    <!-- Операторы и синтаксические конструкции -->
+                    <div class="tree-node tree-node-level-1">
+                        <div class="tree-node-header" onclick="toggleNode(this)">
+                            <span class="tree-icon">▼</span>
+                            <span class="tree-label">🔧 Операторы и синтаксические конструкции</span>
+                            <span class="tree-count">11</span>
+                        </div>
+                        <div class="tree-children">
+                            <div class="tree-leaf" onclick="selectItem(this, 'Операторы и синтаксические конструкции', 'operator', 'set')">
+                <span class="tree-leaf-name">set</span>
+                <span class="tree-leaf-english">set</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Операторы и синтаксические конструкции', 'operator', 'Пока')">
+                <span class="tree-leaf-name">Пока</span>
+                <span class="tree-leaf-english">While</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Операторы и синтаксические конструкции', 'operator', 'Goto')">
+                <span class="tree-leaf-name">Goto</span>
+                <span class="tree-leaf-english">Goto</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Операторы и синтаксические конструкции', 'operator', 'ВызватьИсключение')">
+                <span class="tree-leaf-name">ВызватьИсключение</span>
+                <span class="tree-leaf-english">Raise</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Операторы и синтаксические конструкции', 'operator', 'Попытка')">
+                <span class="tree-leaf-name">Попытка</span>
+                <span class="tree-leaf-english">Try</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Операторы и синтаксические конструкции', 'operator', 'ДобавитьОбработчик')">
+                <span class="tree-leaf-name">ДобавитьОбработчик</span>
+                <span class="tree-leaf-english">AddHandler</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Операторы и синтаксические конструкции', 'operator', 'Для')">
+                <span class="tree-leaf-name">Для</span>
+                <span class="tree-leaf-english">For</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Операторы и синтаксические конструкции', 'operator', 'Для каждого')">
+                <span class="tree-leaf-name">Для каждого</span>
+                <span class="tree-leaf-english">For each</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Операторы и синтаксические конструкции', 'operator', 'await')">
+                <span class="tree-leaf-name">await</span>
+                <span class="tree-leaf-english">await</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Операторы и синтаксические конструкции', 'operator', 'Если')">
+                <span class="tree-leaf-name">Если</span>
+                <span class="tree-leaf-english">If</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Операторы и синтаксические конструкции', 'operator', 'УдалитьОбработчик')">
+                <span class="tree-leaf-name">УдалитьОбработчик</span>
+                <span class="tree-leaf-english">RemoveHandler</span>
+            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Определения -->
+                    <div class="tree-node tree-node-level-1">
+                        <div class="tree-node-header" onclick="toggleNode(this)">
+                            <span class="tree-icon">▼</span>
+                            <span class="tree-label">📝 Определения</span>
+                            <span class="tree-count">7</span>
+                        </div>
+                        <div class="tree-children">
+                            <div class="tree-leaf" onclick="selectItem(this, 'Определения', 'definition', 'Неопределено')">
+                <span class="tree-leaf-name">Неопределено</span>
+                <span class="tree-leaf-english">Undefined</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Определения', 'definition', 'Процедура')">
+                <span class="tree-leaf-name">Процедура</span>
+                <span class="tree-leaf-english">Procedure</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Определения', 'definition', 'Null')">
+                <span class="tree-leaf-name">Null</span>
+                <span class="tree-leaf-english">Null</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Определения', 'definition', 'Перем')">
+                <span class="tree-leaf-name">Перем</span>
+                <span class="tree-leaf-english">Var</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Определения', 'definition', 'Ложь')">
+                <span class="tree-leaf-name">Ложь</span>
+                <span class="tree-leaf-english">False</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Определения', 'definition', 'Функция')">
+                <span class="tree-leaf-name">Функция</span>
+                <span class="tree-leaf-english">Function</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Определения', 'definition', 'Истина')">
+                <span class="tree-leaf-name">Истина</span>
+                <span class="tree-leaf-english">True</span>
+            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Выражения -->
+                    <div class="tree-node tree-node-level-1">
+                        <div class="tree-node-header" onclick="toggleNode(this)">
+                            <span class="tree-icon">▼</span>
+                            <span class="tree-label">🔤 Выражения</span>
+                            <span class="tree-count">4</span>
+                        </div>
+                        <div class="tree-children">
+                            <div class="tree-leaf" onclick="selectItem(this, 'Выражения', 'expression', '?')">
+                <span class="tree-leaf-name">?</span>
+                <span class="tree-leaf-english">вычислить выражение по условию</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Выражения', 'expression', 'New')">
+                <span class="tree-leaf-name">New</span>
+                <span class="tree-leaf-english">New</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Выражения', 'expression', '[...]')">
+                <span class="tree-leaf-name">[...]</span>
+                <span class="tree-leaf-english">обращение к свойствам объекта</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Выражения', 'expression', 'Выполнить')">
+                <span class="tree-leaf-name">Выполнить</span>
+                <span class="tree-leaf-english">Execute</span>
+            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Инструкции препроцессора -->
+                    
+                    
+                </div>
+            </div>
+            
+            <!-- Глобальный контекст -->
+            <div class="tree-node tree-node-level-0">
+                <div class="tree-node-header" onclick="toggleNode(this)">
+                    <span class="tree-icon">▶</span>
+                    <span class="tree-label">🌐 Глобальный контекст</span>
+                </div>
+                <div class="tree-children collapsed">
+                    <!-- Глобальные функции -->
+                    <div class="tree-node tree-node-level-1">
+                        <div class="tree-node-header" onclick="toggleNode(this)">
+                            <span class="tree-icon">▶</span>
+                            <span class="tree-label">📦 Глобальные функции</span>
+                            <span class="tree-count">476</span>
+                        </div>
+                        <div class="tree-children collapsed">
+                            <div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ATan (ATan)')">
+                <span class="tree-leaf-name">ATan (ATan)</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ASin (ASin)')">
+                <span class="tree-leaf-name">ASin (ASin)</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ACos (ACos)')">
+                <span class="tree-leaf-name">ACos (ACos)</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Base64Строка / Base64String')">
+                <span class="tree-leaf-name">Base64Строка / Base64String</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Base64Значение / Base64Value')">
+                <span class="tree-leaf-name">Base64Значение / Base64Value</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Cos (Cos)')">
+                <span class="tree-leaf-name">Cos (Cos)</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Exp (Exp)')">
+                <span class="tree-leaf-name">Exp (Exp)</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Log (Log)')">
+                <span class="tree-leaf-name">Log (Log)</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Log10 (Log10)')">
+                <span class="tree-leaf-name">Log10 (Log10)</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Pow (Pow)')">
+                <span class="tree-leaf-name">Pow (Pow)</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Sqrt (Sqrt)')">
+                <span class="tree-leaf-name">Sqrt (Sqrt)</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Sin (Sin)')">
+                <span class="tree-leaf-name">Sin (Sin)</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Tan (Tan)')">
+                <span class="tree-leaf-name">Tan (Tan)</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'XMLСтрока / XMLString')">
+                <span class="tree-leaf-name">XMLСтрока / XMLString</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'XMLТипЗнч / XMLTypeOf')">
+                <span class="tree-leaf-name">XMLТипЗнч / XMLTypeOf</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'XMLТип / XMLType')">
+                <span class="tree-leaf-name">XMLТип / XMLType</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'АктивноеОкно / ActiveWindow')">
+                <span class="tree-leaf-name">АктивноеОкно / ActiveWindow</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Булево / Boolean')">
+                <span class="tree-leaf-name">Булево / Boolean</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'БезопасныйРежимРазделенияДанных / DataSeparationSafeMode')">
+                <span class="tree-leaf-name">БезопасныйРежимРазделенияДанных / DataSeparationSafeMode</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'БезопасныйРежим / SafeMode')">
+                <span class="tree-leaf-name">БезопасныйРежим / SafeMode</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ВыгрузитьЖурналРегистрации / UnloadEventLog')">
+                <span class="tree-leaf-name">ВыгрузитьЖурналРегистрации / UnloadEventLog</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ВыполнитьОбработкуОповещения / RunCallback')">
+                <span class="tree-leaf-name">ВыполнитьОбработкуОповещения / RunCallback</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ВвестиЗначениеАсинх / InputValueAsync')">
+                <span class="tree-leaf-name">ВвестиЗначениеАсинх / InputValueAsync</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Год / Year')">
+                <span class="tree-leaf-name">Год / Year</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ДеньНедели / WeekDay')">
+                <span class="tree-leaf-name">ДеньНедели / WeekDay</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ДеньГода / DayOfYear')">
+                <span class="tree-leaf-name">ДеньГода / DayOfYear</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ДокументЗащищенПаролемАсинх / DocumentIsPasswordProtectedAsync')">
+                <span class="tree-leaf-name">ДокументЗащищенПаролемАсинх / DocumentIsPasswordProtectedAsync</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ЗаписатьДатуJSON / WriteJSONDate')">
+                <span class="tree-leaf-name">ЗаписатьДатуJSON / WriteJSONDate</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ЗаблокироватьРаботуПользователя / LockApplication')">
+                <span class="tree-leaf-name">ЗаблокироватьРаботуПользователя / LockApplication</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ЗапуститьПриложениеАсинх / RunAppAsync')">
+                <span class="tree-leaf-name">ЗапуститьПриложениеАсинх / RunAppAsync</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ИмяПользователя / UserName')">
+                <span class="tree-leaf-name">ИмяПользователя / UserName</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ИнициализироватьПредопределенныеДанные / InitializePredefinedData')">
+                <span class="tree-leaf-name">ИнициализироватьПредопределенныеДанные / InitializePredefinedData</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ИзXMLТипа / FromXMLType')">
+                <span class="tree-leaf-name">ИзXMLТипа / FromXMLType</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'КопироватьДанныеФормы / CopyFormData')">
+                <span class="tree-leaf-name">КопироватьДанныеФормы / CopyFormData</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'КомандаСистемы / System')">
+                <span class="tree-leaf-name">КомандаСистемы / System</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'КаталогБиблиотекиМобильногоУстройстваАсинх / MobileDeviceLibraryDirAsync')">
+                <span class="tree-leaf-name">КаталогБиблиотекиМобильногоУстройстваАсинх / MobileDeviceLibraryDirAsync</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Лев / Left')">
+                <span class="tree-leaf-name">Лев / Left</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Минута / Minute')">
+                <span class="tree-leaf-name">Минута / Minute</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Мин / Min')">
+                <span class="tree-leaf-name">Мин / Min</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'МестноеВремя / ToLocalTime')">
+                <span class="tree-leaf-name">МестноеВремя / ToLocalTime</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'НачалоГода / BegOfYear')">
+                <span class="tree-leaf-name">НачалоГода / BegOfYear</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'НачатьПолучениеФайлаССервера / BeginGetFileFromServer')">
+                <span class="tree-leaf-name">НачатьПолучениеФайлаССервера / BeginGetFileFromServer</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'НачатьПолучениеФайлов / BeginGettingFiles')">
+                <span class="tree-leaf-name">НачатьПолучениеФайлов / BeginGettingFiles</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ОповеститьОбИзменении / NotifyChanged')">
+                <span class="tree-leaf-name">ОповеститьОбИзменении / NotifyChanged</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ОткрытьИндексСправки / OpenHelpIndex')">
+                <span class="tree-leaf-name">ОткрытьИндексСправки / OpenHelpIndex</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ОписаниеОшибки / ErrorDescription')">
+                <span class="tree-leaf-name">ОписаниеОшибки / ErrorDescription</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ПолучитьМаскуВсеФайлы / GetAllFilesMask')">
+                <span class="tree-leaf-name">ПолучитьМаскуВсеФайлы / GetAllFilesMask</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ПолучитьДвоичныеДанныеИзHexДвоичныхДанных / GetBinaryDataFromHexBinaryData')">
+                <span class="tree-leaf-name">ПолучитьДвоичныеДанныеИзHexДвоичныхДанных / GetBinaryDataFromHexBinaryData</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ПоказатьВводОценкиПриложения / ShowInputAppRate')">
+                <span class="tree-leaf-name">ПоказатьВводОценкиПриложения / ShowInputAppRate</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'РаскодироватьСтроку / DecodeString')">
+                <span class="tree-leaf-name">РаскодироватьСтроку / DecodeString</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'РазделитьФайл / SplitFile')">
+                <span class="tree-leaf-name">РазделитьФайл / SplitFile</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'РазблокироватьДанныеДляРедактирования / UnlockDataForEdit')">
+                <span class="tree-leaf-name">РазблокироватьДанныеДляРедактирования / UnlockDataForEdit</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'СтрЧислоВхождений / StrOccurrenceCount')">
+                <span class="tree-leaf-name">СтрЧислоВхождений / StrOccurrenceCount</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'СтрДлина / StrLen')">
+                <span class="tree-leaf-name">СтрДлина / StrLen</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'СохранитьНастройкиПользователя / SaveUserSettings')">
+                <span class="tree-leaf-name">СохранитьНастройкиПользователя / SaveUserSettings</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Тип / Type')">
+                <span class="tree-leaf-name">Тип / Type</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ТекущийРежимЗапуска / CurrentRunMode')">
+                <span class="tree-leaf-name">ТекущийРежимЗапуска / CurrentRunMode</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ТекущаяУниверсальнаяДатаВМиллисекундах / CurrentUniversalDateInMilliseconds')">
+                <span class="tree-leaf-name">ТекущаяУниверсальнаяДатаВМиллисекундах / CurrentUniversalDateInMilliseconds</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'УстановитьВремяЗавершенияСпящегоСеанса / SetHibernateSessionTerminateTime')">
+                <span class="tree-leaf-name">УстановитьВремяЗавершенияСпящегоСеанса / SetHibernateSessionTerminateTime</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'УстановитьБлокировкуСеансов / SetSessionsLock')">
+                <span class="tree-leaf-name">УстановитьБлокировкуСеансов / SetSessionsLock</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'УстановитьКоличествоЗаданийПересчетаИтогов / SetTotalRecalcJobCount')">
+                <span class="tree-leaf-name">УстановитьКоличествоЗаданийПересчетаИтогов / SetTotalRecalcJobCount</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Формат / Format')">
+                <span class="tree-leaf-name">Формат / Format</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Цел / Int')">
+                <span class="tree-leaf-name">Цел / Int</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ЧислоПрописью / NumberInWords')">
+                <span class="tree-leaf-name">ЧислоПрописью / NumberInWords</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'Число / Number')">
+                <span class="tree-leaf-name">Число / Number</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ЧасовойПоясСеанса / SessionTimeZone')">
+                <span class="tree-leaf-name">ЧасовойПоясСеанса / SessionTimeZone</span>
+            </div>
+<div class="tree-leaf" onclick="selectItem(this, 'Глобальный контекст', 'function', 'ЭтоАдресВременногоХранилища / IsTempStorageURL')">
+                <span class="tree-leaf-name">ЭтоАдресВременногоХранилища / IsTempStorageURL</span>
+            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Глобальные объекты -->
+                    <div class="tree-node tree-node-level-1">
+                        <div class="tree-node-header" onclick="toggleNode(this)">
+                            <span class="tree-icon">▶</span>
+                            <span class="tree-label">🏢 Глобальные объекты</span>
+                            <span class="tree-count">0</span>
+                        </div>
+                        <div class="tree-children collapsed">
+                            <!-- Здесь будут объекты когда их извлечём из синтакс-помощника -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Правая панель с деталями -->
+    <div class="content" id="content">
+        <div class="welcome">
+            <h2>Добро пожаловать!</h2>
+            <p>Это правильная иерархическая структура языковых конструкций BSL, соответствующая официальной документации 1С:Предприятие</p>
+            
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🔧</div>
+                    <div class="feature-title">Операторы</div>
+                    <div class="feature-desc">Управляющие конструкции: Если, Для, Пока</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📝</div>
+                    <div class="feature-title">Определения</div>
+                    <div class="feature-desc">Типы и переменные: Строка, Число, Перем</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔤</div>
+                    <div class="feature-title">Выражения</div>
+                    <div class="feature-desc">Операции и вычисления: Новый, Выполнить</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📦</div>
+                    <div class="feature-title">Функции</div>
+                    <div class="feature-desc">Глобальные функции платформы</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Переключение узла дерева
+        function toggleNode(header) {
+            const icon = header.querySelector('.tree-icon');
+            const children = header.nextElementSibling;
+            
+            if (children && children.classList.contains('tree-children')) {
+                const isCollapsed = children.classList.toggle('collapsed');
+                icon.textContent = isCollapsed ? '▶' : '▼';
+            }
+        }
+        
+        // Выбор элемента
+        function selectItem(element, category, type, name) {
+            // Снимаем выделение с других элементов
+            document.querySelectorAll('.tree-leaf.selected, .tree-node-header.selected').forEach(el => {
+                el.classList.remove('selected');
+            });
+            
+            // Выделяем текущий элемент
+            element.classList.add('selected');
+            
+            // Показываем детали
+            showDetails(category, type, name);
+        }
+        
+        // Показ деталей элемента
+        function showDetails(category, type, name) {
+            const content = document.getElementById('content');
+            
+            let html = `
+                <div class="content-header">
+                    <div class="content-breadcrumb">
+                        <span>Общее описание встроенного языка</span> / 
+                        <span>${category}</span>
+                    </div>
+                    <h2 class="content-title">${name}</h2>
+                </div>
+            `;
+            
+            if (type === 'operator') {
+                html += `
+                    <div class="detail-section">
+                        <h3>Синтаксис</h3>
+                        <div class="code-block">
+                            <span class="code-keyword">${name}</span> <span class="code-comment">// условие или выражение</span><br>
+                            <span class="code-comment">    // блок кода</span><br>
+                            <span class="code-keyword">Конец${name}</span>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <h3>Описание</h3>
+                        <p>Управляющая конструкция языка BSL для организации логики программы.</p>
+                    </div>
+                `;
+            } else if (type === 'definition') {
+                html += `
+                    <div class="detail-section">
+                        <h3>Тип данных</h3>
+                        <p>Базовый тип данных языка BSL.</p>
+                    </div>
+                `;
+            } else if (type === 'function') {
+                html += `
+                    <div class="detail-section">
+                        <h3>Глобальная функция</h3>
+                        <p>Встроенная функция платформы 1С:Предприятие.</p>
+                    </div>
+                `;
+            }
+            
+            content.innerHTML = html;
+        }
+        
+        // Фильтрация дерева
+        function filterTree(query) {
+            query = query.toLowerCase();
+            const allNodes = document.querySelectorAll('.tree-leaf, .tree-node-header');
+            
+            allNodes.forEach(node => {
+                const text = node.textContent.toLowerCase();
+                const parent = node.closest('.tree-node');
+                
+                if (query === '' || text.includes(query)) {
+                    node.style.display = '';
+                    // Раскрываем родительские узлы
+                    let current = parent;
+                    while (current && current.classList.contains('tree-node')) {
+                        const children = current.querySelector('.tree-children');
+                        if (children) {
+                            children.classList.remove('collapsed');
+                            const icon = current.querySelector('.tree-icon');
+                            if (icon) icon.textContent = '▼';
+                        }
+                        current = current.parentElement.closest('.tree-node');
+                    }
+                } else {
+                    node.style.display = 'none';
+                }
+            });
+        }
+    </script>
+</body>
+</html>

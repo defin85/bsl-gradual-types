@@ -50,6 +50,30 @@ impl FacetRegistry {
             })
     }
     
+    /// Register a facet for a specific type
+    pub fn register_facet(&mut self, type_name: &str, facet_kind: FacetKind, methods: Vec<Method>, properties: Vec<Property>) {
+        let template = FacetTemplate {
+            kind: facet_kind,
+            methods,
+            properties,
+        };
+        
+        let templates = self.templates.entry(type_name.to_string()).or_insert_with(|| FacetTemplates {
+            manager: None,
+            object: None,
+            reference: None,
+            metadata: None,
+        });
+        
+        match facet_kind {
+            FacetKind::Manager => templates.manager = Some(template),
+            FacetKind::Object => templates.object = Some(template),
+            FacetKind::Reference => templates.reference = Some(template),
+            FacetKind::Metadata => templates.metadata = Some(template),
+            _ => {} // Ignore other facet kinds for now
+        }
+    }
+    
     fn init_catalog_facets(&mut self) {
         let templates = FacetTemplates {
             manager: Some(FacetTemplate {

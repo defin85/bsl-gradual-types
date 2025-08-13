@@ -69,23 +69,35 @@ impl BslLanguageServer {
         let lines: Vec<&str> = text.lines().collect();
         
         if let Some(line) = lines.get(position.line as usize) {
-            let char_pos = position.character as usize;
-            if char_pos <= line.len() {
-                let line_before_cursor = &line[..char_pos];
+            // Конвертируем позицию символа LSP (UTF-16) в байтовый индекс
+            let mut byte_pos = 0;
+            let mut char_count = 0u32;
+            
+            for ch in line.chars() {
+                if char_count >= position.character {
+                    break;
+                }
+                byte_pos += ch.len_utf8();
+                char_count += ch.len_utf16() as u32;
+            }
+            
+            if byte_pos <= line.len() {
+                let line_before_cursor = &line[..byte_pos];
                 
-                // Ищем начало идентификатора (буквы, цифры, точка, подчеркивание)
-                let start = line_before_cursor
-                    .rfind(|c: char| {
-                        !c.is_alphanumeric() && 
-                        c != '.' && 
-                        c != '_' && 
-                        !('а'..='я').contains(&c) && 
-                        !('А'..='Я').contains(&c)
-                    })
-                    .map(|i| i + 1)
-                    .unwrap_or(0);
+                // Ищем начало идентификатора, работая с char итератором для корректной обработки Unicode
+                let mut last_non_ident_byte = 0;
                 
-                return line_before_cursor[start..].to_string();
+                for (idx, ch) in line_before_cursor.char_indices() {
+                    if !ch.is_alphanumeric() && 
+                       ch != '.' && 
+                       ch != '_' && 
+                       !('а'..='я').contains(&ch) && 
+                       !('А'..='Я').contains(&ch) {
+                        last_non_ident_byte = idx + ch.len_utf8();
+                    }
+                }
+                
+                return line_before_cursor[last_non_ident_byte..].to_string();
             }
         }
         

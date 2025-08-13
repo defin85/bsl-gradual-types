@@ -15,7 +15,17 @@
       "Bash(mkdir:*)",
       "Bash(mv:*)",
       "Bash(cp:*)",
-      "Bash(unzip:*)"
+      "Bash(unzip:*)",
+      "Bash(dir:*)",
+      "Bash(sed:*)",
+      "Bash(cat:*)",
+      "Bash(python:*)",
+      "Bash(powershell:*)",
+      "Bash(start type_hierarchy_enhanced.html)",
+      "Bash(start type_hierarchy_report.html)",
+      "Bash(./target/debug/examples/syntax_helper_parser_demo.exe)",
+      "Bash(del \"C:\\1CProject\\bsl-gradual-types\\src\\adapters\\platform_docs.rs\")",
+      "Bash(jq:*)"
     ],
     "deny": []
   }

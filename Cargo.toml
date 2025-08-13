@@ -1,6 +1,6 @@
 [package]
 name = "bsl-gradual-types"
-version = "0.2.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["BSL Type System Team"]
 description = "Gradual type system for 1C:Enterprise BSL with evolutionary architecture"
@@ -88,6 +88,26 @@ path = "src/bin/type_check.rs"
 [[example]]
 name = "query_demo"
 path = "examples/query_demo.rs"
+
+[[example]]
+name = "syntax_helper_parser_demo"
+path = "examples/syntax_helper_parser_demo.rs"
+
+[[example]]
+name = "platform_types_v2_demo"
+path = "examples/platform_types_v2_demo.rs"
+
+[[example]]
+name = "type_hierarchy_visualizer"
+path = "examples/type_hierarchy_visualizer.rs"
+
+[[example]]
+name = "generate_html_report"
+path = "examples/generate_html_report.rs"
+
+[[example]]
+name = "generate_1c_style_tree"
+path = "examples/generate_1c_style_tree.rs"
 
 [profile.dev]
 opt-level = 0

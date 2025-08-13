@@ -1,7 +1,7 @@
 //! Platform-aware type resolver
 
 use std::collections::HashMap;
-use crate::adapters::platform_types;
+use crate::adapters::platform_types_v2::PlatformTypesResolverV2;
 use crate::adapters::config_parser_xml::ConfigParserXml;
 use super::types::{TypeResolution, Certainty, ResolutionResult, ConcreteType, ResolutionMetadata, ResolutionSource, FacetKind};
 
@@ -25,9 +25,11 @@ pub enum CompletionKind {
 }
 
 /// Resolver that knows about platform types and configuration
-#[derive(Debug)]
 pub struct PlatformTypeResolver {
-    /// Platform global types (hardcoded for now)
+    /// Platform types resolver v2 with syntax helper data
+    platform_resolver: PlatformTypesResolverV2,
+    
+    /// Platform global types
     platform_globals: HashMap<String, TypeResolution>,
     
     /// Configuration types from XML parser
@@ -39,8 +41,19 @@ pub struct PlatformTypeResolver {
 
 impl PlatformTypeResolver {
     pub fn new() -> Self {
+        let mut platform_resolver = PlatformTypesResolverV2::new();
+        
+        // Try to load syntax helper data
+        let json_path = "examples/syntax_helper/syntax_database.json";
+        if std::path::Path::new(json_path).exists() {
+            let _ = platform_resolver.load_from_file(json_path);
+        }
+        
+        let platform_globals = platform_resolver.get_platform_globals();
+        
         Self {
-            platform_globals: platform_types::get_platform_globals(),
+            platform_resolver,
+            platform_globals,
             config_parser: None,
             cache: HashMap::new(),
         }
@@ -299,13 +312,23 @@ impl PlatformTypeResolver {
         match parts.as_slice() {
             // Empty or single incomplete identifier - show globals
             [] | [""] => {
-                // Add all platform globals
-                for (name, _) in &self.platform_globals {
+                // Add all platform globals (managers and global functions)
+                for (name, _type_resolution) in &self.platform_globals {
+                    let (kind, detail) = if name.contains("Справочники") || name.contains("Catalogs") ||
+                                           name.contains("Документы") || name.contains("Documents") ||
+                                           name.contains("Перечисления") || name.contains("Enums") ||
+                                           name.contains("РегистрыСведений") || name.contains("InformationRegisters") {
+                        (CompletionKind::Global, "Менеджер объектов конфигурации")
+                    } else {
+                        // Это глобальная функция из синтакс-помощника
+                        (CompletionKind::Method, "Глобальная функция")
+                    };
+                    
                     completions.push(CompletionItem {
                         label: name.clone(),
-                        kind: CompletionKind::Global,
-                        detail: Some("Platform global".to_string()),
-                        documentation: None,
+                        kind,
+                        detail: Some(detail.to_string()),
+                        documentation: self.get_function_documentation(name),
                     });
                 }
             }
@@ -325,7 +348,31 @@ impl PlatformTypeResolver {
                 completions.extend(self.get_enum_completions());
             }
             
-            // Partial match at the end
+            // Single partial identifier - filter globals
+            [partial] if !partial.is_empty() => {
+                for (name, _) in &self.platform_globals {
+                    // Case-insensitive starts_with for Russian and English
+                    if name.to_lowercase().starts_with(&partial.to_lowercase()) {
+                        let (kind, detail) = if name.contains("Справочники") || name.contains("Catalogs") ||
+                                               name.contains("Документы") || name.contains("Documents") ||
+                                               name.contains("Перечисления") || name.contains("Enums") ||
+                                               name.contains("РегистрыСведений") || name.contains("InformationRegisters") {
+                            (CompletionKind::Global, "Менеджер объектов конфигурации")
+                        } else {
+                            (CompletionKind::Method, "Глобальная функция")
+                        };
+                        
+                        completions.push(CompletionItem {
+                            label: name.clone(),
+                            kind,
+                            detail: Some(detail.to_string()),
+                            documentation: self.get_function_documentation(name),
+                        });
+                    }
+                }
+            }
+            
+            // Partial match at the end after dot
             [base, partial] if !partial.is_empty() => {
                 match *base {
                     "Справочники" | "Catalogs" => {
@@ -342,7 +389,40 @@ impl PlatformTypeResolver {
                                 .filter(|c| c.label.starts_with(partial))
                         );
                     }
+                    // Методы и свойства объектов
+                    "Массив" | "Array" | "Строка" | "String" | 
+                    "Структура" | "Structure" | "Соответствие" | "Map" => {
+                        completions.extend(
+                            self.get_object_member_completions(base)
+                                .into_iter()
+                                .filter(|c| c.label.to_lowercase().starts_with(&partial.to_lowercase()))
+                        );
+                    }
                     _ => {}
+                }
+            }
+            
+            // Object methods/properties after dot (e.g., "Массив.", "Строка.")
+            [base, ""] => {
+                // Check if base is a known object type
+                if matches!(*base, "Массив" | "Array" | "Строка" | "String" | 
+                           "Структура" | "Structure" | "Соответствие" | "Map" |
+                           "ТаблицаЗначений" | "ValueTable" | "СписокЗначений" | "ValueList") {
+                    completions.extend(self.get_object_member_completions(base));
+                } else {
+                    // Check for configuration managers
+                    match *base {
+                        "Справочники" | "Catalogs" => {
+                            completions.extend(self.get_catalog_completions());
+                        }
+                        "Документы" | "Documents" => {
+                            completions.extend(self.get_document_completions());
+                        }
+                        "Перечисления" | "Enums" => {
+                            completions.extend(self.get_enum_completions());
+                        }
+                        _ => {}
+                    }
                 }
             }
             
@@ -434,5 +514,64 @@ impl PlatformTypeResolver {
         }
         
         items
+    }
+    
+    /// Получает документацию для глобальной функции
+    fn get_function_documentation(&self, name: &str) -> Option<String> {
+        // Можно расширить для получения документации из синтакс-помощника
+        match name {
+            "Сообщить" => Some("Выводит сообщение пользователю".to_string()),
+            "Тип" => Some("Возвращает тип значения".to_string()),
+            "ТипЗнч" => Some("Возвращает тип значения".to_string()),
+            "XMLСтрока" => Some("Преобразует значение в строку XML".to_string()),
+            "XMLЗначение" => Some("Преобразует строку XML в значение".to_string()),
+            _ => None,
+        }
+    }
+    
+    /// Получает автодополнение для членов объекта (методы и свойства)
+    fn get_object_member_completions(&self, object_name: &str) -> Vec<CompletionItem> {
+        let mut completions = Vec::new();
+        
+        // Получаем методы из PlatformTypesResolverV2
+        let methods = self.platform_resolver.get_object_methods(object_name);
+        for method in methods {
+            let params_str = method.parameters.iter()
+                .map(|p| format!("{}: {}", 
+                    p.name, 
+                    p.type_.as_deref().unwrap_or("Произвольный")))
+                .collect::<Vec<_>>()
+                .join(", ");
+                
+            let detail = if !params_str.is_empty() {
+                format!("Метод({})", params_str)
+            } else {
+                "Метод()".to_string()
+            };
+            
+            completions.push(CompletionItem {
+                label: method.name.clone(),
+                kind: CompletionKind::Method,
+                detail: Some(detail),
+                documentation: method.return_type.map(|rt| format!("Возвращает: {}", rt)),
+            });
+        }
+        
+        // Получаем свойства из PlatformTypesResolverV2
+        let properties = self.platform_resolver.get_object_properties(object_name);
+        for property in properties {
+            let detail = format!("Свойство: {}{}", 
+                property.type_, 
+                if property.readonly { " (только чтение)" } else { "" });
+                
+            completions.push(CompletionItem {
+                label: property.name.clone(),
+                kind: CompletionKind::Property,
+                detail: Some(detail),
+                documentation: None,
+            });
+        }
+        
+        completions
     }
 }

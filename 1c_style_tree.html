@@ -1,0 +1,1658 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Синтакс-помощник BSL</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 13px;
+            background: #f0f0f0;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        .sidebar {
+            width: 350px;
+            background: white;
+            border-right: 1px solid #d0d0d0;
+            overflow-y: auto;
+        }
+        .header {
+            background: linear-gradient(to bottom, #fafafa, #e8e8e8);
+            padding: 8px 12px;
+            border-bottom: 1px solid #c0c0c0;
+            font-weight: bold;
+        }
+        .tabs {
+            display: flex;
+            background: #f8f8f8;
+            border-bottom: 1px solid #d0d0d0;
+        }
+        .tab {
+            padding: 6px 12px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            background: #e8e8e8;
+            margin-right: 2px;
+        }
+        .tab.active {
+            background: white;
+            border: 1px solid #d0d0d0;
+            border-bottom: 1px solid white;
+        }
+        .tree {
+            padding: 4px;
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            line-height: 20px;
+        }
+        .tree-item {
+            cursor: pointer;
+            padding: 2px 0;
+            white-space: nowrap;
+            user-select: none;
+        }
+        .tree-item:hover {
+            background: #e8f4ff;
+        }
+        .tree-item.selected {
+            background: #cce8ff;
+        }
+        .tree-children {
+            margin-left: 18px;
+            display: none;
+        }
+        .tree-children.expanded {
+            display: block;
+        }
+        .tree-icon {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+        .icon-folder-closed {
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="%23dcb67a" d="M1 3h6l2 2h6v8H1z"/></svg>') center/contain no-repeat;
+        }
+        .icon-folder-open {
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="%23dcb67a" d="M1 3h6l2 2h6v1l-1 7H0l1-7V3z"/></svg>') center/contain no-repeat;
+        }
+        .icon-function {
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect fill="%234a90e2" x="2" y="2" width="12" height="12" rx="1"/><text x="8" y="11" text-anchor="middle" fill="white" font-size="10">f</text></svg>') center/contain no-repeat;
+        }
+        .icon-property {
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle fill="%2342b883" cx="8" cy="8" r="6"/><text x="8" y="11" text-anchor="middle" fill="white" font-size="10">P</text></svg>') center/contain no-repeat;
+        }
+        .icon-type {
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect fill="%23ff7b00" x="2" y="2" width="12" height="12" rx="1"/><text x="8" y="11" text-anchor="middle" fill="white" font-size="10">T</text></svg>') center/contain no-repeat;
+        }
+        .icon-keyword {
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect fill="%239b59b6" x="2" y="2" width="12" height="12" rx="1"/><text x="8" y="11" text-anchor="middle" fill="white" font-size="10">K</text></svg>') center/contain no-repeat;
+        }
+        .toggle {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            margin-right: 2px;
+            vertical-align: middle;
+            cursor: pointer;
+        }
+        .toggle.collapsed::before {
+            content: '▶';
+            font-size: 10px;
+            color: #666;
+        }
+        .toggle.expanded::before {
+            content: '▼';
+            font-size: 10px;
+            color: #666;
+        }
+        .content {
+            flex: 1;
+            padding: 20px;
+            background: white;
+            overflow-y: auto;
+        }
+        .search-box {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #d0d0d0;
+            margin: 4px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="header">Синтакс-помощник</div>
+            <div class="tabs">
+                <div class="tab active">Содержание</div>
+                <div class="tab">Индекс</div>
+                <div class="tab">Поиск</div>
+            </div>
+            <input type="text" class="search-box" placeholder="Быстрый поиск..." onkeyup="filterTree(this.value)">
+            <div class="tree">
+                <div class="tree-item" onclick="toggleNode(this)">
+                    <span class="toggle expanded"></span>
+                    <span class="tree-icon icon-folder-open"></span>
+                    <span>Общее описание встроенного языка</span>
+                </div>
+                <div class="tree-children expanded">
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Операторы (4)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>? (вычислить выражение по условию)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>New</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>[...] (обращение к свойствам объекта)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Выполнить (Execute)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Определения (7)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Неопределено (Undefined)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Процедура (Procedure)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Null</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Перем (Var)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Ложь (False)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Функция (Function)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Истина (True)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Специальные операторы (2)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>set</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>await</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Управляющие конструкции (9)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Пока (While)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Goto</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>ВызватьИсключение (Raise)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Попытка (Try)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>ДобавитьОбработчик (AddHandler)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Для (For)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Для каждого (For each)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>Если (If)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-keyword"></span>
+<span>УдалитьОбработчик (RemoveHandler)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+                        <span class="toggle collapsed"></span>
+                        <span class="tree-icon icon-folder-closed"></span>
+                        <span>Примитивные типы</span>
+                    </div>
+                    <div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-type"></span>
+<span>Null</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-type"></span>
+<span>Неопределено</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-type"></span>
+<span>Число</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-type"></span>
+<span>Строка</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-type"></span>
+<span>Дата</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-type"></span>
+<span>Булево</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-type"></span>
+<span>Тип</span>
+</div>
+                    </div>
+                </div>
+                <div class="tree-item" onclick="toggleNode(this)">
+                    <span class="toggle collapsed"></span>
+                    <span class="tree-icon icon-folder-closed"></span>
+                    <span>Глобальный контекст</span>
+                </div>
+                <div class="tree-children">
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции интерактивной работы (6)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ВопросАсинх (DoQueryBoxAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьСообщенияПользователю (GetUserMessages)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Вопрос (DoQueryBox)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ОчиститьСообщения (ClearMessages)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПоказатьВопрос (ShowQueryBox)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Сообщить (Message)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции работы с COM (1)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьCOMОбъект (GetCOMObject)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции работы с JSON (6)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЗаписатьJSON (WriteJSON)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЗаписатьДатуJSON (WriteJSONDate)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПрочитатьJSON (ReadJSON)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЗаписатьЗначениеJSON (WriteJSONValue)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПрочитатьДатуJSON (ReadJSONDate)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПрочитатьЗначениеJSON (ReadJSONValue)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции работы с XML (11)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьXMLТип (GetXMLType)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ВозможностьЧтенияXML (CanReadXML)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>XMLТипЗнч (XMLTypeOf)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЗаписатьXML (WriteXML)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ИзXMLТипа (FromXMLType)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НайтиНедопустимыеСимволыXML (FindDisallowedXMLCharacters)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>XMLСтрока (XMLString)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПрочитатьXML (ReadXML)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>XMLТип (XMLType)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УдалитьНедопустимыеСимволыXML (DeleteDisallowedXMLCharacters)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>XMLЗначение (XMLValue)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции работы с датами (12)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>КонецГода (EndOfYear)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Месяц (Month)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачалоМесяца (BegOfMonth)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ДеньГода (DayOfYear)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Дата (Date)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НеделяГода (WeekOfYear)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>КонецМесяца (EndOfMonth)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ДобавитьМесяц (AddMonth)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачалоГода (BegOfYear)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>День (Day)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ДеньНедели (WeekDay)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Год (Year)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции работы с двоичными данными (28)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЧислоИзДвоичнойСтроки (NumberFromBinaryString)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СоединитьБуферыДвоичныхДанных (ConcatBinaryDataBuffers)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Base64Значение (Base64Value)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьСтрокуИзДвоичныхДанных (GetStringFromBinaryData)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>РазделитьДвоичныеДанные (SplitBinaryData)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьДвоичныеДанныеИзBase64ДвоичныхДанных (GetBinaryDataFromBase64BinaryData)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьHexСтрокуИзБуфераДвоичныхДанных (GetHexStringFromBinaryDataBuffer)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьBase64БуферДвоичныхДанныхИзБуфераДвоичныхДанных (GetBase64BinaryDataBufferFromBinaryDataBuffer)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьДвоичныеДанныеИзHexСтроки (GetBinaryDataFromHexString)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьБуферДвоичныхДанныхИзHexСтроки (GetBinaryDataBufferFromHexString)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьСтрокуИзБуфераДвоичныхДанных (GetStringFromBinaryDataBuffer)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьBase64СтрокуИзДвоичныхДанных (GetBase64StringFromBinaryData)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьБуферДвоичныхДанныхИзBase64Строки (GetBinaryDataBufferFromBase64String)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьБуферДвоичныхДанныхИзДвоичныхДанных (GetBinaryDataBufferFromBinaryData)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьHexДвоичныеДанныеИзДвоичныхДанных (GetHexBinaryDataFromBinaryData)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьДвоичныеДанныеИзBase64Строки (GetBinaryDataFromBase64String)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьBase64ДвоичныеДанныеИзДвоичныхДанных (GetBase64BinaryDataFromBinaryData)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьДвоичныеДанныеИзHexДвоичныхДанных (GetBinaryDataFromHexBinaryData)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьBase64СтрокуИзБуфераДвоичныхДанных (GetBase64StringFromBinaryDataBuffer)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьHexБуферДвоичныхДанныхИзБуфераДвоичныхДанных (GetHexBinaryDataBufferFromBinaryDataBuffer)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СоединитьДвоичныеДанные (ConcatBinaryData)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьHexСтрокуИзДвоичныхДанных (GetHexStringFromBinaryData)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьБуферДвоичныхДанныхИзBase64БуфераДвоичныхДанных (GetBinaryDataBufferFromBase64BinaryDataBuffer)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьБуферДвоичныхДанныхИзСтроки (GetBinaryDataBufferFromString)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьДвоичныеДанныеИзБуфераДвоичныхДанных (GetBinaryDataFromBinaryDataBuffer)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Base64Строка (Base64String)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьБуферДвоичныхДанныхИзHexБуфераДвоичныхДанных (GetBinaryDataBufferFromHexBinaryDataBuffer)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьДвоичныеДанныеИзСтроки (GetBinaryDataFromString)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции работы с криптографией (6)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПодключениеРасширенияРаботыСКриптографией (BeginAttachingCryptoExtension)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПодключитьРасширениеРаботыСКриптографией (AttachCryptoExtension)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьУстановкуРасширенияРаботыСКриптографией (BeginInstallCryptoExtension)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПодключитьРасширениеРаботыСКриптографиейАсинх (AttachCryptoExtensionAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьРасширениеРаботыСКриптографиейАсинх (InstallCryptoExtensionAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьРасширениеРаботыСКриптографией (InstallCryptoExtension)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции работы с типами (3)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Тип (Type)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЗначениеЗаполнено (ValueIsFilled)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ТипЗнч (TypeOf)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции работы с файлами (59)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЗначениеИзФайла (ValueFromFile)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПоместитьФайл (PutFile)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УдалитьФайлыАсинх (DeleteFilesAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СоздатьДвоичныеДанныеИзФайлаАсинх (CreateBinaryDataFromFileAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПомещениеФайлаНаСервер (BeginPutFileToServer)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьСозданиеДвоичныхДанныхИзФайла (BeginCreateBinaryDataFromFile)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПоместитьФайлНаСерверАсинх (PutFileToServerAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПоместитьФайлы (PutFiles)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПереместитьФайлАсинх (MoveFileAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПолучениеФайловССервера (BeginGetFilesFromServer)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьФайлССервераАсинх (GetFileFromServerAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПомещениеФайловНаСервер (BeginPutFilesToServer)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьРасширениеРаботыСФайламиАсинх (InstallFileSystemExtensionAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПоискФайлов (BeginFindingFiles)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьКопированиеФайла (BeginCopyingFile)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПодключениеРасширенияРаботыСФайлами (BeginAttachingFileSystemExtension)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПолучениеФайлов (BeginGettingFiles)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>КаталогДокументов (DocumentsDir)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>КаталогВременныхФайлов (TempFilesDir)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьМаскуВсеФайлыСервера (GetServerAllFilesMask)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ОбъединитьФайлы (MergeFiles)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПоместитьФайлыНаСерверАсинх (PutFilesToServerAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>РазделитьФайл (SplitFile)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НайтиФайлы (FindFiles)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>РабочийКаталогДанныхПользователя (UserDataWorkDir)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьФайл (GetFile)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьУдалениеФайлов (BeginDeletingFiles)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>КаталогБиблиотекиМобильногоУстройстваАсинх (MobileDeviceLibraryDirAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>КаталогБиблиотекиМобильногоУстройства (MobileDeviceLibraryDir)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>КаталогДокументовАсинх (DocumentsDirAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПеремещениеФайла (BeginMovingFile)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьРасширениеРаботыСФайлами (InstallFileSystemExtension)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьСозданиеКаталога (BeginCreatingDirectory)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПолучениеКаталогаДокументов (BeginGettingDocumentsDir)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПомещениеФайла (BeginPutFile)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьИмяВременногоФайла (GetTempFileName)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НайтиФайлыАсинх (FindFilesAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СоздатьКаталогАсинх (CreateDirectoryAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>КаталогВременныхФайловАсинх (TempFilesDirAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьМаскуВсеФайлыКлиента (GetClientAllFilesMask)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьФайлы (GetFiles)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьФайлыССервераАсинх (GetFilesFromServerAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПолучениеКаталогаБиблиотекиМобильногоУстройства (BeginGettingMobileDeviceLibraryDir)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СоздатьКаталог (CreateDirectory)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПолучениеРабочегоКаталогаДанныхПользователя (BeginGettingUserDataWorkDir)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьУстановкуРасширенияРаботыСФайлами (BeginInstallFileSystemExtension)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьМаскуВсеФайлы (GetAllFilesMask)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>РабочийКаталогДанныхПользователяАсинх (UserDataWorkDirAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>КопироватьФайлАсинх (CopyFileAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПодключитьРасширениеРаботыСФайламиАсинх (AttachFileSystemExtensionAsync)</span>
+</div>
+                        <div class="tree-item" style="color:#888;">
+<span style="width:14px;display:inline-block;"></span>
+<span style="margin-left:20px;">...ещё 9 функций</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции работы с числами (9)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ВвестиЧисло (InputNumber)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Число (Number)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Цел (Int)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Окр (Round)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Cos (Cos)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЧислоИзШестнадцатеричнойСтроки (NumberFromHexString)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ВвестиЧислоАсинх (InputNumberAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Sin (Sin)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЧислоПрописью (NumberInWords)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции работы со строками (20)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрЧислоВхождений (StrOccurrenceCount)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрНайти (StrFind)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрокаСЧислом (StringWithNumber)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрСравнить (StrCompare)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрокаСоединенияИнформационнойБазы (InfoBaseConnectionString)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрРазделить (StrSplit)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрЗаменить (StrReplace)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрПолучитьСтроку (StrGetLine)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрНачинаетсяС (StrStartsWith)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрНайтиПоРегулярномуВыражению (StrFindByRegularExpression)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрЗаканчиваетсяНа (StrEndsWith)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрПодобнаПоРегулярномуВыражению (StrLikeByRegularExpression)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрЧислоСтрок (StrLineCount)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрДлина (StrLen)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрШаблон (StrTemplate)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрСоединить (StrConcat)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Строка (String)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрНайтиИВыделитьОформлением (StrFindAndHighlightByAppearance)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрЗаменитьПоРегулярномуВыражению (StrReplaceByRegularExpression)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СтрНайтиВсеПоРегулярномуВыражению (StrFindAllByRegularExpression)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции сеанса работы (24)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЗапроситьРазрешениеПользователя (RequestUserPermission)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПоказатьОповещениеПользователя (ShowUserNotification)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьМинимальнуюДлинуПаролейПользователей (GetUserPasswordMinLength)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьЗапросРазрешенияПользователя (BeginRequestingUserPermission)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЗаблокироватьРаботуПользователя (LockApplication)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьПроверкуСложностиПаролейПользователей (SetUserPasswordStrengthCheck)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьСрокПредупрежденияОбИстеченииСрокаДействияПаролейПользователей (GetUserPasswordExpirationNotificationPeriod)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьМаксимальныйСрокДействияПаролейПользователей (SetUserPasswordMaxEffectivePeriod)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьПроверкуСложностиПаролейПользователей (GetUserPasswordStrengthCheck)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьМинимальнуюДлинуПаролейПользователей (SetUserPasswordMinLength)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьСрокПредупрежденияОбИстеченииСрокаДействияПаролейПользователей (SetUserPasswordExpirationNotificationPeriod)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьОграничениеПовторенияПаролейПользователейСредиПоследних (GetUserPasswordReuseLimit)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СохранитьНастройкиПользователя (SaveUserSettings)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЗапроситьРазрешениеПользователяАсинх (RequestUserPermissionAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПользователиОС (OSUsers)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьМаксимальныйСрокДействияПаролейПользователей (GetUserPasswordMaxEffectivePeriod)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолноеИмяПользователя (UserFullName)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ОчиститьНастройкиПользователя (ClearUserSettings)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ИмяПользователя (UserName)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьМинимальныйСрокДействияПаролейПользователей (SetUserPasswordMinEffectivePeriod)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьОграничениеПовторенияПаролейПользователейСредиПоследних (SetUserPasswordReuseLimit)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ОбработкаПрерыванияПользователя (UserInterruptProcessing)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьМинимальныйСрокДействияПаролейПользователей (GetUserPasswordMinEffectivePeriod)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПользователиWindows (WindowsUsers)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции управления транзакциями (4)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьТранзакцию (BeginTransaction)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЗафиксироватьТранзакцию (CommitTransaction)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ОтменитьТранзакцию (RollbackTransaction)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ТранзакцияАктивна (TransactionActive)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Процедуры и функции форматирования (1)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Формат (Format)</span>
+</div>
+                    </div>
+                    <div class="tree-item" onclick="toggleNode(this)">
+<span class="toggle collapsed"></span>
+<span class="tree-icon icon-folder-closed"></span>
+<span>Прочие процедуры и функции (286)</span>
+</div>
+<div class="tree-children">
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ТРег (Title)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачалоКвартала (BegOfQuarter)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Сигнал (Beep)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Секунда (Second)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ОткрытьСодержаниеСправки (OpenHelpContent)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СоздатьФабрикуXDTO (CreateXDTOFactory)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьНачалоСтолетияИнформационнойБазы (SetInfoBaseBeginningOfCentury)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПодключитьОбработчикЗапросаНастроекКлиентаЛицензирования (AttachLicensingClientParametersRequestHandler)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьФорму (GetForm)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПобитовыйСдвигВправо (BitwiseShiftRight)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьПараметрыФункциональныхОпцийИнтерфейса (GetInterfaceFunctionalOptionParameters)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьРежимВнешнихРесурсов (GetExternalResourcesMode)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ДокументЗащищенПаролемАсинх (DocumentIsPasswordProtectedAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УниверсальноеВремя (ToUniversalTime)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьИспользуемыйСервер (GetUsedServer)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ВвестиДатуАсинх (InputDateAsync)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьОкна (GetWindows)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьОбновлениеПредопределенныхДанныхИнформационнойБазы (GetInfoBasePredefinedData)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ЗапрещеноОткрытиеФорм (CannotOpenForm)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьНастройкиКлиентаЛицензирования (SetLicensingClientParameters)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьПараметрыМонопольногоРежима (GetExclusiveModeParameters)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьЧасовойПоясИнформационнойБазы (SetInfoBaseTimeZone)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПодключитьОбработчикОжидания (AttachIdleHandler)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПодключитьОбработчикОповещения (AttachNotificationHandler)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьМакетОформления (GetAppearanceTemplate)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ОткрытьИндексСправки (OpenHelpIndex)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ТекущаяУниверсальнаяДатаВМиллисекундах (CurrentUniversalDateInMilliseconds)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьКоличествоЗаданийПересчетаИтогов (SetTotalRecalcJobCount)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>КодСимвола (CharCode)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьСпособПроверкиПодписиМобильногоКлиента (SetMobileClientSignatureVerificationMethod)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>СмещениеЛетнегоВремени (DaylightTimeOffset)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НачатьПодключениеРасширенияПолученияИнформацииОКомпьютере (BeginAttachingComputerInformationExtension)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПроверитьБит (CheckBit)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьПериодРазделенияХраненияДанныхЖурналаРегистрации (GetEventLogDataStorageSplitPeriod)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПредопределенноеЗначение (PredefinedValue)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьСоответствиеОбъектаИФормы (GetObjectAndFormConformity)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>РазблокироватьДанныеДляРедактирования (UnlockDataForEdit)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьДопустимыеЧасовыеПояса (GetAvailableTimeZones)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НомерСоединенияИнформационнойБазы (InfoBaseConnectionNumber)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьБлокировкуСеансов (SetSessionsLock)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьУникальныйИдентификаторСПоддержкойСовместимости (GetUUIDWithCompatibilitySupport)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>УстановитьПериодРазделенияХраненияДанныхЖурналаРегистрации (SetEventLogDataStorageSplitPeriod)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>НайтиПомеченныеНаУдаление (FindMarkedForDeletion)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>БезопасныйРежим (SafeMode)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПредставлениеПрава (RightPresentation)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>Сред (Mid)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПредставлениеПериода (PeriodPresentation)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ACos (ACos)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ПолучитьСоставСтандартногоИнтерфейсаOData (GetStandardODataInterfaceContent)</span>
+</div>
+                        <div class="tree-item">
+<span style="width:14px;display:inline-block;"></span>
+<span class="tree-icon icon-function"></span>
+<span>ВвестиЗначениеАсинх (InputValueAsync)</span>
+</div>
+                        <div class="tree-item" style="color:#888;">
+<span style="width:14px;display:inline-block;"></span>
+<span style="margin-left:20px;">...ещё 236 функций</span>
+</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="content">
+            <h2>BSL Type System</h2>
+            <p>Выберите элемент в дереве слева для просмотра подробной информации.</p>
+            <br>
+            <h3>Статистика:</h3>
+            <ul>
+                <li>Глобальных функций: 476</li>
+                <li>Ключевых слов: 22</li>
+                <li>Категорий функций: 15</li>
+            </ul>
+        </div>
+    </div>
+    <script>
+        function toggleNode(element) {
+            const toggle = element.querySelector('.toggle');
+            const icon = element.querySelector('.tree-icon');
+            const children = element.nextElementSibling;
+            
+            if (toggle && children && children.classList.contains('tree-children')) {
+                toggle.classList.toggle('collapsed');
+                toggle.classList.toggle('expanded');
+                children.classList.toggle('expanded');
+                
+                if (icon) {
+                    if (icon.classList.contains('icon-folder-closed')) {
+                        icon.classList.remove('icon-folder-closed');
+                        icon.classList.add('icon-folder-open');
+                    } else if (icon.classList.contains('icon-folder-open')) {
+                        icon.classList.remove('icon-folder-open');
+                        icon.classList.add('icon-folder-closed');
+                    }
+                }
+            }
+            
+            // Выделение выбранного элемента
+            document.querySelectorAll('.tree-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            element.classList.add('selected');
+        }
+        
+        function filterTree(searchTerm) {
+            const term = searchTerm.toLowerCase();
+            const items = document.querySelectorAll('.tree-item');
+            
+            items.forEach(item => {
+                const text = item.textContent.toLowerCase();
+                if (term === '' || text.includes(term)) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+    </script>
+</body>
+</html>

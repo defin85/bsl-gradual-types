@@ -1,5 +1,7 @@
 //! Adapters for external data sources
 
-pub mod platform_docs;
 pub mod config_parser_xml;
-pub mod platform_types;
+pub mod platform_types_v2;
+pub mod syntax_helper_parser;
+pub mod syntax_helper_parser_v2;
+pub mod facet_cache;

@@ -1,0 +1,2125 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BSL Type Hierarchy - Иерархия типов 1С</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        h1 {
+            margin: 0;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .subtitle {
+            margin-top: 10px;
+            opacity: 0.9;
+        }
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .stat-card {
+            text-align: center;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            min-width: 120px;
+        }
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+        .content {
+            padding: 30px;
+        }
+        .section {
+            margin-bottom: 40px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .section-title {
+            font-size: 1.5em;
+            color: #495057;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+        .function-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 10px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .function-card {
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            border-left: 3px solid #667eea;
+            transition: all 0.3s;
+        }
+        .function-card:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
+        .function-name {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .function-english {
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+        .keyword-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .keyword {
+            padding: 5px 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+        .search-box {
+            padding: 10px;
+            width: 100%;
+            border: 2px solid #dee2e6;
+            border-radius: 5px;
+            font-size: 1em;
+            margin-bottom: 20px;
+        }
+        .search-box:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏗️ BSL Type Hierarchy</h1>
+            <div class="subtitle">Иерархия типов и функций языка 1С:Предприятие</div>
+        </div>
+        <div class="stats">
+            <div class="stat-card">
+<div style="font-size: 2em;">📦</div>
+<div class="stat-number">476</div>
+<div class="stat-label">Функций</div>
+</div>
+            <div class="stat-card">
+<div style="font-size: 2em;">🏢</div>
+<div class="stat-number">0</div>
+<div class="stat-label">Объектов</div>
+</div>
+            <div class="stat-card">
+<div style="font-size: 2em;">🎯</div>
+<div class="stat-number">0</div>
+<div class="stat-label">Методов</div>
+</div>
+            <div class="stat-card">
+<div style="font-size: 2em;">⚙️</div>
+<div class="stat-number">0</div>
+<div class="stat-label">Свойств</div>
+</div>
+            <div class="stat-card">
+<div style="font-size: 2em;">📝</div>
+<div class="stat-number">0</div>
+<div class="stat-label">Перечислений</div>
+</div>
+            <div class="stat-card">
+<div style="font-size: 2em;">🔤</div>
+<div class="stat-number">22</div>
+<div class="stat-label">Ключевых слов</div>
+</div>
+        </div>
+        <div class="content">
+            <input type="text" class="search-box" id="searchBox" placeholder="🔍 Поиск функций, ключевых слов..." onkeyup="filterContent()">
+            <div class="section" id="functions">
+                <h2 class="section-title">📦 Глобальные функции</h2>
+                <div class="function-grid">
+                    <div class="function-card searchable" data-search="удалитьнедопустимыесимволыxml deletedisallowedxmlcharacters">
+<div class="function-name">УдалитьНедопустимыеСимволыXML</div>
+<div class="function-english">DeleteDisallowedXMLCharacters</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьподключениерасширенияработыскриптографией beginattachingcryptoextension">
+<div class="function-name">НачатьПодключениеРасширенияРаботыСКриптографией</div>
+<div class="function-english">BeginAttachingCryptoExtension</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьфайлы getfiles">
+<div class="function-name">ПолучитьФайлы</div>
+<div class="function-english">GetFiles</div>
+</div>
+                    <div class="function-card searchable" data-search="конфигурацияизменена configurationchanged">
+<div class="function-name">КонфигурацияИзменена</div>
+<div class="function-english">ConfigurationChanged</div>
+</div>
+                    <div class="function-card searchable" data-search="поместитьфайлынасерверасинх putfilestoserverasync">
+<div class="function-name">ПоместитьФайлыНаСерверАсинх</div>
+<div class="function-english">PutFilesToServerAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="стрподобнапорегулярномувыражению strlikebyregularexpression">
+<div class="function-name">СтрПодобнаПоРегулярномуВыражению</div>
+<div class="function-english">StrLikeByRegularExpression</div>
+</div>
+                    <div class="function-card searchable" data-search="запроситьразрешениепользователяасинх requestuserpermissionasync">
+<div class="function-name">ЗапроситьРазрешениеПользователяАсинх</div>
+<div class="function-english">RequestUserPermissionAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="день day">
+<div class="function-name">День</div>
+<div class="function-english">Day</div>
+</div>
+                    <div class="function-card searchable" data-search="записьжурналарегистрации writelogevent">
+<div class="function-name">ЗаписьЖурналаРегистрации</div>
+<div class="function-english">WriteLogEvent</div>
+</div>
+                    <div class="function-card searchable" data-search="числоиздвоичнойстроки numberfrombinarystring">
+<div class="function-name">ЧислоИзДвоичнойСтроки</div>
+<div class="function-english">NumberFromBinaryString</div>
+</div>
+                    <div class="function-card searchable" data-search="показатьвводстроки showinputstring">
+<div class="function-name">ПоказатьВводСтроки</div>
+<div class="function-english">ShowInputString</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьуникальныйидентификаторсподдержкойсовместимости getuuidwithcompatibilitysupport">
+<div class="function-name">ПолучитьУникальныйИдентификаторСПоддержкойСовместимости</div>
+<div class="function-english">GetUUIDWithCompatibilitySupport</div>
+</div>
+                    <div class="function-card searchable" data-search="создатьобъектвнешнейкомпонентыасинх createaddinobjectasync">
+<div class="function-name">СоздатьОбъектВнешнейКомпонентыАсинх</div>
+<div class="function-english">CreateAddInObjectAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="этоадресвременногохранилища istempstorageurl">
+<div class="function-name">ЭтоАдресВременногоХранилища</div>
+<div class="function-english">IsTempStorageURL</div>
+</div>
+                    <div class="function-card searchable" data-search="поместитьвовременноехранилище puttotempstorage">
+<div class="function-name">ПоместитьВоВременноеХранилище</div>
+<div class="function-english">PutToTempStorage</div>
+</div>
+                    <div class="function-card searchable" data-search="значениеизфайла valuefromfile">
+<div class="function-name">ЗначениеИзФайла</div>
+<div class="function-english">ValueFromFile</div>
+</div>
+                    <div class="function-card searchable" data-search="сокрл triml">
+<div class="function-name">СокрЛ</div>
+<div class="function-english">TrimL</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьполучениерабочегокаталогаданныхпользователя begingettinguserdataworkdir">
+<div class="function-name">НачатьПолучениеРабочегоКаталогаДанныхПользователя</div>
+<div class="function-english">BeginGettingUserDataWorkDir</div>
+</div>
+                    <div class="function-card searchable" data-search="предопределенноезначение predefinedvalue">
+<div class="function-name">ПредопределенноеЗначение</div>
+<div class="function-english">PredefinedValue</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьбезопасныйрежим setsafemode">
+<div class="function-name">УстановитьБезопасныйРежим</div>
+<div class="function-english">SetSafeMode</div>
+</div>
+                    <div class="function-card searchable" data-search="проверитьциклическиессылкивстроенногоязыка checkscriptcircularrefs">
+<div class="function-name">ПроверитьЦиклическиеСсылкиВстроенногоЯзыка</div>
+<div class="function-english">CheckScriptCircularRefs</div>
+</div>
+                    <div class="function-card searchable" data-search="номерсоединенияинформационнойбазы infobaseconnectionnumber">
+<div class="function-name">НомерСоединенияИнформационнойБазы</div>
+<div class="function-english">InfoBaseConnectionNumber</div>
+</div>
+                    <div class="function-card searchable" data-search="atan (atan) ">
+<div class="function-name">ATan (ATan)</div>
+<div class="function-english"></div>
+</div>
+                    <div class="function-card searchable" data-search="получитьcomобъект getcomobject">
+<div class="function-name">ПолучитьCOMОбъект</div>
+<div class="function-english">GetCOMObject</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьполучениефайлов begingettingfiles">
+<div class="function-name">НачатьПолучениеФайлов</div>
+<div class="function-english">BeginGettingFiles</div>
+</div>
+                    <div class="function-card searchable" data-search="началостолетиясеанса sessionbeginningofcentury">
+<div class="function-name">НачалоСтолетияСеанса</div>
+<div class="function-english">SessionBeginningOfCentury</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьсоединенияинформационнойбазы getinfobaseconnections">
+<div class="function-name">ПолучитьСоединенияИнформационнойБазы</div>
+<div class="function-english">GetInfoBaseConnections</div>
+</div>
+                    <div class="function-card searchable" data-search="записатьдатуjson writejsondate">
+<div class="function-name">ЗаписатьДатуJSON</div>
+<div class="function-english">WriteJSONDate</div>
+</div>
+                    <div class="function-card searchable" data-search="показатьвводоценкиприложения showinputapprate">
+<div class="function-name">ПоказатьВводОценкиПриложения</div>
+<div class="function-english">ShowInputAppRate</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьдвоичныеданныеизстроки getbinarydatafromstring">
+<div class="function-name">ПолучитьДвоичныеДанныеИзСтроки</div>
+<div class="function-english">GetBinaryDataFromString</div>
+</div>
+                    <div class="function-card searchable" data-search="тип type">
+<div class="function-name">Тип</div>
+<div class="function-english">Type</div>
+</div>
+                    <div class="function-card searchable" data-search="неделягода weekofyear">
+<div class="function-name">НеделяГода</div>
+<div class="function-english">WeekOfYear</div>
+</div>
+                    <div class="function-card searchable" data-search="показатьвопрос showquerybox">
+<div class="function-name">ПоказатьВопрос</div>
+<div class="function-english">ShowQueryBox</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьначалостолетияинформационнойбазы setinfobasebeginningofcentury">
+<div class="function-name">УстановитьНачалоСтолетияИнформационнойБазы</div>
+<div class="function-english">SetInfoBaseBeginningOfCentury</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьфайлссервераасинх getfilefromserverasync">
+<div class="function-name">ПолучитьФайлССервераАсинх</div>
+<div class="function-english">GetFileFromServerAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьмаксимальныйсрокдействияпаролейпользователей getuserpasswordmaxeffectiveperiod">
+<div class="function-name">ПолучитьМаксимальныйСрокДействияПаролейПользователей</div>
+<div class="function-english">GetUserPasswordMaxEffectivePeriod</div>
+</div>
+                    <div class="function-card searchable" data-search="побитовоене bitwisenot">
+<div class="function-name">ПобитовоеНе</div>
+<div class="function-english">BitwiseNot</div>
+</div>
+                    <div class="function-card searchable" data-search="изxmlтипа fromxmltype">
+<div class="function-name">ИзXMLТипа</div>
+<div class="function-english">FromXMLType</div>
+</div>
+                    <div class="function-card searchable" data-search="подключитьрасширениеработысфайламиасинх attachfilesystemextensionasync">
+<div class="function-name">ПодключитьРасширениеРаботыСФайламиАсинх</div>
+<div class="function-english">AttachFileSystemExtensionAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="побитовыйсдвигвправо bitwiseshiftright">
+<div class="function-name">ПобитовыйСдвигВправо</div>
+<div class="function-english">BitwiseShiftRight</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьсоответствиеобъектаиреквизитаформы getobjectandformattributeconformity">
+<div class="function-name">ПолучитьСоответствиеОбъектаИРеквизитаФормы</div>
+<div class="function-english">GetObjectAndFormAttributeConformity</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьспособпроверкиподписимобильногоклиента getmobileclientsignatureverificationmethod">
+<div class="function-name">ПолучитьСпособПроверкиПодписиМобильногоКлиента</div>
+<div class="function-english">GetMobileClientSignatureVerificationMethod</div>
+</div>
+                    <div class="function-card searchable" data-search="значениезаполнено valueisfilled">
+<div class="function-name">ЗначениеЗаполнено</div>
+<div class="function-english">ValueIsFilled</div>
+</div>
+                    <div class="function-card searchable" data-search="значениевстрокувнутр valuetostringinternal">
+<div class="function-name">ЗначениеВСтрокуВнутр</div>
+<div class="function-english">ValueToStringInternal</div>
+</div>
+                    <div class="function-card searchable" data-search="прекратитьработусистемы terminate">
+<div class="function-name">ПрекратитьРаботуСистемы</div>
+<div class="function-english">Terminate</div>
+</div>
+                    <div class="function-card searchable" data-search="стрсоединить strconcat">
+<div class="function-name">СтрСоединить</div>
+<div class="function-english">StrConcat</div>
+</div>
+                    <div class="function-card searchable" data-search="заблокироватьданныедляредактирования lockdataforedit">
+<div class="function-name">ЗаблокироватьДанныеДляРедактирования</div>
+<div class="function-english">LockDataForEdit</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьотключениебезопасногорежима setsafemodedisabled">
+<div class="function-name">УстановитьОтключениеБезопасногоРежима</div>
+<div class="function-english">SetSafeModeDisabled</div>
+</div>
+                    <div class="function-card searchable" data-search="каталогвременныхфайловасинх tempfilesdirasync">
+<div class="function-name">КаталогВременныхФайловАсинх</div>
+<div class="function-english">TempFilesDirAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="отключитьобработчикожидания detachidlehandler">
+<div class="function-name">ОтключитьОбработчикОжидания</div>
+<div class="function-english">DetachIdleHandler</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьизвременногохранилища getfromtempstorage">
+<div class="function-name">ПолучитьИзВременногоХранилища</div>
+<div class="function-english">GetFromTempStorage</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьрегиональныенастройкисеанса getsessionregionalsettings">
+<div class="function-name">ПолучитьРегиональныеНастройкиСеанса</div>
+<div class="function-english">GetSessionRegionalSettings</div>
+</div>
+                    <div class="function-card searchable" data-search="выгрузитьжурналрегистрации unloadeventlog">
+<div class="function-name">ВыгрузитьЖурналРегистрации</div>
+<div class="function-english">UnloadEventLog</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьдвоичныеданныеизбуферадвоичныхданных getbinarydatafrombinarydatabuffer">
+<div class="function-name">ПолучитьДвоичныеДанныеИзБуфераДвоичныхДанных</div>
+<div class="function-english">GetBinaryDataFromBinaryDataBuffer</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьполучениекаталогавременныхфайлов begingettingtempfilesdir">
+<div class="function-name">НачатьПолучениеКаталогаВременныхФайлов</div>
+<div class="function-english">BeginGettingTempFilesDir</div>
+</div>
+                    <div class="function-card searchable" data-search="завершитьработусистемы exit">
+<div class="function-name">ЗавершитьРаботуСистемы</div>
+<div class="function-english">Exit</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьвремяожиданияблокировкиданных getlockwaittime">
+<div class="function-name">ПолучитьВремяОжиданияБлокировкиДанных</div>
+<div class="function-english">GetLockWaitTime</div>
+</div>
+                    <div class="function-card searchable" data-search="подключитьрасширениеработыскриптографиейасинх attachcryptoextensionasync">
+<div class="function-name">ПодключитьРасширениеРаботыСКриптографиейАсинх</div>
+<div class="function-english">AttachCryptoExtensionAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="побитовоеисключительноеили bitwisexor">
+<div class="function-name">ПобитовоеИсключительноеИли</div>
+<div class="function-english">BitwiseXor</div>
+</div>
+                    <div class="function-card searchable" data-search="запуститьсистему runsystem">
+<div class="function-name">ЗапуститьСистему</div>
+<div class="function-english">RunSystem</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьпомещениефайловнасервер beginputfilestoserver">
+<div class="function-name">НачатьПомещениеФайловНаСервер</div>
+<div class="function-english">BeginPutFilesToServer</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьзначенияотборажурналарегистрации geteventlogfiltervalues">
+<div class="function-name">ПолучитьЗначенияОтбораЖурналаРегистрации</div>
+<div class="function-english">GetEventLogFilterValues</div>
+</div>
+                    <div class="function-card searchable" data-search="год year">
+<div class="function-name">Год</div>
+<div class="function-english">Year</div>
+</div>
+                    <div class="function-card searchable" data-search="каталогпрограммы bindir">
+<div class="function-name">КаталогПрограммы</div>
+<div class="function-english">BinDir</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьпараметрыфункциональныхопцийинтерфейса getinterfacefunctionaloptionparameters">
+<div class="function-name">ПолучитьПараметрыФункциональныхОпцийИнтерфейса</div>
+<div class="function-english">GetInterfaceFunctionalOptionParameters</div>
+</div>
+                    <div class="function-card searchable" data-search="вызватьпаузу callsleep">
+<div class="function-name">ВызватьПаузу</div>
+<div class="function-english">CallSleep</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьиспользованиесобытияжурналарегистрации geteventlogeventuse">
+<div class="function-name">ПолучитьИспользованиеСобытияЖурналаРегистрации</div>
+<div class="function-english">GetEventLogEventUse</div>
+</div>
+                    <div class="function-card searchable" data-search="tan (tan) ">
+<div class="function-name">Tan (Tan)</div>
+<div class="function-english"></div>
+</div>
+                    <div class="function-card searchable" data-search="получитьинформациюэкрановклиента getclientdisplaysinformation">
+<div class="function-name">ПолучитьИнформациюЭкрановКлиента</div>
+<div class="function-english">GetClientDisplaysInformation</div>
+</div>
+                    <div class="function-card searchable" data-search="мин min">
+<div class="function-name">Мин</div>
+<div class="function-english">Min</div>
+</div>
+                    <div class="function-card searchable" data-search="представлениеправа rightpresentation">
+<div class="function-name">ПредставлениеПрава</div>
+<div class="function-english">RightPresentation</div>
+</div>
+                    <div class="function-card searchable" data-search="показатьвводчисла showinputnumber">
+<div class="function-name">ПоказатьВводЧисла</div>
+<div class="function-english">ShowInputNumber</div>
+</div>
+                    <div class="function-card searchable" data-search="значениевфайл valuetofile">
+<div class="function-name">ЗначениеВФайл</div>
+<div class="function-english">ValueToFile</div>
+</div>
+                    <div class="function-card searchable" data-search="конецминуты endofminute">
+<div class="function-name">КонецМинуты</div>
+<div class="function-english">EndOfMinute</div>
+</div>
+                    <div class="function-card searchable" data-search="показатьнакарте showonmap">
+<div class="function-name">ПоказатьНаКарте</div>
+<div class="function-english">ShowOnMap</div>
+</div>
+                    <div class="function-card searchable" data-search="конецнедели endofweek">
+<div class="function-name">КонецНедели</div>
+<div class="function-english">EndOfWeek</div>
+</div>
+                    <div class="function-card searchable" data-search="отключитьобработчикзапросанастроекклиенталицензирования detachlicensingclientparametersrequesthandler">
+<div class="function-name">ОтключитьОбработчикЗапросаНастроекКлиентаЛицензирования</div>
+<div class="function-english">DetachLicensingClientParametersRequestHandler</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьокна getwindows">
+<div class="function-name">ПолучитьОкна</div>
+<div class="function-english">GetWindows</div>
+</div>
+                    <div class="function-card searchable" data-search="стрнайтиивыделитьоформлением strfindandhighlightbyappearance">
+<div class="function-name">СтрНайтиИВыделитьОформлением</div>
+<div class="function-english">StrFindAndHighlightByAppearance</div>
+</div>
+                    <div class="function-card searchable" data-search="xmlтип xmltype">
+<div class="function-name">XMLТип</div>
+<div class="function-english">XMLType</div>
+</div>
+                    <div class="function-card searchable" data-search="поддерживаетсяфункциональностьмобильногоприложения mobileapplicationfunctionalitysupported">
+<div class="function-name">ПоддерживаетсяФункциональностьМобильногоПриложения</div>
+<div class="function-english">MobileApplicationFunctionalitySupported</div>
+</div>
+                    <div class="function-card searchable" data-search="стрполучитьстроку strgetline">
+<div class="function-name">СтрПолучитьСтроку</div>
+<div class="function-english">StrGetLine</div>
+</div>
+                    <div class="function-card searchable" data-search="часовойпояссеанса sessiontimezone">
+<div class="function-name">ЧасовойПоясСеанса</div>
+<div class="function-english">SessionTimeZone</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьместоположениепоадресу getlocationbyaddress">
+<div class="function-name">ПолучитьМестоположениеПоАдресу</div>
+<div class="function-english">GetLocationByAddress</div>
+</div>
+                    <div class="function-card searchable" data-search="log (log) ">
+<div class="function-name">Log (Log)</div>
+<div class="function-english"></div>
+</div>
+                    <div class="function-card searchable" data-search="установитьрегиональныенастройкиинформационнойбазы setinfobaseregionalsettings">
+<div class="function-name">УстановитьРегиональныеНастройкиИнформационнойБазы</div>
+<div class="function-english">SetInfoBaseRegionalSettings</div>
+</div>
+                    <div class="function-card searchable" data-search="копироватьфайл filecopy">
+<div class="function-name">КопироватьФайл</div>
+<div class="function-english">FileCopy</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьперемещениефайла beginmovingfile">
+<div class="function-name">НачатьПеремещениеФайла</div>
+<div class="function-english">BeginMovingFile</div>
+</div>
+                    <div class="function-card searchable" data-search="состояние status">
+<div class="function-name">Состояние</div>
+<div class="function-english">Status</div>
+</div>
+                    <div class="function-card searchable" data-search="записатьjson writejson">
+<div class="function-name">ЗаписатьJSON</div>
+<div class="function-english">WriteJSON</div>
+</div>
+                    <div class="function-card searchable" data-search="создатьдвоичныеданныеизфайлаасинх createbinarydatafromfileasync">
+<div class="function-name">СоздатьДвоичныеДанныеИзФайлаАсинх</div>
+<div class="function-english">CreateBinaryDataFromFileAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="найтифайлыасинх findfilesasync">
+<div class="function-name">НайтиФайлыАсинх</div>
+<div class="function-english">FindFilesAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьобновлениепредопределенныхданныхинформационнойбазы getinfobasepredefineddata">
+<div class="function-name">ПолучитьОбновлениеПредопределенныхДанныхИнформационнойБазы</div>
+<div class="function-english">GetInfoBasePredefinedData</div>
+</div>
+                    <div class="function-card searchable" data-search="sin (sin) ">
+<div class="function-name">Sin (Sin)</div>
+<div class="function-english"></div>
+</div>
+                    <div class="function-card searchable" data-search="минута minute">
+<div class="function-name">Минута</div>
+<div class="function-english">Minute</div>
+</div>
+                    <div class="function-card searchable" data-search="числопрописью numberinwords">
+<div class="function-name">ЧислоПрописью</div>
+<div class="function-english">NumberInWords</div>
+</div>
+                    <div class="function-card searchable" data-search="кодироватьстроку encodestring">
+<div class="function-name">КодироватьСтроку</div>
+<div class="function-english">EncodeString</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьидентификаторконфигурации getconfigurationid">
+<div class="function-name">ПолучитьИдентификаторКонфигурации</div>
+<div class="function-english">GetConfigurationID</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьполучениекаталогадокументов begingettingdocumentsdir">
+<div class="function-name">НачатьПолучениеКаталогаДокументов</div>
+<div class="function-english">BeginGettingDocumentsDir</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьbase64строкуиздвоичныхданных getbase64stringfrombinarydata">
+<div class="function-name">ПолучитьBase64СтрокуИзДвоичныхДанных</div>
+<div class="function-english">GetBase64StringFromBinaryData</div>
+</div>
+                    <div class="function-card searchable" data-search="полноеимяпользователя userfullname">
+<div class="function-name">ПолноеИмяПользователя</div>
+<div class="function-english">UserFullName</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьсеансыинформационнойбазы getinfobasesessions">
+<div class="function-name">ПолучитьСеансыИнформационнойБазы</div>
+<div class="function-english">GetInfoBaseSessions</div>
+</div>
+                    <div class="function-card searchable" data-search="номерсеансаинформационнойбазы infobasesessionnumber">
+<div class="function-name">НомерСеансаИнформационнойБазы</div>
+<div class="function-english">InfoBaseSessionNumber</div>
+</div>
+                    <div class="function-card searchable" data-search="смещениестандартноговремени standardtimeoffset">
+<div class="function-name">СмещениеСтандартногоВремени</div>
+<div class="function-english">StandardTimeOffset</div>
+</div>
+                    <div class="function-card searchable" data-search="конецквартала endofquarter">
+<div class="function-name">КонецКвартала</div>
+<div class="function-english">EndOfQuarter</div>
+</div>
+                    <div class="function-card searchable" data-search="ввестизначениеасинх inputvalueasync">
+<div class="function-name">ВвестиЗначениеАсинх</div>
+<div class="function-english">InputValueAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьполучениефайловссервера begingetfilesfromserver">
+<div class="function-name">НачатьПолучениеФайловССервера</div>
+<div class="function-english">BeginGetFilesFromServer</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьрасширениеполученияинформацииокомпьютереасинх installcomputerinformationextensionasync">
+<div class="function-name">УстановитьРасширениеПолученияИнформацииОКомпьютереАсинх</div>
+<div class="function-english">InstallComputerInformationExtensionAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="предупреждениеасинх domessageboxasync">
+<div class="function-name">ПредупреждениеАсинх</div>
+<div class="function-english">DoMessageBoxAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="показатьпредупреждение showmessagebox">
+<div class="function-name">ПоказатьПредупреждение</div>
+<div class="function-english">ShowMessageBox</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьколичествозаданийпересчетаитогов settotalrecalcjobcount">
+<div class="function-name">УстановитьКоличествоЗаданийПересчетаИтогов</div>
+<div class="function-english">SetTotalRecalcJobCount</div>
+</div>
+                    <div class="function-card searchable" data-search="открытьиндекссправки openhelpindex">
+<div class="function-name">ОткрытьИндексСправки</div>
+<div class="function-english">OpenHelpIndex</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьполучениекаталогабиблиотекимобильногоустройства begingettingmobiledevicelibrarydir">
+<div class="function-name">НачатьПолучениеКаталогаБиблиотекиМобильногоУстройства</div>
+<div class="function-english">BeginGettingMobileDeviceLibraryDir</div>
+</div>
+                    <div class="function-card searchable" data-search="проверитьподключениевнешнейкомпоненты checkaddinattachment">
+<div class="function-name">ПроверитьПодключениеВнешнейКомпоненты</div>
+<div class="function-english">CheckAddInAttachment</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьобщуюформу getcommonform">
+<div class="function-name">ПолучитьОбщуюФорму</div>
+<div class="function-english">GetCommonForm</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьвремяожиданияблокировкиданных setlockwaittime">
+<div class="function-name">УстановитьВремяОжиданияБлокировкиДанных</div>
+<div class="function-english">SetLockWaitTime</div>
+</div>
+                    <div class="function-card searchable" data-search="предупреждение domessagebox">
+<div class="function-name">Предупреждение</div>
+<div class="function-english">DoMessageBox</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьзапретзасыпаниякомпьютера getcomputersleepmodeprohibition">
+<div class="function-name">ПолучитьЗапретЗасыпанияКомпьютера</div>
+<div class="function-english">GetComputerSleepModeProhibition</div>
+</div>
+                    <div class="function-card searchable" data-search="поддерживаетсядинамическаяустановкавнешнихкомпонент dynamicaddininstallationsupported">
+<div class="function-name">ПоддерживаетсяДинамическаяУстановкаВнешнихКомпонент</div>
+<div class="function-english">DynamicAddInInstallationSupported</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьполноеимяпредопределенногозначения getpredefinedvaluefullname">
+<div class="function-name">ПолучитьПолноеИмяПредопределенногоЗначения</div>
+<div class="function-english">GetPredefinedValueFullName</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьрасширениеработыскриптографией installcryptoextension">
+<div class="function-name">УстановитьРасширениеРаботыСКриптографией</div>
+<div class="function-english">InstallCryptoExtension</div>
+</div>
+                    <div class="function-card searchable" data-search="параметрыдоступа accessparameters">
+<div class="function-name">ПараметрыДоступа</div>
+<div class="function-english">AccessParameters</div>
+</div>
+                    <div class="function-card searchable" data-search="проверитьпобитовоймаске checkbybitmask">
+<div class="function-name">ПроверитьПоБитовойМаске</div>
+<div class="function-english">CheckByBitMask</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьблокировкусеансов getsessionslock">
+<div class="function-name">ПолучитьБлокировкуСеансов</div>
+<div class="function-english">GetSessionsLock</div>
+</div>
+                    <div class="function-card searchable" data-search="данныеформывзначение formdatatovalue">
+<div class="function-name">ДанныеФормыВЗначение</div>
+<div class="function-english">FormDataToValue</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьсрокпредупрежденияобистечениисрокадействияпаролейпользователей getuserpasswordexpirationnotificationperiod">
+<div class="function-name">ПолучитьСрокПредупрежденияОбИстеченииСрокаДействияПаролейПользователей</div>
+<div class="function-english">GetUserPasswordExpirationNotificationPeriod</div>
+</div>
+                    <div class="function-card searchable" data-search="рабочийкаталогданныхпользователяасинх userdataworkdirasync">
+<div class="function-name">РабочийКаталогДанныхПользователяАсинх</div>
+<div class="function-english">UserDataWorkDirAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="скопироватьжурналрегистрации copyeventlog">
+<div class="function-name">СкопироватьЖурналРегистрации</div>
+<div class="function-english">CopyEventLog</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьвремязавершенияспящегосеанса gethibernatesessionterminatetime">
+<div class="function-name">ПолучитьВремяЗавершенияСпящегоСеанса</div>
+<div class="function-english">GetHibernateSessionTerminateTime</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьспособпроверкиподписимобильногоклиента setmobileclientsignatureverificationmethod">
+<div class="function-name">УстановитьСпособПроверкиПодписиМобильногоКлиента</div>
+<div class="function-english">SetMobileClientSignatureVerificationMethod</div>
+</div>
+                    <div class="function-card searchable" data-search="xmlстрока xmlstring">
+<div class="function-name">XMLСтрока</div>
+<div class="function-english">XMLString</div>
+</div>
+                    <div class="function-card searchable" data-search="врег upper">
+<div class="function-name">ВРег</div>
+<div class="function-english">Upper</div>
+</div>
+                    <div class="function-card searchable" data-search="разблокироватьданныедляредактирования unlockdataforedit">
+<div class="function-name">РазблокироватьДанныеДляРедактирования</div>
+<div class="function-english">UnlockDataForEdit</div>
+</div>
+                    <div class="function-card searchable" data-search="побитовоеине bitwiseandnot">
+<div class="function-name">ПобитовоеИНе</div>
+<div class="function-english">BitwiseAndNot</div>
+</div>
+                    <div class="function-card searchable" data-search="разделитьдвоичныеданные splitbinarydata">
+<div class="function-name">РазделитьДвоичныеДанные</div>
+<div class="function-english">SplitBinaryData</div>
+</div>
+                    <div class="function-card searchable" data-search="представлениепериода periodpresentation">
+<div class="function-name">ПредставлениеПериода</div>
+<div class="function-english">PeriodPresentation</div>
+</div>
+                    <div class="function-card searchable" data-search="pow (pow) ">
+<div class="function-name">Pow (Pow)</div>
+<div class="function-english"></div>
+</div>
+                    <div class="function-card searchable" data-search="кодлокализацииинформационнойбазы infobaselocalecode">
+<div class="function-name">КодЛокализацииИнформационнойБазы</div>
+<div class="function-english">InfoBaseLocaleCode</div>
+</div>
+                    <div class="function-card searchable" data-search="записатьзначениеjson writejsonvalue">
+<div class="function-name">ЗаписатьЗначениеJSON</div>
+<div class="function-english">WriteJSONValue</div>
+</div>
+                    <div class="function-card searchable" data-search="разорватьсоединениесвнешнимисточникомданных disconnectexternaldatasource">
+<div class="function-name">РазорватьСоединениеСВнешнимИсточникомДанных</div>
+<div class="function-english">DisconnectExternalDataSource</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьhexбуфердвоичныхданныхизбуферадвоичныхданных gethexbinarydatabufferfrombinarydatabuffer">
+<div class="function-name">ПолучитьHexБуферДвоичныхДанныхИзБуфераДвоичныхДанных</div>
+<div class="function-english">GetHexBinaryDataBufferFromBinaryDataBuffer</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьначалостолетияинформационнойбазы getinfobasebeginningofcentury">
+<div class="function-name">ПолучитьНачалоСтолетияИнформационнойБазы</div>
+<div class="function-english">GetInfoBaseBeginningOfCentury</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьотключениебезопасногорежима getsafemodedisabled">
+<div class="function-name">ПолучитьОтключениеБезопасногоРежима</div>
+<div class="function-english">GetSafeModeDisabled</div>
+</div>
+                    <div class="function-card searchable" data-search="поместитьфайл putfile">
+<div class="function-name">ПоместитьФайл</div>
+<div class="function-english">PutFile</div>
+</div>
+                    <div class="function-card searchable" data-search="прочитатьзначениеjson readjsonvalue">
+<div class="function-name">ПрочитатьЗначениеJSON</div>
+<div class="function-english">ReadJSONValue</div>
+</div>
+                    <div class="function-card searchable" data-search="проверитьбит checkbit">
+<div class="function-name">ПроверитьБит</div>
+<div class="function-english">CheckBit</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьустановкурасширенияработыскриптографией begininstallcryptoextension">
+<div class="function-name">НачатьУстановкуРасширенияРаботыСКриптографией</div>
+<div class="function-english">BeginInstallCryptoExtension</div>
+</div>
+                    <div class="function-card searchable" data-search="каталогдокументовасинх documentsdirasync">
+<div class="function-name">КаталогДокументовАсинх</div>
+<div class="function-english">DocumentsDirAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="оповестить notify">
+<div class="function-name">Оповестить</div>
+<div class="function-english">Notify</div>
+</div>
+                    <div class="function-card searchable" data-search="base64строка base64string">
+<div class="function-name">Base64Строка</div>
+<div class="function-english">Base64String</div>
+</div>
+                    <div class="function-card searchable" data-search="началогода begofyear">
+<div class="function-name">НачалоГода</div>
+<div class="function-english">BegOfYear</div>
+</div>
+                    <div class="function-card searchable" data-search="показатьзначение showvalue">
+<div class="function-name">ПоказатьЗначение</div>
+<div class="function-english">ShowValue</div>
+</div>
+                    <div class="function-card searchable" data-search="сокрп trimr">
+<div class="function-name">СокрП</div>
+<div class="function-english">TrimR</div>
+</div>
+                    <div class="function-card searchable" data-search="закрытьсправку closehelp">
+<div class="function-name">ЗакрытьСправку</div>
+<div class="function-english">CloseHelp</div>
+</div>
+                    <div class="function-card searchable" data-search="дата date">
+<div class="function-name">Дата</div>
+<div class="function-english">Date</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьданныевыбора getchoicedata">
+<div class="function-name">ПолучитьДанныеВыбора</div>
+<div class="function-english">GetChoiceData</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьобщиймакет getcommontemplate">
+<div class="function-name">ПолучитьОбщийМакет</div>
+<div class="function-english">GetCommonTemplate</div>
+</div>
+                    <div class="function-card searchable" data-search="рольдоступна isinrole">
+<div class="function-name">РольДоступна</div>
+<div class="function-english">IsInRole</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьподключениевнешнейкомпоненты beginattachingaddin">
+<div class="function-name">НачатьПодключениеВнешнейКомпоненты</div>
+<div class="function-english">BeginAttachingAddIn</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьфункциональнуюопциюинтерфейса getinterfacefunctionaloption">
+<div class="function-name">ПолучитьФункциональнуюОпциюИнтерфейса</div>
+<div class="function-english">GetInterfaceFunctionalOption</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьдополнительныйпараметрклиенталицензирования getlicensingclientadditionalparameter">
+<div class="function-name">ПолучитьДополнительныйПараметрКлиентаЛицензирования</div>
+<div class="function-english">GetLicensingClientAdditionalParameter</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьпериоджурналарегистрации geteventlogperiod">
+<div class="function-name">ПолучитьПериодЖурналаРегистрации</div>
+<div class="function-english">GetEventLogPeriod</div>
+</div>
+                    <div class="function-card searchable" data-search="base64значение base64value">
+<div class="function-name">Base64Значение</div>
+<div class="function-english">Base64Value</div>
+</div>
+                    <div class="function-card searchable" data-search="объединитьфайлы mergefiles">
+<div class="function-name">ОбъединитьФайлы</div>
+<div class="function-english">MergeFiles</div>
+</div>
+                    <div class="function-card searchable" data-search="необходимостьзавершениясоединения connectionstoprequest">
+<div class="function-name">НеобходимостьЗавершенияСоединения</div>
+<div class="function-english">ConnectionStopRequest</div>
+</div>
+                    <div class="function-card searchable" data-search="копироватьфайласинх copyfileasync">
+<div class="function-name">КопироватьФайлАсинх</div>
+<div class="function-english">CopyFileAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="подключитьобработчикоповещения attachnotificationhandler">
+<div class="function-name">ПодключитьОбработчикОповещения</div>
+<div class="function-english">AttachNotificationHandler</div>
+</div>
+                    <div class="function-card searchable" data-search="стрчисловхождений stroccurrencecount">
+<div class="function-name">СтрЧислоВхождений</div>
+<div class="function-english">StrOccurrenceCount</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьрежимвнешнихресурсов getexternalresourcesmode">
+<div class="function-name">ПолучитьРежимВнешнихРесурсов</div>
+<div class="function-english">GetExternalResourcesMode</div>
+</div>
+                    <div class="function-card searchable" data-search="открытьсодержаниесправки openhelpcontent">
+<div class="function-name">ОткрытьСодержаниеСправки</div>
+<div class="function-english">OpenHelpContent</div>
+</div>
+                    <div class="function-card searchable" data-search="представлениекодалокализации localecodepresentation">
+<div class="function-name">ПредставлениеКодаЛокализации</div>
+<div class="function-english">LocaleCodePresentation</div>
+</div>
+                    <div class="function-card searchable" data-search="подключитьрасширениеработыскриптографией attachcryptoextension">
+<div class="function-name">ПодключитьРасширениеРаботыСКриптографией</div>
+<div class="function-english">AttachCryptoExtension</div>
+</div>
+                    <div class="function-card searchable" data-search="переместитьфайл movefile">
+<div class="function-name">ПереместитьФайл</div>
+<div class="function-english">MoveFile</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьнавигационнуюссылку geturl">
+<div class="function-name">ПолучитьНавигационнуюСсылку</div>
+<div class="function-english">GetURL</div>
+</div>
+                    <div class="function-card searchable" data-search="ввестидатуасинх inputdateasync">
+<div class="function-name">ВвестиДатуАсинх</div>
+<div class="function-english">InputDateAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="удалитьизвременногохранилища deletefromtempstorage">
+<div class="function-name">УдалитьИзВременногоХранилища</div>
+<div class="function-english">DeleteFromTempStorage</div>
+</div>
+                    <div class="function-card searchable" data-search="ввестичисло inputnumber">
+<div class="function-name">ВвестиЧисло</div>
+<div class="function-english">InputNumber</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьxmlтип getxmltype">
+<div class="function-name">ПолучитьXMLТип</div>
+<div class="function-english">GetXMLType</div>
+</div>
+                    <div class="function-card searchable" data-search="сигнал beep">
+<div class="function-name">Сигнал</div>
+<div class="function-english">Beep</div>
+</div>
+                    <div class="function-card searchable" data-search="открытьсправку openhelp">
+<div class="function-name">ОткрытьСправку</div>
+<div class="function-english">OpenHelp</div>
+</div>
+                    <div class="function-card searchable" data-search="ввестизначение inputvalue">
+<div class="function-name">ВвестиЗначение</div>
+<div class="function-english">InputValue</div>
+</div>
+                    <div class="function-card searchable" data-search="местноевремя tolocaltime">
+<div class="function-name">МестноеВремя</div>
+<div class="function-english">ToLocalTime</div>
+</div>
+                    <div class="function-card searchable" data-search="универсальноевремя touniversaltime">
+<div class="function-name">УниверсальноеВремя</div>
+<div class="function-english">ToUniversalTime</div>
+</div>
+                    <div class="function-card searchable" data-search="формат format">
+<div class="function-name">Формат</div>
+<div class="function-english">Format</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьпараметрыфункциональныхопцийинтерфейса setinterfacefunctionaloptionparameters">
+<div class="function-name">УстановитьПараметрыФункциональныхОпцийИнтерфейса</div>
+<div class="function-english">SetInterfaceFunctionalOptionParameters</div>
+</div>
+                    <div class="function-card searchable" data-search="разделитьфайл splitfile">
+<div class="function-name">РазделитьФайл</div>
+<div class="function-english">SplitFile</div>
+</div>
+                    <div class="function-card searchable" data-search="подключитьобработчикожидания attachidlehandler">
+<div class="function-name">ПодключитьОбработчикОжидания</div>
+<div class="function-english">AttachIdleHandler</div>
+</div>
+                    <div class="function-card searchable" data-search="найтипомеченныенаудаление findmarkedfordeletion">
+<div class="function-name">НайтиПомеченныеНаУдаление</div>
+<div class="function-english">FindMarkedForDeletion</div>
+</div>
+                    <div class="function-card searchable" data-search="записатьxml writexml">
+<div class="function-name">ЗаписатьXML</div>
+<div class="function-english">WriteXML</div>
+</div>
+                    <div class="function-card searchable" data-search="поместитьфайлнасерверасинх putfiletoserverasync">
+<div class="function-name">ПоместитьФайлНаСерверАсинх</div>
+<div class="function-english">PutFileToServerAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьбуфердвоичныхданныхиздвоичныхданных getbinarydatabufferfrombinarydata">
+<div class="function-name">ПолучитьБуферДвоичныхДанныхИзДвоичныхДанных</div>
+<div class="function-english">GetBinaryDataBufferFromBinaryData</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьудалениефайлов begindeletingfiles">
+<div class="function-name">НачатьУдалениеФайлов</div>
+<div class="function-english">BeginDeletingFiles</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьрасширениеработысфайламиасинх installfilesystemextensionasync">
+<div class="function-name">УстановитьРасширениеРаботыСФайламиАсинх</div>
+<div class="function-english">InstallFileSystemExtensionAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="час hour">
+<div class="function-name">Час</div>
+<div class="function-english">Hour</div>
+</div>
+                    <div class="function-card searchable" data-search="вопрос doquerybox">
+<div class="function-name">Вопрос</div>
+<div class="function-english">DoQueryBox</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьпериодразделенияхраненияданныхжурналарегистрации seteventlogdatastoragesplitperiod">
+<div class="function-name">УстановитьПериодРазделенияХраненияДанныхЖурналаРегистрации</div>
+<div class="function-english">SetEventLogDataStorageSplitPeriod</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьиспользованиесобытияжурналарегистрации seteventlogeventuse">
+<div class="function-name">УстановитьИспользованиеСобытияЖурналаРегистрации</div>
+<div class="function-english">SetEventLogEventUse</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьфайл getfile">
+<div class="function-name">ПолучитьФайл</div>
+<div class="function-english">GetFile</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьформу getform">
+<div class="function-name">ПолучитьФорму</div>
+<div class="function-english">GetForm</div>
+</div>
+                    <div class="function-card searchable" data-search="раскодироватьстроку decodestring">
+<div class="function-name">РаскодироватьСтроку</div>
+<div class="function-english">DecodeString</div>
+</div>
+                    <div class="function-card searchable" data-search="безопасныйрежимразделенияданных dataseparationsafemode">
+<div class="function-name">БезопасныйРежимРазделенияДанных</div>
+<div class="function-english">DataSeparationSafeMode</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьиспользованиежурналарегистрации geteventlogusing">
+<div class="function-name">ПолучитьИспользованиеЖурналаРегистрации</div>
+<div class="function-english">GetEventLogUsing</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьтранзакцию begintransaction">
+<div class="function-name">НачатьТранзакцию</div>
+<div class="function-english">BeginTransaction</div>
+</div>
+                    <div class="function-card searchable" data-search="макс max">
+<div class="function-name">Макс</div>
+<div class="function-english">Max</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьпомещениефайла beginputfile">
+<div class="function-name">НачатьПомещениеФайла</div>
+<div class="function-english">BeginPutFile</div>
+</div>
+                    <div class="function-card searchable" data-search="конфигурациябазыданныхизмененадинамически databaseconfigurationchangeddynamically">
+<div class="function-name">КонфигурацияБазыДанныхИзмененаДинамически</div>
+<div class="function-english">DataBaseConfigurationChangedDynamically</div>
+</div>
+                    <div class="function-card searchable" data-search="создатькаталогасинх createdirectoryasync">
+<div class="function-name">СоздатьКаталогАсинх</div>
+<div class="function-english">CreateDirectoryAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьсоставстандартногоинтерфейсаodata getstandardodatainterfacecontent">
+<div class="function-name">ПолучитьСоставСтандартногоИнтерфейсаOData</div>
+<div class="function-english">GetStandardODataInterfaceContent</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьвремязасыпанияпассивногосеанса setpassivesessionhibernatetime">
+<div class="function-name">УстановитьВремяЗасыпанияПассивногоСеанса</div>
+<div class="function-english">SetPassiveSessionHibernateTime</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьоперативнуюотметкувремени getrealtimetimestamp">
+<div class="function-name">ПолучитьОперативнуюОтметкуВремени</div>
+<div class="function-english">GetRealTimeTimestamp</div>
+</div>
+                    <div class="function-card searchable" data-search="трег title">
+<div class="function-name">ТРег</div>
+<div class="function-english">Title</div>
+</div>
+                    <div class="function-card searchable" data-search="копироватьданныеформы copyformdata">
+<div class="function-name">КопироватьДанныеФормы</div>
+<div class="function-english">CopyFormData</div>
+</div>
+                    <div class="function-card searchable" data-search="запроситьразрешениепользователя requestuserpermission">
+<div class="function-name">ЗапроситьРазрешениеПользователя</div>
+<div class="function-english">RequestUserPermission</div>
+</div>
+                    <div class="function-card searchable" data-search="представлениесобытияжурналарегистрации eventlogeventpresentation">
+<div class="function-name">ПредставлениеСобытияЖурналаРегистрации</div>
+<div class="function-english">EventLogEventPresentation</div>
+</div>
+                    <div class="function-card searchable" data-search="побитовоеили bitwiseor">
+<div class="function-name">ПобитовоеИли</div>
+<div class="function-english">BitwiseOr</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьсклонениястрокипочислу getstringdeclensionsbynumber">
+<div class="function-name">ПолучитьСклоненияСтрокиПоЧислу</div>
+<div class="function-english">GetStringDeclensionsByNumber</div>
+</div>
+                    <div class="function-card searchable" data-search="показатьоповещениепользователя showusernotification">
+<div class="function-name">ПоказатьОповещениеПользователя</div>
+<div class="function-english">ShowUserNotification</div>
+</div>
+                    <div class="function-card searchable" data-search="началочаса begofhour">
+<div class="function-name">НачалоЧаса</div>
+<div class="function-english">BegOfHour</div>
+</div>
+                    <div class="function-card searchable" data-search="кодсимвола charcode">
+<div class="function-name">КодСимвола</div>
+<div class="function-english">CharCode</div>
+</div>
+                    <div class="function-card searchable" data-search="прочитатьjson readjson">
+<div class="function-name">ПрочитатьJSON</div>
+<div class="function-english">ReadJSON</div>
+</div>
+                    <div class="function-card searchable" data-search="значениеизстрокивнутр valuefromstringinternal">
+<div class="function-name">ЗначениеИзСтрокиВнутр</div>
+<div class="function-english">ValueFromStringInternal</div>
+</div>
+                    <div class="function-card searchable" data-search="оповеститьобизменении notifychanged">
+<div class="function-name">ОповеститьОбИзменении</div>
+<div class="function-english">NotifyChanged</div>
+</div>
+                    <div class="function-card searchable" data-search="каталогвременныхфайлов tempfilesdir">
+<div class="function-name">КаталогВременныхФайлов</div>
+<div class="function-english">TempFilesDir</div>
+</div>
+                    <div class="function-card searchable" data-search="каталогбиблиотекимобильногоустройства mobiledevicelibrarydir">
+<div class="function-name">КаталогБиблиотекиМобильногоУстройства</div>
+<div class="function-english">MobileDeviceLibraryDir</div>
+</div>
+                    <div class="function-card searchable" data-search="ввестистроку inputstring">
+<div class="function-name">ВвестиСтроку</div>
+<div class="function-english">InputString</div>
+</div>
+                    <div class="function-card searchable" data-search="текущийязык currentlanguage">
+<div class="function-name">ТекущийЯзык</div>
+<div class="function-english">CurrentLanguage</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьимяклиенталицензирования getlicensingclientname">
+<div class="function-name">ПолучитьИмяКлиентаЛицензирования</div>
+<div class="function-english">GetLicensingClientName</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьhexстрокуизбуферадвоичныхданных gethexstringfrombinarydatabuffer">
+<div class="function-name">ПолучитьHexСтрокуИзБуфераДвоичныхДанных</div>
+<div class="function-english">GetHexStringFromBinaryDataBuffer</div>
+</div>
+                    <div class="function-card searchable" data-search="подключитьобработчикзапросанастроекклиенталицензирования attachlicensingclientparametersrequesthandler">
+<div class="function-name">ПодключитьОбработчикЗапросаНастроекКлиентаЛицензирования</div>
+<div class="function-english">AttachLicensingClientParametersRequestHandler</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьзапросразрешенияпользователя beginrequestinguserpermission">
+<div class="function-name">НачатьЗапросРазрешенияПользователя</div>
+<div class="function-english">BeginRequestingUserPermission</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьbase64двоичныеданныеиздвоичныхданных getbase64binarydatafrombinarydata">
+<div class="function-name">ПолучитьBase64ДвоичныеДанныеИзДвоичныхДанных</div>
+<div class="function-english">GetBase64BinaryDataFromBinaryData</div>
+</div>
+                    <div class="function-card searchable" data-search="запуститьприложение runapp">
+<div class="function-name">ЗапуститьПриложение</div>
+<div class="function-english">RunApp</div>
+</div>
+                    <div class="function-card searchable" data-search="началонедели begofweek">
+<div class="function-name">НачалоНедели</div>
+<div class="function-english">BegOfWeek</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьсоответствиеобъектаиформы setobjectandformconformity">
+<div class="function-name">УстановитьСоответствиеОбъектаИФормы</div>
+<div class="function-english">SetObjectAndFormConformity</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьрасширениеработыскриптографиейасинх installcryptoextensionasync">
+<div class="function-name">УстановитьРасширениеРаботыСКриптографиейАсинх</div>
+<div class="function-english">InstallCryptoExtensionAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="найтинедопустимыесимволыxml finddisallowedxmlcharacters">
+<div class="function-name">НайтиНедопустимыеСимволыXML</div>
+<div class="function-english">FindDisallowedXMLCharacters</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьпреимущественноеиспользованиеосновногосервера setpreferablemainserveruse">
+<div class="function-name">УстановитьПреимущественноеИспользованиеОсновногоСервера</div>
+<div class="function-english">SetPreferableMainServerUse</div>
+</div>
+                    <div class="function-card searchable" data-search="сокрлп trimall">
+<div class="function-name">СокрЛП</div>
+<div class="function-english">TrimAll</div>
+</div>
+                    <div class="function-card searchable" data-search="каталогдокументов documentsdir">
+<div class="function-name">КаталогДокументов</div>
+<div class="function-english">DocumentsDir</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьбуфердвоичныхданныхизhexбуферадвоичныхданных getbinarydatabufferfromhexbinarydatabuffer">
+<div class="function-name">ПолучитьБуферДвоичныхДанныхИзHexБуфераДвоичныхДанных</div>
+<div class="function-english">GetBinaryDataBufferFromHexBinaryDataBuffer</div>
+</div>
+                    <div class="function-card searchable" data-search="сократитьжурналрегистрации truncateeventlog">
+<div class="function-name">СократитьЖурналРегистрации</div>
+<div class="function-english">TruncateEventLog</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьиспользованиежурналарегистрации seteventlogusing">
+<div class="function-name">УстановитьИспользованиеЖурналаРегистрации</div>
+<div class="function-english">SetEventLogUsing</div>
+</div>
+                    <div class="function-card searchable" data-search="представлениеприложения applicationpresentation">
+<div class="function-name">ПредставлениеПриложения</div>
+<div class="function-english">ApplicationPresentation</div>
+</div>
+                    <div class="function-card searchable" data-search="продолжитьвызов proceedwithcall">
+<div class="function-name">ПродолжитьВызов</div>
+<div class="function-english">ProceedWithCall</div>
+</div>
+                    <div class="function-card searchable" data-search="прочитатьxml readxml">
+<div class="function-name">ПрочитатьXML</div>
+<div class="function-english">ReadXML</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьограничениеповторенияпаролейпользователейсредипоследних setuserpasswordreuselimit">
+<div class="function-name">УстановитьОграничениеПовторенияПаролейПользователейСредиПоследних</div>
+<div class="function-english">SetUserPasswordReuseLimit</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьминимальныйсрокдействияпаролейпользователей setuserpasswordmineffectiveperiod">
+<div class="function-name">УстановитьМинимальныйСрокДействияПаролейПользователей</div>
+<div class="function-english">SetUserPasswordMinEffectivePeriod</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьразмерданныхбазыданных getdatabasedatasize">
+<div class="function-name">ПолучитьРазмерДанныхБазыДанных</div>
+<div class="function-english">GetDatabaseDataSize</div>
+</div>
+                    <div class="function-card searchable" data-search="подключитьрасширениеполученияинформацииокомпьютереасинх attachcomputerinformationextensionasync">
+<div class="function-name">ПодключитьРасширениеПолученияИнформацииОКомпьютереАсинх</div>
+<div class="function-english">AttachComputerInformationExtensionAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="найтипоссылкам findbyref">
+<div class="function-name">НайтиПоСсылкам</div>
+<div class="function-english">FindByRef</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьпараметрымонопольногорежима getexclusivemodeparameters">
+<div class="function-name">ПолучитьПараметрыМонопольногоРежима</div>
+<div class="function-english">GetExclusiveModeParameters</div>
+</div>
+                    <div class="function-card searchable" data-search="вопросасинх doqueryboxasync">
+<div class="function-name">ВопросАсинх</div>
+<div class="function-english">DoQueryBoxAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьстрокуизбуферадвоичныхданных getstringfrombinarydatabuffer">
+<div class="function-name">ПолучитьСтрокуИзБуфераДвоичныхДанных</div>
+<div class="function-english">GetStringFromBinaryDataBuffer</div>
+</div>
+                    <div class="function-card searchable" data-search="соединитьбуферыдвоичныхданных concatbinarydatabuffers">
+<div class="function-name">СоединитьБуферыДвоичныхДанных</div>
+<div class="function-english">ConcatBinaryDataBuffers</div>
+</div>
+                    <div class="function-card searchable" data-search="конецдня endofday">
+<div class="function-name">КонецДня</div>
+<div class="function-english">EndOfDay</div>
+</div>
+                    <div class="function-card searchable" data-search="цел int">
+<div class="function-name">Цел</div>
+<div class="function-english">Int</div>
+</div>
+                    <div class="function-card searchable" data-search="информацияобошибке errorinfo">
+<div class="function-name">ИнформацияОбОшибке</div>
+<div class="function-english">ErrorInfo</div>
+</div>
+                    <div class="function-card searchable" data-search="началомесяца begofmonth">
+<div class="function-name">НачалоМесяца</div>
+<div class="function-english">BegOfMonth</div>
+</div>
+                    <div class="function-card searchable" data-search="документзащищенпаролемасинх documentispasswordprotectedasync">
+<div class="function-name">ДокументЗащищенПаролемАсинх</div>
+<div class="function-english">DocumentIsPasswordProtectedAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьразделительпутиклиента getclientpathseparator">
+<div class="function-name">ПолучитьРазделительПутиКлиента</div>
+<div class="function-english">GetClientPathSeparator</div>
+</div>
+                    <div class="function-card searchable" data-search="соединитьдвоичныеданные concatbinarydata">
+<div class="function-name">СоединитьДвоичныеДанные</div>
+<div class="function-english">ConcatBinaryData</div>
+</div>
+                    <div class="function-card searchable" data-search="стрсравнить strcompare">
+<div class="function-name">СтрСравнить</div>
+<div class="function-english">StrCompare</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьинформациюосетевыхадаптерахасинх getnetworkadaptersinformationasync">
+<div class="function-name">ПолучитьИнформациюОСетевыхАдаптерахАсинх</div>
+<div class="function-english">GetNetworkAdaptersInformationAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьмонопольныйрежим setexclusivemode">
+<div class="function-name">УстановитьМонопольныйРежим</div>
+<div class="function-english">SetExclusiveMode</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьрегиональныенастройкиинформационнойбазы getinfobaseregionalsettings">
+<div class="function-name">ПолучитьРегиональныеНастройкиИнформационнойБазы</div>
+<div class="function-english">GetInfoBaseRegionalSettings</div>
+</div>
+                    <div class="function-card searchable" data-search="пользователиос osusers">
+<div class="function-name">ПользователиОС</div>
+<div class="function-english">OSUsers</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьполучениеинформацииосетевыхадаптерах begingettingnetworkadaptersinformation">
+<div class="function-name">НачатьПолучениеИнформацииОСетевыхАдаптерах</div>
+<div class="function-english">BeginGettingNetworkAdaptersInformation</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьнавигационнуюссылкуинформационнойбазы getinfobaseurl">
+<div class="function-name">ПолучитьНавигационнуюСсылкуИнформационнойБазы</div>
+<div class="function-english">GetInfoBaseURL</div>
+</div>
+                    <div class="function-card searchable" data-search="поместитьфайлы putfiles">
+<div class="function-name">ПоместитьФайлы</div>
+<div class="function-english">PutFiles</div>
+</div>
+                    <div class="function-card searchable" data-search="нрег lower">
+<div class="function-name">НРег</div>
+<div class="function-english">Lower</div>
+</div>
+                    <div class="function-card searchable" data-search="открытьформу openform">
+<div class="function-name">ОткрытьФорму</div>
+<div class="function-english">OpenForm</div>
+</div>
+                    <div class="function-card searchable" data-search="удалитьфайлыасинх deletefilesasync">
+<div class="function-name">УдалитьФайлыАсинх</div>
+<div class="function-english">DeleteFilesAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьсоответствиеобъектаиформы getobjectandformconformity">
+<div class="function-name">ПолучитьСоответствиеОбъектаИФормы</div>
+<div class="function-english">GetObjectAndFormConformity</div>
+</div>
+                    <div class="function-card searchable" data-search="монопольныйрежим exclusivemode">
+<div class="function-name">МонопольныйРежим</div>
+<div class="function-english">ExclusiveMode</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьсоответствиеобъектаиреквизитаформы setobjectandformattributeconformity">
+<div class="function-name">УстановитьСоответствиеОбъектаИРеквизитаФормы</div>
+<div class="function-english">SetObjectAndFormAttributeConformity</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьструктурухранениябазыданных getdbstoragestructureinfo">
+<div class="function-name">ПолучитьСтруктуруХраненияБазыДанных</div>
+<div class="function-english">GetDBStorageStructureInfo</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьвнешнююкомпонентуасинх installaddinasync">
+<div class="function-name">УстановитьВнешнююКомпонентуАсинх</div>
+<div class="function-english">InstallAddInAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="запуститьприложениеасинх runappasync">
+<div class="function-name">ЗапуститьПриложениеАсинх</div>
+<div class="function-english">RunAppAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="ввестидату inputdate">
+<div class="function-name">ВвестиДату</div>
+<div class="function-english">InputDate</div>
+</div>
+                    <div class="function-card searchable" data-search="ввестичислоасинх inputnumberasync">
+<div class="function-name">ВвестиЧислоАсинх</div>
+<div class="function-english">InputNumberAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="текущийсеанстестируется currentsessionistested">
+<div class="function-name">ТекущийСеансТестируется</div>
+<div class="function-english">CurrentSessionIsTested</div>
+</div>
+                    <div class="function-card searchable" data-search="нстр nstr">
+<div class="function-name">НСтр</div>
+<div class="function-english">NStr</div>
+</div>
+                    <div class="function-card searchable" data-search="ввестистрокуасинх inputstringasync">
+<div class="function-name">ВвестиСтрокуАсинх</div>
+<div class="function-english">InputStringAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="показатьвводдаты showinputdate">
+<div class="function-name">ПоказатьВводДаты</div>
+<div class="function-english">ShowInputDate</div>
+</div>
+                    <div class="function-card searchable" data-search="часовойпояс timezone">
+<div class="function-name">ЧасовойПояс</div>
+<div class="function-english">TimeZone</div>
+</div>
+                    <div class="function-card searchable" data-search="конецмесяца endofmonth">
+<div class="function-name">КонецМесяца</div>
+<div class="function-english">EndOfMonth</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьдвоичныеданныеизhexдвоичныхданных getbinarydatafromhexbinarydata">
+<div class="function-name">ПолучитьДвоичныеДанныеИзHexДвоичныхДанных</div>
+<div class="function-english">GetBinaryDataFromHexBinaryData</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьдопустимыечасовыепояса getavailabletimezones">
+<div class="function-name">ПолучитьДопустимыеЧасовыеПояса</div>
+<div class="function-english">GetAvailableTimeZones</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьзапретзасыпаниякомпьютера setcomputersleepmodeprohibition">
+<div class="function-name">УстановитьЗапретЗасыпанияКомпьютера</div>
+<div class="function-english">SetComputerSleepModeProhibition</div>
+</div>
+                    <div class="function-card searchable" data-search="числоизшестнадцатеричнойстроки numberfromhexstring">
+<div class="function-name">ЧислоИзШестнадцатеричнойСтроки</div>
+<div class="function-english">NumberFromHexString</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьсоставстандартногоинтерфейсаodata setstandardodatainterfacecontent">
+<div class="function-name">УстановитьСоставСтандартногоИнтерфейсаOData</div>
+<div class="function-english">SetStandardODataInterfaceContent</div>
+</div>
+                    <div class="function-card searchable" data-search="открытьзначение openvalue">
+<div class="function-name">ОткрытьЗначение</div>
+<div class="function-english">OpenValue</div>
+</div>
+                    <div class="function-card searchable" data-search="показатьвводзначения showinputvalue">
+<div class="function-name">ПоказатьВводЗначения</div>
+<div class="function-english">ShowInputValue</div>
+</div>
+                    <div class="function-card searchable" data-search="документзащищенпаролем documentispasswordprotected">
+<div class="function-name">ДокументЗащищенПаролем</div>
+<div class="function-english">DocumentIsPasswordProtected</div>
+</div>
+                    <div class="function-card searchable" data-search="началодня begofday">
+<div class="function-name">НачалоДня</div>
+<div class="function-english">BegOfDay</div>
+</div>
+                    <div class="function-card searchable" data-search="строка string">
+<div class="function-name">Строка</div>
+<div class="function-english">String</div>
+</div>
+                    <div class="function-card searchable" data-search="подробноепредставлениеошибки detailerrordescription">
+<div class="function-name">ПодробноеПредставлениеОшибки</div>
+<div class="function-english">DetailErrorDescription</div>
+</div>
+                    <div class="function-card searchable" data-search="подключитьвнешнююкомпоненту attachaddin">
+<div class="function-name">ПодключитьВнешнююКомпоненту</div>
+<div class="function-english">AttachAddIn</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьиспользуемыйсервер getusedserver">
+<div class="function-name">ПолучитьИспользуемыйСервер</div>
+<div class="function-english">GetUsedServer</div>
+</div>
+                    <div class="function-card searchable" data-search="сохранитьнастройкипользователя saveusersettings">
+<div class="function-name">СохранитьНастройкиПользователя</div>
+<div class="function-english">SaveUserSettings</div>
+</div>
+                    <div class="function-card searchable" data-search="создатькаталог createdirectory">
+<div class="function-name">СоздатьКаталог</div>
+<div class="function-english">CreateDirectory</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьмаксимальныйсрокдействияпаролейпользователей setuserpasswordmaxeffectiveperiod">
+<div class="function-name">УстановитьМаксимальныйСрокДействияПаролейПользователей</div>
+<div class="function-english">SetUserPasswordMaxEffectivePeriod</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьbase64строкуизбуферадвоичныхданных getbase64stringfrombinarydatabuffer">
+<div class="function-name">ПолучитьBase64СтрокуИзБуфераДвоичныхДанных</div>
+<div class="function-english">GetBase64StringFromBinaryDataBuffer</div>
+</div>
+                    <div class="function-card searchable" data-search="зафиксироватьтранзакцию committransaction">
+<div class="function-name">ЗафиксироватьТранзакцию</div>
+<div class="function-english">CommitTransaction</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьbase64буфердвоичныхданныхизбуферадвоичныхданных getbase64binarydatabufferfrombinarydatabuffer">
+<div class="function-name">ПолучитьBase64БуферДвоичныхДанныхИзБуфераДвоичныхДанных</div>
+<div class="function-english">GetBase64BinaryDataBufferFromBinaryDataBuffer</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьбуфердвоичныхданныхизbase64строки getbinarydatabufferfrombase64string">
+<div class="function-name">ПолучитьБуферДвоичныхДанныхИзBase64Строки</div>
+<div class="function-english">GetBinaryDataBufferFromBase64String</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьскоростьклиентскогосоединения getclientconnectionspeed">
+<div class="function-name">ПолучитьСкоростьКлиентскогоСоединения</div>
+<div class="function-english">GetClientConnectionSpeed</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьпомещениефайланасервер beginputfiletoserver">
+<div class="function-name">НачатьПомещениеФайлаНаСервер</div>
+<div class="function-english">BeginPutFileToServer</div>
+</div>
+                    <div class="function-card searchable" data-search="прав right">
+<div class="function-name">Прав</div>
+<div class="function-english">Right</div>
+</div>
+                    <div class="function-card searchable" data-search="открытьзначениеасинх openvalueasync">
+<div class="function-name">ОткрытьЗначениеАсинх</div>
+<div class="function-english">OpenValueAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="деньгода dayofyear">
+<div class="function-name">ДеньГода</div>
+<div class="function-english">DayOfYear</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьрасширениеработысфайлами installfilesystemextension">
+<div class="function-name">УстановитьРасширениеРаботыСФайлами</div>
+<div class="function-english">InstallFileSystemExtension</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьпреимущественноеиспользованиеосновногосервера getpreferablemainserveruse">
+<div class="function-name">ПолучитьПреимущественноеИспользованиеОсновногоСервера</div>
+<div class="function-english">GetPreferableMainServerUse</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьсозданиекаталога begincreatingdirectory">
+<div class="function-name">НачатьСозданиеКаталога</div>
+<div class="function-english">BeginCreatingDirectory</div>
+</div>
+                    <div class="function-card searchable" data-search="начатькопированиефайла begincopyingfile">
+<div class="function-name">НачатьКопированиеФайла</div>
+<div class="function-english">BeginCopyingFile</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьhexстрокуиздвоичныхданных gethexstringfrombinarydata">
+<div class="function-name">ПолучитьHexСтрокуИзДвоичныхДанных</div>
+<div class="function-english">GetHexStringFromBinaryData</div>
+</div>
+                    <div class="function-card searchable" data-search="acos (acos) ">
+<div class="function-name">ACos (ACos)</div>
+<div class="function-english"></div>
+</div>
+                    <div class="function-card searchable" data-search="выполнитьобработкузаданий processjobs">
+<div class="function-name">ВыполнитьОбработкуЗаданий</div>
+<div class="function-english">ProcessJobs</div>
+</div>
+                    <div class="function-card searchable" data-search="xmlзначение xmlvalue">
+<div class="function-name">XMLЗначение</div>
+<div class="function-english">XMLValue</div>
+</div>
+                    <div class="function-card searchable" data-search="текущаядатасеанса currentsessiondate">
+<div class="function-name">ТекущаяДатаСеанса</div>
+<div class="function-english">CurrentSessionDate</div>
+</div>
+                    <div class="function-card searchable" data-search="обновитьинтерфейс refreshinterface">
+<div class="function-name">ОбновитьИнтерфейс</div>
+<div class="function-english">RefreshInterface</div>
+</div>
+                    <div class="function-card searchable" data-search="найти find">
+<div class="function-name">Найти</div>
+<div class="function-english">Find</div>
+</div>
+                    <div class="function-card searchable" data-search="праводоступа accessright">
+<div class="function-name">ПравоДоступа</div>
+<div class="function-english">AccessRight</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьбуфердвоичныхданныхизстроки getbinarydatabufferfromstring">
+<div class="function-name">ПолучитьБуферДвоичныхДанныхИзСтроки</div>
+<div class="function-english">GetBinaryDataBufferFromString</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьбуфердвоичныхданныхизhexстроки getbinarydatabufferfromhexstring">
+<div class="function-name">ПолучитьБуферДвоичныхДанныхИзHexСтроки</div>
+<div class="function-english">GetBinaryDataBufferFromHexString</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьдвоичныеданныеизbase64двоичныхданных getbinarydatafrombase64binarydata">
+<div class="function-name">ПолучитьДвоичныеДанныеИзBase64ДвоичныхДанных</div>
+<div class="function-english">GetBinaryDataFromBase64BinaryData</div>
+</div>
+                    <div class="function-card searchable" data-search="сообщить message">
+<div class="function-name">Сообщить</div>
+<div class="function-english">Message</div>
+</div>
+                    <div class="function-card searchable" data-search="показатьинформациюобошибке showerrorinfo">
+<div class="function-name">ПоказатьИнформациюОбОшибке</div>
+<div class="function-english">ShowErrorInfo</div>
+</div>
+                    <div class="function-card searchable" data-search="имяпользователя username">
+<div class="function-name">ИмяПользователя</div>
+<div class="function-english">UserName</div>
+</div>
+                    <div class="function-card searchable" data-search="текущийязыксистемы currentsystemlanguage">
+<div class="function-name">ТекущийЯзыкСистемы</div>
+<div class="function-english">CurrentSystemLanguage</div>
+</div>
+                    <div class="function-card searchable" data-search="число number">
+<div class="function-name">Число</div>
+<div class="function-english">Number</div>
+</div>
+                    <div class="function-card searchable" data-search="стршаблон strtemplate">
+<div class="function-name">СтрШаблон</div>
+<div class="function-english">StrTemplate</div>
+</div>
+                    <div class="function-card searchable" data-search="обновитьповторноиспользуемыезначения refreshreusablevalues">
+<div class="function-name">ОбновитьПовторноИспользуемыеЗначения</div>
+<div class="function-english">RefreshReusableValues</div>
+</div>
+                    <div class="function-card searchable" data-search="символ char">
+<div class="function-name">Символ</div>
+<div class="function-english">Char</div>
+</div>
+                    <div class="function-card searchable" data-search="отменитьтранзакцию rollbacktransaction">
+<div class="function-name">ОтменитьТранзакцию</div>
+<div class="function-english">RollbackTransaction</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьбезопасныйрежимразделенияданных setdataseparationsafemode">
+<div class="function-name">УстановитьБезопасныйРежимРазделенияДанных</div>
+<div class="function-english">SetDataSeparationSafeMode</div>
+</div>
+                    <div class="function-card searchable" data-search="найтифайлы findfiles">
+<div class="function-name">НайтиФайлы</div>
+<div class="function-english">FindFiles</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьпериодразделенияхраненияданныхжурналарегистрации geteventlogdatastoragesplitperiod">
+<div class="function-name">ПолучитьПериодРазделенияХраненияДанныхЖурналаРегистрации</div>
+<div class="function-english">GetEventLogDataStorageSplitPeriod</div>
+</div>
+                    <div class="function-card searchable" data-search="текущийкодлокализации currentlocalecode">
+<div class="function-name">ТекущийКодЛокализации</div>
+<div class="function-english">CurrentLocaleCode</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьпроверкусложностипаролейпользователей getuserpasswordstrengthcheck">
+<div class="function-name">ПолучитьПроверкуСложностиПаролейПользователей</div>
+<div class="function-english">GetUserPasswordStrengthCheck</div>
+</div>
+                    <div class="function-card searchable" data-search="подключитьрасширениеработысфайлами attachfilesystemextension">
+<div class="function-name">ПодключитьРасширениеРаботыСФайлами</div>
+<div class="function-english">AttachFileSystemExtension</div>
+</div>
+                    <div class="function-card searchable" data-search="привилегированныйрежим privilegedmode">
+<div class="function-name">ПривилегированныйРежим</div>
+<div class="function-english">PrivilegedMode</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьбит setbit">
+<div class="function-name">УстановитьБит</div>
+<div class="function-english">SetBit</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьмаскувсефайлы getallfilesmask">
+<div class="function-name">ПолучитьМаскуВсеФайлы</div>
+<div class="function-english">GetAllFilesMask</div>
+</div>
+                    <div class="function-card searchable" data-search="строкасчислом stringwithnumber">
+<div class="function-name">СтрокаСЧислом</div>
+<div class="function-english">StringWithNumber</div>
+</div>
+                    <div class="function-card searchable" data-search="удалитьданныеинформационнойбазы eraseinfobasedata">
+<div class="function-name">УдалитьДанныеИнформационнойБазы</div>
+<div class="function-english">EraseInfoBaseData</div>
+</div>
+                    <div class="function-card searchable" data-search="типзнч typeof">
+<div class="function-name">ТипЗнч</div>
+<div class="function-english">TypeOf</div>
+</div>
+                    <div class="function-card searchable" data-search="отключитьобработчикоповещения detachnotificationhandler">
+<div class="function-name">ОтключитьОбработчикОповещения</div>
+<div class="function-english">DetachNotificationHandler</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьвремязавершенияспящегосеанса sethibernatesessionterminatetime">
+<div class="function-name">УстановитьВремяЗавершенияСпящегоСеанса</div>
+<div class="function-english">SetHibernateSessionTerminateTime</div>
+</div>
+                    <div class="function-card searchable" data-search="стрзаканчиваетсяна strendswith">
+<div class="function-name">СтрЗаканчиваетсяНа</div>
+<div class="function-english">StrEndsWith</div>
+</div>
+                    <div class="function-card searchable" data-search="выполнитьпроверкуправдоступа verifyaccessrights">
+<div class="function-name">ВыполнитьПроверкуПравДоступа</div>
+<div class="function-english">VerifyAccessRights</div>
+</div>
+                    <div class="function-card searchable" data-search="началоминуты begofminute">
+<div class="function-name">НачалоМинуты</div>
+<div class="function-english">BegOfMinute</div>
+</div>
+                    <div class="function-card searchable" data-search="побитовоеи bitwiseand">
+<div class="function-name">ПобитовоеИ</div>
+<div class="function-english">BitwiseAnd</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьчасовойпояссеанса setsessiontimezone">
+<div class="function-name">УстановитьЧасовойПоясСеанса</div>
+<div class="function-english">SetSessionTimeZone</div>
+</div>
+                    <div class="function-card searchable" data-search="текущаядата currentdate">
+<div class="function-name">ТекущаяДата</div>
+<div class="function-english">CurrentDate</div>
+</div>
+                    <div class="function-card searchable" data-search="стрнайтипорегулярномувыражению strfindbyregularexpression">
+<div class="function-name">СтрНайтиПоРегулярномуВыражению</div>
+<div class="function-english">StrFindByRegularExpression</div>
+</div>
+                    <div class="function-card searchable" data-search="xmlтипзнч xmltypeof">
+<div class="function-name">XMLТипЗнч</div>
+<div class="function-english">XMLTypeOf</div>
+</div>
+                    <div class="function-card searchable" data-search="смещениелетнеговремени daylighttimeoffset">
+<div class="function-name">СмещениеЛетнегоВремени</div>
+<div class="function-english">DaylightTimeOffset</div>
+</div>
+                    <div class="function-card searchable" data-search="добавитьмесяц addmonth">
+<div class="function-name">ДобавитьМесяц</div>
+<div class="function-english">AddMonth</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьвнешнююкомпоненту installaddin">
+<div class="function-name">УстановитьВнешнююКомпоненту</div>
+<div class="function-english">InstallAddIn</div>
+</div>
+                    <div class="function-card searchable" data-search="безопасныйрежим safemode">
+<div class="function-name">БезопасныйРежим</div>
+<div class="function-english">SafeMode</div>
+</div>
+                    <div class="function-card searchable" data-search="лев left">
+<div class="function-name">Лев</div>
+<div class="function-english">Left</div>
+</div>
+                    <div class="function-card searchable" data-search="имякомпьютера computername">
+<div class="function-name">ИмяКомпьютера</div>
+<div class="function-english">ComputerName</div>
+</div>
+                    <div class="function-card searchable" data-search="стрначинаетсяс strstartswith">
+<div class="function-name">СтрНачинаетсяС</div>
+<div class="function-english">StrStartsWith</div>
+</div>
+                    <div class="function-card searchable" data-search="вычислить eval">
+<div class="function-name">Вычислить</div>
+<div class="function-english">Eval</div>
+</div>
+                    <div class="function-card searchable" data-search="сред mid">
+<div class="function-name">Сред</div>
+<div class="function-english">Mid</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьбуфердвоичныхданныхизbase64буферадвоичныхданных getbinarydatabufferfrombase64binarydatabuffer">
+<div class="function-name">ПолучитьБуферДвоичныхДанныхИзBase64БуфераДвоичныхДанных</div>
+<div class="function-english">GetBinaryDataBufferFromBase64BinaryDataBuffer</div>
+</div>
+                    <div class="function-card searchable" data-search="пустаястрока isblankstring">
+<div class="function-name">ПустаяСтрока</div>
+<div class="function-english">IsBlankString</div>
+</div>
+                    <div class="function-card searchable" data-search="стрразделить strsplit">
+<div class="function-name">СтрРазделить</div>
+<div class="function-english">StrSplit</div>
+</div>
+                    <div class="function-card searchable" data-search="началоквартала begofquarter">
+<div class="function-name">НачалоКвартала</div>
+<div class="function-english">BegOfQuarter</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьдвоичныеданныеизhexстроки getbinarydatafromhexstring">
+<div class="function-name">ПолучитьДвоичныеДанныеИзHexСтроки</div>
+<div class="function-english">GetBinaryDataFromHexString</div>
+</div>
+                    <div class="function-card searchable" data-search="загрузитьвнешнююкомпоненту loadaddin">
+<div class="function-name">ЗагрузитьВнешнююКомпоненту</div>
+<div class="function-english">LoadAddIn</div>
+</div>
+                    <div class="function-card searchable" data-search="текущаяуниверсальнаядата currentuniversaldate">
+<div class="function-name">ТекущаяУниверсальнаяДата</div>
+<div class="function-english">CurrentUniversalDate</div>
+</div>
+                    <div class="function-card searchable" data-search="краткоепредставлениеошибки brieferrordescription">
+<div class="function-name">КраткоеПредставлениеОшибки</div>
+<div class="function-english">BriefErrorDescription</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьсоединениесвнешнимисточникомданных connectexternaldatasource">
+<div class="function-name">УстановитьСоединениеСВнешнимИсточникомДанных</div>
+<div class="function-english">ConnectExternalDataSource</div>
+</div>
+                    <div class="function-card searchable" data-search="месяц month">
+<div class="function-name">Месяц</div>
+<div class="function-english">Month</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьминимальнуюдлинупаролейпользователей setuserpasswordminlength">
+<div class="function-name">УстановитьМинимальнуюДлинуПаролейПользователей</div>
+<div class="function-english">SetUserPasswordMinLength</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьполучениефайлассервера begingetfilefromserver">
+<div class="function-name">НачатьПолучениеФайлаССервера</div>
+<div class="function-english">BeginGetFileFromServer</div>
+</div>
+                    <div class="function-card searchable" data-search="удалитьфайлы deletefiles">
+<div class="function-name">УдалитьФайлы</div>
+<div class="function-english">DeleteFiles</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьподключениерасширенияполученияинформацииокомпьютере beginattachingcomputerinformationextension">
+<div class="function-name">НачатьПодключениеРасширенияПолученияИнформацииОКомпьютере</div>
+<div class="function-english">BeginAttachingComputerInformationExtension</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьсозданиедвоичныхданныхизфайла begincreatebinarydatafromfile">
+<div class="function-name">НачатьСозданиеДвоичныхДанныхИзФайла</div>
+<div class="function-english">BeginCreateBinaryDataFromFile</div>
+</div>
+                    <div class="function-card searchable" data-search="конецчаса endofhour">
+<div class="function-name">КонецЧаса</div>
+<div class="function-english">EndOfHour</div>
+</div>
+                    <div class="function-card searchable" data-search="рабочийкаталогданныхпользователя userdataworkdir">
+<div class="function-name">РабочийКаталогДанныхПользователя</div>
+<div class="function-english">UserDataWorkDir</div>
+</div>
+                    <div class="function-card searchable" data-search="основнойсервердоступен mainserveravailable">
+<div class="function-name">ОсновнойСерверДоступен</div>
+<div class="function-english">MainServerAvailable</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьмаскувсефайлысервера getserverallfilesmask">
+<div class="function-name">ПолучитьМаскуВсеФайлыСервера</div>
+<div class="function-english">GetServerAllFilesMask</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьчасовойпоясинформационнойбазы setinfobasetimezone">
+<div class="function-name">УстановитьЧасовойПоясИнформационнойБазы</div>
+<div class="function-english">SetInfoBaseTimeZone</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьпомещениефайлов beginputtingfiles">
+<div class="function-name">НачатьПомещениеФайлов</div>
+<div class="function-english">BeginPuttingFiles</div>
+</div>
+                    <div class="function-card searchable" data-search="очиститьнастройкипользователя clearusersettings">
+<div class="function-name">ОчиститьНастройкиПользователя</div>
+<div class="function-english">ClearUserSettings</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьнастройкиклиенталицензирования setlicensingclientparameters">
+<div class="function-name">УстановитьНастройкиКлиентаЛицензирования</div>
+<div class="function-english">SetLicensingClientParameters</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьобновлениепредопределенныхданныхинформационнойбазы setinfobasepredefineddataupdate">
+<div class="function-name">УстановитьОбновлениеПредопределенныхДанныхИнформационнойБазы</div>
+<div class="function-english">SetInfoBasePredefinedDataUpdate</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьподключениерасширенияработысфайлами beginattachingfilesystemextension">
+<div class="function-name">НачатьПодключениеРасширенияРаботыСФайлами</div>
+<div class="function-english">BeginAttachingFileSystemExtension</div>
+</div>
+                    <div class="function-card searchable" data-search="булево boolean">
+<div class="function-name">Булево</div>
+<div class="function-english">Boolean</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьиспользуемыйсервер setusedserver">
+<div class="function-name">УстановитьИспользуемыйСервер</div>
+<div class="function-english">SetUsedServer</div>
+</div>
+                    <div class="function-card searchable" data-search="импортмоделиxdto importxdtomodel">
+<div class="function-name">ИмпортМоделиXDTO</div>
+<div class="function-english">ImportXDTOModel</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьминимальныйсрокдействияпаролейпользователей getuserpasswordmineffectiveperiod">
+<div class="function-name">ПолучитьМинимальныйСрокДействияПаролейПользователей</div>
+<div class="function-english">GetUserPasswordMinEffectivePeriod</div>
+</div>
+                    <div class="function-card searchable" data-search="пользователиwindows windowsusers">
+<div class="function-name">ПользователиWindows</div>
+<div class="function-english">WindowsUsers</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьчасовойпоясинформационнойбазы getinfobasetimezone">
+<div class="function-name">ПолучитьЧасовойПоясИнформационнойБазы</div>
+<div class="function-english">GetInfoBaseTimeZone</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьвнешнююнавигационнуюссылку getexternalurl">
+<div class="function-name">ПолучитьВнешнююНавигационнуюСсылку</div>
+<div class="function-english">GetExternalURL</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьстрокуиздвоичныхданных getstringfrombinarydata">
+<div class="function-name">ПолучитьСтрокуИзДвоичныхДанных</div>
+<div class="function-english">GetStringFromBinaryData</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьобновлениеконфигурациибазыданных getdatabaseconfigurationupdate">
+<div class="function-name">ПолучитьОбновлениеКонфигурацииБазыДанных</div>
+<div class="function-english">GetDataBaseConfigurationUpdate</div>
+</div>
+                    <div class="function-card searchable" data-search="активноеокно activewindow">
+<div class="function-name">АктивноеОкно</div>
+<div class="function-english">ActiveWindow</div>
+</div>
+                    <div class="function-card searchable" data-search="каталогбиблиотекимобильногоустройстваасинх mobiledevicelibrarydirasync">
+<div class="function-name">КаталогБиблиотекиМобильногоУстройстваАсинх</div>
+<div class="function-english">MobileDeviceLibraryDirAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьсрокпредупрежденияобистечениисрокадействияпаролейпользователей setuserpasswordexpirationnotificationperiod">
+<div class="function-name">УстановитьСрокПредупрежденияОбИстеченииСрокаДействияПаролейПользователей</div>
+<div class="function-english">SetUserPasswordExpirationNotificationPeriod</div>
+</div>
+                    <div class="function-card searchable" data-search="удалитьобъекты deleteobjects">
+<div class="function-name">УдалитьОбъекты</div>
+<div class="function-english">DeleteObjects</div>
+</div>
+                    <div class="function-card searchable" data-search="открытьформумодально openformmodal">
+<div class="function-name">ОткрытьФормуМодально</div>
+<div class="function-english">OpenFormModal</div>
+</div>
+                    <div class="function-card searchable" data-search="конецгода endofyear">
+<div class="function-name">КонецГода</div>
+<div class="function-english">EndOfYear</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьадреспоместоположению getaddressbylocation">
+<div class="function-name">ПолучитьАдресПоМестоположению</div>
+<div class="function-english">GetAddressByLocation</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьпроверкусложностипаролейпользователей setuserpasswordstrengthcheck">
+<div class="function-name">УстановитьПроверкуСложностиПаролейПользователей</div>
+<div class="function-english">SetUserPasswordStrengthCheck</div>
+</div>
+                    <div class="function-card searchable" data-search="log10 (log10) ">
+<div class="function-name">Log10 (Log10)</div>
+<div class="function-english"></div>
+</div>
+                    <div class="function-card searchable" data-search="подключитьвнешнююкомпонентуасинх attachaddinasync">
+<div class="function-name">ПодключитьВнешнююКомпонентуАсинх</div>
+<div class="function-english">AttachAddInAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьпоискфайлов beginfindingfiles">
+<div class="function-name">НачатьПоискФайлов</div>
+<div class="function-english">BeginFindingFiles</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьразделительпути getpathseparator">
+<div class="function-name">ПолучитьРазделительПути</div>
+<div class="function-english">GetPathSeparator</div>
+</div>
+                    <div class="function-card searchable" data-search="деньнедели weekday">
+<div class="function-name">ДеньНедели</div>
+<div class="function-english">WeekDay</div>
+</div>
+                    <div class="function-card searchable" data-search="текущийрежимзапуска currentrunmode">
+<div class="function-name">ТекущийРежимЗапуска</div>
+<div class="function-english">CurrentRunMode</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьимявременногофайла gettempfilename">
+<div class="function-name">ПолучитьИмяВременногоФайла</div>
+<div class="function-english">GetTempFileName</div>
+</div>
+                    <div class="function-card searchable" data-search="заполнитьзначениясвойств fillpropertyvalues">
+<div class="function-name">ЗаполнитьЗначенияСвойств</div>
+<div class="function-english">FillPropertyValues</div>
+</div>
+                    <div class="function-card searchable" data-search="возможностьчтенияxml canreadxml">
+<div class="function-name">ВозможностьЧтенияXML</div>
+<div class="function-english">CanReadXML</div>
+</div>
+                    <div class="function-card searchable" data-search="окр round">
+<div class="function-name">Окр</div>
+<div class="function-english">Round</div>
+</div>
+                    <div class="function-card searchable" data-search="прочитатьдатуjson readjsondate">
+<div class="function-name">ПрочитатьДатуJSON</div>
+<div class="function-english">ReadJSONDate</div>
+</div>
+                    <div class="function-card searchable" data-search="транзакцияактивна transactionactive">
+<div class="function-name">ТранзакцияАктивна</div>
+<div class="function-english">TransactionActive</div>
+</div>
+                    <div class="function-card searchable" data-search="найтиокнопонавигационнойссылке findwindowbyurl">
+<div class="function-name">НайтиОкноПоНавигационнойСсылке</div>
+<div class="function-english">FindWindowByURL</div>
+</div>
+                    <div class="function-card searchable" data-search="запрещенооткрытиеформ cannotopenform">
+<div class="function-name">ЗапрещеноОткрытиеФорм</div>
+<div class="function-english">CannotOpenForm</div>
+</div>
+                    <div class="function-card searchable" data-search="инициализироватьпредопределенныеданные initializepredefineddata">
+<div class="function-name">ИнициализироватьПредопределенныеДанные</div>
+<div class="function-english">InitializePredefinedData</div>
+</div>
+                    <div class="function-card searchable" data-search="обработкапрерыванияпользователя userinterruptprocessing">
+<div class="function-name">ОбработкаПрерыванияПользователя</div>
+<div class="function-english">UserInterruptProcessing</div>
+</div>
+                    <div class="function-card searchable" data-search="секунда second">
+<div class="function-name">Секунда</div>
+<div class="function-english">Second</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьограничениеповторенияпаролейпользователейсредипоследних getuserpasswordreuselimit">
+<div class="function-name">ПолучитьОграничениеПовторенияПаролейПользователейСредиПоследних</div>
+<div class="function-english">GetUserPasswordReuseLimit</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьсообщенияпользователю getusermessages">
+<div class="function-name">ПолучитьСообщенияПользователю</div>
+<div class="function-english">GetUserMessages</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьразмерданныхбазыданныхихранилища getdatabaseandbinarydatastoragedatasize">
+<div class="function-name">ПолучитьРазмерДанныхБазыДанныхИХранилища</div>
+<div class="function-english">GetDatabaseAndBinaryDataStorageDataSize</div>
+</div>
+                    <div class="function-card searchable" data-search="переместитьфайласинх movefileasync">
+<div class="function-name">ПереместитьФайлАсинх</div>
+<div class="function-english">MoveFileAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="поддерживаетсяотображениекарты maprepresentationsupported">
+<div class="function-name">ПоддерживаетсяОтображениеКарты</div>
+<div class="function-english">MapRepresentationSupported</div>
+</div>
+                    <div class="function-card searchable" data-search="asin (asin) ">
+<div class="function-name">ASin (ASin)</div>
+<div class="function-english"></div>
+</div>
+                    <div class="function-card searchable" data-search="побитовыйсдвигвлево bitwiseshiftleft">
+<div class="function-name">ПобитовыйСдвигВлево</div>
+<div class="function-english">BitwiseShiftLeft</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьвремязасыпанияпассивногосеанса getpassivesessionhibernatetime">
+<div class="function-name">ПолучитьВремяЗасыпанияПассивногоСеанса</div>
+<div class="function-english">GetPassiveSessionHibernateTime</div>
+</div>
+                    <div class="function-card searchable" data-search="стрзаменитьпорегулярномувыражению strreplacebyregularexpression">
+<div class="function-name">СтрЗаменитьПоРегулярномуВыражению</div>
+<div class="function-english">StrReplaceByRegularExpression</div>
+</div>
+                    <div class="function-card searchable" data-search="создатьфабрикуxdto createxdtofactory">
+<div class="function-name">СоздатьФабрикуXDTO</div>
+<div class="function-english">CreateXDTOFactory</div>
+</div>
+                    <div class="function-card searchable" data-search="выполнитьобработкуоповещения runcallback">
+<div class="function-name">ВыполнитьОбработкуОповещения</div>
+<div class="function-english">RunCallback</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьтекущийсеансинформационнойбазы getcurrentinfobasesession">
+<div class="function-name">ПолучитьТекущийСеансИнформационнойБазы</div>
+<div class="function-english">GetCurrentInfoBaseSession</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьсклонениястроки getstringdeclensions">
+<div class="function-name">ПолучитьСклоненияСтроки</div>
+<div class="function-english">GetStringDeclensions</div>
+</div>
+                    <div class="function-card searchable" data-search="заблокироватьработупользователя lockapplication">
+<div class="function-name">ЗаблокироватьРаботуПользователя</div>
+<div class="function-english">LockApplication</div>
+</div>
+                    <div class="function-card searchable" data-search="обновитьнумерациюобъектов refreshobjectsnumbering">
+<div class="function-name">ОбновитьНумерациюОбъектов</div>
+<div class="function-english">RefreshObjectsNumbering</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьустановкурасширенияработысфайлами begininstallfilesystemextension">
+<div class="function-name">НачатьУстановкуРасширенияРаботыСФайлами</div>
+<div class="function-english">BeginInstallFileSystemExtension</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьблокировкусеансов setsessionslock">
+<div class="function-name">УстановитьБлокировкуСеансов</div>
+<div class="function-english">SetSessionsLock</div>
+</div>
+                    <div class="function-card searchable" data-search="текущаяуниверсальнаядатавмиллисекундах currentuniversaldateinmilliseconds">
+<div class="function-name">ТекущаяУниверсальнаяДатаВМиллисекундах</div>
+<div class="function-english">CurrentUniversalDateInMilliseconds</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьфайлыссервераасинх getfilesfromserverasync">
+<div class="function-name">ПолучитьФайлыССервераАсинх</div>
+<div class="function-english">GetFilesFromServerAsync</div>
+</div>
+                    <div class="function-card searchable" data-search="sqrt (sqrt) ">
+<div class="function-name">Sqrt (Sqrt)</div>
+<div class="function-english"></div>
+</div>
+                    <div class="function-card searchable" data-search="получитьфункциональнуюопцию getfunctionaloption">
+<div class="function-name">ПолучитьФункциональнуюОпцию</div>
+<div class="function-english">GetFunctionalOption</div>
+</div>
+                    <div class="function-card searchable" data-search="стрнайти strfind">
+<div class="function-name">СтрНайти</div>
+<div class="function-english">StrFind</div>
+</div>
+                    <div class="function-card searchable" data-search="очиститьжурналрегистрации cleareventlog">
+<div class="function-name">ОчиститьЖурналРегистрации</div>
+<div class="function-english">ClearEventLog</div>
+</div>
+                    <div class="function-card searchable" data-search="строкасоединенияинформационнойбазы infobaseconnectionstring">
+<div class="function-name">СтрокаСоединенияИнформационнойБазы</div>
+<div class="function-english">InfoBaseConnectionString</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьминимальнуюдлинупаролейпользователей getuserpasswordminlength">
+<div class="function-name">ПолучитьМинимальнуюДлинуПаролейПользователей</div>
+<div class="function-english">GetUserPasswordMinLength</div>
+</div>
+                    <div class="function-card searchable" data-search="установитьпривилегированныйрежим setprivilegedmode">
+<div class="function-name">УстановитьПривилегированныйРежим</div>
+<div class="function-english">SetPrivilegedMode</div>
+</div>
+                    <div class="function-card searchable" data-search="перейтипонавигационнойссылке gotourl">
+<div class="function-name">ПерейтиПоНавигационнойСсылке</div>
+<div class="function-english">GotoURL</div>
+</div>
+                    <div class="function-card searchable" data-search="очиститьсообщения clearmessages">
+<div class="function-name">ОчиститьСообщения</div>
+<div class="function-english">ClearMessages</div>
+</div>
+                    <div class="function-card searchable" data-search="восстановитьзначение restorevalue">
+<div class="function-name">ВосстановитьЗначение</div>
+<div class="function-english">RestoreValue</div>
+</div>
+                    <div class="function-card searchable" data-search="exp (exp) ">
+<div class="function-name">Exp (Exp)</div>
+<div class="function-english"></div>
+</div>
+                    <div class="function-card searchable" data-search="получитьмакетоформления getappearancetemplate">
+<div class="function-name">ПолучитьМакетОформления</div>
+<div class="function-english">GetAppearanceTemplate</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьпредставлениянавигационныхссылок geturlspresentations">
+<div class="function-name">ПолучитьПредставленияНавигационныхСсылок</div>
+<div class="function-english">GetURLsPresentations</div>
+</div>
+                    <div class="function-card searchable" data-search="стрчислострок strlinecount">
+<div class="function-name">СтрЧислоСтрок</div>
+<div class="function-english">StrLineCount</div>
+</div>
+                    <div class="function-card searchable" data-search="cos (cos) ">
+<div class="function-name">Cos (Cos)</div>
+<div class="function-english"></div>
+</div>
+                    <div class="function-card searchable" data-search="начатьустановкурасширенияполученияинформацииокомпьютере begininstallingcomputerinformationextension">
+<div class="function-name">НачатьУстановкуРасширенияПолученияИнформацииОКомпьютере</div>
+<div class="function-english">BeginInstallingComputerInformationExtension</div>
+</div>
+                    <div class="function-card searchable" data-search="описаниеошибки errordescription">
+<div class="function-name">ОписаниеОшибки</div>
+<div class="function-english">ErrorDescription</div>
+</div>
+                    <div class="function-card searchable" data-search="стрнайтивсепорегулярномувыражению strfindallbyregularexpression">
+<div class="function-name">СтрНайтиВсеПоРегулярномуВыражению</div>
+<div class="function-english">StrFindAllByRegularExpression</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьустановкувнешнейкомпоненты begininstalladdin">
+<div class="function-name">НачатьУстановкуВнешнейКомпоненты</div>
+<div class="function-english">BeginInstallAddIn</div>
+</div>
+                    <div class="function-card searchable" data-search="командасистемы system">
+<div class="function-name">КомандаСистемы</div>
+<div class="function-english">System</div>
+</div>
+                    <div class="function-card searchable" data-search="сохранитьзначение savevalue">
+<div class="function-name">СохранитьЗначение</div>
+<div class="function-english">SaveValue</div>
+</div>
+                    <div class="function-card searchable" data-search="значениевданныеформы valuetoformdata">
+<div class="function-name">ЗначениеВДанныеФормы</div>
+<div class="function-english">ValueToFormData</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьhexдвоичныеданныеиздвоичныхданных gethexbinarydatafrombinarydata">
+<div class="function-name">ПолучитьHexДвоичныеДанныеИзДвоичныхДанных</div>
+<div class="function-english">GetHexBinaryDataFromBinaryData</div>
+</div>
+                    <div class="function-card searchable" data-search="стрзаменить strreplace">
+<div class="function-name">СтрЗаменить</div>
+<div class="function-english">StrReplace</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьколичествозаданийпересчетаитогов gettotalrecalcjobcount">
+<div class="function-name">ПолучитьКоличествоЗаданийПересчетаИтогов</div>
+<div class="function-english">GetTotalRecalcJobCount</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьдвоичныеданныеизbase64строки getbinarydatafrombase64string">
+<div class="function-name">ПолучитьДвоичныеДанныеИзBase64Строки</div>
+<div class="function-english">GetBinaryDataFromBase64String</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьдопустимыекодылокализации getavailablelocalecodes">
+<div class="function-name">ПолучитьДопустимыеКодыЛокализации</div>
+<div class="function-english">GetAvailableLocaleCodes</div>
+</div>
+                    <div class="function-card searchable" data-search="начатьзапускприложения beginrunningapplication">
+<div class="function-name">НачатьЗапускПриложения</div>
+<div class="function-english">BeginRunningApplication</div>
+</div>
+                    <div class="function-card searchable" data-search="стрдлина strlen">
+<div class="function-name">СтрДлина</div>
+<div class="function-english">StrLen</div>
+</div>
+                    <div class="function-card searchable" data-search="представлениечасовогопояса timezonepresentation">
+<div class="function-name">ПредставлениеЧасовогоПояса</div>
+<div class="function-english">TimeZonePresentation</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьмаскувсефайлыклиента getclientallfilesmask">
+<div class="function-name">ПолучитьМаскуВсеФайлыКлиента</div>
+<div class="function-english">GetClientAllFilesMask</div>
+</div>
+                    <div class="function-card searchable" data-search="получитьразделительпутисервера getserverpathseparator">
+<div class="function-name">ПолучитьРазделительПутиСервера</div>
+<div class="function-english">GetServerPathSeparator</div>
+</div>
+                </div>
+            </div>
+            <div class="section" id="keywords">
+                <h2 class="section-title">🔤 Ключевые слова языка</h2>
+                <div class="keyword-list">
+                    <span class="keyword searchable" data-search="? вычислить выражение по условию">? / вычислить выражение по условию</span>
+                    <span class="keyword searchable" data-search="неопределено undefined">Неопределено / Undefined</span>
+                    <span class="keyword searchable" data-search="set set">set / set</span>
+                    <span class="keyword searchable" data-search="процедура procedure">Процедура / Procedure</span>
+                    <span class="keyword searchable" data-search="new new">New / New</span>
+                    <span class="keyword searchable" data-search="пока while">Пока / While</span>
+                    <span class="keyword searchable" data-search="[...] обращение к свойствам объекта">[...] / обращение к свойствам объекта</span>
+                    <span class="keyword searchable" data-search="goto goto">Goto / Goto</span>
+                    <span class="keyword searchable" data-search="вызватьисключение raise">ВызватьИсключение / Raise</span>
+                    <span class="keyword searchable" data-search="попытка try">Попытка / Try</span>
+                    <span class="keyword searchable" data-search="выполнить execute">Выполнить / Execute</span>
+                    <span class="keyword searchable" data-search="добавитьобработчик addhandler">ДобавитьОбработчик / AddHandler</span>
+                    <span class="keyword searchable" data-search="null null">Null / Null</span>
+                    <span class="keyword searchable" data-search="для for">Для / For</span>
+                    <span class="keyword searchable" data-search="перем var">Перем / Var</span>
+                    <span class="keyword searchable" data-search="для каждого for each">Для каждого / For each</span>
+                    <span class="keyword searchable" data-search="ложь false">Ложь / False</span>
+                    <span class="keyword searchable" data-search="await await">await / await</span>
+                    <span class="keyword searchable" data-search="функция function">Функция / Function</span>
+                    <span class="keyword searchable" data-search="если if">Если / If</span>
+                    <span class="keyword searchable" data-search="удалитьобработчик removehandler">УдалитьОбработчик / RemoveHandler</span>
+                    <span class="keyword searchable" data-search="истина true">Истина / True</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        function filterContent() {
+            const searchTerm = document.getElementById('searchBox').value.toLowerCase();
+            const elements = document.querySelectorAll('.searchable');
+            
+            elements.forEach(element => {
+                const text = element.getAttribute('data-search');
+                if (text.includes(searchTerm)) {
+                    element.style.display = '';
+                } else {
+                    element.style.display = 'none';
+                }
+            });
+        }
+    </script>
+</body>
+</html>

@@ -27,7 +27,10 @@
       "Bash(del \"C:\\1CProject\\bsl-gradual-types\\src\\adapters\\platform_docs.rs\")",
       "Bash(jq:*)",
       "Bash(touch:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(start type_hierarchy_v3_visualization.html)",
+      "Bash(start:*)",
+      "Bash(tree:*)"
     ],
     "deny": []
   }

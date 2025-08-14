@@ -94,7 +94,7 @@ impl FacetCache {
     }
     
     /// Создаёт кеш из FacetRegistry
-    pub fn from_registry(registry: &FacetRegistry, platform_version: String) -> Self {
+    pub fn from_registry(_registry: &FacetRegistry, platform_version: String) -> Self {
         let cache = Self::new(platform_version);
         
         // TODO: Добавить метод в FacetRegistry для итерации по всем фасетам

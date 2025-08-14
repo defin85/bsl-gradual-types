@@ -15,15 +15,11 @@ use anyhow::{Result, Context};
 use rayon::prelude::*;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, warn};
 use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
 use dashmap::DashMap;
 
-use crate::core::types::{
-    Certainty, ConcreteType, PlatformType, Method, Property,
-    ResolutionResult, ResolutionSource, TypeResolution, ResolutionMetadata,
-    FacetKind,
-};
+use crate::core::types::FacetKind;
 
 // ============================================================================
 // Структуры данных
@@ -867,6 +863,7 @@ impl SyntaxHelperParser {
         (None, None)
     }
     
+    #[allow(dead_code)]
     fn extract_return_type(&self, document: &Html) -> String {
         self.extract_return_info(document).0.unwrap_or_default()
     }
@@ -909,12 +906,12 @@ impl SyntaxHelperParser {
             .unwrap_or_else(|| "8.3.0+".to_string())
     }
     
-    fn extract_aliases(&self, document: &Html) -> Vec<String> {
+    fn extract_aliases(&self, _document: &Html) -> Vec<String> {
         // Извлекаем альтернативные имена из текста
         Vec::new() // TODO: Implement alias extraction
     }
     
-    fn extract_collection_element(&self, document: &Html) -> Option<String> {
+    fn extract_collection_element(&self, _document: &Html) -> Option<String> {
         // Извлекаем тип элемента коллекции
         None // TODO: Implement collection element extraction
     }

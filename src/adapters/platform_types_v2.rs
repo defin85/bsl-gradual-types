@@ -8,7 +8,6 @@ use anyhow::Result;
 use crate::core::types::{
     Certainty, ConcreteType, PlatformType, Method, Property, Parameter,
     ResolutionResult, ResolutionSource, TypeResolution, ResolutionMetadata,
-    FacetKind,
 };
 use super::syntax_helper_parser::{
     SyntaxHelperParser, OptimizationSettings,

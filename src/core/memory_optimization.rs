@@ -76,6 +76,12 @@ pub struct MemoryMonitor {
     max_profiles: usize,
 }
 
+impl Default for MemoryMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemoryMonitor {
     /// Создать новый монитор памяти
     pub fn new() -> Self {
@@ -192,6 +198,12 @@ pub struct StringInterner {
     saved_bytes: usize,
 }
 
+impl Default for StringInterner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StringInterner {
     /// Создать новый string interner
     pub fn new() -> Self {
@@ -261,6 +273,12 @@ impl StringInterningStats {
 pub struct MemoryOptimizationManager {
     monitor: MemoryMonitor,
     interner: StringInterner,
+}
+
+impl Default for MemoryOptimizationManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MemoryOptimizationManager {

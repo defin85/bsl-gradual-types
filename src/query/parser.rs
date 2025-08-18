@@ -775,9 +775,8 @@ fn is_query_keyword_ahead(input: &str) -> bool {
     ];
     
     for keyword in &keywords {
-        if trimmed.starts_with(keyword) {
+        if let Some(after_keyword) = trimmed.strip_prefix(keyword) {
             // Проверяем, что это отдельное слово
-            let after_keyword = &trimmed[keyword.len()..];
             if after_keyword.is_empty() || 
                !after_keyword.chars().next().unwrap_or(' ').is_alphabetic() {
                 return true;

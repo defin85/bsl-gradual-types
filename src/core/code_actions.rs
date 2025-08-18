@@ -18,6 +18,12 @@ pub struct CodeActionProvider {
     action_cache: HashMap<String, Vec<CodeActionOrCommand>>,
 }
 
+impl Default for CodeActionProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodeActionProvider {
     /// Создать новый поставщик code actions
     pub fn new() -> Self {
@@ -594,6 +600,12 @@ pub struct LSPCodeActionIntegration {
     provider: CodeActionProvider,
     #[allow(dead_code)]
     refactoring_provider: RefactoringProvider,
+}
+
+impl Default for LSPCodeActionIntegration {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LSPCodeActionIntegration {

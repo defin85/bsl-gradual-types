@@ -3,7 +3,7 @@
 //! Создаёт интерактивный HTML отчёт с иерархией типов, индексами и фасетами
 
 use bsl_gradual_types::adapters::syntax_helper_parser::{
-    SyntaxHelperParser, SyntaxNode, TypeInfo, OptimizationSettings, GlobalFunctionInfo,
+    SyntaxHelperParser, SyntaxNode, TypeInfo, OptimizationSettings,
 };
 use bsl_gradual_types::core::types::FacetKind;
 use std::fs;
@@ -98,7 +98,7 @@ fn main() -> Result<()> {
     #[cfg(windows)]
     {
         std::process::Command::new("cmd")
-            .args(&["/C", "start", output_path])
+            .args(["/C", "start", output_path])
             .spawn()
             .ok();
     }
@@ -184,7 +184,7 @@ fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
                 let parent_id = &catalog_id[..slash_pos];
                 // Берём последнюю часть после последнего слеша как ID родителя
                 let parent_catalog = if parent_id.contains('/') {
-                    parent_id.split('/').last().unwrap_or(parent_id)
+                    parent_id.split('/').next_back().unwrap_or(parent_id)
                 } else {
                     parent_id
                 };
@@ -363,12 +363,12 @@ fn generate_global_functions_table(parser: &SyntaxHelperParser) -> String {
     let mut categories: std::collections::HashMap<String, Vec<&SyntaxNode>> = std::collections::HashMap::new();
     let mut no_category = Vec::new();
     
-    for (_, node) in &database.nodes {
+    for node in database.nodes.values() {
         if let SyntaxNode::GlobalFunction(func) = node {
             match &func.category {
                 Some(cat) => {
                     categories.entry(cat.clone())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(node);
                 }
                 None => {

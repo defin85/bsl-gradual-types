@@ -26,6 +26,12 @@ pub struct BasicTypeResolver {
     config_types: HashMap<String, ConfigurationType>,
 }
 
+impl Default for BasicTypeResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BasicTypeResolver {
     pub fn new() -> Self {
         Self {

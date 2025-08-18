@@ -147,7 +147,7 @@ impl QueryTypeChecker {
                     let condition_type = self.check_expression(condition, errors);
                     if !self.is_boolean_type(&condition_type) {
                         errors.push(QueryError {
-                            message: format!("Условие JOIN должно возвращать булево значение"),
+                            message: "Условие JOIN должно возвращать булево значение".to_string(),
                             location: Some("JOIN".to_string()),
                         });
                     }
@@ -520,7 +520,7 @@ impl QueryTypeChecker {
         } else {
             // Ищем поле во всех таблицах
             let mut found_types = Vec::new();
-            for (_, schema) in &self.table_schemas {
+            for schema in self.table_schemas.values() {
                 if let Some(field_schema) = schema.fields.get(field) {
                     found_types.push(field_schema.type_resolution.clone());
                 }
@@ -676,16 +676,14 @@ impl QueryTypeChecker {
 
     fn validate_group_by(&self, select: &SelectClause, group_by: &GroupByClause, errors: &mut Vec<QueryError>) {
         for field in &select.fields {
-            if !self.is_aggregate_expression(&field.expression) {
-                if !self.is_in_group_by(&field.expression, group_by) {
-                    errors.push(QueryError {
-                        message: format!(
-                            "Поле '{}' должно быть в GROUP BY или быть агрегатной функцией",
-                            self.expression_to_string(&field.expression)
-                        ),
-                        location: Some("SELECT".to_string()),
-                    });
-                }
+            if !self.is_aggregate_expression(&field.expression) && !self.is_in_group_by(&field.expression, group_by) {
+                errors.push(QueryError {
+                    message: format!(
+                        "Поле '{}' должно быть в GROUP BY или быть агрегатной функцией",
+                        self.expression_to_string(&field.expression)
+                    ),
+                    location: Some("SELECT".to_string()),
+                });
             }
         }
     }

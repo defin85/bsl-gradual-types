@@ -741,13 +741,11 @@ impl SyntaxHelperParser {
     
     /// Определяет, является ли функция полиморфной
     fn is_polymorphic_function(&self, russian_name: &str, english_name: &Option<String>) -> bool {
-        let polymorphic_functions = vec![
-            "Мин", "Min", "Макс", "Max", 
-            "Строка", "String", "Число", "Number",
-        ];
+        let polymorphic_functions = ["Мин", "Min", "Макс", "Max", 
+            "Строка", "String", "Число", "Number"];
         
         polymorphic_functions.contains(&russian_name) || 
-            english_name.as_ref().map_or(false, |en| polymorphic_functions.contains(&en.as_str()))
+            english_name.as_ref().is_some_and(|en| polymorphic_functions.contains(&en.as_str()))
     }
     
     /// Определяет, является ли функция чистой
@@ -761,7 +759,7 @@ impl SyntaxHelperParser {
         ];
         
         pure_functions.contains(&russian_name) || 
-            english_name.as_ref().map_or(false, |en| pure_functions.contains(&en.as_str()))
+            english_name.as_ref().is_some_and(|en| pure_functions.contains(&en.as_str()))
     }
     
     /// Извлекает категорию функции из пути
@@ -1035,7 +1033,7 @@ impl SyntaxHelperParser {
         }
         
         for entry in by_facet.iter() {
-            index.by_facet.insert(entry.key().clone(), entry.value().clone());
+            index.by_facet.insert(*entry.key(), entry.value().clone());
         }
         
         for entry in by_category.iter() {

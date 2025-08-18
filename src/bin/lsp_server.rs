@@ -284,7 +284,7 @@ impl LanguageServer for BslLanguageServer {
         // Получаем enhanced предложения с типами
         let resolver = self.resolver.read().await;
         let enhanced_completions = self.document_manager.get_completions(
-            &uri.to_string(),
+            uri.as_ref(),
             position,
             &prefix,
             &resolver,
@@ -306,7 +306,7 @@ impl LanguageServer for BslLanguageServer {
         
         // Получаем enhanced hover информацию
         if let Some(hover_text) = self.document_manager.get_enhanced_hover(
-            &uri.to_string(),
+            uri.as_ref(),
             position,
         ).await {
             Ok(Some(Hover {

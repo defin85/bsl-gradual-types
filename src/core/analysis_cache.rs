@@ -317,10 +317,10 @@ impl AnalysisCacheManager {
         // Очищаем disk кеш
         if let Ok(entries) = std::fs::read_dir(&self.cache_dir) {
             for entry in entries.flatten() {
-                if let Ok(data) = std::fs::read(&entry.path()) {
+                if let Ok(data) = std::fs::read(entry.path()) {
                     if let Ok(cached) = bincode::deserialize::<CachedInterproceduralResults>(&data) {
                         if !cached.is_valid() {
-                            let _ = std::fs::remove_file(&entry.path());
+                            let _ = std::fs::remove_file(entry.path());
                             removed_count += 1;
                         }
                     }
@@ -408,7 +408,7 @@ impl CachedInterproceduralAnalyzer {
         };
         
         // Обновляем контекст
-        for (func_name, _return_type) in &function_results {
+        for func_name in function_results.keys() {
             if let Some(signature) = self.base_analyzer.get_function_signature(func_name) {
                 context.functions.insert(func_name.clone(), signature);
             }

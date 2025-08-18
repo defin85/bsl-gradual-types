@@ -84,6 +84,12 @@ pub struct InterproceduralAnalyzer {
     analyzing: HashSet<String>,
 }
 
+impl Default for CallGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CallGraph {
     /// Создать новый граф вызовов
     pub fn new() -> Self {
@@ -311,7 +317,7 @@ impl CallGraph {
             for call_site in call_sites {
                 self.callers
                     .entry(call_site.callee_name.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(caller.clone());
             }
         }
@@ -564,7 +570,7 @@ impl InterproceduralAnalyzer {
     
     /// Обновить контекст типов на основе анализа
     pub fn update_type_context(&mut self) {
-        for (function_name, _return_type) in &self.function_results {
+        for function_name in self.function_results.keys() {
             if let Some(signature) = self.get_function_signature(function_name) {
                 self.type_context.functions.insert(function_name.clone(), signature);
             }

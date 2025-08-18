@@ -122,7 +122,7 @@ impl TypeDependencyGraph {
         {
             let mut edges = self.edges.write().unwrap();
             edges.entry(edge.from.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(edge.clone());
         }
         
@@ -130,7 +130,7 @@ impl TypeDependencyGraph {
         {
             let mut reverse = self.reverse_edges.write().unwrap();
             reverse.entry(edge.to.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(edge);
         }
     }

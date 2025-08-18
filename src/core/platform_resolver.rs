@@ -42,6 +42,12 @@ pub struct PlatformTypeResolver {
     cache: HashMap<String, TypeResolution>,
 }
 
+impl Default for PlatformTypeResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlatformTypeResolver {
     pub fn new() -> Self {
         let mut platform_resolver = PlatformTypesResolverV2::new();
@@ -375,7 +381,7 @@ impl PlatformTypeResolver {
             // Empty or single incomplete identifier - show globals
             [] | [""] => {
                 // Add all platform globals (managers and global functions)
-                for (name, _type_resolution) in &self.platform_globals {
+                for name in self.platform_globals.keys() {
                     let (kind, detail) = if name.contains("Справочники") || name.contains("Catalogs") ||
                                            name.contains("Документы") || name.contains("Documents") ||
                                            name.contains("Перечисления") || name.contains("Enums") ||
@@ -412,7 +418,7 @@ impl PlatformTypeResolver {
             
             // Single partial identifier - filter globals
             [partial] if !partial.is_empty() => {
-                for (name, _) in &self.platform_globals {
+                for name in self.platform_globals.keys() {
                     // Case-insensitive starts_with for Russian and English
                     if name.to_lowercase().starts_with(&partial.to_lowercase()) {
                         let (kind, detail) = if name.contains("Справочники") || name.contains("Catalogs") ||

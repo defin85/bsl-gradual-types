@@ -86,6 +86,12 @@ pub struct PerformanceProfiler {
     session_start: Instant,
 }
 
+impl Default for PerformanceProfiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PerformanceProfiler {
     /// Создать новый профайлер
     pub fn new() -> Self {
@@ -252,7 +258,7 @@ impl PerformanceReport {
     pub fn format_human_readable(&self) -> String {
         let mut report = String::new();
         
-        report.push_str(&format!("🔍 Отчет о производительности BSL Type System\n"));
+        report.push_str("🔍 Отчет о производительности BSL Type System\n");
         report.push_str(&format!("📊 Сессия: {:.2?}\n", self.session_duration));
         report.push_str(&format!("⏱️  Общее время анализа: {:.2?}\n", self.total_analysis_time));
         report.push_str(&format!("🔢 Общее количество вызовов: {}\n", self.total_calls));

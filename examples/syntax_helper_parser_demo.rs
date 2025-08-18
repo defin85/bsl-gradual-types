@@ -43,10 +43,10 @@ fn main() -> anyhow::Result<()> {
     println!("\n📊 Статистика парсинга:");
     println!("  📂 Обработано файлов: {}", stats.files_parsed);
     println!("  ⏱️ Время парсинга: {:?}", stats.parse_duration);
-    println!("  📦 Найдено типов: {}", stats.types_found);
-    println!("  🎯 Найдено методов: {}", stats.methods_found);
-    println!("  ⚙️ Найдено свойств: {}", stats.properties_found);
-    println!("  📑 Найдено категорий: {}", stats.categories_found);
+    println!("  📦 Найдено типов: {}", stats.types_count);
+    println!("  🎯 Найдено методов: {}", stats.methods_count);
+    println!("  ⚙️ Найдено свойств: {}", stats.properties_count);
+    println!("  📑 Найдено категорий: {}", stats.categories_count);
     
     // Получаем базу данных
     let database = parser.export_database();
@@ -60,19 +60,19 @@ fn main() -> anyhow::Result<()> {
     // Показываем примеры методов
     println!("\n🎯 Примеры найденных методов:");
     for (name, method) in database.methods.iter().take(5) {
-        println!("  - {} (тип: {})", name, method.owner_type);
+        println!("  - {} (параметры: {})", name, method.parameters.len());
     }
     
     // Показываем примеры свойств
     println!("\n⚙️ Примеры найденных свойств:");
     for (name, prop) in database.properties.iter().take(5) {
-        println!("  - {} (тип: {})", name, prop.owner_type);
+        println!("  - {} (тип: {})", name, prop.property_type);
     }
     
     // Показываем примеры категорий
     println!("\n📑 Примеры категорий:");
     for (name, category) in database.categories.iter().take(5) {
-        println!("  - {} ({} типов)", name, category.type_count);
+        println!("  - {} ({} типов)", name, category.types.len());
     }
     
     // Получаем индекс для поиска
@@ -86,7 +86,7 @@ fn main() -> anyhow::Result<()> {
     if let Some(type_info) = parser.find_type("Массив") {
         println!("\n✨ Найден тип 'Массив':");
         println!("  - Русское имя: {}", type_info.identity.russian_name);
-        if let Some(en) = &type_info.identity.english_name {
+        if let Some(en) = type_info.identity.english_name.as_ref() {
             println!("  - Английское имя: {}", en);
         }
         println!("  - Методов: {}", type_info.structure.methods.len());

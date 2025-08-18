@@ -61,6 +61,12 @@ pub struct IncrementalParsingManager {
     ast_cache: HashMap<String, Program>,
 }
 
+impl Default for IncrementalParsingManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IncrementalParsingManager {
     pub fn new() -> Self {
         Self {
@@ -79,8 +85,7 @@ impl IncrementalParsingManager {
         // Конвертируем LSP изменения в наш формат
         let text_changes: Vec<TextChange> = changes.iter()
             .filter_map(|change| {
-                if let Some(range) = change.range {
-                    Some(TextChange {
+                change.range.map(|range| TextChange {
                         start_byte: self.position_to_byte_offset(new_content, range.start),
                         old_end_byte: self.position_to_byte_offset(new_content, range.end),
                         new_end_byte: self.position_to_byte_offset(new_content, range.end),
@@ -97,9 +102,6 @@ impl IncrementalParsingManager {
                             column: range.end.character as usize,
                         },
                     })
-                } else {
-                    None
-                }
             })
             .collect();
         
@@ -158,6 +160,12 @@ pub struct EnhancedTypeAnalyzer {
     parsing_manager: IncrementalParsingManager,
     /// Кеш результатов анализа для быстрого доступа
     analysis_cache: HashMap<String, (TypeContext, Vec<TypeDiagnostic>)>,
+}
+
+impl Default for EnhancedTypeAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EnhancedTypeAnalyzer {
@@ -446,6 +454,12 @@ pub struct DocumentManager {
     analyzer: Arc<RwLock<EnhancedTypeAnalyzer>>,
 }
 
+impl Default for DocumentManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DocumentManager {
     pub fn new() -> Self {
         Self {
@@ -504,11 +518,7 @@ impl DocumentManager {
         uri: &str,
         position: Position,
     ) -> Option<String> {
-        if let Some(type_resolution) = self.get_type_at_position(uri, position).await {
-            Some(EnhancedTypeAnalyzer::format_type_info(&type_resolution))
-        } else {
-            None
-        }
+        self.get_type_at_position(uri, position).await.map(|type_resolution| EnhancedTypeAnalyzer::format_type_info(&type_resolution))
     }
     
     /// Получить улучшенные completion

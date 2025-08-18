@@ -23,6 +23,12 @@ pub struct FacetTemplate {
     pub properties: Vec<Property>,
 }
 
+impl Default for FacetRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FacetRegistry {
     pub fn new() -> Self {
         Self {

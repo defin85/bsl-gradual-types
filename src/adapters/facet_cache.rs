@@ -43,7 +43,7 @@ impl FacetCache {
     
     /// Добавляет фасет в кеш
     pub fn add_facet(&mut self, type_name: &str, facet_kind: FacetKind, methods: Vec<Method>, properties: Vec<Property>) {
-        let type_facets = self.facets.entry(type_name.to_string()).or_insert_with(HashMap::new);
+        let type_facets = self.facets.entry(type_name.to_string()).or_default();
         type_facets.insert(facet_kind, CachedFacet { methods, properties });
     }
     
@@ -95,12 +95,12 @@ impl FacetCache {
     
     /// Создаёт кеш из FacetRegistry
     pub fn from_registry(_registry: &FacetRegistry, platform_version: String) -> Self {
-        let cache = Self::new(platform_version);
+        
         
         // TODO: Добавить метод в FacetRegistry для итерации по всем фасетам
         // Пока возвращаем пустой кеш
         
-        cache
+        Self::new(platform_version)
     }
 }
 

@@ -1,6 +1,7 @@
 //! Демонстрация работы tree-sitter парсера BSL
 
-use bsl_gradual_types::parser::{ParserFactory, Parser};
+use bsl_gradual_types::parser::ParserFactory;
+use bsl_gradual_types::parser::common::Parser;
 
 fn main() -> anyhow::Result<()> {
     println!("=== Демонстрация tree-sitter парсера BSL ===\n");

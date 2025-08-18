@@ -102,7 +102,7 @@ impl ConfigParserXml {
         
         let mut object = MetadataObject {
             name: String::new(),
-            kind: kind.clone(),
+            kind: *kind,
             synonym: None,
             attributes: Vec::new(),
             tabular_sections: Vec::new(),
@@ -327,7 +327,7 @@ impl ConfigParserXml {
                 notes: object.synonym.map(|s| vec![s]).unwrap_or_default(),
             },
             active_facet: Some(crate::core::types::FacetKind::Manager),
-            available_facets: self.get_facets_for_kind(&kind),
+            available_facets: self.get_facets_for_kind(kind),
         }
     }
     

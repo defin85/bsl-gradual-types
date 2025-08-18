@@ -202,14 +202,14 @@ impl TypeHintsProvider {
     /// Проверить нужно ли показывать hint для типа
     fn should_show_hint(&self, type_res: &TypeResolution) -> bool {
         // Проверяем уровень уверенности
-        let certainty_check = match type_res.certainty {
+        
+        
+        // Для тестов показываем все типы
+        match type_res.certainty {
             Certainty::Known => true,
             Certainty::Inferred(conf) => conf >= self.settings.min_certainty,
             Certainty::Unknown => false,
-        };
-        
-        // Для тестов показываем все типы
-        certainty_check
+        }
     }
     
     /// Создать hint для типа переменной
@@ -699,6 +699,12 @@ pub struct SemanticToken {
 pub struct TypeHintsIntegration {
     provider: TypeHintsProvider,
     semantic_provider: SemanticTokensProvider,
+}
+
+impl Default for TypeHintsIntegration {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TypeHintsIntegration {

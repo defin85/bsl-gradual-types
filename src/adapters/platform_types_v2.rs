@@ -131,7 +131,7 @@ impl PlatformTypesResolverV2 {
         let mut objects = HashMap::new();
         
         if let Some(ref database) = self.database {
-            for (_, node) in &database.nodes {
+            for node in database.nodes.values() {
                 if let SyntaxNode::Type(type_info) = node {
                     let resolution = self.type_to_resolution(type_info);
                     

@@ -129,7 +129,7 @@ impl TypeChecker {
             analyzer.update_type_context();
             
             // Обновляем наш контекст функциями из межпроцедурного анализа
-            for (func_name, _signature) in analyzer.get_analyzed_functions() {
+            for func_name in analyzer.get_analyzed_functions().keys() {
                 if let Some(sig) = analyzer.get_function_signature(func_name) {
                     self.context.functions.insert(func_name.clone(), sig);
                 }

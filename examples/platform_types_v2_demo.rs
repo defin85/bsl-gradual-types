@@ -1,16 +1,19 @@
 //! Демонстрация новой системы типов платформы с syntax helper
 
-use bsl_gradual_types::adapters::platform_types_v2::create_platform_resolver_with_syntax_helper;
+use bsl_gradual_types::adapters::platform_types_v2::PlatformTypesResolverV2;
 
 fn main() -> anyhow::Result<()> {
     println!("=== Демонстрация PlatformTypesResolverV2 ===\n");
     
-    // Создаём резолвер с автоматической загрузкой syntax helper
-    let resolver = create_platform_resolver_with_syntax_helper();
+    // Создаём резолвер
+    let mut resolver = PlatformTypesResolverV2::new();
+    
+    // Загружаем syntax helper если доступен
+    let _ = resolver.load_from_file("examples/syntax_helper/syntax_database.json");
     
     // Показываем статистику
     println!("📊 Статистика загруженных данных:");
-    let stats = resolver.get_statistics();
+    let stats = resolver.get_stats();
     for (key, value) in &stats {
         println!("  {}: {}", key, value);
     }

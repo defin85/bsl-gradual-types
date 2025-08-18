@@ -1,299 +1,151 @@
 # BSL Gradual Type System
 
 [![CI](https://github.com/yourusername/bsl-gradual-types/workflows/BSL%20Gradual%20Type%20System%20CI/badge.svg)](https://github.com/yourusername/bsl-gradual-types/actions)
-[![Security](https://github.com/yourusername/bsl-gradual-types/workflows/Security%20Audit/badge.svg)](https://github.com/yourusername/bsl-gradual-types/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70+-brightgreen.svg)](https://www.rust-lang.org/)
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/yourusername/bsl-gradual-types/releases)
 
-> 🏆 **Enterprise-ready система градуальной типизации для языка 1С:Предприятие BSL с продвинутым статическим анализом и полной IDE экосистемой**
-
-## ✨ Ключевые возможности v1.0.0
-
-### 🔍 **Продвинутый анализ типов**
-- **Flow-Sensitive Analysis** - отслеживание изменений типов по мере выполнения
-- **Union Types** - полноценные union типы с весами и нормализацией  
-- **Межпроцедурный анализ** - анализ типов через границы функций
-- **Type Narrowing** - уточнение типов в условных конструкциях
-- **476+ глобальных функций** платформы с полиморфным выводом типов
-
-### 🚀 **Production-Ready LSP сервер**
-- **Инкрементальный парсинг** с tree-sitter-bsl для blazing fast performance
-- **Enhanced hover** с детальной информацией о типах и Union весами
-- **Smart автодополнение** с контекстными предложениями
-- **Real-time диагностика** с продвинутыми анализаторами
-- **Code Actions** - автоматические исправления и рефакторинг
-
-### ⚡ **Enterprise Performance**
-- **Парсинг**: ~189μs (исключительно быстро)
-- **Type Checking**: ~125μs (готов для больших проектов) 
-- **Flow Analysis**: ~175ns (мгновенно)
-- **Кеширование результатов** межпроцедурного анализа
-- **Параллельный анализ** для обработки множественных модулей
-
-### 🛠️ **Comprehensive Tooling**
-- **7 CLI инструментов** для всех задач разработки
-- **VSCode Extension** с enhanced LSP integration (209 файлов)
-- **Web-based Type Browser** для браузерного просмотра типов
-- **GitHub Actions CI/CD** с multi-platform support
-- **Performance Profiling** с автоматическими рекомендациями
+> 🏆 **Enterprise-ready система градуальной типизации для языка 1С:Предприятие BSL**
 
 ## 🚀 Быстрый старт
 
-### 📦 Установка
 ```bash
-# Клонирование репозитория
-git clone https://github.com/yourusername/bsl-gradual-types
+# 1. Клонирование и сборка
+git clone https://github.com/yourusername/bsl-gradual-types.git
 cd bsl-gradual-types
-
-# Сборка всех компонентов
 cargo build --release
 
-# Запуск тестов для проверки
-cargo test
+# 2. Анализ BSL файла
+echo 'Функция Тест() Возврат "привет"; КонецФункции' > test.bsl
+./target/release/type-check --file test.bsl
+
+# 3. Запуск web интерфейса
+./target/release/bsl-web-server --port 8080
+# Открыть http://localhost:8080
+
+# 4. VSCode расширение
+cd vscode-extension
+npm install && npm run compile && vsce package
+code --install-extension bsl-gradual-types-1.0.0.vsix
 ```
 
-### 🔧 CLI Инструменты
+## ✨ Ключевые возможности
+
+### 🔍 Продвинутый анализ типов
+- **Flow-Sensitive Analysis** - отслеживание изменений типов по мере выполнения
+- **Union Types** - полноценные union типы с весами (`String 60% | Number 40%`)
+- **Межпроцедурный анализ** - анализ типов через границы функций
+- **Type Narrowing** - уточнение типов в условиях (`ТипЗнч(x) = Тип("Строка")`)
+
+### ⚡ Enterprise Performance
+- **Парсинг**: ~189μs | **Type Checking**: ~125μs | **Flow Analysis**: ~175ns
+- **Кеширование** результатов анализа между сессиями
+- **Параллельный анализ** больших проектов с rayon
+- **Memory optimization** для enterprise нагрузок
+
+### 🛠️ Production Tooling
+- **Enhanced LSP сервер** с инкрементальным парсингом
+- **VSCode Extension** с type hints и code actions
+- **Web-based Type Browser** для команд разработки
+- **CLI инструменты** для автоматизации и CI/CD
+
+## 🔧 CLI Инструменты
+
 ```bash
-# Анализ BSL файла с enhanced возможностями
+# Проверка типов
 cargo run --bin type-check -- --file module.bsl
 
-# Запуск production LSP сервера
+# LSP сервер для IDE
 cargo run --bin lsp-server
 
-# Performance profiling и бенчмарки  
-cargo run --bin bsl-profiler benchmark --iterations 10
-cargo run --bin bsl-profiler project /path/to/1c/project --threads 4
+# Performance профилирование
+cargo run --bin bsl-profiler benchmark
+cargo run --bin bsl-profiler project /path/to/1c --threads 4
 
-# Web-based type browser
+# Web type browser
 cargo run --bin bsl-web-server --port 8080
-# Открыть http://localhost:8080 для браузерного интерфейса
 
-# Построение индекса типов
-cargo run --bin build-index -- --config /path/to/config
-
-# Legacy analyzer (совместимость)
+# Legacy analyzer
 cargo run --bin bsl-analyzer -- --file module.bsl
 ```
 
-### 💻 IDE Integration
+## 💻 VSCode Extension
+
+### Сборка расширения
 ```bash
-# VSCode Extension
 cd vscode-extension
-npm install && npm run compile
+
+# Установка зависимостей
+npm install
+
+# Компиляция TypeScript
+npm run compile
+
+# Упаковка extension
+npm install -g vsce
 vsce package
+
+# Установка в VSCode
 code --install-extension bsl-gradual-types-1.0.0.vsix
-
-# Запуск LSP для IDE интеграции
-cargo run --bin lsp-server
 ```
 
-### 🎨 Демонстрации и примеры
+### Возможности extension
+- **Type Hints** - inline отображение типов в коде
+- **Enhanced Hover** - детальная информация о типах с union весами
+- **Code Actions** - автоматические исправления (объявление переменных, type fixes)
+- **Real-time диагностика** с flow-sensitive анализом
+- **Performance Monitor** - статистика LSP операций в status bar
+
+### Настройки
+```json
+{
+  "bsl.typeHints.showVariableTypes": true,
+  "bsl.typeHints.showReturnTypes": true,
+  "bsl.analysis.enableCaching": true,
+  "bsl.performance.enableProfiling": false
+}
+```
+
+## 🌐 Web API
+
 ```bash
-# Интерактивная визуализация системы типов
-cargo run --example visualize_parser_v3
+# Запуск web сервера
+cargo run --bin bsl-web-server --port 8080
 
-# Tree-sitter парсер демо
-cargo run --example demo_tree_sitter
+# Поиск типов
+curl "http://localhost:8080/api/types?search=Массив"
 
-# Демонстрация flow-sensitive анализа
-cargo run --example test_tree_sitter_real
+# Анализ кода
+curl -X POST "http://localhost:8080/api/analyze" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "Функция Тест() Возврат 42; КонецФункции"}'
 
-# Парсер запросов 1С
-cargo run --example query_demo
+# Статистика системы
+curl "http://localhost:8080/api/stats"
 ```
 
-## 🏗️ Архитектура v1.0.0
+## 🏗️ Архитектура
 
-Современная модульная архитектура с 6 завершенными фазами разработки:
-
-### 🧩 Ключевые концепции
-
-1. **TypeResolution** - Градуальное разрешение типов с уровнями уверенности (Known/Inferred/Unknown)
-2. **Flow-Sensitive States** - Отслеживание изменений типов по мере выполнения программы
-3. **Union Types** - Weighted union типы с автоматической нормализацией и упрощением
-4. **Фасетная система** - Multiple представления типов (Manager, Object, Reference, Metadata)
-5. **Межпроцедурный граф** - Анализ типов через границы функций с топологической сортировкой
-
-### 📐 Слоистая архитектура
-
+### Слоистая архитектура
 ```
-┌────────────────────────────────────────────────────────┐
-│                IDE Integration Layer                    │
-│   (VSCode Extension, Web Browser, IntelliJ Plugin)     │
-├────────────────────────────────────────────────────────┤
-│              Application Layer                         │
-│  (Enhanced LSP, CLI Tools, Web Server, Profiler)      │
-├────────────────────────────────────────────────────────┤
-│              Advanced Analysis Layer                   │
-│  (Flow-Sensitive, Union Types, Interprocedural)       │
-├────────────────────────────────────────────────────────┤
-│               Analysis Layer                           │
-│    (Tree-sitter Parser, Type Checker, Query Parser)   │
-├────────────────────────────────────────────────────────┤
-│               Resolution Layer                         │
-│     (Type Resolver, Context Resolver, Cache)          │
-├────────────────────────────────────────────────────────┤
-│                Core Layer                              │
-│    (Types, Facets, Contracts, Performance)            │
-├────────────────────────────────────────────────────────┤
-│               Adapter Layer                            │
-│     (Platform Docs, Config Parser, Syntax Helper)     │
-└────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│    IDE Integration (VSCode, Web)        │
+├─────────────────────────────────────────┤
+│    Application (LSP, CLI, Web Server)   │
+├─────────────────────────────────────────┤
+│    Advanced Analysis (Flow, Union, IP)  │
+├─────────────────────────────────────────┤
+│    Analysis (Parser, TypeChecker)       │
+├─────────────────────────────────────────┤
+│    Core (Types, Facets, Contracts)      │
+└─────────────────────────────────────────┘
 ```
 
-### 🔄 Фазы разработки (все завершены)
-
-- ✅ **Phase 1**: MVP - Базовая система типов
-- ✅ **Phase 2**: Анализ кода и AST
-- ✅ **Phase 3**: Поддержка языка запросов  
-- ✅ **Phase 4**: Расширенный анализ (Type narrowing, глобальные функции)
-- ✅ **Phase 5**: Production Readiness (LSP Enhancement, Performance)
-- ✅ **Phase 6**: IDE Integration & Ecosystem
-
-## 🔄 Дорожная карта разработки
-
-### ✅ Phase 1: MVP (Завершена)
-- [x] Базовое разрешение типов с уровнями уверенности
-- [x] Полная фасетная система (Manager, Object, Reference, Constructor)
-- [x] Основные структуры данных и абстракции
-- [x] Загрузка платформенных типов (хардкод с TODO)
-- [x] Парсинг Configuration.xml с табличными частями
-- [x] LSP сервер с hover и completion
-- [x] Генерация runtime контрактов
-
-### ✅ Phase 2: Анализ кода (Завершена)
-- [x] BSL парсер на основе nom combinators
-- [x] Генерация AST (Abstract Syntax Tree)
-- [x] Visitor pattern для обхода AST
-- [x] Граф зависимостей типов с обнаружением циклов
-- [x] Type checker с выводом типов
-- [x] Проверка совместимости типов
-- [x] Диагностики в LSP (ошибки, предупреждения)
-- [x] Контекстно-зависимое разрешение типов
-
-### ✅ Phase 3: Поддержка запросов (Завершена)
-- [x] Парсер языка запросов 1С
-- [x] Поддержка составных имён таблиц (Документ.ПоступлениеТоваровУслуг)
-- [x] Временные таблицы (ПОМЕСТИТЬ/ИЗ ВТ_)
-- [x] Пакетные запросы с анализом зависимостей
-- [x] JOIN операции (ЛЕВОЕ/ПРАВОЕ/ПОЛНОЕ/ВНУТРЕННЕЕ СОЕДИНЕНИЕ)
-- [x] Агрегатные функции и GROUP BY
-- [x] Подзапросы и UNION
-- [x] Интеграция с системой типов
-
-### ✅ Phase 3.5: Парсер синтакс-помощника (Завершена)
-- [x] Парсер ZIP архивов синтакс-помощника
-- [x] Извлечение глобальных функций и их сигнатур (476 функций)
-- [x] Извлечение глобальных объектов (60 объектов: Array, String, Map и др.)
-- [x] Парсинг системных перечислений (712 перечислений с значениями)
-- [x] Извлечение методов объектов (5617 методов)
-- [x] Извлечение свойств объектов (12044 свойства)
-- [x] Парсинг ключевых слов с правильной категоризацией (22 слова)
-- [x] Система TypeRef для нормализации типов
-- [x] Интеграция с FacetRegistry и PlatformTypeResolver
-- [x] Кеширование фасетов (FacetCache)
-- [x] Визуализация с правильной иерархией языка
-- [x] Интеграция новых типов в LSP для автодополнения
-
-### ✅ Phase 3.6: Оптимизация и визуализация (Завершена)
-- [x] Многопоточный парсинг с rayon (ускорение в 4-8 раз)
-- [x] Единая унифицированная версия парсера
-- [x] Извлечение человекочитаемых категорий (276 категорий)
-- [x] Интерактивная HTML визуализация с вкладками
-- [x] Поиск и фильтрация по категориям
-- [x] Система фасетов в визуализации
-- [x] Двуязычные индексы (русский/английский)
-
-### 📋 Phase 4: Расширенный анализ (Запланировано)
-- [ ] Flow-sensitive анализ типов
-- [ ] Межпроцедурный анализ
-- [ ] Type narrowing в условиях
-- [ ] Обнаружение мёртвого кода
-- [ ] Оптимизация запросов
-
-### Phase 5: Интеграция с платформой
-- [ ] Парсер документации платформы
-- [ ] Реальные типы платформы из ITS/HTML документации
-- [ ] Индексация метаданных конфигурации
-- [ ] Межмодульное отслеживание типов
-
-### Phase 6: Оптимизация и ML
-- [ ] Инкрементальный анализ
-- [ ] Параллельная проверка типов
-- [ ] ML-based предсказания типов
-- [ ] Инструменты профилирования
-
-## 🏗️ Структура проекта
-
-```
-bsl-gradual-types/
-├── src/
-│   ├── core/                    # Ядро системы типов
-│   │   ├── types.rs            # Определения типов и разрешение
-│   │   ├── resolution.rs       # Pipeline разрешения типов
-│   │   ├── contracts.rs        # Генерация runtime контрактов
-│   │   ├── facets.rs           # Фасетная система
-│   │   ├── context.rs          # Контекстно-зависимое разрешение
-│   │   ├── dependency_graph.rs # Граф зависимостей типов
-│   │   ├── type_checker.rs     # Проверка и вывод типов
-│   │   └── standard_types.rs   # Стандартные типы BSL
-│   ├── parser/                  # BSL парсер
-│   │   ├── lexer.rs            # Токенизация
-│   │   ├── parser.rs           # Синтаксический анализ (nom)
-│   │   ├── ast.rs              # Abstract Syntax Tree
-│   │   ├── visitor.rs          # Visitor pattern для AST
-│   │   └── graph_builder.rs    # Построение графа зависимостей
-│   ├── query/                   # Парсер запросов 1С
-│   │   ├── parser.rs           # Парсер языка запросов
-│   │   ├── ast.rs              # AST для запросов
-│   │   ├── batch.rs            # Пакетные запросы
-│   │   └── type_checker.rs     # Проверка типов в запросах
-│   ├── adapters/                # Адаптеры внешних данных
-│   │   ├── config_parser_xml.rs # Парсер Configuration.xml
-│   │   └── syntax_helper_parser.rs # Парсер синтакс-помощника
-│   └── bin/                     # Исполняемые файлы
-│       ├── analyzer.rs          # CLI анализатор
-│       ├── lsp_server.rs        # Language Server Protocol
-│       ├── build_index.rs       # Построитель индекса типов
-│       └── type_check.rs        # CLI проверка типов
-├── tests/                       # Тесты
-│   ├── integration/            # Интеграционные тесты
-│   └── fixtures/               # Тестовые данные
-│       ├── bsl/               # BSL файлы
-│       ├── xml/               # XML конфигурации
-│       └── queries/           # Примеры запросов
-├── examples/                    # Примеры использования
-│   ├── query_demo.rs           # Демо парсера запросов
-│   └── queries/                # Примеры запросов 1С
-├── docs/                        # Документация
-│   ├── ARCHITECTURE.md         # Архитектура системы
-│   ├── MIGRATION_PLAN.md       # План миграции
-│   └── TEST_STRUCTURE.md       # Структура тестов
-└── CLAUDE.md                    # Контекст для Claude AI
-
-```
-
-## 📚 Документация
-
-### 🚀 Быстрый старт
-- **[📖 Documentation Index](docs/INDEX.md)** - Полный индекс документации
-- **[⚡ Quick Start](docs/getting-started/QUICKSTART.md)** - 5-минутный старт
-- **[📦 Installation Guide](docs/getting-started/INSTALLATION.md)** - Детальная установка
-- **[🔧 Building Guide](docs/development/BUILDING.md)** - Сборка из исходников
-
-### 🛠️ Development & Deployment
-- **[👨‍💻 Development Setup](docs/development/SETUP.md)** - Настройка окружения разработки
-- **[📱 VSCode Extension](docs/development/VSCODE_EXTENSION.md)** - Сборка и публикация расширения
-- **[🚀 Production Deployment](docs/deployment/PRODUCTION.md)** - Enterprise deployment
-- **[🐳 Docker Setup](docs/deployment/DOCKER.md)** - Контейнеризация
-
-### 📋 Reference & Examples
-- **[🔧 API Reference](docs/API.md)** - Полная справка API
-- **[🎯 Examples](docs/EXAMPLES.md)** - Практические примеры
-- **[🏗️ Architecture](docs/architecture/overview.md)** - Архитектура системы
-- **[📈 Changelog](CHANGELOG.md)** - История изменений
-- **[🤝 Contributing](CONTRIBUTING.md)** - Руководство для участников
+### Ключевые модули
+- **Core**: `types.rs`, `flow_sensitive.rs`, `union_types.rs`, `interprocedural.rs`
+- **Parser**: `tree_sitter_adapter.rs` (на основе tree-sitter-bsl)
+- **LSP**: `lsp_enhanced.rs` с инкрементальным парсингом
+- **Tools**: `profiler.rs`, `web_server.rs`
 
 ## 🧪 Тестирование
 
@@ -301,87 +153,78 @@ bsl-gradual-types/
 # Все тесты
 cargo test
 
-# Только интеграционные тесты
-cargo test --test "*"
+# Performance тесты
+cargo run --bin bsl-profiler benchmark --iterations 10
 
-# Конкретный тест
-cargo test --test query_parser_test
-
-# С выводом отладочной информации
-cargo test -- --nocapture
+# Проверка extension
+cd vscode-extension && npm test
 ```
 
-## 🤝 Участие в разработке
+## 🚀 Production Deployment
 
-Проект находится в активной разработке. Приветствуются контрибуции!
-
-### Принципы разработки
-
-1. **Честная неопределённость** - TypeResolution::Unknown лучше неправильного Inferred
-2. **Эволюционность** - Каждая фаза даёт работающий функционал
-3. **Модульность** - Новые анализаторы добавляются через traits
-4. **Градуальность** - Начинаем со статики, добавляем динамику где нужно
-
-## 📚 Документация
-
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Архитектура системы
-- [VISUALIZATION.md](docs/VISUALIZATION.md) - Визуализация и отчёты
-- [MIGRATION_PLAN.md](docs/MIGRATION_PLAN.md) - План миграции
-- [parser_recommendations.md](docs/parser_recommendations.md) - Рекомендации по парсеру
-- [CLAUDE.md](CLAUDE.md) - Контекст для AI-ассистента
-
-### Визуализация системы типов
-
-Проект предоставляет интерактивные HTML визуализации:
-
+### Docker
 ```bash
-# Генерация визуализаций
-cargo run --example generate_proper_hierarchy    # Правильная иерархия языка
-cargo run --example generate_tree_hierarchy      # Древовидная структура
-cargo run --example generate_enhanced_report     # Расширенный отчёт с TypeRef
+# Build image
+docker build -t bsl-gradual-types .
+
+# Run web server
+docker run -p 8080:8080 bsl-gradual-types
+
+# With project analysis
+docker run -p 8080:8080 -v /path/to/1c:/app/project:ro bsl-gradual-types \
+  ./bsl-web-server --project /app/project --port 8080
 ```
 
-Подробнее см. [VISUALIZATION.md](docs/VISUALIZATION.md)
+### Systemd Service
+```ini
+# /etc/systemd/system/bsl-web.service
+[Unit]
+Description=BSL Type Browser
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/bsl-web-server --port 8080
+Restart=always
+User=bsl-analyzer
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## 📊 Performance Benchmarks
+
+| Component | Time | Status |
+|-----------|------|--------|
+| Parsing | ~189μs | ✅ Excellent |
+| Type Checking | ~125μs | ✅ Production Ready |
+| Flow Analysis | ~175ns | ✅ Blazing Fast |
+| LSP Response | <100ms | ✅ Responsive |
+
+## 🤝 Contributing
+
+1. Fork репозитория
+2. Создайте feature branch: `git checkout -b feature/name`
+3. Внесите изменения и добавьте тесты
+4. Убедитесь что `cargo test` и `cargo clippy` проходят
+5. Создайте Pull Request
+
+### Стандарты кода
+```bash
+cargo fmt      # Форматирование
+cargo clippy   # Линтинг
+cargo test     # Тесты
+```
 
 ## 📄 Лицензия
 
-MIT License - см. файл [LICENSE](LICENSE)
+MIT License - см. [LICENSE](LICENSE)
 
-## 🔗 Связанные проекты
+## 📞 Поддержка
 
-- [bsl_type_safety_analyzer](https://github.com/yourusername/bsl_type_safety_analyzer) - Предыдущая итерация
-- [1c-syntax](https://github.com/1c-syntax) - Инструменты для BSL
+- 🐛 [Issues](https://github.com/yourusername/bsl-gradual-types/issues) - Баги и вопросы
+- 💬 [Discussions](https://github.com/yourusername/bsl-gradual-types/discussions) - Обсуждения
+- 📖 [Детальная документация](docs/architecture/overview.md) - Архитектура системы
 
-## 📊 Статус
+---
 
-**Текущая версия**: 1.0.0  
-**Текущая фаза**: Phase 6.0 ✅ ЗАВЕРШЕНА  
-**Статус**: Enterprise Ready 🏆  
-**Поддержка платформы**: 1С:Предприятие 8.3.20+
-
-### 🏆 Последние достижения Phase 6.0 - IDE Integration & Ecosystem
-- ✅ **VSCode Extension** - полная адаптация из bsl_type_safety_analyzer (209 файлов)
-  - Enhanced LSP integration с кастомными request types
-  - TypeHintsProvider для inline type information
-  - CodeActionsProvider с автоматическими исправлениями
-  - PerformanceMonitor для real-time статистики
-- ✅ **Web-based Type Browser** - браузерный интерфейс для просмотра типов
-  - HTTP REST API для поиска и анализа типов
-  - Live code analysis в браузере
-  - Responsive UI с VSCode-style dark theme
-  - Performance metrics и system statistics
-
-### 📈 Полная статистика проекта (Phases 1-6)
-- **Enhanced LSP Server** с инкрементальным парсингом и real-time диагностикой
-- **Flow-Sensitive Analysis** с отслеживанием изменений типов
-- **Full Union Types** с нормализацией и weighted probabilities
-- **Interprocedural Analysis** через границы функций с кешированием
-- **Performance**: ~189μs парсинг, ~125μs type checking, ~175ns flow analysis
-- **Parallel Analysis** для больших проектов с rayon integration
-- **Comprehensive Tooling** - 7 CLI инструментов, VSCode extension, web browser
-
-### Метрики производительности
-- Загрузка конфигурации с 1000+ объектами: < 1 сек
-- Ответ LSP на автодополнение: < 100ms
-- Парсинг BSL файла 10000 строк: < 500ms
-- Анализ пакета из 10 запросов: < 50ms
+**🚀 Готов к использованию в 1С проектах! Enterprise-grade система типов с modern tooling.**

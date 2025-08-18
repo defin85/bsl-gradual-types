@@ -3,9 +3,6 @@
     <Catalog>
         <Properties>
             <Name>Контрагенты</Name>
-            <Synonym>
-                <v8:item><v8:content>Контрагенты</v8:content></v8:item>
-            </Synonym>
         </Properties>
         <ChildObjects>
             <Attribute>

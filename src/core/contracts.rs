@@ -126,6 +126,12 @@ impl ContractGenerator {
                 let type_check = format!("Тип(\"{}\")", type_name);
                 self.format_check(&type_check, &type_name)
             }
+            ConcreteType::GlobalFunction(func) => {
+                // Глобальные функции не могут быть значениями переменных в BSL
+                // Это ошибка типов, но генерируем проверку для полноты
+                let error_msg = format!("Глобальная функция '{}' не может быть значением", func.name);
+                format!("ВызватьИсключение(\"{}\")", error_msg)
+            }
         }
     }
     
@@ -136,6 +142,7 @@ impl ContractGenerator {
                 ConcreteType::Configuration(c) => format!("{:?}.{}", c.kind, c.name),
                 ConcreteType::Primitive(p) => format!("{:?}", p),
                 ConcreteType::Special(s) => format!("{:?}", s),
+                ConcreteType::GlobalFunction(f) => format!("GlobalFunction.{}", f.name),
             }
         }).collect();
         

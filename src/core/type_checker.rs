@@ -13,6 +13,7 @@ use crate::core::standard_types::{
     is_number, is_string, is_boolean
 };
 use crate::parser::graph_builder::DependencyGraphBuilder;
+use crate::core::type_narrowing::TypeNarrower;
 
 /// Диагностическое сообщение о проблеме с типами
 #[derive(Debug, Clone)]
@@ -489,10 +490,26 @@ impl AstVisitor for TypeChecker {
             );
         }
         
-        // Анализируем ветки
+        // Анализируем условие для type narrowing
+        let mut narrower = TypeNarrower::new(self.context.clone());
+        let refinements = narrower.analyze_condition(condition);
+        
+        // Сохраняем текущий контекст
+        let original_context = self.context.clone();
+        
+        // Применяем уточнения для then-ветки
+        if !refinements.is_empty() {
+            let refined_context = narrower.apply_refinements_to_context(&refinements);
+            self.context = refined_context;
+        }
+        
+        // Анализируем then-ветку с уточнёнными типами
         for stmt in then_branch {
             self.visit_statement(stmt);
         }
+        
+        // Восстанавливаем контекст для else_if веток
+        self.context = original_context.clone();
         
         for (cond, branch) in else_if_branches {
             let cond_type = self.infer_expression_type(cond);
@@ -503,16 +520,39 @@ impl AstVisitor for TypeChecker {
                 );
             }
             
+            // Type narrowing для else_if условий
+            let mut narrower = TypeNarrower::new(self.context.clone());
+            let refinements = narrower.analyze_condition(cond);
+            
+            if !refinements.is_empty() {
+                let refined_context = narrower.apply_refinements_to_context(&refinements);
+                self.context = refined_context;
+            }
+            
+            for stmt in branch {
+                self.visit_statement(stmt);
+            }
+            
+            // Восстанавливаем контекст
+            self.context = original_context.clone();
+        }
+        
+        // Для else-ветки применяем инвертированные уточнения
+        if let Some(branch) = else_branch {
+            if !refinements.is_empty() {
+                let mut narrower = TypeNarrower::new(self.context.clone());
+                let inverted = narrower.invert_refinements(&refinements);
+                let refined_context = narrower.apply_refinements_to_context(&inverted);
+                self.context = refined_context;
+            }
+            
             for stmt in branch {
                 self.visit_statement(stmt);
             }
         }
         
-        if let Some(branch) = else_branch {
-            for stmt in branch {
-                self.visit_statement(stmt);
-            }
-        }
+        // Восстанавливаем исходный контекст после всего if-statement
+        self.context = original_context;
         
         self.current_line += 1;
     }

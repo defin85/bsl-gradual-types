@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Central abstraction - not a type, but a "type resolution" with confidence level
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TypeResolution {
     /// Level of confidence in the resolution
     pub certainty: Certainty,
@@ -39,7 +39,7 @@ pub enum Certainty {
 }
 
 /// Result of type resolution
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ResolutionResult {
     /// Concrete type is known
     Concrete(ConcreteType),
@@ -58,7 +58,7 @@ pub enum ResolutionResult {
 }
 
 /// A type with probability weight
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WeightedType {
     pub type_: ConcreteType,
     pub weight: f32,
@@ -78,6 +78,9 @@ pub enum ConcreteType {
     
     /// Special types (Undefined, Null)
     Special(SpecialType),
+    
+    /// Global function (Min, Max, String, etc.)
+    GlobalFunction(GlobalFunction),
 }
 
 /// Platform-provided types
@@ -127,6 +130,29 @@ pub enum SpecialType {
     Type,
 }
 
+/// Global function definition
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GlobalFunction {
+    pub name: String,
+    pub english_name: String,
+    pub parameters: Vec<GlobalFunctionParameter>,
+    pub return_type: Option<Box<TypeResolution>>,
+    pub pure: bool,              // Pure function without side effects
+    pub polymorphic: bool,        // Polymorphic function (type depends on args)
+    pub context_required: Vec<ExecutionContext>, // Where available
+}
+
+/// Global function parameter
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GlobalFunctionParameter {
+    pub name: String,
+    pub type_: Option<Box<TypeResolution>>,
+    pub is_optional: bool,
+    pub default_value: Option<String>,
+    pub description: Option<String>,
+}
+
+
 /// Method definition
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Method {
@@ -169,7 +195,7 @@ pub struct TabularSection {
 }
 
 /// Conditional type that depends on runtime conditions
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConditionalType {
     pub condition: String,
     pub then_type: ResolutionResult,
@@ -177,7 +203,7 @@ pub struct ConditionalType {
 }
 
 /// Type with context and effects
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContextualType {
     pub base_type: ResolutionResult,
     pub effects: Vec<TypeEffect>,
@@ -185,7 +211,7 @@ pub struct ContextualType {
 }
 
 /// Type effects that modify behavior
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeEffect {
     MayBeNull,
     RequiresTransaction,
@@ -216,7 +242,7 @@ pub enum ResolutionSource {
 }
 
 /// Metadata for type resolution
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ResolutionMetadata {
     pub file: Option<String>,
     pub line: Option<u32>,
@@ -321,8 +347,66 @@ impl TypeResolution {
         }
     }
     
+    /// Create an inferred type resolution
+    pub fn inferred(confidence: f32, result: ResolutionResult) -> Self {
+        Self {
+            certainty: Certainty::Inferred(confidence),
+            result,
+            source: ResolutionSource::Inferred,
+            metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
+        }
+    }
+    
     /// Check if the type is fully resolved
     pub fn is_resolved(&self) -> bool {
         matches!(self.certainty, Certainty::Known)
+    }
+}
+
+impl GlobalFunction {
+    /// Resolve return type for polymorphic functions based on arguments
+    pub fn resolve_return_type(&self, args: &[TypeResolution]) -> TypeResolution {
+        if !self.polymorphic {
+            // For non-polymorphic functions, return the static return type
+            return self.return_type
+                .as_ref()
+                .map(|t| (**t).clone())
+                .unwrap_or_else(TypeResolution::unknown);
+        }
+        
+        // Handle polymorphic functions
+        match self.name.as_str() {
+            "Мин" | "Min" | "Макс" | "Max" => {
+                if args.is_empty() {
+                    return TypeResolution::unknown();
+                }
+                
+                // Return type is determined by the first argument
+                match &args[0].result {
+                    ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Number)) => {
+                        TypeResolution::known(ConcreteType::Primitive(PrimitiveType::Number))
+                    }
+                    ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::String)) => {
+                        TypeResolution::known(ConcreteType::Primitive(PrimitiveType::String))
+                    }
+                    ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Date)) => {
+                        TypeResolution::known(ConcreteType::Primitive(PrimitiveType::Date))
+                    }
+                    ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Boolean)) => {
+                        TypeResolution::known(ConcreteType::Primitive(PrimitiveType::Boolean))
+                    }
+                    _ => TypeResolution::inferred(0.5, args[0].result.clone())
+                }
+            }
+            _ => {
+                // For other polymorphic functions, use default behavior
+                self.return_type
+                    .as_ref()
+                    .map(|t| (**t).clone())
+                    .unwrap_or_else(TypeResolution::unknown)
+            }
+        }
     }
 }

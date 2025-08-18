@@ -11,3 +11,4 @@ pub mod platform_resolver;
 pub mod dependency_graph;
 pub mod type_checker;
 pub mod standard_types;
+pub mod type_narrowing;

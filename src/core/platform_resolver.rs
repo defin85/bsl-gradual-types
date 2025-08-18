@@ -22,6 +22,7 @@ pub enum CompletionKind {
     Enum,
     Method,
     Property,
+    GlobalFunction,
 }
 
 /// Resolver that knows about platform types and configuration
@@ -49,7 +50,12 @@ impl PlatformTypeResolver {
             let _ = platform_resolver.load_from_file(json_path);
         }
         
-        let platform_globals = platform_resolver.get_platform_globals();
+        let mut platform_globals = platform_resolver.get_platform_globals();
+        
+        // Add hardcoded platform managers if not loaded from file
+        if !platform_globals.contains_key("Справочники") {
+            Self::add_platform_managers(&mut platform_globals);
+        }
         
         Self {
             platform_resolver,
@@ -79,6 +85,60 @@ impl PlatformTypeResolver {
         }
         
         Ok(resolver)
+    }
+    
+    /// Add hardcoded platform managers
+    fn add_platform_managers(globals: &mut HashMap<String, TypeResolution>) {
+        // Russian names
+        globals.insert("Справочники".to_string(), Self::create_manager_type("Справочники"));
+        globals.insert("Документы".to_string(), Self::create_manager_type("Документы"));
+        globals.insert("Перечисления".to_string(), Self::create_manager_type("Перечисления"));
+        globals.insert("РегистрыСведений".to_string(), Self::create_manager_type("РегистрыСведений"));
+        globals.insert("РегистрыНакопления".to_string(), Self::create_manager_type("РегистрыНакопления"));
+        globals.insert("РегистрыБухгалтерии".to_string(), Self::create_manager_type("РегистрыБухгалтерии"));
+        globals.insert("РегистрыРасчета".to_string(), Self::create_manager_type("РегистрыРасчета"));
+        
+        // English names
+        globals.insert("Catalogs".to_string(), Self::create_manager_type("Catalogs"));
+        globals.insert("Documents".to_string(), Self::create_manager_type("Documents"));
+        globals.insert("Enums".to_string(), Self::create_manager_type("Enums"));
+        globals.insert("InformationRegisters".to_string(), Self::create_manager_type("InformationRegisters"));
+        globals.insert("AccumulationRegisters".to_string(), Self::create_manager_type("AccumulationRegisters"));
+        globals.insert("AccountingRegisters".to_string(), Self::create_manager_type("AccountingRegisters"));
+        globals.insert("CalculationRegisters".to_string(), Self::create_manager_type("CalculationRegisters"));
+    }
+    
+    /// Create a manager type resolution
+    fn create_manager_type(name: &str) -> TypeResolution {
+        TypeResolution {
+            certainty: Certainty::Known,
+            result: ResolutionResult::Concrete(ConcreteType::Platform(
+                crate::core::types::PlatformType {
+                    name: name.to_string(),
+                    methods: vec![],
+                    properties: vec![],
+                }
+            )),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata {
+                file: Some("platform:managers".to_string()),
+                line: None,
+                column: None,
+                notes: vec![format!("Platform manager type: {}", name)],
+            },
+            active_facet: None,
+            available_facets: vec![],
+        }
+    }
+    
+    /// Get count of loaded platform globals (for debugging)
+    pub fn get_platform_globals_count(&self) -> usize {
+        self.platform_globals.len()
+    }
+    
+    /// Check if a specific global is loaded (for debugging)
+    pub fn has_platform_global(&self, key: &str) -> bool {
+        self.platform_globals.contains_key(key)
     }
     
     /// Resolve a dotted expression like "Справочники.Контрагенты"
@@ -321,7 +381,7 @@ impl PlatformTypeResolver {
                         (CompletionKind::Global, "Менеджер объектов конфигурации")
                     } else {
                         // Это глобальная функция из синтакс-помощника
-                        (CompletionKind::Method, "Глобальная функция")
+                        (CompletionKind::GlobalFunction, "Глобальная функция")
                     };
                     
                     completions.push(CompletionItem {

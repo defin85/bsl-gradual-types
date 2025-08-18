@@ -1,6 +1,6 @@
 [package]
 name = "bsl-gradual-types"
-version = "0.4.0"
+version = "0.4.2"
 edition = "2021"
 authors = ["BSL Type System Team"]
 description = "Gradual type system for 1C:Enterprise BSL with evolutionary architecture"
@@ -33,6 +33,11 @@ roxmltree = "0.19"
 encoding_rs = "0.8"
 encoding_rs_io = "0.1"
 nom = "7.1"
+
+# Tree-sitter support - используем последнюю доступную версию
+tree-sitter = "0.25"
+tree-sitter-loader = "0.25"
+cc = "1.0"
 
 # File system
 walkdir = "2.5"
@@ -72,6 +77,9 @@ pretty_assertions = "1.4"
 tempfile = "3.8"
 insta = "1.34"
 
+[build-dependencies]
+cc = "1.0"
+
 [[bin]]
 name = "bsl-analyzer"
 path = "src/bin/analyzer.rs"
@@ -101,17 +109,7 @@ path = "examples/syntax_helper_parser_demo.rs"
 name = "platform_types_v2_demo"
 path = "examples/platform_types_v2_demo.rs"
 
-[[example]]
-name = "type_hierarchy_visualizer"
-path = "examples/type_hierarchy_visualizer.rs"
 
-[[example]]
-name = "generate_html_report"
-path = "examples/generate_html_report.rs"
-
-[[example]]
-name = "generate_1c_style_tree"
-path = "examples/generate_1c_style_tree.rs"
 
 # Benchmarks
 [[bench]]

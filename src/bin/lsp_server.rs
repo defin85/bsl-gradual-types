@@ -51,6 +51,9 @@ impl BslLanguageServer {
                     bsl_gradual_types::core::platform_resolver::CompletionKind::Property => {
                         CompletionItemKind::PROPERTY
                     }
+                    bsl_gradual_types::core::platform_resolver::CompletionKind::GlobalFunction => {
+                        CompletionItemKind::FUNCTION
+                    }
                 }),
                 detail: item.detail,
                 documentation: item.documentation.map(|doc| {

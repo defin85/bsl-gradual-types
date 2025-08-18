@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.11">
+    <Document>
+        <Properties>
+            <Name>ЗаказНаряды</Name>
+        </Properties>
+        <ChildObjects>
+            <Attribute>
+                <Properties>
+                    <Name>Сторона</Name>
+                    <Type>
+                        <Type>xs:string</Type>
+                        <Type>cfg:CatalogRef.Контрагенты</Type>
+                        <Type>cfg:CatalogRef.Организации</Type>
+                    </Type>
+                </Properties>
+            </Attribute>
+            <Attribute>
+                <Properties>
+                    <Name>Номер</Name>
+                    <Type>
+                        <Type>xs:string</Type>
+                    </Type>
+                </Properties>
+            </Attribute>
+        </ChildObjects>
+    </Document>
+</MetaDataObject>

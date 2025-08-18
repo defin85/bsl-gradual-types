@@ -55,15 +55,6 @@ impl PlatformTypesResolverV2 {
         Ok(())
     }
     
-    /// Loads syntax helper data from archives (для совместимости)
-    pub fn load_from_archives<P1: AsRef<Path>, P2: AsRef<Path>>(
-        &mut self, 
-        _context_path: P1, 
-        _lang_path: P2
-    ) -> Result<()> {
-        // Для обратной совместимости - теперь нужно указывать директорию
-        anyhow::bail!("load_from_archives is deprecated. Use load_from_directory with extracted archives instead")
-    }
     
     /// Loads syntax helper data from saved JSON file
     pub fn load_from_file<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {

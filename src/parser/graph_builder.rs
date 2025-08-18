@@ -347,12 +347,15 @@ impl AstVisitor for DependencyGraphBuilder {
         self.current_line += 1;
     }
     
-    fn visit_for(&mut self, variable: &str, from: &Expression, to: &Expression, body: &[Statement]) {
+    fn visit_for(&mut self, variable: &str, from: &Expression, to: &Expression, step: &Option<Expression>, body: &[Statement]) {
         let var_node = self.make_variable_node(variable);
         self.graph.add_node(var_node.clone());
         
         self.process_expression_dependencies(from, Some(&var_node));
         self.process_expression_dependencies(to, None);
+        if let Some(s) = step {
+            self.process_expression_dependencies(s, None);
+        }
         
         for stmt in body {
             self.visit_statement(stmt);

@@ -60,6 +60,7 @@ pub enum Statement {
         variable: String,
         from: Expression,
         to: Expression,
+        step: Option<Expression>,
         body: Vec<Statement>,
     },
     

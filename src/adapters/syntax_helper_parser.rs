@@ -38,6 +38,8 @@ pub enum SyntaxNode {
     Property(PropertyInfo),
     /// Конструктор типа
     Constructor(ConstructorInfo),
+    /// Глобальная функция (например "Мин", "Макс")
+    GlobalFunction(GlobalFunctionInfo),
 }
 
 /// Информация о категории типов
@@ -145,6 +147,21 @@ pub struct ParameterInfo {
     pub is_optional: bool,
     pub default_value: Option<String>,
     pub description: Option<String>,
+}
+
+/// Информация о глобальной функции
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GlobalFunctionInfo {
+    pub name: String,
+    pub english_name: Option<String>,
+    pub description: Option<String>,
+    pub parameters: Vec<ParameterInfo>,
+    pub return_type: Option<String>,
+    pub return_description: Option<String>,
+    pub polymorphic: bool,
+    pub pure: bool,
+    pub contexts: Vec<String>, // Where available (Server, Client, etc.)
+    pub category: Option<String>, // Category name like "Прочие процедуры и функции"
 }
 
 /// База данных синтакс-помощника
@@ -429,20 +446,61 @@ impl SyntaxHelperParser {
                 let constructor_info = self.parse_constructor_from_document(&document)?;
                 Ok(SyntaxNode::Constructor(constructor_info))
             }
+            FileType::GlobalFunction => {
+                let global_func_info = self.parse_global_function_from_document(path, &document)?;
+                Ok(SyntaxNode::GlobalFunction(global_func_info))
+            }
         }
     }
     
     /// Определяет тип файла
     fn detect_file_type(&self, path: &Path, document: &Html) -> FileType {
-        // Проверяем, является ли это файлом категории catalog*.html
+        // Проверяем, является ли это файлом категории в корне objects
         if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-            if file_name.starts_with("catalog") && file_name.ends_with(".html") {
-                // Проверяем, есть ли одноименная директория
-                if let Some(parent) = path.parent() {
+            if let Some(parent) = path.parent() {
+                // Проверяем, что файл находится в корне objects
+                if parent.file_name().and_then(|n| n.to_str()) == Some("objects") {
+                    // Для файлов в корне objects проверяем наличие одноименной директории
+                    if file_name.ends_with(".html") {
+                        let dir_name = file_name.trim_end_matches(".html");
+                        let potential_dir = parent.join(dir_name);
+                        
+                        // Если есть одноименная директория или это Global context - это категория
+                        if potential_dir.exists() && potential_dir.is_dir() {
+                            return FileType::Category;
+                        }
+                        // Специальная обработка для Global context.html
+                        if file_name == "Global context.html" {
+                            return FileType::Category;
+                        }
+                    }
+                }
+                
+                // Для вложенных catalog*.html тоже проверяем
+                if file_name.starts_with("catalog") && file_name.ends_with(".html") {
                     let catalog_name = file_name.trim_end_matches(".html");
                     let catalog_dir = parent.join(catalog_name);
                     if catalog_dir.exists() && catalog_dir.is_dir() {
                         return FileType::Category;
+                    }
+                }
+            }
+        }
+        
+        // Специальная проверка для глобальных функций в Global context
+        if let Some(path_str) = path.to_str() {
+            if path_str.contains("Global context") && path_str.contains("methods") {
+                // Проверяем заголовок документа
+                let title_selector = Selector::parse("h1.V8SH_pagetitle").unwrap_or_else(|_| {
+                    Selector::parse("h1").unwrap()
+                });
+                
+                if let Some(title_elem) = document.select(&title_selector).next() {
+                    let title = title_elem.text().collect::<String>();
+                    // Если заголовок начинается с "Глобальный контекст." или "Global context."
+                    // это глобальная функция
+                    if title.starts_with("Глобальный контекст.") || title.starts_with("Global context.") {
+                        return FileType::GlobalFunction;
                     }
                 }
             }
@@ -490,20 +548,51 @@ impl SyntaxHelperParser {
             .map(|entry| (entry.key().clone(), entry.value().clone()))
             .collect();
         
-        for (catalog_id, category) in categories_snapshot {
+        // Сначала обрабатываем категории верхнего уровня
+        for (catalog_id, category) in &categories_snapshot {
             debug!("Обработка категории {}: {}", catalog_id, category.name);
             
-            // Обновляем типы, которые находятся в директории этой категории
-            let pattern = format!("/{}/", catalog_id);
+            // Паттерн для категорий верхнего уровня (например, objects/catalog234/)
+            let top_level_pattern = format!("/objects/{}/", catalog_id);
             
-            // Находим все типы в этой категории
+            // Находим все типы непосредственно в этой категории
             for mut entry in self.nodes.iter_mut() {
                 let path = entry.key();
-                if path.contains(&pattern) {
-                    if let SyntaxNode::Type(ref mut type_info) = entry.value_mut() {
-                        type_info.identity.category_path = category.name.clone();
-                        debug!("  Связал тип {} с категорией {}", 
-                            type_info.identity.russian_name, category.name);
+                
+                // Проверяем, находится ли тип непосредственно в каталоге категории
+                // но не в подкаталогах вида catalogXXX
+                if path.contains(&top_level_pattern) {
+                    // Проверяем, что это не вложенная категория
+                    let after_pattern = &path[path.find(&top_level_pattern).unwrap() + top_level_pattern.len()..];
+                    
+                    // Если после паттерна нет другого catalog*, значит это тип в основной категории
+                    if !after_pattern.starts_with("catalog") {
+                        if let SyntaxNode::Type(ref mut type_info) = entry.value_mut() {
+                            type_info.identity.category_path = category.name.clone();
+                            debug!("  Связал тип {} с категорией {}", 
+                                type_info.identity.russian_name, category.name);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Затем обрабатываем подкатегории (catalogXXX внутри catalogYYY)
+        for mut entry in self.nodes.iter_mut() {
+            let path = entry.key().clone();  // Клонируем ключ чтобы избежать проблем с заимствованием
+            if let SyntaxNode::Type(ref mut type_info) = entry.value_mut() {
+                // Если категория еще не установлена
+                if type_info.identity.category_path.is_empty() {
+                    // Ищем родительскую категорию для вложенных типов
+                    for (catalog_id, category) in &categories_snapshot {
+                        let pattern = format!("/{}/", catalog_id);
+                        if path.contains(&pattern) {
+                            // Для вложенных категорий используем основную категорию
+                            type_info.identity.category_path = category.name.clone();
+                            debug!("  Связал вложенный тип {} с категорией {}", 
+                                type_info.identity.russian_name, category.name);
+                            break;
+                        }
                     }
                 }
             }
@@ -567,6 +656,174 @@ impl SyntaxHelperParser {
         })
     }
     
+    /// Парсит глобальную функцию из документа
+    fn parse_global_function_from_document(&self, path: &Path, document: &Html) -> Result<GlobalFunctionInfo> {
+        // Извлекаем категорию из пути
+        // Путь вида: .../Global context/methods/catalog1762/Min962.html
+        // Нужно найти catalog ID и загрузить название категории
+        let category = self.extract_function_category(path);
+        // Извлекаем заголовок, например "Глобальный контекст.Мин (Global context.Min)"
+        let title = self.extract_title(document);
+        
+        // Извлекаем имя функции из заголовка
+        let (russian_name, english_name) = if title.contains('.') {
+            // Убираем "Глобальный контекст." или "Global context."
+            let parts: Vec<&str> = title.split('.').collect();
+            if parts.len() >= 2 {
+                // Берём всё после первой точки
+                let func_part = parts[1..].join(".");
+                // Извлекаем русское и английское названия
+                if func_part.contains(" (") {
+                    // Разделяем по " (" чтобы получить русское имя и английскую часть
+                    let russian = func_part.split(" (").next().unwrap_or(&func_part).trim();
+                    let english = func_part
+                        .split(" (").nth(1)
+                        .and_then(|s| {
+                            // Убираем "Global context." из английской части
+                            if s.contains('.') {
+                                s.split('.').nth(1).and_then(|name| {
+                                    // Убираем закрывающую скобку
+                                    name.split(')').next().map(|n| n.trim().to_string())
+                                })
+                            } else {
+                                s.split(')').next().map(|n| n.trim().to_string())
+                            }
+                        });
+                    (russian.to_string(), english)
+                } else {
+                    (func_part.trim().to_string(), None)
+                }
+            } else {
+                // Если нет точки, пробуем извлечь из скобок
+                if title.contains(" (") {
+                    let russian = title.split(" (").next().unwrap_or(&title).trim();
+                    (russian.to_string(), None)
+                } else {
+                    (title.clone(), None)
+                }
+            }
+        } else {
+            // Если нет точки, пробуем извлечь из скобок
+            if title.contains(" (") {
+                let russian = title.split(" (").next().unwrap_or(&title).trim();
+                (russian.to_string(), None)
+            } else {
+                (title.clone(), None)
+            }
+        };
+        
+        let description = self.extract_description(document);
+        let parameters = self.extract_parameters(document);
+        let (return_type, return_description) = self.extract_return_info(document);
+        
+        // Определяем, является ли функция полиморфной
+        let polymorphic = self.is_polymorphic_function(&russian_name, &english_name);
+        
+        // Определяем, является ли функция чистой (без побочных эффектов)
+        let pure = self.is_pure_function(&russian_name, &english_name);
+        
+        // Извлекаем контексты доступности
+        let contexts = self.extract_availability_contexts(document);
+        
+        Ok(GlobalFunctionInfo {
+            name: russian_name,
+            english_name,
+            description: Some(description),
+            parameters,
+            return_type,
+            return_description,
+            polymorphic,
+            pure,
+            contexts,
+            category,
+        })
+    }
+    
+    /// Определяет, является ли функция полиморфной
+    fn is_polymorphic_function(&self, russian_name: &str, english_name: &Option<String>) -> bool {
+        let polymorphic_functions = vec![
+            "Мин", "Min", "Макс", "Max", 
+            "Строка", "String", "Число", "Number",
+        ];
+        
+        polymorphic_functions.contains(&russian_name) || 
+            english_name.as_ref().map_or(false, |en| polymorphic_functions.contains(&en.as_str()))
+    }
+    
+    /// Определяет, является ли функция чистой
+    fn is_pure_function(&self, russian_name: &str, english_name: &Option<String>) -> bool {
+        let pure_functions = vec![
+            "Мин", "Min", "Макс", "Max",
+            "Строка", "String", "Число", "Number",
+            "Тип", "Type", "ТипЗнч", "TypeOf",
+            "СтрДлина", "StrLen", "Лев", "Left", "Прав", "Right",
+            "Окр", "Round", "Цел", "Int", "Лог", "Log",
+        ];
+        
+        pure_functions.contains(&russian_name) || 
+            english_name.as_ref().map_or(false, |en| pure_functions.contains(&en.as_str()))
+    }
+    
+    /// Извлекает категорию функции из пути
+    fn extract_function_category(&self, path: &Path) -> Option<String> {
+        // Путь вида: .../Global context/methods/catalog1762/Min962.html
+        // Извлекаем catalog ID (например, catalog1762)
+        let path_str = path.to_string_lossy();
+        
+        // Ищем паттерн "methods\catalogXXX\" или "methods/catalogXXX/" в зависимости от ОС
+        let pattern = if cfg!(windows) { r"methods\catalog" } else { "methods/catalog" };
+        let separator = if cfg!(windows) { '\\' } else { '/' };
+        
+        if let Some(start) = path_str.find(pattern) {
+            let skip_len = if cfg!(windows) { 8 } else { 8 }; // Skip "methods\" or "methods/"
+            let catalog_part = &path_str[start + skip_len..];
+            if let Some(end) = catalog_part.find(separator) {
+                let catalog_id = &catalog_part[..end];
+                
+                // Строим путь к файлу категории
+                let category_file = path.parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.join(format!("{}.html", catalog_id)));
+                
+                // Пытаемся прочитать название категории из файла
+                if let Some(category_path) = category_file {
+                    if category_path.exists() {
+                        if let Ok(content) = std::fs::read_to_string(&category_path) {
+                            // Извлекаем название из <h1 class="V8SH_pagetitle">
+                            if let Some(start) = content.find(r#"<h1 class="V8SH_pagetitle">"#) {
+                                let start_pos = start + r#"<h1 class="V8SH_pagetitle">"#.len();
+                                let title_part = &content[start_pos..];
+                                if let Some(end) = title_part.find("</h1>") {
+                                    return Some(title_part[..end].to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        None
+    }
+    
+    /// Извлекает контексты доступности функции
+    fn extract_availability_contexts(&self, document: &Html) -> Vec<String> {
+        let availability_selector = Selector::parse("p.V8SH_chapter + p").unwrap();
+        
+        for element in document.select(&availability_selector) {
+            let text = element.text().collect::<String>();
+            if text.contains("клиент") || text.contains("сервер") || text.contains("соединение") {
+                // Парсим список контекстов
+                return text.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+        }
+        
+        Vec::new()
+    }
+    
     /// Парсит свойство из документа
     fn parse_property_from_document(&self, document: &Html) -> Result<PropertyInfo> {
         let name = self.extract_title(document);
@@ -589,11 +846,37 @@ impl SyntaxHelperParser {
         let related_links = self.extract_links(document);
         let types = self.extract_type_list(document);
         
-        // Извлекаем catalog ID из имени файла
-        let catalog_id = path.file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_string();
+        // Строим catalog_path относительно objects
+        // Для корневых категорий: catalog234
+        // Для вложенных: catalog234/catalog236
+        let catalog_id = if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
+            // Проверяем путь относительно objects
+            let path_str = path.to_string_lossy();
+            if let Some(objects_pos) = path_str.rfind("objects") {
+                let after_objects = &path_str[objects_pos + 8..]; // 8 = len("objects/")
+                // Убираем расширение .html и слеши в начале
+                let clean_path = after_objects
+                    .trim_start_matches('/')
+                    .trim_start_matches('\\')
+                    .trim_end_matches(".html");
+                
+                // Если это файл в корне objects - возвращаем только имя
+                // Если вложенный - сохраняем структуру каталогов
+                if !clean_path.contains('/') && !clean_path.contains('\\') {
+                    file_stem.to_string()
+                } else {
+                    // Заменяем обратные слеши на прямые и берём путь до файла
+                    clean_path.replace('\\', "/")
+                        .rsplit_once('/')
+                        .map(|(dir, _)| format!("{}/{}", dir, file_stem))
+                        .unwrap_or_else(|| file_stem.to_string())
+                }
+            } else {
+                file_stem.to_string()
+            }
+        } else {
+            "unknown".to_string()
+        };
         
         Ok(CategoryInfo {
             name,
@@ -637,6 +920,11 @@ impl SyntaxHelperParser {
                 let key = format!("property_{}", prop.name);
                 self.properties.insert(key.clone(), prop.clone());
                 self.nodes.insert(key, SyntaxNode::Property(prop));
+            },
+            SyntaxNode::GlobalFunction(func) => {
+                let key = format!("global_function_{}", func.name);
+                // Добавим в nodes для общего доступа
+                self.nodes.insert(key, SyntaxNode::GlobalFunction(func));
             },
             SyntaxNode::Constructor(cons) => {
                 let key = format!("constructor_{}", self.nodes.len());
@@ -945,11 +1233,10 @@ impl SyntaxHelperParser {
         types
     }
     
-    fn extract_category_path(&self, path: &Path) -> String {
-        path.parent()
-            .and_then(|p| p.to_str())
-            .unwrap_or("")
-            .to_string()
+    fn extract_category_path(&self, _path: &Path) -> String {
+        // Пока возвращаем пустую строку, так как категории будут установлены
+        // позже в link_types_to_categories на основе каталогов категорий
+        String::new()
     }
     
     fn is_readonly(&self, document: &Html) -> bool {
@@ -1161,6 +1448,7 @@ enum FileType {
     Property,
     Category,
     Constructor,
+    GlobalFunction,
 }
 
 impl Default for SyntaxHelperParser {

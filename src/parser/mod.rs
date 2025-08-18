@@ -8,8 +8,11 @@ pub mod ast;
 pub mod parser;
 pub mod visitor;
 pub mod graph_builder;
+pub mod tree_sitter_adapter;
+pub mod common;
 
 pub use ast::{Program, Statement, Expression};
 pub use parser::BslParser;
 pub use visitor::AstVisitor;
 pub use graph_builder::DependencyGraphBuilder;
+pub use common::{Parser, ParserFactory};

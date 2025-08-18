@@ -5,8 +5,8 @@ mod tests {
     
     #[test]
     fn test_parse_composite_type_attribute() {
-        // Используем документ ЗаказНаряды с составным полем Сторона
-        let config_path = r"C:\1CProject\bsl_type_safety_analyzer\examples\ConfTest";
+        // Используем документ ЗаказНаряды с составным полем Сторона из реальной конфигурации
+        let config_path = "../conf/conf_test";
         
         let mut parser = ConfigParserXml::new(config_path);
         let resolutions = parser.parse_configuration().unwrap();
@@ -35,8 +35,17 @@ mod tests {
         if let ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) = &doc.result {
             println!("Документ: {}", cfg.name);
             
-            // Найдём атрибут Сторона
-            let attr = cfg.attributes.iter()
+            // Найдём табличную часть Стороны
+            let ts = cfg.tabular_sections.iter()
+                .find(|ts| ts.name == "Стороны");
+                
+            assert!(ts.is_some(), "Должна быть табличная часть Стороны");
+            
+            let ts = ts.unwrap();
+            println!("Табличная часть: {}", ts.name);
+            
+            // Найдём атрибут Сторона в табличной части
+            let attr = ts.attributes.iter()
                 .find(|a| a.name == "Сторона");
                 
             if let Some(attr) = attr {
@@ -53,18 +62,18 @@ mod tests {
                 assert!(attr.types.contains(&"СправочникСсылка.Организации".to_string()));
                 assert!(attr.types.contains(&"Строка".to_string()));
             } else {
-                println!("Доступные атрибуты:");
-                for a in &cfg.attributes {
+                println!("Доступные атрибуты в табличной части:");
+                for a in &ts.attributes {
                     println!("  - {}: {}", a.name, a.type_);
                 }
-                panic!("Не найден атрибут Сторона");
+                panic!("Не найден атрибут Сторона в табличной части");
             }
         }
     }
     
     #[test]
     fn test_simple_type_attribute() {
-        let config_path = r"C:\1CProject\bsl_type_safety_analyzer\examples\ConfTest";
+        let config_path = "../conf/conf_test";
         
         let mut parser = ConfigParserXml::new(config_path);
         let resolutions = parser.parse_configuration().unwrap();

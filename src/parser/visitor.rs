@@ -32,8 +32,8 @@ pub trait AstVisitor {
             Statement::If { condition, then_branch, else_if_branches, else_branch } => {
                 self.visit_if(condition, then_branch, else_if_branches, else_branch.as_ref());
             }
-            Statement::For { variable, from, to, body } => {
-                self.visit_for(variable, from, to, body);
+            Statement::For { variable, from, to, step, body } => {
+                self.visit_for(variable, from, to, step, body);
             }
             Statement::ForEach { variable, collection, body } => {
                 self.visit_for_each(variable, collection, body);
@@ -126,9 +126,12 @@ pub trait AstVisitor {
         }
     }
     
-    fn visit_for(&mut self, _variable: &str, from: &Expression, to: &Expression, body: &[Statement]) {
+    fn visit_for(&mut self, _variable: &str, from: &Expression, to: &Expression, step: &Option<Expression>, body: &[Statement]) {
         self.visit_expression(from);
         self.visit_expression(to);
+        if let Some(s) = step {
+            self.visit_expression(s);
+        }
         for stmt in body {
             self.visit_statement(stmt);
         }

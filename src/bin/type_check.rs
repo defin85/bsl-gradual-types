@@ -115,6 +115,12 @@ fn main() {
                     ConcreteType::Special(s) => {
                         println!("  Type: Special.{:?}", s);
                     }
+                    ConcreteType::GlobalFunction(f) => {
+                        println!("  Type: GlobalFunction.{}", f.name);
+                        if f.polymorphic {
+                            println!("  Polymorphic: true");
+                        }
+                    }
                 }
             }
             ResolutionResult::Union(types) => {
@@ -180,6 +186,7 @@ fn show_completions(resolver: &PlatformTypeResolver, prefix: &str) {
             CompletionKind::Enum => "📝 Enums",
             CompletionKind::Method => "🔧 Methods",
             CompletionKind::Property => "📌 Properties",
+            CompletionKind::GlobalFunction => "⚡ Functions",
         };
         
         println!("\n{}:", kind_name);

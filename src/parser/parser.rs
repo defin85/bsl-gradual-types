@@ -2,31 +2,70 @@
 
 use super::lexer::{Token, tokenize};
 use super::ast::*;
+use super::common::Parser;
+use anyhow::{Result, anyhow};
 
 /// Основной парсер BSL
 pub struct BslParser {
-    tokens: Vec<Token>,
-    position: usize,
+    tokens: Option<Vec<Token>>,
+    _position: usize,
 }
 
 impl BslParser {
-    /// Создание нового парсера
+    /// Создание нового парсера (для совместимости)
     pub fn new(input: &str) -> Result<Self, String> {
         match tokenize(input) {
             Ok((_, tokens)) => Ok(Self {
-                tokens,
-                position: 0,
+                tokens: Some(tokens),
+                _position: 0,
             }),
             Err(e) => Err(format!("Tokenization error: {:?}", e)),
         }
     }
     
-    /// Парсинг программы
+    /// Парсинг программы (для совместимости со старым API)
     pub fn parse(&mut self) -> Result<Program, String> {
-        let statements = self.parse_statements()?;
+        if let Some(tokens) = self.tokens.take() {
+            self.parse_with_tokens(tokens)
+        } else {
+            Err("Parser already consumed".to_string())
+        }
+    }
+    
+    /// Парсинг программы с токенами
+    fn parse_with_tokens(&mut self, tokens: Vec<Token>) -> Result<Program, String> {
+        let mut inner = InnerParser {
+            tokens,
+            position: 0,
+        };
+        let statements = inner.parse_statements()?;
         Ok(Program { statements })
     }
     
+}
+
+impl Parser for BslParser {
+    fn parse(&mut self, source: &str) -> Result<Program> {
+        // Создаём новый парсер для каждого вызова
+        match tokenize(source) {
+            Ok((_, tokens)) => self.parse_with_tokens(tokens)
+                .map_err(|e| anyhow!(e)),
+            Err(e) => Err(anyhow!("Tokenization error: {:?}", e)),
+        }
+    }
+    
+    fn name(&self) -> &str {
+        "nom"
+    }
+}
+
+/// Внутренний парсер с токенами
+struct InnerParser {
+    tokens: Vec<Token>,
+    position: usize,
+}
+
+impl InnerParser {
     /// Парсинг списка операторов
     fn parse_statements(&mut self) -> Result<Vec<Statement>, String> {
         let mut statements = Vec::new();
@@ -212,6 +251,7 @@ impl BslParser {
             variable,
             from,
             to,
+            step: None, // TODO: Поддержка шага в nom-парсере
             body,
         })
     }

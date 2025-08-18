@@ -1,14 +1,26 @@
 #[cfg(test)]
 mod tests {
     use bsl_gradual_types::core::platform_resolver::PlatformTypeResolver;
-    use bsl_gradual_types::core::types::FacetKind;
+    use bsl_gradual_types::core::types::{FacetKind, Certainty};
 
     #[test]
     fn test_catalog_has_facets() {
         let mut resolver = PlatformTypeResolver::new();
         
+        // Debug: check if "Справочники" is loaded
+        println!("Platform globals count: {}", resolver.get_platform_globals_count());
+        if resolver.has_platform_global("Справочники") {
+            println!("'Справочники' found in platform_globals");
+        } else {
+            println!("'Справочники' NOT found in platform_globals");
+        }
+        
         // Resolve a catalog type
         let resolution = resolver.resolve_expression("Справочники.Контрагенты");
+        
+        println!("Resolution: {:?}", resolution.active_facet);
+        println!("Available facets: {:?}", resolution.available_facets);
+        println!("Certainty: {:?}", resolution.certainty);
         
         // Check that it has facets
         assert!(resolution.active_facet.is_some());

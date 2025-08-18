@@ -276,12 +276,24 @@ bsl-gradual-types/
 
 ## 📚 Документация
 
-Детальная документация в директории `docs/`:
+### 🚀 Быстрый старт
+- **[📖 Documentation Index](docs/INDEX.md)** - Полный индекс документации
+- **[⚡ Quick Start](docs/getting-started/QUICKSTART.md)** - 5-минутный старт
+- **[📦 Installation Guide](docs/getting-started/INSTALLATION.md)** - Детальная установка
+- **[🔧 Building Guide](docs/development/BUILDING.md)** - Сборка из исходников
 
-- [Архитектура системы](docs/ARCHITECTURE.md)
-- [План миграции](docs/MIGRATION_PLAN.md)
-- [Структура тестов](TEST_STRUCTURE.md)
-- [История изменений](CHANGELOG.md)
+### 🛠️ Development & Deployment
+- **[👨‍💻 Development Setup](docs/development/SETUP.md)** - Настройка окружения разработки
+- **[📱 VSCode Extension](docs/development/VSCODE_EXTENSION.md)** - Сборка и публикация расширения
+- **[🚀 Production Deployment](docs/deployment/PRODUCTION.md)** - Enterprise deployment
+- **[🐳 Docker Setup](docs/deployment/DOCKER.md)** - Контейнеризация
+
+### 📋 Reference & Examples
+- **[🔧 API Reference](docs/API.md)** - Полная справка API
+- **[🎯 Examples](docs/EXAMPLES.md)** - Практические примеры
+- **[🏗️ Architecture](docs/architecture/overview.md)** - Архитектура системы
+- **[📈 Changelog](CHANGELOG.md)** - История изменений
+- **[🤝 Contributing](CONTRIBUTING.md)** - Руководство для участников
 
 ## 🧪 Тестирование
 

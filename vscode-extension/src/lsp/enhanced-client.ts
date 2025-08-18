@@ -275,6 +275,40 @@ export class EnhancedLspClient {
     }
     
     /**
+     * Запрос code actions
+     */
+    async requestCodeActions(params: any): Promise<any> {
+        if (!this.client) {
+            throw new Error('LSP client not initialized');
+        }
+        
+        return await this.client.sendRequest('textDocument/codeAction', params);
+    }
+    
+    /**
+     * Запрос inlay hints
+     */
+    async requestInlayHints(params: any): Promise<any> {
+        if (!this.client) {
+            throw new Error('LSP client not initialized');
+        }
+        
+        return await this.client.sendRequest('textDocument/inlayHint', params);
+    }
+    
+    /**
+     * Запрос enhanced диагностик
+     */
+    async requestEnhancedDiagnostics(uri: string): Promise<any> {
+        if (!this.client) {
+            throw new Error('LSP client not initialized');
+        }
+        
+        // TODO: Реализовать custom enhanced diagnostics request
+        return [];
+    }
+    
+    /**
      * Регистрация обработчиков enhanced уведомлений
      */
     private registerEnhancedHandlers(): void {

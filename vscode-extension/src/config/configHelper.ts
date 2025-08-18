@@ -69,6 +69,23 @@ export class BslAnalyzerConfig {
     static get enableMetrics(): boolean {
         return this.getConfig().get<boolean>('enableMetrics', true);
     }
+    
+    // Enhanced methods для новой функциональности
+    static isValid(): boolean {
+        // Проверяем что основные настройки корректны
+        return this.enabled && this.binaryPath.length > 0;
+    }
+    
+    static summary(): any {
+        return {
+            enabled: this.enabled,
+            serverMode: this.serverMode,
+            serverTcpPort: this.serverTcpPort,
+            binaryPath: this.binaryPath,
+            configurationPath: this.configurationPath,
+            enableRealTimeAnalysis: this.enableRealTimeAnalysis
+        };
+    }
 }
 
 /**

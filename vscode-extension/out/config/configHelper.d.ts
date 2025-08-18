@@ -18,6 +18,8 @@ export declare class BslAnalyzerConfig {
     static get autoIndexBuild(): boolean;
     static get rulesConfig(): string;
     static get enableMetrics(): boolean;
+    static isValid(): boolean;
+    static summary(): any;
 }
 /**
  * Мигрирует старые настройки на новые имена

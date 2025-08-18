@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.15">
+	<Enum uuid="11112222-3333-4444-5555-666677778888">
+		<Properties>
+			<Name>ТипыКонтактнойИнформации</Name>
+			<Synonym>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Типы контактной информации</v8:content>
+				</v8:item>
+			</Synonym>
+		</Properties>
+	</Enum>
+</MetaDataObject>

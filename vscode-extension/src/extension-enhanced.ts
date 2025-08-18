@@ -14,10 +14,10 @@ import { LanguageClient } from 'vscode-languageclient/node';
 
 // Enhanced imports для новой функциональности
 import { EnhancedLspClient } from './lsp/enhanced-client';
-import { TypeHintsProvider } from './providers/type-hints-provider';
-import { CodeActionsProvider } from './providers/code-actions-provider';
+import { TypeHintsProvider } from './providers/type-hints-simple';
+import { CodeActionsProvider } from './providers/code-actions-simple';
 import { PerformanceMonitor } from './utils/performance-monitor';
-import { EnhancedDiagnosticsProvider } from './providers/enhanced-diagnostics-provider';
+import { EnhancedDiagnosticsProvider } from './providers/enhanced-diagnostics-simple';
 
 // Импорты из старого проекта (адаптированные)
 import { BslAnalyzerConfig } from './config/configHelper';

@@ -80,6 +80,21 @@ class BslAnalyzerConfig {
     static get enableMetrics() {
         return this.getConfig().get('enableMetrics', true);
     }
+    // Enhanced methods для новой функциональности
+    static isValid() {
+        // Проверяем что основные настройки корректны
+        return this.enabled && this.binaryPath.length > 0;
+    }
+    static summary() {
+        return {
+            enabled: this.enabled,
+            serverMode: this.serverMode,
+            serverTcpPort: this.serverTcpPort,
+            binaryPath: this.binaryPath,
+            configurationPath: this.configurationPath,
+            enableRealTimeAnalysis: this.enableRealTimeAnalysis
+        };
+    }
 }
 exports.BslAnalyzerConfig = BslAnalyzerConfig;
 /**

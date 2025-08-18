@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.15">
+	<Document uuid="87654321-4321-4321-4321-210987654321">
+		<Properties>
+			<Name>ТестовыйДокумент</Name>
+			<Synonym>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Тестовый документ</v8:content>
+				</v8:item>
+			</Synonym>
+		</Properties>
+		<ChildObjects>
+			<Attribute uuid="66666666-6666-6666-6666-666666666666">
+				<Properties>
+					<Name>Номер</Name>
+					<Type>
+						<v8:Type>xs:string</v8:Type>
+					</Type>
+				</Properties>
+			</Attribute>
+			<Attribute uuid="77777777-7777-7777-7777-777777777777">
+				<Properties>
+					<Name>Дата</Name>
+					<Type>
+						<v8:Type>xs:dateTime</v8:Type>
+					</Type>
+				</Properties>
+			</Attribute>
+		</ChildObjects>
+	</Document>
+</MetaDataObject>

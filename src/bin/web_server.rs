@@ -24,7 +24,7 @@ struct Cli {
     port: u16,
     
     /// Путь к проекту 1С для анализа
-    #[arg(short, long)]
+    #[arg(short = 'j', long)]
     project: Option<PathBuf>,
     
     /// Включить hot reload для разработки
@@ -46,6 +46,25 @@ struct AppState {
     /// Кеш для быстрого поиска (TODO: реализовать)
     #[allow(dead_code)]
     search_cache: Arc<RwLock<HashMap<String, Vec<SearchResult>>>>,
+    /// Статус загрузки платформенных типов
+    loading_status: Arc<RwLock<LoadingStatus>>,
+}
+
+/// Статус загрузки документации
+#[derive(Debug, Clone, Serialize)]
+struct LoadingStatus {
+    /// Загружаются ли данные сейчас
+    pub is_loading: bool,
+    /// Текущий прогресс (0-100)
+    pub progress: u8,
+    /// Обработано файлов
+    pub processed_files: usize,
+    /// Всего файлов
+    pub total_files: usize,
+    /// Текущая операция
+    pub current_operation: String,
+    /// Ошибки парсинга
+    pub errors: usize,
 }
 
 /// Результат поиска типов
@@ -118,6 +137,14 @@ async fn main() -> Result<()> {
         type_context: Arc::new(RwLock::new(None)),
         platform_resolver: Arc::new(RwLock::new(PlatformTypeResolver::new())),
         search_cache: Arc::new(RwLock::new(HashMap::new())),
+        loading_status: Arc::new(RwLock::new(LoadingStatus {
+            is_loading: false,
+            progress: 100,
+            processed_files: 0,
+            total_files: 0,
+            current_operation: "Платформенные типы загружены".to_string(),
+            errors: 0,
+        })),
     };
     
     // Если указан проект, анализируем его
@@ -206,6 +233,13 @@ async fn start_web_server(port: u16, app_state: AppState, static_dir: PathBuf) -
                 .and_then(handle_get_stats)
         )
         .or(
+            // GET /api/loading-status
+            warp::path("loading-status")
+                .and(warp::get())
+                .and(with_state(app_state.clone()))
+                .and_then(handle_get_loading_status)
+        )
+        .or(
             // POST /api/analyze
             warp::path("analyze")
                 .and(warp::post())
@@ -284,6 +318,8 @@ async fn search_types(state: &AppState, search_term: &str) -> Vec<SearchResult> 
     // Поиск в platform resolver
     let platform_resolver = state.platform_resolver.read().await;
     let completions = platform_resolver.get_completions(search_term);
+    
+    println!("🔍 Search for '{}': found {} platform completions", search_term, completions.len());
     
     for completion in completions {
         results.push(SearchResult {
@@ -395,20 +431,39 @@ async fn handle_get_stats(
     Ok(warp::reply::json(&stats))
 }
 
+/// Обработчик статуса загрузки
+async fn handle_get_loading_status(
+    state: AppState,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let status = state.loading_status.read().await.clone();
+    Ok(warp::reply::json(&status))
+}
+
 /// Получение статистики системы
 async fn get_system_stats(state: &AppState) -> SystemStats {
     let context = state.type_context.read().await;
+    let platform_resolver = state.platform_resolver.read().await;
+    
+    // Получаем количество платформенных типов
+    let platform_types_count = platform_resolver.get_completions("").len();
+    println!("📊 Platform types count: {}", platform_types_count);
     
     if let Some(ctx) = context.as_ref() {
         SystemStats {
             total_functions: ctx.functions.len(),
             total_variables: ctx.variables.len(),
-            platform_types: 0, // TODO: Получить из platform resolver
+            platform_types: platform_types_count,
             analysis_cache_size: 0, // TODO: Интеграция с cache
             memory_usage_mb: estimate_memory_usage(ctx),
         }
     } else {
-        SystemStats::default()
+        SystemStats {
+            total_functions: 0,
+            total_variables: 0,
+            platform_types: platform_types_count,
+            analysis_cache_size: 0,
+            memory_usage_mb: 0.0,
+        }
     }
 }
 
@@ -604,6 +659,37 @@ fn generate_index_html() -> String {
         .loading { color: #ffcc00; }
         .error { color: #f44747; }
         .success { color: #4fc1ff; }
+        
+        .progress-section { 
+            margin-bottom: 30px; 
+            background: #2d2d30; 
+            padding: 20px; 
+            border-radius: 5px; 
+            border: 1px solid #3c3c3c; 
+        }
+        .progress-bar { 
+            width: 100%; 
+            height: 20px; 
+            background: #1e1e1e; 
+            border-radius: 10px; 
+            overflow: hidden; 
+            margin-top: 10px; 
+        }
+        .progress-fill { 
+            height: 100%; 
+            background: linear-gradient(90deg, #0e639c, #4fc1ff); 
+            transition: width 0.3s ease; 
+            width: 0%; 
+        }
+        .progress-text { 
+            color: #9cdcfe; 
+            margin-bottom: 5px; 
+        }
+        .progress-details { 
+            color: #d4d4d4; 
+            font-size: 0.9em; 
+            margin-top: 10px; 
+        }
     </style>
 </head>
 <body>
@@ -611,6 +697,14 @@ fn generate_index_html() -> String {
         <div class="header">
             <h1>🚀 BSL Type Browser</h1>
             <p>Production-ready система типов для 1С:Предприятие</p>
+        </div>
+        
+        <div class="progress-section" id="progress-section" style="display: none;">
+            <div class="progress-text" id="progress-text">📊 Загрузка документации 1С...</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <div class="progress-details" id="progress-details">Подготовка...</div>
         </div>
         
         <div class="stats-grid" id="stats">
@@ -655,6 +749,7 @@ fn generate_index_html() -> String {
     <script>
         // Загрузка статистики при старте
         loadStats();
+        checkLoadingStatus();
         
         // Поиск типов
         let searchTimeout;
@@ -711,6 +806,61 @@ fn generate_index_html() -> String {
             } catch (error) {
                 document.getElementById('results').innerHTML = 
                     '<p class="error">❌ Ошибка поиска: ' + error.message + '</p>';
+            }
+        }
+        
+        let progressInterval;
+        
+        async function checkLoadingStatus() {
+            try {
+                const response = await fetch('/api/loading-status');
+                const status = await response.json();
+                
+                const progressSection = document.getElementById('progress-section');
+                const progressFill = document.getElementById('progress-fill');
+                const progressText = document.getElementById('progress-text');
+                const progressDetails = document.getElementById('progress-details');
+                
+                if (status.is_loading) {
+                    // Показываем прогресс-бар
+                    progressSection.style.display = 'block';
+                    progressFill.style.width = status.progress + '%';
+                    progressText.textContent = '📊 ' + status.current_operation;
+                    
+                    let details = `Обработано: ${status.processed_files}`;
+                    if (status.total_files > 0) {
+                        details += ` из ${status.total_files}`;
+                    }
+                    if (status.errors > 0) {
+                        details += ` (ошибок: ${status.errors})`;
+                    }
+                    progressDetails.textContent = details;
+                    
+                    // Продолжаем проверять статус
+                    if (!progressInterval) {
+                        progressInterval = setInterval(checkLoadingStatus, 1000);
+                    }
+                } else {
+                    // Скрываем прогресс-бар
+                    progressSection.style.display = 'none';
+                    
+                    // Останавливаем проверку
+                    if (progressInterval) {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                    }
+                    
+                    // Обновляем статистику
+                    loadStats();
+                }
+            } catch (error) {
+                console.error('Error checking loading status:', error);
+                // Скрываем прогресс-бар при ошибке
+                document.getElementById('progress-section').style.display = 'none';
+                if (progressInterval) {
+                    clearInterval(progressInterval);
+                    progressInterval = null;
+                }
             }
         }
         

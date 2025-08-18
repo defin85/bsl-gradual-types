@@ -39,7 +39,12 @@
       "Bash(del \"C:\\1CProject\\bsl-gradual-types\\src\\parser\\tree_sitter_adapter_v2.rs\")",
       "Bash(del examplestest_parser_factory.rs)",
       "Bash(del nul)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(npm install)",
+      "Bash(npm run compile:*)",
+      "Bash(tsc:*)",
+      "Bash(npx tsc:*)",
+      "Bash(vsce package:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

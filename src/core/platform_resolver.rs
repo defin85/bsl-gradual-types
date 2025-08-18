@@ -52,13 +52,49 @@ impl PlatformTypeResolver {
     pub fn new() -> Self {
         let mut platform_resolver = PlatformTypesResolverV2::new();
         
-        // Try to load syntax helper data
-        let json_path = "examples/syntax_helper/syntax_database.json";
-        if std::path::Path::new(json_path).exists() {
-            let _ = platform_resolver.load_from_file(json_path);
+        // Try to load syntax helper data from HTML directory
+        let html_dir_path = "examples/syntax_helper/rebuilt.shcntx_ru";
+        let absolute_path = std::path::Path::new(&std::env::current_dir().unwrap_or_default()).join(html_dir_path);
+        
+        println!("🔍 Checking HTML directory: {}", absolute_path.display());
+        
+        if absolute_path.exists() {
+            println!("✅ Found HTML directory, loading...");
+            match platform_resolver.load_from_directory(absolute_path.to_str().unwrap()) {
+                Ok(_) => println!("✅ HTML directory loaded successfully"),
+                Err(e) => println!("❌ Error loading HTML directory: {}", e),
+            }
+        } else if std::path::Path::new(html_dir_path).exists() {
+            println!("✅ Found relative HTML directory, loading...");
+            match platform_resolver.load_from_directory(html_dir_path) {
+                Ok(_) => println!("✅ Relative HTML directory loaded successfully"),
+                Err(e) => println!("❌ Error loading relative HTML directory: {}", e),
+            }
+        } else {
+            println!("⚠️ HTML directory not found, falling back to JSON");
+            // Fallback to JSON if HTML directory not found
+            let json_path = "examples/syntax_helper/syntax_database.json";
+            let json_absolute_path = std::path::Path::new(&std::env::current_dir().unwrap_or_default()).join(json_path);
+            if json_absolute_path.exists() {
+                println!("✅ Found absolute JSON file, loading...");
+                match platform_resolver.load_from_file(json_absolute_path.to_str().unwrap()) {
+                    Ok(_) => println!("✅ JSON file loaded successfully"),
+                    Err(e) => println!("❌ Error loading JSON file: {}", e),
+                }
+            } else if std::path::Path::new(json_path).exists() {
+                println!("✅ Found relative JSON file, loading...");
+                match platform_resolver.load_from_file(json_path) {
+                    Ok(_) => println!("✅ Relative JSON file loaded successfully"),
+                    Err(e) => println!("❌ Error loading relative JSON file: {}", e),
+                }
+            } else {
+                println!("❌ No data source found!");
+            }
         }
         
         let mut platform_globals = platform_resolver.get_platform_globals();
+        
+        println!("📊 Loaded {} platform globals", platform_globals.len());
         
         // Add hardcoded platform managers if not loaded from file
         if !platform_globals.contains_key("Справочники") {

@@ -21,6 +21,15 @@
     ],
     "exclude": [
         "node_modules",
-        "out"
+        "out",
+        "src/extension-enhanced.ts",
+        "src/providers/type-hints-provider.ts",
+        "src/providers/code-actions-provider.ts", 
+        "src/providers/enhanced-diagnostics-provider.ts",
+        "src/providers/enhanced-diagnostics-simple.ts",
+        "src/providers/type-hints-simple.ts",
+        "src/providers/code-actions-simple.ts",
+        "src/utils/performance-monitor.ts",
+        "src/lsp/enhanced-client.ts"
     ]
 }

@@ -71,6 +71,8 @@ sha2 = "0.10"
 
 # CLI output
 colored = "2.0"
+chrono = { version = "0.4.41", features = ["serde"] }
+num_cpus = "1.17.0"
 
 # Optional ML support (for future)
 # candle = { version = "0.3", optional = true }

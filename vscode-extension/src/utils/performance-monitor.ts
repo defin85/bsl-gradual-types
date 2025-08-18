@@ -170,6 +170,30 @@ export class PerformanceMonitor {
     }
     
     /**
+     * Запись операции LSP (placeholder)
+     */
+    recordLspOperation(operation: string, durationMs: number): void {
+        // Простая заглушка
+        console.log(`LSP Operation: ${operation} took ${durationMs}ms`);
+    }
+    
+    /**
+     * Запись cache hit
+     */
+    recordCacheHit(): void {
+        this.cacheMetrics.hits++;
+        this.updateCacheHitRate();
+    }
+    
+    /**
+     * Запись cache miss  
+     */
+    recordCacheMiss(): void {
+        this.cacheMetrics.misses++;
+        this.updateCacheHitRate();
+    }
+    
+    /**
      * Генерация отчета о производительности
      */
     generateReport(): PerformanceReport {

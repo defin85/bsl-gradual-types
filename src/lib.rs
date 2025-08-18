@@ -7,6 +7,7 @@ pub mod core;
 pub mod adapters;
 pub mod parser;
 pub mod query;
+pub mod documentation;
 
 pub use core::{
     types::{UnifiedBslType, TypeResolution, Certainty, Contract},

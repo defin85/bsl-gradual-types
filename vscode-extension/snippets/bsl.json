@@ -1,0 +1,94 @@
+{
+    "Function": {
+        "prefix": "function",
+        "body": [
+            "Функция ${1:FunctionName}(${2:Parameters})",
+            "\t${3:// function body}",
+            "\tВозврат ${4:Result};",
+            "КонецФункции"
+        ],
+        "description": "Create a new function"
+    },
+    "Procedure": {
+        "prefix": "procedure",
+        "body": [
+            "Процедура ${1:ProcedureName}(${2:Parameters})",
+            "\t${3:// procedure body}",
+            "КонецПроцедуры"
+        ],
+        "description": "Create a new procedure"
+    },
+    "If": {
+        "prefix": "if",
+        "body": [
+            "Если ${1:condition} Тогда",
+            "\t${2:// code}",
+            "КонецЕсли;"
+        ],
+        "description": "If statement"
+    },
+    "For": {
+        "prefix": "for",
+        "body": [
+            "Для ${1:variable} = ${2:start} По ${3:end} Цикл",
+            "\t${4:// code}",
+            "КонецЦикла;"
+        ],
+        "description": "For loop"
+    },
+    "ForEach": {
+        "prefix": "foreach",
+        "body": [
+            "Для Каждого ${1:item} Из ${2:collection} Цикл",
+            "\t${3:// code}",
+            "КонецЦикла;"
+        ],
+        "description": "For each loop"
+    },
+    "While": {
+        "prefix": "while",
+        "body": [
+            "Пока ${1:condition} Цикл",
+            "\t${2:// code}",
+            "КонецЦикла;"
+        ],
+        "description": "While loop"
+    },
+    "Try": {
+        "prefix": "try",
+        "body": [
+            "Попытка",
+            "\t${1:// code}",
+            "Исключение",
+            "\t${2:// exception handling}",
+            "КонецПопытки;"
+        ],
+        "description": "Try-catch block"
+    },
+    "Variable": {
+        "prefix": "var",
+        "body": [
+            "Перем ${1:VariableName};"
+        ],
+        "description": "Declare a variable"
+    },
+    "Export Function": {
+        "prefix": "export_function",
+        "body": [
+            "Функция ${1:FunctionName}(${2:Parameters}) Экспорт",
+            "\t${3:// function body}",
+            "\tВозврат ${4:Result};",
+            "КонецФункции"
+        ],
+        "description": "Create an exported function"
+    },
+    "Export Procedure": {
+        "prefix": "export_procedure",
+        "body": [
+            "Процедура ${1:ProcedureName}(${2:Parameters}) Экспорт",
+            "\t${3:// procedure body}",
+            "КонецПроцедуры"
+        ],
+        "description": "Create an exported procedure"
+    }
+}

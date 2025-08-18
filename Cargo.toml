@@ -53,6 +53,9 @@ tower-lsp = "0.20"
 lsp-types = "0.95"
 url = "2.5"
 
+# Web server support
+warp = "0.3"
+
 # HTML parsing (for syntax helper)
 scraper = "0.18"
 zip = "0.6"
@@ -100,6 +103,10 @@ path = "src/bin/type_check.rs"
 [[bin]]
 name = "bsl-profiler"
 path = "src/bin/profiler.rs"
+
+[[bin]]
+name = "bsl-web-server"
+path = "src/bin/web_server.rs"
 
 # Examples
 [[example]]

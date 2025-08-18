@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="rustGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#CE422B;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8B2C1B;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="bslGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#007ACC;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#004D80;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="rgba(0,0,0,0.3)"/>
+    </filter>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="url(#rustGradient)" filter="url(#shadow)"/>
+  
+  <!-- Inner circle for contrast -->
+  <circle cx="64" cy="64" r="52" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+  
+  <!-- Main BSL icon - stylized code brackets -->
+  <g transform="translate(64,64)">
+    <!-- Left bracket -->
+    <path d="M -20 -25 L -30 -25 L -30 -15 L -25 -10 L -30 -5 L -30 5 L -25 10 L -30 15 L -30 25 L -20 25" 
+          fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Right bracket -->
+    <path d="M 20 -25 L 30 -25 L 30 -15 L 25 -10 L 30 -5 L 30 5 L 25 10 L 30 15 L 30 25 L 20 25" 
+          fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Center elements - representing type safety -->
+    <circle cx="0" cy="-8" r="3" fill="url(#bslGradient)"/>
+    <circle cx="-8" cy="0" r="3" fill="url(#bslGradient)"/>
+    <circle cx="8" cy="0" r="3" fill="url(#bslGradient)"/>
+    <circle cx="0" cy="8" r="3" fill="url(#bslGradient)"/>
+    
+    <!-- Connecting lines -->
+    <line x1="0" y1="-5" x2="-5" y2="0" stroke="white" stroke-width="1.5" opacity="0.8"/>
+    <line x1="-5" y1="0" x2="0" y2="5" stroke="white" stroke-width="1.5" opacity="0.8"/>
+    <line x1="0" y1="5" x2="5" y2="0" stroke="white" stroke-width="1.5" opacity="0.8"/>
+    <line x1="5" y1="0" x2="0" y2="-5" stroke="white" stroke-width="1.5" opacity="0.8"/>
+  </g>
+  
+  <!-- Small Rust gear icon in bottom right -->
+  <g transform="translate(94,94) scale(0.5)">
+    <circle cx="0" cy="0" r="8" fill="white" opacity="0.9"/>
+    <path d="M -6 -2 L -2 -6 L 2 -6 L 6 -2 L 6 2 L 2 6 L -2 6 L -6 2 Z" 
+          fill="url(#rustGradient)" opacity="0.8"/>
+    <circle cx="0" cy="0" r="3" fill="white"/>
+  </g>
+  
+  <!-- 1C identifier in top right -->
+  <g transform="translate(94,34)">
+    <rect x="-8" y="-8" width="16" height="16" rx="2" fill="white" opacity="0.2"/>
+    <text x="0" y="2" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="white">1C</text>
+  </g>
+</svg>

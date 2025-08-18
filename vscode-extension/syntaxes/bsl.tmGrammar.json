@@ -1,0 +1,67 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "BSL",
+    "scopeName": "source.bsl",
+    "patterns": [
+        {
+            "include": "#keywords"
+        },
+        {
+            "include": "#strings"
+        },
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#numbers"
+        },
+        {
+            "include": "#functions"
+        },
+        {
+            "include": "#variables"
+        }
+    ],
+    "repository": {
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.bsl",
+                    "match": "\\b(Если|If|Тогда|Then|Иначе|Else|ИначеЕсли|ElsIf|КонецЕсли|EndIf|Пока|While|Для|For|Каждого|Each|Из|In|По|To|Цикл|Do|КонецЦикла|EndDo|Процедура|Procedure|Функция|Function|КонецПроцедуры|EndProcedure|КонецФункции|EndFunction|Возврат|Return|Прервать|Break|Продолжить|Continue|Попытка|Try|Исключение|Except|КонецПопытки|EndTry|ВызватьИсключение|Raise|Новый|New|Выполнить|Execute|Перем|Var|Экспорт|Export)\\b"
+                }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.double.bsl",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.bsl",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.double-slash.bsl",
+                    "begin": "//",
+                    "end": "$"
+                }
+            ]
+        },
+        "numbers": {
+            "name": "constant.numeric.bsl",
+            "match": "\\b\\d+(\\.\\d+)?\\b"
+        },
+        "functions": {
+            "name": "entity.name.function.bsl",
+            "match": "\\b[А-Яа-яA-Za-z_][А-Яа-яA-Za-z0-9_]*(?=\\s*\\()"
+        },
+        "variables": {
+            "name": "variable.other.bsl",
+            "match": "\\b[А-Яа-яA-Za-z_][А-Яа-яA-Za-z0-9_]*\\b"
+        }
+    }
+}

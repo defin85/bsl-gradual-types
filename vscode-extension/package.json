@@ -1,0 +1,603 @@
+{
+    "name": "bsl-gradual-types",
+    "displayName": "BSL Gradual Type System",
+    "description": "Production-ready BSL (1C:Enterprise) gradual type system with flow-sensitive analysis, union types, and enhanced LSP server",
+    "version": "1.0.0",
+    "publisher": "bsl-gradual-types-team",
+    "icon": "images/bsl-analyzer-logo.png",
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Linters",
+        "Other"
+    ],
+    "activationEvents": [
+        "onStartupFinished",
+        "onLanguage:bsl",
+        "workspaceContains:**/*.bsl"
+    ],
+    "galleryBanner": {
+        "color": "#CE422B",
+        "theme": "dark"
+    },
+    "keywords": [
+        "bsl",
+        "1c",
+        "enterprise",
+        "static-analysis",
+        "type-safety"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "languages": [
+            {
+                "id": "bsl",
+                "aliases": [
+                    "BSL",
+                    "1C:Enterprise"
+                ],
+                "extensions": [
+                    ".bsl",
+                    ".os"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "bsl",
+                "scopeName": "source.bsl",
+                "path": "./syntaxes/bsl.tmGrammar.json"
+            }
+        ],
+        "configuration": [
+            {
+                "title": "Основные",
+                "order": 0,
+                "properties": {
+                    "bslAnalyzer.enabled": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Включить BSL Analyzer",
+                        "scope": "resource",
+                        "order": 0
+                    },
+                    "bslAnalyzer.enableRealTimeAnalysis": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Включить анализ в реальном времени при наборе текста",
+                        "order": 1
+                    },
+                    "bslAnalyzer.maxFileSize": {
+                        "type": "number",
+                        "default": 1048576,
+                        "description": "Максимальный размер файла для анализа (в байтах)",
+                        "minimum": 0,
+                        "order": 2
+                    }
+                }
+            },
+            {
+                "title": "LSP Сервер",
+                "order": 1,
+                "properties": {
+                    "bslAnalyzer.serverMode": {
+                        "type": "string",
+                        "enum": ["stdio", "tcp"],
+                        "enumDescriptions": [
+                            "Стандартный ввод/вывод (рекомендуется)",
+                            "TCP соединение"
+                        ],
+                        "default": "stdio",
+                        "description": "Режим взаимодействия с LSP сервером",
+                        "order": 0
+                    },
+                    "bslAnalyzer.serverTcpPort": {
+                        "type": "number",
+                        "default": 8080,
+                        "description": "TCP порт для LSP сервера (при использовании TCP режима)",
+                        "minimum": 1,
+                        "maximum": 65535,
+                        "order": 1
+                    },
+                    "bslAnalyzer.serverTrace": {
+                        "type": "string",
+                        "enum": ["off", "messages", "verbose"],
+                        "enumDescriptions": [
+                            "Отключено",
+                            "Только сообщения",
+                            "Подробная трассировка"
+                        ],
+                        "default": "off",
+                        "description": "Уровень трассировки взаимодействия между VS Code и LSP сервером",
+                        "order": 2
+                    }
+                }
+            },
+            {
+                "title": "Бинарные файлы",
+                "order": 2,
+                "properties": {
+                    "bslAnalyzer.useBundledBinaries": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Использовать встроенные бинарные файлы из расширения",
+                        "order": 0
+                    },
+                    "bslAnalyzer.binaryPath": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Путь к директории с бинарными файлами BSL Analyzer (используется если useBundledBinaries = false)",
+                        "order": 1
+                    }
+                }
+            },
+            {
+                "title": "Индексация",
+                "order": 3,
+                "properties": {
+                    "bslAnalyzer.configurationPath": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Путь к директории конфигурации 1С для построения индекса",
+                        "scope": "resource",
+                        "order": 0
+                    },
+                    "bslAnalyzer.platformVersion": {
+                        "type": "string",
+                        "default": "8.3.25",
+                        "description": "Версия платформы 1С (например: 8.3.25)",
+                        "pattern": "^\\d+\\.\\d+\\.\\d+$",
+                        "order": 1
+                    },
+                    "bslAnalyzer.platformDocsArchive": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Путь к архиву документации платформы 1С (rebuilt.shcntx_ru.zip или rebuilt.shlang_ru.zip)",
+                        "order": 2
+                    },
+                    "bslAnalyzer.autoIndexBuild": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Автоматически строить индекс при открытии BSL файлов",
+                        "order": 3
+                    }
+                }
+            },
+            {
+                "title": "Анализ кода",
+                "order": 4,
+                "properties": {
+                    "bslAnalyzer.rulesConfig": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Путь к файлу конфигурации правил анализа",
+                        "order": 0
+                    },
+                    "bslAnalyzer.enableMetrics": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Включить вычисление метрик качества кода",
+                        "order": 1
+                    }
+                }
+            },
+            {
+                "title": "Enhanced Features (Phase 5.0)",
+                "order": 10,
+                "properties": {
+                    "bsl.typeHints.showVariableTypes": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Show type hints for variables",
+                        "order": 0
+                    },
+                    "bsl.typeHints.showReturnTypes": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Show type hints for function return types",
+                        "order": 1
+                    },
+                    "bsl.typeHints.showUnionDetails": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Show detailed information for Union types",
+                        "order": 2
+                    },
+                    "bsl.typeHints.minCertainty": {
+                        "type": "number",
+                        "default": 0.7,
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "description": "Minimum certainty level to show type hints",
+                        "order": 3
+                    },
+                    "bsl.performance.enableProfiling": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Enable automatic performance profiling",
+                        "order": 4
+                    },
+                    "bsl.analysis.useParallelProcessing": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Use parallel processing for project analysis",
+                        "order": 5
+                    },
+                    "bsl.analysis.enableCaching": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Enable caching of analysis results",
+                        "order": 6
+                    },
+                    "bsl.analysis.cacheDirectory": {
+                        "type": "string",
+                        "description": "Custom directory for analysis cache (leave empty for auto)",
+                        "order": 7
+                    }
+                }
+            }
+        ],
+        "commands": [
+            {
+                "command": "bslAnalyzer.analyzeFile",
+                "title": "Analyze Current File",
+                "category": "BSL Analyzer"
+            },
+            {
+                "command": "bslAnalyzer.analyzeWorkspace",
+                "title": "Analyze Workspace",
+                "category": "BSL Analyzer"
+            },
+            {
+                "command": "bslAnalyzer.generateReports",
+                "title": "Generate Reports",
+                "category": "BSL Analyzer"
+            },
+            {
+                "command": "bslAnalyzer.showMetrics",
+                "title": "Show Code Quality Metrics",
+                "category": "BSL Analyzer"
+            },
+            {
+                "command": "bslAnalyzer.configureRules",
+                "title": "Configure Rules",
+                "category": "BSL Analyzer"
+            },
+            {
+                "command": "bslAnalyzer.restartServer",
+                "title": "Restart LSP Server",
+                "category": "BSL Analyzer"
+            },
+            {
+                "command": "bsl.showTypeInfo",
+                "title": "Show Type Information",
+                "category": "BSL Gradual Types"
+            },
+            {
+                "command": "bsl.runPerformanceProfiling",
+                "title": "Run Performance Profiling",
+                "category": "BSL Gradual Types"
+            },
+            {
+                "command": "bsl.analyzeProject",
+                "title": "Analyze Project (Enhanced)",
+                "category": "BSL Gradual Types"
+            },
+            {
+                "command": "bsl.configureTypeHints",
+                "title": "Configure Type Hints",
+                "category": "BSL Gradual Types"
+            },
+            {
+                "command": "bsl.clearAnalysisCache",
+                "title": "Clear Analysis Cache",
+                "category": "BSL Gradual Types"
+            },
+            {
+                "command": "bslAnalyzer.searchType",
+                "title": "Search BSL Type",
+                "category": "BSL Index",
+                "icon": "$(search)"
+            },
+            {
+                "command": "bslAnalyzer.searchMethod",
+                "title": "Search Method in Type",
+                "category": "BSL Index",
+                "icon": "$(symbol-method)"
+            },
+            {
+                "command": "bslAnalyzer.buildIndex",
+                "title": "Build Unified BSL Index",
+                "category": "BSL Index",
+                "icon": "$(database)"
+            },
+            {
+                "command": "bslAnalyzer.showIndexStats",
+                "title": "Show Index Statistics",
+                "category": "BSL Index",
+                "icon": "$(graph)"
+            },
+            {
+                "command": "bslAnalyzer.incrementalUpdate",
+                "title": "Incremental Index Update",
+                "category": "BSL Index",
+                "icon": "$(sync)"
+            },
+            {
+                "command": "bslAnalyzer.exploreType",
+                "title": "Explore Type Methods & Properties",
+                "category": "BSL Index",
+                "icon": "$(type-hierarchy)"
+            },
+            {
+                "command": "bslAnalyzer.validateMethodCall",
+                "title": "Validate Method Call",
+                "category": "BSL Verification",
+                "icon": "$(check)"
+            },
+            {
+                "command": "bslAnalyzer.checkTypeCompatibility",
+                "title": "Check Type Compatibility",
+                "category": "BSL Verification",
+                "icon": "$(arrow-both)"
+            },
+            {
+                "command": "bslAnalyzer.refreshOverview",
+                "title": "Refresh",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "bslAnalyzer.refreshDiagnostics",
+                "title": "Refresh",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "bslAnalyzer.refreshTypeIndex",
+                "title": "Refresh",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "bslAnalyzer.addPlatformDocs",
+                "title": "Add Platform Documentation",
+                "icon": "$(add)"
+            },
+            {
+                "command": "bslAnalyzer.removePlatformDocs",
+                "title": "Remove Platform Documentation",
+                "icon": "$(trash)"
+            },
+            {
+                "command": "bslAnalyzer.refreshPlatformDocs",
+                "title": "Refresh",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "bslAnalyzer.parsePlatformDocs",
+                "title": "Parse Platform Documentation",
+                "icon": "$(play)"
+            },
+            {
+                "command": "bslAnalyzer.testProgress",
+                "title": "Test Progress System",
+                "category": "BSL Debug",
+                "icon": "$(beaker)"
+            }
+        ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "bslAnalyzer",
+                    "title": "BSL Analyzer",
+                    "icon": "$(bracket)"
+                }
+            ]
+        },
+        "views": {
+            "bslAnalyzer": [
+                {
+                    "id": "bslAnalyzer.overview",
+                    "name": "Overview",
+                    "type": "tree"
+                },
+                {
+                    "id": "bslAnalyzer.diagnostics",
+                    "name": "Diagnostics",
+                    "type": "tree"
+                },
+                {
+                    "id": "bslAnalyzer.typeIndex",
+                    "name": "Type Index",
+                    "type": "tree"
+                },
+                {
+                    "id": "bslAnalyzer.actions",
+                    "name": "Quick Actions",
+                    "type": "webview"
+                },
+                {
+                    "id": "bslAnalyzer.platformDocs",
+                    "name": "Platform Documentation",
+                    "type": "tree"
+                }
+            ]
+        },
+        "menus": {
+            "explorer/context": [
+                {
+                    "when": "resourceExtname == .bsl",
+                    "command": "bslAnalyzer.analyzeFile",
+                    "group": "BSL Analyzer"
+                }
+            ],
+            "editor/context": [
+                {
+                    "when": "resourceExtname == .bsl",
+                    "command": "bslAnalyzer.analyzeFile",
+                    "group": "BSL Analyzer@1"
+                },
+                {
+                    "when": "resourceExtname == .bsl",
+                    "command": "bslAnalyzer.showMetrics",
+                    "group": "BSL Analyzer@2"
+                },
+                {
+                    "when": "resourceExtname == .bsl && editorHasSelection",
+                    "command": "bslAnalyzer.validateMethodCall",
+                    "group": "BSL Index@1"
+                },
+                {
+                    "when": "resourceExtname == .bsl && editorHasSelection",
+                    "command": "bslAnalyzer.exploreType",
+                    "group": "BSL Index@2"
+                }
+            ],
+            "commandPalette": [
+                {
+                    "command": "bslAnalyzer.analyzeFile",
+                    "when": "resourceExtname == .bsl"
+                },
+                {
+                    "command": "bslAnalyzer.analyzeWorkspace"
+                },
+                {
+                    "command": "bslAnalyzer.generateReports"
+                },
+                {
+                    "command": "bslAnalyzer.showMetrics",
+                    "when": "resourceExtname == .bsl"
+                },
+                {
+                    "command": "bslAnalyzer.configureRules"
+                },
+                {
+                    "command": "bslAnalyzer.restartServer"
+                },
+                {
+                    "command": "bslAnalyzer.searchType"
+                },
+                {
+                    "command": "bslAnalyzer.searchMethod"
+                },
+                {
+                    "command": "bslAnalyzer.buildIndex"
+                },
+                {
+                    "command": "bslAnalyzer.showIndexStats"
+                },
+                {
+                    "command": "bslAnalyzer.incrementalUpdate"
+                },
+                {
+                    "command": "bslAnalyzer.exploreType"
+                },
+                {
+                    "command": "bslAnalyzer.validateMethodCall",
+                    "when": "resourceExtname == .bsl && editorHasSelection"
+                },
+                {
+                    "command": "bslAnalyzer.checkTypeCompatibility"
+                },
+                {
+                    "command": "bslAnalyzer.addPlatformDocs"
+                },
+                {
+                    "command": "bslAnalyzer.parsePlatformDocs"
+                },
+                {
+                    "command": "bslAnalyzer.removePlatformDocs"
+                },
+                {
+                    "command": "bslAnalyzer.testProgress"
+                }
+            ],
+            "view/title": [
+                {
+                    "command": "bslAnalyzer.refreshOverview",
+                    "when": "view == bslAnalyzer.overview",
+                    "group": "navigation"
+                },
+                {
+                    "command": "bslAnalyzer.refreshDiagnostics",
+                    "when": "view == bslAnalyzer.diagnostics",
+                    "group": "navigation"
+                },
+                {
+                    "command": "bslAnalyzer.refreshTypeIndex",
+                    "when": "view == bslAnalyzer.typeIndex",
+                    "group": "navigation"
+                },
+                {
+                    "command": "bslAnalyzer.addPlatformDocs",
+                    "when": "view == bslAnalyzer.platformDocs",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "bslAnalyzer.refreshPlatformDocs",
+                    "when": "view == bslAnalyzer.platformDocs",
+                    "group": "navigation@2"
+                }
+            ],
+            "view/item/context": [
+                {
+                    "command": "bslAnalyzer.parsePlatformDocs",
+                    "when": "view == bslAnalyzer.platformDocs && viewItem == version",
+                    "group": "platform@1"
+                },
+                {
+                    "command": "bslAnalyzer.removePlatformDocs", 
+                    "when": "view == bslAnalyzer.platformDocs && viewItem == version",
+                    "group": "platform@2"
+                }
+            ]
+        },
+        "snippets": [
+            {
+                "language": "bsl",
+                "path": "./snippets/bsl.json"
+            }
+        ]
+    },
+    "files": [
+        "out/**/*",
+        "bin/**/*",
+        "syntaxes/**/*",
+        "snippets/**/*",
+        "images/**/*",
+        "language-configuration.json",
+        "LICENSE",
+        "README.md"
+    ],
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile && npm run lint",
+        "lint": "tsc --noEmit",
+        "test": "node ./out/test/runTest.js"
+    },
+    "devDependencies": {
+        "@types/glob": "^8.0.0",
+        "@types/mocha": "^10.0.1",
+        "@types/node": "16.x",
+        "@types/vscode": "^1.74.0",
+        "@vscode/test-electron": "^2.2.0",
+        "glob": "^8.0.3",
+        "mocha": "^10.1.0",
+        "typescript": "^4.9.5"
+    },
+    "dependencies": {
+        "vscode-languageclient": "^8.1.0"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/defin85/bsl_type_safety_analyzer.git"
+    },
+    "bugs": {
+        "url": "https://github.com/defin85/bsl_type_safety_analyzer/issues"
+    },
+    "homepage": "https://github.com/defin85/bsl_type_safety_analyzer#readme",
+    "license": "MIT"
+}

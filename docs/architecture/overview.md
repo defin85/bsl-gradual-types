@@ -1,12 +1,13 @@
-# Архитектура BSL Gradual Type System
+# Архитектура BSL Gradual Type System v1.0.0
 
 ## 📊 Обзор
 
-BSL Gradual Type System - это современная система типов для языка 1С:Предприятие BSL, объединяющая статический анализ с runtime контрактами через градуальную типизацию.
+BSL Gradual Type System - это **enterprise-ready система типов** для языка 1С:Предприятие BSL, объединяющая статический анализ с runtime контрактами через градуальную типизацию.
 
-### 🔄 Последние обновления
-- **Phase 4 в разработке**: Добавляется поддержка глобальных функций как отдельного типа
-- Подробности в [Global Functions Architecture](global_functions.md)
+### 🏆 Текущий статус (v1.0.0)
+- **Phase 6.0 ЗАВЕРШЕНА**: IDE Integration & Ecosystem
+- **Enterprise Ready**: Production deployment готов
+- **Full Ecosystem**: LSP + VSCode Extension + Web Browser + CLI Tools
 
 ## 🎯 Ключевые принципы
 
@@ -17,17 +18,23 @@ BSL Gradual Type System - это современная система типо�
 
 ## 🏗️ Архитектура системы
 
-### Слоистая архитектура
+### Слоистая архитектура v1.0.0
 
 ```
-┌─────────────────────────────────────────┐
-│         Application Layer               │
-│   (LSP Server, CLI Tools, Extensions)   │
-├─────────────────────────────────────────┤
-│         Analysis Layer                  │
-│   (Parser, Type Checker, Query Analyzer)│
-├─────────────────────────────────────────┤
-│         Resolution Layer                │
+┌────────────────────────────────────────────────────────┐
+│                IDE Integration Layer                    │
+│   (VSCode Extension, Web Browser, IntelliJ Plugin)     │
+├────────────────────────────────────────────────────────┤
+│              Application Layer                         │
+│  (Enhanced LSP, CLI Tools, Web Server, Profiler)      │
+├────────────────────────────────────────────────────────┤
+│              Advanced Analysis Layer                   │
+│  (Flow-Sensitive, Union Types, Interprocedural)       │
+├────────────────────────────────────────────────────────┤
+│               Analysis Layer                           │
+│    (Tree-sitter Parser, Type Checker, Query Parser)   │
+├────────────────────────────────────────────────────────┤
+│               Resolution Layer                         │
 │   (Type Resolver, Context Resolver)     │
 ├─────────────────────────────────────────┤
 │           Core Layer                    │

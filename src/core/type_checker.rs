@@ -68,6 +68,7 @@ pub struct TypeChecker {
     current_line: usize,
     flow_analyzer: Option<FlowSensitiveAnalyzer>,
     interprocedural_analyzer: Option<InterproceduralAnalyzer>,
+    #[allow(dead_code)]
     cache_manager: Option<AnalysisCacheManager>,
 }
 

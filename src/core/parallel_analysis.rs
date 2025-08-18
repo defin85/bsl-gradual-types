@@ -10,7 +10,7 @@ use anyhow::Result;
 use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 
-use crate::parser::common::{Parser, ParserFactory};
+use crate::parser::common::ParserFactory;
 use crate::core::type_checker::{TypeChecker, TypeContext, TypeDiagnostic};
 use crate::core::analysis_cache::AnalysisCacheManager;
 

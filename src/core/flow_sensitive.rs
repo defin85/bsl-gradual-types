@@ -95,6 +95,7 @@ impl FlowSensitiveAnalyzer {
     }
     
     /// Получить мутабельную ссылку на текущее состояние
+    #[allow(dead_code)]
     fn current_state_mut(&mut self) -> &mut FlowState {
         &mut self.states[self.current_state]
     }
@@ -313,6 +314,7 @@ impl FlowSensitiveAnalyzer {
     }
     
     /// Проверить равенство типов
+    #[allow(dead_code)]
     fn types_equal(&self, type1: &TypeResolution, type2: &TypeResolution) -> bool {
         // Упрощенная проверка по результату разрешения
         type1.result == type2.result

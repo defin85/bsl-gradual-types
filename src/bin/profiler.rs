@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     
     match cli.command {
-        Commands::Benchmark { iterations, output } => {
+        Commands::Benchmark { iterations: _, output } => {
             println!("{}", "🔍 Запуск полного набора бенчмарков...".cyan().bold());
             
             let report = BenchmarkSuite::run_full_benchmark_suite();

@@ -135,6 +135,7 @@ pub struct AnalysisCacheManager {
     /// Максимальный размер memory кеша
     max_memory_entries: usize,
     /// Версия анализатора для кеша
+    #[allow(dead_code)]
     analyzer_version: String,
     /// Статистика использования кеша
     stats: CacheStats,

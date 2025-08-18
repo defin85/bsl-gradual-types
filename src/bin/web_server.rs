@@ -43,7 +43,8 @@ struct AppState {
     type_context: Arc<RwLock<Option<TypeContext>>>,
     /// Platform resolver
     platform_resolver: Arc<RwLock<PlatformTypeResolver>>,
-    /// Кеш для быстрого поиска
+    /// Кеш для быстрого поиска (TODO: реализовать)
+    #[allow(dead_code)]
     search_cache: Arc<RwLock<HashMap<String, Vec<SearchResult>>>>,
 }
 
@@ -370,7 +371,7 @@ async fn handle_get_type_details(
 }
 
 /// Получение деталей типа
-async fn get_type_details(state: &AppState, type_name: &str) -> TypeDetails {
+async fn get_type_details(_state: &AppState, type_name: &str) -> TypeDetails {
     // TODO: Реализовать получение детальной информации о типе
     TypeDetails {
         name: type_name.to_string(),
@@ -459,7 +460,7 @@ struct DiagnosticInfo {
 /// Обработчик анализа кода
 async fn handle_analyze_code(
     request: AnalyzeRequest,
-    state: AppState,
+    _state: AppState,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let result = analyze_code_snippet(&request.code, &request.filename).await;
     Ok(warp::reply::json(&result))

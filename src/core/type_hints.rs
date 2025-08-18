@@ -659,6 +659,7 @@ impl SemanticTokensProvider {
     }
     
     /// Кодировать токены в формат LSP
+    #[allow(dead_code)]
     fn encode_tokens(&self, tokens: Vec<SemanticToken>) -> Vec<u32> {
         let mut encoded = Vec::new();
         

@@ -3,6 +3,9 @@
 //! Этот модуль предоставляет автоматические исправления и улучшения кода
 //! на основе результатов анализа типов.
 
+#![allow(unused_variables)]
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 use crate::core::types::{TypeResolution, ResolutionResult, ConcreteType, Certainty};
@@ -477,7 +480,7 @@ impl RefactoringProvider {
         uri: &str,
         range: Range,
         type_context: &TypeContext,
-        program: &Program,
+        _program: &Program,
     ) -> Vec<CodeActionOrCommand> {
         let mut actions = Vec::new();
         
@@ -589,6 +592,7 @@ impl RefactoringProvider {
 /// Интеграция code actions в LSP сервер
 pub struct LSPCodeActionIntegration {
     provider: CodeActionProvider,
+    #[allow(dead_code)]
     refactoring_provider: RefactoringProvider,
 }
 

@@ -286,6 +286,7 @@ static mut GLOBAL_PROFILER: Option<PerformanceProfiler> = None;
 static PROFILER_INIT: std::sync::Once = std::sync::Once::new();
 
 /// Получить глобальный профайлер
+#[allow(static_mut_refs)]
 pub fn global_profiler() -> &'static mut PerformanceProfiler {
     unsafe {
         PROFILER_INIT.call_once(|| {

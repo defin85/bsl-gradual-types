@@ -12,3 +12,6 @@ pub mod dependency_graph;
 pub mod type_checker;
 pub mod standard_types;
 pub mod type_narrowing;
+pub mod flow_sensitive;
+pub mod union_types;
+pub mod interprocedural;

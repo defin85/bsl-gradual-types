@@ -14,6 +14,8 @@ use crate::core::standard_types::{
 };
 use crate::parser::graph_builder::DependencyGraphBuilder;
 use crate::core::type_narrowing::TypeNarrower;
+use crate::core::flow_sensitive::FlowSensitiveAnalyzer;
+use crate::core::interprocedural::{CallGraph, InterproceduralAnalyzer};
 
 /// Диагностическое сообщение о проблеме с типами
 #[derive(Debug, Clone)]
@@ -62,6 +64,8 @@ pub struct TypeChecker {
     dependency_graph: Option<TypeDependencyGraph>,
     current_file: String,
     current_line: usize,
+    flow_analyzer: Option<FlowSensitiveAnalyzer>,
+    interprocedural_analyzer: Option<InterproceduralAnalyzer>,
 }
 
 impl TypeChecker {
@@ -78,6 +82,8 @@ impl TypeChecker {
             dependency_graph: None,
             current_file: file_name,
             current_line: 1,
+            flow_analyzer: None,
+            interprocedural_analyzer: None,
         }
     }
     
@@ -87,8 +93,34 @@ impl TypeChecker {
         let builder = DependencyGraphBuilder::new(self.current_file.clone());
         self.dependency_graph = Some(builder.build(program));
         
-        // Затем анализируем типы
+        // Инициализируем межпроцедурный анализатор
+        let call_graph = CallGraph::build_from_program(program);
+        self.interprocedural_analyzer = Some(InterproceduralAnalyzer::new(call_graph, self.context.clone()));
+        
+        // Проводим межпроцедурный анализ
+        if let Some(analyzer) = &mut self.interprocedural_analyzer {
+            analyzer.analyze_all_functions();
+            analyzer.update_type_context();
+            
+            // Обновляем наш контекст функциями из межпроцедурного анализа
+            for (func_name, _signature) in analyzer.get_analyzed_functions() {
+                if let Some(sig) = analyzer.get_function_signature(func_name) {
+                    self.context.functions.insert(func_name.clone(), sig);
+                }
+            }
+        }
+        
+        // Инициализируем flow-sensitive анализатор
+        self.flow_analyzer = Some(FlowSensitiveAnalyzer::new(self.context.clone()));
+        
+        // Затем анализируем типы с улучшенным контекстом
         self.visit_program(program);
+        
+        // Обновляем контекст из flow analyzer
+        if let Some(analyzer) = &self.flow_analyzer {
+            let final_state = analyzer.get_final_state();
+            self.context.variables = final_state.variable_types.clone();
+        }
         
         (self.context, self.diagnostics)
     }
@@ -459,22 +491,53 @@ impl AstVisitor for TypeChecker {
     }
     
     fn visit_assignment(&mut self, target: &Expression, value: &Expression) {
-        let value_type = self.infer_expression_type(value);
-        
         if let Expression::Identifier(var_name) = target {
-            // Проверяем, была ли переменная объявлена
-            if let Some(existing_type) = self.context.variables.get(var_name) {
-                // Проверяем совместимость типов
-                if !self.types_compatible(existing_type, &value_type) {
-                    self.add_diagnostic(
-                        DiagnosticSeverity::Warning,
-                        format!("Несовместимое присваивание переменной '{}'", var_name),
-                    );
-                }
-            }
+            // Используем flow-sensitive анализатор
+            let use_flow_analyzer = self.flow_analyzer.is_some();
             
-            // Обновляем тип переменной
-            self.context.variables.insert(var_name.clone(), value_type);
+            if use_flow_analyzer {
+                // Сначала анализируем присваивание
+                if let Some(analyzer) = &mut self.flow_analyzer {
+                    analyzer.analyze_assignment(target, value);
+                }
+                
+                // Затем обновляем локальный контекст
+                let (new_type, existing_type) = if let Some(analyzer) = &self.flow_analyzer {
+                    let new_type = analyzer.get_variable_type(var_name).cloned();
+                    let existing_type = self.context.variables.get(var_name).cloned();
+                    (new_type, existing_type)
+                } else {
+                    (None, None)
+                };
+                
+                if let Some(new_type) = new_type {
+                    // Проверяем совместимость типов
+                    if let Some(existing) = existing_type {
+                        if !self.types_compatible(&existing, &new_type) {
+                            self.add_diagnostic(
+                                DiagnosticSeverity::Warning,
+                                format!("Несовместимое присваивание переменной '{}'", var_name),
+                            );
+                        }
+                    }
+                    
+                    self.context.variables.insert(var_name.clone(), new_type);
+                }
+            } else {
+                // Fallback к старому поведению
+                let value_type = self.infer_expression_type(value);
+                
+                if let Some(existing_type) = self.context.variables.get(var_name) {
+                    if !self.types_compatible(existing_type, &value_type) {
+                        self.add_diagnostic(
+                            DiagnosticSeverity::Warning,
+                            format!("Несовместимое присваивание переменной '{}'", var_name),
+                        );
+                    }
+                }
+                
+                self.context.variables.insert(var_name.clone(), value_type);
+            }
         }
         
         self.current_line += 1;
@@ -490,69 +553,83 @@ impl AstVisitor for TypeChecker {
             );
         }
         
-        // Анализируем условие для type narrowing
-        let mut narrower = TypeNarrower::new(self.context.clone());
-        let refinements = narrower.analyze_condition(condition);
-        
-        // Сохраняем текущий контекст
-        let original_context = self.context.clone();
-        
-        // Применяем уточнения для then-ветки
-        if !refinements.is_empty() {
-            let refined_context = narrower.apply_refinements_to_context(&refinements);
-            self.context = refined_context;
-        }
-        
-        // Анализируем then-ветку с уточнёнными типами
-        for stmt in then_branch {
-            self.visit_statement(stmt);
-        }
-        
-        // Восстанавливаем контекст для else_if веток
-        self.context = original_context.clone();
-        
-        for (cond, branch) in else_if_branches {
-            let cond_type = self.infer_expression_type(cond);
-            if !is_boolean(&cond_type) && !matches!(cond_type.certainty, Certainty::Unknown) {
-                self.add_diagnostic(
-                    DiagnosticSeverity::Warning,
-                    "Условие должно быть булевым".to_string(),
-                );
+        // Используем flow-sensitive анализатор для условий
+        if let Some(analyzer) = &mut self.flow_analyzer {
+            // Конвертируем else_if_branches в простую else ветку для упрощения
+            // TODO: Поддержка else_if в будущем
+            let simple_else_branch: Option<&[Statement]> = if else_if_branches.is_empty() {
+                else_branch.map(|v| v.as_slice())
+            } else {
+                // Пока игнорируем else_if для простоты
+                None
+            };
+            
+            analyzer.analyze_conditional(condition, then_branch, simple_else_branch);
+            
+            // Обновляем контекст из анализатора
+            let final_state = analyzer.get_final_state();
+            for (var_name, var_type) in &final_state.variable_types {
+                self.context.variables.insert(var_name.clone(), var_type.clone());
             }
-            
-            // Type narrowing для else_if условий
+        } else {
+            // Fallback к старому поведению с type narrowing
             let mut narrower = TypeNarrower::new(self.context.clone());
-            let refinements = narrower.analyze_condition(cond);
+            let refinements = narrower.analyze_condition(condition);
+            let original_context = self.context.clone();
             
+            // Then branch
             if !refinements.is_empty() {
                 let refined_context = narrower.apply_refinements_to_context(&refinements);
                 self.context = refined_context;
             }
             
-            for stmt in branch {
+            for stmt in then_branch {
                 self.visit_statement(stmt);
             }
             
-            // Восстанавливаем контекст
             self.context = original_context.clone();
-        }
-        
-        // Для else-ветки применяем инвертированные уточнения
-        if let Some(branch) = else_branch {
-            if !refinements.is_empty() {
+            
+            // Else_if branches
+            for (cond, branch) in else_if_branches {
+                let cond_type = self.infer_expression_type(cond);
+                if !is_boolean(&cond_type) && !matches!(cond_type.certainty, Certainty::Unknown) {
+                    self.add_diagnostic(
+                        DiagnosticSeverity::Warning,
+                        "Условие должно быть булевым".to_string(),
+                    );
+                }
+                
                 let mut narrower = TypeNarrower::new(self.context.clone());
-                let inverted = narrower.invert_refinements(&refinements);
-                let refined_context = narrower.apply_refinements_to_context(&inverted);
-                self.context = refined_context;
+                let refinements = narrower.analyze_condition(cond);
+                
+                if !refinements.is_empty() {
+                    let refined_context = narrower.apply_refinements_to_context(&refinements);
+                    self.context = refined_context;
+                }
+                
+                for stmt in branch {
+                    self.visit_statement(stmt);
+                }
+                
+                self.context = original_context.clone();
             }
             
-            for stmt in branch {
-                self.visit_statement(stmt);
+            // Else branch
+            if let Some(branch) = else_branch {
+                if !refinements.is_empty() {
+                    let mut narrower = TypeNarrower::new(self.context.clone());
+                    let inverted = narrower.invert_refinements(&refinements);
+                    let refined_context = narrower.apply_refinements_to_context(&inverted);
+                    self.context = refined_context;
+                }
+                
+                for stmt in branch {
+                    self.visit_statement(stmt);
+                }
             }
+            
+            self.context = original_context;
         }
-        
-        // Восстанавливаем исходный контекст после всего if-statement
-        self.context = original_context;
         
         self.current_line += 1;
     }

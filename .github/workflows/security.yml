@@ -1,0 +1,91 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  schedule:
+    # Запускаем каждую неделю в понедельник в 9:00 UTC
+    - cron: '0 9 * * 1'
+
+jobs:
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-security-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Install security tools
+      run: |
+        cargo install cargo-audit
+        cargo install cargo-deny
+        
+    - name: Run cargo audit
+      run: cargo audit
+      
+    - name: Run cargo deny
+      run: cargo deny check
+      
+    - name: Check for known security issues
+      run: |
+        # Проверяем известные проблемы безопасности в зависимостях
+        cargo audit --json | jq '.vulnerabilities | length' | (read count; if [ "$count" != "0" ]; then exit 1; fi)
+        
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Dependency Review
+      uses: actions/dependency-review-action@v4
+      with:
+        config-file: '.github/dependency-review-config.yml'
+        
+  supply-chain:
+    name: Supply Chain Security
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Generate Software Bill of Materials (SBOM)
+      run: |
+        cargo install cargo-cyclonedx
+        cargo cyclonedx --format json --output sbom.json
+        
+    - name: Upload SBOM
+      uses: actions/upload-artifact@v4
+      with:
+        name: software-bill-of-materials
+        path: sbom.json
+        
+    - name: Sign SBOM (if secrets available)
+      if: ${{ secrets.SIGNING_KEY != '' }}
+      run: |
+        # TODO: Добавить подписание SBOM
+        echo "SBOM signing not implemented yet"

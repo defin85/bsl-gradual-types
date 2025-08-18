@@ -17,3 +17,8 @@ pub mod union_types;
 pub mod interprocedural;
 pub mod lsp_enhanced;
 pub mod performance;
+pub mod analysis_cache;
+pub mod parallel_analysis;
+pub mod memory_optimization;
+pub mod code_actions;
+pub mod type_hints;

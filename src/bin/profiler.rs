@@ -6,6 +6,7 @@ use colored::*;
 use std::path::PathBuf;
 
 use bsl_gradual_types::core::performance::{BenchmarkSuite, PerformanceOptimizer, global_profiler};
+use bsl_gradual_types::core::parallel_analysis::{ParallelAnalyzer, ParallelAnalysisConfig, ParallelAnalysisCLI};
 use bsl_gradual_types::parser::common::ParserFactory;
 
 #[derive(Parser)]
@@ -60,6 +61,24 @@ enum Commands {
     Analyze {
         /// JSON файл с результатами профилирования
         report: PathBuf,
+    },
+    
+    /// Параллельный анализ проекта 1С
+    Project {
+        /// Путь к корню проекта 1С
+        path: PathBuf,
+        
+        /// Количество потоков (по умолчанию = CPU cores)
+        #[arg(short, long)]
+        threads: Option<usize>,
+        
+        /// Показать бенчмарк последовательный vs параллельный
+        #[arg(short, long)]
+        benchmark: bool,
+        
+        /// Отключить кеширование
+        #[arg(long)]
+        no_cache: bool,
     },
 }
 
@@ -241,6 +260,36 @@ async fn main() -> Result<()> {
                         i + 1, rec.component, rec.reason, rec.strategy);
                 }
             }
+        }
+        
+        Commands::Project { path, threads, benchmark, no_cache } => {
+            println!("{}", format!("🚀 Параллельный анализ проекта: {}", path.display()).cyan().bold());
+            
+            let config = ParallelAnalysisConfig {
+                num_threads: threads,
+                use_cache: !no_cache,
+                show_progress: true,
+                ..Default::default()
+            };
+            
+            if benchmark {
+                // Запускаем бенчмарк
+                let analyzer = ParallelAnalyzer::new(config.clone())?;
+                let files = ParallelAnalyzer::find_bsl_files(&path)?;
+                
+                if files.len() < 2 {
+                    println!("⚠️ Недостаточно файлов для бенчмарка (нужно минимум 2)");
+                } else {
+                    let files_sample = files.into_iter().take(10).collect(); // Берем первые 10 файлов
+                    println!("📊 Бенчмарк параллельного vs последовательного анализа...");
+                    
+                    let benchmark_result = analyzer.benchmark_parallel_vs_sequential(files_sample)?;
+                    println!("\n{}", benchmark_result.format_results());
+                }
+            }
+            
+            // Обычный анализ проекта
+            ParallelAnalysisCLI::run_project_analysis(path, config)?;
         }
     }
     

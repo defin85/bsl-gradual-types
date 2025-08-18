@@ -1,6 +1,7 @@
 //! Базовый type checker для BSL
 
 use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
 use crate::parser::ast::*;
 use crate::parser::visitor::AstVisitor;
 use crate::core::types::{
@@ -16,6 +17,7 @@ use crate::parser::graph_builder::DependencyGraphBuilder;
 use crate::core::type_narrowing::TypeNarrower;
 use crate::core::flow_sensitive::FlowSensitiveAnalyzer;
 use crate::core::interprocedural::{CallGraph, InterproceduralAnalyzer};
+use crate::core::analysis_cache::{AnalysisCacheManager, CacheKey, CachedInterproceduralAnalyzer};
 
 /// Диагностическое сообщение о проблеме с типами
 #[derive(Debug, Clone)]
@@ -50,7 +52,7 @@ pub struct TypeContext {
 }
 
 /// Сигнатура функции
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionSignature {
     pub params: Vec<(String, TypeResolution)>,
     pub return_type: TypeResolution,
@@ -66,6 +68,7 @@ pub struct TypeChecker {
     current_line: usize,
     flow_analyzer: Option<FlowSensitiveAnalyzer>,
     interprocedural_analyzer: Option<InterproceduralAnalyzer>,
+    cache_manager: Option<AnalysisCacheManager>,
 }
 
 impl TypeChecker {
@@ -84,7 +87,29 @@ impl TypeChecker {
             current_line: 1,
             flow_analyzer: None,
             interprocedural_analyzer: None,
+            cache_manager: None,
         }
+    }
+    
+    /// Создание type checker с кешированием
+    pub fn with_cache<P: AsRef<std::path::Path>>(file_name: String, cache_dir: P) -> anyhow::Result<Self> {
+        let cache_manager = AnalysisCacheManager::new(cache_dir, env!("CARGO_PKG_VERSION"))?;
+        
+        Ok(Self {
+            context: TypeContext {
+                variables: HashMap::new(),
+                functions: HashMap::new(),
+                current_scope: Scope::Module(file_name.clone()),
+                scope_stack: Vec::new(),
+            },
+            diagnostics: Vec::new(),
+            dependency_graph: None,
+            current_file: file_name,
+            current_line: 1,
+            flow_analyzer: None,
+            interprocedural_analyzer: None,
+            cache_manager: Some(cache_manager),
+        })
     }
     
     /// Проверка типов в программе

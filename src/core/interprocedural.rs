@@ -37,11 +37,11 @@ pub struct CallLocation {
 #[derive(Debug)]
 pub struct CallGraph {
     /// Функции/процедуры в программе
-    functions: HashMap<String, FunctionInfo>,
+    pub functions: HashMap<String, FunctionInfo>,
     /// Граф вызовов: функция -> список вызываемых функций
-    call_edges: HashMap<String, Vec<CallSite>>,
+    pub call_edges: HashMap<String, Vec<CallSite>>,
     /// Обратный граф: функция -> список функций которые её вызывают
-    callers: HashMap<String, Vec<String>>,
+    pub callers: HashMap<String, Vec<String>>,
 }
 
 /// Информация о функции/процедуре
@@ -76,7 +76,7 @@ pub struct ParameterInfo {
 
 /// Межпроцедурный анализатор типов
 pub struct InterproceduralAnalyzer {
-    call_graph: CallGraph,
+    pub call_graph: CallGraph,
     type_context: TypeContext,
     /// Кеш результатов анализа функций
     function_results: HashMap<String, TypeResolution>,

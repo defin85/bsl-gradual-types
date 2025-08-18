@@ -1,0 +1,307 @@
+name: BSL Gradual Type System CI
+
+on:
+  push:
+    branches: [ master, develop ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        rust: [stable, beta]
+        exclude:
+          # Исключаем beta на macOS для экономии CI времени
+          - os: macos-latest
+            rust: beta
+            
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+        components: rustfmt, clippy
+        
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ matrix.rust }}-
+          ${{ runner.os }}-cargo-
+          
+    - name: Install tree-sitter-bsl (Linux/macOS)
+      if: runner.os != 'Windows'
+      run: |
+        git clone https://github.com/alkoleft/tree-sitter-bsl
+        cd tree-sitter-bsl
+        npm install
+        npm run build
+        
+    - name: Install tree-sitter-bsl (Windows) 
+      if: runner.os == 'Windows'
+      run: |
+        git clone https://github.com/alkoleft/tree-sitter-bsl
+        cd tree-sitter-bsl
+        npm install
+        npm run build
+      shell: powershell
+      
+    - name: Check code formatting
+      run: cargo fmt --all -- --check
+      
+    - name: Run Clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      
+    - name: Build project
+      run: cargo build --verbose --all-features
+      
+    - name: Run tests
+      run: cargo test --verbose --all-features
+      
+    - name: Run integration tests
+      run: cargo test --test "*" --verbose
+      
+    - name: Test examples
+      run: |
+        cargo run --example visualize_parser_v3 --quiet
+        cargo run --example demo_tree_sitter --quiet
+        
+    - name: Performance benchmarks
+      run: cargo run --bin bsl-profiler benchmark --iterations 5
+      
+    - name: Test LSP server startup
+      run: timeout 10s cargo run --bin lsp-server || true
+      
+  lint:
+    name: Linting and Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+        
+    - name: Check code formatting
+      run: cargo fmt --all -- --check
+      
+    - name: Run Clippy with strict settings
+      run: cargo clippy --all-targets --all-features -- -D warnings -D clippy::all
+      
+    - name: Check for security vulnerabilities
+      run: |
+        cargo install cargo-audit
+        cargo audit
+        
+    - name: Check for outdated dependencies
+      run: |
+        cargo install cargo-outdated
+        cargo outdated --exit-code 1
+      continue-on-error: true
+      
+  documentation:
+    name: Documentation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Generate documentation
+      run: cargo doc --all-features --no-deps
+      
+    - name: Check documentation coverage
+      run: |
+        cargo install cargo-doc-coverage
+        cargo doc-coverage --output-format lcov --output-path ./lcov.info
+        
+    - name: Upload documentation coverage
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./lcov.info
+        flags: docs
+        
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: llvm-tools-preview
+        
+    - name: Install cargo-llvm-cov
+      run: cargo install cargo-llvm-cov
+      
+    - name: Generate coverage report
+      run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+      
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./lcov.info
+        flags: unittests
+        
+  performance:
+    name: Performance Regression Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-perf-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Run performance benchmarks
+      run: |
+        cargo run --bin bsl-profiler benchmark --iterations 10 --output benchmark_results.json
+        
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-results
+        path: benchmark_results.json
+        
+    - name: Compare with baseline (if available)
+      run: |
+        if [ -f "baseline_benchmark.json" ]; then
+          cargo run --bin bsl-profiler analyze benchmark_results.json
+        else
+          echo "No baseline available for comparison"
+        fi
+        
+  type-check-examples:
+    name: Type Check Example Projects
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Create example BSL project
+      run: |
+        mkdir -p test_project/src/CommonModules
+        cat > test_project/src/CommonModules/TestModule.bsl << 'EOF'
+        Функция ТестоваяФункция(параметр1, параметр2)
+            Если параметр1 > 0 Тогда
+                результат = параметр1 + параметр2;
+                Возврат Строка(результат);
+            Иначе
+                Возврат "ошибка";
+            КонецЕсли;
+        КонецФункции
+        
+        Процедура ТестоваяПроцедура()
+            Для сч = 1 По 10 Цикл
+                значение = ТестоваяФункция(сч, сч * 2);
+                Сообщить(значение);
+            КонецЦикла;
+        КонецПроцедуры
+        EOF
+        
+    - name: Run type checking on example project
+      run: |
+        cargo run --bin bsl-profiler project test_project --threads 2
+        
+    - name: Validate no critical type errors
+      run: |
+        # Проверяем что нет критических ошибок типов
+        cargo run --bin type-check -- --file test_project/src/CommonModules/TestModule.bsl
+        
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [test, lint, documentation, coverage, performance]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Build release binaries
+      run: |
+        cargo build --release --all-targets
+        
+    - name: Create release archive
+      run: |
+        mkdir -p release/bin
+        cp target/release/bsl-analyzer release/bin/
+        cp target/release/lsp-server release/bin/
+        cp target/release/type-check release/bin/
+        cp target/release/bsl-profiler release/bin/
+        cp target/release/build-index release/bin/
+        
+        tar -czf bsl-gradual-types-linux-x64.tar.gz -C release .
+        
+    - name: Upload release artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-binaries
+        path: bsl-gradual-types-linux-x64.tar.gz
+        
+    - name: Generate changelog
+      run: |
+        echo "# Changelog" > CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "## Features" >> CHANGELOG.md
+        git log --oneline --grep="feat" HEAD~10..HEAD >> CHANGELOG.md || true
+        echo "" >> CHANGELOG.md
+        echo "## Fixes" >> CHANGELOG.md  
+        git log --oneline --grep="fix" HEAD~10..HEAD >> CHANGELOG.md || true
+        
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      if: github.ref == 'refs/heads/master'
+      with:
+        tag_name: v${{ github.run_number }}
+        name: BSL Gradual Types v${{ github.run_number }}
+        body_path: CHANGELOG.md
+        files: bsl-gradual-types-linux-x64.tar.gz
+        draft: false
+        prerelease: false

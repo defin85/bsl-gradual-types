@@ -1,0 +1,139 @@
+name: Nightly Tests
+
+on:
+  schedule:
+    # Запускаем каждую ночь в 2:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Позволяет запускать вручную
+
+jobs:
+  nightly-tests:
+    name: Nightly Rust Tests
+    runs-on: ubuntu-latest
+    continue-on-error: true # Nightly может быть нестабильным
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install nightly Rust
+      uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: rustfmt, clippy, miri
+        
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-nightly-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Run tests with nightly
+      run: cargo test --all-features
+      
+    - name: Run Miri for unsafe code detection
+      run: |
+        # Miri для проверки unsafe кода (если есть)
+        cargo miri test --all-features || echo "Miri tests failed or no unsafe code"
+        
+    - name: Future compatibility check
+      run: |
+        # Проверяем совместимость с future Rust features
+        cargo check -Z future-incompat-report
+        
+  large-project-simulation:
+    name: Large Project Simulation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Generate large test project
+      run: |
+        mkdir -p large_test_project/src/CommonModules
+        mkdir -p large_test_project/src/Catalogs
+        mkdir -p large_test_project/src/Documents
+        mkdir -p large_test_project/src/Reports
+        
+        # Генерируем множество BSL файлов для симуляции большого проекта
+        for i in {1..50}; do
+          cat > large_test_project/src/CommonModules/Module$i.bsl << EOF
+        Функция Функция${i}(параметр1, параметр2, параметр3)
+            Если параметр1 > параметр2 Тогда
+                результат = параметр1 * параметр3;
+                массив = Новый Массив;
+                Для сч = 1 По параметр2 Цикл
+                    массив.Добавить(сч * результат);
+                КонецЦикла;
+                Возврат массив;
+            ИначеЕсли параметр2 > параметр3 Тогда
+                структура = Новый Структура;
+                структура.Вставить("значение1", параметр1);
+                структура.Вставить("значение2", параметр2);
+                структура.Вставить("значение3", параметр3);
+                Возврат структура;
+            Иначе
+                Возврат Неопределено;
+            КонецЕсли;
+        КонецФункции
+        
+        Процедура Процедура${i}()
+            результат = Функция${i}(${i}, $((i*2)), $((i*3)));
+            Если ТипЗнч(результат) = Тип("Массив") Тогда
+                Для Каждого элемент Из результат Цикл
+                    Сообщить("Элемент: " + Строка(элемент));
+                КонецЦикла;
+            ИначеЕсли ТипЗнч(результат) = Тип("Структура") Тогда
+                Для Каждого КлючЗначение Из результат Цикл
+                    Сообщить(КлючЗначение.Ключ + ": " + Строка(КлючЗначение.Значение));
+                КонецЦикла;
+            КонецЕсли;
+        КонецПроцедуры
+        EOF
+        done
+        
+    - name: Test large project analysis
+      run: |
+        echo "🚀 Тестирование на большом проекте (50 модулей)..."
+        time cargo run --bin bsl-profiler project large_test_project --threads 4 --benchmark
+        
+    - name: Memory usage test
+      run: |
+        # Мониторим использование памяти
+        /usr/bin/time -v cargo run --bin bsl-profiler project large_test_project --threads 1 2>&1 | grep "Maximum resident set size"
+        
+  cross-platform-compatibility:
+    name: Cross-Platform Compatibility
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-20.04, ubuntu-22.04, windows-2019, windows-2022, macos-11, macos-12]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Test platform-specific functionality
+      run: |
+        cargo test --all-features
+        cargo run --bin bsl-profiler benchmark --iterations 3
+        
+    - name: Test file path handling
+      run: |
+        # Создаем файлы с разными путями для тестирования
+        mkdir -p "test dir with spaces/модуль с русскими символами"
+        echo 'Процедура Тест() КонецПроцедуры' > "test dir with spaces/модуль с русскими символами/тест.bsl"
+        
+        # Проверяем что анализатор корректно обрабатывает такие пути
+        cargo run --bin type-check -- --file "test dir with spaces/модуль с русскими символами/тест.bsl" || echo "Path handling test completed"

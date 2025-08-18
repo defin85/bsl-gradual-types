@@ -38,7 +38,8 @@
       "Bash(git clone:*)",
       "Bash(del \"C:\\1CProject\\bsl-gradual-types\\src\\parser\\tree_sitter_adapter_v2.rs\")",
       "Bash(del examplestest_parser_factory.rs)",
-      "Bash(del nul)"
+      "Bash(del nul)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

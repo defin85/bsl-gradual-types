@@ -15,3 +15,5 @@ pub mod type_narrowing;
 pub mod flow_sensitive;
 pub mod union_types;
 pub mod interprocedural;
+pub mod lsp_enhanced;
+pub mod performance;

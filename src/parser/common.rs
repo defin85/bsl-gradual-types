@@ -4,7 +4,7 @@ use crate::parser::ast::Program;
 use anyhow::Result;
 
 /// Общий trait для всех парсеров BSL
-pub trait Parser {
+pub trait Parser: Send + Sync {
     /// Парсить исходный код и вернуть AST
     fn parse(&mut self, source: &str) -> Result<Program>;
     

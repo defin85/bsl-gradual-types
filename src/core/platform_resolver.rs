@@ -23,6 +23,8 @@ pub enum CompletionKind {
     Method,
     Property,
     GlobalFunction,
+    Variable,
+    Function,
 }
 
 /// Resolver that knows about platform types and configuration

@@ -51,6 +51,7 @@ async-trait = "0.1"
 # LSP support
 tower-lsp = "0.20"
 lsp-types = "0.95"
+url = "2.5"
 
 # HTML parsing (for syntax helper)
 scraper = "0.18"
@@ -95,6 +96,10 @@ path = "src/bin/lsp_server.rs"
 [[bin]]
 name = "type-check"
 path = "src/bin/type_check.rs"
+
+[[bin]]
+name = "bsl-profiler"
+path = "src/bin/profiler.rs"
 
 # Examples
 [[example]]

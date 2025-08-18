@@ -187,6 +187,8 @@ fn show_completions(resolver: &PlatformTypeResolver, prefix: &str) {
             CompletionKind::Method => "🔧 Methods",
             CompletionKind::Property => "📌 Properties",
             CompletionKind::GlobalFunction => "⚡ Functions",
+            CompletionKind::Variable => "📦 Variables",
+            CompletionKind::Function => "🔧 Functions",
         };
         
         println!("\n{}:", kind_name);

@@ -2,6 +2,7 @@
 
 use bsl_gradual_types::parser::tree_sitter_adapter::TreeSitterAdapter;
 use bsl_gradual_types::parser::ast::Statement;
+use bsl_gradual_types::parser::common::Parser;
 
 fn main() -> anyhow::Result<()> {
     println!("=== Тестирование циклов tree-sitter-bsl ===\n");

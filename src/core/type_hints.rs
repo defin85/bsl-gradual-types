@@ -3,7 +3,6 @@
 //! Этот модуль предоставляет возможности для отображения типов прямо в коде
 //! через LSP inlay hints и другие механизмы визуализации типов.
 
-use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 use crate::core::types::{TypeResolution, ResolutionResult, ConcreteType, Certainty};
 use crate::core::type_checker::TypeContext;

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 use crate::core::types::{TypeResolution, ResolutionResult, ConcreteType, Certainty};
 use crate::core::type_checker::{TypeContext, TypeDiagnostic, DiagnosticSeverity};
-use crate::parser::ast::{Expression, Statement, Program};
+use crate::parser::ast::Program;
 
 /// Поставщик code actions
 pub struct CodeActionProvider {

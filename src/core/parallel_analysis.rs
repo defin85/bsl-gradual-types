@@ -11,9 +11,7 @@ use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::parser::common::{Parser, ParserFactory};
-use crate::parser::ast::Program;
 use crate::core::type_checker::{TypeChecker, TypeContext, TypeDiagnostic};
-use crate::core::types::TypeResolution;
 use crate::core::analysis_cache::AnalysisCacheManager;
 
 /// Результат анализа одного файла
@@ -356,14 +354,14 @@ impl ParallelAnalyzer {
         
         // Последовательный анализ
         let sequential_start = std::time::Instant::now();
-        let sequential_results: Vec<_> = files_clone.iter()
+        let _sequential_results: Vec<_> = files_clone.iter()
             .map(|path| self.analyze_single_file(path.as_ref()))
             .collect::<Result<Vec<_>>>()?;
         let sequential_time = sequential_start.elapsed();
         
         // Параллельный анализ
         let parallel_start = std::time::Instant::now();
-        let parallel_results: Vec<_> = file_paths.par_iter()
+        let _parallel_results: Vec<_> = file_paths.par_iter()
             .map(|path| self.analyze_single_file(path.as_ref()))
             .collect::<Result<Vec<_>>>()?;
         let parallel_time = parallel_start.elapsed();

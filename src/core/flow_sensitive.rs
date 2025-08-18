@@ -13,8 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use crate::parser::ast::{Statement, Expression, BinaryOp};
 use crate::core::types::{
-    TypeResolution, Certainty, ResolutionResult, ConcreteType,
-    WeightedType, ResolutionSource, ResolutionMetadata
+    TypeResolution, Certainty, ResolutionResult, ConcreteType, ResolutionSource, ResolutionMetadata
 };
 use crate::core::type_checker::TypeContext;
 use crate::core::type_narrowing::TypeNarrower;

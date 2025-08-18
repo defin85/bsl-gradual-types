@@ -17,7 +17,7 @@ use crate::parser::graph_builder::DependencyGraphBuilder;
 use crate::core::type_narrowing::TypeNarrower;
 use crate::core::flow_sensitive::FlowSensitiveAnalyzer;
 use crate::core::interprocedural::{CallGraph, InterproceduralAnalyzer};
-use crate::core::analysis_cache::{AnalysisCacheManager, CacheKey, CachedInterproceduralAnalyzer};
+use crate::core::analysis_cache::AnalysisCacheManager;
 
 /// Диагностическое сообщение о проблеме с типами
 #[derive(Debug, Clone)]

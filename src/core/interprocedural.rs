@@ -514,7 +514,7 @@ impl InterproceduralAnalyzer {
             Expression::Number(_) => self.create_number_type(),
             Expression::Boolean(_) => self.create_boolean_type(),
             
-            Expression::Call { function, args } => {
+            Expression::Call { function, args: _ } => {
                 if let Expression::Identifier(func_name) = &**function {
                     // Если это анализируемая нами функция, получаем её тип
                     if let Some(result_type) = self.function_results.get(func_name) {

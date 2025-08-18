@@ -10,7 +10,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{error, info};
 
 use bsl_gradual_types::core::platform_resolver::{PlatformTypeResolver, CompletionItem as BslCompletion};
-use bsl_gradual_types::core::lsp_enhanced::{DocumentManager, DiagnosticsConverter};
+use bsl_gradual_types::core::lsp_enhanced::DocumentManager;
 
 /// BSL Language Server backend
 struct BslLanguageServer {

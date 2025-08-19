@@ -25,6 +25,14 @@ impl TreeSitterAdapter {
     pub fn new() -> Result<Self> {
         let mut parser = TSParser::new();
         let language = unsafe { tree_sitter_bsl() };
+        
+        // Проверяем, что язык предоставлен (не заглушка)
+        if language.abi_version() == 0 {
+            return Err(anyhow::anyhow!(
+                "Tree-sitter BSL language not available. This is a stub implementation."
+            ));
+        }
+        
         parser.set_language(&language)
             .context("Failed to set BSL language")?;
         

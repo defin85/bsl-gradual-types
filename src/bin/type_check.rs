@@ -23,6 +23,10 @@ struct Args {
     /// Get completions for the expression
     #[arg(long)]
     complete: bool,
+    
+    /// Use Configuration-guided Discovery parser (recommended)
+    #[arg(long)]
+    guided: bool,
 }
 
 fn main() {
@@ -31,11 +35,31 @@ fn main() {
     // Create resolver
     let mut resolver = if let Some(config_path) = args.config {
         println!("Loading configuration from: {}", config_path);
-        match PlatformTypeResolver::with_config(&config_path) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Failed to load config: {}", e);
-                PlatformTypeResolver::new()
+        
+        if args.guided {
+            println!("🚀 Using Configuration-guided Discovery parser");
+            match PlatformTypeResolver::with_guided_config(&config_path) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("❌ Failed to load config with guided discovery: {}", e);
+                    println!("📦 Falling back to legacy XML parser");
+                    match PlatformTypeResolver::with_config(&config_path) {
+                        Ok(r) => r,
+                        Err(e2) => {
+                            eprintln!("❌ Legacy parser also failed: {}", e2);
+                            PlatformTypeResolver::new()
+                        }
+                    }
+                }
+            }
+        } else {
+            println!("📦 Using legacy XML parser (use --guided for better results)");
+            match PlatformTypeResolver::with_config(&config_path) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("❌ Failed to load config: {}", e);
+                    PlatformTypeResolver::new()
+                }
             }
         }
     } else {

@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use crate::adapters::platform_types_v2::PlatformTypesResolverV2;
 use crate::adapters::config_parser_xml::ConfigParserXml;
+use crate::adapters::config_parser_guided_discovery::ConfigurationGuidedParser;
 use super::types::{TypeResolution, Certainty, ResolutionResult, ConcreteType, ResolutionMetadata, ResolutionSource, FacetKind};
 
 /// Completion item with metadata
@@ -37,6 +38,9 @@ pub struct PlatformTypeResolver {
     
     /// Configuration types from XML parser
     config_parser: Option<ConfigParserXml>,
+    
+    /// Configuration-guided Discovery parser
+    guided_parser: Option<ConfigurationGuidedParser>,
     
     /// Cached resolutions
     cache: HashMap<String, TypeResolution>,
@@ -105,6 +109,7 @@ impl PlatformTypeResolver {
             platform_resolver,
             platform_globals,
             config_parser: None,
+            guided_parser: None,
             cache: HashMap::new(),
         }
     }
@@ -125,6 +130,33 @@ impl PlatformTypeResolver {
             if let ResolutionResult::Concrete(ConcreteType::Configuration(config)) = &type_resolution.result {
                 let key = format!("{:?}.{}", config.kind, config.name);
                 resolver.cache.insert(key, type_resolution);
+            }
+        }
+        
+        Ok(resolver)
+    }
+    
+    /// Initialize with configuration using guided discovery
+    pub fn with_guided_config(config_path: &str) -> anyhow::Result<Self> {
+        let mut resolver = Self::new();
+        let mut guided_parser = ConfigurationGuidedParser::new(config_path);
+        
+        println!("🚀 Using Configuration-guided Discovery parser for: {}", config_path);
+        
+        // Parse configuration using guided discovery approach
+        let config_types = guided_parser.parse_with_configuration_guide()?;
+        
+        println!("✅ Loaded {} configuration types using guided discovery", config_types.len());
+        
+        // Store parser for later use
+        resolver.guided_parser = Some(guided_parser);
+        
+        // Cache configuration types
+        for type_resolution in config_types {
+            if let ResolutionResult::Concrete(ConcreteType::Configuration(config)) = &type_resolution.result {
+                let key = format!("{:?}.{}", config.kind, config.name);
+                resolver.cache.insert(key.clone(), type_resolution);
+                println!("📦 Cached configuration type: {}", key);
             }
         }
         

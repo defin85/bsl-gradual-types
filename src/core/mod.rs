@@ -22,3 +22,5 @@ pub mod parallel_analysis;
 pub mod memory_optimization;
 pub mod code_actions;
 pub mod type_hints;
+pub mod type_system_service;
+pub mod unified_type_system;

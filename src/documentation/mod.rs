@@ -20,5 +20,9 @@ pub mod render;
 pub use core::{BslDocumentationSystem, DocumentationNode, TypeDocumentationFull};
 pub use platform::PlatformDocumentationProvider;
 pub use configuration::ConfigurationDocumentationProvider;
-pub use search::{DocumentationSearchEngine, AdvancedSearchQuery, SearchResults};
+pub use search::{
+    DocumentationSearchEngine, AdvancedSearchQuery, SearchResults,
+    SearchFilters, SearchSort, SortField, SortDirection, 
+    SearchPagination, SearchOptions
+};
 pub use render::{RenderEngine, HtmlDocumentationRenderer};

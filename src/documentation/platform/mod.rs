@@ -12,8 +12,7 @@ use super::core::{
 };
 use super::core::statistics::{ProviderStatistics, InitializationStatus};
 use super::core::hierarchy::{
-    TypeDocumentationFull, RootCategoryNode, DocumentationNode,
-    PlatformTypeNode, PlatformTypeSpecific, AvailabilityContext,
+    TypeDocumentationFull, RootCategoryNode, DocumentationNode, AvailabilityContext,
     UiMetadata, MethodDocumentation, PropertyDocumentation, CodeExample
 };
 use super::search::{AdvancedSearchQuery};
@@ -134,7 +133,7 @@ impl PlatformDocumentationProvider {
         use crate::adapters::syntax_helper_parser::SyntaxNode;
         use crate::core::types::{
             TypeResolution, Certainty, ResolutionResult, ConcreteType, 
-            PlatformType, Method, Property, ResolutionSource, ResolutionMetadata
+            PlatformType, ResolutionSource, ResolutionMetadata
         };
         use super::core::hierarchy::DocumentationSourceType;
         
@@ -528,7 +527,7 @@ impl PlatformDocumentationProvider {
     
     /// Конвертировать методы для TypeResolution
     async fn convert_methods(&self, method_names: &[String]) -> Result<Vec<Method>> {
-        use crate::core::types::Parameter;
+        
         
         // TODO: Получить полную информацию о методах из парсера
         Ok(method_names.iter().map(|name| Method {

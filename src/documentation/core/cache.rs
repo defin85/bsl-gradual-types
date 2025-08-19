@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use chrono::{DateTime, Utc};
-use anyhow::Result;
 use serde::{Serialize, Deserialize};
 
 use super::hierarchy::TypeDocumentationFull;

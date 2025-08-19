@@ -873,7 +873,7 @@ impl TypeHierarchy {
     ) -> Result<Self> {
         let start_time = std::time::Instant::now();
         
-        let mut root_categories = Vec::new();
+        let root_categories = Vec::new();
         
         // TODO: Добавляем платформенные типы
         // if let Ok(platform_category) = platform_provider.get_root_category().await {

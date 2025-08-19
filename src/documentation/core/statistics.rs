@@ -1,7 +1,6 @@
 //! Статистика и метрики системы документации
 
-use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
+use serde::Serialize;
 
 /// Статистика провайдера
 #[derive(Debug, Clone, Serialize)]

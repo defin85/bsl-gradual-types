@@ -3,10 +3,8 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use anyhow::Result;
-use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
+use serde::Serialize;
 
-use crate::core::types::{TypeResolution, FacetKind};
 use super::platform::PlatformDocumentationProvider;
 use super::configuration::ConfigurationDocumentationProvider;
 use super::search::{DocumentationSearchEngine, AdvancedSearchQuery, SearchResults};

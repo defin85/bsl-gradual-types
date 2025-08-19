@@ -6,8 +6,7 @@ use anyhow::Result;
 use super::hierarchy::{
     DocumentationNode, TypeDocumentationFull, RootCategoryNode
 };
-use super::statistics::{ProviderStatistics, InitializationStatus};
-use crate::documentation::search::{AdvancedSearchQuery, SearchResults};
+use crate::documentation::search::AdvancedSearchQuery;
 
 /// Базовый трейт для всех провайдеров документации
 #[async_trait]

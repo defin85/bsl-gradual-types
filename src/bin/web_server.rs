@@ -14,6 +14,11 @@ use bsl_gradual_types::core::type_checker::{TypeChecker, TypeContext};
 use bsl_gradual_types::core::types::{TypeResolution, ResolutionResult, ConcreteType};
 use bsl_gradual_types::core::platform_resolver::PlatformTypeResolver;
 use bsl_gradual_types::parser::common::ParserFactory;
+use bsl_gradual_types::documentation::{
+    DocumentationSearchEngine, PlatformDocumentationProvider, ConfigurationDocumentationProvider,
+    AdvancedSearchQuery
+};
+use bsl_gradual_types::documentation::core::{DocumentationProvider, ProviderConfig};
 
 #[derive(Parser)]
 #[command(name = "bsl-web-server")]
@@ -48,6 +53,10 @@ struct AppState {
     search_cache: Arc<RwLock<HashMap<String, Vec<SearchResult>>>>,
     /// Статус загрузки платформенных типов
     loading_status: Arc<RwLock<LoadingStatus>>,
+    /// Поисковая система документации
+    search_engine: Arc<DocumentationSearchEngine>,
+    /// Платформенный провайдер документации
+    platform_provider: Arc<PlatformDocumentationProvider>,
 }
 
 /// Статус загрузки документации
@@ -132,6 +141,26 @@ async fn main() -> Result<()> {
     
     println!("🌐 Starting BSL Type Browser Web Server on port {}", cli.port);
     
+    // Инициализируем поисковую систему и провайдеры
+    println!("🔧 Инициализация поисковой системы...");
+    let search_engine = Arc::new(DocumentationSearchEngine::new());
+    let platform_provider = Arc::new(PlatformDocumentationProvider::new());
+    
+    // Инициализируем платформенный провайдер
+    let config = ProviderConfig::default();
+    if let Err(e) = platform_provider.initialize(&config).await {
+        println!("⚠️ Предупреждение при инициализации провайдера: {}", e);
+        println!("   Система будет работать без справки синтакс-помощника");
+    }
+    
+    // Строим индексы для поиска
+    let config_provider = ConfigurationDocumentationProvider::new();
+    if let Err(e) = search_engine.build_indexes(&*platform_provider, &config_provider).await {
+        println!("⚠️ Предупреждение при построении индексов: {}", e);
+    } else {
+        println!("✅ Индексы поиска построены");
+    }
+    
     // Инициализируем состояние приложения
     let app_state = AppState {
         type_context: Arc::new(RwLock::new(None)),
@@ -142,9 +171,11 @@ async fn main() -> Result<()> {
             progress: 100,
             processed_files: 0,
             total_files: 0,
-            current_operation: "Платформенные типы загружены".to_string(),
+            current_operation: "Поисковая система готова".to_string(),
             errors: 0,
         })),
+        search_engine,
+        platform_provider,
     };
     
     // Если указан проект, анализируем его
@@ -247,6 +278,40 @@ async fn start_web_server(port: u16, app_state: AppState, static_dir: PathBuf) -
                 .and(with_state(app_state.clone()))
                 .and_then(handle_analyze_code)
         )
+        .or(
+            // POST /api/v1/search - новый расширенный поиск
+            warp::path("v1")
+                .and(warp::path("search"))
+                .and(warp::post())
+                .and(warp::body::json())
+                .and(with_state(app_state.clone()))
+                .and_then(handle_advanced_search)
+        )
+        .or(
+            // GET /api/v1/suggestions?q=query - автодополнение
+            warp::path("v1")
+                .and(warp::path("suggestions"))
+                .and(warp::get())
+                .and(warp::query::<SuggestionsQuery>())
+                .and(with_state(app_state.clone()))
+                .and_then(handle_get_suggestions)
+        )
+        .or(
+            // GET /api/v1/search-stats - статистика поиска
+            warp::path("v1")
+                .and(warp::path("search-stats"))
+                .and(warp::get())
+                .and(with_state(app_state.clone()))
+                .and_then(handle_get_search_stats)
+        )
+        .or(
+            // GET /api/v1/categories - список категорий
+            warp::path("v1")
+                .and(warp::path("categories"))
+                .and(warp::get())
+                .and(with_state(app_state.clone()))
+                .and_then(handle_get_categories)
+        )
     ).with(cors);
     
     // Статические файлы
@@ -282,6 +347,44 @@ struct SearchQuery {
     search: Option<String>,
     page: Option<usize>,
     per_page: Option<usize>,
+}
+
+/// Query параметры для автодополнения
+#[derive(Deserialize)]
+struct SuggestionsQuery {
+    q: String,
+    limit: Option<usize>,
+}
+
+/// Ответ API с ошибкой
+#[derive(Serialize)]
+struct ApiError {
+    error: String,
+    code: u16,
+}
+
+/// Ответ для автодополнения
+#[derive(Serialize)]
+struct SuggestionsResponse {
+    suggestions: Vec<String>,
+    query: String,
+    count: usize,
+}
+
+/// Ответ для категорий
+#[derive(Serialize)]
+struct CategoriesResponse {
+    categories: Vec<CategoryInfo>,
+    total_count: usize,
+}
+
+/// Информация о категории
+#[derive(Serialize)]
+struct CategoryInfo {
+    name: String,
+    path: String,
+    types_count: usize,
+    subcategories: usize,
 }
 
 /// Обработчик поиска типов
@@ -563,6 +666,114 @@ async fn analyze_code_snippet(code: &str, filename: &Option<String>) -> AnalyzeR
             }
         }
     }
+}
+
+// === НОВЫЕ API ENDPOINTS ДЛЯ ПОИСКОВОЙ СИСТЕМЫ ===
+
+/// Обработчик расширенного поиска
+async fn handle_advanced_search(
+    query: AdvancedSearchQuery,
+    state: AppState,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    println!("🔍 API поиск: '{}'", query.query);
+    
+    match state.search_engine.search(query).await {
+        Ok(results) => {
+            println!("✅ Найдено {} результатов", results.total_count);
+            Ok(warp::reply::json(&results))
+        }
+        Err(e) => {
+            println!("❌ Ошибка поиска: {}", e);
+            let error = ApiError {
+                error: e.to_string(),
+                code: 500,
+            };
+            Ok(warp::reply::json(&error))
+        }
+    }
+}
+
+/// Обработчик автодополнения
+async fn handle_get_suggestions(
+    query: SuggestionsQuery,
+    state: AppState,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let limit = query.limit.unwrap_or(10);
+    
+    match state.search_engine.get_suggestions(&query.q).await {
+        Ok(suggestions) => {
+            let limited_suggestions: Vec<String> = suggestions.into_iter().take(limit).collect();
+            let response = SuggestionsResponse {
+                query: query.q.clone(),
+                count: limited_suggestions.len(),
+                suggestions: limited_suggestions,
+            };
+            Ok(warp::reply::json(&response))
+        }
+        Err(e) => {
+            let error = ApiError {
+                error: e.to_string(),
+                code: 500,
+            };
+            Ok(warp::reply::json(&error))
+        }
+    }
+}
+
+/// Обработчик статистики поиска
+async fn handle_get_search_stats(
+    state: AppState,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    match state.search_engine.get_statistics().await {
+        Ok(stats) => Ok(warp::reply::json(&stats)),
+        Err(e) => {
+            let error = ApiError {
+                error: e.to_string(),
+                code: 500,
+            };
+            Ok(warp::reply::json(&error))
+        }
+    }
+}
+
+/// Обработчик списка категорий
+async fn handle_get_categories(
+    state: AppState,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    // Пока простая реализация - возвращаем фиксированный список
+    let categories = vec![
+        CategoryInfo {
+            name: "Универсальные коллекции".to_string(),
+            path: "Global context/Universal collections".to_string(),
+            types_count: 15,
+            subcategories: 0,
+        },
+        CategoryInfo {
+            name: "Справочники".to_string(),
+            path: "Catalogs".to_string(),
+            types_count: 8,
+            subcategories: 2,
+        },
+        CategoryInfo {
+            name: "Документы".to_string(),
+            path: "Documents".to_string(),
+            types_count: 6,
+            subcategories: 1,
+        },
+        CategoryInfo {
+            name: "Перечисления".to_string(),
+            path: "Enums".to_string(),
+            types_count: 4,
+            subcategories: 0,
+        },
+    ];
+    
+    let response = CategoriesResponse {
+        total_count: categories.len(),
+        categories,
+    };
+    
+    Ok(warp::reply::json(&response))
 }
 
 /// Обработчик главной страницы

@@ -1,0 +1,277 @@
+/* === ИНТЕРАКТИВНОЕ ДЕРЕВО === */
+.interactive-tree {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.tree-header {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid #3c3c3c;
+  padding: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.tree-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.tree-controls button {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid #3c3c3c;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85em;
+  transition: all 0.2s;
+}
+
+.tree-controls button:hover {
+  background: var(--accent-color);
+  transform: translateY(-1px);
+}
+
+.tree-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#tree-search-input {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid #3c3c3c;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  width: 200px;
+  font-size: 0.9em;
+}
+
+#tree-search-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px rgba(86, 156, 214, 0.3);
+}
+
+.clear-search {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.9em;
+  padding: 0.2rem;
+}
+
+.tree-root {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0;
+}
+
+/* === УЗЛЫ ДЕРЕВА === */
+.tree-node {
+  display: flex;
+  align-items: center;
+  margin: 1px 0;
+  cursor: pointer;
+  padding: 0.4rem 0.5rem;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  position: relative;
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+
+.tree-node:hover {
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateX(2px);
+}
+
+.tree-node.selected {
+  background: var(--accent-color);
+  color: white;
+  font-weight: 600;
+}
+
+.tree-node.expanded > .expand-indicator {
+  transform: rotate(90deg);
+}
+
+/* === ТИПЫ УЗЛОВ === */
+.category-node {
+  background: rgba(255, 193, 7, 0.1);
+  border-left: 3px solid #ffc107;
+}
+
+.platform-type-node {
+  background: rgba(33, 150, 243, 0.1);
+  border-left: 3px solid #2196f3;
+}
+
+.config-type-node {
+  background: rgba(76, 175, 80, 0.1);
+  border-left: 3px solid #4caf50;
+}
+
+.method-node {
+  background: rgba(156, 39, 176, 0.1);
+  border-left: 3px solid #9c27b0;
+}
+
+.property-node {
+  background: rgba(255, 87, 34, 0.1);
+  border-left: 3px solid #ff5722;
+}
+
+.parameter-node {
+  background: rgba(96, 125, 139, 0.1);
+  border-left: 3px solid #607d8b;
+}
+
+/* === ЭЛЕМЕНТЫ УЗЛА === */
+.expand-indicator {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 0.5rem;
+  font-size: 0.8em;
+  color: var(--text-secondary);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.expand-placeholder {
+  width: 16px;
+  margin-right: 0.5rem;
+  flex-shrink: 0;
+}
+
+.node-icon {
+  margin-right: 0.5rem;
+  font-size: 1.1em;
+  flex-shrink: 0;
+}
+
+.node-title {
+  flex: 1;
+  margin-right: 0.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-meta {
+  color: var(--text-secondary);
+  font-size: 0.8em;
+  font-style: italic;
+  flex-shrink: 0;
+}
+
+/* === ДОЧЕРНИЕ УЗЛЫ === */
+.tree-children {
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.tree-children.loading {
+  opacity: 0.6;
+}
+
+.loading-placeholder {
+  padding: 0.5rem 1rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  text-align: center;
+}
+
+/* === DRAG & DROP === */
+.tree-node[draggable='true'] {
+  cursor: grab;
+}
+
+.tree-node.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.tree-node.drag-over {
+  background: rgba(86, 156, 214, 0.3);
+  border: 2px dashed var(--accent-color);
+}
+
+/* === КОНТЕКСТНОЕ МЕНЮ === */
+.context-menu {
+  position: fixed;
+  background: var(--bg-secondary);
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  min-width: 180px;
+  display: none;
+}
+
+.context-menu.show {
+  display: block;
+}
+
+.context-menu-item {
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  transition: background 0.2s;
+}
+
+.context-menu-item:last-child {
+  border-bottom: none;
+}
+
+.context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0.25rem 0;
+}
+
+/* === АНИМАЦИИ === */
+@keyframes slideDown {
+  from { max-height: 0; opacity: 0; }
+  to { max-height: 1000px; opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { max-height: 1000px; opacity: 1; }
+  to { max-height: 0; opacity: 0; }
+}
+
+.tree-children.expanding {
+  animation: slideDown 0.3s ease;
+}
+
+.tree-children.collapsing {
+  animation: slideUp 0.3s ease;
+}
+
+/* === ОСОБЕННОСТИ БРАУЗЕРОВ === */
+.tree-node::-webkit-scrollbar {
+  width: 6px;
+}
+
+.tree-node::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tree-node::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}

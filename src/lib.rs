@@ -7,6 +7,8 @@ pub mod core;
 pub mod adapters;
 pub mod parser;
 pub mod query;
+pub mod ideal;
+
 pub mod documentation;
 
 pub use core::{

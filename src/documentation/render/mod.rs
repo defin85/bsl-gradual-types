@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use super::core::hierarchy::{TypeHierarchy, TypeDocumentationFull};
 use super::search::SearchResults;
 
+pub mod unified_template;
+
 /// Движок рендеринга документации
 pub struct RenderEngine {
     /// HTML рендерер для веб-интерфейса
@@ -463,6 +465,10 @@ impl HtmlDocumentationRenderer {
         // Преобразуем категории в узлы дерева
         for category in &hierarchy.root_categories {
             let node = self.convert_category_to_tree_node(category);
+            
+            // Автоматически разворачиваем корневые категории
+            tree.expanded_nodes.insert(node.id.clone());
+            
             tree.root_nodes.push(node);
         }
         
@@ -473,20 +479,74 @@ impl HtmlDocumentationRenderer {
     fn convert_category_to_tree_node(&self, category: &super::core::hierarchy::CategoryNode) -> InteractiveTreeNode {
         let node_id = format!("category_{}", category.name.replace(" ", "_"));
         
+        // Динамическая группировка - показываем только подкатегории с типами
+        let mut children = Vec::new();
+        
+        for child in category.children.iter() {
+            match child {
+                super::core::hierarchy::DocumentationNode::SubCategory(sub_cat) => {
+                    // Показываем только подкатегории с типами
+                    if !sub_cat.children.is_empty() {
+                        // Определяем иконку по названию подкатегории
+                        let icon = if sub_cat.name.contains("HTTP") || sub_cat.name.contains("Интернет") || sub_cat.name.contains("Файл") {
+                            "🌐"
+                        } else if sub_cat.name.contains("Справочник") {
+                            "🏢"
+                        } else if sub_cat.name.contains("Документ") {
+                            "📄"
+                        } else if sub_cat.name.contains("Регистр") {
+                            "📋"
+                        } else if sub_cat.name.contains("Форма") || sub_cat.name.contains("Табличный") {
+                            "🎨"
+                        } else if sub_cat.name.contains("Коллекция") || sub_cat.name.contains("Массив") || sub_cat.name.contains("Структура") {
+                            "📊"
+                        } else {
+                            "📂"
+                        };
+                        
+                        children.push(InteractiveTreeNode {
+                            id: format!("subcategory_{}", sub_cat.name.replace(" ", "_")),
+                            display_name: format!("{} ({} типов)", sub_cat.name, sub_cat.children.len()),
+                            node_type: TreeNodeType::SubCategory,
+                            icon: icon.to_string(),
+                            description: Some(format!("Подкатегория: {} типов", sub_cat.children.len())),
+                            children: Vec::new(), // Lazy loading дочерних типов
+                            has_children: true,
+                            children_loaded: false,
+                            children_url: Some(format!("/api/tree/children/subcategory_{}", sub_cat.name.replace(" ", "_"))),
+                            metadata: {
+                                let mut meta = std::collections::HashMap::new();
+                                meta.insert("type".to_string(), "subcategory".to_string());
+                                meta.insert("count".to_string(), sub_cat.children.len().to_string());
+                                meta.insert("original_name".to_string(), sub_cat.name.clone());
+                                meta
+                            },
+                            draggable: false,
+                            droppable: true,
+                        });
+                    }
+                },
+                _ => {} // Игнорируем другие типы на корневом уровне
+            }
+        }
+        
+        let children_count = children.len();
+        let has_children = !children.is_empty();
+        
         InteractiveTreeNode {
             id: node_id.clone(),
-            display_name: category.name.clone(),
+            display_name: format!("{} ({} групп типов)", category.name, children_count),
             node_type: TreeNodeType::Category,
             icon: "📁".to_string(),
-            description: Some(format!("Категория типов: {} элементов", category.children.len())),
-            children: Vec::new(), // Будут загружены по запросу
-            has_children: !category.children.is_empty(),
-            children_loaded: false,
+            description: Some(format!("Категория типов: {} подкатегорий", children_count)),
+            children,
+            has_children,
+            children_loaded: true, // Первый уровень загружен сразу
             children_url: Some(format!("/api/tree/children/{}", node_id)),
             metadata: {
                 let mut meta = std::collections::HashMap::new();
                 meta.insert("type".to_string(), "category".to_string());
-                meta.insert("count".to_string(), category.children.len().to_string());
+                meta.insert("count".to_string(), children_count.to_string());
                 meta
             },
             draggable: false,
@@ -600,22 +660,27 @@ impl HtmlDocumentationRenderer {
         
         html.push_str("</div>\n"); // tree-node
         
-        // Дочерние узлы (если загружены и развернуты)
-        if node.children_loaded && is_expanded && !node.children.is_empty() {
-            html.push_str("<div class='tree-children' data-parent-id='{}'>\n");
+        // Дочерние узлы (отображаем если есть, независимо от expanded состояния)
+        if node.children_loaded && !node.children.is_empty() {
+            let display = if is_expanded { "block" } else { "none" };
+            html.push_str(&format!(
+                "<div class='tree-children' data-parent-id='{}' style='display: {};'>\n",
+                node.id, display
+            ));
             
             for child in &node.children {
                 html.push_str(&self.render_tree_node(child, depth + 1, tree)?);
             }
             
             html.push_str("</div>\n");
-        } else if node.has_children && is_expanded {
-            // Placeholder для lazy loading
+        } else if node.has_children {
+            // Placeholder для lazy loading или свернутых узлов
+            let display = if is_expanded { "block" } else { "none" };
             html.push_str(&format!(
-                "<div class='tree-children loading' data-parent-id='{}'>\n\
+                "<div class='tree-children loading' data-parent-id='{}' style='display: {};'>\n\
                  <div class='loading-placeholder'>Загрузка...</div>\n\
                  </div>\n",
-                node.id
+                node.id, display
             ));
         }
         
@@ -1084,18 +1149,28 @@ function handleNodeClick(event, nodeId) {
 
 // === РАСКРЫТИЕ/СВОРАЧИВАНИЕ УЗЛА ===
 function toggleNodeExpansion(event, nodeId) {
-    event.stopPropagation();
+    if (event && event.stopPropagation) {
+        event.stopPropagation();
+    }
     
     const node = document.getElementById(`node_${nodeId}`);
-    if (!node) return;
+    if (!node) {
+        console.log('❌ Узел не найден:', nodeId);
+        return;
+    }
     
     const hasChildren = node.dataset.hasChildren === 'true';
     const childrenLoaded = node.dataset.childrenLoaded === 'true';
     
-    if (!hasChildren) return;
+    if (!hasChildren) {
+        console.log('ℹ️ Узел не имеет дочерних элементов:', nodeId);
+        return;
+    }
     
     const isExpanded = treeState.expandedNodes.has(nodeId);
     const indicator = node.querySelector('.expand-indicator');
+    
+    console.log(`🔄 Переключаем узел ${nodeId}: ${isExpanded ? 'сворачиваем' : 'разворачиваем'}`);
     
     if (isExpanded) {
         // Сворачиваем
@@ -1103,28 +1178,40 @@ function toggleNodeExpansion(event, nodeId) {
         const children = document.querySelector(`.tree-children[data-parent-id="${nodeId}"]`);
         if (children) {
             children.style.display = 'none';
+            children.classList.add('collapsing');
+            setTimeout(() => children.classList.remove('collapsing'), 300);
         }
-        indicator.textContent = '▶';
-        indicator.dataset.expanded = 'false';
+        if (indicator) {
+            indicator.textContent = '▶';
+            indicator.dataset.expanded = 'false';
+        }
         node.classList.remove('expanded');
+        console.log('📁 Узел свернут:', nodeId);
     } else {
         // Раскрываем
         treeState.expandedNodes.add(nodeId);
         
+        const children = document.querySelector(`.tree-children[data-parent-id="${nodeId}"]`);
+        
         if (!childrenLoaded) {
+            console.log('⏳ Загружаем дочерние узлы для:', nodeId);
             // Lazy loading - загружаем дочерние узлы
             loadChildrenNodes(nodeId);
         } else {
             // Показываем уже загруженные узлы
-            const children = document.querySelector(`.tree-children[data-parent-id="${nodeId}"]`);
             if (children) {
                 children.style.display = 'block';
+                children.classList.add('expanding');
+                setTimeout(() => children.classList.remove('expanding'), 300);
             }
         }
         
-        indicator.textContent = '▼';
-        indicator.dataset.expanded = 'true';
+        if (indicator) {
+            indicator.textContent = '▼';
+            indicator.dataset.expanded = 'true';
+        }
         node.classList.add('expanded');
+        console.log('📂 Узел развернут:', nodeId);
     }
 }
 
@@ -1259,9 +1346,11 @@ function clearTreeSearch() {
 
 // === РАЗВЕРНУТЬ ВСЕ УЗЛЫ ===
 function expandAllNodes() {
+    console.log('🔄 Разворачиваем все узлы...');
     document.querySelectorAll('.tree-node[data-has-children="true"]').forEach(node => {
         const nodeId = node.dataset.nodeId;
-        if (!treeState.expandedNodes.has(nodeId)) {
+        if (nodeId && !treeState.expandedNodes.has(nodeId)) {
+            console.log('📂 Разворачиваем узел:', nodeId);
             toggleNodeExpansion({ stopPropagation: () => {} }, nodeId);
         }
     });
@@ -1269,8 +1358,12 @@ function expandAllNodes() {
 
 // === СВЕРНУТЬ ВСЕ УЗЛЫ ===
 function collapseAllNodes() {
-    document.querySelectorAll('.tree-node.expanded').forEach(node => {
-        const nodeId = node.dataset.nodeId;
+    console.log('🔄 Сворачиваем все узлы...');
+    
+    // Сворачиваем все развернутые узлы
+    const expandedNodes = Array.from(treeState.expandedNodes);
+    expandedNodes.forEach(nodeId => {
+        console.log('📁 Сворачиваем узел:', nodeId);
         toggleNodeExpansion({ stopPropagation: () => {} }, nodeId);
     });
 }
@@ -1533,6 +1626,30 @@ document.addEventListener('DOMContentLoaded', function() {
     const savedTheme = localStorage.getItem('bsl-docs-theme') || 'dark';
     switchTheme(savedTheme);
     
+    // Инициализируем состояние дерева с развернутыми корневыми узлами
+    document.querySelectorAll('.tree-node[data-node-type="Category"]').forEach(categoryNode => {
+        const nodeId = categoryNode.dataset.nodeId;
+        if (nodeId) {
+            treeState.expandedNodes.add(nodeId);
+            categoryNode.classList.add('expanded');
+            
+            // Разворачиваем дочерние элементы
+            const children = document.querySelector(`.tree-children[data-parent-id="${nodeId}"]`);
+            if (children) {
+                children.style.display = 'block';
+            }
+            
+            // Обновляем индикатор
+            const indicator = categoryNode.querySelector('.expand-indicator');
+            if (indicator) {
+                indicator.textContent = '▼';
+                indicator.dataset.expanded = 'true';
+            }
+            
+            console.log('📂 Автоматически развернули категорию:', nodeId);
+        }
+    });
+    
     // Закрытие контекстного меню по Escape
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
@@ -1542,6 +1659,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     console.log('🚀 BSL Interactive Tree initialized');
+    console.log('📊 Expanded nodes:', Array.from(treeState.expandedNodes));
 });
 </script>
 

@@ -5,79 +5,33 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    // Временная заглушка для tree_sitter_bsl
-    // TODO: Заменить на реальную tree-sitter-bsl библиотеку
-    
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     
-    // Создаем C файл с заглушкой
-    let c_stub = r#"
-#include <stdint.h>
-#include <stdlib.h>
-
-// Заглушка для tree_sitter_bsl
-// Создает минимальную структуру TSLanguage с abi_version 0
-typedef struct TSLanguage {
-    uint32_t version;
-    uint32_t symbol_count;
-    const char * const *symbol_names;
-    // Остальные поля не используются в заглушке
-    const void *parse_table;
-    const void *parse_actions;
-    const void *lex_modes;
-    const void *keyword_lex_modes;
-    const void *keyword_capture_token;
-    const void *external_token_count;
-    const void *external_scanner;
-    const void *field_count;
-    const void *field_map_slices;
-    const void *field_map_entries;
-    const void *field_names;
-    const void *max_alias_sequence_length;
-    const void *alias_map;
-    const void *alias_sequences;
-    const void *small_parse_table;
-    const void *small_parse_table_map;
-    const void *public_symbol_map;
-} TSLanguage;
-
-// Статическая заглушка языка
-static const TSLanguage bsl_language_stub = {
-    .version = 0,  // Версия 0 означает заглушку
-    .symbol_count = 0,
-    .symbol_names = NULL,
-    .parse_table = NULL,
-    .parse_actions = NULL,
-    .lex_modes = NULL,
-    .keyword_lex_modes = NULL,
-    .keyword_capture_token = NULL,
-    .external_token_count = NULL,
-    .external_scanner = NULL,
-    .field_count = NULL,
-    .field_map_slices = NULL,
-    .field_map_entries = NULL,
-    .field_names = NULL,
-    .max_alias_sequence_length = NULL,
-    .alias_map = NULL,
-    .alias_sequences = NULL,
-    .small_parse_table = NULL,
-    .small_parse_table_map = NULL,
-    .public_symbol_map = NULL,
-};
-
-const TSLanguage *tree_sitter_bsl(void) {
-    return &bsl_language_stub;
-}
-"#;
+    // Проверяем наличие реальной tree-sitter-bsl библиотеки
+    let tree_sitter_bsl_path = "../tree-sitter-bsl";
+    let parser_c_path = format!("{}/src/parser.c", tree_sitter_bsl_path);
     
-    let c_file = out_dir.join("tree_sitter_bsl_stub.c");
-    std::fs::write(&c_file, c_stub).unwrap();
+    if std::path::Path::new(&parser_c_path).exists() {
+        println!("cargo:warning=🔍 НАЙДЕНА реальная tree-sitter-bsl: {}", tree_sitter_bsl_path);
+        
+        // Компилируем РЕАЛЬНЫЙ парсер с правильным именем
+        cc::Build::new()
+            .std("c11")
+            .include(format!("{}/src", tree_sitter_bsl_path))
+            .file(&parser_c_path)
+            .compile("tree_sitter_bsl");  // ← ИСПРАВЛЕНО ИМЯ (с подчёркиваниями)
+            
+        println!("cargo:warning=✅ РЕАЛЬНАЯ tree-sitter-bsl скомпилирована как tree_sitter_bsl");
+        println!("cargo:rustc-link-lib=tree_sitter_bsl");  // ← ИСПРАВЛЕНО ИМЯ
+        return;
+    }
     
-    // Компилируем C заглушку
-    cc::Build::new()
-        .file(&c_file)
-        .compile("tree_sitter_bsl_stub");
+    // Fallback на заглушку если библиотека не найдена
+    println!("cargo:warning=⚠️ tree-sitter-bsl НЕ НАЙДЕНА в {}, используем заглушку", tree_sitter_bsl_path);
     
-    println!("cargo:rustc-link-lib=tree_sitter_bsl_stub");
+    // НЕ создаём заглушку - используем fallback в коде
+    println!("cargo:warning=❌ Заглушка НЕ создана - tree-sitter функции недоступны");
+    println!("cargo:warning=📋 Код должен использовать cfg условную компиляцию");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=../tree-sitter-bsl/src/parser.c");
 }

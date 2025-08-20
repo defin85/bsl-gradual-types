@@ -19,7 +19,7 @@ pub struct DocumentationSearchEngine {
     fulltext_index: Arc<RwLock<FullTextIndex>>,
     
     /// Индексы по категориям
-    category_indexes: Arc<RwLock<HashMap<String, CategoryIndex>>>,
+    pub category_indexes: Arc<RwLock<HashMap<String, CategoryIndex>>>,
     
     /// Индексы по фасетам
     facet_indexes: Arc<RwLock<HashMap<FacetKind, FacetIndex>>>,
@@ -354,10 +354,10 @@ pub struct IndexingConfig {
 #[derive(Debug, Default)]
 pub struct CategoryIndex {
     /// Категория → типы
-    category_to_types: HashMap<String, Vec<String>>,
+    pub category_to_types: HashMap<String, Vec<String>>,
     
     /// Тип → категория
-    type_to_category: HashMap<String, String>,
+    pub type_to_category: HashMap<String, String>,
 }
 
 /// Индекс по фасетам

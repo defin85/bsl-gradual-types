@@ -33,6 +33,8 @@ roxmltree = "0.19"
 encoding_rs = "0.8"
 encoding_rs_io = "0.1"
 nom = "7.1"
+regex = "1.10"
+urlencoding = "2.1"
 
 # Tree-sitter support - используем последнюю доступную версию
 tree-sitter = "0.25"

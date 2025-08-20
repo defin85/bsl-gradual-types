@@ -212,6 +212,11 @@ impl PlatformTypeResolver {
         self.platform_globals.len()
     }
     
+    /// Получить все platform globals для отображения в иерархии
+    pub fn get_platform_globals(&self) -> &HashMap<String, TypeResolution> {
+        &self.platform_globals
+    }
+    
     /// Check if a specific global is loaded (for debugging)
     pub fn has_platform_global(&self, key: &str) -> bool {
         self.platform_globals.contains_key(key)

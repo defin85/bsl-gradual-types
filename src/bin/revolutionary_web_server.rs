@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use warp::Filter;
 
-use bsl_gradual_types::ideal::system::{CentralTypeSystem, CentralSystemConfig};
-use bsl_gradual_types::ideal::presentation::{WebSearchRequest};
+use bsl_gradual_types::target::system::{CentralTypeSystem, CentralSystemConfig};
+use bsl_gradual_types::target::presentation::{WebSearchRequest};
 
 #[derive(Parser)]
 #[command(name = "revolutionary-web-server")]
@@ -187,7 +187,7 @@ async fn handle_index(state: AppState) -> Result<impl warp::Reply, warp::Rejecti
     Ok(warp::reply::html(html))
 }
 
-fn generate_index_page(metrics: &bsl_gradual_types::ideal::system::SystemMetrics, health: &bsl_gradual_types::ideal::system::HealthStatus) -> String {
+fn generate_index_page(metrics: &bsl_gradual_types::target::system::SystemMetrics, health: &bsl_gradual_types::target::system::HealthStatus) -> String {
     format!(r#"<!DOCTYPE html>
 <html>
 <head>
@@ -261,7 +261,7 @@ fn generate_index_page(metrics: &bsl_gradual_types::ideal::system::SystemMetrics
     )
 }
 
-fn generate_hierarchy_page(hierarchy: &bsl_gradual_types::ideal::presentation::WebHierarchyResponse) -> String {
+fn generate_hierarchy_page(hierarchy: &bsl_gradual_types::target::presentation::WebHierarchyResponse) -> String {
     let mut html = String::new();
     
     html.push_str(r#"<!DOCTYPE html>

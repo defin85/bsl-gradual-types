@@ -7,7 +7,9 @@ pub mod core;
 pub mod adapters;
 pub mod parser;
 pub mod query;
-pub mod ideal;
+pub mod target;
+// Временная совместимость: старый путь `ideal` указывает на `target`
+pub use crate::target as ideal;
 
 pub mod documentation;
 

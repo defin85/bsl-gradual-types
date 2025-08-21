@@ -3,7 +3,7 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use bsl_gradual_types::ideal::system::{CentralTypeSystem, CentralSystemConfig};
+use bsl_gradual_types::target::system::{CentralTypeSystem, CentralSystemConfig};
 
 #[tokio::main]
 async fn main() -> Result<()> {

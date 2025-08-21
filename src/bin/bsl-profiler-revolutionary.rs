@@ -5,7 +5,7 @@ use clap::Parser;
 use std::sync::Arc;
 use std::path::PathBuf;
 
-use bsl_gradual_types::ideal::system::{CentralTypeSystem, CentralSystemConfig};
+use bsl_gradual_types::target::system::{CentralTypeSystem, CentralSystemConfig};
 
 #[derive(Parser)]
 #[command(name = "bsl-profiler-revolutionary")]
@@ -151,7 +151,7 @@ async fn run_project_profiling(central_system: &CentralTypeSystem, project_path:
     println!("Profiling project: {}", project_path.display());
     println!("Using {} threads", threads);
     
-    let cli_analysis_request = bsl_gradual_types::ideal::presentation::CliAnalysisRequest {
+    let cli_analysis_request = bsl_gradual_types::target::presentation::CliAnalysisRequest {
         project_path: project_path.clone(),
         output_format: CliOutputFormat::Text,
         include_coverage: true,

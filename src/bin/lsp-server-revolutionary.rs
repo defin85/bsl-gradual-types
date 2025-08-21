@@ -4,8 +4,8 @@ use anyhow::Result;
 use clap::Parser;
 use std::sync::Arc;
 
-use bsl_gradual_types::ideal::system::{CentralTypeSystem, CentralSystemConfig};
-use bsl_gradual_types::ideal::presentation::{LspCompletionRequest, LspHoverRequest};
+use bsl_gradual_types::target::system::{CentralTypeSystem, CentralSystemConfig};
+use bsl_gradual_types::target::presentation::{LspCompletionRequest, LspHoverRequest};
 
 #[derive(Parser)]
 #[command(name = "lsp-server-revolutionary")]

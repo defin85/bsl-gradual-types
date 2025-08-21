@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use warp::Filter;
 
-use bsl_gradual_types::ideal::system::{CentralTypeSystem, CentralSystemConfig};
+use bsl_gradual_types::target::system::{CentralTypeSystem, CentralSystemConfig};
 
 #[derive(Clone)]
 struct SimpleAppState {

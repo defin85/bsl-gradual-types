@@ -276,7 +276,7 @@ MIT License - см. [LICENSE](LICENSE)
 
 - 🐛 [Issues](https://github.com/yourusername/bsl-gradual-types/issues) - Баги и вопросы
 - 💬 [Discussions](https://github.com/yourusername/bsl-gradual-types/discussions) - Обсуждения
-- 📖 [Детальная документация](docs/architecture/overview.md) - Архитектура системы
+- 📖 [Детальная документация](docs/reference/target_architecture/overview.md) - Архитектура системы
 
 ---
 

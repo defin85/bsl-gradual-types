@@ -5,8 +5,8 @@ use clap::Parser;
 use std::sync::Arc;
 use std::path::PathBuf;
 
-use bsl_gradual_types::ideal::system::{CentralTypeSystem, CentralSystemConfig};
-use bsl_gradual_types::ideal::presentation::{CliAnalysisRequest, CliOutputFormat};
+use bsl_gradual_types::target::system::{CentralTypeSystem, CentralSystemConfig};
+use bsl_gradual_types::target::presentation::{CliAnalysisRequest, CliOutputFormat};
 
 #[derive(Parser)]
 #[command(name = "type-check-revolutionary")]

@@ -411,8 +411,11 @@ impl WebTypeService {
     pub async fn get_all_types_with_documentation(&self) -> Result<Vec<WebTypeInfo>> {
         println!("🌐 Получение всех типов для веб-интерфейса...");
         
-        // TODO: Получаем все типы через публичный API TypeResolutionService
-        let all_types: Vec<RawTypeData> = Vec::new(); // Заглушка пока нет публичного API
+        // Получаем все типы через новый публичный API
+        let type_search_results = self.resolution_service.get_all_types().await?;
+        let all_types: Vec<RawTypeData> = type_search_results.into_iter()
+            .map(|result| result.raw_data)
+            .collect();
         
         // Конвертируем в веб-формат
         let mut web_types = Vec::new();
@@ -437,8 +440,11 @@ impl WebTypeService {
     pub async fn build_type_hierarchy(&self) -> Result<WebTypeHierarchy> {
         println!("🌳 Построение иерархии типов для веб...");
         
-        // TODO: Получаем типы через публичный API  
-        let all_types: Vec<RawTypeData> = Vec::new(); // Заглушка
+        // Получаем типы через публичный API
+        let type_search_results = self.resolution_service.get_all_types().await?;
+        let all_types: Vec<RawTypeData> = type_search_results.into_iter()
+            .map(|result| result.raw_data)
+            .collect();
         
         // Группируем типы по категориям
         let mut categories_map: HashMap<String, Vec<RawTypeData>> = HashMap::new();

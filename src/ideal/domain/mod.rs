@@ -200,6 +200,22 @@ impl TypeResolutionService {
         self.metrics.read().await.clone()
     }
     
+    /// ПУБЛИЧНЫЙ МЕТОД: Получить все типы из репозитория
+    pub async fn get_all_types(&self) -> Result<Vec<TypeSearchResult>> {
+        let raw_types = self.repository.load_all_types().await?;
+        
+        let mut results = Vec::new();
+        for raw_type in raw_types {
+            results.push(TypeSearchResult {
+                raw_data: raw_type,
+                relevance_score: 1.0,
+                match_highlights: Vec::new(),
+            });
+        }
+        
+        Ok(results)
+    }
+    
     // === ПРИВАТНЫЕ МЕТОДЫ ===
     
     async fn get_from_cache(&self, key: &str) -> Option<CachedTypeResolution> {

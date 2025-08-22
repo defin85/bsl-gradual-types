@@ -1,8 +1,8 @@
 //! File system utilities for BSL files
 
+use anyhow::Result;
 use std::fs;
 use std::path::Path;
-use anyhow::Result;
 
 /// Read a BSL file as UTF-8, stripping BOM if present
 pub fn read_bsl_file(path: &Path) -> Result<String> {

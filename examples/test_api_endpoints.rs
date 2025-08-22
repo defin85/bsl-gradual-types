@@ -6,16 +6,16 @@ use serde_json::json;
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("🌐 Тестирование REST API endpoints");
-    
+
     // Запускаем веб-сервер в фоне (потребуется отдельный процесс)
     println!("📋 Для полного тестирования запустите веб-сервер:");
     println!("   cargo run --bin bsl-web-server --port 8080");
     println!();
-    
+
     // Примеры curl команд для тестирования API
     println!("🔧 Примеры использования API:");
     println!();
-    
+
     // 1. Расширенный поиск
     println!("1️⃣ POST /api/v1/search - Расширенный поиск:");
     let search_payload = json!({
@@ -48,35 +48,35 @@ async fn main() -> Result<()> {
             "highlight_matches": true
         }
     });
-    
+
     println!("curl -X POST http://localhost:8080/api/v1/search \\");
     println!("  -H \"Content-Type: application/json\" \\");
     println!("  -d '{}'", search_payload.to_string());
     println!();
-    
+
     // 2. Автодополнение
     println!("2️⃣ GET /api/v1/suggestions - Автодополнение:");
     println!("curl \"http://localhost:8080/api/v1/suggestions?q=Табли&limit=5\"");
     println!();
-    
+
     // 3. Статистика поиска
     println!("3️⃣ GET /api/v1/search-stats - Статистика поиска:");
     println!("curl \"http://localhost:8080/api/v1/search-stats\"");
     println!();
-    
+
     // 4. Категории
     println!("4️⃣ GET /api/v1/categories - Список категорий:");
     println!("curl \"http://localhost:8080/api/v1/categories\"");
     println!();
-    
+
     // 5. Legacy поиск (совместимость)
     println!("5️⃣ GET /api/types - Legacy поиск (обратная совместимость):");
     println!("curl \"http://localhost:8080/api/types?search=Таблица&page=0&per_page=10\"");
     println!();
-    
+
     println!("🎯 Примеры ответов API:");
     println!();
-    
+
     // Пример ответа поиска
     println!("📊 Пример ответа /api/v1/search:");
     let sample_search_response = json!({
@@ -119,7 +119,7 @@ async fn main() -> Result<()> {
     });
     println!("{}", serde_json::to_string_pretty(&sample_search_response)?);
     println!();
-    
+
     // Пример ответа автодополнения
     println!("💡 Пример ответа /api/v1/suggestions:");
     let sample_suggestions_response = json!({
@@ -127,10 +127,13 @@ async fn main() -> Result<()> {
         "query": "Табли",
         "count": 3
     });
-    println!("{}", serde_json::to_string_pretty(&sample_suggestions_response)?);
-    
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&sample_suggestions_response)?
+    );
+
     println!("\n🎉 Документация API endpoints готова!");
     println!("🚀 Запустите веб-сервер для тестирования API");
-    
+
     Ok(())
 }

@@ -1,7 +1,7 @@
 //! Type resolution engine
 
-use super::types::*;
 use super::context::Context;
+use super::types::*;
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -9,10 +9,10 @@ use std::collections::HashMap;
 pub trait TypeResolver {
     /// Resolve type for an expression
     fn resolve(&self, expression: &str, context: Option<&Context>) -> TypeResolution;
-    
+
     /// Get completions for a position
     fn get_completions(&self, position: &Position) -> Vec<Completion>;
-    
+
     /// Check types in AST
     fn check_types(&self, ast: &AST) -> Vec<Diagnostic>;
 }
@@ -21,7 +21,7 @@ pub trait TypeResolver {
 pub struct BasicTypeResolver {
     /// Platform types from syntax helper
     platform_types: HashMap<String, PlatformType>,
-    
+
     /// Configuration types from XML
     config_types: HashMap<String, ConfigurationType>,
 }
@@ -39,13 +39,13 @@ impl BasicTypeResolver {
             config_types: HashMap::new(),
         }
     }
-    
+
     /// Load platform types from cache or documentation
     pub fn load_platform_types(&mut self, _version: &str) -> Result<()> {
         // TODO: Implement loading from platform docs
         Ok(())
     }
-    
+
     /// Load configuration types from XML
     pub fn load_config_types(&mut self, _config_path: &str) -> Result<()> {
         // TODO: Implement XML parsing
@@ -56,38 +56,38 @@ impl BasicTypeResolver {
 impl TypeResolver for BasicTypeResolver {
     fn resolve(&self, expression: &str, _context: Option<&Context>) -> TypeResolution {
         // MVP: Simple direct resolution
-        
+
         // Try to parse expression
         if let Some(parsed) = self.parse_expression(expression) {
             match parsed {
                 Expression::GlobalProperty(prop, member) => {
                     if prop == "Справочники" || prop == "Catalogs" {
                         if let Some(config_type) = self.config_types.get(&member) {
-                            return TypeResolution::known(
-                                ConcreteType::Configuration(config_type.clone())
-                            );
+                            return TypeResolution::known(ConcreteType::Configuration(
+                                config_type.clone(),
+                            ));
                         }
                     }
                 }
                 Expression::Constructor(type_name, _args) => {
                     if let Some(platform_type) = self.platform_types.get(&type_name) {
-                        return TypeResolution::known(
-                            ConcreteType::Platform(platform_type.clone())
-                        );
+                        return TypeResolution::known(ConcreteType::Platform(
+                            platform_type.clone(),
+                        ));
                     }
                 }
                 _ => {}
             }
         }
-        
+
         TypeResolution::unknown()
     }
-    
+
     fn get_completions(&self, _position: &Position) -> Vec<Completion> {
         // TODO: Implement completions
         vec![]
     }
-    
+
     fn check_types(&self, _ast: &AST) -> Vec<Diagnostic> {
         // TODO: Implement type checking
         vec![]
@@ -97,7 +97,8 @@ impl TypeResolver for BasicTypeResolver {
 impl BasicTypeResolver {
     fn parse_expression(&self, expression: &str) -> Option<Expression> {
         // Simple expression parser for MVP
-        if expression.starts_with("Справочники.") || expression.starts_with("Catalogs.") {
+        if expression.starts_with("Справочники.") || expression.starts_with("Catalogs.")
+        {
             let parts: Vec<&str> = expression.split('.').collect();
             if parts.len() == 2 {
                 return Some(Expression::GlobalProperty(
@@ -106,7 +107,7 @@ impl BasicTypeResolver {
                 ));
             }
         }
-        
+
         if expression.starts_with("Новый ") || expression.starts_with("New ") {
             let type_name = expression
                 .replace("Новый ", "")
@@ -114,7 +115,7 @@ impl BasicTypeResolver {
                 .replace("()", "");
             return Some(Expression::Constructor(type_name, vec![]));
         }
-        
+
         None
     }
 }

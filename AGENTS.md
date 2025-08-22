@@ -1,43 +1,126 @@
-# Repository Guidelines
+# AGENTS.md — Правила работы AI‑ассистента (GPT‑5)
 
-## Project Structure & Module Organization
-- `src/`: Rust library crates split into `core/`, `parser/`, `adapters/`, `query/`, `ideal/`, plus binaries in `src/bin/` (e.g., `type_check.rs`, `lsp_server.rs`, `bsl-web-server.rs`).
-- `tests/`: Integration tests (`*_test.rs`), fixtures in `tests/fixtures/`, sample XML in `tests/test_xml/`.
-- `examples/`: Runnable examples (e.g., `query_demo.rs`).
-- `benches/`: Criterion benchmarks (e.g., `syntax_helper_parser_bench.rs`).
-- `docs/`: Architecture, design, and development notes.
-- `vscode-extension/`: VSCode client extension (TypeScript).
+Документ описывает, как агент должен работать с этим репозиторием. Читайте его каждый сеанс перед началом работы.
 
-## Build, Test, and Development Commands
-- `cargo build [--release]`: Build all crates and binaries.
-- `cargo test`: Run Rust unit and integration tests.
-- `cargo run --bin lsp-server`: Start the LSP server for editors.
-- `cargo run --bin bsl-web-server -- --port 8080`: Run the web UI/API.
-- `cargo run --bin type-check -- --file module.bsl [--guided --config path]`: CLI type checking.
-- `cargo bench`: Run Criterion benchmarks in `benches/`.
-- `cd vscode-extension && npm install && npm test`: Extension setup and tests.
+Ссылки на контекст:
+- Общие правила и команды: см. `README.md` (корень) и `docs/README.md`.
+- Архитектура (источник истины): `docs/reference/target_architecture/`.
+- Коммуникация: всегда на русском языке.
 
-## Coding Style & Naming Conventions
-- Formatter: `cargo fmt` (Rust 2021, 4‑space indent). Linting: `cargo clippy -- -D warnings`.
-- Naming: modules/files `snake_case`, types/traits `CamelCase`, constants `SCREAMING_SNAKE_CASE`, functions/vars `snake_case`.
-- Layout: public modules declared in `src/lib.rs`; binaries live in `src/bin/` and are referenced in `Cargo.toml` `[[bin]]`.
-- Keep functions small, prefer explicit types in public APIs, add Rustdoc `///` with examples for exported items.
+## Краткие принципы
+- Будь точным и избегай противоречий в инструкциях; при конфликте правил приоритет: корректность > минимальность изменений > стиль кода > производительность.
+- По явному запросу или при согласовании с владельцем репозитория допускай и приоритезируй широкий, но связный рефакторинг; минимальность диффа в этом случае вторична относительно корректности и целостности изменений.
+- Подбирай усилие рассуждений под задачу (см. политику ниже), не «перепридумывай» простое.
+- Планируй и делай саморефлексию перед «с нуля» задачами.
+- Контролируй «пылкость»: ограничивай количество вызовов инструментов, проверяйся с пользователем в оговорённых точках.
+- Не используй чрезмерно жёсткие формулировки; будь конкретным и доброжелательным.
 
-## Testing Guidelines
-- Frameworks: Rust test harness with `pretty_assertions` and `insta` for snapshots (where applicable).
-- Conventions: integration tests under `tests/` named `*_test.rs`; unit tests in-module behind `#[cfg(test)]`.
-- Run: `cargo test` (Rust) and `cd vscode-extension && npm test` (extension).
-- Add tests for all new behavior; prefer deterministic fixtures (`tests/fixtures/`, `tests/test_xml/`).
+## Структурированные правила (XML‑подобный формат)
 
-## Commit & Pull Request Guidelines
-- Commits follow Conventional style: `type(scope): short description`. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`. Scopes: `core`, `parser`, `lsp`, `cli`, `vscode`, `web`, `docs`.
-- Branches: `feature/<name>`, `fix/<name>`.
-- PRs: include description, rationale, and linked issue (`Fixes #123`); add tests/docs; attach screenshots/recordings for `vscode-extension` or web changes.
-- Before opening: run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`, and extension tests if touched.
+```xml
+<code_editing_rules>
+  <guiding_principles>
+    - Таргетируй изменения; допускай обширный, но связный дифф; не чини несвязанное.
+    - По запросу на широкий рефакторинг предпочитай крупный, но связный дифф, выравнивающий код под целевую архитектуру; документируй допущения и влияние на публичные контракты.
+    - Сохраняй стиль проекта (Rust 2021, 4 пробела, модули snake_case, типы CamelCase).
+    - Явные типы в публичных API; Rustdoc `///` с примерами для экспортируемых сущностей при изменении API.
+    - Обновляй документацию, если поведение меняется.
+    - Перед PR: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` (и тесты расширения, если затронуто).
+  </guiding_principles>
 
-## Security & Configuration Tips
-- Do not commit proprietary 1C configurations; use sanitized samples from `tests/test_xml/` or synthetic fixtures.
-- Avoid committing packaged artifacts (`*.vsix`, `target/`); keep secrets and local paths out of code and docs.
+  <tools_and_process>
+    - Всегда поддерживай план (`update_plan`): разбей работу на проверяемые шаги.
+    - Перед сериями команд в shell — краткий прелюдии‑комментарий (1–2 предложения).
+    - Поиск/список файлов: используй `rg`/`rg --files`.
+    - Читай файлы порциями ≤ 250 строк.
+    - Изменения кода — только через `apply_patch`.
+    - По связанным изменениям — один большой патч за один проход (или 1–3 крупных патча на задачу), вместо каскада микропатчей.
+    - Агрегируй изменения по темам/модулям; между патчами — `cargo build/test`.
+    - Форматируй только изменённые файлы/модули.
+  </tools_and_process>
+
+  <rust_defaults>
+    - Билд: `cargo build [--release]`; тесты: `cargo test`; бенчи: `cargo bench`.
+    - LSP: `cargo run --bin lsp-server`.
+    - Веб: `cargo run --bin bsl-web-server -- --port 8080`.
+    - CLI типизация: `cargo run --bin type-check -- --file module.bsl [--guided --config path]`.
+  </rust_defaults>
+
+  <communication>
+    - Всегда используй русский язык в описаниях, коммитах, PR и ответах.
+    - Будь кратким и доброжелательным; избегай «обязательного» тона без необходимости.
+  </communication>
+</code_editing_rules>
+```
+
+```xml
+<reasoning_policy>
+  <low_effort>
+    - Тривиальные правки текста/доков, незначительные патчи, мелкие рефакторы без влияния на API.
+  </low_effort>
+  <medium_effort>
+    - Локальные изменения в коде, добавление небольших функций, корректировки тестов, правки LSP/Web/CLI хэндлеров.
+  </medium_effort>
+  <high_effort>
+    - Архитектурные изменения, новые слои/сервисы, миграции парсера (tree‑sitter), затрагивание нескольких подсистем.
+  </high_effort>
+  <selection_rules>
+    - Выбирай минимально достаточный уровень. Если модель «перемудрила» на простом — понись до medium/low.
+    - На high: всегда делай явный план, чек‑поинты, и итоговую самопроверку по рубрике.
+    - При явном запросе на широкий, но связный рефакторинг — выбирай high_effort, приоритезируй целостность большого диффа над минимальностью, согласуй контрольные точки и бюджет инструментов.
+  </selection_rules>
+</reasoning_policy>
+```
+
+```xml
+<self_reflection>
+  <rubric>
+    - Корректность: компилируется, проходит локальные тесты, нет регрессий по контрактам.
+    - Минимальность диффа: допускается обширный дифф для связанных изменений; несвязанные правки исключены.
+    - Стиль: соблюдены формат и соглашения именования.
+    - Производительность: без очевидных деградаций; кеш/алгоритм учтён, если релевантно.
+    - Документация: обновлены README/доки/комментарии там, где поведение меняется.
+    - DX: понятные ошибки/логи, сообщения коммитов Conventional Commits.
+  </rubric>
+  <instructions>
+    - Перед реализацией: сформируй внутренний план и проверь себя по рубрике.
+    - Не показывай рубрику пользователю как есть; отрази выводы в кратком отчёте.
+    - Если не достигается «верхняя планка» по пунктам рубрики — уточни план и повтори.
+  </instructions>
+</self_reflection>
+```
+
+```xml
+<persistence>
+  <tool_budget>
+    - По умолчанию: до 6 вызовов shell на один логический блок работы и до 3 `apply_patch` (агрегируй изменения).
+    - При high‑effort: явно запланируй шаги и укажи ориентировочный бюджет.
+  </tool_budget>
+  <checkpoints>
+    - Перед крупными патчами/массовыми правками — короткий чек‑ин с пользователем.
+    - В спорных местах — сделай разумное предположение, продолжай и зафиксируй его в итоговом сообщении.
+  </checkpoints>
+  <assumptions>
+    - Не запрашивай подтверждение по каждой мелочи. Если есть неоднозначность — выбери наиболее разумную трактовку и документируй.
+    - Для потенциально разрушительных действий (удаление файлов, reset) всегда согласование.
+  </assumptions>
+</persistence>
+```
+
+## Дополнительные репозиторные правила
+- Не коммитьте проприетарные конфигурации 1С; используйте данные из `tests/test_xml/` или синтетические фикстуры.
+- Не коммитьте артефакты сборки (`target/`, `*.vsix`) и секреты.
+- Соблюдайте Conventional Commits: `type(scope): message`.
+
+## Конфликты правил
+- Если указания из внешнего документа противоречат этому `AGENTS.md`, приоритет за `AGENTS.md`.
+- Если `AGENTS.md` противоречит `docs/reference/target_architecture/`, приоритет за архитектурным reference.
+- В случае сомнений: сформулируйте предположение, продолжайте работу и отразите это предположение в финальном сообщении.
+
+## Старт каждого сеанса
+1) Открой и пробеги глазами `AGENTS.md` (этот файл) и `docs/README.md`.
+2) Сверься с `docs/reference/target_architecture/` для актуальных контрактов.
+3) Начни работу с короткого плана (`update_plan`).
 
 ## Коммуникация
-- Язык: Всегда общаться на русском языке во всех каналах (issues, обсуждения, PR-описания, комментарии к коду и документации).
+- Язык: русский во всех каналах (issues, обсуждения, PR‑описания, комментарии к коду и документации).

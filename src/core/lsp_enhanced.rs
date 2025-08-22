@@ -6,15 +6,17 @@
 //! - Union типы в hover и completion
 //! - Межпроцедурный анализ для лучшего автодополнения
 
+use crate::core::platform_resolver::{
+    CompletionItem as BslCompletion, CompletionKind, PlatformTypeResolver,
+};
+use crate::core::type_checker::{TypeChecker, TypeContext, TypeDiagnostic};
+use crate::core::types::{ConcreteType, ResolutionResult, TypeResolution};
+use crate::parser::ast::Program;
+use crate::parser::common::{Parser, ParserFactory, TextChange};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp::lsp_types::*;
-use crate::parser::common::{Parser, ParserFactory, TextChange};
-use crate::parser::ast::Program;
-use crate::core::type_checker::{TypeChecker, TypeContext, TypeDiagnostic};
-use crate::core::types::{TypeResolution, ResolutionResult, ConcreteType};
-use crate::core::platform_resolver::{PlatformTypeResolver, CompletionItem as BslCompletion, CompletionKind};
 
 /// Состояние документа с кешированными результатами анализа
 #[derive(Debug, Clone)]
@@ -44,12 +46,12 @@ impl DocumentState {
             last_analysis: std::time::Instant::now(),
         }
     }
-    
+
     /// Проверить нужен ли повторный анализ
     pub fn needs_reanalysis(&self) -> bool {
-        self.ast.is_none() || 
-        self.type_context.is_none() ||
-        self.last_analysis.elapsed() > std::time::Duration::from_secs(5)
+        self.ast.is_none()
+            || self.type_context.is_none()
+            || self.last_analysis.elapsed() > std::time::Duration::from_secs(5)
     }
 }
 
@@ -74,37 +76,38 @@ impl IncrementalParsingManager {
             ast_cache: HashMap::new(),
         }
     }
-    
+
     /// Инкрементально парсить документ
     pub fn parse_incremental(
-        &mut self, 
-        uri: &str, 
+        &mut self,
+        uri: &str,
         new_content: &str,
-        changes: &[TextDocumentContentChangeEvent]
+        changes: &[TextDocumentContentChangeEvent],
     ) -> anyhow::Result<Program> {
         // Конвертируем LSP изменения в наш формат
-        let text_changes: Vec<TextChange> = changes.iter()
+        let text_changes: Vec<TextChange> = changes
+            .iter()
             .filter_map(|change| {
                 change.range.map(|range| TextChange {
-                        start_byte: self.position_to_byte_offset(new_content, range.start),
-                        old_end_byte: self.position_to_byte_offset(new_content, range.end),
-                        new_end_byte: self.position_to_byte_offset(new_content, range.end),
-                        start_position: crate::parser::common::Position {
-                            row: range.start.line as usize,
-                            column: range.start.character as usize,
-                        },
-                        old_end_position: crate::parser::common::Position {
-                            row: range.end.line as usize,
-                            column: range.end.character as usize,
-                        },
-                        new_end_position: crate::parser::common::Position {
-                            row: range.end.line as usize,
-                            column: range.end.character as usize,
-                        },
-                    })
+                    start_byte: self.position_to_byte_offset(new_content, range.start),
+                    old_end_byte: self.position_to_byte_offset(new_content, range.end),
+                    new_end_byte: self.position_to_byte_offset(new_content, range.end),
+                    start_position: crate::parser::common::Position {
+                        row: range.start.line as usize,
+                        column: range.start.character as usize,
+                    },
+                    old_end_position: crate::parser::common::Position {
+                        row: range.end.line as usize,
+                        column: range.end.character as usize,
+                    },
+                    new_end_position: crate::parser::common::Position {
+                        row: range.end.line as usize,
+                        column: range.end.character as usize,
+                    },
+                })
             })
             .collect();
-        
+
         // Пытаемся инкрементальный парсинг
         let program = if !text_changes.is_empty() && self.ast_cache.contains_key(uri) {
             match self.parser.parse_incremental(new_content, &text_changes) {
@@ -118,38 +121,38 @@ impl IncrementalParsingManager {
             // Полный парсинг для новых файлов
             self.parser.parse(new_content)?
         };
-        
+
         // Обновляем кеш
         self.ast_cache.insert(uri.to_string(), program.clone());
-        
+
         Ok(program)
     }
-    
+
     /// Конвертировать LSP Position в байтовый офсет
     fn position_to_byte_offset(&self, content: &str, position: Position) -> usize {
         let mut byte_offset = 0;
         let mut current_line = 0u32;
         let mut current_char = 0u32;
-        
+
         for ch in content.chars() {
             if current_line > position.line {
                 break;
             }
-            
+
             if current_line == position.line && current_char >= position.character {
                 break;
             }
-            
+
             if ch == '\n' {
                 current_line += 1;
                 current_char = 0;
             } else {
                 current_char += ch.len_utf16() as u32;
             }
-            
+
             byte_offset += ch.len_utf8();
         }
-        
+
         byte_offset
     }
 }
@@ -175,7 +178,7 @@ impl EnhancedTypeAnalyzer {
             analysis_cache: HashMap::new(),
         }
     }
-    
+
     /// Проанализировать документ с использованием всех продвинутых анализаторов
     pub fn analyze_document(
         &mut self,
@@ -184,34 +187,33 @@ impl EnhancedTypeAnalyzer {
         changes: &[TextDocumentContentChangeEvent],
     ) -> anyhow::Result<(TypeContext, Vec<TypeDiagnostic>)> {
         // Инкрементально парсим документ
-        let program = self.parsing_manager.parse_incremental(uri, content, changes)?;
-        
+        let program = self
+            .parsing_manager
+            .parse_incremental(uri, content, changes)?;
+
         // Создаем type checker с улучшенными анализаторами
         let file_name = Self::uri_to_filename(uri);
         let type_checker = TypeChecker::new(file_name);
-        
+
         // Проводим полный анализ с flow-sensitive, union types и межпроцедурным анализом
         let (context, diagnostics) = type_checker.check(&program);
-        
+
         // Кешируем результат
-        self.analysis_cache.insert(uri.to_string(), (context.clone(), diagnostics.clone()));
-        
+        self.analysis_cache
+            .insert(uri.to_string(), (context.clone(), diagnostics.clone()));
+
         Ok((context, diagnostics))
     }
-    
+
     /// Получить тип переменной в конкретной позиции
-    pub fn get_type_at_position(
-        &self,
-        uri: &str,
-        _position: Position,
-    ) -> Option<TypeResolution> {
+    pub fn get_type_at_position(&self, uri: &str, _position: Position) -> Option<TypeResolution> {
         let (context, _) = self.analysis_cache.get(uri)?;
-        
+
         // TODO: Более сложная логика для определения переменной по позиции
         // Пока возвращаем первую найденную переменную для демонстрации
         context.variables.values().next().cloned()
     }
-    
+
     /// Получить автодополнения с учетом типов из продвинутого анализа
     pub fn get_enhanced_completions(
         &self,
@@ -221,10 +223,10 @@ impl EnhancedTypeAnalyzer {
         platform_resolver: &PlatformTypeResolver,
     ) -> Vec<BslCompletion> {
         let mut completions = Vec::new();
-        
+
         // Добавляем стандартные completion из platform resolver
         completions.extend(platform_resolver.get_completions(prefix));
-        
+
         // Добавляем completion на основе локального контекста типов
         if let Some((context, _)) = self.analysis_cache.get(uri) {
             // Переменные из flow-sensitive анализа
@@ -238,7 +240,7 @@ impl EnhancedTypeAnalyzer {
                     });
                 }
             }
-            
+
             // Функции из межпроцедурного анализа
             for (func_name, signature) in &context.functions {
                 if func_name.starts_with(prefix) {
@@ -246,12 +248,18 @@ impl EnhancedTypeAnalyzer {
                         "Функция: {} -> {}\nПараметры: {}",
                         func_name,
                         Self::format_type_short(&signature.return_type),
-                        signature.params.iter()
-                            .map(|(name, type_)| format!("{}: {}", name, Self::format_type_short(type_)))
+                        signature
+                            .params
+                            .iter()
+                            .map(|(name, type_)| format!(
+                                "{}: {}",
+                                name,
+                                Self::format_type_short(type_)
+                            ))
                             .collect::<Vec<_>>()
                             .join(", ")
                     );
-                    
+
                     completions.push(BslCompletion {
                         label: func_name.clone(),
                         kind: CompletionKind::Function,
@@ -261,11 +269,10 @@ impl EnhancedTypeAnalyzer {
                 }
             }
         }
-        
+
         completions
     }
-    
-    
+
     /// Получить диагностики из кеша
     pub fn get_cached_diagnostics(&self, uri: &str) -> Vec<TypeDiagnostic> {
         self.analysis_cache
@@ -273,7 +280,7 @@ impl EnhancedTypeAnalyzer {
             .map(|(_, diagnostics)| diagnostics.clone())
             .unwrap_or_default()
     }
-    
+
     /// Форматировать информацию о типе для hover
     fn format_type_info(type_resolution: &TypeResolution) -> String {
         match &type_resolution.result {
@@ -286,12 +293,17 @@ impl EnhancedTypeAnalyzer {
                 )
             }
             ResolutionResult::Union(union_types) => {
-                let types: Vec<String> = union_types.iter()
-                    .map(|wt| format!("{} ({}%)", 
-                        Self::format_concrete_type(&wt.type_), 
-                        (wt.weight * 100.0) as u32))
+                let types: Vec<String> = union_types
+                    .iter()
+                    .map(|wt| {
+                        format!(
+                            "{} ({}%)",
+                            Self::format_concrete_type(&wt.type_),
+                            (wt.weight * 100.0) as u32
+                        )
+                    })
                     .collect();
-                
+
                 format!(
                     "**Union тип:** `{}`\n**Варианты:** {}\n**Уверенность:** {}",
                     types.join(" | "),
@@ -322,16 +334,15 @@ impl EnhancedTypeAnalyzer {
             }
         }
     }
-    
+
     /// Короткое форматирование типа для completion
     fn format_type_short(type_resolution: &TypeResolution) -> String {
         match &type_resolution.result {
-            ResolutionResult::Concrete(concrete_type) => {
-                Self::format_concrete_type(concrete_type)
-            }
+            ResolutionResult::Concrete(concrete_type) => Self::format_concrete_type(concrete_type),
             ResolutionResult::Union(union_types) => {
                 if union_types.len() <= 2 {
-                    union_types.iter()
+                    union_types
+                        .iter()
                         .map(|wt| Self::format_concrete_type(&wt.type_))
                         .collect::<Vec<_>>()
                         .join(" | ")
@@ -344,7 +355,7 @@ impl EnhancedTypeAnalyzer {
             ResolutionResult::Contextual(_) => "Contextual".to_string(),
         }
     }
-    
+
     /// Форматировать конкретный тип
     fn format_concrete_type(concrete_type: &ConcreteType) -> String {
         match concrete_type {
@@ -355,7 +366,7 @@ impl EnhancedTypeAnalyzer {
             ConcreteType::GlobalFunction(func) => format!("Функция {}", func.name),
         }
     }
-    
+
     /// Форматировать уровень уверенности
     fn format_certainty(certainty: &crate::core::types::Certainty) -> String {
         match certainty {
@@ -364,12 +375,13 @@ impl EnhancedTypeAnalyzer {
             crate::core::types::Certainty::Unknown => "неизвестно".to_string(),
         }
     }
-    
+
     /// Конвертировать URI в имя файла
     fn uri_to_filename(uri: &str) -> String {
         if let Ok(url) = url::Url::parse(uri) {
             if let Ok(path) = url.to_file_path() {
-                return path.file_name()
+                return path
+                    .file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or("unknown.bsl")
                     .to_string();
@@ -377,20 +389,24 @@ impl EnhancedTypeAnalyzer {
         }
         "unknown.bsl".to_string()
     }
-    
+
     /// Инвалидировать кеш для URI
     pub fn invalidate_cache(&mut self, uri: &str) {
         self.analysis_cache.remove(uri);
     }
-    
+
     /// Получить статистику кеша
     pub fn get_cache_stats(&self) -> CacheStats {
         CacheStats {
             cached_documents: self.analysis_cache.len(),
-            total_variables: self.analysis_cache.values()
+            total_variables: self
+                .analysis_cache
+                .values()
                 .map(|(ctx, _)| ctx.variables.len())
                 .sum(),
-            total_functions: self.analysis_cache.values()
+            total_functions: self
+                .analysis_cache
+                .values()
                 .map(|(ctx, _)| ctx.functions.len())
                 .sum(),
         }
@@ -411,32 +427,37 @@ pub struct DiagnosticsConverter;
 impl DiagnosticsConverter {
     /// Конвертировать наши диагностики в LSP формат
     pub fn convert_diagnostics(diagnostics: &[TypeDiagnostic]) -> Vec<Diagnostic> {
-        diagnostics.iter().map(|diag| {
-            Diagnostic {
-                range: Range {
-                    start: Position {
-                        line: (diag.line.saturating_sub(1)) as u32,
-                        character: diag.column as u32,
+        diagnostics
+            .iter()
+            .map(|diag| {
+                Diagnostic {
+                    range: Range {
+                        start: Position {
+                            line: (diag.line.saturating_sub(1)) as u32,
+                            character: diag.column as u32,
+                        },
+                        end: Position {
+                            line: (diag.line.saturating_sub(1)) as u32,
+                            character: (diag.column + 10) as u32, // Примерная длина
+                        },
                     },
-                    end: Position {
-                        line: (diag.line.saturating_sub(1)) as u32,
-                        character: (diag.column + 10) as u32, // Примерная длина
-                    },
-                },
-                severity: Some(Self::convert_severity(&diag.severity)),
-                code: None,
-                code_description: None,
-                source: Some("bsl-gradual-types".to_string()),
-                message: diag.message.clone(),
-                related_information: None,
-                tags: None,
-                data: None,
-            }
-        }).collect()
+                    severity: Some(Self::convert_severity(&diag.severity)),
+                    code: None,
+                    code_description: None,
+                    source: Some("bsl-gradual-types".to_string()),
+                    message: diag.message.clone(),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                }
+            })
+            .collect()
     }
-    
+
     /// Конвертировать уровень серьезности
-    fn convert_severity(severity: &crate::core::type_checker::DiagnosticSeverity) -> DiagnosticSeverity {
+    fn convert_severity(
+        severity: &crate::core::type_checker::DiagnosticSeverity,
+    ) -> DiagnosticSeverity {
         match severity {
             crate::core::type_checker::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
             crate::core::type_checker::DiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
@@ -467,7 +488,7 @@ impl DocumentManager {
             analyzer: Arc::new(RwLock::new(EnhancedTypeAnalyzer::new())),
         }
     }
-    
+
     /// Обновить документ с инкрементальным анализом
     pub async fn update_document(
         &self,
@@ -481,13 +502,13 @@ impl DocumentManager {
             let mut docs = self.documents.write().await;
             docs.insert(uri.clone(), DocumentState::new(content.clone(), version));
         }
-        
+
         // Проводим анализ
         let (context, diagnostics) = {
             let mut analyzer = self.analyzer.write().await;
             analyzer.analyze_document(&uri, &content, &changes)?
         };
-        
+
         // Обновляем кешированные результаты
         {
             let mut docs = self.documents.write().await;
@@ -497,11 +518,11 @@ impl DocumentManager {
                 doc_state.last_analysis = std::time::Instant::now();
             }
         }
-        
+
         // Конвертируем в LSP диагностики
         Ok(DiagnosticsConverter::convert_diagnostics(&diagnostics))
     }
-    
+
     /// Получить тип в позиции
     pub async fn get_type_at_position(
         &self,
@@ -511,16 +532,14 @@ impl DocumentManager {
         let analyzer = self.analyzer.read().await;
         analyzer.get_type_at_position(uri, position)
     }
-    
+
     /// Получить hover информацию с типами
-    pub async fn get_enhanced_hover(
-        &self,
-        uri: &str,
-        position: Position,
-    ) -> Option<String> {
-        self.get_type_at_position(uri, position).await.map(|type_resolution| EnhancedTypeAnalyzer::format_type_info(&type_resolution))
+    pub async fn get_enhanced_hover(&self, uri: &str, position: Position) -> Option<String> {
+        self.get_type_at_position(uri, position)
+            .await
+            .map(|type_resolution| EnhancedTypeAnalyzer::format_type_info(&type_resolution))
     }
-    
+
     /// Получить улучшенные completion
     pub async fn get_completions(
         &self,
@@ -532,18 +551,20 @@ impl DocumentManager {
         let analyzer = self.analyzer.read().await;
         analyzer.get_enhanced_completions(uri, position, prefix, platform_resolver)
     }
-    
+
     /// Получить статистику для мониторинга
     pub async fn get_stats(&self) -> DocumentManagerStats {
         let docs = self.documents.read().await;
         let analyzer = self.analyzer.read().await;
-        
+
         DocumentManagerStats {
             total_documents: docs.len(),
             cache_stats: analyzer.get_cache_stats(),
-            avg_analysis_time_ms: docs.values()
+            avg_analysis_time_ms: docs
+                .values()
                 .map(|doc| doc.last_analysis.elapsed().as_millis() as f64)
-                .sum::<f64>() / docs.len() as f64,
+                .sum::<f64>()
+                / docs.len() as f64,
         }
     }
 }
@@ -559,7 +580,7 @@ pub struct DocumentManagerStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_document_state_creation() {
         let state = DocumentState::new("test content".to_string(), 1);
@@ -567,43 +588,44 @@ mod tests {
         assert_eq!(state.version, 1);
         assert!(state.needs_reanalysis());
     }
-    
+
     #[test]
     fn test_incremental_parsing_manager() {
         let mut manager = IncrementalParsingManager::new();
-        
+
         let simple_code = r#"Процедура Тест() КонецПроцедуры"#;
         let result = manager.parse_incremental("test.bsl", simple_code, &[]);
-        
+
         assert!(result.is_ok());
-        
+
         // Проверяем что AST кешируется
         assert!(manager.ast_cache.contains_key("test.bsl"));
     }
-    
+
     #[test]
     fn test_type_formatting() {
-        let string_type = crate::core::standard_types::primitive_type(
-            crate::core::types::PrimitiveType::String
-        );
-        
+        let string_type =
+            crate::core::standard_types::primitive_type(crate::core::types::PrimitiveType::String);
+
         let formatted = EnhancedTypeAnalyzer::format_type_short(&string_type);
         assert_eq!(formatted, "String");
     }
-    
+
     #[tokio::test]
     async fn test_document_manager() {
         let manager = DocumentManager::new();
-        
-        let result = manager.update_document(
-            "test://test.bsl".to_string(),
-            "Процедура Тест() КонецПроцедуры".to_string(),
-            1,
-            vec![],
-        ).await;
-        
+
+        let result = manager
+            .update_document(
+                "test://test.bsl".to_string(),
+                "Процедура Тест() КонецПроцедуры".to_string(),
+                1,
+                vec![],
+            )
+            .await;
+
         assert!(result.is_ok());
-        
+
         let stats = manager.get_stats().await;
         assert_eq!(stats.total_documents, 1);
     }

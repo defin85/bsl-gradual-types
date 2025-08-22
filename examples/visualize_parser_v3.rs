@@ -1,19 +1,19 @@
 //! Визуализация данных из парсера синтакс-помощника версии 3
-//! 
+//!
 //! Создаёт интерактивный HTML отчёт с иерархией типов, индексами и фасетами
 
+use anyhow::Result;
 use bsl_gradual_types::adapters::syntax_helper_parser::{
-    SyntaxHelperParser, SyntaxNode, TypeInfo, OptimizationSettings,
+    OptimizationSettings, SyntaxHelperParser, SyntaxNode, TypeInfo,
 };
 use bsl_gradual_types::core::types::FacetKind;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::fs;
 use std::path::Path;
-use anyhow::Result;
-use indicatif::{ProgressBar, ProgressStyle};
 
 fn main() -> Result<()> {
     println!("🎨 Визуализация данных парсера v3...\n");
-    
+
     // Путь к распакованному синтакс-помощнику
     // Пробуем несколько возможных путей
     let syntax_helper_path = if Path::new("examples/syntax_helper/rebuilt.shcntx_ru").exists() {
@@ -23,14 +23,14 @@ fn main() -> Result<()> {
     } else {
         Path::new("data/syntax_helper/extracted")
     };
-    
+
     // Создаём парсер с настройками
     let settings = OptimizationSettings {
         show_progress: true,
         ..Default::default()
     };
     let mut parser = SyntaxHelperParser::with_settings(settings);
-    
+
     // Парсим данные
     if syntax_helper_path.exists() {
         println!("📂 Парсинг из: {}", syntax_helper_path.display());
@@ -39,48 +39,48 @@ fn main() -> Result<()> {
         println!("⚠️  Путь не найден, создаём демо-данные...");
         create_demo_data(&mut parser)?;
     }
-    
+
     // Собираем статистику
     let stats = collect_statistics(&parser);
-    
+
     // Генерируем HTML визуализацию с прогресс-баром
     println!("\n📝 Генерация HTML отчёта...");
     let pb = ProgressBar::new(5); // 5 основных этапов
     pb.set_style(
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")?
-            .progress_chars("##-")
+            .progress_chars("##-"),
     );
-    
+
     pb.set_message("Генерация заголовка и статистики");
     let mut html = String::new();
     // Начало HTML документа
     html.push_str(&generate_html_header());
     html.push_str(&generate_stats_html(&stats));
     pb.inc(1);
-    
+
     pb.set_message("Генерация дерева типов");
     html.push_str(&generate_tree_html(&parser));
     pb.inc(1);
-    
+
     pb.set_message("Генерация таблицы типов");
     html.push_str(&generate_types_table_html(&parser));
     pb.inc(1);
-    
+
     pb.set_message("Генерация информации об индексах и фасетах");
     html.push_str(&generate_indices_and_facets_html(&parser, &stats));
     pb.inc(1);
-    
+
     pb.set_message("Добавление JavaScript и завершение");
     html.push_str(&generate_html_footer(&parser));
     pb.inc(1);
-    
+
     pb.finish_with_message("HTML отчёт сгенерирован");
-    
+
     // Сохраняем файл
     let output_path = "type_hierarchy_v3_visualization.html";
     fs::write(output_path, html)?;
-    
+
     println!("\n✅ Визуализация создана: {}", output_path);
     println!("\n📊 Статистика:");
     println!("   • Всего узлов: {}", stats.total_nodes);
@@ -93,7 +93,7 @@ fn main() -> Result<()> {
     println!("   • По английским именам: {}", stats.english_index_size);
     println!("   • По категориям: {}", stats.category_index_size);
     println!("   • По фасетам: {}", stats.facet_index_size);
-    
+
     // Открываем в браузере
     #[cfg(windows)]
     {
@@ -102,7 +102,7 @@ fn main() -> Result<()> {
             .spawn()
             .ok();
     }
-    
+
     Ok(())
 }
 
@@ -130,7 +130,7 @@ fn collect_statistics(parser: &SyntaxHelperParser) -> Statistics {
         category_index_size: 0,
         facet_index_size: 0,
     };
-    
+
     // Подсчёт узлов
     let database = parser.export_database();
     let mut global_functions_count = 0;
@@ -145,36 +145,37 @@ fn collect_statistics(parser: &SyntaxHelperParser) -> Statistics {
             _ => {}
         }
     }
-    
+
     // Добавляем глобальные функции в методы для общей статистики
     println!("📊 Найдено глобальных функций: {}", global_functions_count);
-    
+
     // Размеры индексов
     let index = parser.export_index();
     stats.russian_index_size = index.by_russian.len();
     stats.english_index_size = index.by_english.len();
     stats.category_index_size = index.by_category.len();
     stats.facet_index_size = index.by_facet.len();
-    
+
     stats
 }
 
 fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
     use bsl_gradual_types::adapters::syntax_helper_parser::CategoryInfo;
     let mut html = String::new();
-    
+
     let database = parser.export_database();
-    
+
     // Discovery-based: находим корневые категории динамически из данных парсера
     // Корневые категории - это те, что не содержат "/" в catalog_path или только "Global context"
     let mut root_categories: Vec<(&String, &CategoryInfo)> = Vec::new();
-    let mut sub_categories: std::collections::HashMap<String, Vec<(&String, &CategoryInfo)>> = std::collections::HashMap::new();
-    
+    let mut sub_categories: std::collections::HashMap<String, Vec<(&String, &CategoryInfo)>> =
+        std::collections::HashMap::new();
+
     for (catalog_id, cat_info) in &database.categories {
         // Проверяем, является ли это корневой категорией
         // Корневая категория: catalog_id без "/" или "Global context"
         let is_root = !catalog_id.contains('/') || catalog_id == "Global context";
-        
+
         if is_root {
             root_categories.push((catalog_id, cat_info));
         } else {
@@ -188,22 +189,26 @@ fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
                 } else {
                     parent_id
                 };
-                sub_categories.entry(parent_catalog.to_string()).or_default().push((catalog_id, cat_info));
+                sub_categories
+                    .entry(parent_catalog.to_string())
+                    .or_default()
+                    .push((catalog_id, cat_info));
             }
         }
     }
-    
+
     // Сортируем корневые категории по имени
     root_categories.sort_by(|a, b| a.1.name.cmp(&b.1.name));
-    
+
     // Собираем типы по catalog_id категории, а не по имени!
     // Это важно, так как имена могут дублироваться
-    let mut types_by_catalog_id: std::collections::HashMap<String, Vec<&TypeInfo>> = std::collections::HashMap::new();
-    
+    let mut types_by_catalog_id: std::collections::HashMap<String, Vec<&TypeInfo>> =
+        std::collections::HashMap::new();
+
     for (_, node) in database.nodes.iter() {
         if let SyntaxNode::Type(type_info) = node {
             // Определяем catalog_id из пути типа
-            // Путь может быть: 
+            // Путь может быть:
             // - "objects/catalog234/Array.html" -> catalog234
             // - "objects/catalog234/catalog236/ValueTable.html" -> catalog234/catalog236
             // - "objects/catalog234/catalog236/ValueTableRow.html" -> catalog234/catalog236
@@ -213,10 +218,10 @@ fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
                 let path = &type_info.identity.catalog_path;
                 if let Some(objects_pos) = path.find("objects/") {
                     let after_objects = &path[objects_pos + 8..]; // Пропускаем "objects/"
-                    
+
                     // Подсчитываем количество catalog в пути
                     let catalog_count = after_objects.matches("catalog").count();
-                    
+
                     if catalog_count == 0 {
                         "unknown".to_string()
                     } else if catalog_count == 1 {
@@ -233,7 +238,7 @@ fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
                         // Нужно взять путь до последнего catalog включительно
                         let parts: Vec<&str> = after_objects.split('/').collect();
                         let mut catalog_parts = Vec::new();
-                        
+
                         for part in parts {
                             if part.starts_with("catalog") && !part.ends_with(".html") {
                                 catalog_parts.push(part);
@@ -247,24 +252,30 @@ fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
                                 break;
                             }
                         }
-                        
+
                         catalog_parts.join("/")
                     }
                 } else {
                     "unknown".to_string()
                 }
             };
-            
-            types_by_catalog_id.entry(catalog_id).or_default().push(type_info);
+
+            types_by_catalog_id
+                .entry(catalog_id)
+                .or_default()
+                .push(type_info);
         }
     }
-    
+
     // Генерируем HTML для корневых категорий - БЕЗ ТИПОВ для упрощения
     for (cat_id, cat_info) in root_categories {
         // Считаем количество элементов в категории
-        let type_count = types_by_catalog_id.get(cat_id).map(|v| v.len()).unwrap_or(0);
+        let type_count = types_by_catalog_id
+            .get(cat_id)
+            .map(|v| v.len())
+            .unwrap_or(0);
         let subcat_count = sub_categories.get(cat_id).map(|v| v.len()).unwrap_or(0);
-        
+
         // Корневая категория со счетчиком и data-атрибутами
         html.push_str(&format!(
             r#"<div class="tree-node root-category" data-category-id="{}" data-category-name="{}">
@@ -273,19 +284,18 @@ fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
                     <span style="color: #999; font-size: 0.9em;">({} подкатегорий, {} типов)</span>
                 </div>
                 <div class="tree-children">"#,
-            cat_id,
-            cat_info.name,
-            cat_info.name,
-            subcat_count,
-            type_count
+            cat_id, cat_info.name, cat_info.name, subcat_count, type_count
         ));
-        
+
         // Добавляем только подкатегории БЕЗ их типов
         if let Some(subcats) = sub_categories.get(cat_id) {
             for (subcat_id, subcat_info) in subcats {
                 // Для подкатегорий используем полный ID (например, catalog234/catalog236)
-                let subcat_type_count = types_by_catalog_id.get(subcat_id.as_str()).map(|v| v.len()).unwrap_or(0);
-                
+                let subcat_type_count = types_by_catalog_id
+                    .get(subcat_id.as_str())
+                    .map(|v| v.len())
+                    .unwrap_or(0);
+
                 html.push_str(&format!(
                     r#"
                     <div class="tree-node" data-category-id="{}" data-category-name="{}">
@@ -294,27 +304,26 @@ fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
                             <span style="color: #999; font-size: 0.9em;">({} типов)</span>
                         </div>
                     </div>"#,
-                    subcat_id,
-                    subcat_info.name,
-                    subcat_info.name,
-                    subcat_type_count
+                    subcat_id, subcat_info.name, subcat_info.name, subcat_type_count
                 ));
             }
         }
-        
+
         // Закрываем корневую категорию
         html.push_str("\n                </div>\n            </div>\n");
     }
-    
+
     // Добавляем типы без категории
     if let Some(uncategorized) = types_by_catalog_id.get("unknown") {
         if !uncategorized.is_empty() {
-            html.push_str(r#"<div class="tree-node">
+            html.push_str(
+                r#"<div class="tree-node">
                 <div class="tree-node-header">
                     <span class="icon icon-category">❓</span> Без категории
                 </div>
-                <div class="tree-children">"#);
-            
+                <div class="tree-children">"#,
+            );
+
             for type_info in uncategorized {
                 html.push_str(&format!(
                     r#"<div class="tree-node">
@@ -322,18 +331,17 @@ fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
                             <span class="icon icon-type">📄</span> {} / {}
                         </div>
                     </div>"#,
-                    type_info.identity.russian_name,
-                    type_info.identity.english_name
+                    type_info.identity.russian_name, type_info.identity.english_name
                 ));
             }
-            
+
             html.push_str("</div></div>");
         }
     }
-    
+
     // Генерируем JSON с данными о типах для JavaScript
     let mut types_data_json = String::from("const categoryTypes = {\n");
-    
+
     for (catalog_id, types) in &types_by_catalog_id {
         if !types.is_empty() {
             types_data_json.push_str(&format!("    \"{}\": [\n", catalog_id));
@@ -342,34 +350,36 @@ fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
                     "        {{russian: \"{}\", english: \"{}\", path: \"{}\"}},\n",
                     type_info.identity.russian_name.replace("\"", "\\\""),
                     type_info.identity.english_name.replace("\"", "\\\""),
-                    type_info.identity.catalog_path.replace("\\", "/").replace("\"", "\\\"")
+                    type_info
+                        .identity
+                        .catalog_path
+                        .replace("\\", "/")
+                        .replace("\"", "\\\"")
                 ));
             }
             types_data_json.push_str("    ],\n");
         }
     }
-    
+
     types_data_json.push_str("};\n");
-    
+
     (html, types_data_json)
 }
-
 
 fn generate_global_functions_table(parser: &SyntaxHelperParser) -> String {
     let mut html = String::new();
     let database = parser.export_database();
-    
+
     // Собираем глобальные функции и группируем по категориям
-    let mut categories: std::collections::HashMap<String, Vec<&SyntaxNode>> = std::collections::HashMap::new();
+    let mut categories: std::collections::HashMap<String, Vec<&SyntaxNode>> =
+        std::collections::HashMap::new();
     let mut no_category = Vec::new();
-    
+
     for node in database.nodes.values() {
         if let SyntaxNode::GlobalFunction(func) = node {
             match &func.category {
                 Some(cat) => {
-                    categories.entry(cat.clone())
-                        .or_default()
-                        .push(node);
+                    categories.entry(cat.clone()).or_default().push(node);
                 }
                 None => {
                     no_category.push(node);
@@ -377,12 +387,13 @@ fn generate_global_functions_table(parser: &SyntaxHelperParser) -> String {
             }
         }
     }
-    
+
     // Сортируем категории по количеству функций
     let mut sorted_categories: Vec<_> = categories.into_iter().collect();
     sorted_categories.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
-    
-    html.push_str(r#"
+
+    html.push_str(
+        r#"
     <style>
         .category-header {
             background-color: #f0f0f0;
@@ -411,18 +422,26 @@ fn generate_global_functions_table(parser: &SyntaxHelperParser) -> String {
                 <th>Контексты</th>
             </tr>
         </thead>
-        <tbody>"#);
-    
+        <tbody>"#,
+    );
+
     // Выводим функции по категориям
     for (idx, (category, functions)) in sorted_categories.iter().enumerate() {
         // Заголовок категории
-        html.push_str(&format!(r#"
+        html.push_str(&format!(
+            r#"
             <tr class="category-header" onclick="toggleCategory('cat-{}')">
                 <td colspan="6">📁 {} ({} функций)</td>
             </tr>
             <tbody id="cat-{}" class="category-content {}">
-        "#, idx, category, functions.len(), idx, if idx < 3 { "expanded" } else { "" }));
-        
+        "#,
+            idx,
+            category,
+            functions.len(),
+            idx,
+            if idx < 3 { "expanded" } else { "" }
+        ));
+
         // Сортируем функции внутри категории
         let mut sorted_functions = functions.clone();
         sorted_functions.sort_by(|a, b| {
@@ -432,7 +451,7 @@ fn generate_global_functions_table(parser: &SyntaxHelperParser) -> String {
                 std::cmp::Ordering::Equal
             }
         });
-        
+
         // Показываем первые 20 функций в категории
         for func_node in sorted_functions.iter().take(20) {
             if let SyntaxNode::GlobalFunction(func) = func_node {
@@ -440,13 +459,14 @@ fn generate_global_functions_table(parser: &SyntaxHelperParser) -> String {
                 let polymorphic = if func.polymorphic { "✅" } else { "❌" };
                 let pure = if func.pure { "✅" } else { "❌" };
                 let params_count = func.parameters.len();
-        let contexts = if func.contexts.is_empty() {
-            "Все".to_string()
-        } else {
-            format!("{} контекстов", func.contexts.len())
-        };
-        
-                html.push_str(&format!(r#"
+                let contexts = if func.contexts.is_empty() {
+                    "Все".to_string()
+                } else {
+                    format!("{} контекстов", func.contexts.len())
+                };
+
+                html.push_str(&format!(
+                    r#"
                 <tr>
                     <td><strong>{}</strong></td>
                     <td>{}</td>
@@ -455,29 +475,32 @@ fn generate_global_functions_table(parser: &SyntaxHelperParser) -> String {
                     <td>{}</td>
                     <td>{}</td>
                 </tr>"#,
-                func.name, english, polymorphic, pure, params_count, contexts
+                    func.name, english, polymorphic, pure, params_count, contexts
                 ));
             }
         }
-        
+
         // Если в категории больше 20 функций, показываем сколько ещё
         if sorted_functions.len() > 20 {
-            html.push_str(&format!(r#"
+            html.push_str(&format!(
+                r#"
                 <tr>
                     <td colspan="6" style="text-align: center; font-style: italic">
                         ... и ещё {} функций в этой категории
                     </td>
-                </tr>"#, sorted_functions.len() - 20));
+                </tr>"#,
+                sorted_functions.len() - 20
+            ));
         }
-        
+
         html.push_str("</tbody>");
     }
-    
+
     // Подсчитываем общую статистику
     let mut total = 0;
     let mut polymorphic_count = 0;
     let mut pure_count = 0;
-    
+
     for (_, functions) in &sorted_categories {
         for func_node in functions {
             if let SyntaxNode::GlobalFunction(func) = func_node {
@@ -491,11 +514,12 @@ fn generate_global_functions_table(parser: &SyntaxHelperParser) -> String {
             }
         }
     }
-    
+
     // Добавляем функции без категории
     total += no_category.len();
-    
-    html.push_str(&format!(r#"
+
+    html.push_str(&format!(
+        r#"
         </tbody>
     </table>
     
@@ -516,26 +540,35 @@ fn generate_global_functions_table(parser: &SyntaxHelperParser) -> String {
             element.classList.toggle('expanded');
         }}
     }}
-    </script>"#, total, sorted_categories.len(), polymorphic_count, pure_count));
-    
+    </script>"#,
+        total,
+        sorted_categories.len(),
+        polymorphic_count,
+        pure_count
+    ));
+
     html
 }
 
 fn generate_facets_info(parser: &SyntaxHelperParser) -> String {
     let mut html = String::new();
-    
+
     // Собираем статистику по фасетам
-    let mut facet_stats: std::collections::HashMap<FacetKind, Vec<String>> = std::collections::HashMap::new();
-    
+    let mut facet_stats: std::collections::HashMap<FacetKind, Vec<String>> =
+        std::collections::HashMap::new();
+
     let database = parser.export_database();
     for (_, node) in database.nodes.iter() {
         if let SyntaxNode::Type(type_info) = node {
             for facet in &type_info.metadata.available_facets {
-                facet_stats.entry(*facet).or_default().push(type_info.identity.russian_name.clone());
+                facet_stats
+                    .entry(*facet)
+                    .or_default()
+                    .push(type_info.identity.russian_name.clone());
             }
         }
     }
-    
+
     // Генерируем HTML
     for (facet, types) in facet_stats.iter() {
         let (icon, name, description) = match facet {
@@ -545,7 +578,7 @@ fn generate_facets_info(parser: &SyntaxHelperParser) -> String {
             FacetKind::Constructor => ("🏗️", "Constructor", "Конструируемые типы"),
             _ => ("📦", "Other", "Другие типы"),
         };
-        
+
         html.push_str(&format!(
             r#"<div style="margin: 20px 0;">
                 <h4>{} {} ({} типов)</h4>
@@ -554,68 +587,76 @@ fn generate_facets_info(parser: &SyntaxHelperParser) -> String {
                     Примеры: {}</p>
                 </div>
             </div>"#,
-            icon, name, types.len(), description,
-            types.iter().take(3).map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            icon,
+            name,
+            types.len(),
+            description,
+            types
+                .iter()
+                .take(3)
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
-    
+
     html
 }
 
 fn create_demo_data(parser: &mut SyntaxHelperParser) -> Result<()> {
     // Создаём временную структуру для демонстрации
     use tempfile::TempDir;
-    
+
     let dir = TempDir::new()?;
     let base = dir.path();
-    
+
     // Создаём демо-структуру
     let objects_dir = base.join("objects");
     fs::create_dir(&objects_dir)?;
-    
+
     // Коллекции
     let collections_dir = objects_dir.join("catalog_collections");
     fs::create_dir(&collections_dir)?;
-    
+
     fs::write(
         collections_dir.join("ValueTable.html"),
         r#"<html>
 <h1 class="V8SH_pagetitle">ТаблицаЗначений (ValueTable)</h1>
 <p>Объект для хранения табличных данных. Для объекта доступен обход коллекции посредством оператора Для каждого.</p>
-</html>"#
+</html>"#,
     )?;
-    
+
     fs::write(
         collections_dir.join("Array.html"),
         r#"<html>
 <h1 class="V8SH_pagetitle">Массив (Array)</h1>
 <p>Упорядоченная коллекция значений. Для объекта доступен обход коллекции посредством оператора Для каждого.</p>
-</html>"#
+</html>"#,
     )?;
-    
+
     fs::write(
         collections_dir.join("Map.html"),
         r#"<html>
 <h1 class="V8SH_pagetitle">Соответствие (Map)</h1>
 <p>Коллекция пар ключ-значение. Для объекта доступен обход коллекции посредством оператора Для каждого.</p>
-</html>"#
+</html>"#,
     )?;
-    
+
     // Глобальные объекты
     let globals_dir = objects_dir.join("catalog_globals");
     fs::create_dir(&globals_dir)?;
-    
+
     fs::write(
         globals_dir.join("XMLWriter.html"),
         r#"<html>
 <h1 class="V8SH_pagetitle">ЗаписьXML (XMLWriter)</h1>
 <p>Объект для записи XML документов.</p>
-</html>"#
+</html>"#,
     )?;
-    
+
     // Парсим созданную структуру
     parser.parse_directory(base)?;
-    
+
     Ok(())
 }
 
@@ -867,11 +908,13 @@ fn generate_html_header() -> String {
         <div class="header">
             <h1>🚀 BSL Parser V3 - Визуализация</h1>
             <p>Discovery-based парсер с двуязычной поддержкой и системой фасетов</p>
-        </div>"#.to_string()
+        </div>"#
+        .to_string()
 }
 
 fn generate_stats_html(stats: &Statistics) -> String {
-    format!(r#"
+    format!(
+        r#"
         <!-- Статистика -->
         <div class="stats-grid">
             <div class="stat-card">
@@ -907,20 +950,25 @@ fn generate_stats_html(stats: &Statistics) -> String {
                 <h2>📚 Иерархия типов</h2>
                 <input type="text" class="search-box" placeholder="Поиск типов..." id="searchBox">
                 <div id="tree">"#,
-        stats.total_nodes, stats.types_count, stats.categories_count,
-        stats.russian_index_size, stats.english_index_size, stats.facet_index_size
+        stats.total_nodes,
+        stats.types_count,
+        stats.categories_count,
+        stats.russian_index_size,
+        stats.english_index_size,
+        stats.facet_index_size
     )
 }
 
 fn generate_tree_html(parser: &SyntaxHelperParser) -> String {
     let mut html = String::new();
-    
+
     // Генерируем дерево для левой панели и данные о типах
     let (tree_html, _types_data) = generate_tree(parser);
     html.push_str(&tree_html);
-    
+
     // Закрываем div#tree и div.sidebar, открываем правую панель
-    html.push_str(r#"
+    html.push_str(
+        r#"
                 </div>
             </div>
             
@@ -948,8 +996,9 @@ fn generate_tree_html(parser: &SyntaxHelperParser) -> String {
                                 <th>Фасеты</th>
                             </tr>
                         </thead>
-                        <tbody>"#);
-    
+                        <tbody>"#,
+    );
+
     html
 }
 
@@ -967,9 +1016,10 @@ fn generate_types_table_html(_parser: &SyntaxHelperParser) -> String {
 
 fn generate_indices_and_facets_html(parser: &SyntaxHelperParser, stats: &Statistics) -> String {
     let mut html = String::new();
-    
+
     // Индексы
-    html.push_str(&format!(r#"
+    html.push_str(&format!(
+        r#"
                 <div class="tab-content" id="indices">
                     <h3>Индексы для поиска</h3>
                     <p>Система индексов обеспечивает O(1) поиск типов по различным критериям:</p>
@@ -984,37 +1034,44 @@ fn generate_indices_and_facets_html(parser: &SyntaxHelperParser, stats: &Statist
                 <div class="tab-content" id="facets">
                     <h3>Система фасетов</h3>
                     <p>Фасеты определяют различные представления одного типа:</p>"#,
-        stats.russian_index_size, stats.english_index_size,
-        stats.category_index_size, stats.facet_index_size
+        stats.russian_index_size,
+        stats.english_index_size,
+        stats.category_index_size,
+        stats.facet_index_size
     ));
-    
+
     // Используем существующую функцию generate_facets_info
     html.push_str(&generate_facets_info(parser));
-    
-    html.push_str(r#"
+
+    html.push_str(
+        r#"
                 </div>
                 
                 <div class="tab-content" id="functions">
                     <h3>🔧 Глобальные функции</h3>
-                    <p>Встроенные функции BSL, доступные глобально:</p>"#);
-    
+                    <p>Встроенные функции BSL, доступные глобально:</p>"#,
+    );
+
     // Генерируем таблицу глобальных функций
     html.push_str(&generate_global_functions_table(parser));
-    
-    html.push_str(r#"
+
+    html.push_str(
+        r#"
                 </div>
             </div>
         </div>
-    </div>"#);
-    
+    </div>"#,
+    );
+
     html
 }
 
 fn generate_html_footer(parser: &SyntaxHelperParser) -> String {
     // Генерируем данные о типах
     let (_, types_data) = generate_tree(parser);
-    
-    let script_content = format!(r#"
+
+    let script_content = format!(
+        r#"
     <script>
         // Данные о типах по категориям
         {}
@@ -1126,7 +1183,9 @@ fn generate_html_footer(parser: &SyntaxHelperParser) -> String {
         }}
     </script>
 </body>
-</html>"#, types_data);
-    
+</html>"#,
+        types_data
+    );
+
     script_content
 }

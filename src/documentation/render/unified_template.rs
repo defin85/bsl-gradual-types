@@ -1,20 +1,19 @@
 //! Унифицированная система шаблонов для всех страниц
 
-
 /// Базовый шаблон для всех страниц
 pub struct UnifiedPageTemplate {
     /// Заголовок страницы
     pub title: String,
-    
+
     /// Активная секция навигации
     pub active_section: String,
-    
+
     /// Статистика для header
     pub stats: PageStatistics,
-    
+
     /// Основной контент
     pub content: String,
-    
+
     /// Активная тема
     pub theme: String,
 }
@@ -39,25 +38,25 @@ impl UnifiedPageTemplate {
             theme: "dark".to_string(),
         }
     }
-    
+
     /// Установить статистику
     pub fn with_stats(mut self, stats: PageStatistics) -> Self {
         self.stats = stats;
         self
     }
-    
+
     /// Установить контент
     pub fn with_content(mut self, content: String) -> Self {
         self.content = content;
         self
     }
-    
+
     /// Установить тему
     pub fn with_theme(mut self, theme: String) -> Self {
         self.theme = theme;
         self
     }
-    
+
     /// Рендеринг полной страницы
     pub fn render(&self) -> String {
         format!(
@@ -81,25 +80,25 @@ impl UnifiedPageTemplate {
     {}
 </body>
 </html>"#,
-            self.theme,                                     // html class
-            self.title,                                     // title
-            self.render_shared_css(),                       // CSS
-            self.render_page_css(),                         // Дополнительный CSS
-            self.theme,                                     // body class
-            self.render_header(),                           // header
-            self.content,                                   // main content
-            self.render_footer(),                           // footer
-            self.render_javascript()                        // JavaScript
+            self.theme,               // html class
+            self.title,               // title
+            self.render_shared_css(), // CSS
+            self.render_page_css(),   // Дополнительный CSS
+            self.theme,               // body class
+            self.render_header(),     // header
+            self.content,             // main content
+            self.render_footer(),     // footer
+            self.render_javascript()  // JavaScript
         )
     }
-    
+
     /// Рендеринг общих CSS стилей
     fn render_shared_css(&self) -> String {
         // Включаем содержимое shared_styles.css
         let shared_css = include_str!("shared_styles.css");
         format!("<style>\n{}\n</style>", shared_css)
     }
-    
+
     /// Рендеринг дополнительных CSS для конкретной страницы
     fn render_page_css(&self) -> String {
         match self.active_section.as_str() {
@@ -108,7 +107,7 @@ impl UnifiedPageTemplate {
             _ => String::new(),
         }
     }
-    
+
     /// Рендеринг header со статистикой и навигацией
     fn render_header(&self) -> String {
         format!(
@@ -135,16 +134,40 @@ impl UnifiedPageTemplate {
                 
                 {}
             </header>"#,
-            if self.active_section == "home" { "active" } else { "" },
-            if self.active_section == "hierarchy" { "active" } else { "" },
-            if self.active_section == "search" { "active" } else { "" },
-            if self.active_section == "analyzer" { "active" } else { "" },
-            if self.active_section == "stats" { "active" } else { "" },
-            if self.active_section == "api" { "active" } else { "" },
+            if self.active_section == "home" {
+                "active"
+            } else {
+                ""
+            },
+            if self.active_section == "hierarchy" {
+                "active"
+            } else {
+                ""
+            },
+            if self.active_section == "search" {
+                "active"
+            } else {
+                ""
+            },
+            if self.active_section == "analyzer" {
+                "active"
+            } else {
+                ""
+            },
+            if self.active_section == "stats" {
+                "active"
+            } else {
+                ""
+            },
+            if self.active_section == "api" {
+                "active"
+            } else {
+                ""
+            },
             self.render_stats_section()
         )
     }
-    
+
     /// Условный рендеринг статистики (только для главной страницы)
     fn render_stats_section(&self) -> String {
         if self.active_section == "home" {
@@ -179,12 +202,11 @@ impl UnifiedPageTemplate {
                     <span class="compact-stat">📊 {} типов</span>
                     <span class="compact-stat">💾 {:.1} MB</span>
                 </div>"#,
-                self.stats.platform_types_count,
-                self.stats.memory_usage_mb
+                self.stats.platform_types_count, self.stats.memory_usage_mb
             )
         }
     }
-    
+
     /// Рендеринг footer
     fn render_footer(&self) -> String {
         r#"<footer class="page-footer">
@@ -193,7 +215,7 @@ impl UnifiedPageTemplate {
             </p>
         </footer>"#.to_string()
     }
-    
+
     /// CSS специфичный для страницы иерархии
     fn render_hierarchy_css(&self) -> String {
         r#"<style>
@@ -421,9 +443,10 @@ impl UnifiedPageTemplate {
     border-radius: calc(var(--border-radius) / 3);
     margin: var(--spacing-xs) 0;
 }
-</style>"#.to_string()
+</style>"#
+            .to_string()
     }
-    
+
     /// CSS для страницы поиска
     fn render_search_css(&self) -> String {
         r#"<style>
@@ -431,9 +454,10 @@ impl UnifiedPageTemplate {
 .search-layout {
     padding: var(--spacing-xl);
 }
-</style>"#.to_string()
+</style>"#
+            .to_string()
     }
-    
+
     /// Рендеринг JavaScript
     fn render_javascript(&self) -> String {
         r#"<script>
@@ -1160,7 +1184,7 @@ pub fn create_home_template(stats: PageStatistics) -> UnifiedPageTemplate {
                 </div>
             </div>
         </div>"#.to_string();
-    
+
     UnifiedPageTemplate::new("BSL Type Browser", "home")
         .with_stats(stats)
         .with_content(content)
@@ -1225,7 +1249,7 @@ pub fn create_search_template(stats: PageStatistics) -> UnifiedPageTemplate {
                 <div id="search-suggestions" class="suggestions-container"></div>
             </div>
         </div>"#.to_string();
-    
+
     UnifiedPageTemplate::new("BSL Type Search", "search")
         .with_stats(stats)
         .with_content(content)
@@ -1333,7 +1357,7 @@ pub fn create_analyzer_template(stats: PageStatistics) -> UnifiedPageTemplate {
                 </div>
             </div>
         </div>"#.to_string();
-    
+
     UnifiedPageTemplate::new("BSL Code Analyzer", "analyzer")
         .with_stats(stats)
         .with_content(content)
@@ -1491,7 +1515,7 @@ pub fn create_api_template(stats: PageStatistics) -> UnifiedPageTemplate {
                 </div>
             </div>
         </div>"#.to_string();
-    
+
     UnifiedPageTemplate::new("BSL API Documentation", "api")
         .with_stats(stats)
         .with_content(content)
@@ -1626,14 +1650,17 @@ pub fn create_stats_template(stats: PageStatistics) -> UnifiedPageTemplate {
                 </div>
             </div>
         </div>"#.to_string();
-    
+
     UnifiedPageTemplate::new("BSL Statistics", "stats")
         .with_stats(stats)
         .with_content(content)
 }
 
 /// Создание шаблона для страницы иерархии
-pub fn create_hierarchy_template(stats: PageStatistics, tree_content: String) -> UnifiedPageTemplate {
+pub fn create_hierarchy_template(
+    stats: PageStatistics,
+    tree_content: String,
+) -> UnifiedPageTemplate {
     let content = format!(
         r#"<div class="hierarchy-layout">
             <div class="hierarchy-sidebar">
@@ -1668,7 +1695,7 @@ pub fn create_hierarchy_template(stats: PageStatistics, tree_content: String) ->
         </div>"#,
         tree_content
     );
-    
+
     UnifiedPageTemplate::new("BSL Type Hierarchy", "hierarchy")
         .with_stats(stats)
         .with_content(content)

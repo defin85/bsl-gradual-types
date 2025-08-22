@@ -3,16 +3,16 @@
 //! Этот модуль предоставляет возможности для параллельной обработки
 //! множественных BSL файлов с оптимальным использованием CPU ресурсов.
 
+use anyhow::Result;
+use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use anyhow::Result;
-use rayon::prelude::*;
-use indicatif::{ProgressBar, ProgressStyle};
 
-use crate::parser::common::ParserFactory;
-use crate::core::type_checker::{TypeChecker, TypeContext, TypeDiagnostic};
 use crate::core::analysis_cache::AnalysisCacheManager;
+use crate::core::type_checker::{TypeChecker, TypeContext, TypeDiagnostic};
+use crate::parser::common::ParserFactory;
 
 /// Результат анализа одного файла
 #[derive(Debug, Clone)]
@@ -107,27 +107,27 @@ impl ParallelAnalyzer {
         } else {
             None
         };
-        
+
         Ok(Self {
             config,
             cache_manager,
         })
     }
-    
+
     /// Проанализировать множество файлов параллельно
     pub fn analyze_files<P: AsRef<Path> + Send + Sync>(
         &self,
         file_paths: Vec<P>,
     ) -> Result<BatchAnalysisResult> {
         let start_time = std::time::Instant::now();
-        
+
         // Настраиваем thread pool если указано
         if let Some(num_threads) = self.config.num_threads {
             rayon::ThreadPoolBuilder::new()
                 .num_threads(num_threads)
                 .build_global()?;
         }
-        
+
         // Создаем прогресс бар
         let progress = if self.config.show_progress {
             let pb = ProgressBar::new(file_paths.len() as u64);
@@ -141,13 +141,13 @@ impl ParallelAnalyzer {
         } else {
             None
         };
-        
+
         // Параллельно анализируем файлы
         let file_results: Vec<FileAnalysisResult> = file_paths
             .par_iter()
             .map(|file_path| {
                 let result = self.analyze_single_file(file_path.as_ref());
-                
+
                 // Обновляем прогресс
                 if let Some(pb) = &progress {
                     pb.inc(1);
@@ -155,7 +155,7 @@ impl ParallelAnalyzer {
                         pb.set_message(format!("Анализ: {}", res.file_path.display()));
                     }
                 }
-                
+
                 result.unwrap_or_else(|e| FileAnalysisResult {
                     file_path: file_path.as_ref().to_path_buf(),
                     type_context: TypeContext {
@@ -171,35 +171,35 @@ impl ParallelAnalyzer {
                 })
             })
             .collect();
-        
+
         if let Some(pb) = progress {
             pb.finish_with_message("Анализ завершен");
         }
-        
+
         let total_time = start_time.elapsed();
         let stats = self.calculate_stats(&file_results, total_time);
-        
+
         Ok(BatchAnalysisResult {
             file_results,
             total_time,
             stats,
         })
     }
-    
+
     /// Проанализировать один файл
     fn analyze_single_file(&self, file_path: &Path) -> Result<FileAnalysisResult> {
         let analysis_start = std::time::Instant::now();
-        
+
         // Читаем файл
         let content = std::fs::read_to_string(file_path)?;
-        
+
         // Проверяем кеш если включен
         if let Some(cache_manager) = &self.cache_manager {
             let cache_key = crate::core::analysis_cache::CacheKey::from_content(
-                &content, 
-                env!("CARGO_PKG_VERSION")
+                &content,
+                env!("CARGO_PKG_VERSION"),
             );
-            
+
             if let Ok(mut manager) = cache_manager.lock() {
                 if let Some(cached) = manager.get(&cache_key) {
                     return Ok(FileAnalysisResult {
@@ -218,28 +218,29 @@ impl ParallelAnalyzer {
                 }
             }
         }
-        
+
         // Анализируем файл
         let mut parser = ParserFactory::create();
         let program = parser.parse(&content)?;
-        
-        let file_name = file_path.file_name()
+
+        let file_name = file_path
+            .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("unknown.bsl")
             .to_string();
-        
+
         let type_checker = TypeChecker::new(file_name);
         let (context, diagnostics) = type_checker.check(&program);
-        
+
         let analysis_time = analysis_start.elapsed();
-        
+
         // Сохраняем в кеш если включен
         if let Some(cache_manager) = &self.cache_manager {
             let cache_key = crate::core::analysis_cache::CacheKey::from_content(
-                &content, 
-                env!("CARGO_PKG_VERSION")
+                &content,
+                env!("CARGO_PKG_VERSION"),
             );
-            
+
             let cached_results = crate::core::analysis_cache::CachedInterproceduralResults {
                 function_results: HashMap::new(), // TODO: Извлечь из context
                 function_signatures: context.functions.clone(),
@@ -251,12 +252,12 @@ impl ParallelAnalyzer {
                 created_at: std::time::SystemTime::now(),
                 ttl: std::time::Duration::from_secs(3600),
             };
-            
+
             if let Ok(mut manager) = cache_manager.lock() {
                 let _ = manager.put(cache_key, cached_results);
             }
         }
-        
+
         Ok(FileAnalysisResult {
             file_path: file_path.to_path_buf(),
             type_context: context,
@@ -266,31 +267,29 @@ impl ParallelAnalyzer {
             error_message: None,
         })
     }
-    
+
     /// Вычислить статистику
-    fn calculate_stats(&self, results: &[FileAnalysisResult], total_time: std::time::Duration) -> BatchAnalysisStats {
+    fn calculate_stats(
+        &self,
+        results: &[FileAnalysisResult],
+        total_time: std::time::Duration,
+    ) -> BatchAnalysisStats {
         let total_files = results.len();
         let successful_files = results.iter().filter(|r| r.success).count();
         let failed_files = total_files - successful_files;
-        
-        let total_functions: usize = results.iter()
-            .map(|r| r.type_context.functions.len())
-            .sum();
-        
-        let total_variables: usize = results.iter()
-            .map(|r| r.type_context.variables.len())
-            .sum();
-        
-        let total_diagnostics: usize = results.iter()
-            .map(|r| r.diagnostics.len())
-            .sum();
-        
+
+        let total_functions: usize = results.iter().map(|r| r.type_context.functions.len()).sum();
+
+        let total_variables: usize = results.iter().map(|r| r.type_context.variables.len()).sum();
+
+        let total_diagnostics: usize = results.iter().map(|r| r.diagnostics.len()).sum();
+
         let avg_analysis_time = if total_files > 0 {
             total_time / total_files as u32
         } else {
             std::time::Duration::ZERO
         };
-        
+
         BatchAnalysisStats {
             total_files,
             successful_files,
@@ -301,11 +300,11 @@ impl ParallelAnalyzer {
             avg_analysis_time,
         }
     }
-    
+
     /// Найти все BSL файлы в директории
     pub fn find_bsl_files<P: AsRef<Path>>(root_dir: P) -> Result<Vec<PathBuf>> {
         let mut bsl_files = Vec::new();
-        
+
         for entry in walkdir::WalkDir::new(root_dir) {
             let entry = entry?;
             if entry.file_type().is_file() {
@@ -316,14 +315,14 @@ impl ParallelAnalyzer {
                 }
             }
         }
-        
+
         Ok(bsl_files)
     }
-    
+
     /// Анализировать проект 1С целиком
     pub fn analyze_project<P: AsRef<Path>>(&self, project_root: P) -> Result<BatchAnalysisResult> {
         let bsl_files = Self::find_bsl_files(project_root)?;
-        
+
         if bsl_files.is_empty() {
             return Ok(BatchAnalysisResult {
                 file_results: vec![],
@@ -339,36 +338,38 @@ impl ParallelAnalyzer {
                 },
             });
         }
-        
+
         println!("🔍 Найдено {} BSL файлов для анализа", bsl_files.len());
-        
+
         self.analyze_files(bsl_files)
     }
-    
+
     /// Получить информацию о производительности
     pub fn benchmark_parallel_vs_sequential<P: AsRef<Path> + Send + Sync + Clone>(
         &self,
         file_paths: Vec<P>,
     ) -> Result<ParallelBenchmarkResult> {
         let files_clone = file_paths.clone();
-        
+
         // Последовательный анализ
         let sequential_start = std::time::Instant::now();
-        let _sequential_results: Vec<_> = files_clone.iter()
+        let _sequential_results: Vec<_> = files_clone
+            .iter()
             .map(|path| self.analyze_single_file(path.as_ref()))
             .collect::<Result<Vec<_>>>()?;
         let sequential_time = sequential_start.elapsed();
-        
+
         // Параллельный анализ
         let parallel_start = std::time::Instant::now();
-        let _parallel_results: Vec<_> = file_paths.par_iter()
+        let _parallel_results: Vec<_> = file_paths
+            .par_iter()
             .map(|path| self.analyze_single_file(path.as_ref()))
             .collect::<Result<Vec<_>>>()?;
         let parallel_time = parallel_start.elapsed();
-        
+
         let speedup = sequential_time.as_secs_f64() / parallel_time.as_secs_f64();
         let efficiency = speedup / rayon::current_num_threads() as f64;
-        
+
         Ok(ParallelBenchmarkResult {
             sequential_time,
             parallel_time,
@@ -427,7 +428,7 @@ impl ProjectAnalysisUtils {
     /// Найти конфигурацию 1С в проекте
     pub fn find_1c_config<P: AsRef<Path>>(project_root: P) -> Option<PathBuf> {
         let root = project_root.as_ref();
-        
+
         // Стандартные места расположения конфигурации
         let candidates = [
             root.join("src").join("cf"),
@@ -435,42 +436,46 @@ impl ProjectAnalysisUtils {
             root.join("Ext").join("Configuration.xml"),
             root.join("ConfigDumpInfo.xml"),
         ];
-        
+
         for candidate in &candidates {
             if candidate.exists() {
                 return Some(candidate.clone());
             }
         }
-        
+
         None
     }
-    
+
     /// Группировать файлы по подсистемам
     pub fn group_files_by_subsystem(file_paths: &[PathBuf]) -> HashMap<String, Vec<PathBuf>> {
         let mut groups = HashMap::new();
-        
+
         for file_path in file_paths {
             let subsystem = Self::extract_subsystem_name(file_path);
-            groups.entry(subsystem).or_insert_with(Vec::new).push(file_path.clone());
+            groups
+                .entry(subsystem)
+                .or_insert_with(Vec::new)
+                .push(file_path.clone());
         }
-        
+
         groups
     }
-    
+
     /// Извлечь имя подсистемы из пути файла
     fn extract_subsystem_name(file_path: &Path) -> String {
         // Простая эвристика: берем название родительской директории
-        file_path.parent()
+        file_path
+            .parent()
             .and_then(|parent| parent.file_name())
             .and_then(|name| name.to_str())
             .unwrap_or("Common")
             .to_string()
     }
-    
+
     /// Приоритизировать файлы для анализа
     pub fn prioritize_files(file_paths: &[PathBuf]) -> Vec<PathBuf> {
         let mut prioritized = file_paths.to_vec();
-        
+
         // Сортируем по приоритету:
         // 1. CommonModules (общие модули)
         // 2. Catalogs, Documents (основная функциональность)
@@ -480,14 +485,14 @@ impl ProjectAnalysisUtils {
             let priority_b = Self::get_file_priority(b);
             priority_a.cmp(&priority_b)
         });
-        
+
         prioritized
     }
-    
+
     /// Получить приоритет файла для анализа
     fn get_file_priority(file_path: &Path) -> u32 {
         let path_str = file_path.to_string_lossy().to_lowercase();
-        
+
         if path_str.contains("commonmodules") {
             1 // Высший приоритет
         } else if path_str.contains("catalogs") || path_str.contains("documents") {
@@ -509,18 +514,20 @@ impl ParallelAnalysisCLI {
         project_root: P,
         config: ParallelAnalysisConfig,
     ) -> Result<()> {
-        println!("🚀 Запуск параллельного анализа проекта: {}", 
-                 project_root.as_ref().display());
-        
+        println!(
+            "🚀 Запуск параллельного анализа проекта: {}",
+            project_root.as_ref().display()
+        );
+
         let analyzer = ParallelAnalyzer::new(config)?;
         let result = analyzer.analyze_project(project_root)?;
-        
+
         // Выводим результаты
         Self::print_analysis_results(&result);
-        
+
         Ok(())
     }
-    
+
     /// Напечатать результаты анализа
     fn print_analysis_results(result: &BatchAnalysisResult) {
         println!("\n📊 Результаты анализа:");
@@ -531,33 +538,43 @@ impl ParallelAnalysisCLI {
         println!("🔧 Функций найдено: {}", result.stats.total_functions);
         println!("📦 Переменных найдено: {}", result.stats.total_variables);
         println!("🚨 Диагностик: {}", result.stats.total_diagnostics);
-        println!("📈 Среднее время на файл: {:.2?}", result.stats.avg_analysis_time);
-        
+        println!(
+            "📈 Среднее время на файл: {:.2?}",
+            result.stats.avg_analysis_time
+        );
+
         if result.stats.failed_files > 0 {
             println!("\n❌ Файлы с ошибками:");
             for file_result in &result.file_results {
                 if !file_result.success {
-                    println!("  • {} - {}", 
-                             file_result.file_path.display(),
-                             file_result.error_message.as_ref().unwrap_or(&"Неизвестная ошибка".to_string())
+                    println!(
+                        "  • {} - {}",
+                        file_result.file_path.display(),
+                        file_result
+                            .error_message
+                            .as_ref()
+                            .unwrap_or(&"Неизвестная ошибка".to_string())
                     );
                 }
             }
         }
-        
+
         // Топ файлов по количеству диагностик
-        let mut files_by_diagnostics: Vec<_> = result.file_results.iter()
+        let mut files_by_diagnostics: Vec<_> = result
+            .file_results
+            .iter()
             .filter(|r| r.success && !r.diagnostics.is_empty())
             .collect();
         files_by_diagnostics.sort_by(|a, b| b.diagnostics.len().cmp(&a.diagnostics.len()));
-        
+
         if !files_by_diagnostics.is_empty() {
             println!("\n🔍 Файлы с наибольшим количеством диагностик:");
             for (i, file_result) in files_by_diagnostics.iter().take(5).enumerate() {
-                println!("  {}. {} - {} диагностик", 
-                         i + 1,
-                         file_result.file_path.display(),
-                         file_result.diagnostics.len()
+                println!(
+                    "  {}. {} - {} диагностик",
+                    i + 1,
+                    file_result.file_path.display(),
+                    file_result.diagnostics.len()
                 );
             }
         }
@@ -567,9 +584,9 @@ impl ParallelAnalysisCLI {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::fs;
-    
+    use tempfile::TempDir;
+
     #[test]
     fn test_parallel_analysis_config() {
         let config = ParallelAnalysisConfig::default();
@@ -577,41 +594,41 @@ mod tests {
         assert!(config.show_progress);
         assert!(config.use_cache);
     }
-    
+
     #[test]
     fn test_file_priority() {
         let common_module = PathBuf::from("/src/CommonModules/TestModule.bsl");
         let catalog = PathBuf::from("/src/Catalogs/Items/Ext/ObjectModule.bsl");
         let report = PathBuf::from("/src/Reports/TestReport/Ext/ObjectModule.bsl");
-        
+
         assert_eq!(ProjectAnalysisUtils::get_file_priority(&common_module), 1);
         assert_eq!(ProjectAnalysisUtils::get_file_priority(&catalog), 2);
         assert_eq!(ProjectAnalysisUtils::get_file_priority(&report), 3);
     }
-    
+
     #[test]
     fn test_find_bsl_files() -> Result<()> {
         let temp_dir = TempDir::new()?;
-        
+
         // Создаем тестовые файлы
         let bsl_file = temp_dir.path().join("test.bsl");
         let os_file = temp_dir.path().join("test.os");
         let txt_file = temp_dir.path().join("test.txt");
-        
+
         fs::write(&bsl_file, "Процедура Тест() КонецПроцедуры")?;
         fs::write(&os_file, "Процедура ТестОС() КонецПроцедуры")?;
         fs::write(&txt_file, "not bsl file")?;
-        
+
         let found_files = ParallelAnalyzer::find_bsl_files(temp_dir.path())?;
-        
+
         assert_eq!(found_files.len(), 2);
         assert!(found_files.contains(&bsl_file));
         assert!(found_files.contains(&os_file));
         assert!(!found_files.contains(&txt_file));
-        
+
         Ok(())
     }
-    
+
     #[test]
     fn test_parallel_analyzer_creation() -> Result<()> {
         let config = ParallelAnalysisConfig {
@@ -620,13 +637,13 @@ mod tests {
             use_cache: false,
             ..Default::default()
         };
-        
+
         let analyzer = ParallelAnalyzer::new(config)?;
         assert!(analyzer.cache_manager.is_none()); // Кеш выключен
-        
+
         Ok(())
     }
-    
+
     #[test]
     fn test_group_files_by_subsystem() {
         let files = vec![
@@ -635,9 +652,9 @@ mod tests {
             PathBuf::from("/project/Catalogs/Items.bsl"),
             PathBuf::from("/project/Reports/Report1.bsl"),
         ];
-        
+
         let groups = ProjectAnalysisUtils::group_files_by_subsystem(&files);
-        
+
         assert_eq!(groups.get("CommonModules").unwrap().len(), 2);
         assert_eq!(groups.get("Catalogs").unwrap().len(), 1);
         assert_eq!(groups.get("Reports").unwrap().len(), 1);

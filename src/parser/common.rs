@@ -7,13 +7,13 @@ use anyhow::Result;
 pub trait Parser: Send + Sync {
     /// Парсить исходный код и вернуть AST
     fn parse(&mut self, source: &str) -> Result<Program>;
-    
+
     /// Парсить инкрементально (для LSP)
     fn parse_incremental(&mut self, source: &str, _changes: &[TextChange]) -> Result<Program> {
         // По умолчанию просто перепарсиваем весь файл
         self.parse(source)
     }
-    
+
     /// Получить имя парсера
     fn name(&self) -> &str;
 }
@@ -36,7 +36,6 @@ pub struct Position {
     pub column: usize,
 }
 
-
 /// Фабрика для создания парсеров
 pub struct ParserFactory;
 
@@ -45,19 +44,17 @@ impl ParserFactory {
     pub fn create() -> Box<dyn Parser> {
         Box::new(crate::parser::tree_sitter_adapter::TreeSitterAdapter::new().unwrap())
     }
-    
+
     /// Создать парсер по имени
     pub fn create_by_name(name: &str) -> Option<Box<dyn Parser>> {
         match name {
-            "tree-sitter" => {
-                crate::parser::tree_sitter_adapter::TreeSitterAdapter::new()
-                    .ok()
-                    .map(|p| Box::new(p) as Box<dyn Parser>)
-            }
+            "tree-sitter" => crate::parser::tree_sitter_adapter::TreeSitterAdapter::new()
+                .ok()
+                .map(|p| Box::new(p) as Box<dyn Parser>),
             _ => None,
         }
     }
-    
+
     /// Получить список доступных парсеров
     pub fn available_parsers() -> Vec<&'static str> {
         vec!["tree-sitter"]

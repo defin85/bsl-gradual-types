@@ -1,11 +1,9 @@
 //! Трейты и базовые реализации провайдеров документации
 
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 
-use super::hierarchy::{
-    DocumentationNode, TypeDocumentationFull, RootCategoryNode
-};
+use super::hierarchy::{DocumentationNode, RootCategoryNode, TypeDocumentationFull};
 use crate::documentation::search::AdvancedSearchQuery;
 
 /// Базовый трейт для всех провайдеров документации
@@ -13,34 +11,34 @@ use crate::documentation::search::AdvancedSearchQuery;
 pub trait DocumentationProvider: Send + Sync {
     /// Уникальный идентификатор провайдера
     fn provider_id(&self) -> &str;
-    
+
     /// Название провайдера для отображения
     fn display_name(&self) -> &str;
-    
+
     /// Инициализация провайдера
     async fn initialize(&self, config: &ProviderConfig) -> Result<()>;
-    
+
     /// Получить корневую категорию для иерархии
     async fn get_root_category(&self) -> Result<RootCategoryNode>;
-    
+
     /// Получить детали типа по ID
     async fn get_type_details(&self, type_id: &str) -> Result<Option<TypeDocumentationFull>>;
-    
+
     /// Поиск типов в провайдере
     async fn search_types(&self, query: &AdvancedSearchQuery) -> Result<Vec<DocumentationNode>>;
-    
+
     /// Получить все доступные типы (для индексации)
     async fn get_all_types(&self) -> Result<Vec<TypeDocumentationFull>>;
-    
+
     /// Получить статистику провайдера
     async fn get_statistics(&self) -> Result<super::statistics::ProviderStatistics>;
-    
+
     /// Получить статус инициализации
     async fn get_initialization_status(&self) -> Result<super::statistics::InitializationStatus>;
-    
+
     /// Проверить доступность источника данных
     async fn check_availability(&self) -> Result<bool>;
-    
+
     /// Обновить данные (при изменении источника)
     async fn refresh(&self) -> Result<()>;
 }
@@ -50,13 +48,13 @@ pub trait DocumentationProvider: Send + Sync {
 pub struct ProviderConfig {
     /// Источник данных
     pub data_source: String,
-    
+
     /// Настройки производительности
     pub performance_settings: PerformanceSettings,
-    
+
     /// Настройки кеширования
     pub cache_settings: CacheSettings,
-    
+
     /// Дополнительные параметры
     pub additional_params: std::collections::HashMap<String, String>,
 }
@@ -66,13 +64,13 @@ pub struct ProviderConfig {
 pub struct PerformanceSettings {
     /// Количество рабочих потоков
     pub worker_threads: usize,
-    
+
     /// Размер батча для обработки
     pub batch_size: usize,
-    
+
     /// Таймаут операций (мс)
     pub operation_timeout_ms: u64,
-    
+
     /// Показывать прогресс
     pub show_progress: bool,
 }
@@ -82,13 +80,13 @@ pub struct PerformanceSettings {
 pub struct CacheSettings {
     /// Включить кеширование
     pub enabled: bool,
-    
+
     /// Максимальный размер кеша
     pub max_cache_size: usize,
-    
+
     /// TTL кеша (секунды)
     pub cache_ttl_seconds: u64,
-    
+
     /// Стратегия вытеснения
     pub eviction_strategy: EvictionStrategy,
 }
@@ -98,13 +96,13 @@ pub struct CacheSettings {
 pub enum EvictionStrategy {
     /// Least Recently Used
     LRU,
-    
+
     /// First In First Out
     FIFO,
-    
+
     /// Least Frequently Used
     LFU,
-    
+
     /// Time To Live
     TTL,
 }
@@ -147,13 +145,13 @@ impl Default for ProviderConfig {
 pub struct ValidationResult {
     /// Валидный ли провайдер
     pub is_valid: bool,
-    
+
     /// Сообщения об ошибках
     pub error_messages: Vec<String>,
-    
+
     /// Предупреждения
     pub warnings: Vec<String>,
-    
+
     /// Рекомендации по улучшению
     pub recommendations: Vec<String>,
 }
@@ -163,7 +161,7 @@ pub struct ValidationResult {
 pub trait ValidatableProvider: DocumentationProvider {
     /// Валидация корректности данных провайдера
     async fn validate(&self) -> Result<ValidationResult>;
-    
+
     /// Самодиагностика провайдера
     async fn self_diagnostics(&self) -> Result<DiagnosticsReport>;
 }
@@ -173,10 +171,10 @@ pub trait ValidatableProvider: DocumentationProvider {
 pub struct DiagnosticsReport {
     /// Статус здоровья провайдера
     pub health_status: HealthStatus,
-    
+
     /// Подробная информация
     pub details: Vec<DiagnosticItem>,
-    
+
     /// Рекомендации по исправлению
     pub action_items: Vec<String>,
 }
@@ -195,13 +193,13 @@ pub enum HealthStatus {
 pub struct DiagnosticItem {
     /// Категория проблемы
     pub category: String,
-    
+
     /// Сообщение
     pub message: String,
-    
+
     /// Уровень важности
     pub severity: DiagnosticSeverity,
-    
+
     /// Детали для отладки
     pub debug_info: Option<String>,
 }

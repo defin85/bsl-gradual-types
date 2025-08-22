@@ -11,6 +11,20 @@
 - Формат: Концепт + рабочий план
 - Ориентир: реализуется итеративно, совместно с текущим кодом
 
+### Статус миграции (обновление v0.4.x)
+- Переключатель движка (Strangler) реализован для: LSP, Web, CLI (`--engine` и ENV `BSL_TYPES_ENGINE`). По умолчанию — legacy.
+- Центральная система (`CentralTypeSystem`) подключена и инициализирует слои Data → Domain → Application → Presentation.
+- Data Layer: InMemory `TypeRepository` с `save/load/search/filters` и корректной статистикой по источникам.
+- Domain Layer: базовые резолверы (Platform, Builtin, минимальный Expression), каркас BSL/tree‑sitter; минимальный `TypeCheckerService`.
+- Application/Presentation: LSP‑проксирование hover/completion через `LspInterface`; Web – поисковые ручки `/api/types` и детали `/api/types/{name}` в target‑режиме через `WebInterface`; CLI – базовая интеграция.
+- Метрики: агрегируются метрики LSP; статус системы доступен на `GET /api/health` (target).
+
+В ближайших итерациях:
+- Расширение метрик домена (total_resolutions, avg_resolution_time) и проброс в `SystemMetrics`.
+- Укрепление `ExpressionResolver` и покрытие конфигурационных типов.
+- Интеграция `TypeCheckerService` в diagnostics (LSP/Web/CLI).
+- Тесты: unit для резолверов и интеграционные для инициализации/ручек.
+
 ## С чего начать
 1. Прочесть «Обзор» — `overview.md`
 2. Посмотреть API центральной системы — `central_type_system.md`

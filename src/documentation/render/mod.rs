@@ -1,10 +1,10 @@
 //! Система рендеринга документации в разные форматы
 
 use anyhow::Result;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::core::hierarchy::{TypeHierarchy, TypeDocumentationFull};
+use super::core::hierarchy::{TypeDocumentationFull, TypeHierarchy};
 use super::search::SearchResults;
 
 pub mod unified_template;
@@ -13,16 +13,16 @@ pub mod unified_template;
 pub struct RenderEngine {
     /// HTML рендерер для веб-интерфейса
     html_renderer: HtmlDocumentationRenderer,
-    
+
     /// JSON рендерер для API
     json_renderer: JsonDocumentationRenderer,
-    
+
     /// PDF рендерер для экспорта
     pdf_renderer: Option<PdfDocumentationRenderer>,
-    
+
     /// Markdown рендерер
     markdown_renderer: MarkdownDocumentationRenderer,
-    
+
     /// Система шаблонов
     template_engine: TemplateEngine,
 }
@@ -31,13 +31,13 @@ pub struct RenderEngine {
 pub struct HtmlDocumentationRenderer {
     /// Активная тема
     current_theme: DocumentationTheme,
-    
+
     /// Доступные темы
     available_themes: HashMap<String, DocumentationTheme>,
-    
+
     /// Компоненты UI
     ui_components: UiComponentLibrary,
-    
+
     /// Настройки рендеринга
     render_settings: HtmlRenderSettings,
 }
@@ -47,19 +47,19 @@ pub struct HtmlDocumentationRenderer {
 pub struct DocumentationTheme {
     /// Название темы
     pub name: String,
-    
+
     /// Цветовая схема
     pub color_scheme: ColorScheme,
-    
+
     /// Иконки для разных типов
     pub type_icons: HashMap<String, String>,
-    
+
     /// CSS стили
     pub css_styles: String,
-    
+
     /// JavaScript код
     pub javascript_code: String,
-    
+
     /// Шрифты
     pub fonts: FontConfig,
 }
@@ -69,19 +69,19 @@ pub struct DocumentationTheme {
 pub struct ColorScheme {
     /// Основной цвет фона
     pub background_primary: String,
-    
+
     /// Вторичный цвет фона
     pub background_secondary: String,
-    
+
     /// Основной цвет текста
     pub text_primary: String,
-    
+
     /// Вторичный цвет текста
     pub text_secondary: String,
-    
+
     /// Цвет акцента
     pub accent_color: String,
-    
+
     /// Цвета для разных типов
     pub type_colors: HashMap<String, String>,
 }
@@ -91,10 +91,10 @@ pub struct ColorScheme {
 pub struct FontConfig {
     /// Основной шрифт
     pub primary_font: String,
-    
+
     /// Моноширинный шрифт для кода
     pub code_font: String,
-    
+
     /// Размеры шрифтов
     pub font_sizes: HashMap<String, String>,
 }
@@ -104,19 +104,19 @@ pub struct FontConfig {
 pub struct HtmlRenderSettings {
     /// Включить синтаксическую подсветку кода
     pub enable_syntax_highlighting: bool,
-    
+
     /// Включить интерактивные примеры
     pub enable_interactive_examples: bool,
-    
+
     /// Показывать навигацию по иерархии
     pub show_breadcrumbs: bool,
-    
+
     /// Включить поиск в реальном времени
     pub enable_live_search: bool,
-    
+
     /// Минифицировать выходной HTML
     pub minify_output: bool,
-    
+
     /// Включить PWA функциональность
     pub enable_pwa: bool,
 }
@@ -132,13 +132,13 @@ pub struct UiComponentLibrary {
 pub struct UiComponent {
     /// Название компонента
     pub name: String,
-    
+
     /// HTML шаблон
     pub template: String,
-    
+
     /// CSS стили
     pub styles: String,
-    
+
     /// JavaScript поведение
     pub behavior: String,
 }
@@ -148,16 +148,16 @@ pub struct UiComponent {
 pub struct InteractiveTree {
     /// ID дерева
     pub id: String,
-    
+
     /// Корневые узлы
     pub root_nodes: Vec<InteractiveTreeNode>,
-    
+
     /// Настройки дерева
     pub settings: TreeSettings,
-    
+
     /// Состояние развёрнутых узлов
     pub expanded_nodes: std::collections::HashSet<String>,
-    
+
     /// Выбранный узел
     pub selected_node: Option<String>,
 }
@@ -167,37 +167,37 @@ pub struct InteractiveTree {
 pub struct InteractiveTreeNode {
     /// Уникальный ID узла
     pub id: String,
-    
+
     /// Отображаемое название
     pub display_name: String,
-    
+
     /// Тип узла
     pub node_type: TreeNodeType,
-    
+
     /// Иконка узла
     pub icon: String,
-    
+
     /// Описание (tooltip)
     pub description: Option<String>,
-    
+
     /// Дочерние узлы
     pub children: Vec<InteractiveTreeNode>,
-    
+
     /// Может ли иметь дочерние узлы
     pub has_children: bool,
-    
+
     /// Загружены ли дочерние узлы
     pub children_loaded: bool,
-    
+
     /// URL для загрузки дочерних узлов
     pub children_url: Option<String>,
-    
+
     /// Метаданные узла
     pub metadata: std::collections::HashMap<String, String>,
-    
+
     /// Поддерживает ли drag & drop
     pub draggable: bool,
-    
+
     /// Может ли быть drop target
     pub droppable: bool,
 }
@@ -230,25 +230,25 @@ pub enum TreeNodeType {
 pub struct TreeSettings {
     /// Включить lazy loading
     pub lazy_loading: bool,
-    
+
     /// Включить drag & drop
     pub drag_drop: bool,
-    
+
     /// Включить контекстные меню
     pub context_menus: bool,
-    
+
     /// Включить поиск в дереве
     pub tree_search: bool,
-    
+
     /// Включить закладки
     pub bookmarks: bool,
-    
+
     /// Включить избранное
     pub favorites: bool,
-    
+
     /// Максимальная глубина загрузки
     pub max_depth: usize,
-    
+
     /// Количество узлов на уровень
     pub nodes_per_level: usize,
 }
@@ -264,13 +264,13 @@ pub struct JsonDocumentationRenderer {
 pub struct JsonSerializationSettings {
     /// Красивое форматирование
     pub pretty_print: bool,
-    
+
     /// Включать null значения
     pub include_nulls: bool,
-    
+
     /// Сжимать вывод
     pub compress_output: bool,
-    
+
     /// Включать метаданные
     pub include_metadata: bool,
 }
@@ -286,16 +286,16 @@ pub struct PdfDocumentationRenderer {
 pub struct PdfSettings {
     /// Размер страницы
     pub page_size: PageSize,
-    
+
     /// Ориентация
     pub orientation: PageOrientation,
-    
+
     /// Поля страницы
     pub margins: PageMargins,
-    
+
     /// Включать оглавление
     pub include_toc: bool,
-    
+
     /// Включать индекс
     pub include_index: bool,
 }
@@ -336,10 +336,10 @@ pub struct MarkdownDocumentationRenderer {
 pub struct MarkdownSettings {
     /// Включать оглавление
     pub include_toc: bool,
-    
+
     /// Включать ссылки
     pub include_links: bool,
-    
+
     /// Формат кода
     pub code_format: CodeFormat,
 }
@@ -349,10 +349,10 @@ pub struct MarkdownSettings {
 pub enum CodeFormat {
     /// Блоки кода с подсветкой
     FencedCodeBlocks,
-    
+
     /// Обычные блоки кода
     IndentedCodeBlocks,
-    
+
     /// Inline код
     InlineCode,
 }
@@ -361,7 +361,7 @@ pub enum CodeFormat {
 pub struct TemplateEngine {
     /// Загруженные шаблоны
     templates: HashMap<String, Template>,
-    
+
     /// Настройки шаблонизатора
     settings: TemplateSettings,
 }
@@ -371,10 +371,10 @@ pub struct TemplateEngine {
 pub struct Template {
     /// Название шаблона
     pub name: String,
-    
+
     /// Содержимое шаблона
     pub content: String,
-    
+
     /// Зависимые шаблоны
     pub dependencies: Vec<String>,
 }
@@ -384,10 +384,10 @@ pub struct Template {
 pub struct TemplateSettings {
     /// Кеширование шаблонов
     pub cache_templates: bool,
-    
+
     /// Автоматическое обновление
     pub auto_reload: bool,
-    
+
     /// Строгий режим
     pub strict_mode: bool,
 }
@@ -403,32 +403,36 @@ impl RenderEngine {
             template_engine: TemplateEngine::new(),
         }
     }
-    
+
     /// Получить HTML рендерер
     pub fn html_renderer(&self) -> &HtmlDocumentationRenderer {
         &self.html_renderer
     }
-    
+
     /// Рендеринг иерархии в HTML
     pub async fn render_hierarchy_html(&self, hierarchy: &TypeHierarchy) -> Result<String> {
         self.html_renderer.render_hierarchy(hierarchy).await
     }
-    
+
     /// Рендеринг результатов поиска в HTML
     pub async fn render_search_results_html(&self, results: &SearchResults) -> Result<String> {
         self.html_renderer.render_search_results(results).await
     }
-    
+
     /// Рендеринг типа в JSON
     pub async fn render_type_json(&self, type_doc: &TypeDocumentationFull) -> Result<String> {
         self.json_renderer.render_type(type_doc).await
     }
-    
+
     /// Получить доступные темы
     pub fn get_available_themes(&self) -> Vec<String> {
-        self.html_renderer.available_themes.keys().cloned().collect()
+        self.html_renderer
+            .available_themes
+            .keys()
+            .cloned()
+            .collect()
     }
-    
+
     /// Установить тему
     pub async fn set_theme(&mut self, theme_name: &str) -> Result<()> {
         self.html_renderer.set_theme(theme_name).await
@@ -438,12 +442,12 @@ impl RenderEngine {
 impl HtmlDocumentationRenderer {
     pub fn new() -> Self {
         let mut themes = HashMap::new();
-        
+
         // Добавляем встроенные темы
         themes.insert("dark".to_string(), Self::create_dark_theme());
         themes.insert("light".to_string(), Self::create_light_theme());
         themes.insert("vscode".to_string(), Self::create_vscode_theme());
-        
+
         Self {
             current_theme: Self::create_dark_theme(),
             available_themes: themes,
@@ -451,7 +455,7 @@ impl HtmlDocumentationRenderer {
             render_settings: HtmlRenderSettings::default(),
         }
     }
-    
+
     /// Создать интерактивное дерево из иерархии типов
     pub fn create_interactive_tree(&self, hierarchy: &TypeHierarchy) -> InteractiveTree {
         let mut tree = InteractiveTree {
@@ -461,34 +465,40 @@ impl HtmlDocumentationRenderer {
             expanded_nodes: std::collections::HashSet::new(),
             selected_node: None,
         };
-        
+
         // Преобразуем категории в узлы дерева
         for category in &hierarchy.root_categories {
             let node = self.convert_category_to_tree_node(category);
-            
+
             // Автоматически разворачиваем корневые категории
             tree.expanded_nodes.insert(node.id.clone());
-            
+
             tree.root_nodes.push(node);
         }
-        
+
         tree
     }
-    
+
     /// Преобразовать категорию в узел дерева
-    fn convert_category_to_tree_node(&self, category: &super::core::hierarchy::CategoryNode) -> InteractiveTreeNode {
+    fn convert_category_to_tree_node(
+        &self,
+        category: &super::core::hierarchy::CategoryNode,
+    ) -> InteractiveTreeNode {
         let node_id = format!("category_{}", category.name.replace(" ", "_"));
-        
+
         // Динамическая группировка - показываем только подкатегории с типами
         let mut children = Vec::new();
-        
+
         for child in category.children.iter() {
             match child {
                 super::core::hierarchy::DocumentationNode::SubCategory(sub_cat) => {
                     // Показываем только подкатегории с типами
                     if !sub_cat.children.is_empty() {
                         // Определяем иконку по названию подкатегории
-                        let icon = if sub_cat.name.contains("HTTP") || sub_cat.name.contains("Интернет") || sub_cat.name.contains("Файл") {
+                        let icon = if sub_cat.name.contains("HTTP")
+                            || sub_cat.name.contains("Интернет")
+                            || sub_cat.name.contains("Файл")
+                        {
                             "🌐"
                         } else if sub_cat.name.contains("Справочник") {
                             "🏢"
@@ -496,28 +506,46 @@ impl HtmlDocumentationRenderer {
                             "📄"
                         } else if sub_cat.name.contains("Регистр") {
                             "📋"
-                        } else if sub_cat.name.contains("Форма") || sub_cat.name.contains("Табличный") {
+                        } else if sub_cat.name.contains("Форма")
+                            || sub_cat.name.contains("Табличный")
+                        {
                             "🎨"
-                        } else if sub_cat.name.contains("Коллекция") || sub_cat.name.contains("Массив") || sub_cat.name.contains("Структура") {
+                        } else if sub_cat.name.contains("Коллекция")
+                            || sub_cat.name.contains("Массив")
+                            || sub_cat.name.contains("Структура")
+                        {
                             "📊"
                         } else {
                             "📂"
                         };
-                        
+
                         children.push(InteractiveTreeNode {
                             id: format!("subcategory_{}", sub_cat.name.replace(" ", "_")),
-                            display_name: format!("{} ({} типов)", sub_cat.name, sub_cat.children.len()),
+                            display_name: format!(
+                                "{} ({} типов)",
+                                sub_cat.name,
+                                sub_cat.children.len()
+                            ),
                             node_type: TreeNodeType::SubCategory,
                             icon: icon.to_string(),
-                            description: Some(format!("Подкатегория: {} типов", sub_cat.children.len())),
+                            description: Some(format!(
+                                "Подкатегория: {} типов",
+                                sub_cat.children.len()
+                            )),
                             children: Vec::new(), // Lazy loading дочерних типов
                             has_children: true,
                             children_loaded: false,
-                            children_url: Some(format!("/api/tree/children/subcategory_{}", sub_cat.name.replace(" ", "_"))),
+                            children_url: Some(format!(
+                                "/api/tree/children/subcategory_{}",
+                                sub_cat.name.replace(" ", "_")
+                            )),
                             metadata: {
                                 let mut meta = std::collections::HashMap::new();
                                 meta.insert("type".to_string(), "subcategory".to_string());
-                                meta.insert("count".to_string(), sub_cat.children.len().to_string());
+                                meta.insert(
+                                    "count".to_string(),
+                                    sub_cat.children.len().to_string(),
+                                );
                                 meta.insert("original_name".to_string(), sub_cat.name.clone());
                                 meta
                             },
@@ -525,14 +553,14 @@ impl HtmlDocumentationRenderer {
                             droppable: true,
                         });
                     }
-                },
+                }
                 _ => {} // Игнорируем другие типы на корневом уровне
             }
         }
-        
+
         let children_count = children.len();
         let has_children = !children.is_empty();
-        
+
         InteractiveTreeNode {
             id: node_id.clone(),
             display_name: format!("{} ({} групп типов)", category.name, children_count),
@@ -553,11 +581,11 @@ impl HtmlDocumentationRenderer {
             droppable: true,
         }
     }
-    
+
     /// Рендеринг интерактивного дерева в HTML
     pub fn render_interactive_tree(&self, tree: &InteractiveTree) -> Result<String> {
         let mut html = String::new();
-        
+
         // Контейнер дерева
         html.push_str(&format!(
             "<div class='interactive-tree' id='{}'>\n\
@@ -573,28 +601,33 @@ impl HtmlDocumentationRenderer {
              </div>\n",
             tree.id
         ));
-        
+
         // Корень дерева
         html.push_str("<div class='tree-root' data-tree-root='true'>\n");
-        
+
         // Рендерим корневые узлы
         for node in &tree.root_nodes {
             html.push_str(&self.render_tree_node(node, 0, tree)?);
         }
-        
+
         html.push_str("</div>\n"); // tree-root
         html.push_str("</div>\n"); // interactive-tree
-        
+
         Ok(html)
     }
-    
+
     /// Рендеринг отдельного узла дерева
-    fn render_tree_node(&self, node: &InteractiveTreeNode, depth: usize, tree: &InteractiveTree) -> Result<String> {
+    fn render_tree_node(
+        &self,
+        node: &InteractiveTreeNode,
+        depth: usize,
+        tree: &InteractiveTree,
+    ) -> Result<String> {
         let mut html = String::new();
         let indent = depth * 20; // px
         let is_expanded = tree.expanded_nodes.contains(&node.id);
         let is_selected = tree.selected_node.as_ref() == Some(&node.id);
-        
+
         // Основной элемент узла
         html.push_str(&format!(
             "<div class='tree-node {}{}{}' \
@@ -610,7 +643,7 @@ impl HtmlDocumentationRenderer {
              oncontextmenu='showNodeContextMenu(event, \"{}\")'>\n",
             match node.node_type {
                 TreeNodeType::Category => "category-node",
-                TreeNodeType::SubCategory => "subcategory-node", 
+                TreeNodeType::SubCategory => "subcategory-node",
                 TreeNodeType::PlatformType => "platform-type-node",
                 TreeNodeType::ConfigurationType => "config-type-node",
                 TreeNodeType::Method => "method-node",
@@ -621,14 +654,28 @@ impl HtmlDocumentationRenderer {
             },
             if is_expanded { " expanded" } else { "" },
             if is_selected { " selected" } else { "" },
-            node.id, node.id,
-            serde_json::to_string(&node.node_type).unwrap_or_default().trim_matches('"'),
-            node.has_children, node.children_loaded, indent,
-            if node.draggable { "draggable='true' ondragstart='handleDragStart(event)'" } else { "" },
-            if node.droppable { "ondragover='handleDragOver(event)' ondrop='handleDrop(event)'" } else { "" },
-            node.id, node.id
+            node.id,
+            node.id,
+            serde_json::to_string(&node.node_type)
+                .unwrap_or_default()
+                .trim_matches('"'),
+            node.has_children,
+            node.children_loaded,
+            indent,
+            if node.draggable {
+                "draggable='true' ondragstart='handleDragStart(event)'"
+            } else {
+                ""
+            },
+            if node.droppable {
+                "ondragover='handleDragOver(event)' ondrop='handleDrop(event)'"
+            } else {
+                ""
+            },
+            node.id,
+            node.id
         ));
-        
+
         // Expand/collapse индикатор
         if node.has_children {
             html.push_str(&format!(
@@ -640,7 +687,7 @@ impl HtmlDocumentationRenderer {
         } else {
             html.push_str("<span class='expand-placeholder'></span>\n");
         }
-        
+
         // Иконка и название
         html.push_str(&format!(
             "<span class='node-icon'>{}</span>\n\
@@ -649,17 +696,14 @@ impl HtmlDocumentationRenderer {
             node.description.as_deref().unwrap_or(""),
             node.display_name
         ));
-        
+
         // Метаданные (например, количество дочерних элементов)
         if let Some(count) = node.metadata.get("count") {
-            html.push_str(&format!(
-                "<span class='node-meta'>({} эл.)</span>\n",
-                count
-            ));
+            html.push_str(&format!("<span class='node-meta'>({} эл.)</span>\n", count));
         }
-        
+
         html.push_str("</div>\n"); // tree-node
-        
+
         // Дочерние узлы (отображаем если есть, независимо от expanded состояния)
         if node.children_loaded && !node.children.is_empty() {
             let display = if is_expanded { "block" } else { "none" };
@@ -667,11 +711,11 @@ impl HtmlDocumentationRenderer {
                 "<div class='tree-children' data-parent-id='{}' style='display: {};'>\n",
                 node.id, display
             ));
-            
+
             for child in &node.children {
                 html.push_str(&self.render_tree_node(child, depth + 1, tree)?);
             }
-            
+
             html.push_str("</div>\n");
         } else if node.has_children {
             // Placeholder для lazy loading или свернутых узлов
@@ -683,28 +727,28 @@ impl HtmlDocumentationRenderer {
                 node.id, display
             ));
         }
-        
+
         Ok(html)
     }
-    
+
     /// Рендеринг полной иерархии типов в HTML
     pub async fn render_hierarchy(&self, hierarchy: &TypeHierarchy) -> Result<String> {
         let mut html = String::new();
-        
+
         // Начинаем с основного контейнера
         html.push_str(&self.render_page_header("BSL Type Hierarchy"));
         html.push_str("<div class='hierarchy-container'>\n");
-        
+
         // Боковая панель с интерактивным деревом
         html.push_str("<div class='sidebar'>\n");
         html.push_str("<div class='tree-container'>\n");
-        
+
         // Создаем и рендерим интерактивное дерево
         let interactive_tree = self.create_interactive_tree(hierarchy);
         html.push_str(&self.render_interactive_tree(&interactive_tree)?);
-        
+
         html.push_str("</div>\n</div>\n");
-        
+
         // Основная область с деталями
         html.push_str("<div class='main-content'>\n");
         html.push_str("<div id='type-details'>\n");
@@ -719,17 +763,17 @@ impl HtmlDocumentationRenderer {
         html.push_str("</div>\n");
         html.push_str("<p class='instruction'>Выберите категорию или тип в дереве слева для просмотра детальной информации.</p>\n");
         html.push_str("</div>\n</div>\n</div>\n");
-        
+
         html.push_str("</div>\n"); // hierarchy-container
         html.push_str(&self.render_page_footer());
-        
+
         Ok(html)
     }
-    
+
     /// Рендеринг результатов поиска в HTML
     pub async fn render_search_results(&self, results: &SearchResults) -> Result<String> {
         let mut html = String::new();
-        
+
         // Заголовок с результатами
         html.push_str(&format!(
             "<div class='search-results-header'>\n\
@@ -740,16 +784,16 @@ impl HtmlDocumentationRenderer {
              </div>\n</div>\n",
             results.total_count, results.search_time_ms
         ));
-        
+
         // Фасеты (фильтры)
         if !results.facets.is_empty() {
             html.push_str("<div class='facets-panel'>\n");
             html.push_str("<h3>Фильтры</h3>\n");
-            
+
             for facet in &results.facets {
                 html.push_str(&format!("<div class='facet-group'>\n"));
                 html.push_str(&format!("<h4>{}</h4>\n", facet.name));
-                
+
                 for value in &facet.values {
                     let selected = if value.selected { "selected" } else { "" };
                     let checked = if value.selected { "checked" } else { "" };
@@ -765,28 +809,31 @@ impl HtmlDocumentationRenderer {
             }
             html.push_str("</div>\n");
         }
-        
+
         // Результаты поиска
         html.push_str("<div class='search-results-list'>\n");
-        
+
         for item in &results.items {
             html.push_str(&self.render_search_result_item(item).await?);
         }
-        
+
         html.push_str("</div>\n");
-        
+
         // Пагинация
         html.push_str(&self.render_pagination(&results.pagination_info));
-        
+
         Ok(html)
     }
-    
+
     /// Рендеринг отдельного результата поиска
-    async fn render_search_result_item(&self, item: &super::search::SearchResultItem) -> Result<String> {
+    async fn render_search_result_item(
+        &self,
+        item: &super::search::SearchResultItem,
+    ) -> Result<String> {
         let mut html = String::new();
-        
+
         html.push_str("<div class='search-result-item'>\n");
-        
+
         // Заголовок с названием типа
         html.push_str(&format!(
             "<div class='result-header'>\n\
@@ -796,20 +843,20 @@ impl HtmlDocumentationRenderer {
              </div>\n",
             item.display_name, item.category, item.relevance_score
         ));
-        
+
         // Описание
         html.push_str(&format!(
             "<div class='result-description'>{}</div>\n",
             item.description.chars().take(200).collect::<String>()
         ));
-        
+
         // Хлебные крошки
         if !item.breadcrumb.is_empty() {
             html.push_str("<div class='breadcrumb'>\n");
             html.push_str(&item.breadcrumb.join(" → "));
             html.push_str("</div>\n");
         }
-        
+
         // Подсветка совпадений
         if !item.highlights.is_empty() {
             html.push_str("<div class='highlights'>\n");
@@ -821,12 +868,12 @@ impl HtmlDocumentationRenderer {
             }
             html.push_str("</div>\n");
         }
-        
+
         html.push_str("</div>\n");
-        
+
         Ok(html)
     }
-    
+
     pub async fn set_theme(&mut self, theme_name: &str) -> Result<()> {
         if let Some(theme) = self.available_themes.get(theme_name) {
             self.current_theme = theme.clone();
@@ -835,7 +882,7 @@ impl HtmlDocumentationRenderer {
             Err(anyhow::anyhow!("Theme '{}' not found", theme_name))
         }
     }
-    
+
     // Встроенные темы
     fn create_dark_theme() -> DocumentationTheme {
         DocumentationTheme {
@@ -854,7 +901,7 @@ impl HtmlDocumentationRenderer {
             fonts: FontConfig::default(),
         }
     }
-    
+
     fn create_light_theme() -> DocumentationTheme {
         DocumentationTheme {
             name: "Light".to_string(),
@@ -872,7 +919,7 @@ impl HtmlDocumentationRenderer {
             fonts: FontConfig::default(),
         }
     }
-    
+
     fn create_vscode_theme() -> DocumentationTheme {
         DocumentationTheme {
             name: "VSCode".to_string(),
@@ -890,9 +937,9 @@ impl HtmlDocumentationRenderer {
             fonts: FontConfig::default(),
         }
     }
-    
+
     // === ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ РЕНДЕРИНГА ===
-    
+
     /// Рендеринг заголовка страницы
     fn render_page_header(&self, title: &str) -> String {
         format!(
@@ -913,13 +960,13 @@ impl HtmlDocumentationRenderer {
              <button onclick='switchTheme(\"vscode\")'>💻 VSCode</button>\n\
              </div>\n\
              </header>\n",
-            title, 
+            title,
             self.render_css(),
             self.current_theme.name.to_lowercase(),
             title
         )
     }
-    
+
     /// Рендеринг подвала страницы
     fn render_page_footer(&self) -> String {
         format!(
@@ -932,7 +979,7 @@ impl HtmlDocumentationRenderer {
             self.render_javascript()
         )
     }
-    
+
     /// Рендеринг CSS стилей
     pub fn render_css(&self) -> String {
         let theme = &self.current_theme;
@@ -1103,7 +1150,7 @@ impl HtmlDocumentationRenderer {
             theme.color_scheme.accent_color
         )
     }
-    
+
     /// Рендеринг JavaScript кода
     pub fn render_javascript(&self) -> String {
         r#"
@@ -1726,52 +1773,62 @@ document.addEventListener('DOMContentLoaded', function() {
 </style>
         "#.to_string()
     }
-    
+
     /// Рендеринг дерева типов (упрощенная версия)
-    async fn render_type_tree(&self, categories: &[super::core::hierarchy::CategoryNode]) -> Result<String> {
+    async fn render_type_tree(
+        &self,
+        categories: &[super::core::hierarchy::CategoryNode],
+    ) -> Result<String> {
         let mut html = String::new();
-        
+
         html.push_str("<div class='tree-root'>\n");
-        
+
         // Простой рендеринг без глубокой рекурсии
         for category in categories {
             let node_id = format!("category_{}", category.name.replace(" ", "_"));
-            
+
             html.push_str(&format!(
                 "<div class='tree-node category-node' id='{}' onclick='toggleTreeNode(\"{}\")'>\n\
                  <span class='tree-icon'>📁</span>\n\
                  <span class='category-name'>{}</span>\n\
                  <span class='category-count'>({} дочерних)</span>\n\
                  </div>\n",
-                node_id, node_id, category.name, category.children.len()
+                node_id,
+                node_id,
+                category.name,
+                category.children.len()
             ));
-            
+
             // Простое отображение дочерних элементов
             if !category.children.is_empty() {
                 html.push_str("<div class='tree-children' style='margin-left: 1.5rem;'>\n");
-                
+
                 for (i, child_node) in category.children.iter().enumerate().take(10) {
                     html.push_str(&self.render_simple_node(child_node, i));
                 }
-                
+
                 if category.children.len() > 10 {
                     html.push_str(&format!(
                         "<div class='tree-node more-items'>... и еще {} элементов</div>\n",
                         category.children.len() - 10
                     ));
                 }
-                
+
                 html.push_str("</div>\n");
             }
         }
-        
+
         html.push_str("</div>\n");
-        
+
         Ok(html)
     }
-    
+
     /// Простой рендеринг узла без рекурсии
-    fn render_simple_node(&self, node: &super::core::hierarchy::DocumentationNode, index: usize) -> String {
+    fn render_simple_node(
+        &self,
+        node: &super::core::hierarchy::DocumentationNode,
+        index: usize,
+    ) -> String {
         match node {
             super::core::hierarchy::DocumentationNode::SubCategory(sub_cat) => {
                 format!(
@@ -1788,7 +1845,8 @@ document.addEventListener('DOMContentLoaded', function() {
                      <span class='type-icon'>🔧</span>\n\
                      <span class='type-name'>{}</span>\n\
                      </div>\n",
-                    platform_type.base_info.id, platform_type.base_info.russian_name,
+                    platform_type.base_info.id,
+                    platform_type.base_info.russian_name,
                     platform_type.base_info.russian_name
                 )
             }
@@ -1813,30 +1871,41 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     }
-    
+
     /// Рендеринг узла типа
-    async fn render_type_node(&self, type_doc: &super::core::hierarchy::TypeDocumentationFull, depth: usize) -> Result<String> {
+    async fn render_type_node(
+        &self,
+        type_doc: &super::core::hierarchy::TypeDocumentationFull,
+        depth: usize,
+    ) -> Result<String> {
         let indent = "  ".repeat(depth);
         let node_id = format!("type_{}", type_doc.id);
-        
+
         Ok(format!(
             "{}<div class='tree-node type-node' id='{}' onclick='selectType(\"{}\", \"{}\")'>\n\
              {}<span class='type-icon'>📄</span>\n\
              {}<span class='type-name'>{}</span>\n\
              {}<span class='type-info'>({} методов)</span>\n\
              {}</div>\n",
-            indent, node_id, type_doc.id, type_doc.russian_name,
-            indent, indent, type_doc.russian_name,
-            indent, type_doc.methods.len(), indent
+            indent,
+            node_id,
+            type_doc.id,
+            type_doc.russian_name,
+            indent,
+            indent,
+            type_doc.russian_name,
+            indent,
+            type_doc.methods.len(),
+            indent
         ))
     }
-    
+
     /// Рендеринг пагинации
     fn render_pagination(&self, pagination: &super::search::PaginationInfo) -> String {
         let mut html = String::new();
-        
+
         html.push_str("<div class='pagination'>\n");
-        
+
         // Кнопка "Предыдущая"
         if pagination.has_previous {
             html.push_str(&format!(
@@ -1844,13 +1913,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 pagination.current_page.saturating_sub(1)
             ));
         }
-        
+
         // Информация о страницах
         html.push_str(&format!(
             "<span class='pagination-info'>Страница {} из {}</span>\n",
-            pagination.current_page + 1, pagination.total_pages
+            pagination.current_page + 1,
+            pagination.total_pages
         ));
-        
+
         // Кнопка "Следующая"
         if pagination.has_next {
             html.push_str(&format!(
@@ -1858,9 +1928,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 pagination.current_page + 1
             ));
         }
-        
+
         html.push_str("</div>\n");
-        
+
         html
     }
 }
@@ -1871,7 +1941,7 @@ impl JsonDocumentationRenderer {
             serialization_settings: JsonSerializationSettings::default(),
         }
     }
-    
+
     pub async fn render_type(&self, _type_doc: &TypeDocumentationFull) -> Result<String> {
         // TODO: JSON сериализация типа
         Ok("{}".to_string())
@@ -1906,7 +1976,8 @@ impl TemplateEngine {
 impl Default for FontConfig {
     fn default() -> Self {
         Self {
-            primary_font: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif".to_string(),
+            primary_font: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+                .to_string(),
             code_font: "'Fira Code', 'JetBrains Mono', 'Consolas', monospace".to_string(),
             font_sizes: HashMap::new(),
         }

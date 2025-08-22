@@ -7,8 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::core::types::{
-    Attribute, Certainty, ConcreteType, ResolutionMetadata, ResolutionResult,
-    ResolutionSource, TypeResolution, TabularSection,
+    Attribute, Certainty, ConcreteType, ResolutionMetadata, ResolutionResult, ResolutionSource,
+    TabularSection, TypeResolution,
 };
 
 /// Metadata object info
@@ -59,11 +59,11 @@ impl ConfigParserXml {
     /// Parse configuration and return type resolutions
     pub fn parse_configuration(&mut self) -> Result<Vec<TypeResolution>> {
         let mut resolutions = Vec::new();
-        
+
         // Parse different metadata types
         resolutions.extend(self.parse_metadata_objects("Catalogs", MetadataKind::Catalog)?);
         resolutions.extend(self.parse_metadata_objects("Documents", MetadataKind::Document)?);
-        
+
         Ok(resolutions)
     }
 
@@ -86,8 +86,9 @@ impl ConfigParserXml {
             if path.extension().is_some_and(|ext| ext == "xml") {
                 let object = self.parse_metadata_xml(&path, &kind)?;
                 let qualified_name = format!("{}.{}", kind.to_prefix(), &object.name);
-                self.metadata_cache.insert(qualified_name.clone(), object.clone());
-                
+                self.metadata_cache
+                    .insert(qualified_name.clone(), object.clone());
+
                 resolutions.push(self.create_resolution(object, &kind));
             }
         }
@@ -99,7 +100,7 @@ impl ConfigParserXml {
         let content = fs::read_to_string(path)?;
         let doc = Document::parse(&content)?;
         let root = doc.root_element();
-        
+
         let mut object = MetadataObject {
             name: String::new(),
             kind: *kind,
@@ -107,93 +108,86 @@ impl ConfigParserXml {
             attributes: Vec::new(),
             tabular_sections: Vec::new(),
         };
-        
+
         // Документ или справочник - это первый дочерний элемент root
-        let metadata_element = root.children()
+        let metadata_element = root
+            .children()
             .find(|n| n.is_element())
             .expect("No metadata element found");
-        
+
         // Найдём элемент Properties внутри Document/Catalog
-        if let Some(props) = metadata_element.children()
-            .find(|n| n.has_tag_name("Properties")) {
-            
+        if let Some(props) = metadata_element
+            .children()
+            .find(|n| n.has_tag_name("Properties"))
+        {
             // Извлечём имя объекта
-            if let Some(name_node) = props.children()
-                .find(|n| n.has_tag_name("Name")) {
+            if let Some(name_node) = props.children().find(|n| n.has_tag_name("Name")) {
                 object.name = name_node.text().unwrap_or("").to_string();
             }
-            
+
             // Извлечём синоним
-            if let Some(synonym_node) = props.children()
-                .find(|n| n.has_tag_name("Synonym")) {
-                if let Some(item) = synonym_node.children()
-                    .find(|n| n.has_tag_name("v8:item")) {
-                    if let Some(content) = item.children()
-                        .find(|n| n.has_tag_name("v8:content")) {
+            if let Some(synonym_node) = props.children().find(|n| n.has_tag_name("Synonym")) {
+                if let Some(item) = synonym_node.children().find(|n| n.has_tag_name("v8:item")) {
+                    if let Some(content) = item.children().find(|n| n.has_tag_name("v8:content")) {
                         object.synonym = Some(content.text().unwrap_or("").to_string());
                     }
                 }
             }
         }
-        
+
         // Найдём атрибуты и табличные части в ChildObjects
-        if let Some(child_objects) = metadata_element.children()
-            .find(|n| n.has_tag_name("ChildObjects")) {
-            
+        if let Some(child_objects) = metadata_element
+            .children()
+            .find(|n| n.has_tag_name("ChildObjects"))
+        {
             // Парсим каждый атрибут
-            for attr_node in child_objects.children()
-                .filter(|n| n.has_tag_name("Attribute")) {
-                
+            for attr_node in child_objects
+                .children()
+                .filter(|n| n.has_tag_name("Attribute"))
+            {
                 if let Some(attr) = self.parse_attribute_node(&attr_node) {
                     object.attributes.push(attr);
                 }
             }
-            
+
             // Парсим табличные части
-            for ts_node in child_objects.children()
-                .filter(|n| n.has_tag_name("TabularSection")) {
-                
+            for ts_node in child_objects
+                .children()
+                .filter(|n| n.has_tag_name("TabularSection"))
+            {
                 if let Some(ts) = self.parse_tabular_section(&ts_node) {
                     object.tabular_sections.push(ts);
                 }
             }
         }
-        
+
         Ok(object)
     }
-    
+
     fn parse_attribute_node(&self, attr_node: &Node) -> Option<Attribute> {
         let mut name = String::new();
         let mut type_names = Vec::new();
-        
+
         // Найдём Properties внутри атрибута
-        if let Some(props) = attr_node.children()
-            .find(|n| n.has_tag_name("Properties")) {
-            
+        if let Some(props) = attr_node.children().find(|n| n.has_tag_name("Properties")) {
             // Имя атрибута
-            if let Some(name_node) = props.children()
-                .find(|n| n.has_tag_name("Name")) {
+            if let Some(name_node) = props.children().find(|n| n.has_tag_name("Name")) {
                 // Получаем весь текст внутри элемента Name
-                let text_content: String = name_node.children()
-                    .filter_map(|n| n.text())
-                    .collect();
+                let text_content: String = name_node.children().filter_map(|n| n.text()).collect();
                 if !text_content.is_empty() {
                     name = text_content.trim().to_string();
                 }
             }
-            
+
             // Типы атрибута
-            if let Some(type_node) = props.children()
-                .find(|n| n.has_tag_name("Type")) {
-                
+            if let Some(type_node) = props.children().find(|n| n.has_tag_name("Type")) {
                 // Собираем все элементы Type внутри Type (v8:Type в пространстве имён v8)
                 for child in type_node.children() {
                     if child.is_element() && child.tag_name().name() == "Type" {
                         // Получаем текст из узла
-                        let text_content: String = child.children()
-                            .filter_map(|n| n.text())
-                            .collect();
-                        
+                        let text_content: String =
+                            child.children().filter_map(|n| n.text()).collect();
+
                         if !text_content.is_empty() {
                             type_names.push(self.normalize_type_name(text_content.trim()));
                         }
@@ -201,18 +195,18 @@ impl ConfigParserXml {
                 }
             }
         }
-        
+
         if name.is_empty() {
             return None;
         }
-        
+
         let is_composite = type_names.len() > 1;
         let type_str = if type_names.is_empty() {
             "Произвольный".to_string()
         } else {
             type_names.join(", ")
         };
-        
+
         Some(Attribute {
             name,
             type_: type_str,
@@ -220,60 +214,53 @@ impl ConfigParserXml {
             types: type_names,
         })
     }
-    
+
     fn parse_tabular_section(&self, ts_node: &Node) -> Option<TabularSection> {
         let mut name = String::new();
         let mut synonym = None;
         let mut attributes = Vec::new();
-        
+
         // Найдём Properties внутри TabularSection
-        if let Some(props) = ts_node.children()
-            .find(|n| n.has_tag_name("Properties")) {
-            
+        if let Some(props) = ts_node.children().find(|n| n.has_tag_name("Properties")) {
             // Имя табличной части
-            if let Some(name_node) = props.children()
-                .find(|n| n.has_tag_name("Name")) {
+            if let Some(name_node) = props.children().find(|n| n.has_tag_name("Name")) {
                 name = name_node.text().unwrap_or("").to_string();
             }
-            
+
             // Синоним табличной части
-            if let Some(synonym_node) = props.children()
-                .find(|n| n.has_tag_name("Synonym")) {
-                if let Some(item) = synonym_node.children()
-                    .find(|n| n.has_tag_name("v8:item")) {
-                    if let Some(content) = item.children()
-                        .find(|n| n.has_tag_name("v8:content")) {
+            if let Some(synonym_node) = props.children().find(|n| n.has_tag_name("Synonym")) {
+                if let Some(item) = synonym_node.children().find(|n| n.has_tag_name("v8:item")) {
+                    if let Some(content) = item.children().find(|n| n.has_tag_name("v8:content")) {
                         synonym = Some(content.text().unwrap_or("").to_string());
                     }
                 }
             }
         }
-        
+
         // Найдём атрибуты табличной части в ChildObjects
-        if let Some(child_objects) = ts_node.children()
-            .find(|n| n.has_tag_name("ChildObjects")) {
-            
+        if let Some(child_objects) = ts_node.children().find(|n| n.has_tag_name("ChildObjects")) {
             // Парсим каждый атрибут табличной части
-            for attr_node in child_objects.children()
-                .filter(|n| n.has_tag_name("Attribute")) {
-                
+            for attr_node in child_objects
+                .children()
+                .filter(|n| n.has_tag_name("Attribute"))
+            {
                 if let Some(attr) = self.parse_attribute_node(&attr_node) {
                     attributes.push(attr);
                 }
             }
         }
-        
+
         if name.is_empty() {
             return None;
         }
-        
+
         Some(TabularSection {
             name,
             synonym,
             attributes,
         })
     }
-    
+
     /// Нормализует имя типа из XML
     fn normalize_type_name(&self, type_name: &str) -> String {
         match type_name {
@@ -330,10 +317,10 @@ impl ConfigParserXml {
             available_facets: self.get_facets_for_kind(kind),
         }
     }
-    
+
     fn get_facets_for_kind(&self, kind: &MetadataKind) -> Vec<crate::core::types::FacetKind> {
         use crate::core::types::FacetKind;
-        
+
         match kind {
             MetadataKind::Catalog => vec![
                 FacetKind::Manager,
@@ -352,65 +339,64 @@ impl ConfigParserXml {
                 FacetKind::Object,    // НаборЗаписей
                 FacetKind::Reference, // МенеджерЗаписи
             ],
-            MetadataKind::Enum => vec![
-                FacetKind::Manager,
-                FacetKind::Reference,
-            ],
+            MetadataKind::Enum => vec![FacetKind::Manager, FacetKind::Reference],
         }
     }
-    
+
     /// Get metadata object by qualified name (e.g., "Справочник.Контрагенты")
     pub fn get_metadata(&self, qualified_name: &str) -> Option<&MetadataObject> {
         self.metadata_cache.get(qualified_name)
     }
-    
+
     /// Get catalog metadata
     pub fn get_catalog(&self, name: &str) -> Option<&MetadataObject> {
         let qualified_name = format!("Справочник.{}", name);
         self.get_metadata(&qualified_name)
     }
-    
+
     /// Get document metadata
     pub fn get_document(&self, name: &str) -> Option<&MetadataObject> {
         let qualified_name = format!("Документ.{}", name);
         self.get_metadata(&qualified_name)
     }
-    
+
     /// Get register metadata
     pub fn get_register(&self, reg_type: &str, name: &str) -> Option<&MetadataObject> {
         let qualified_name = format!("{}.{}", reg_type, name);
         self.get_metadata(&qualified_name)
     }
-    
+
     /// Get all metadata objects
     pub fn get_all_metadata(&self) -> Vec<&MetadataObject> {
         self.metadata_cache.values().collect()
     }
-    
+
     /// Load all metadata types from configuration
     pub fn load_all_types(&mut self) -> Result<Vec<TypeResolution>> {
         let mut all_resolutions = Vec::new();
-        
+
         // Load catalogs
         if let Ok(resolutions) = self.parse_metadata_objects("Catalogs", MetadataKind::Catalog) {
             all_resolutions.extend(resolutions);
         }
-        
+
         // Load documents
         if let Ok(resolutions) = self.parse_metadata_objects("Documents", MetadataKind::Document) {
             all_resolutions.extend(resolutions);
         }
-        
+
         // Load registers
-        if let Ok(resolutions) = self.parse_metadata_objects("InformationRegisters", MetadataKind::InformationRegister) {
+        if let Ok(resolutions) =
+            self.parse_metadata_objects("InformationRegisters", MetadataKind::InformationRegister)
+        {
             all_resolutions.extend(resolutions);
         }
-        
+
         // Load enums
         if let Ok(resolutions) = self.parse_metadata_objects("Enums", MetadataKind::Enum) {
             all_resolutions.extend(resolutions);
         }
-        
+
         Ok(all_resolutions)
     }
 }

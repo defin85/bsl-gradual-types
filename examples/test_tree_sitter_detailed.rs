@@ -1,30 +1,30 @@
 //! Детальный тест tree-sitter-bsl парсера
 
-use bsl_gradual_types::parser::tree_sitter_adapter::TreeSitterAdapter;
 use bsl_gradual_types::parser::common::Parser;
+use bsl_gradual_types::parser::tree_sitter_adapter::TreeSitterAdapter;
 
 fn main() -> anyhow::Result<()> {
     println!("=== Детальное тестирование tree-sitter-bsl ===\n");
-    
+
     // Создаём адаптер
     let mut adapter = TreeSitterAdapter::new()?;
     println!("✓ Адаптер создан успешно");
-    
+
     // Тест 1: Простое присваивание
     test_simple_assignment(&mut adapter)?;
-    
+
     // Тест 2: Условный оператор
     test_if_statement(&mut adapter)?;
-    
+
     // Тест 3: Функция
     test_function(&mut adapter)?;
-    
+
     // Тест 4: Процедура
     test_procedure(&mut adapter)?;
-    
+
     // Тест 5: Комментарии (новая возможность tree-sitter)
     test_with_comments(&mut adapter)?;
-    
+
     println!("\n✅ Все тесты пройдены успешно!");
     Ok(())
 }
@@ -35,7 +35,7 @@ fn test_simple_assignment(adapter: &mut TreeSitterAdapter) -> anyhow::Result<()>
     let program = adapter.parse(code)?;
     println!("   Код: {}", code);
     println!("   Statements: {}", program.statements.len());
-    
+
     if program.statements.is_empty() {
         println!("   ⚠️  Нет распознанных statements");
     } else {
@@ -57,7 +57,7 @@ fn test_if_statement(adapter: &mut TreeSitterAdapter) -> anyhow::Result<()> {
 "#;
     let program = adapter.parse(code)?;
     println!("   Statements: {}", program.statements.len());
-    
+
     if program.statements.is_empty() {
         println!("   ⚠️  Нет распознанных statements");
     } else {
@@ -76,7 +76,7 @@ fn test_function(adapter: &mut TreeSitterAdapter) -> anyhow::Result<()> {
 "#;
     let program = adapter.parse(code)?;
     println!("   Statements: {}", program.statements.len());
-    
+
     if program.statements.is_empty() {
         println!("   ⚠️  Нет распознанных statements");
     } else {
@@ -103,7 +103,7 @@ fn test_procedure(adapter: &mut TreeSitterAdapter) -> anyhow::Result<()> {
 "#;
     let program = adapter.parse(code)?;
     println!("   Statements: {}", program.statements.len());
-    
+
     if program.statements.is_empty() {
         println!("   ⚠️  Нет распознанных statements");
     } else {
@@ -133,8 +133,11 @@ fn test_with_comments(adapter: &mut TreeSitterAdapter) -> anyhow::Result<()> {
 Б = 2;
 "#;
     let program = adapter.parse(code)?;
-    println!("   Statements (без комментариев): {}", program.statements.len());
-    
+    println!(
+        "   Statements (без комментариев): {}",
+        program.statements.len()
+    );
+
     if program.statements.is_empty() {
         println!("   ⚠️  Нет распознанных statements");
     } else {

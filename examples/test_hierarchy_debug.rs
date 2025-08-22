@@ -1,7 +1,5 @@
 use anyhow::Result;
-use bsl_gradual_types::documentation::{
-    core::{BslDocumentationSystem, DocumentationConfig},
-};
+use bsl_gradual_types::documentation::core::{BslDocumentationSystem, DocumentationConfig};
 
 /// Отладка структуры иерархии типов
 #[tokio::main]
@@ -16,14 +14,17 @@ async fn main() -> Result<()> {
 
     // Получаем иерархию
     let hierarchy = documentation_system.get_type_hierarchy().await?;
-    
+
     println!("📊 Общая статистика:");
-    println!("   • Корневых категорий: {}", hierarchy.root_categories.len());
-    
+    println!(
+        "   • Корневых категорий: {}",
+        hierarchy.root_categories.len()
+    );
+
     for (i, category) in hierarchy.root_categories.iter().enumerate() {
         println!("\n📁 Категория {}: '{}'", i + 1, category.name);
         println!("   • Дочерних элементов: {}", category.children.len());
-        
+
         // Показываем первые 10 дочерних элементов
         for (j, child) in category.children.iter().take(10).enumerate() {
             match child {
@@ -48,21 +49,25 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        
+
         if category.children.len() > 10 {
             println!("   └─ ... и еще {} элементов", category.children.len() - 10);
         }
     }
-    
+
     // Подсчет общего количества элементов
-    let total_elements: usize = hierarchy.root_categories.iter()
+    let total_elements: usize = hierarchy
+        .root_categories
+        .iter()
         .map(|cat| cat.children.len())
         .sum();
-    
+
     println!("\n📈 Итоговая статистика:");
     println!("   • Всего элементов в иерархии: {}", total_elements);
-    println!("   • Среднее количество элементов на категорию: {:.1}", 
-        total_elements as f32 / hierarchy.root_categories.len() as f32);
+    println!(
+        "   • Среднее количество элементов на категорию: {:.1}",
+        total_elements as f32 / hierarchy.root_categories.len() as f32
+    );
 
     Ok(())
 }

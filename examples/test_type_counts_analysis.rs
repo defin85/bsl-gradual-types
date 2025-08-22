@@ -2,7 +2,10 @@ use anyhow::Result;
 use bsl_gradual_types::{
     core::platform_resolver::PlatformTypeResolver,
     documentation::{
-        core::{BslDocumentationSystem, DocumentationConfig, DocumentationProvider, providers::ProviderConfig},
+        core::{
+            providers::ProviderConfig, BslDocumentationSystem, DocumentationConfig,
+            DocumentationProvider,
+        },
         platform::PlatformDocumentationProvider,
     },
 };
@@ -22,14 +25,17 @@ async fn main() -> Result<()> {
     // 2. PlatformDocumentationProvider (используется для иерархии)
     println!("\n📚 2. PlatformDocumentationProvider (иерархия):");
     let platform_provider = PlatformDocumentationProvider::new();
-    
+
     // Инициализируем провайдер
     let config = ProviderConfig::default();
     match platform_provider.initialize(&config).await {
         Ok(_) => {
             let provider_types = platform_provider.get_all_types().await?;
-            println!("   • Documentation provider types: {}", provider_types.len());
-            
+            println!(
+                "   • Documentation provider types: {}",
+                provider_types.len()
+            );
+
             // Показываем первые 10 типов
             for (i, doc_node) in provider_types.iter().take(10).enumerate() {
                 match doc_node {
@@ -44,7 +50,7 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-        },
+        }
         Err(e) => {
             println!("   ❌ Ошибка инициализации: {}", e);
         }
@@ -54,20 +60,27 @@ async fn main() -> Result<()> {
     println!("\n🏗️ 3. BslDocumentationSystem (полная система):");
     let documentation_system = BslDocumentationSystem::new();
     let docs_config = DocumentationConfig::default();
-    
+
     match documentation_system.initialize(docs_config).await {
         Ok(_) => {
             let hierarchy = documentation_system.get_type_hierarchy().await?;
-            
-            println!("   • Корневых категорий: {}", hierarchy.root_categories.len());
-            
+
+            println!(
+                "   • Корневых категорий: {}",
+                hierarchy.root_categories.len()
+            );
+
             let mut total_subcategories = 0;
             let mut total_types_in_hierarchy = 0;
             let mut non_empty_subcategories = 0;
-            
+
             for category in &hierarchy.root_categories {
-                println!("   📁 Категория: '{}' ({} дочерних)", category.name, category.children.len());
-                
+                println!(
+                    "   📁 Категория: '{}' ({} дочерних)",
+                    category.name,
+                    category.children.len()
+                );
+
                 for child in &category.children {
                     match child {
                         bsl_gradual_types::documentation::core::hierarchy::DocumentationNode::SubCategory(sub_cat) => {
@@ -88,11 +101,11 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            
+
             println!("   • Всего подкатегорий: {}", total_subcategories);
             println!("   • Непустых подкатегорий: {}", non_empty_subcategories);
             println!("   • Типов в иерархии: {}", total_types_in_hierarchy);
-        },
+        }
         Err(e) => {
             println!("   ❌ Ошибка инициализации системы: {}", e);
         }
@@ -100,7 +113,7 @@ async fn main() -> Result<()> {
 
     println!("\n🎯 ВЫВОДЫ:");
     println!("   • 13,607 = PlatformTypeResolver.get_platform_globals() - ВСЕ глобальные объекты");
-    println!("   • 3,884 = DocumentationProvider - типы для документации"); 
+    println!("   • 3,884 = DocumentationProvider - типы для документации");
     println!("   • 195 = Подкатегории в иерархии (многие пустые)");
     println!("   • ? = Реальное количество типов для отображения в дереве");
 

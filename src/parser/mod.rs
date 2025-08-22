@@ -1,18 +1,18 @@
 //! BSL Parser module
-//! 
+//!
 //! Парсер для языка 1С:Предприятие BSL (Built-in Script Language)
 //! Использует nom для построения AST (Abstract Syntax Tree)
 
-pub mod lexer;
 pub mod ast;
-pub mod parser;
-pub mod visitor;
-pub mod graph_builder;
-pub mod tree_sitter_adapter;
 pub mod common;
+pub mod graph_builder;
+pub mod lexer;
+pub mod parser;
+pub mod tree_sitter_adapter;
+pub mod visitor;
 
-pub use ast::{Program, Statement, Expression};
+pub use ast::{Expression, Program, Statement};
+pub use common::{Parser, ParserFactory};
+pub use graph_builder::DependencyGraphBuilder;
 pub use parser::BslParser;
 pub use visitor::AstVisitor;
-pub use graph_builder::DependencyGraphBuilder;
-pub use common::{Parser, ParserFactory};

@@ -1,30 +1,32 @@
 //! Простой тест HTML рендеринга
 
 use anyhow::Result;
+use bsl_gradual_types::documentation::core::hierarchy::DocumentationSourceType;
 use bsl_gradual_types::documentation::render::HtmlDocumentationRenderer;
 use bsl_gradual_types::documentation::search::{
-    SearchResults, SearchResultItem, PaginationInfo, 
-    HighlightFragment, SearchFacet, FacetValue
+    FacetValue, HighlightFragment, PaginationInfo, SearchFacet, SearchResultItem, SearchResults,
 };
-use bsl_gradual_types::documentation::core::hierarchy::DocumentationSourceType;
 use std::fs;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("🎨 Простой тест HTML рендеринга");
-    
+
     // Создаем HTML рендерер
     let html_renderer = HtmlDocumentationRenderer::new();
     println!("✅ HtmlDocumentationRenderer создан");
-    
+
     // Создаем тестовые результаты поиска
     let test_results = create_test_search_results();
-    println!("✅ Тестовые результаты созданы: {} элементов", test_results.items.len());
-    
+    println!(
+        "✅ Тестовые результаты созданы: {} элементов",
+        test_results.items.len()
+    );
+
     // Рендеринг результатов поиска
     println!("\n=== 🔍 Рендеринг результатов поиска ===");
     let search_html = html_renderer.render_search_results(&test_results).await?;
-    
+
     // Создаем полную HTML страницу
     let full_page = format!(
         "<!DOCTYPE html>\n\
@@ -46,33 +48,33 @@ async fn main() -> Result<()> {
         search_html,
         html_renderer.render_javascript()
     );
-    
+
     // Сохраняем в файл
     let output_file = "bsl_search_demo.html";
     fs::write(output_file, &full_page)?;
-    
+
     println!("✅ HTML страница сохранена: {}", output_file);
     println!("📄 Размер HTML: {} символов", full_page.len());
     println!("🌐 Откройте файл в браузере для просмотра результата");
-    
+
     // Тест разных тем
     println!("\n=== 🎨 Тест переключения тем ===");
     let mut renderer_copy = html_renderer;
-    
+
     // Тест темной темы
     renderer_copy.set_theme("dark").await?;
     println!("✅ Темная тема установлена");
-    
-    // Тест светлой темы  
+
+    // Тест светлой темы
     renderer_copy.set_theme("light").await?;
     println!("✅ Светлая тема установлена");
-    
+
     // Тест VSCode темы
     renderer_copy.set_theme("vscode").await?;
     println!("✅ VSCode тема установлена");
-    
+
     println!("\n🎉 HTML рендеринг работает отлично!");
-    
+
     Ok(())
 }
 

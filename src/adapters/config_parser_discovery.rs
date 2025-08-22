@@ -1,5 +1,5 @@
 //! Discovery-based парсер конфигурации 1С:Предприятие
-//! 
+//!
 //! Основные принципы:
 //! - Никаких предположений о структуре каталогов
 //! - Динамическое обнаружение типов метаданных из XML
@@ -14,9 +14,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::core::types::{
-    Attribute, Certainty, ConcreteType, ConfigurationType, FacetKind,
-    MetadataKind, ResolutionMetadata, ResolutionResult, ResolutionSource,
-    TabularSection, TypeResolution,
+    Attribute, Certainty, ConcreteType, ConfigurationType, FacetKind, MetadataKind,
+    ResolutionMetadata, ResolutionResult, ResolutionSource, TabularSection, TypeResolution,
 };
 
 /// Discovery-based парсер конфигурации
@@ -87,7 +86,10 @@ impl ConfigurationDiscoveryParser {
 
     /// Запустить discovery парсинг конфигурации
     pub fn discover_and_parse(&mut self) -> Result<Vec<TypeResolution>> {
-        println!("🔍 Запуск Discovery-based парсинга: {}", self.config_path.display());
+        println!(
+            "🔍 Запуск Discovery-based парсинга: {}",
+            self.config_path.display()
+        );
 
         // Фаза 1: Discovery - обнаружение структуры
         let discovered_files = self.discover_structure()?;
@@ -98,17 +100,19 @@ impl ConfigurationDiscoveryParser {
         for file_info in discovered_files {
             match self.parse_discovered_xml(&file_info) {
                 Ok(metadata) => {
-                    println!("   ✅ {}: {} ({})", 
+                    println!(
+                        "   ✅ {}: {} ({})",
                         self.get_kind_display_name(metadata.kind),
                         metadata.name,
                         metadata.discovery_context.xml_root_element
                     );
-                    
+
                     // Создаем TypeResolution для всех фасетов
                     resolutions.extend(self.create_type_resolutions(&metadata));
-                    
+
                     // Сохраняем в кеш
-                    self.discovered_objects.insert(metadata.qualified_name.clone(), metadata);
+                    self.discovered_objects
+                        .insert(metadata.qualified_name.clone(), metadata);
                 }
                 Err(e) => {
                     println!("   ❌ Ошибка парсинга {}: {}", file_info.path.display(), e);
@@ -116,8 +120,9 @@ impl ConfigurationDiscoveryParser {
             }
         }
 
-        println!("✅ Discovery завершен: {} типов из {} объектов", 
-            resolutions.len(), 
+        println!(
+            "✅ Discovery завершен: {} типов из {} объектов",
+            resolutions.len(),
             self.discovered_objects.len()
         );
 
@@ -127,10 +132,10 @@ impl ConfigurationDiscoveryParser {
     /// Фаза 1: Discovery - обнаружение всех XML файлов метаданных
     fn discover_structure(&self) -> Result<Vec<DiscoveredFile>> {
         let mut discovered = Vec::new();
-        
+
         // Рекурсивно обходим все каталоги начиная с корня конфигурации
         self.discover_recursive(&self.config_path, &mut discovered)?;
-        
+
         Ok(discovered)
     }
 
@@ -173,7 +178,7 @@ impl ConfigurationDiscoveryParser {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(ref e)) => {
                     let tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    
+
                     // Определяем тип метаданных по корневому элементу
                     if let Some(kind) = self.detect_metadata_kind(&tag_name) {
                         return Ok(Some(DiscoveredFile {
@@ -183,9 +188,12 @@ impl ConfigurationDiscoveryParser {
                             discovery_method: DiscoveryMethod::XmlRootElement,
                         }));
                     }
-                    
+
                     // Если встретили системные элементы - прекращаем анализ
-                    if matches!(tag_name.as_str(), "Configuration" | "Language" | "ConfigDumpInfo") {
+                    if matches!(
+                        tag_name.as_str(),
+                        "Configuration" | "Language" | "ConfigDumpInfo"
+                    ) {
                         return Ok(None);
                     }
                 }
@@ -210,7 +218,7 @@ impl ConfigurationDiscoveryParser {
             "DataProcessor" => Some(MetadataKind::DataProcessor),
             "ChartOfAccounts" => Some(MetadataKind::ChartOfAccounts),
             "ChartOfCharacteristicTypes" => Some(MetadataKind::ChartOfCharacteristicTypes),
-            
+
             // Исключаем системные файлы конфигурации
             "Configuration" => None,  // Корневой файл конфигурации
             "Language" => None,       // Файлы языков
@@ -254,7 +262,7 @@ impl ConfigurationDiscoveryParser {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(ref e)) => {
                     let tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    
+
                     match tag_name.as_str() {
                         "Properties" => in_properties = true,
                         "ChildObjects" => in_child_objects = true,
@@ -275,7 +283,7 @@ impl ConfigurationDiscoveryParser {
                         }
                         tag => {
                             current_element = tag.to_string();
-                            
+
                             // Извлекаем UUID из атрибутов корневого элемента
                             if tag == &file_info.root_element {
                                 for attr in e.attributes() {
@@ -293,7 +301,7 @@ impl ConfigurationDiscoveryParser {
                 }
                 Ok(Event::Text(e)) => {
                     let text = e.unescape()?.into_owned();
-                    
+
                     if in_properties && !text.trim().is_empty() {
                         match current_element.as_str() {
                             "Name" => {
@@ -301,8 +309,9 @@ impl ConfigurationDiscoveryParser {
                                 if metadata.name.is_empty() {
                                     metadata.name = text;
                                     // Формируем qualified_name
-                                    metadata.qualified_name = format!("{}.{}", 
-                                        self.get_kind_prefix(metadata.kind), 
+                                    metadata.qualified_name = format!(
+                                        "{}.{}",
+                                        self.get_kind_prefix(metadata.kind),
                                         metadata.name
                                     );
                                 }
@@ -323,7 +332,7 @@ impl ConfigurationDiscoveryParser {
                 }
                 Ok(Event::End(ref e)) => {
                     let tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    
+
                     match tag_name.as_str() {
                         "Properties" => in_properties = false,
                         "ChildObjects" => in_child_objects = false,
@@ -347,11 +356,15 @@ impl ConfigurationDiscoveryParser {
                 }
                 Ok(Event::Eof) => break,
                 Err(e) => {
-                    println!("⚠️ XML parsing warning: {} at position {}", e, reader.buffer_position());
+                    println!(
+                        "⚠️ XML parsing warning: {} at position {}",
+                        e,
+                        reader.buffer_position()
+                    );
                 }
                 _ => {}
             }
-            
+
             buf.clear();
         }
 
@@ -366,35 +379,47 @@ impl ConfigurationDiscoveryParser {
     /// Создание TypeResolution для всех фасетов объекта
     fn create_type_resolutions(&self, metadata: &DiscoveredMetadata) -> Vec<TypeResolution> {
         let mut resolutions = Vec::new();
-        
+
         // Получаем фасеты для данного типа метаданных
         let facets = self.get_facets_for_kind(metadata.kind);
-        
+
         println!("🎭 Создаем фасеты для {}: {:?}", metadata.name, facets);
-        
+
         // Создаем TypeResolution для каждого фасета
         for facet in facets {
             let config_type = ConfigurationType {
                 kind: metadata.kind,
                 name: metadata.name.clone(),
-                attributes: metadata.attributes.iter().map(|attr| Attribute {
-                    name: attr.name.clone(),
-                    type_: attr.type_definition.clone(),
-                    is_composite: false,
-                    types: vec![attr.type_definition.clone()],
-                }).collect(),
-                tabular_sections: metadata.tabular_sections.iter().map(|ts| TabularSection {
-                    name: ts.name.clone(),
-                    synonym: ts.synonym.clone(),
-                    attributes: ts.attributes.iter().map(|attr| Attribute {
+                attributes: metadata
+                    .attributes
+                    .iter()
+                    .map(|attr| Attribute {
                         name: attr.name.clone(),
                         type_: attr.type_definition.clone(),
                         is_composite: false,
                         types: vec![attr.type_definition.clone()],
-                    }).collect(),
-                }).collect(),
+                    })
+                    .collect(),
+                tabular_sections: metadata
+                    .tabular_sections
+                    .iter()
+                    .map(|ts| TabularSection {
+                        name: ts.name.clone(),
+                        synonym: ts.synonym.clone(),
+                        attributes: ts
+                            .attributes
+                            .iter()
+                            .map(|attr| Attribute {
+                                name: attr.name.clone(),
+                                type_: attr.type_definition.clone(),
+                                is_composite: false,
+                                types: vec![attr.type_definition.clone()],
+                            })
+                            .collect(),
+                    })
+                    .collect(),
             };
-            
+
             let resolution = TypeResolution {
                 certainty: Certainty::Known,
                 result: ResolutionResult::Concrete(ConcreteType::Configuration(config_type)),
@@ -406,19 +431,33 @@ impl ConfigurationDiscoveryParser {
                     notes: vec![
                         format!("kind:{:?}", metadata.kind),
                         format!("facet:{:?}", facet),
-                        format!("discovery_method:{:?}", metadata.discovery_context.discovery_method),
+                        format!(
+                            "discovery_method:{:?}",
+                            metadata.discovery_context.discovery_method
+                        ),
                         format!("xml_root:{}", metadata.discovery_context.xml_root_element),
-                        metadata.synonym.as_ref().map(|s| format!("synonym:{}", s)).unwrap_or_default(),
-                        metadata.uuid.as_ref().map(|u| format!("uuid:{}", u)).unwrap_or_default(),
-                    ].into_iter().filter(|s| !s.is_empty()).collect(),
+                        metadata
+                            .synonym
+                            .as_ref()
+                            .map(|s| format!("synonym:{}", s))
+                            .unwrap_or_default(),
+                        metadata
+                            .uuid
+                            .as_ref()
+                            .map(|u| format!("uuid:{}", u))
+                            .unwrap_or_default(),
+                    ]
+                    .into_iter()
+                    .filter(|s| !s.is_empty())
+                    .collect(),
                 },
                 active_facet: Some(facet),
                 available_facets: vec![facet],
             };
-            
+
             resolutions.push(resolution);
         }
-        
+
         resolutions
     }
 
@@ -426,20 +465,20 @@ impl ConfigurationDiscoveryParser {
     fn get_facets_for_kind(&self, kind: MetadataKind) -> Vec<FacetKind> {
         match kind {
             MetadataKind::Catalog => vec![
-                FacetKind::Manager,    // Справочники.Контрагенты
-                FacetKind::Object,     // СправочникОбъект.Контрагенты  
-                FacetKind::Reference,  // СправочникСсылка.Контрагенты
+                FacetKind::Manager,   // Справочники.Контрагенты
+                FacetKind::Object,    // СправочникОбъект.Контрагенты
+                FacetKind::Reference, // СправочникСсылка.Контрагенты
             ],
             MetadataKind::Document => vec![
-                FacetKind::Manager,    // Документы.ЗаказНаряды
-                FacetKind::Object,     // ДокументОбъект.ЗаказНаряды
-                FacetKind::Reference,  // ДокументСсылка.ЗаказНаряды
+                FacetKind::Manager,   // Документы.ЗаказНаряды
+                FacetKind::Object,    // ДокументОбъект.ЗаказНаряды
+                FacetKind::Reference, // ДокументСсылка.ЗаказНаряды
             ],
             MetadataKind::Register => vec![
-                FacetKind::Manager,    // РегистрыСведений.ТестовыйРегистр
+                FacetKind::Manager, // РегистрыСведений.ТестовыйРегистр
             ],
             MetadataKind::Enum => vec![
-                FacetKind::Manager,    // Перечисления.ВидКонтрагента
+                FacetKind::Manager, // Перечисления.ВидКонтрагента
             ],
             _ => vec![FacetKind::Manager], // Для остальных типов - базовый фасет
         }
@@ -458,7 +497,7 @@ impl ConfigurationDiscoveryParser {
             MetadataKind::ChartOfCharacteristicTypes => "План видов характеристик",
         }
     }
-    
+
     /// Получить префикс для типа
     fn get_kind_prefix(&self, kind: MetadataKind) -> &str {
         match kind {
@@ -486,7 +525,7 @@ impl ConfigurationDiscoveryParser {
     /// Статистика discovery
     pub fn get_discovery_stats(&self) -> DiscoveryStats {
         let mut stats = DiscoveryStats::default();
-        
+
         for metadata in self.discovered_objects.values() {
             match metadata.kind {
                 MetadataKind::Catalog => stats.catalogs += 1,
@@ -496,13 +535,15 @@ impl ConfigurationDiscoveryParser {
                 MetadataKind::Report => stats.reports += 1,
                 MetadataKind::DataProcessor => stats.data_processors += 1,
                 MetadataKind::ChartOfAccounts => stats.chart_of_accounts += 1,
-                MetadataKind::ChartOfCharacteristicTypes => stats.chart_of_characteristic_types += 1,
+                MetadataKind::ChartOfCharacteristicTypes => {
+                    stats.chart_of_characteristic_types += 1
+                }
             }
-            
+
             stats.total_attributes += metadata.attributes.len();
             stats.total_tabular_sections += metadata.tabular_sections.len();
         }
-        
+
         stats.total_objects = self.discovered_objects.len();
         stats
     }
@@ -545,7 +586,10 @@ impl DiscoveryStats {
         println!("   Отчеты: {}", self.reports);
         println!("   Обработки: {}", self.data_processors);
         println!("   Планы счетов: {}", self.chart_of_accounts);
-        println!("   Планы видов характеристик: {}", self.chart_of_characteristic_types);
+        println!(
+            "   Планы видов характеристик: {}",
+            self.chart_of_characteristic_types
+        );
         println!("   Всего атрибутов: {}", self.total_attributes);
         println!("   Всего табличных частей: {}", self.total_tabular_sections);
     }

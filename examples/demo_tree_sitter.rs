@@ -1,11 +1,11 @@
 //! Демонстрация работы tree-sitter парсера BSL
 
-use bsl_gradual_types::parser::ParserFactory;
 use bsl_gradual_types::parser::common::Parser;
+use bsl_gradual_types::parser::ParserFactory;
 
 fn main() -> anyhow::Result<()> {
     println!("=== Демонстрация tree-sitter парсера BSL ===\n");
-    
+
     // Тестовый BSL код с различными конструкциями
     let code = r#"
 // Комментарий - теперь поддерживается!
@@ -41,28 +41,38 @@ fn main() -> anyhow::Result<()> {
     Возврат Н * Факториал(Н - 1);
 КонецФункции
 "#;
-    
+
     // Создаём tree-sitter парсер
     let mut parser = ParserFactory::create();
     println!("Используется парсер: {}\n", parser.name());
-    
+
     // Парсим код
     match parser.parse(code) {
         Ok(program) => {
             println!("✅ Парсинг успешен!");
-            println!("Найдено {} операторов верхнего уровня\n", program.statements.len());
-            
+            println!(
+                "Найдено {} операторов верхнего уровня\n",
+                program.statements.len()
+            );
+
             // Выводим информацию о найденных элементах
             for (i, stmt) in program.statements.iter().enumerate() {
                 use bsl_gradual_types::parser::ast::Statement;
                 match stmt {
-                    Statement::ProcedureDecl { name, params, body, export } => {
+                    Statement::ProcedureDecl {
+                        name,
+                        params,
+                        body,
+                        export,
+                    } => {
                         println!("{}. Процедура '{}'", i + 1, name);
                         println!("   - Параметров: {}", params.len());
                         println!("   - Операторов в теле: {}", body.len());
                         println!("   - Экспортная: {}", if *export { "Да" } else { "Нет" });
                     }
-                    Statement::FunctionDecl { name, params, body, .. } => {
+                    Statement::FunctionDecl {
+                        name, params, body, ..
+                    } => {
                         println!("{}. Функция '{}'", i + 1, name);
                         println!("   - Параметров: {}", params.len());
                         println!("   - Операторов в теле: {}", body.len());
@@ -72,7 +82,7 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            
+
             println!("\n🎉 Tree-sitter парсер успешно обрабатывает:");
             println!("   ✓ Комментарии");
             println!("   ✓ Процедуры и функции");
@@ -84,6 +94,6 @@ fn main() -> anyhow::Result<()> {
             println!("❌ Ошибка парсинга: {:?}", e);
         }
     }
-    
+
     Ok(())
 }

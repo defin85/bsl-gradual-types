@@ -1,5 +1,5 @@
 //! Configuration-guided Discovery парсер для конфигурации 1С:Предприятие
-//! 
+//!
 //! Использует Configuration.xml как опорный файл для получения полного списка
 //! объектов метаданных, что гораздо надежнее чем рекурсивный обход каталогов
 
@@ -11,9 +11,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::core::types::{
-    Attribute, Certainty, ConcreteType, ConfigurationType, FacetKind,
-    MetadataKind, ResolutionMetadata, ResolutionResult, ResolutionSource,
-    TabularSection, TypeResolution,
+    Attribute, Certainty, ConcreteType, ConfigurationType, FacetKind, MetadataKind,
+    ResolutionMetadata, ResolutionResult, ResolutionSource, TabularSection, TypeResolution,
 };
 
 /// Configuration-guided Discovery парсер
@@ -90,12 +89,12 @@ struct StandardAttributes {
     pub description_length: Option<u32>,
     pub hierarchical: bool,
     pub owners: Vec<String>,
-    
-    // Документы  
+
+    // Документы
     pub number_length: Option<u32>,
     pub number_type: Option<String>,
     pub number_periodicity: Option<String>,
-    
+
     // Общие
     pub posting: Option<String>,
 }
@@ -115,7 +114,10 @@ impl ConfigurationGuidedParser {
         // Фаза 1: Парсинг Configuration.xml как опорного файла
         let config_xml_path = self.config_path.join("Configuration.xml");
         if !config_xml_path.exists() {
-            return Err(anyhow::anyhow!("Configuration.xml не найден: {}", config_xml_path.display()));
+            return Err(anyhow::anyhow!(
+                "Configuration.xml не найден: {}",
+                config_xml_path.display()
+            ));
         }
 
         let config_info = self.parse_configuration_xml(&config_xml_path)?;
@@ -131,7 +133,8 @@ impl ConfigurationGuidedParser {
             match self.parse_metadata_by_reference(metadata_ref) {
                 Ok(Some(metadata)) => {
                     resolutions.extend(self.create_type_resolutions(&metadata));
-                    self.discovered_objects.insert(metadata.qualified_name.clone(), metadata);
+                    self.discovered_objects
+                        .insert(metadata.qualified_name.clone(), metadata);
                     found_count += 1;
                 }
                 Ok(None) => {
@@ -148,8 +151,12 @@ impl ConfigurationGuidedParser {
 
     /// Парсинг Configuration.xml для получения списка объектов метаданных
     fn parse_configuration_xml(&self, config_xml_path: &Path) -> Result<ConfigurationInfo> {
-        let content = fs::read_to_string(config_xml_path)
-            .with_context(|| format!("Не удается прочитать Configuration.xml: {}", config_xml_path.display()))?;
+        let content = fs::read_to_string(config_xml_path).with_context(|| {
+            format!(
+                "Не удается прочитать Configuration.xml: {}",
+                config_xml_path.display()
+            )
+        })?;
 
         let mut reader = Reader::from_str(&content);
         reader.trim_text(true);
@@ -170,7 +177,7 @@ impl ConfigurationGuidedParser {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(ref e)) => {
                     let tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    
+
                     match tag_name.as_str() {
                         "Configuration" => {
                             // Извлекаем UUID из атрибутов
@@ -188,7 +195,7 @@ impl ConfigurationGuidedParser {
                         "ChildObjects" => in_child_objects = true,
                         tag => {
                             current_element = tag.to_string();
-                            
+
                             // Обрабатываем объекты метаданных в ChildObjects
                             if in_child_objects {
                                 if let Some(kind) = self.xml_tag_to_metadata_kind(&tag) {
@@ -201,11 +208,11 @@ impl ConfigurationGuidedParser {
                 }
                 Ok(Event::Text(e)) => {
                     let text = e.unescape()?.into_owned().trim().to_string();
-                    
+
                     if text.is_empty() {
                         continue;
                     }
-                    
+
                     if in_properties {
                         match current_element.as_str() {
                             "Name" => config_info.name = text,
@@ -224,7 +231,7 @@ impl ConfigurationGuidedParser {
                 }
                 Ok(Event::End(ref e)) => {
                     let tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    
+
                     match tag_name.as_str() {
                         "Properties" => in_properties = false,
                         "ChildObjects" => in_child_objects = false,
@@ -234,16 +241,22 @@ impl ConfigurationGuidedParser {
                 }
                 Ok(Event::Eof) => break,
                 Err(e) => {
-                    println!("⚠️ XML parsing warning in Configuration.xml: {} at position {}", e, reader.buffer_position());
+                    println!(
+                        "⚠️ XML parsing warning in Configuration.xml: {} at position {}",
+                        e,
+                        reader.buffer_position()
+                    );
                 }
                 _ => {}
             }
-            
+
             buf.clear();
         }
 
         if config_info.name.is_empty() {
-            return Err(anyhow::anyhow!("Не удалось извлечь имя конфигурации из Configuration.xml"));
+            return Err(anyhow::anyhow!(
+                "Не удалось извлечь имя конфигурации из Configuration.xml"
+            ));
         }
 
         Ok(config_info)
@@ -265,39 +278,48 @@ impl ConfigurationGuidedParser {
             "ChartOfAccounts" => Some(MetadataKind::ChartOfAccounts),
             "ChartOfCharacteristicTypes" => Some(MetadataKind::ChartOfCharacteristicTypes),
             "ChartOfCalculationTypes" => Some(MetadataKind::ChartOfCharacteristicTypes),
-            
+
             // Дополнительные типы, которые могут встретиться
             "BusinessProcess" => Some(MetadataKind::DataProcessor), // Бизнес-процессы как обработки
-            "Task" => Some(MetadataKind::DataProcessor), // Задачи как обработки
+            "Task" => Some(MetadataKind::DataProcessor),            // Задачи как обработки
             "FilterCriterion" => Some(MetadataKind::DataProcessor),
             "SettingsStorage" => Some(MetadataKind::DataProcessor),
             "ExchangePlan" => Some(MetadataKind::DataProcessor),
-            
+
             // Системные элементы исключаем
             "Language" | "Configuration" | "ConfigDumpInfo" => None,
-            
+
             // Все неизвестные теги считаем обработками (безопасная стратегия)
             _ => {
-                println!("⚠️ Неизвестный тип метаданных: {}, считаем обработкой", xml_tag);
+                println!(
+                    "⚠️ Неизвестный тип метаданных: {}, считаем обработкой",
+                    xml_tag
+                );
                 Some(MetadataKind::DataProcessor)
             }
         }
     }
 
     /// Парсинг объекта метаданных по ссылке из Configuration.xml
-    pub fn parse_metadata_by_reference(&self, metadata_ref: &MetadataReference) -> Result<Option<DiscoveredMetadata>> {
+    pub fn parse_metadata_by_reference(
+        &self,
+        metadata_ref: &MetadataReference,
+    ) -> Result<Option<DiscoveredMetadata>> {
         // Ищем XML файл объекта динамически по всей структуре каталогов
         let xml_file_path = self.find_metadata_file_dynamically(metadata_ref)?;
-        
+
         if let Some(file_path) = xml_file_path {
             return self.parse_metadata_from_file(&file_path, metadata_ref);
         }
-        
+
         Ok(None)
     }
 
     /// Динамический поиск файла метаданных без хардкода путей
-    fn find_metadata_file_dynamically(&self, metadata_ref: &MetadataReference) -> Result<Option<PathBuf>> {
+    fn find_metadata_file_dynamically(
+        &self,
+        metadata_ref: &MetadataReference,
+    ) -> Result<Option<PathBuf>> {
         // Ищем файл с именем {metadata_ref.name}.xml рекурсивно по всем каталогам
         self.find_xml_file_recursive(&self.config_path, &metadata_ref.name)
     }
@@ -314,7 +336,9 @@ impl ConfigurationGuidedParser {
 
             if path.is_file() {
                 if let Some(file_name) = path.file_stem() {
-                    if file_name == target_name && path.extension().map_or(false, |ext| ext == "xml") {
+                    if file_name == target_name
+                        && path.extension().map_or(false, |ext| ext == "xml")
+                    {
                         return Ok(Some(path));
                     }
                 }
@@ -330,8 +354,11 @@ impl ConfigurationGuidedParser {
     }
 
     /// Парсинг метаданных из найденного файла
-    fn parse_metadata_from_file(&self, xml_file_path: &Path, metadata_ref: &MetadataReference) -> Result<Option<DiscoveredMetadata>> {
-
+    fn parse_metadata_from_file(
+        &self,
+        xml_file_path: &Path,
+        metadata_ref: &MetadataReference,
+    ) -> Result<Option<DiscoveredMetadata>> {
         // Парсим XML файл объекта
         let content = fs::read_to_string(&xml_file_path)
             .with_context(|| format!("Не удается прочитать файл: {}", xml_file_path.display()))?;
@@ -342,7 +369,11 @@ impl ConfigurationGuidedParser {
         let mut metadata = DiscoveredMetadata {
             name: metadata_ref.name.clone(), // Имя уже известно из Configuration.xml
             kind: metadata_ref.kind,
-            qualified_name: format!("{}.{}", self.get_kind_prefix(metadata_ref.kind), metadata_ref.name),
+            qualified_name: format!(
+                "{}.{}",
+                self.get_kind_prefix(metadata_ref.kind),
+                metadata_ref.name
+            ),
             file_path: xml_file_path.to_path_buf(),
             reference_source: ReferenceSource::ConfigurationChildObjects,
             synonym: None,
@@ -358,7 +389,7 @@ impl ConfigurationGuidedParser {
         let mut current_element = String::new();
         let mut current_attribute: Option<AttributeInfo> = None;
         let mut current_tabular_section: Option<TabularSectionInfo> = None;
-        
+
         // Для стандартных атрибутов
         let mut standard_attributes = StandardAttributes::default();
 
@@ -366,7 +397,7 @@ impl ConfigurationGuidedParser {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(ref e)) => {
                     let tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    
+
                     match tag_name.as_str() {
                         "Properties" if !in_child_objects => {
                             in_properties = true;
@@ -394,7 +425,7 @@ impl ConfigurationGuidedParser {
                         }
                         tag => {
                             current_element = tag.to_string();
-                            
+
                             // Извлекаем UUID из корневого элемента
                             if tag == &metadata_ref.xml_tag {
                                 for attr in e.attributes() {
@@ -412,7 +443,7 @@ impl ConfigurationGuidedParser {
                 }
                 Ok(Event::Text(e)) => {
                     let text = e.unescape()?.into_owned();
-                    
+
                     if !text.trim().is_empty() {
                         if in_properties {
                             // Парсинг стандартных атрибутов из Properties
@@ -429,7 +460,8 @@ impl ConfigurationGuidedParser {
                                     }
                                 }
                                 "Hierarchical" => {
-                                    standard_attributes.hierarchical = text.to_lowercase() == "true";
+                                    standard_attributes.hierarchical =
+                                        text.to_lowercase() == "true";
                                 }
                                 "NumberLength" => {
                                     if let Ok(length) = text.parse::<u32>() {
@@ -437,7 +469,9 @@ impl ConfigurationGuidedParser {
                                     }
                                 }
                                 "NumberType" => standard_attributes.number_type = Some(text),
-                                "NumberPeriodicity" => standard_attributes.number_periodicity = Some(text),
+                                "NumberPeriodicity" => {
+                                    standard_attributes.number_periodicity = Some(text)
+                                }
                                 "Posting" => standard_attributes.posting = Some(text),
                                 _ => {}
                             }
@@ -460,7 +494,7 @@ impl ConfigurationGuidedParser {
                 }
                 Ok(Event::End(ref e)) => {
                     let tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    
+
                     match tag_name.as_str() {
                         "Properties" if !current_attribute.is_some() => {
                             in_properties = false;
@@ -491,11 +525,15 @@ impl ConfigurationGuidedParser {
                 }
                 Ok(Event::Eof) => break,
                 Err(e) => {
-                    println!("⚠️ XML parsing warning: {} at position {}", e, reader.buffer_position());
+                    println!(
+                        "⚠️ XML parsing warning: {} at position {}",
+                        e,
+                        reader.buffer_position()
+                    );
                 }
                 _ => {}
             }
-            
+
             buf.clear();
         }
 
@@ -506,11 +544,15 @@ impl ConfigurationGuidedParser {
     }
 
     /// Добавление стандартных атрибутов объектов метаданных
-    fn add_standard_attributes(&self, metadata: &mut DiscoveredMetadata, std_attrs: &StandardAttributes) {
+    fn add_standard_attributes(
+        &self,
+        metadata: &mut DiscoveredMetadata,
+        std_attrs: &StandardAttributes,
+    ) {
         match metadata.kind {
             MetadataKind::Catalog => {
                 // Стандартные атрибуты справочников
-                
+
                 // Код
                 if let (Some(length), code_type) = (std_attrs.code_length, &std_attrs.code_type) {
                     let code_type_str = match code_type.as_deref() {
@@ -518,7 +560,7 @@ impl ConfigurationGuidedParser {
                         Some("Number") => format!("Число({}, 0)", length),
                         _ => format!("Строка({})", length), // По умолчанию строка
                     };
-                    
+
                     metadata.attributes.push(AttributeInfo {
                         name: "Код".to_string(),
                         type_definition: code_type_str,
@@ -526,7 +568,7 @@ impl ConfigurationGuidedParser {
                         mandatory: false,
                     });
                 }
-                
+
                 // Наименование
                 if let Some(length) = std_attrs.description_length {
                     metadata.attributes.push(AttributeInfo {
@@ -536,7 +578,7 @@ impl ConfigurationGuidedParser {
                         mandatory: true,
                     });
                 }
-                
+
                 // Родитель (если иерархический)
                 if std_attrs.hierarchical {
                     let parent_type = format!("СправочникСсылка.{}", metadata.name);
@@ -547,13 +589,15 @@ impl ConfigurationGuidedParser {
                         mandatory: false,
                     });
                 }
-                
+
                 // Владелец (если есть владельцы)
                 if !std_attrs.owners.is_empty() {
-                    let owner_types: Vec<String> = std_attrs.owners.iter()
+                    let owner_types: Vec<String> = std_attrs
+                        .owners
+                        .iter()
                         .map(|owner| format!("СправочникСсылка.{}", owner))
                         .collect();
-                    
+
                     metadata.attributes.push(AttributeInfo {
                         name: "Владелец".to_string(),
                         type_definition: if owner_types.len() == 1 {
@@ -566,18 +610,20 @@ impl ConfigurationGuidedParser {
                     });
                 }
             }
-            
+
             MetadataKind::Document => {
                 // Стандартные атрибуты документов
-                
+
                 // Номер
-                if let (Some(length), number_type) = (std_attrs.number_length, &std_attrs.number_type) {
+                if let (Some(length), number_type) =
+                    (std_attrs.number_length, &std_attrs.number_type)
+                {
                     let number_type_str = match number_type.as_deref() {
                         Some("String") => format!("Строка({})", length),
                         Some("Number") => format!("Число({}, 0)", length),
                         _ => format!("Строка({})", length),
                     };
-                    
+
                     metadata.attributes.push(AttributeInfo {
                         name: "Номер".to_string(),
                         type_definition: number_type_str,
@@ -585,7 +631,7 @@ impl ConfigurationGuidedParser {
                         mandatory: false,
                     });
                 }
-                
+
                 // Дата
                 metadata.attributes.push(AttributeInfo {
                     name: "Дата".to_string(),
@@ -593,7 +639,7 @@ impl ConfigurationGuidedParser {
                     synonym: Some("Date".to_string()),
                     mandatory: true,
                 });
-                
+
                 // Проведен (если документ проводимый)
                 if std_attrs.posting.is_some() {
                     metadata.attributes.push(AttributeInfo {
@@ -604,10 +650,10 @@ impl ConfigurationGuidedParser {
                     });
                 }
             }
-            
+
             MetadataKind::Register => {
                 // Стандартные атрибуты регистров
-                
+
                 // Период (для регистров сведений)
                 metadata.attributes.push(AttributeInfo {
                     name: "Период".to_string(),
@@ -615,7 +661,7 @@ impl ConfigurationGuidedParser {
                     synonym: Some("Period".to_string()),
                     mandatory: true,
                 });
-                
+
                 // Активность (для регистров сведений)
                 metadata.attributes.push(AttributeInfo {
                     name: "Активность".to_string(),
@@ -624,44 +670,55 @@ impl ConfigurationGuidedParser {
                     mandatory: false,
                 });
             }
-            
+
             _ => {
                 // Для других типов метаданных стандартные атрибуты пока не добавляем
             }
         }
     }
 
-
     /// Создание TypeResolution для всех фасетов объекта
     fn create_type_resolutions(&self, metadata: &DiscoveredMetadata) -> Vec<TypeResolution> {
         let mut resolutions = Vec::new();
-        
+
         // Получаем фасеты для данного типа метаданных
         let facets = self.get_facets_for_kind(metadata.kind);
-        
+
         // Создаем TypeResolution для каждого фасета
         for facet in facets {
             let config_type = ConfigurationType {
                 kind: metadata.kind,
                 name: metadata.name.clone(),
-                attributes: metadata.attributes.iter().map(|attr| Attribute {
-                    name: attr.name.clone(),
-                    type_: attr.type_definition.clone(),
-                    is_composite: false,
-                    types: vec![attr.type_definition.clone()],
-                }).collect(),
-                tabular_sections: metadata.tabular_sections.iter().map(|ts| TabularSection {
-                    name: ts.name.clone(),
-                    synonym: ts.synonym.clone(),
-                    attributes: ts.attributes.iter().map(|attr| Attribute {
+                attributes: metadata
+                    .attributes
+                    .iter()
+                    .map(|attr| Attribute {
                         name: attr.name.clone(),
                         type_: attr.type_definition.clone(),
                         is_composite: false,
                         types: vec![attr.type_definition.clone()],
-                    }).collect(),
-                }).collect(),
+                    })
+                    .collect(),
+                tabular_sections: metadata
+                    .tabular_sections
+                    .iter()
+                    .map(|ts| TabularSection {
+                        name: ts.name.clone(),
+                        synonym: ts.synonym.clone(),
+                        attributes: ts
+                            .attributes
+                            .iter()
+                            .map(|attr| Attribute {
+                                name: attr.name.clone(),
+                                type_: attr.type_definition.clone(),
+                                is_composite: false,
+                                types: vec![attr.type_definition.clone()],
+                            })
+                            .collect(),
+                    })
+                    .collect(),
             };
-            
+
             let resolution = TypeResolution {
                 certainty: Certainty::Known,
                 result: ResolutionResult::Concrete(ConcreteType::Configuration(config_type)),
@@ -674,17 +731,28 @@ impl ConfigurationGuidedParser {
                         format!("kind:{:?}", metadata.kind),
                         format!("facet:{:?}", facet),
                         format!("source:{:?}", metadata.reference_source),
-                        metadata.synonym.as_ref().map(|s| format!("synonym:{}", s)).unwrap_or_default(),
-                        metadata.uuid.as_ref().map(|u| format!("uuid:{}", u)).unwrap_or_default(),
-                    ].into_iter().filter(|s| !s.is_empty()).collect(),
+                        metadata
+                            .synonym
+                            .as_ref()
+                            .map(|s| format!("synonym:{}", s))
+                            .unwrap_or_default(),
+                        metadata
+                            .uuid
+                            .as_ref()
+                            .map(|u| format!("uuid:{}", u))
+                            .unwrap_or_default(),
+                    ]
+                    .into_iter()
+                    .filter(|s| !s.is_empty())
+                    .collect(),
                 },
                 active_facet: Some(facet),
                 available_facets: vec![facet],
             };
-            
+
             resolutions.push(resolution);
         }
-        
+
         resolutions
     }
 
@@ -692,20 +760,20 @@ impl ConfigurationGuidedParser {
     fn get_facets_for_kind(&self, kind: MetadataKind) -> Vec<FacetKind> {
         match kind {
             MetadataKind::Catalog => vec![
-                FacetKind::Manager,    // Справочники.Контрагенты
-                FacetKind::Object,     // СправочникОбъект.Контрагенты  
-                FacetKind::Reference,  // СправочникСсылка.Контрагенты
+                FacetKind::Manager,   // Справочники.Контрагенты
+                FacetKind::Object,    // СправочникОбъект.Контрагенты
+                FacetKind::Reference, // СправочникСсылка.Контрагенты
             ],
             MetadataKind::Document => vec![
-                FacetKind::Manager,    // Документы.ЗаказНаряды
-                FacetKind::Object,     // ДокументОбъект.ЗаказНаряды
-                FacetKind::Reference,  // ДокументСсылка.ЗаказНаряды
+                FacetKind::Manager,   // Документы.ЗаказНаряды
+                FacetKind::Object,    // ДокументОбъект.ЗаказНаряды
+                FacetKind::Reference, // ДокументСсылка.ЗаказНаряды
             ],
             MetadataKind::Register => vec![
-                FacetKind::Manager,    // РегистрыСведений.ТестовыйРегистр
+                FacetKind::Manager, // РегистрыСведений.ТестовыйРегистр
             ],
             MetadataKind::Enum => vec![
-                FacetKind::Manager,    // Перечисления.ВидКонтрагента
+                FacetKind::Manager, // Перечисления.ВидКонтрагента
             ],
             _ => vec![FacetKind::Manager], // Для остальных типов - базовый фасет
         }
@@ -724,7 +792,7 @@ impl ConfigurationGuidedParser {
             MetadataKind::ChartOfCharacteristicTypes => "План видов характеристик",
         }
     }
-    
+
     /// Получить префикс для типа
     fn get_kind_prefix(&self, kind: MetadataKind) -> &str {
         match kind {
@@ -757,12 +825,12 @@ impl ConfigurationGuidedParser {
     /// Статистика guided discovery
     pub fn get_guided_discovery_stats(&self) -> GuidedDiscoveryStats {
         let mut stats = GuidedDiscoveryStats::default();
-        
+
         if let Some(config_info) = &self.configuration_info {
             stats.configuration_name = config_info.name.clone();
             stats.total_references = config_info.metadata_objects.len();
         }
-        
+
         for metadata in self.discovered_objects.values() {
             match metadata.kind {
                 MetadataKind::Catalog => stats.catalogs += 1,
@@ -772,13 +840,15 @@ impl ConfigurationGuidedParser {
                 MetadataKind::Report => stats.reports += 1,
                 MetadataKind::DataProcessor => stats.data_processors += 1,
                 MetadataKind::ChartOfAccounts => stats.chart_of_accounts += 1,
-                MetadataKind::ChartOfCharacteristicTypes => stats.chart_of_characteristic_types += 1,
+                MetadataKind::ChartOfCharacteristicTypes => {
+                    stats.chart_of_characteristic_types += 1
+                }
             }
-            
+
             stats.total_attributes += metadata.attributes.len();
             stats.total_tabular_sections += metadata.tabular_sections.len();
         }
-        
+
         stats.found_objects = self.discovered_objects.len();
         stats.missing_objects = stats.total_references - stats.found_objects;
         stats
@@ -819,7 +889,10 @@ impl GuidedDiscoveryStats {
         println!("   Отчеты: {}", self.reports);
         println!("   Обработки: {}", self.data_processors);
         println!("   Планы счетов: {}", self.chart_of_accounts);
-        println!("   Планы видов характеристик: {}", self.chart_of_characteristic_types);
+        println!(
+            "   Планы видов характеристик: {}",
+            self.chart_of_characteristic_types
+        );
         println!("   Всего атрибутов: {}", self.total_attributes);
         println!("   Всего табличных частей: {}", self.total_tabular_sections);
     }

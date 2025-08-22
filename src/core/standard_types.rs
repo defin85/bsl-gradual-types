@@ -1,9 +1,8 @@
 //! Стандартные типы BSL
 
 use crate::core::types::{
-    TypeResolution, Certainty, ResolutionResult, ConcreteType, 
-    PrimitiveType as CorePrimitiveType, SpecialType, PlatformType,
-    ResolutionSource
+    Certainty, ConcreteType, PlatformType, PrimitiveType as CorePrimitiveType, ResolutionResult,
+    ResolutionSource, SpecialType, TypeResolution,
 };
 
 /// Создание примитивного типа
@@ -37,7 +36,7 @@ pub fn platform_type(name: &str) -> TypeResolution {
         methods: Vec::new(),
         properties: Vec::new(),
     };
-    
+
     TypeResolution {
         certainty: Certainty::Known,
         result: ResolutionResult::Concrete(ConcreteType::Platform(platform)),

@@ -17,7 +17,7 @@ cargo build --release
 
 # 2. Анализ BSL файла
 echo 'Функция Тест() Возврат "привет"; КонецФункции' > test.bsl
-./target/release/type-check --file test.bsl
+./target/release/bsl-analyzer --file test.bsl
 
 # 3. Запуск web интерфейса
 ./target/release/bsl-web-server --port 8080
@@ -44,7 +44,7 @@ code --install-extension bsl-gradual-types-1.0.0.vsix
 - **Memory optimization** для enterprise нагрузок
 
 ### 🛠️ Production Tooling
-- **Enhanced LSP сервер** с инкрементальным парсингом
+- **LSP сервер**
 - **VSCode Extension** с type hints и code actions
 - **Web-based Type Browser** для команд разработки
 - **CLI инструменты** для автоматизации и CI/CD
@@ -60,8 +60,9 @@ code --install-extension bsl-gradual-types-1.0.0.vsix
 ## 🔧 CLI Инструменты
 
 ```bash
-# Проверка типов
-cargo run --bin type-check -- --file module.bsl
+# Проверка типов (выражение или автодополнение)
+cargo run --bin type-check -- "Справочники.Контрагенты"
+cargo run --bin type-check -- --complete "Справочники."
 
 # LSP сервер для IDE
 cargo run --bin lsp-server
@@ -71,13 +72,16 @@ cargo run --bin bsl-profiler benchmark
 cargo run --bin bsl-profiler project /path/to/1c --threads 4
 
 # Web type browser
-cargo run --bin bsl-web-server --port 8080
+cargo run --bin bsl-web-server -- --port 8080
+
+# Конфигурация (опционально)
+cargo run --bin bsl-web-server -- --config path/to/cf --port 8080
 
 # Configuration-guided Discovery парсер (NEW!)
 cargo run --example test_simple
 cargo test --test config_parser_guided_test
 
-# Legacy analyzer
+# Analyzer CLI
 cargo run --bin bsl-analyzer -- --file module.bsl
 ```
 
@@ -126,6 +130,9 @@ cargo run --bin bsl-web-server --port 8080
 
 # Поиск типов
 curl "http://localhost:8080/api/types?search=Массив"
+
+# Статус здоровья (health)
+curl "http://localhost:8080/api/health"
 
 # Анализ кода
 curl -X POST "http://localhost:8080/api/analyze" \

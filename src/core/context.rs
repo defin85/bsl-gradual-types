@@ -1,19 +1,19 @@
 //! Context handling for type resolution
 
-use super::types::{FacetKind, ExecutionContext};
+use super::types::{ExecutionContext, FacetKind};
 
 /// Context for type resolution
 #[derive(Debug, Clone)]
 pub struct Context {
     /// Current execution context
     pub execution: ExecutionContext,
-    
+
     /// Parent expression context
     pub parent: Option<String>,
-    
+
     /// Method being called
     pub method: Option<String>,
-    
+
     /// Current scope variables
     pub scope: Vec<ScopeVariable>,
 }
@@ -39,7 +39,7 @@ impl ContextResolver {
                 return FacetKind::Metadata;
             }
         }
-        
+
         if let Some(method) = &context.method {
             if method == "СоздатьЭлемент" || method == "CreateItem" {
                 return FacetKind::Object;
@@ -48,11 +48,11 @@ impl ContextResolver {
                 return FacetKind::Reference;
             }
         }
-        
+
         // Default to reference facet
         FacetKind::Reference
     }
-    
+
     /// Check if context allows certain operations
     pub fn is_allowed(&self, context: &Context, operation: &str) -> bool {
         match context.execution {
@@ -84,12 +84,12 @@ impl Context {
             scope: Vec::new(),
         }
     }
-    
+
     pub fn with_parent(mut self, parent: String) -> Self {
         self.parent = Some(parent);
         self
     }
-    
+
     pub fn with_method(mut self, method: String) -> Self {
         self.method = Some(method);
         self

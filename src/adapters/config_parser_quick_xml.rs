@@ -4,13 +4,13 @@
 use anyhow::{Context, Result};
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 
 use crate::core::types::{
-    TypeResolution, Certainty, ResolutionResult, ConcreteType, ConfigurationType,
-    MetadataKind, Attribute, TabularSection, ResolutionSource, ResolutionMetadata
+    Attribute, Certainty, ConcreteType, ConfigurationType, MetadataKind, ResolutionMetadata,
+    ResolutionResult, ResolutionSource, TabularSection, TypeResolution,
 };
 
 /// Улучшенный парсер конфигурации с поддержкой namespace
@@ -64,61 +64,68 @@ impl ConfigurationQuickXmlParser {
             metadata_cache: HashMap::new(),
         }
     }
-    
+
     /// Парсинг всей конфигурации
     pub fn parse_configuration(&mut self) -> Result<Vec<TypeResolution>> {
         let mut resolutions = Vec::new();
-        
+
         println!("📁 Парсинг конфигурации: {}", self.config_path.display());
-        
+
         // Парсим справочники
         resolutions.extend(self.parse_metadata_objects("Catalogs", MetadataKind::Catalog)?);
-        
+
         // Парсим документы
         resolutions.extend(self.parse_metadata_objects("Documents", MetadataKind::Document)?);
-        
+
         // Парсим регистры сведений
-        resolutions.extend(self.parse_metadata_objects("InformationRegisters", MetadataKind::Register)?);
-        
+        resolutions
+            .extend(self.parse_metadata_objects("InformationRegisters", MetadataKind::Register)?);
+
         // Парсим перечисления
         resolutions.extend(self.parse_metadata_objects("Enums", MetadataKind::Enum)?);
-        
+
         println!("✅ Парсинг завершен: {} типов", resolutions.len());
-        
+
         Ok(resolutions)
     }
-    
+
     /// Парсинг объектов определенного типа
-    fn parse_metadata_objects(&mut self, folder: &str, kind: MetadataKind) -> Result<Vec<TypeResolution>> {
+    fn parse_metadata_objects(
+        &mut self,
+        folder: &str,
+        kind: MetadataKind,
+    ) -> Result<Vec<TypeResolution>> {
         let mut resolutions = Vec::new();
         let objects_path = self.config_path.join(folder);
-        
+
         if !objects_path.exists() {
             println!("⚠️ Папка {} не найдена", folder);
             return Ok(resolutions);
         }
-        
+
         println!("📂 Обработка {}", folder);
-        
+
         for entry in fs::read_dir(&objects_path)? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.extension().map_or(false, |ext| ext == "xml") {
                 match self.parse_metadata_xml(&path, kind) {
                     Ok(metadata) => {
-                        println!("   ✅ {}: {} (атрибутов: {}, табл.частей: {})", 
-                            self.get_kind_display_name(kind), 
+                        println!(
+                            "   ✅ {}: {} (атрибутов: {}, табл.частей: {})",
+                            self.get_kind_display_name(kind),
                             metadata.name,
                             metadata.attributes.len(),
                             metadata.tabular_sections.len()
                         );
-                        
+
                         // Создаем TypeResolution для каждого фасета
                         resolutions.extend(self.create_type_resolutions(&metadata));
-                        
+
                         // Сохраняем в кеш
-                        let qualified_name = format!("{}.{}", self.get_kind_prefix(kind), metadata.name);
+                        let qualified_name =
+                            format!("{}.{}", self.get_kind_prefix(kind), metadata.name);
                         self.metadata_cache.insert(qualified_name, metadata);
                     }
                     Err(e) => {
@@ -127,18 +134,22 @@ impl ConfigurationQuickXmlParser {
                 }
             }
         }
-        
+
         Ok(resolutions)
     }
-    
+
     /// Парсинг XML файла метаданных
-    pub fn parse_metadata_xml(&self, xml_path: &Path, kind: MetadataKind) -> Result<ConfigurationMetadata> {
+    pub fn parse_metadata_xml(
+        &self,
+        xml_path: &Path,
+        kind: MetadataKind,
+    ) -> Result<ConfigurationMetadata> {
         let content = fs::read_to_string(xml_path)
             .with_context(|| format!("Не удается прочитать файл: {}", xml_path.display()))?;
-        
+
         let mut reader = Reader::from_str(&content);
         reader.trim_text(true);
-        
+
         let mut metadata = ConfigurationMetadata {
             name: String::new(),
             kind,
@@ -148,7 +159,7 @@ impl ConfigurationQuickXmlParser {
             uuid: None,
             generated_types: Vec::new(),
         };
-        
+
         let mut buf = Vec::new();
         let mut in_properties = false;
         let mut in_child_objects = false;
@@ -156,12 +167,12 @@ impl ConfigurationQuickXmlParser {
         let mut current_element = String::new();
         let mut current_attribute: Option<AttributeInfo> = None;
         let mut current_tabular_section: Option<TabularSectionInfo> = None;
-        
+
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(ref e)) => {
                     let tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    
+
                     match tag_name.as_str() {
                         "Properties" => in_properties = true,
                         "ChildObjects" => in_child_objects = true,
@@ -183,9 +194,13 @@ impl ConfigurationQuickXmlParser {
                         }
                         tag => {
                             current_element = tag.to_string();
-                            
+
                             // Извлекаем UUID из атрибутов
-                            if tag == "Catalog" || tag == "Document" || tag == "InformationRegister" || tag == "Enum" {
+                            if tag == "Catalog"
+                                || tag == "Document"
+                                || tag == "InformationRegister"
+                                || tag == "Enum"
+                            {
                                 for attr in e.attributes() {
                                     if let Ok(attr) = attr {
                                         if attr.key.as_ref() == b"uuid" {
@@ -201,7 +216,7 @@ impl ConfigurationQuickXmlParser {
                 }
                 Ok(Event::Text(e)) => {
                     let text = e.unescape()?.into_owned();
-                    
+
                     if in_properties && !text.trim().is_empty() {
                         match current_element.as_str() {
                             "Name" => metadata.name = text,
@@ -221,10 +236,10 @@ impl ConfigurationQuickXmlParser {
                 }
                 Ok(Event::End(ref e)) => {
                     let tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    
+
                     match tag_name.as_str() {
                         "Properties" => in_properties = false,
-                        "ChildObjects" => in_child_objects = false, 
+                        "ChildObjects" => in_child_objects = false,
                         "InternalInfo" => in_internal_info = false,
                         "Attribute" if in_child_objects => {
                             if let Some(attr) = current_attribute.take() {
@@ -247,74 +262,90 @@ impl ConfigurationQuickXmlParser {
                 Ok(Event::Eof) => break,
                 Err(e) => {
                     // Логируем ошибку, но продолжаем парсинг
-                    println!("⚠️ XML parsing warning: {} at position {}", e, reader.buffer_position());
+                    println!(
+                        "⚠️ XML parsing warning: {} at position {}",
+                        e,
+                        reader.buffer_position()
+                    );
                 }
                 _ => {}
             }
-            
+
             buf.clear();
         }
-        
+
         // Проверяем что получили минимальные данные
         if metadata.name.is_empty() {
             return Err(anyhow::anyhow!("Не удалось извлечь имя объекта из XML"));
         }
-        
+
         Ok(metadata)
     }
-    
+
     /// Создать TypeResolution для всех фасетов объекта
     fn create_type_resolutions(&self, metadata: &ConfigurationMetadata) -> Vec<TypeResolution> {
-        use crate::core::types::{FacetKind};
-        
+        use crate::core::types::FacetKind;
+
         let mut resolutions = Vec::new();
-        
+
         // Основные фасеты для каждого типа объекта
         let facets = match metadata.kind {
             MetadataKind::Catalog => vec![
-                FacetKind::Manager,    // Справочники.Контрагенты
-                FacetKind::Object,     // СправочникОбъект.Контрагенты  
-                FacetKind::Reference,  // СправочникСсылка.Контрагенты
+                FacetKind::Manager,   // Справочники.Контрагенты
+                FacetKind::Object,    // СправочникОбъект.Контрагенты
+                FacetKind::Reference, // СправочникСсылка.Контрагенты
             ],
             MetadataKind::Document => vec![
-                FacetKind::Manager,    // Документы.ЗаказНаряды
-                FacetKind::Object,     // ДокументОбъект.ЗаказНаряды
-                FacetKind::Reference,  // ДокументСсылка.ЗаказНаряды
+                FacetKind::Manager,   // Документы.ЗаказНаряды
+                FacetKind::Object,    // ДокументОбъект.ЗаказНаряды
+                FacetKind::Reference, // ДокументСсылка.ЗаказНаряды
             ],
             MetadataKind::Register => vec![
-                FacetKind::Manager,    // РегистрыСведений.ТестовыйРегистр
+                FacetKind::Manager, // РегистрыСведений.ТестовыйРегистр
             ],
             MetadataKind::Enum => vec![
-                FacetKind::Manager,    // Перечисления.ВидКонтрагента
+                FacetKind::Manager, // Перечисления.ВидКонтрагента
             ],
             _ => vec![FacetKind::Manager], // Для остальных типов - базовый фасет
         };
-        
+
         println!("🎭 Создаем фасеты для {}: {:?}", metadata.name, facets);
-        
+
         // Создаем TypeResolution для каждого фасета
         for facet in facets {
             let config_type = ConfigurationType {
                 kind: metadata.kind,
                 name: metadata.name.clone(),
-                attributes: metadata.attributes.iter().map(|attr| Attribute {
-                    name: attr.name.clone(),
-                    type_: attr.type_definition.clone(),
-                    is_composite: false,
-                    types: vec![attr.type_definition.clone()],
-                }).collect(),
-                tabular_sections: metadata.tabular_sections.iter().map(|ts| TabularSection {
-                    name: ts.name.clone(),
-                    synonym: ts.synonym.clone(),
-                    attributes: ts.attributes.iter().map(|attr| Attribute {
+                attributes: metadata
+                    .attributes
+                    .iter()
+                    .map(|attr| Attribute {
                         name: attr.name.clone(),
                         type_: attr.type_definition.clone(),
                         is_composite: false,
                         types: vec![attr.type_definition.clone()],
-                    }).collect(),
-                }).collect(),
+                    })
+                    .collect(),
+                tabular_sections: metadata
+                    .tabular_sections
+                    .iter()
+                    .map(|ts| TabularSection {
+                        name: ts.name.clone(),
+                        synonym: ts.synonym.clone(),
+                        attributes: ts
+                            .attributes
+                            .iter()
+                            .map(|attr| Attribute {
+                                name: attr.name.clone(),
+                                type_: attr.type_definition.clone(),
+                                is_composite: false,
+                                types: vec![attr.type_definition.clone()],
+                            })
+                            .collect(),
+                    })
+                    .collect(),
             };
-            
+
             let resolution = TypeResolution {
                 certainty: Certainty::Known,
                 result: ResolutionResult::Concrete(ConcreteType::Configuration(config_type)),
@@ -326,19 +357,26 @@ impl ConfigurationQuickXmlParser {
                     notes: vec![
                         format!("kind:{:?}", metadata.kind),
                         format!("facet:{:?}", facet),
-                        metadata.synonym.as_ref().map(|s| format!("synonym:{}", s)).unwrap_or_default(),
-                    ].into_iter().filter(|s| !s.is_empty()).collect(),
+                        metadata
+                            .synonym
+                            .as_ref()
+                            .map(|s| format!("synonym:{}", s))
+                            .unwrap_or_default(),
+                    ]
+                    .into_iter()
+                    .filter(|s| !s.is_empty())
+                    .collect(),
                 },
                 active_facet: Some(facet),
                 available_facets: vec![facet],
             };
-            
+
             resolutions.push(resolution);
         }
-        
+
         resolutions
     }
-    
+
     /// Получить отображаемое название типа
     fn get_kind_display_name(&self, kind: MetadataKind) -> &str {
         match kind {
@@ -352,7 +390,7 @@ impl ConfigurationQuickXmlParser {
             MetadataKind::ChartOfCharacteristicTypes => "План видов характеристик",
         }
     }
-    
+
     /// Получить префикс для типа
     fn get_kind_prefix(&self, kind: MetadataKind) -> &str {
         match kind {
@@ -366,12 +404,12 @@ impl ConfigurationQuickXmlParser {
             MetadataKind::ChartOfCharacteristicTypes => "ПланыВидовХарактеристик",
         }
     }
-    
+
     /// Получить кешированные метаданные
     pub fn get_metadata(&self, qualified_name: &str) -> Option<&ConfigurationMetadata> {
         self.metadata_cache.get(qualified_name)
     }
-    
+
     /// Получить все метаданные
     pub fn get_all_metadata(&self) -> &HashMap<String, ConfigurationMetadata> {
         &self.metadata_cache

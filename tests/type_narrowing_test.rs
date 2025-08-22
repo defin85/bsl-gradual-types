@@ -1,7 +1,7 @@
 //! Интеграционные тесты для type narrowing
 
+use bsl_gradual_types::core::type_checker::{DiagnosticSeverity, TypeChecker};
 use bsl_gradual_types::parser::BslParser;
-use bsl_gradual_types::core::type_checker::{TypeChecker, DiagnosticSeverity};
 
 #[test]
 fn test_type_narrowing_in_if_statement() {
@@ -17,13 +17,13 @@ fn test_type_narrowing_in_if_statement() {
             у = х;
         КонецЕсли;
     "#;
-    
+
     let mut parser = BslParser::new(code).expect("Failed to create parser");
     let program = parser.parse().expect("Failed to parse");
-    
+
     let type_checker = TypeChecker::new("test.bsl".to_string());
     let (context, _diagnostics) = type_checker.check(&program);
-    
+
     // После анализа переменная у должна быть определена
     assert!(context.variables.contains_key("у"));
 }
@@ -40,15 +40,16 @@ fn test_undefined_check_narrowing() {
         
         Результат = Параметр + 1;
     "#;
-    
+
     let mut parser = BslParser::new(code).expect("Failed to create parser");
     let program = parser.parse().expect("Failed to parse");
-    
+
     let type_checker = TypeChecker::new("test.bsl".to_string());
     let (context, diagnostics) = type_checker.check(&program);
-    
+
     // Не должно быть ошибок типов
-    let errors: Vec<_> = diagnostics.iter()
+    let errors: Vec<_> = diagnostics
+        .iter()
         .filter(|d| d.severity == DiagnosticSeverity::Error)
         .collect();
     assert_eq!(errors.len(), 0, "Should have no type errors");
@@ -64,15 +65,16 @@ fn test_not_undefined_narrowing() {
             Длина = СтрДлина(МожетБытьНеопределено);
         КонецЕсли;
     "#;
-    
+
     let mut parser = BslParser::new(code).expect("Failed to create parser");
     let program = parser.parse().expect("Failed to parse");
-    
+
     let type_checker = TypeChecker::new("test.bsl".to_string());
     let (_context, diagnostics) = type_checker.check(&program);
-    
+
     // Проверяем, что нет критических ошибок
-    let errors: Vec<_> = diagnostics.iter()
+    let errors: Vec<_> = diagnostics
+        .iter()
         .filter(|d| d.severity == DiagnosticSeverity::Error)
         .collect();
     assert_eq!(errors.len(), 0, "Should have no type errors");
@@ -93,18 +95,19 @@ fn test_multiple_type_checks() {
             Длина = СтрДлина(Значение);
         КонецЕсли;
     "#;
-    
+
     let mut parser = BslParser::new(code).expect("Failed to create parser");
     let program = parser.parse().expect("Failed to parse");
-    
+
     let type_checker = TypeChecker::new("test.bsl".to_string());
     let (_context, diagnostics) = type_checker.check(&program);
-    
+
     // Не должно быть ошибок при вызове методов после проверки типа
-    let errors: Vec<_> = diagnostics.iter()
+    let errors: Vec<_> = diagnostics
+        .iter()
         .filter(|d| d.severity == DiagnosticSeverity::Error)
         .collect();
-    
+
     // В текущей реализации могут быть предупреждения о неизвестных методах,
     // но не должно быть критических ошибок
     println!("Diagnostics: {:?}", diagnostics);
@@ -122,13 +125,13 @@ fn test_truthy_falsy_narrowing() {
             Результат = "Ложь";
         КонецЕсли;
     "#;
-    
+
     let mut parser = BslParser::new(code).expect("Failed to create parser");
     let program = parser.parse().expect("Failed to parse");
-    
+
     let type_checker = TypeChecker::new("test.bsl".to_string());
     let (context, _diagnostics) = type_checker.check(&program);
-    
+
     // Результат должен быть определён
     assert!(context.variables.contains_key("Результат"));
 }

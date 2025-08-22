@@ -1,13 +1,13 @@
 //! Лексический анализатор BSL
 
 use nom::{
-    IResult,
     branch::alt,
     bytes::complete::{tag, take_while, take_while1},
-    character::complete::{char, multispace0, digit1},
+    character::complete::{char, digit1, multispace0},
     combinator::{opt, recognize, value},
     multi::many0,
     sequence::{preceded, tuple},
+    IResult,
 };
 
 /// Токены BSL
@@ -48,13 +48,13 @@ pub enum Token {
     False,
     Undefined,
     Null,
-    
+
     // Идентификаторы и литералы
     Identifier(String),
     Number(f64),
     String(String),
     Date(String),
-    
+
     // Операторы
     Plus,
     Minus,
@@ -68,7 +68,7 @@ pub enum Token {
     Greater,
     GreaterOrEqual,
     Assign,
-    
+
     // Разделители
     LeftParen,
     RightParen,
@@ -78,7 +78,7 @@ pub enum Token {
     Semicolon,
     Dot,
     Question,
-    
+
     // Специальные
     Newline,
     Eof,
@@ -96,13 +96,11 @@ fn is_identifier_continue(c: char) -> bool {
 
 /// Парсинг идентификатора или ключевого слова
 pub fn identifier(input: &str) -> IResult<&str, Token> {
-    let (input, ident) = recognize(
-        tuple((
-            take_while1(is_identifier_start),
-            take_while(is_identifier_continue),
-        ))
-    )(input)?;
-    
+    let (input, ident) = recognize(tuple((
+        take_while1(is_identifier_start),
+        take_while(is_identifier_continue),
+    )))(input)?;
+
     // Проверяем, является ли это ключевым словом
     let token = match ident.to_lowercase().as_str() {
         "если" | "if" => Token::If,
@@ -141,20 +139,18 @@ pub fn identifier(input: &str) -> IResult<&str, Token> {
         "null" => Token::Null,
         _ => Token::Identifier(ident.to_string()),
     };
-    
+
     Ok((input, token))
 }
 
 /// Парсинг числа
 pub fn number(input: &str) -> IResult<&str, Token> {
-    let (input, num_str) = recognize(
-        tuple((
-            opt(char('-')),
-            digit1,
-            opt(tuple((char('.'), digit1))),
-        ))
-    )(input)?;
-    
+    let (input, num_str) = recognize(tuple((
+        opt(char('-')),
+        digit1,
+        opt(tuple((char('.'), digit1))),
+    )))(input)?;
+
     let num = num_str.parse::<f64>().unwrap_or(0.0);
     Ok((input, Token::Number(num)))
 }
@@ -164,10 +160,10 @@ pub fn string_literal(input: &str) -> IResult<&str, Token> {
     let (input, _) = char('"')(input)?;
     let (input, content) = take_while(|c| c != '"')(input)?;
     let (input, _) = char('"')(input)?;
-    
+
     // Обработка экранированных кавычек
     let content = content.replace("\"\"", "\"");
-    
+
     Ok((input, Token::String(content)))
 }
 
@@ -176,7 +172,7 @@ pub fn date_literal(input: &str) -> IResult<&str, Token> {
     let (input, _) = char('\'')(input)?;
     let (input, content) = take_while(|c| c != '\'')(input)?;
     let (input, _) = char('\'')(input)?;
-    
+
     Ok((input, Token::Date(content.to_string())))
 }
 
@@ -213,13 +209,7 @@ pub fn delimiter(input: &str) -> IResult<&str, Token> {
 
 /// Пропуск комментариев
 pub fn comment(input: &str) -> IResult<&str, ()> {
-    value(
-        (),
-        preceded(
-            tag("//"),
-            take_while(|c| c != '\n'),
-        )
-    )(input)
+    value((), preceded(tag("//"), take_while(|c| c != '\n')))(input)
 }
 
 /// Парсинг одного токена
@@ -228,7 +218,7 @@ pub fn token(input: &str) -> IResult<&str, Token> {
     let (input, _) = multispace0(input)?;
     let (input, _) = opt(comment)(input)?;
     let (input, _) = multispace0(input)?;
-    
+
     alt((
         date_literal,
         string_literal,
@@ -247,37 +237,49 @@ pub fn tokenize(input: &str) -> IResult<&str, Vec<Token>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_identifier() {
-        assert_eq!(identifier("переменная"), Ok(("", Token::Identifier("переменная".to_string()))));
+        assert_eq!(
+            identifier("переменная"),
+            Ok(("", Token::Identifier("переменная".to_string())))
+        );
         assert_eq!(identifier("Если"), Ok(("", Token::If)));
         assert_eq!(identifier("КонецЕсли"), Ok(("", Token::EndIf)));
     }
-    
+
     #[test]
     fn test_number() {
         assert_eq!(number("123"), Ok(("", Token::Number(123.0))));
         assert_eq!(number("123.45"), Ok(("", Token::Number(123.45))));
         assert_eq!(number("-42"), Ok(("", Token::Number(-42.0))));
     }
-    
+
     #[test]
     fn test_string() {
-        assert_eq!(string_literal("\"Hello\""), Ok(("", Token::String("Hello".to_string()))));
-        assert_eq!(string_literal("\"Привет\""), Ok(("", Token::String("Привет".to_string()))));
+        assert_eq!(
+            string_literal("\"Hello\""),
+            Ok(("", Token::String("Hello".to_string())))
+        );
+        assert_eq!(
+            string_literal("\"Привет\""),
+            Ok(("", Token::String("Привет".to_string())))
+        );
     }
-    
+
     #[test]
     fn test_tokenize() {
         let code = "Перем А = 10;";
         let (_, tokens) = tokenize(code).unwrap();
-        assert_eq!(tokens, vec![
-            Token::Var,
-            Token::Identifier("А".to_string()),
-            Token::Assign,
-            Token::Number(10.0),
-            Token::Semicolon,
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Var,
+                Token::Identifier("А".to_string()),
+                Token::Assign,
+                Token::Number(10.0),
+                Token::Semicolon,
+            ]
+        );
     }
 }

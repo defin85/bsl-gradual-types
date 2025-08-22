@@ -1,227 +1,77 @@
-//! Simple CLI for testing type resolution
+//! Simple CLI for testing type resolution (target-only)
 
+use bsl_gradual_types::architecture::presentation::{LspCompletionRequest, LspHoverRequest};
+use bsl_gradual_types::target::system::{CentralSystemConfig, CentralTypeSystem};
 use clap::Parser;
-use bsl_gradual_types::core::platform_resolver::PlatformTypeResolver;
-use bsl_gradual_types::core::types::Certainty;
 
 #[derive(Parser, Debug)]
 #[command(name = "type-check")]
-#[command(about = "BSL Type Checker - test type resolution for expressions")]
+#[command(about = "BSL Type Checker - test type resolution for expressions (target)")]
 struct Args {
     /// Expression to resolve (e.g., "Справочники.Контрагенты")
     /// Or use --complete to get completions
     expression: String,
-    
+
     /// Path to configuration XML (optional)
     #[arg(short, long)]
     config: Option<String>,
-    
+
     /// Verbose output
     #[arg(short, long)]
     verbose: bool,
-    
+
     /// Get completions for the expression
     #[arg(long)]
     complete: bool,
-    
-    /// Use Configuration-guided Discovery parser (recommended)
-    #[arg(long)]
-    guided: bool,
 }
 
 fn main() {
     let args = Args::parse();
-    
-    // Create resolver
-    let mut resolver = if let Some(config_path) = args.config {
-        println!("Loading configuration from: {}", config_path);
-        
-        if args.guided {
-            println!("🚀 Using Configuration-guided Discovery parser");
-            match PlatformTypeResolver::with_guided_config(&config_path) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("❌ Failed to load config with guided discovery: {}", e);
-                    println!("📦 Falling back to legacy XML parser");
-                    match PlatformTypeResolver::with_config(&config_path) {
-                        Ok(r) => r,
-                        Err(e2) => {
-                            eprintln!("❌ Legacy parser also failed: {}", e2);
-                            PlatformTypeResolver::new()
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    rt.block_on(async {
+        let mut cfg = CentralSystemConfig::default();
+        if let Some(ref path) = args.config {
+            cfg.configuration_path = Some(path.clone());
+        }
+        let central = CentralTypeSystem::new(cfg);
+        if let Err(e) = central.initialize().await {
+            eprintln!("Initialization error: {}", e);
+        }
+        if args.complete {
+            let req = LspCompletionRequest {
+                file_path: "cli".to_string(),
+                line: 0,
+                column: 0,
+                prefix: args.expression.clone(),
+                trigger_character: None,
+            };
+            match central.lsp_interface().handle_completion_request(req).await {
+                Ok(resp) => {
+                    if resp.items.is_empty() {
+                        println!("No completions found");
+                    } else {
+                        println!("Completions:");
+                        for it in resp.items {
+                            println!("  • {}", it.label);
                         }
                     }
                 }
+                Err(e) => eprintln!("Completion error: {}", e),
             }
         } else {
-            println!("📦 Using legacy XML parser (use --guided for better results)");
-            match PlatformTypeResolver::with_config(&config_path) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("❌ Failed to load config: {}", e);
-                    PlatformTypeResolver::new()
-                }
-            }
-        }
-    } else {
-        println!("Using platform types only (no configuration)");
-        PlatformTypeResolver::new()
-    };
-    
-    // Check if we need completions
-    if args.complete {
-        show_completions(&resolver, &args.expression);
-        return;
-    }
-    
-    // Resolve expression
-    println!("\nResolving: {}", args.expression);
-    println!("{}", "─".repeat(50));
-    
-    let resolution = resolver.resolve_expression(&args.expression);
-    
-    // Display result
-    match resolution.certainty {
-        Certainty::Known => {
-            println!("✅ Type is KNOWN");
-        }
-        Certainty::Inferred(confidence) => {
-            println!("🔍 Type is INFERRED (confidence: {:.0}%)", confidence * 100.0);
-        }
-        Certainty::Unknown => {
-            println!("❓ Type is UNKNOWN");
-        }
-    }
-    
-    // Show facet information
-    if let Some(active) = &resolution.active_facet {
-        println!("  Active facet: {:?}", active);
-    }
-    
-    if !resolution.available_facets.is_empty() {
-        println!("  Available facets: {:?}", resolution.available_facets);
-    }
-    
-    if args.verbose {
-        println!("\nDetails:");
-        println!("  Source: {:?}", resolution.source);
-        
-        if let Some(file) = &resolution.metadata.file {
-            println!("  File: {}", file);
-        }
-        
-        if !resolution.metadata.notes.is_empty() {
-            println!("  Notes:");
-            for note in &resolution.metadata.notes {
-                println!("    - {}", note);
-            }
-        }
-        
-        println!("\n  Result: {:#?}", resolution.result);
-    } else {
-        // Simple output
-        use bsl_gradual_types::core::types::{ResolutionResult, ConcreteType};
-        
-        match &resolution.result {
-            ResolutionResult::Concrete(concrete) => {
-                match concrete {
-                    ConcreteType::Platform(p) => {
-                        println!("  Type: Platform.{}", p.name);
-                        if !p.methods.is_empty() {
-                            println!("  Methods: {}", p.methods.len());
-                        }
-                    }
-                    ConcreteType::Configuration(c) => {
-                        println!("  Type: {:?}.{}", c.kind, c.name);
-                    }
-                    ConcreteType::Primitive(p) => {
-                        println!("  Type: Primitive.{:?}", p);
-                    }
-                    ConcreteType::Special(s) => {
-                        println!("  Type: Special.{:?}", s);
-                    }
-                    ConcreteType::GlobalFunction(f) => {
-                        println!("  Type: GlobalFunction.{}", f.name);
-                        if f.polymorphic {
-                            println!("  Polymorphic: true");
-                        }
-                    }
-                }
-            }
-            ResolutionResult::Union(types) => {
-                println!("  Type: Union of {} types", types.len());
-            }
-            ResolutionResult::Dynamic => {
-                println!("  Type: Dynamic (runtime)");
-            }
-            _ => {
-                println!("  Type: Complex");
-            }
-        }
-    }
-    
-    // Test some examples if no expression provided
-    if args.expression.is_empty() {
-        println!("\n\nExamples:");
-        println!("{}", "─".repeat(50));
-        
-        for expr in &[
-            "Справочники",
-            "Справочники.Контрагенты", 
-            "Документы.ЗаказПокупателя",
-            "Перечисления.СтатусыЗаказов",
-            "НеизвестныйТип",
-        ] {
-            let res = resolver.resolve_expression(expr);
-            let icon = match res.certainty {
-                Certainty::Known => "✅",
-                Certainty::Inferred(_) => "🔍",
-                Certainty::Unknown => "❓",
+            let req = LspHoverRequest {
+                file_path: "cli".to_string(),
+                line: 0,
+                column: 0,
+                expression: args.expression.clone(),
             };
-            println!("{} {} -> {:?}", icon, expr, res.certainty);
-        }
-    }
-}
-
-fn show_completions(resolver: &PlatformTypeResolver, prefix: &str) {
-    use bsl_gradual_types::core::platform_resolver::CompletionKind;
-    
-    println!("\nCompletions for: {}", prefix);
-    println!("{}", "─".repeat(50));
-    
-    let completions = resolver.get_completions(prefix);
-    
-    if completions.is_empty() {
-        println!("No completions found");
-        return;
-    }
-    
-    // Group by kind
-    let mut by_kind = std::collections::HashMap::new();
-    for item in completions {
-        by_kind.entry(item.kind.clone()).or_insert(Vec::new()).push(item);
-    }
-    
-    // Display grouped
-    for (kind, items) in by_kind {
-        let kind_name = match kind {
-            CompletionKind::Global => "🌐 Globals",
-            CompletionKind::Catalog => "📁 Catalogs",
-            CompletionKind::Document => "📄 Documents",
-            CompletionKind::Enum => "📝 Enums",
-            CompletionKind::Method => "🔧 Methods",
-            CompletionKind::Property => "📌 Properties",
-            CompletionKind::GlobalFunction => "⚡ Functions",
-            CompletionKind::Variable => "📦 Variables",
-            CompletionKind::Function => "🔧 Functions",
-        };
-        
-        println!("\n{}:", kind_name);
-        for item in items {
-            print!("  • {}", item.label);
-            if let Some(detail) = &item.detail {
-                print!(" - {}", detail);
+            match central.lsp_interface().handle_hover_request(req).await {
+                Ok(Some(h)) => {
+                    println!("{}", h.contents.join("\n\n"));
+                }
+                Ok(None) => println!("Type unknown"),
+                Err(e) => eprintln!("Hover error: {}", e),
             }
-            println!();
         }
-    }
+    });
 }

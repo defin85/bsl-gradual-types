@@ -1,48 +1,50 @@
 //! Ядро системы документации BSL
 
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use anyhow::Result;
 use serde::Serialize;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-use super::platform::PlatformDocumentationProvider;
 use super::configuration::ConfigurationDocumentationProvider;
-use super::search::{DocumentationSearchEngine, AdvancedSearchQuery, SearchResults};
+use super::platform::PlatformDocumentationProvider;
 use super::render::RenderEngine;
+use super::search::{AdvancedSearchQuery, DocumentationSearchEngine, SearchResults};
+use crate::documentation::core::providers::DocumentationProvider;
 
+pub mod cache;
 pub mod hierarchy;
 pub mod providers;
-pub mod cache;
 pub mod statistics;
 
+pub use cache::{DocumentationCache, EvictionStrategy as CacheEvictionStrategy};
 pub use hierarchy::*;
-pub use providers::*;
-pub use cache::*;
+pub use providers::{EvictionStrategy as ProviderEvictionStrategy, ProviderConfig};
+pub use statistics::ProviderStatistics;
 pub use statistics::*;
 
 /// Центральная система документации BSL
-/// 
+///
 /// Координирует работу всех провайдеров и предоставляет единый API
 /// для доступа к документации типов
 pub struct BslDocumentationSystem {
     /// Провайдер платформенных типов
     platform_provider: Arc<PlatformDocumentationProvider>,
-    
+
     /// Провайдер конфигурационных типов
     configuration_provider: Arc<ConfigurationDocumentationProvider>,
-    
+
     /// Система поиска и индексации
     search_engine: Arc<DocumentationSearchEngine>,
-    
+
     /// Кеш для производительности
     cache_manager: Arc<DocumentationCache>,
-    
+
     /// Система рендеринга
     render_engine: Arc<RenderEngine>,
-    
+
     /// Собранная иерархия типов
     hierarchy_cache: Arc<RwLock<Option<TypeHierarchy>>>,
-    
+
     /// Статус инициализации
     initialization_status: Arc<RwLock<InitializationStatus>>,
 }
@@ -52,16 +54,16 @@ pub struct BslDocumentationSystem {
 pub struct InitializationStatus {
     /// Инициализируется ли система
     pub is_initializing: bool,
-    
+
     /// Процент завершения (0-100)
     pub progress_percent: u8,
-    
+
     /// Текущая операция
     pub current_operation: String,
-    
+
     /// Детали прогресса
     pub details: InitializationDetails,
-    
+
     /// Ошибки инициализации
     pub errors: Vec<String>,
 }
@@ -71,13 +73,13 @@ pub struct InitializationStatus {
 pub struct InitializationDetails {
     /// Платформенные типы
     pub platform_types: ProviderStatus,
-    
+
     /// Конфигурационные типы  
     pub configuration_types: ProviderStatus,
-    
+
     /// Индексы поиска
     pub search_indexes: ProviderStatus,
-    
+
     /// Кеш
     pub cache: ProviderStatus,
 }
@@ -87,16 +89,16 @@ pub struct InitializationDetails {
 pub struct ProviderStatus {
     /// Статус загрузки
     pub status: LoadingStatus,
-    
+
     /// Загружено элементов
     pub loaded_items: usize,
-    
+
     /// Всего элементов
     pub total_items: usize,
-    
+
     /// Время загрузки (мс)
     pub loading_time_ms: u64,
-    
+
     /// Сообщения об ошибках
     pub error_messages: Vec<String>,
 }
@@ -106,16 +108,16 @@ pub struct ProviderStatus {
 pub enum LoadingStatus {
     /// Не начата
     NotStarted,
-    
+
     /// Загружается
     Loading,
-    
+
     /// Завершена успешно
     Completed,
-    
+
     /// Завершена с ошибками
     CompletedWithErrors,
-    
+
     /// Критическая ошибка
     Failed,
 }
@@ -133,7 +135,7 @@ impl BslDocumentationSystem {
             initialization_status: Arc::new(RwLock::new(InitializationStatus::default())),
         }
     }
-    
+
     /// Инициализировать систему асинхронно
     pub async fn initialize(&self, config: DocumentationConfig) -> Result<()> {
         // Устанавливаем статус инициализации
@@ -143,29 +145,33 @@ impl BslDocumentationSystem {
             status.current_operation = "Инициализация системы документации".to_string();
             status.progress_percent = 0;
         }
-        
+
         // Инициализируем платформенные типы
         let platform_provider_config = providers::ProviderConfig {
             data_source: config.platform_config.syntax_helper_path.clone(),
             ..Default::default()
         };
-        self.platform_provider.initialize(&platform_provider_config).await?;
-        
+        self.platform_provider
+            .initialize(&platform_provider_config)
+            .await?;
+
         // Инициализируем конфигурационные типы
         if let Some(config_path) = &config.configuration_path {
             let config_provider_config = providers::ProviderConfig {
                 data_source: config_path.clone(),
                 ..Default::default()
             };
-            self.configuration_provider.initialize(&config_provider_config).await?;
+            self.configuration_provider
+                .initialize(&config_provider_config)
+                .await?;
         }
-        
+
         // Строим поисковые индексы
         self.build_search_indexes().await?;
-        
+
         // Собираем полную иерархию
         self.build_type_hierarchy().await?;
-        
+
         // Завершаем инициализацию
         {
             let mut status = self.initialization_status.write().await;
@@ -173,19 +179,19 @@ impl BslDocumentationSystem {
             status.progress_percent = 100;
             status.current_operation = "Система документации готова".to_string();
         }
-        
+
         Ok(())
     }
-    
+
     /// Получить статус инициализации
     pub async fn get_initialization_status(&self) -> InitializationStatus {
         self.initialization_status.read().await.clone()
     }
-    
+
     /// Получить полную иерархию типов
     pub async fn get_type_hierarchy(&self) -> Result<TypeHierarchy> {
         let hierarchy = self.hierarchy_cache.read().await;
-        
+
         match hierarchy.as_ref() {
             Some(h) => Ok(h.clone()),
             None => {
@@ -197,39 +203,47 @@ impl BslDocumentationSystem {
             }
         }
     }
-    
+
     /// Поиск в документации
     pub async fn search(&self, query: AdvancedSearchQuery) -> Result<SearchResults> {
         self.search_engine.search(query).await
     }
-    
+
     /// Получить детали типа
     pub async fn get_type_details(&self, type_id: &str) -> Result<Option<TypeDocumentationFull>> {
         // Сначала проверяем кеш
         if let Some(cached) = self.cache_manager.get_type_details(type_id).await {
             return Ok(Some(cached));
         }
-        
+
         // Ищем в провайдерах
         if let Some(details) = self.platform_provider.get_type_details(type_id).await? {
-            self.cache_manager.store_type_details(type_id, &details).await;
+            self.cache_manager
+                .store_type_details(type_id, &details)
+                .await;
             return Ok(Some(details));
         }
-        
-        if let Some(details) = self.configuration_provider.get_type_details(type_id).await? {
-            self.cache_manager.store_type_details(type_id, &details).await;
+
+        if let Some(details) = self
+            .configuration_provider
+            .get_type_details(type_id)
+            .await?
+        {
+            self.cache_manager
+                .store_type_details(type_id, &details)
+                .await;
             return Ok(Some(details));
         }
-        
+
         Ok(None)
     }
-    
+
     /// Получить статистику системы
     pub async fn get_statistics(&self) -> Result<DocumentationStatistics> {
         let platform_stats = self.platform_provider.get_statistics().await?;
         let config_stats = self.configuration_provider.get_statistics().await?;
         let search_stats = self.search_engine.get_statistics().await?;
-        
+
         Ok(DocumentationStatistics {
             platform: platform_stats,
             configuration: config_stats,
@@ -238,41 +252,40 @@ impl BslDocumentationSystem {
             total_memory_mb: self.estimate_memory_usage().await,
         })
     }
-    
+
     // Приватные методы инициализации
-    
+
     async fn build_search_indexes(&self) -> Result<()> {
         {
             let mut status = self.initialization_status.write().await;
             status.current_operation = "Построение поисковых индексов".to_string();
             status.progress_percent = 70;
         }
-        
-        self.search_engine.build_indexes(
-            &self.platform_provider,
-            &self.configuration_provider
-        ).await
+
+        self.search_engine
+            .build_indexes(&self.platform_provider, &self.configuration_provider)
+            .await
     }
-    
+
     async fn build_type_hierarchy(&self) -> Result<()> {
         {
             let mut status = self.initialization_status.write().await;
             status.current_operation = "Сборка иерархии типов".to_string();
             status.progress_percent = 90;
         }
-        
+
         let mut root_categories = Vec::new();
-        
+
         // Добавляем платформенные типы
         if let Ok(platform_category) = self.platform_provider.get_root_category().await {
             root_categories.push(platform_category);
         }
-        
+
         // Добавляем конфигурационные типы
         if let Ok(config_category) = self.configuration_provider.get_root_category().await {
             root_categories.push(config_category);
         }
-        
+
         // Создаем иерархию
         let hierarchy = hierarchy::TypeHierarchy {
             root_categories,
@@ -296,11 +309,11 @@ impl BslDocumentationSystem {
                 build_config: hierarchy::BuildConfig::default(),
             },
         };
-        
+
         *self.hierarchy_cache.write().await = Some(hierarchy);
         Ok(())
     }
-    
+
     async fn estimate_memory_usage(&self) -> f64 {
         // TODO: Реализовать подсчет использования памяти
         0.0
@@ -312,13 +325,13 @@ impl BslDocumentationSystem {
 pub struct DocumentationConfig {
     /// Конфигурация платформенных типов
     pub platform_config: PlatformConfig,
-    
+
     /// Путь к конфигурации (опционально)
     pub configuration_path: Option<String>,
-    
+
     /// Настройки кеширования
     pub cache_config: CacheConfig,
-    
+
     /// Настройки поиска
     pub search_config: SearchConfig,
 }
@@ -328,13 +341,13 @@ pub struct DocumentationConfig {
 pub struct PlatformConfig {
     /// Путь к справке синтакс-помощника
     pub syntax_helper_path: String,
-    
+
     /// Версия платформы
     pub platform_version: String,
-    
+
     /// Показывать прогресс парсинга
     pub show_progress: bool,
-    
+
     /// Количество потоков для парсинга
     pub worker_threads: usize,
 }
@@ -344,16 +357,16 @@ pub struct PlatformConfig {
 pub struct DocumentationStatistics {
     /// Статистика платформенных типов
     pub platform: ProviderStatistics,
-    
+
     /// Статистика конфигурационных типов
     pub configuration: ProviderStatistics,
-    
+
     /// Статистика поиска
     pub search: crate::documentation::search::SearchStatistics,
-    
+
     /// Процент попаданий в кеш
     pub cache_hits: f64,
-    
+
     /// Общее использование памяти (MB)
     pub total_memory_mb: f64,
 }
@@ -414,13 +427,13 @@ impl Default for DocumentationConfig {
 pub struct CacheConfig {
     /// Максимальный размер кеша (элементов)
     pub max_cache_size: usize,
-    
+
     /// TTL для кеша (секунды)
     pub cache_ttl_seconds: u64,
-    
+
     /// Включить персистентный кеш
     pub persistent_cache: bool,
-    
+
     /// Путь для персистентного кеша
     pub cache_directory: String,
 }
@@ -441,13 +454,13 @@ impl Default for CacheConfig {
 pub struct SearchConfig {
     /// Максимум результатов на страницу
     pub max_results_per_page: usize,
-    
+
     /// Включить семантический поиск
     pub enable_semantic_search: bool,
-    
+
     /// Включить нечеткий поиск
     pub enable_fuzzy_search: bool,
-    
+
     /// Минимальный score для результатов
     pub min_score_threshold: f64,
 }

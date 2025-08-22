@@ -4,21 +4,24 @@
 
 use anyhow::Result;
 use clap::Parser;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use bsl_gradual_types::core::type_checker::{TypeChecker, TypeContext};
-use bsl_gradual_types::core::types::{TypeResolution, ResolutionResult, ConcreteType};
-use bsl_gradual_types::core::platform_resolver::PlatformTypeResolver;
-use bsl_gradual_types::parser::common::ParserFactory;
+use bsl_gradual_types::core::types::{ConcreteType, ResolutionResult, TypeResolution};
+use bsl_gradual_types::documentation::core::providers::DocumentationProvider;
+use bsl_gradual_types::documentation::core::ProviderConfig;
 use bsl_gradual_types::documentation::{
-    DocumentationSearchEngine, PlatformDocumentationProvider, ConfigurationDocumentationProvider,
-    AdvancedSearchQuery
+    AdvancedSearchQuery, ConfigurationDocumentationProvider, DocumentationSearchEngine,
+    PlatformDocumentationProvider,
 };
-use bsl_gradual_types::documentation::core::{DocumentationProvider, ProviderConfig};
+use bsl_gradual_types::parser::common::ParserFactory;
+// Target architecture
+use bsl_gradual_types::architecture::presentation::{WebSearchFilters, WebSearchRequest};
+use bsl_gradual_types::target::system::{CentralSystemConfig, CentralTypeSystem};
 
 #[derive(Parser)]
 #[command(name = "bsl-web-server")]
@@ -27,18 +30,23 @@ struct Cli {
     /// Порт для HTTP сервера
     #[arg(short, long, default_value = "8080")]
     port: u16,
-    
+
     /// Путь к проекту 1С для анализа
     #[arg(short = 'j', long)]
     project: Option<PathBuf>,
-    
+
+    /// Путь к XML конфигурации (для target движка)
+    #[arg(long)]
+    config: Option<String>,
+
     /// Включить hot reload для разработки
     #[arg(long)]
     hot_reload: bool,
-    
+
     /// Путь к статическим файлам
     #[arg(long, default_value = "web")]
     static_dir: PathBuf,
+    // Движок удалён: всегда target
 }
 
 /// Состояние web сервера
@@ -46,8 +54,6 @@ struct Cli {
 struct AppState {
     /// Контекст типов
     type_context: Arc<RwLock<Option<TypeContext>>>,
-    /// Platform resolver
-    platform_resolver: Arc<RwLock<PlatformTypeResolver>>,
     /// Кеш для быстрого поиска (TODO: реализовать)
     #[allow(dead_code)]
     search_cache: Arc<RwLock<HashMap<String, Vec<SearchResult>>>>,
@@ -57,7 +63,11 @@ struct AppState {
     search_engine: Arc<DocumentationSearchEngine>,
     /// Платформенный провайдер документации
     platform_provider: Arc<PlatformDocumentationProvider>,
+    /// Центральная система типов (target-only)
+    central: Arc<CentralTypeSystem>,
 }
+
+// Движок legacy удалён, сервер работает только в target-режиме
 
 /// Статус загрузки документации
 #[derive(Debug, Clone, Serialize)]
@@ -136,35 +146,54 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter("bsl_web_server=info,warp=info")
         .init();
-    
+
     let cli = Cli::parse();
-    
-    println!("🌐 Starting BSL Type Browser Web Server on port {}", cli.port);
-    
+
+    println!(
+        "🌐 Starting BSL Type Browser Web Server on port {}",
+        cli.port
+    );
+
     // Инициализируем поисковую систему и провайдеры
     println!("🔧 Инициализация поисковой системы...");
     let search_engine = Arc::new(DocumentationSearchEngine::new());
     let platform_provider = Arc::new(PlatformDocumentationProvider::new());
-    
+
     // Инициализируем платформенный провайдер
     let config = ProviderConfig::default();
     if let Err(e) = platform_provider.initialize(&config).await {
         println!("⚠️ Предупреждение при инициализации провайдера: {}", e);
         println!("   Система будет работать без справки синтакс-помощника");
     }
-    
+
     // Строим индексы для поиска
     let config_provider = ConfigurationDocumentationProvider::new();
-    if let Err(e) = search_engine.build_indexes(&*platform_provider, &config_provider).await {
+    if let Err(e) = search_engine
+        .build_indexes(&*platform_provider, &config_provider)
+        .await
+    {
         println!("⚠️ Предупреждение при построении индексов: {}", e);
     } else {
         println!("✅ Индексы поиска построены");
     }
-    
-    // Инициализируем состояние приложения
+
+    // Инициализируем центральную систему (target-only)
+    println!("🚀 Инициализация CentralTypeSystem (target engine)");
+    let mut cfg = CentralSystemConfig::default();
+    if let Some(path) = &cli.config {
+        cfg.configuration_path = Some(path.clone());
+    }
+    let central = Arc::new(
+        CentralTypeSystem::initialize_with_config(cfg)
+            .await
+            .unwrap_or_else(|e| {
+                println!("⚠️ Ошибка инициализации CentralTypeSystem: {}", e);
+                CentralTypeSystem::new(CentralSystemConfig::default())
+            }),
+    );
+
     let app_state = AppState {
         type_context: Arc::new(RwLock::new(None)),
-        platform_resolver: Arc::new(RwLock::new(PlatformTypeResolver::new())),
         search_cache: Arc::new(RwLock::new(HashMap::new())),
         loading_status: Arc::new(RwLock::new(LoadingStatus {
             is_loading: false,
@@ -176,8 +205,9 @@ async fn main() -> Result<()> {
         })),
         search_engine,
         platform_provider,
+        central: central.clone(),
     };
-    
+
     // Если указан проект, анализируем его
     if let Some(project_path) = cli.project {
         println!("📁 Analyzing project: {}", project_path.display());
@@ -185,26 +215,26 @@ async fn main() -> Result<()> {
         *app_state.type_context.write().await = Some(context);
         println!("✅ Project analysis completed");
     }
-    
+
     // Запускаем web сервер
     start_web_server(cli.port, app_state, cli.static_dir).await?;
-    
+
     Ok(())
 }
 
 /// Анализ проекта для получения типов
 async fn analyze_project(project_path: &PathBuf) -> Result<TypeContext> {
-    use bsl_gradual_types::core::parallel_analysis::{ParallelAnalyzer, ParallelAnalysisConfig};
-    
+    use bsl_gradual_types::core::parallel_analysis::{ParallelAnalysisConfig, ParallelAnalyzer};
+
     let config = ParallelAnalysisConfig {
         show_progress: false, // Отключаем для web сервера
         use_cache: true,
         ..Default::default()
     };
-    
+
     let analyzer = ParallelAnalyzer::new(config)?;
     let results = analyzer.analyze_project(project_path)?;
-    
+
     // Объединяем все контексты типов
     let mut combined_context = bsl_gradual_types::core::type_checker::TypeContext {
         variables: HashMap::new(),
@@ -212,125 +242,130 @@ async fn analyze_project(project_path: &PathBuf) -> Result<TypeContext> {
         current_scope: bsl_gradual_types::core::dependency_graph::Scope::Global,
         scope_stack: vec![],
     };
-    
+
     for file_result in results.file_results {
         if file_result.success {
             // Объединяем функции
             for (name, signature) in file_result.type_context.functions {
                 combined_context.functions.insert(name, signature);
             }
-            
+
             // Объединяем переменные (глобальные)
             for (name, type_res) in file_result.type_context.variables {
                 combined_context.variables.insert(name, type_res);
             }
         }
     }
-    
+
     Ok(combined_context)
 }
 
 /// Запуск web сервера
 async fn start_web_server(port: u16, app_state: AppState, static_dir: PathBuf) -> Result<()> {
     use warp::Filter;
-    
+
     // CORS для разработки
     let cors = warp::cors()
         .allow_any_origin()
         .allow_headers(vec!["content-type"])
         .allow_methods(vec!["GET", "POST", "OPTIONS"]);
-    
+
     // API routes
-    let api = warp::path("api").and(
-        // GET /api/types?search=&page=&per_page=
-        warp::path("types")
-            .and(warp::get())
-            .and(warp::query::<SearchQuery>())
-            .and(with_state(app_state.clone()))
-            .and_then(handle_search_types)
-        .or(
-            // GET /api/types/{name}
+    let api_base = warp::path("api");
+    let api = api_base
+        .and(
+            // GET /api/types?search=&page=&per_page=
             warp::path("types")
-                .and(warp::path::param::<String>())
                 .and(warp::get())
+                .and(warp::query::<SearchQuery>())
                 .and(with_state(app_state.clone()))
-                .and_then(handle_get_type_details)
+                .and_then(handle_search_types)
+                .or(
+                    // GET /api/types/{name}
+                    warp::path("types")
+                        .and(warp::path::param::<String>())
+                        .and(warp::get())
+                        .and(with_state(app_state.clone()))
+                        .and_then(handle_get_type_details),
+                )
+                .or(
+                    // GET /api/stats
+                    warp::path("stats")
+                        .and(warp::get())
+                        .and(with_state(app_state.clone()))
+                        .and_then(handle_get_stats),
+                )
+                .or(
+                    // GET /api/loading-status
+                    warp::path("loading-status")
+                        .and(warp::get())
+                        .and(with_state(app_state.clone()))
+                        .and_then(handle_get_loading_status),
+                )
+                .or(
+                    // POST /api/analyze
+                    warp::path("analyze")
+                        .and(warp::post())
+                        .and(warp::body::json())
+                        .and(with_state(app_state.clone()))
+                        .and_then(handle_analyze_code),
+                )
+                .or(
+                    // POST /api/v1/search - новый расширенный поиск
+                    warp::path("v1")
+                        .and(warp::path("search"))
+                        .and(warp::post())
+                        .and(warp::body::json())
+                        .and(with_state(app_state.clone()))
+                        .and_then(handle_advanced_search),
+                )
+                .or(
+                    // GET /api/v1/suggestions?q=query - автодополнение
+                    warp::path("v1")
+                        .and(warp::path("suggestions"))
+                        .and(warp::get())
+                        .and(warp::query::<SuggestionsQuery>())
+                        .and(with_state(app_state.clone()))
+                        .and_then(handle_get_suggestions),
+                )
+                .or(
+                    // GET /api/v1/search-stats - статистика поиска
+                    warp::path("v1")
+                        .and(warp::path("search-stats"))
+                        .and(warp::get())
+                        .and(with_state(app_state.clone()))
+                        .and_then(handle_get_search_stats),
+                )
+                .or(
+                    // GET /api/v1/categories - список категорий
+                    warp::path("v1")
+                        .and(warp::path("categories"))
+                        .and(warp::get())
+                        .and(with_state(app_state.clone()))
+                        .and_then(handle_get_categories),
+                ),
         )
-        .or(
-            // GET /api/stats
-            warp::path("stats")
-                .and(warp::get())
-                .and(with_state(app_state.clone()))
-                .and_then(handle_get_stats)
-        )
-        .or(
-            // GET /api/loading-status
-            warp::path("loading-status")
-                .and(warp::get())
-                .and(with_state(app_state.clone()))
-                .and_then(handle_get_loading_status)
-        )
-        .or(
-            // POST /api/analyze
-            warp::path("analyze")
-                .and(warp::post())
-                .and(warp::body::json())
-                .and(with_state(app_state.clone()))
-                .and_then(handle_analyze_code)
-        )
-        .or(
-            // POST /api/v1/search - новый расширенный поиск
-            warp::path("v1")
-                .and(warp::path("search"))
-                .and(warp::post())
-                .and(warp::body::json())
-                .and(with_state(app_state.clone()))
-                .and_then(handle_advanced_search)
-        )
-        .or(
-            // GET /api/v1/suggestions?q=query - автодополнение
-            warp::path("v1")
-                .and(warp::path("suggestions"))
-                .and(warp::get())
-                .and(warp::query::<SuggestionsQuery>())
-                .and(with_state(app_state.clone()))
-                .and_then(handle_get_suggestions)
-        )
-        .or(
-            // GET /api/v1/search-stats - статистика поиска
-            warp::path("v1")
-                .and(warp::path("search-stats"))
-                .and(warp::get())
-                .and(with_state(app_state.clone()))
-                .and_then(handle_get_search_stats)
-        )
-        .or(
-            // GET /api/v1/categories - список категорий
-            warp::path("v1")
-                .and(warp::path("categories"))
-                .and(warp::get())
-                .and(with_state(app_state.clone()))
-                .and_then(handle_get_categories)
-        )
-    ).with(cors);
-    
+        .with(cors);
+
+    // Доп. health endpoint: /api/health (в target режиме отдаёт состояние CentralTypeSystem)
+    let health = warp::path!("api" / "health")
+        .and(warp::get())
+        .and(with_state(app_state.clone()))
+        .and_then(handle_health);
+
     // Статические файлы
     let static_files = warp::fs::dir(static_dir);
-    
+
     // Главная страница
-    let index = warp::path::end()
-        .and(warp::get())
-        .and_then(handle_index);
-    
-    let routes = api.or(static_files).or(index);
-    
+    let index = warp::path::end().and(warp::get()).and_then(handle_index);
+
+    let routes = api.or(health).or(static_files).or(index);
+
     println!("🚀 Web server running on http://localhost:{}", port);
     println!("📖 Open http://localhost:{} to browse BSL types", port);
-    
-    warp::serve(routes)
-        .run(([127, 0, 0, 1], port))
-        .await;
-    
+
+    warp::serve(routes).run(([127, 0, 0, 1], port)).await;
+
     Ok(())
 }
 
@@ -363,6 +398,28 @@ struct ApiError {
     code: u16,
 }
 
+#[derive(Serialize)]
+struct HealthResponse {
+    status: String,
+    overall_score: f32,
+    metrics: Option<HealthMetrics>,
+}
+
+#[derive(Serialize)]
+struct HealthMetrics {
+    // Типы
+    total_types: usize,
+    platform_types: usize,
+    configuration_types: usize,
+    user_defined_types: usize,
+    // Производительность
+    average_lsp_response_ms: f64,
+    average_web_response_ms: f64,
+    total_requests: u64,
+    // Кеш
+    cache_hit_rate: f64,
+}
+
 /// Ответ для автодополнения
 #[derive(Serialize)]
 struct SuggestionsResponse {
@@ -392,94 +449,48 @@ async fn handle_search_types(
     query: SearchQuery,
     state: AppState,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-    let search_term = query.search.unwrap_or_default().to_lowercase();
+    let search_term = query.search.unwrap_or_default();
     let page = query.page.unwrap_or(1);
     let per_page = query.per_page.unwrap_or(20).min(100); // Максимум 100
-    
-    let results = search_types(&state, &search_term).await;
-    
-    // Пагинация
-    let total = results.len();
-    let start = (page - 1) * per_page;
-    let end = (start + per_page).min(total);
-    let page_results = results[start..end].to_vec();
-    
-    let response = TypesResponse {
-        types: page_results,
-        total,
-        page,
-        per_page,
+
+    // Target-only: используем CentralTypeSystem WebInterface
+    let req = WebSearchRequest {
+        query: search_term.clone(),
+        page: Some(page),
+        per_page: Some(per_page),
+        filters: None,
     };
-    
-    Ok(warp::reply::json(&response))
+    match state.central.web_interface().handle_search_request(req).await {
+        Ok(web_resp) => {
+            let types: Vec<SearchResult> = web_resp
+                .results
+                .into_iter()
+                .map(|it| SearchResult {
+                    name: it.name,
+                    category: it.category,
+                    description: Some(it.description),
+                    methods_count: 0,
+                    properties_count: 0,
+                    result_type: "Type".to_string(),
+                })
+                .collect();
+            let response = TypesResponse {
+                types,
+                total: web_resp.total_count,
+                page: web_resp.page,
+                per_page: web_resp.per_page,
+            };
+            Ok(warp::reply::json(&response))
+        }
+        Err(e) => {
+            eprintln!("WebInterface search error: {}", e);
+            let response = TypesResponse { types: vec![], total: 0, page, per_page };
+            Ok(warp::reply::json(&response))
+        }
+    }
 }
 
-/// Поиск типов
-async fn search_types(state: &AppState, search_term: &str) -> Vec<SearchResult> {
-    let mut results = Vec::new();
-    
-    // Поиск в platform resolver
-    let platform_resolver = state.platform_resolver.read().await;
-    let completions = platform_resolver.get_completions(search_term);
-    
-    println!("🔍 Search for '{}': found {} platform completions", search_term, completions.len());
-    
-    for completion in completions {
-        results.push(SearchResult {
-            name: completion.label.clone(),
-            category: format!("{:?}", completion.kind),
-            description: completion.documentation,
-            methods_count: 0, // TODO: Получить реальное количество
-            properties_count: 0,
-            result_type: "Platform".to_string(),
-        });
-    }
-    
-    // Поиск в type context
-    if let Some(context) = state.type_context.read().await.as_ref() {
-        // Функции
-        for (name, signature) in &context.functions {
-            if name.to_lowercase().contains(search_term) {
-                results.push(SearchResult {
-                    name: name.clone(),
-                    category: "Function".to_string(),
-                    description: Some(format!("Параметры: {}", signature.params.len())),
-                    methods_count: 0,
-                    properties_count: 0,
-                    result_type: format_type_result(&signature.return_type),
-                });
-            }
-        }
-        
-        // Переменные
-        for (name, type_res) in &context.variables {
-            if name.to_lowercase().contains(search_term) {
-                results.push(SearchResult {
-                    name: name.clone(),
-                    category: "Variable".to_string(),
-                    description: Some(format!("Уверенность: {:?}", type_res.certainty)),
-                    methods_count: 0,
-                    properties_count: 0,
-                    result_type: format_type_result(type_res),
-                });
-            }
-        }
-    }
-    
-    // Сортируем по релевантности
-    results.sort_by(|a, b| {
-        let a_exact = a.name.to_lowercase() == search_term;
-        let b_exact = b.name.to_lowercase() == search_term;
-        
-        match (a_exact, b_exact) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.cmp(&b.name),
-        }
-    });
-    
-    results
-}
+// Поиск типов перенесён в WebInterface (target-only)
 
 /// Форматирование типа для отображения
 fn format_type_result(type_res: &TypeResolution) -> String {
@@ -487,11 +498,10 @@ fn format_type_result(type_res: &TypeResolution) -> String {
         ResolutionResult::Concrete(ConcreteType::Primitive(primitive)) => {
             format!("{:?}", primitive)
         }
-        ResolutionResult::Concrete(ConcreteType::Platform(platform)) => {
-            platform.name.clone()
-        }
+        ResolutionResult::Concrete(ConcreteType::Platform(platform)) => platform.name.clone(),
         ResolutionResult::Union(union_types) => {
-            let names: Vec<String> = union_types.iter()
+            let names: Vec<String> = union_types
+                .iter()
                 .map(|wt| format!("{:?}", wt.type_))
                 .collect();
             format!("Union({})", names.join(" | "))
@@ -510,8 +520,59 @@ async fn handle_get_type_details(
 }
 
 /// Получение деталей типа
-async fn get_type_details(_state: &AppState, type_name: &str) -> TypeDetails {
-    // TODO: Реализовать получение детальной информации о типе
+async fn get_type_details(state: &AppState, type_name: &str) -> TypeDetails {
+    // Target-only: CentralTypeSystem
+    match state
+        .web_interface()
+        .handle_type_details_request(type_name)
+        .await
+    {
+        Ok(resp) => {
+            return TypeDetails {
+                    name: resp.name,
+                    category: "Type".to_string(),
+                    description: Some("".to_string()),
+                    methods: resp
+                        .methods
+                        .into_iter()
+                        .map(|m| MethodInfo {
+                            name: m.name,
+                            parameters: m
+                                .parameters
+                                .into_iter()
+                                .map(|p| {
+                                    format!(
+                                        "{}: {}{}",
+                                        p.name,
+                                        p.type_name,
+                                        if p.is_optional { "?" } else { "" }
+                                    )
+                                })
+                                .collect(),
+                            return_type: m.return_type,
+                            description: Some(m.description),
+                        })
+                        .collect(),
+                    properties: resp
+                        .properties
+                        .into_iter()
+                        .map(|p| PropertyInfo {
+                            name: p.name,
+                            type_name: p.type_name,
+                            readonly: p.is_readonly,
+                            description: Some(p.description),
+                        })
+                        .collect(),
+                    related_types: Vec::new(),
+                    usage_examples: Vec::new(),
+            };
+        }
+        Err(e) => {
+            eprintln!("WebInterface type_details error: {}", e);
+        }
+    }
+
+    // Заглушка на случай ошибки
     TypeDetails {
         name: type_name.to_string(),
         category: "Unknown".to_string(),
@@ -527,17 +588,13 @@ async fn get_type_details(_state: &AppState, type_name: &str) -> TypeDetails {
 }
 
 /// Обработчик статистики
-async fn handle_get_stats(
-    state: AppState,
-) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handle_get_stats(state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
     let stats = get_system_stats(&state).await;
     Ok(warp::reply::json(&stats))
 }
 
 /// Обработчик статуса загрузки
-async fn handle_get_loading_status(
-    state: AppState,
-) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handle_get_loading_status(state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
     let status = state.loading_status.read().await.clone();
     Ok(warp::reply::json(&status))
 }
@@ -545,25 +602,21 @@ async fn handle_get_loading_status(
 /// Получение статистики системы
 async fn get_system_stats(state: &AppState) -> SystemStats {
     let context = state.type_context.read().await;
-    let platform_resolver = state.platform_resolver.read().await;
-    
-    // Получаем количество платформенных типов
-    let platform_types_count = platform_resolver.get_completions("").len();
-    println!("📊 Platform types count: {}", platform_types_count);
-    
+    let metrics = state.central.get_system_metrics().await;
+
     if let Some(ctx) = context.as_ref() {
         SystemStats {
             total_functions: ctx.functions.len(),
             total_variables: ctx.variables.len(),
-            platform_types: platform_types_count,
-            analysis_cache_size: 0, // TODO: Интеграция с cache
+            platform_types: metrics.platform_types,
+            analysis_cache_size: 0, // TODO
             memory_usage_mb: estimate_memory_usage(ctx),
         }
     } else {
         SystemStats {
             total_functions: 0,
             total_variables: 0,
-            platform_types: platform_types_count,
+            platform_types: metrics.platform_types,
             analysis_cache_size: 0,
             memory_usage_mb: 0.0,
         }
@@ -582,11 +635,15 @@ struct SystemStats {
 /// Приблизительная оценка использования памяти
 fn estimate_memory_usage(context: &TypeContext) -> f64 {
     use std::mem;
-    
+
     let base_size = mem::size_of::<TypeContext>();
     let vars_size = context.variables.len() * mem::size_of::<(String, TypeResolution)>();
-    let funcs_size = context.functions.len() * mem::size_of::<(String, bsl_gradual_types::core::type_checker::FunctionSignature)>();
-    
+    let funcs_size = context.functions.len()
+        * mem::size_of::<(
+            String,
+            bsl_gradual_types::core::type_checker::FunctionSignature,
+        )>();
+
     (base_size + vars_size + funcs_size) as f64 / (1024.0 * 1024.0)
 }
 
@@ -627,44 +684,45 @@ async fn handle_analyze_code(
 /// Анализ фрагмента кода
 async fn analyze_code_snippet(code: &str, filename: &Option<String>) -> AnalyzeResponse {
     let start_time = std::time::Instant::now();
-    
+
     let file_name = filename.as_deref().unwrap_or("snippet.bsl").to_string();
-    
+
     // Парсим и анализируем код
     let mut parser = ParserFactory::create();
-    
+
     match parser.parse(code) {
         Ok(program) => {
             let type_checker = TypeChecker::new(file_name);
             let (context, diagnostics) = type_checker.check(&program);
-            
+
             AnalyzeResponse {
                 success: true,
                 functions: context.functions.len(),
                 variables: context.variables.len(),
-                diagnostics: diagnostics.iter().map(|d| DiagnosticInfo {
-                    line: d.line,
-                    column: d.column,
-                    severity: format!("{:?}", d.severity),
-                    message: d.message.clone(),
-                }).collect(),
+                diagnostics: diagnostics
+                    .iter()
+                    .map(|d| DiagnosticInfo {
+                        line: d.line,
+                        column: d.column,
+                        severity: format!("{:?}", d.severity),
+                        message: d.message.clone(),
+                    })
+                    .collect(),
                 analysis_time_ms: start_time.elapsed().as_millis() as u64,
             }
         }
-        Err(e) => {
-            AnalyzeResponse {
-                success: false,
-                functions: 0,
-                variables: 0,
-                diagnostics: vec![DiagnosticInfo {
-                    line: 1,
-                    column: 1,
-                    severity: "Error".to_string(),
-                    message: format!("Parse error: {}", e),
-                }],
-                analysis_time_ms: start_time.elapsed().as_millis() as u64,
-            }
-        }
+        Err(e) => AnalyzeResponse {
+            success: false,
+            functions: 0,
+            variables: 0,
+            diagnostics: vec![DiagnosticInfo {
+                line: 1,
+                column: 1,
+                severity: "Error".to_string(),
+                message: format!("Parse error: {}", e),
+            }],
+            analysis_time_ms: start_time.elapsed().as_millis() as u64,
+        },
     }
 }
 
@@ -676,7 +734,7 @@ async fn handle_advanced_search(
     state: AppState,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     println!("🔍 API поиск: '{}'", query.query);
-    
+
     match state.search_engine.search(query).await {
         Ok(results) => {
             println!("✅ Найдено {} результатов", results.total_count);
@@ -699,7 +757,7 @@ async fn handle_get_suggestions(
     state: AppState,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let limit = query.limit.unwrap_or(10);
-    
+
     match state.search_engine.get_suggestions(&query.q).await {
         Ok(suggestions) => {
             let limited_suggestions: Vec<String> = suggestions.into_iter().take(limit).collect();
@@ -721,9 +779,7 @@ async fn handle_get_suggestions(
 }
 
 /// Обработчик статистики поиска
-async fn handle_get_search_stats(
-    state: AppState,
-) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handle_get_search_stats(state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
     match state.search_engine.get_statistics().await {
         Ok(stats) => Ok(warp::reply::json(&stats)),
         Err(e) => {
@@ -736,10 +792,29 @@ async fn handle_get_search_stats(
     }
 }
 
+/// Обработчик /api/health
+async fn handle_health(state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
+    let health = state.central.health_check().await;
+    let sm = state.central.get_system_metrics().await;
+    let response = HealthResponse {
+        status: health.status,
+        overall_score: health.overall_score,
+        metrics: Some(HealthMetrics {
+            total_types: sm.total_types,
+            platform_types: sm.platform_types,
+            configuration_types: sm.configuration_types,
+            user_defined_types: sm.user_defined_types,
+            average_lsp_response_ms: sm.average_lsp_response_ms,
+            average_web_response_ms: sm.average_web_response_ms,
+            total_requests: sm.total_requests,
+            cache_hit_rate: sm.cache_hit_rate,
+        }),
+    };
+    Ok(warp::reply::json(&response))
+}
+
 /// Обработчик списка категорий
-async fn handle_get_categories(
-    state: AppState,
-) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handle_get_categories(state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
     // Пока простая реализация - возвращаем фиксированный список
     let categories = vec![
         CategoryInfo {
@@ -767,12 +842,12 @@ async fn handle_get_categories(
             subcategories: 0,
         },
     ];
-    
+
     let response = CategoriesResponse {
         total_count: categories.len(),
         categories,
     };
-    
+
     Ok(warp::reply::json(&response))
 }
 

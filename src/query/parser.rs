@@ -23,7 +23,7 @@ pub fn preprocess_query(input: &str) -> String {
             } else {
                 line
             };
-            
+
             // Удаляем однострочные комментарии
             if let Some(comment_pos) = line.find("//") {
                 &line[..comment_pos]
@@ -37,10 +37,7 @@ pub fn preprocess_query(input: &str) -> String {
 
 /// Парсит несколько запросов, разделённых точкой с запятой
 pub fn parse_queries(input: &str) -> IResult<&str, Vec<Query>> {
-    separated_list1(
-        ws(char(';')),
-        parse_query
-    )(input)
+    separated_list1(ws(char(';')), parse_query)(input)
 }
 
 /// Парсит запрос в формате 1С (с символами | и комментариями)
@@ -71,7 +68,7 @@ pub fn parse_query(input: &str) -> IResult<&str, Query> {
     let (input, select_clause) = parse_select_clause(input)?;
     #[cfg(debug_assertions)]
     eprintln!("[DEBUG] After SELECT: remaining = '{}'", input);
-    
+
     let (input, from_clause) = parse_from_clause(input)?;
     #[cfg(debug_assertions)]
     eprintln!("[DEBUG] After FROM: remaining = '{}'", input);
@@ -99,19 +96,20 @@ pub fn parse_query(input: &str) -> IResult<&str, Query> {
 
 fn parse_select_clause(input: &str) -> IResult<&str, SelectClause> {
     let (input, _) = ws(tag_no_case("ВЫБРАТЬ"))(input)?;
-    let (input, distinct) = map(opt(ws(tag_no_case("РАЗЛИЧНЫЕ"))), |o| o.is_some())(input)?;
-    let (input, allowed) = map(opt(ws(tag_no_case("РАЗРЕШЕННЫЕ"))), |o| o.is_some())(input)?;
+    let (input, distinct) =
+        map(opt(ws(tag_no_case("РАЗЛИЧНЫЕ"))), |o| o.is_some())(input)?;
+    let (input, allowed) = map(opt(ws(tag_no_case("РАЗРЕШЕННЫЕ"))), |o| {
+        o.is_some()
+    })(input)?;
     let (input, top) = opt(preceded(
         ws(tag_no_case("ПЕРВЫЕ")),
         map(ws(digit1), |s: &str| s.parse::<usize>().unwrap_or(0)),
     ))(input)?;
     let (input, fields) = separated_list1(ws(char(',')), parse_select_field)(input)?;
-    
+
     // Проверяем наличие ПОМЕСТИТЬ для временной таблицы
-    let (input, into_temp_table) = opt(preceded(
-        ws(tag_no_case("ПОМЕСТИТЬ")),
-        parse_identifier
-    ))(input)?;
+    let (input, into_temp_table) =
+        opt(preceded(ws(tag_no_case("ПОМЕСТИТЬ")), parse_identifier))(input)?;
 
     Ok((
         input,
@@ -127,10 +125,7 @@ fn parse_select_clause(input: &str) -> IResult<&str, SelectClause> {
 
 fn parse_select_field(input: &str) -> IResult<&str, SelectField> {
     let (input, expression) = parse_expression(input)?;
-    let (input, alias) = opt(preceded(
-        ws(tag_no_case("КАК")),
-        parse_identifier,
-    ))(input)?;
+    let (input, alias) = opt(preceded(ws(tag_no_case("КАК")), parse_identifier))(input)?;
 
     Ok((
         input,
@@ -145,20 +140,20 @@ fn parse_from_clause(input: &str) -> IResult<&str, FromClause> {
     let (input, _) = ws(tag_no_case("ИЗ"))(input)?;
     #[cfg(debug_assertions)]
     eprintln!("[DEBUG] parse_from_clause after 'ИЗ': input = '{}'", input);
-    
+
     let (input, sources) = separated_list1(ws(char(',')), parse_table_source)(input)?;
     #[cfg(debug_assertions)]
-    eprintln!("[DEBUG] parse_from_clause after sources: input = '{}'", input);
+    eprintln!(
+        "[DEBUG] parse_from_clause after sources: input = '{}'",
+        input
+    );
 
     Ok((input, FromClause { sources }))
 }
 
 fn parse_table_source(input: &str) -> IResult<&str, TableSource> {
     let (input, table) = parse_table_reference(input)?;
-    let (input, alias) = opt(preceded(
-        ws(tag_no_case("КАК")),
-        parse_identifier,
-    ))(input)?;
+    let (input, alias) = opt(preceded(ws(tag_no_case("КАК")), parse_identifier))(input)?;
     let (input, joins) = many0(parse_join)(input)?;
 
     Ok((
@@ -174,7 +169,7 @@ fn parse_table_source(input: &str) -> IResult<&str, TableSource> {
 fn parse_table_reference(input: &str) -> IResult<&str, TableReference> {
     alt((
         parse_subquery_reference,
-        parse_virtual_table,  // Виртуальные таблицы должны быть перед простыми регистрами
+        parse_virtual_table, // Виртуальные таблицы должны быть перед простыми регистрами
         parse_catalog_reference,
         parse_document_reference,
         parse_register_reference,
@@ -195,11 +190,7 @@ fn parse_catalog_reference(input: &str) -> IResult<&str, TableReference> {
 
 fn parse_document_reference(input: &str) -> IResult<&str, TableReference> {
     map(
-        separated_pair(
-            ws(tag_no_case("Документ")),
-            ws(char('.')),
-            parse_identifier,
-        ),
+        separated_pair(ws(tag_no_case("Документ")), ws(char('.')), parse_identifier),
         |(_, name)| TableReference::Document("Документ".to_string(), name.to_string()),
     )(input)
 }
@@ -264,14 +255,9 @@ fn parse_virtual_parameter(input: &str) -> IResult<&str, VirtualTableParameter> 
 }
 
 fn parse_subquery_reference(input: &str) -> IResult<&str, TableReference> {
-    map(
-        delimited(
-            ws(char('(')),
-            parse_query,
-            ws(char(')')),
-        ),
-        |q| TableReference::Subquery(Box::new(q)),
-    )(input)
+    map(delimited(ws(char('(')), parse_query, ws(char(')'))), |q| {
+        TableReference::Subquery(Box::new(q))
+    })(input)
 }
 
 fn parse_simple_table(input: &str) -> IResult<&str, TableReference> {
@@ -284,10 +270,7 @@ fn parse_join(input: &str) -> IResult<&str, Join> {
     let (input, join_type) = parse_join_type(input)?;
     let (input, _) = ws(tag_no_case("СОЕДИНЕНИЕ"))(input)?;
     let (input, table) = parse_table_source(input)?;
-    let (input, condition) = opt(preceded(
-        ws(tag_no_case("ПО")),
-        parse_expression,
-    ))(input)?;
+    let (input, condition) = opt(preceded(ws(tag_no_case("ПО")), parse_expression))(input)?;
 
     Ok((
         input,
@@ -335,15 +318,10 @@ fn parse_having_clause(input: &str) -> IResult<&str, HavingClause> {
 fn parse_order_by_clause(input: &str) -> IResult<&str, OrderByClause> {
     let (input, _) = ws(tag_no_case("УПОРЯДОЧИТЬ ПО"))(input)?;
     let (input, items) = separated_list1(ws(char(',')), parse_order_by_item)(input)?;
-    let (input, auto_order) = map(
-        opt(ws(tag_no_case("АВТОУПОРЯДОЧИВАНИЕ"))),
-        |o| o.is_some(),
-    )(input)?;
+    let (input, auto_order) =
+        map(opt(ws(tag_no_case("АВТОУПОРЯДОЧИВАНИЕ"))), |o| o.is_some())(input)?;
 
-    Ok((
-        input,
-        OrderByClause { items, auto_order },
-    ))
+    Ok((input, OrderByClause { items, auto_order }))
 }
 
 fn parse_order_by_item(input: &str) -> IResult<&str, OrderByItem> {
@@ -367,10 +345,7 @@ fn parse_totals_clause(input: &str) -> IResult<&str, TotalsClause> {
     let (input, _fields) = separated_list1(ws(char(',')), parse_expression)(input)?;
     let (input, _) = ws(tag_no_case("ПО"))(input)?;
     let (input, overall) = map(opt(ws(tag_no_case("ОБЩИЕ"))), |o| o.is_some())(input)?;
-    let (input, by_fields) = separated_list0(
-        ws(char(',')),
-        parse_identifier,
-    )(input)?;
+    let (input, by_fields) = separated_list0(ws(char(',')), parse_identifier)(input)?;
 
     Ok((
         input,
@@ -403,34 +378,37 @@ fn parse_expression(input: &str) -> IResult<&str, Expression> {
 
 fn parse_or_expression(input: &str) -> IResult<&str, Expression> {
     let (input, left) = parse_and_expression(input)?;
-    
+
     // Проверяем, не является ли следующее слово ключевым словом запроса
     if is_query_keyword_ahead(input) {
         return Ok((input, left));
     }
-    
+
     let (input, exprs) = many0(preceded(ws(tag_no_case("ИЛИ")), parse_and_expression))(input)?;
-    Ok((input, exprs.into_iter().fold(left, |acc, expr| {
-        Expression::BinaryOp(Box::new(acc), BinaryOperator::Or, Box::new(expr))
-    })))
+    Ok((
+        input,
+        exprs.into_iter().fold(left, |acc, expr| {
+            Expression::BinaryOp(Box::new(acc), BinaryOperator::Or, Box::new(expr))
+        }),
+    ))
 }
 
 fn parse_and_expression(input: &str) -> IResult<&str, Expression> {
     let (input, left) = parse_not_expression(input)?;
-    
+
     // Проверяем, не является ли следующее слово ключевым словом запроса
     if is_query_keyword_ahead(input) {
         return Ok((input, left));
     }
-    
-    let (input, exprs) = many0(preceded(
-        ws(parse_keyword_and), 
-        parse_not_expression
-    ))(input)?;
-    
-    Ok((input, exprs.into_iter().fold(left, |acc, expr| {
-        Expression::BinaryOp(Box::new(acc), BinaryOperator::And, Box::new(expr))
-    })))
+
+    let (input, exprs) = many0(preceded(ws(parse_keyword_and), parse_not_expression))(input)?;
+
+    Ok((
+        input,
+        exprs.into_iter().fold(left, |acc, expr| {
+            Expression::BinaryOp(Box::new(acc), BinaryOperator::And, Box::new(expr))
+        }),
+    ))
 }
 
 fn parse_not_expression(input: &str) -> IResult<&str, Expression> {
@@ -445,15 +423,18 @@ fn parse_not_expression(input: &str) -> IResult<&str, Expression> {
 
 fn parse_comparison_expression(input: &str) -> IResult<&str, Expression> {
     let (input, left) = parse_additive_expression(input)?;
-    
+
     // Try BETWEEN
     if let Ok((rest, _)) = ws(tag_no_case("МЕЖДУ"))(input) {
         let (rest, lower) = parse_additive_expression(rest)?;
         let (rest, _) = ws(tag_no_case("И"))(rest)?;
         let (rest, upper) = parse_additive_expression(rest)?;
-        return Ok((rest, Expression::Between(Box::new(left), Box::new(lower), Box::new(upper))));
+        return Ok((
+            rest,
+            Expression::Between(Box::new(left), Box::new(lower), Box::new(upper)),
+        ));
     }
-    
+
     // Try IN - проверяем, что "В" - это отдельное слово
     if let Ok((rest, _)) = parse_keyword_in(input) {
         let (rest, list) = delimited(
@@ -463,7 +444,7 @@ fn parse_comparison_expression(input: &str) -> IResult<&str, Expression> {
         )(rest)?;
         return Ok((rest, Expression::In(Box::new(left), list)));
     }
-    
+
     // Try comparison operators
     if let Ok((rest, op)) = alt((
         value(BinaryOperator::Equal, ws(char('='))),
@@ -473,11 +454,15 @@ fn parse_comparison_expression(input: &str) -> IResult<&str, Expression> {
         value(BinaryOperator::Less, ws(char('<'))),
         value(BinaryOperator::Greater, ws(char('>'))),
         value(BinaryOperator::Like, ws(tag_no_case("ПОДОБНО"))),
-    ))(input) {
+    ))(input)
+    {
         let (rest, right) = parse_additive_expression(rest)?;
-        return Ok((rest, Expression::BinaryOp(Box::new(left), op, Box::new(right))));
+        return Ok((
+            rest,
+            Expression::BinaryOp(Box::new(left), op, Box::new(right)),
+        ));
     }
-    
+
     Ok((input, left))
 }
 
@@ -490,10 +475,13 @@ fn parse_additive_expression(input: &str) -> IResult<&str, Expression> {
         )),
         parse_multiplicative_expression,
     )))(input)?;
-    
-    Ok((input, ops.into_iter().fold(left, |acc, (op, right)| {
-        Expression::BinaryOp(Box::new(acc), op, Box::new(right))
-    })))
+
+    Ok((
+        input,
+        ops.into_iter().fold(left, |acc, (op, right)| {
+            Expression::BinaryOp(Box::new(acc), op, Box::new(right))
+        }),
+    ))
 }
 
 fn parse_multiplicative_expression(input: &str) -> IResult<&str, Expression> {
@@ -505,27 +493,29 @@ fn parse_multiplicative_expression(input: &str) -> IResult<&str, Expression> {
         )),
         parse_unary_expression,
     )))(input)?;
-    
-    Ok((input, ops.into_iter().fold(left, |acc, (op, right)| {
-        Expression::BinaryOp(Box::new(acc), op, Box::new(right))
-    })))
+
+    Ok((
+        input,
+        ops.into_iter().fold(left, |acc, (op, right)| {
+            Expression::BinaryOp(Box::new(acc), op, Box::new(right))
+        }),
+    ))
 }
 
 fn parse_unary_expression(input: &str) -> IResult<&str, Expression> {
     alt((
-        map(
-            preceded(ws(char('-')), parse_unary_expression),
-            |expr| Expression::UnaryOp(UnaryOperator::Minus, Box::new(expr)),
-        ),
+        map(preceded(ws(char('-')), parse_unary_expression), |expr| {
+            Expression::UnaryOp(UnaryOperator::Minus, Box::new(expr))
+        }),
         parse_postfix_expression,
     ))(input)
 }
 
 fn parse_postfix_expression(input: &str) -> IResult<&str, Expression> {
     let (input, expr) = parse_primary_expression(input)?;
-    
+
     let (input, fields) = many0(preceded(ws(char('.')), parse_identifier))(input)?;
-    
+
     let expr = fields.into_iter().fold(expr, |acc, field| {
         if let Expression::Field(table) = acc {
             Expression::QualifiedField(table, field.to_string())
@@ -652,38 +642,48 @@ fn parse_function_call(input: &str) -> IResult<&str, Expression> {
 }
 
 fn parse_parameter(input: &str) -> IResult<&str, Expression> {
-    map(
-        preceded(ws(char('&')), parse_identifier),
-        |name| Expression::Parameter(name.to_string()),
-    )(input)
+    map(preceded(ws(char('&')), parse_identifier), |name| {
+        Expression::Parameter(name.to_string())
+    })(input)
 }
 
 fn parse_subquery_expression(input: &str) -> IResult<&str, Expression> {
-    map(
-        delimited(ws(char('(')), parse_query, ws(char(')'))),
-        |q| Expression::Subquery(Box::new(q)),
-    )(input)
+    map(delimited(ws(char('(')), parse_query, ws(char(')'))), |q| {
+        Expression::Subquery(Box::new(q))
+    })(input)
 }
 
 fn parse_literal(input: &str) -> IResult<&str, Expression> {
     alt((
-        map(parse_string_literal, |s| Expression::Literal(Literal::String(s))),
-        map(parse_number_literal, |n| Expression::Literal(Literal::Number(n))),
-        map(parse_date_literal, |d| Expression::Literal(Literal::Date(d))),
-        value(Expression::Literal(Literal::Boolean(true)), ws(tag_no_case("ИСТИНА"))),
-        value(Expression::Literal(Literal::Boolean(false)), ws(tag_no_case("ЛОЖЬ"))),
+        map(parse_string_literal, |s| {
+            Expression::Literal(Literal::String(s))
+        }),
+        map(parse_number_literal, |n| {
+            Expression::Literal(Literal::Number(n))
+        }),
+        map(parse_date_literal, |d| {
+            Expression::Literal(Literal::Date(d))
+        }),
+        value(
+            Expression::Literal(Literal::Boolean(true)),
+            ws(tag_no_case("ИСТИНА")),
+        ),
+        value(
+            Expression::Literal(Literal::Boolean(false)),
+            ws(tag_no_case("ЛОЖЬ")),
+        ),
         value(Expression::Literal(Literal::Null), ws(tag_no_case("NULL"))),
-        value(Expression::Literal(Literal::Undefined), ws(tag_no_case("НЕОПРЕДЕЛЕНО"))),
+        value(
+            Expression::Literal(Literal::Undefined),
+            ws(tag_no_case("НЕОПРЕДЕЛЕНО")),
+        ),
     ))(input)
 }
 
 fn parse_string_literal(input: &str) -> IResult<&str, String> {
     delimited(
         char('"'),
-        map(
-            take_till(|c| c == '"'),
-            |s: &str| s.to_string(),
-        ),
+        map(take_till(|c| c == '"'), |s: &str| s.to_string()),
         char('"'),
     )(input)
 }
@@ -729,7 +729,7 @@ where
 fn parse_keyword_and(input: &str) -> IResult<&str, &str> {
     let (input, _) = multispace0(input)?;
     let (input, keyword) = tag_no_case("И")(input)?;
-    
+
     // Проверяем, что после "И" идёт пробел или конец строки
     // (т.е. это не часть другого слова как "ИЗ")
     if let Some(next_char) = input.chars().next() {
@@ -740,7 +740,7 @@ fn parse_keyword_and(input: &str) -> IResult<&str, &str> {
             )));
         }
     }
-    
+
     Ok((input, keyword))
 }
 
@@ -748,7 +748,7 @@ fn parse_keyword_and(input: &str) -> IResult<&str, &str> {
 fn parse_keyword_in(input: &str) -> IResult<&str, &str> {
     let (input, _) = multispace0(input)?;
     let (input, keyword) = tag_no_case("В")(input)?;
-    
+
     // Проверяем, что после "В" идёт пробел или '('
     // (т.е. это не часть другого слова)
     if let Some(next_char) = input.chars().next() {
@@ -759,34 +759,45 @@ fn parse_keyword_in(input: &str) -> IResult<&str, &str> {
             )));
         }
     }
-    
+
     Ok((input, keyword))
 }
 
 // Проверяет, является ли следующее слово ключевым словом запроса
 fn is_query_keyword_ahead(input: &str) -> bool {
     let trimmed = input.trim_start();
-    
+
     // Список ключевых слов, которые должны прерывать парсинг выражений
     let keywords = [
-        "ИЗ", "ГДЕ", "СГРУППИРОВАТЬ", "ИМЕЮЩИЕ", "УПОРЯДОЧИТЬ", 
-        "ИТОГИ", "ОБЪЕДИНИТЬ", "КАК", "ЛЕВОЕ", "ПРАВОЕ", "ПОЛНОЕ", 
-        "ВНУТРЕННЕЕ", "СОЕДИНЕНИЕ", "ПО"
+        "ИЗ",
+        "ГДЕ",
+        "СГРУППИРОВАТЬ",
+        "ИМЕЮЩИЕ",
+        "УПОРЯДОЧИТЬ",
+        "ИТОГИ",
+        "ОБЪЕДИНИТЬ",
+        "КАК",
+        "ЛЕВОЕ",
+        "ПРАВОЕ",
+        "ПОЛНОЕ",
+        "ВНУТРЕННЕЕ",
+        "СОЕДИНЕНИЕ",
+        "ПО",
     ];
-    
+
     for keyword in &keywords {
         if let Some(after_keyword) = trimmed.strip_prefix(keyword) {
             // Проверяем, что это отдельное слово
-            if after_keyword.is_empty() || 
-               !after_keyword.chars().next().unwrap_or(' ').is_alphabetic() {
+            if after_keyword.is_empty()
+                || !after_keyword.chars().next().unwrap_or(' ').is_alphabetic()
+            {
                 return true;
             }
         }
     }
-    
+
     false
 }
-
 
 #[cfg(test)]
 mod tests {

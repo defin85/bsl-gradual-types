@@ -42,7 +42,7 @@ pub struct TableSource {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TableReference {
     Table(String),
-    Catalog(String, String), // Справочник.Контрагенты
+    Catalog(String, String),  // Справочник.Контрагенты
     Document(String, String), // Документ.ПоступлениеТоваровУслуг
     Register(String, String), // РегистрСведений.КурсыВалют
     VirtualTable(String, String, Vec<VirtualTableParameter>),

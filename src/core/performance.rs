@@ -3,9 +3,9 @@
 //! Предоставляет инструменты для измерения и оптимизации производительности
 //! различных компонентов системы типов.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use serde::{Serialize, Deserialize};
 
 /// Метрики производительности для компонента
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,12 +38,12 @@ impl ComponentMetrics {
             recent_times: Vec::new(),
         }
     }
-    
+
     /// Добавить новое измерение
     pub fn add_measurement(&mut self, time: Duration) {
         self.total_time += time;
         self.call_count += 1;
-        
+
         // Обновляем min/max
         if time < self.min_time {
             self.min_time = time;
@@ -51,26 +51,26 @@ impl ComponentMetrics {
         if time > self.max_time {
             self.max_time = time;
         }
-        
+
         // Пересчитываем среднее
         self.avg_time = self.total_time / self.call_count as u32;
-        
+
         // Обновляем последние измерения
         self.recent_times.push(time);
         if self.recent_times.len() > 10 {
             self.recent_times.remove(0);
         }
     }
-    
+
     /// Получить процентиль времени выполнения
     pub fn get_percentile(&self, percentile: f64) -> Duration {
         if self.recent_times.is_empty() {
             return Duration::ZERO;
         }
-        
+
         let mut sorted_times = self.recent_times.clone();
         sorted_times.sort();
-        
+
         let index = ((sorted_times.len() - 1) as f64 * percentile / 100.0) as usize;
         sorted_times[index]
     }
@@ -101,18 +101,18 @@ impl PerformanceProfiler {
             session_start: Instant::now(),
         }
     }
-    
+
     /// Включить профилирование
     pub fn enable(&mut self) {
         self.enabled = true;
         self.session_start = Instant::now();
     }
-    
+
     /// Выключить профилирование
     pub fn disable(&mut self) {
         self.enabled = false;
     }
-    
+
     /// Измерить время выполнения блока кода
     pub fn measure<F, R>(&mut self, component: &str, func: F) -> R
     where
@@ -121,19 +121,21 @@ impl PerformanceProfiler {
         if !self.enabled {
             return func();
         }
-        
+
         let start = Instant::now();
         let result = func();
         let elapsed = start.elapsed();
-        
+
         // Добавляем измерение
-        let metrics = self.metrics.entry(component.to_string())
+        let metrics = self
+            .metrics
+            .entry(component.to_string())
             .or_insert_with(|| ComponentMetrics::new(component.to_string()));
         metrics.add_measurement(elapsed);
-        
+
         result
     }
-    
+
     /// Создать таймер для ручного измерения
     pub fn start_timer(&self, component: &str) -> PerformanceTimer {
         PerformanceTimer {
@@ -142,70 +144,74 @@ impl PerformanceProfiler {
             enabled: self.enabled,
         }
     }
-    
+
     /// Получить метрики для компонента
     pub fn get_metrics(&self, component: &str) -> Option<&ComponentMetrics> {
         self.metrics.get(component)
     }
-    
+
     /// Получить все метрики
     pub fn get_all_metrics(&self) -> &HashMap<String, ComponentMetrics> {
         &self.metrics
     }
-    
+
     /// Сгенерировать отчет о производительности
     pub fn generate_report(&self) -> PerformanceReport {
         let mut total_time = Duration::ZERO;
         let mut total_calls = 0;
-        
+
         for metrics in self.metrics.values() {
             total_time += metrics.total_time;
             total_calls += metrics.call_count;
         }
-        
+
         PerformanceReport {
             session_duration: self.session_start.elapsed(),
             total_analysis_time: total_time,
             total_calls,
-            avg_call_time: if total_calls > 0 { 
-                total_time / total_calls as u32 
-            } else { 
-                Duration::ZERO 
+            avg_call_time: if total_calls > 0 {
+                total_time / total_calls as u32
+            } else {
+                Duration::ZERO
             },
             components: self.metrics.clone(),
             slowest_components: self.get_slowest_components(5),
             most_called_components: self.get_most_called_components(5),
         }
     }
-    
+
     /// Получить самые медленные компоненты
     fn get_slowest_components(&self, limit: usize) -> Vec<(String, Duration)> {
-        let mut components: Vec<_> = self.metrics.iter()
+        let mut components: Vec<_> = self
+            .metrics
+            .iter()
             .map(|(name, metrics)| (name.clone(), metrics.avg_time))
             .collect();
-        
+
         components.sort_by(|a, b| b.1.cmp(&a.1));
         components.truncate(limit);
         components
     }
-    
+
     /// Получить самые вызываемые компоненты
     fn get_most_called_components(&self, limit: usize) -> Vec<(String, usize)> {
-        let mut components: Vec<_> = self.metrics.iter()
+        let mut components: Vec<_> = self
+            .metrics
+            .iter()
             .map(|(name, metrics)| (name.clone(), metrics.call_count))
             .collect();
-        
+
         components.sort_by(|a, b| b.1.cmp(&a.1));
         components.truncate(limit);
         components
     }
-    
+
     /// Очистить все метрики
     pub fn reset(&mut self) {
         self.metrics.clear();
         self.session_start = Instant::now();
     }
-    
+
     /// Экспортировать метрики в JSON
     pub fn export_json(&self) -> anyhow::Result<String> {
         let report = self.generate_report();
@@ -226,9 +232,11 @@ impl PerformanceTimer {
         if !self.enabled {
             return;
         }
-        
+
         let elapsed = self.start_time.elapsed();
-        let metrics = profiler.metrics.entry(self.component.clone())
+        let metrics = profiler
+            .metrics
+            .entry(self.component.clone())
             .or_insert_with(|| ComponentMetrics::new(self.component));
         metrics.add_measurement(elapsed);
     }
@@ -257,32 +265,40 @@ impl PerformanceReport {
     /// Форматировать отчет в человекочитаемый вид
     pub fn format_human_readable(&self) -> String {
         let mut report = String::new();
-        
+
         report.push_str("🔍 Отчет о производительности BSL Type System\n");
         report.push_str(&format!("📊 Сессия: {:.2?}\n", self.session_duration));
-        report.push_str(&format!("⏱️  Общее время анализа: {:.2?}\n", self.total_analysis_time));
-        report.push_str(&format!("🔢 Общее количество вызовов: {}\n", self.total_calls));
-        report.push_str(&format!("📈 Среднее время вызова: {:.2?}\n\n", self.avg_call_time));
-        
+        report.push_str(&format!(
+            "⏱️  Общее время анализа: {:.2?}\n",
+            self.total_analysis_time
+        ));
+        report.push_str(&format!(
+            "🔢 Общее количество вызовов: {}\n",
+            self.total_calls
+        ));
+        report.push_str(&format!(
+            "📈 Среднее время вызова: {:.2?}\n\n",
+            self.avg_call_time
+        ));
+
         report.push_str("🐌 Самые медленные компоненты:\n");
         for (i, (name, time)) in self.slowest_components.iter().enumerate() {
             report.push_str(&format!("  {}. {} - {:.2?}\n", i + 1, name, time));
         }
-        
+
         report.push_str("\n🔥 Самые вызываемые компоненты:\n");
         for (i, (name, count)) in self.most_called_components.iter().enumerate() {
             report.push_str(&format!("  {}. {} - {} вызовов\n", i + 1, name, count));
         }
-        
+
         report.push_str("\n📋 Детальные метрики:\n");
         for (name, metrics) in &self.components {
             report.push_str(&format!(
                 "  • {}: {:.2?} avg, {} calls, {:.2?}-{:.2?} range\n",
-                name, metrics.avg_time, metrics.call_count, 
-                metrics.min_time, metrics.max_time
+                name, metrics.avg_time, metrics.call_count, metrics.min_time, metrics.max_time
             ));
         }
-        
+
         report
     }
 }
@@ -329,7 +345,7 @@ impl PerformanceOptimizer {
     /// Проанализировать метрики и дать рекомендации
     pub fn analyze_and_suggest(report: &PerformanceReport) -> Vec<OptimizationSuggestion> {
         let mut suggestions = Vec::new();
-        
+
         // Проверяем медленные компоненты
         for (component, avg_time) in &report.slowest_components {
             if avg_time.as_millis() > 100 {
@@ -344,7 +360,7 @@ impl PerformanceOptimizer {
                 });
             }
         }
-        
+
         // Проверяем часто вызываемые компоненты
         for (component, call_count) in &report.most_called_components {
             if *call_count > 1000 {
@@ -363,7 +379,7 @@ impl PerformanceOptimizer {
                 }
             }
         }
-        
+
         // Проверяем общую производительность
         if report.avg_call_time.as_millis() > 50 {
             suggestions.push(OptimizationSuggestion {
@@ -376,14 +392,14 @@ impl PerformanceOptimizer {
                 priority: OptimizationPriority::Medium,
             });
         }
-        
+
         suggestions
     }
-    
+
     /// Получить рекомендации по кешированию
     pub fn cache_recommendations(report: &PerformanceReport) -> Vec<CacheRecommendation> {
         let mut recommendations = Vec::new();
-        
+
         for (component, metrics) in &report.components {
             // Рекомендуем кеширование для медленных и часто вызываемых компонентов
             if metrics.call_count > 100 && metrics.avg_time.as_millis() > 20 {
@@ -398,7 +414,7 @@ impl PerformanceOptimizer {
                 });
             }
         }
-        
+
         recommendations
     }
 }
@@ -433,8 +449,8 @@ pub struct CacheRecommendation {
 /// Стратегия кеширования
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CacheStrategy {
-    LRU,      // Least Recently Used
-    TTL,      // Time To Live
+    LRU,          // Least Recently Used
+    TTL,          // Time To Live
     WriteThrough, // Write-through cache
     WriteBack,    // Write-back cache
 }
@@ -446,45 +462,49 @@ impl BenchmarkSuite {
     /// Запустить бенчмарк парсинга
     pub fn benchmark_parsing(source_code: &str, iterations: usize) -> ComponentMetrics {
         let mut metrics = ComponentMetrics::new("parsing".to_string());
-        
+
         for _ in 0..iterations {
             let start = Instant::now();
-            
+
             let mut parser = crate::parser::common::ParserFactory::create();
             let _result = parser.parse(source_code);
-            
+
             metrics.add_measurement(start.elapsed());
         }
-        
+
         metrics
     }
-    
+
     /// Запустить бенчмарк type checking
-    pub fn benchmark_type_checking(program: &crate::parser::ast::Program, iterations: usize) -> ComponentMetrics {
+    pub fn benchmark_type_checking(
+        program: &crate::parser::ast::Program,
+        iterations: usize,
+    ) -> ComponentMetrics {
         let mut metrics = ComponentMetrics::new("type_checking".to_string());
-        
+
         for _ in 0..iterations {
             let start = Instant::now();
-            
-            let type_checker = crate::core::type_checker::TypeChecker::new("benchmark.bsl".to_string());
+
+            let type_checker =
+                crate::core::type_checker::TypeChecker::new("benchmark.bsl".to_string());
             let _result = type_checker.check(program);
-            
+
             metrics.add_measurement(start.elapsed());
         }
-        
+
         metrics
     }
-    
+
     /// Запустить бенчмарк flow-sensitive анализа
     pub fn benchmark_flow_analysis(
-        program: &crate::parser::ast::Program, 
-        iterations: usize
+        program: &crate::parser::ast::Program,
+        iterations: usize,
     ) -> ComponentMetrics {
         let mut metrics = ComponentMetrics::new("flow_analysis".to_string());
-        
+
         for _ in 0..iterations {
             let start = Instant::now();
-            
+
             // Создаем базовый контекст
             let context = crate::core::type_checker::TypeContext {
                 variables: std::collections::HashMap::new(),
@@ -492,25 +512,25 @@ impl BenchmarkSuite {
                 current_scope: crate::core::dependency_graph::Scope::Global,
                 scope_stack: vec![],
             };
-            
+
             let mut analyzer = crate::core::flow_sensitive::FlowSensitiveAnalyzer::new(context);
-            
+
             // Анализируем все statements
             for statement in &program.statements {
                 analyzer.analyze_statement(statement);
             }
-            
+
             metrics.add_measurement(start.elapsed());
         }
-        
+
         metrics
     }
-    
+
     /// Запустить полный набор бенчмарков
     pub fn run_full_benchmark_suite() -> PerformanceReport {
         let mut profiler = PerformanceProfiler::new();
         profiler.enable();
-        
+
         // Тестовый код для бенчмарков
         let test_code = r#"
             Функция ТестоваяФункция(параметр1, параметр2)
@@ -529,25 +549,31 @@ impl BenchmarkSuite {
                 КонецЦикла;
             КонецПроцедуры
         "#;
-        
+
         // Парсинг
         let parsing_metrics = Self::benchmark_parsing(test_code, 50);
-        
+
         // Парсим один раз для получения AST
         let mut parser = crate::parser::common::ParserFactory::create();
         if let Ok(program) = parser.parse(test_code) {
             // Type checking
             let type_checking_metrics = Self::benchmark_type_checking(&program, 20);
-            
+
             // Flow analysis
             let flow_metrics = Self::benchmark_flow_analysis(&program, 20);
-            
+
             // Добавляем метрики в профайлер
-            profiler.metrics.insert("parsing".to_string(), parsing_metrics);
-            profiler.metrics.insert("type_checking".to_string(), type_checking_metrics);
-            profiler.metrics.insert("flow_analysis".to_string(), flow_metrics);
+            profiler
+                .metrics
+                .insert("parsing".to_string(), parsing_metrics);
+            profiler
+                .metrics
+                .insert("type_checking".to_string(), type_checking_metrics);
+            profiler
+                .metrics
+                .insert("flow_analysis".to_string(), flow_metrics);
         }
-        
+
         profiler.generate_report()
     }
 }
@@ -555,60 +581,60 @@ impl BenchmarkSuite {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_component_metrics() {
         let mut metrics = ComponentMetrics::new("test".to_string());
-        
+
         metrics.add_measurement(Duration::from_millis(10));
         metrics.add_measurement(Duration::from_millis(20));
         metrics.add_measurement(Duration::from_millis(15));
-        
+
         assert_eq!(metrics.call_count, 3);
         assert_eq!(metrics.avg_time, Duration::from_millis(15));
         assert_eq!(metrics.min_time, Duration::from_millis(10));
         assert_eq!(metrics.max_time, Duration::from_millis(20));
     }
-    
+
     #[test]
     fn test_performance_profiler() {
         let mut profiler = PerformanceProfiler::new();
         profiler.enable();
-        
+
         let result = profiler.measure("test_component", || {
             std::thread::sleep(Duration::from_millis(1));
             42
         });
-        
+
         assert_eq!(result, 42);
-        
+
         let metrics = profiler.get_metrics("test_component").unwrap();
         assert_eq!(metrics.call_count, 1);
         assert!(metrics.avg_time.as_millis() >= 1);
     }
-    
+
     #[test]
     fn test_performance_timer() {
         let mut profiler = PerformanceProfiler::new();
         profiler.enable();
-        
+
         let timer = profiler.start_timer("manual_test");
         std::thread::sleep(Duration::from_millis(1));
         timer.finish(&mut profiler);
-        
+
         let metrics = profiler.get_metrics("manual_test").unwrap();
         assert_eq!(metrics.call_count, 1);
     }
-    
+
     #[test]
     fn test_benchmark_suite() {
         let simple_code = "Процедура Тест() КонецПроцедуры";
         let metrics = BenchmarkSuite::benchmark_parsing(simple_code, 5);
-        
+
         assert_eq!(metrics.call_count, 5);
         assert!(metrics.avg_time.as_nanos() > 0);
     }
-    
+
     #[test]
     fn test_optimization_suggestions() {
         // Создаем отчет с медленным компонентом
@@ -616,7 +642,7 @@ mod tests {
         let mut slow_metrics = ComponentMetrics::new("slow_component".to_string());
         slow_metrics.add_measurement(Duration::from_millis(200));
         components.insert("slow_component".to_string(), slow_metrics);
-        
+
         let report = PerformanceReport {
             session_duration: Duration::from_secs(60),
             total_analysis_time: Duration::from_millis(200),
@@ -626,7 +652,7 @@ mod tests {
             slowest_components: vec![("slow_component".to_string(), Duration::from_millis(200))],
             most_called_components: vec![],
         };
-        
+
         let suggestions = PerformanceOptimizer::analyze_and_suggest(&report);
         assert!(!suggestions.is_empty());
         assert_eq!(suggestions[0].priority, OptimizationPriority::High);

@@ -11,29 +11,31 @@ struct Args {
     /// Configuration path
     #[arg(short, long)]
     config: String,
-    
+
     /// Platform version
     #[arg(short = 'v', long, default_value = "8.3.25")]
     platform_version: String,
-    
+
     /// Output path
     #[arg(short, long)]
     output: Option<String>,
 }
 
+use bsl_gradual_types::architecture::data::TypeRepository;
+
 fn main() -> Result<()> {
     let args = Args::parse();
-    
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
-    
+
+    TypeRepository::check_version();
+
+    tracing_subscriber::fmt().with_env_filter("info").init();
+
     info!("Building type index from: {}", args.config);
     info!("Platform version: {}", args.platform_version);
-    
+
     // TODO: Implement index building
-    
+
     info!("Index building complete");
-    
+
     Ok(())
 }

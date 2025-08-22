@@ -3,13 +3,13 @@
 //! Этот модуль предоставляет инструменты для мониторинга и оптимизации
 //! использования памяти при анализе больших проектов 1С.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::mem;
-use serde::{Serialize, Deserialize};
+use std::sync::Arc;
 
-use crate::core::types::TypeResolution;
 use crate::core::type_checker::TypeContext;
+use crate::core::types::TypeResolution;
 
 /// Профиль использования памяти
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,33 +90,35 @@ impl MemoryMonitor {
             max_profiles: 100,
         }
     }
-    
+
     /// Создать снимок текущего использования памяти
     pub fn take_snapshot(&mut self, contexts: &[&TypeContext]) -> MemoryProfile {
         let mut total_memory = 0;
         let mut types_memory = 0;
         let mut context_memory = 0;
         let mut object_counts = ObjectCounts::default();
-        
+
         for context in contexts {
             // Приблизительно вычисляем размер TypeContext
-            let ctx_size = mem::size_of::<TypeContext>() +
-                context.variables.len() * (mem::size_of::<String>() + mem::size_of::<TypeResolution>()) +
-                context.functions.len() * mem::size_of::<(String, crate::core::type_checker::FunctionSignature)>();
-            
+            let ctx_size = mem::size_of::<TypeContext>()
+                + context.variables.len()
+                    * (mem::size_of::<String>() + mem::size_of::<TypeResolution>())
+                + context.functions.len()
+                    * mem::size_of::<(String, crate::core::type_checker::FunctionSignature)>();
+
             context_memory += ctx_size;
             total_memory += ctx_size;
-            
+
             // Подсчитываем объекты
             object_counts.type_contexts += 1;
             object_counts.type_resolutions += context.variables.len() + context.functions.len();
-            
+
             // Вычисляем размер типов
             for type_res in context.variables.values() {
                 types_memory += Self::estimate_type_resolution_size(type_res);
             }
         }
-        
+
         let profile = MemoryProfile {
             total_memory_bytes: total_memory,
             types_memory_bytes: types_memory,
@@ -124,65 +126,72 @@ impl MemoryMonitor {
             object_counts,
             timestamp: std::time::SystemTime::now(),
         };
-        
+
         self.profiles.push(profile.clone());
-        
+
         // Ограничиваем количество профилей
         if self.profiles.len() > self.max_profiles {
             self.profiles.remove(0);
         }
-        
+
         profile
     }
-    
+
     /// Приблизительно вычислить размер TypeResolution
     fn estimate_type_resolution_size(type_res: &TypeResolution) -> usize {
         let mut size = mem::size_of::<TypeResolution>();
-        
+
         // Добавляем размер метаданных
-        size += type_res.metadata.notes.iter()
+        size += type_res
+            .metadata
+            .notes
+            .iter()
             .map(|note| note.len())
             .sum::<usize>();
-        
+
         size
     }
-    
+
     /// Получить статистику использования памяти
     pub fn get_memory_stats(&self) -> Option<MemoryStats> {
         if self.profiles.is_empty() {
             return None;
         }
-        
+
         let latest = self.profiles.last().unwrap();
-        let peak_memory = self.profiles.iter()
+        let peak_memory = self
+            .profiles
+            .iter()
             .map(|p| p.total_memory_bytes)
             .max()
             .unwrap_or(0);
-        
+
         let avg_memory = if !self.profiles.is_empty() {
-            self.profiles.iter()
+            self.profiles
+                .iter()
                 .map(|p| p.total_memory_bytes)
-                .sum::<usize>() / self.profiles.len()
+                .sum::<usize>()
+                / self.profiles.len()
         } else {
             0
         };
-        
+
         Some(MemoryStats {
             current_memory_bytes: latest.total_memory_bytes,
             peak_memory_bytes: peak_memory,
             average_memory_bytes: avg_memory,
-            total_objects: latest.object_counts.type_resolutions + 
-                          latest.object_counts.type_contexts,
+            total_objects: latest.object_counts.type_resolutions
+                + latest.object_counts.type_contexts,
             memory_efficiency: Self::calculate_efficiency(latest),
         })
     }
-    
+
     /// Вычислить эффективность использования памяти
     fn calculate_efficiency(profile: &MemoryProfile) -> f64 {
         if profile.total_memory_bytes == 0 {
             return 1.0;
         }
-        
+
         // Эффективность = полезная память / общая память
         let useful_memory = profile.types_memory_bytes + profile.context_memory_bytes;
         useful_memory as f64 / profile.total_memory_bytes as f64
@@ -213,11 +222,11 @@ impl StringInterner {
             saved_bytes: 0,
         }
     }
-    
+
     /// Интернировать строку
     pub fn intern(&mut self, s: &str) -> Arc<str> {
         self.total_strings += 1;
-        
+
         if let Some(interned) = self.strings.get(s) {
             self.saved_bytes += s.len();
             interned.clone()
@@ -227,7 +236,7 @@ impl StringInterner {
             arc_str
         }
     }
-    
+
     /// Получить статистику интернирования
     pub fn get_stats(&self) -> StringInterningStats {
         StringInterningStats {
@@ -289,12 +298,12 @@ impl MemoryOptimizationManager {
             interner: StringInterner::new(),
         }
     }
-    
+
     /// Получить отчет об оптимизации
     pub fn generate_optimization_report(&self) -> MemoryOptimizationReport {
         let memory_stats = self.monitor.get_memory_stats();
         let string_stats = self.interner.get_stats();
-        
+
         MemoryOptimizationReport {
             memory_stats,
             string_interning_stats: string_stats,
@@ -315,21 +324,21 @@ impl MemoryOptimizationReport {
     /// Форматировать отчет
     pub fn format_human_readable(&self) -> String {
         let mut report = String::new();
-        
+
         report.push_str("🧠 Отчет об оптимизации памяти\n\n");
-        
+
         if let Some(ref stats) = self.memory_stats {
             report.push_str(&stats.format());
             report.push('\n');
         }
-        
+
         report.push_str(&format!(
             "\n💾 Общая экономия: {:.2} KB\n\n",
             self.total_saved_bytes as f64 / 1024.0
         ));
-        
+
         report.push_str(&self.string_interning_stats.format());
-        
+
         report
     }
 }
@@ -338,16 +347,18 @@ impl MemoryOptimizationReport {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    
+
     fn create_test_context() -> TypeContext {
         let mut variables = HashMap::new();
-        variables.insert("var1".to_string(), crate::core::standard_types::primitive_type(
-            crate::core::types::PrimitiveType::String
-        ));
-        variables.insert("var2".to_string(), crate::core::standard_types::primitive_type(
-            crate::core::types::PrimitiveType::Number
-        ));
-        
+        variables.insert(
+            "var1".to_string(),
+            crate::core::standard_types::primitive_type(crate::core::types::PrimitiveType::String),
+        );
+        variables.insert(
+            "var2".to_string(),
+            crate::core::standard_types::primitive_type(crate::core::types::PrimitiveType::Number),
+        );
+
         TypeContext {
             variables,
             functions: HashMap::new(),
@@ -355,43 +366,45 @@ mod tests {
             scope_stack: vec![],
         }
     }
-    
+
     #[test]
     fn test_memory_monitor() {
         let mut monitor = MemoryMonitor::new();
         let context = create_test_context();
-        
+
         let profile = monitor.take_snapshot(&[&context]);
-        
+
         assert!(profile.total_memory_bytes > 0);
         assert!(profile.object_counts.type_resolutions > 0);
         assert_eq!(monitor.profiles.len(), 1);
     }
-    
+
     #[test]
     fn test_string_interner() {
         let mut interner = StringInterner::new();
-        
+
         let s1 = interner.intern("test");
         let s2 = interner.intern("test");
         let s3 = interner.intern("other");
-        
+
         // Одинаковые строки должны быть тем же Arc
         assert!(Arc::ptr_eq(&s1, &s2));
         assert!(!Arc::ptr_eq(&s1, &s3));
-        
+
         let stats = interner.get_stats();
         assert_eq!(stats.unique_strings, 2);
         assert_eq!(stats.total_requests, 3);
         assert!(stats.hit_rate > 0.0);
     }
-    
+
     #[test]
     fn test_memory_optimization_manager() {
         let manager = MemoryOptimizationManager::new();
-        
+
         let report = manager.generate_optimization_report();
         // Должен создаваться без ошибок
-        assert!(report.format_human_readable().contains("🧠 Отчет об оптимизации памяти"));
+        assert!(report
+            .format_human_readable()
+            .contains("🧠 Отчет об оптимизации памяти"));
     }
 }

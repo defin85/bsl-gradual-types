@@ -7,16 +7,16 @@ use serde::Serialize;
 pub struct ProviderStatistics {
     /// Всего типов
     pub total_types: usize,
-    
+
     /// Всего методов
     pub total_methods: usize,
-    
+
     /// Всего свойств
     pub total_properties: usize,
-    
+
     /// Время последней загрузки (мс)
     pub last_load_time_ms: u64,
-    
+
     /// Использование памяти (MB)
     pub memory_usage_mb: f64,
 }
@@ -26,16 +26,16 @@ pub struct ProviderStatistics {
 pub struct InitializationStatus {
     /// Инициализируется ли система
     pub is_initializing: bool,
-    
+
     /// Процент завершения (0-100)
     pub progress_percent: u8,
-    
+
     /// Текущая операция
     pub current_operation: String,
-    
+
     /// Детали прогресса
     pub details: InitializationDetails,
-    
+
     /// Ошибки инициализации
     pub errors: Vec<String>,
 }
@@ -45,13 +45,13 @@ pub struct InitializationStatus {
 pub struct InitializationDetails {
     /// Платформенные типы
     pub platform_types: ProviderStatus,
-    
+
     /// Конфигурационные типы  
     pub configuration_types: ProviderStatus,
-    
+
     /// Индексы поиска
     pub search_indexes: ProviderStatus,
-    
+
     /// Кеш
     pub cache: ProviderStatus,
 }
@@ -61,16 +61,16 @@ pub struct InitializationDetails {
 pub struct ProviderStatus {
     /// Статус загрузки
     pub status: LoadingStatus,
-    
+
     /// Загружено элементов
     pub loaded_items: usize,
-    
+
     /// Всего элементов
     pub total_items: usize,
-    
+
     /// Время загрузки (мс)
     pub loading_time_ms: u64,
-    
+
     /// Сообщения об ошибках
     pub error_messages: Vec<String>,
 }
@@ -80,16 +80,16 @@ pub struct ProviderStatus {
 pub enum LoadingStatus {
     /// Не начата
     NotStarted,
-    
+
     /// Загружается
     Loading,
-    
+
     /// Завершена успешно
     Completed,
-    
+
     /// Завершена с ошибками
     CompletedWithErrors,
-    
+
     /// Критическая ошибка
     Failed,
 }

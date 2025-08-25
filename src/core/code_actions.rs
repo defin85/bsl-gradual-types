@@ -7,8 +7,8 @@
 #![allow(dead_code)]
 
 use crate::core::type_checker::{DiagnosticSeverity, TypeContext, TypeDiagnostic};
-use crate::core::types::{Certainty, ConcreteType, ResolutionResult, TypeResolution};
-use crate::parser::ast::Program;
+use crate::domain::types::{Certainty, ConcreteType, ResolutionResult, TypeResolution};
+use crate::parsing::bsl::ast::Program;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 

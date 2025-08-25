@@ -1,12 +1,12 @@
 //! Platform-aware type resolver
 
-use super::types::{
+use crate::domain::types::{
     Certainty, ConcreteType, FacetKind, ResolutionMetadata, ResolutionResult, ResolutionSource,
     TypeResolution,
 };
-use crate::adapters::config_parser_guided_discovery::ConfigurationGuidedParser;
-use crate::adapters::config_parser_xml::ConfigParserXml;
-use crate::adapters::platform_types_v2::PlatformTypesResolverV2;
+use crate::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
+use crate::data::loaders::config_parser_xml::ConfigParserXml;
+use crate::data::loaders::platform_types_v2::PlatformTypesResolverV2;
 use std::collections::HashMap;
 
 /// Completion item with metadata

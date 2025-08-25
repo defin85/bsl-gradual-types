@@ -617,6 +617,7 @@ impl HtmlDocumentationRenderer {
     }
 
     /// Рендеринг отдельного узла дерева
+    #[allow(clippy::only_used_in_recursion)]
     fn render_tree_node(
         &self,
         node: &InteractiveTreeNode,
@@ -791,7 +792,7 @@ impl HtmlDocumentationRenderer {
             html.push_str("<h3>Фильтры</h3>\n");
 
             for facet in &results.facets {
-                html.push_str(&format!("<div class='facet-group'>\n"));
+                html.push_str("<div class='facet-group'>\n");
                 html.push_str(&format!("<h4>{}</h4>\n", facet.name));
 
                 for value in &facet.values {
@@ -1948,11 +1949,23 @@ impl JsonDocumentationRenderer {
     }
 }
 
+impl Default for JsonDocumentationRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MarkdownDocumentationRenderer {
     pub fn new() -> Self {
         Self {
             markdown_settings: MarkdownSettings::default(),
         }
+    }
+}
+
+impl Default for MarkdownDocumentationRenderer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1964,12 +1977,24 @@ impl UiComponentLibrary {
     }
 }
 
+impl Default for UiComponentLibrary {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TemplateEngine {
     pub fn new() -> Self {
         Self {
             templates: HashMap::new(),
             settings: TemplateSettings::default(),
         }
+    }
+}
+
+impl Default for TemplateEngine {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

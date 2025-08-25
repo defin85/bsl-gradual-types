@@ -4,8 +4,8 @@
 //! через LSP inlay hints и другие механизмы визуализации типов.
 
 use crate::core::type_checker::TypeContext;
-use crate::core::types::{Certainty, ConcreteType, ResolutionResult, TypeResolution};
-use crate::parser::ast::{Expression, Program, Statement};
+use crate::domain::types::{Certainty, ConcreteType, ResolutionResult, TypeResolution};
+use crate::parsing::bsl::ast::{Expression, Program, Statement};
 use tower_lsp::lsp_types::*;
 
 /// Поставщик type hints для LSP

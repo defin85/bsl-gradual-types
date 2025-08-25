@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::core::types::{
+use crate::domain::types::{
     Attribute, Certainty, ConcreteType, ConfigurationType, MetadataKind, ResolutionMetadata,
     ResolutionResult, ResolutionSource, TabularSection, TypeResolution,
 };
@@ -163,7 +163,7 @@ impl ConfigurationQuickXmlParser {
         let mut buf = Vec::new();
         let mut in_properties = false;
         let mut in_child_objects = false;
-        let mut in_internal_info = false;
+        let mut _in_internal_info = false;
         let mut current_element = String::new();
         let mut current_attribute: Option<AttributeInfo> = None;
         let mut current_tabular_section: Option<TabularSectionInfo> = None;
@@ -176,7 +176,7 @@ impl ConfigurationQuickXmlParser {
                     match tag_name.as_str() {
                         "Properties" => in_properties = true,
                         "ChildObjects" => in_child_objects = true,
-                        "InternalInfo" => in_internal_info = true,
+                        "InternalInfo" => _in_internal_info = true,
                         "Attribute" if in_child_objects => {
                             current_attribute = Some(AttributeInfo {
                                 name: String::new(),
@@ -218,19 +218,16 @@ impl ConfigurationQuickXmlParser {
                     let text = e.unescape()?.into_owned();
 
                     if in_properties && !text.trim().is_empty() {
-                        match current_element.as_str() {
-                            "Name" => metadata.name = text,
-                            _ => {}
+                        if current_element.as_str() == "Name" {
+                            metadata.name = text;
                         }
                     } else if let Some(ref mut attr) = current_attribute {
-                        match current_element.as_str() {
-                            "Name" => attr.name = text,
-                            _ => {}
+                        if current_element.as_str() == "Name" {
+                            attr.name = text;
                         }
                     } else if let Some(ref mut ts) = current_tabular_section {
-                        match current_element.as_str() {
-                            "Name" => ts.name = text,
-                            _ => {}
+                        if current_element.as_str() == "Name" {
+                            ts.name = text;
                         }
                     }
                 }
@@ -240,7 +237,7 @@ impl ConfigurationQuickXmlParser {
                     match tag_name.as_str() {
                         "Properties" => in_properties = false,
                         "ChildObjects" => in_child_objects = false,
-                        "InternalInfo" => in_internal_info = false,
+                        "InternalInfo" => _in_internal_info = false,
                         "Attribute" if in_child_objects => {
                             if let Some(attr) = current_attribute.take() {
                                 if !attr.name.is_empty() {

@@ -21,6 +21,5 @@ pub mod type_checker;
 pub mod type_hints;
 pub mod type_narrowing;
 pub mod type_system_service;
-pub mod types;
 pub mod unified_type_system;
 pub mod union_types;

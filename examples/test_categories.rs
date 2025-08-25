@@ -1,7 +1,7 @@
 //! Тестирование парсинга категорий и группировки типов
 
 use anyhow::Result;
-use bsl_gradual_types::adapters::syntax_helper_parser::{
+use bsl_gradual_types::data::loaders::syntax_helper_parser::{
     OptimizationSettings, SyntaxHelperParser, SyntaxNode,
 };
 use std::path::Path;

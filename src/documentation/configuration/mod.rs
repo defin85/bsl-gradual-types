@@ -12,9 +12,9 @@ use super::core::hierarchy::{
 use super::core::providers::{DocumentationProvider, ProviderConfig};
 use super::core::statistics::{InitializationStatus, ProviderStatistics};
 use super::search::AdvancedSearchQuery;
-use crate::adapters::config_parser_quick_xml::ConfigurationQuickXmlParser;
-use crate::adapters::config_parser_xml::ConfigParserXml;
-use crate::core::types::{MetadataKind, TypeResolution};
+use crate::data::loaders::config_parser_quick_xml::ConfigurationQuickXmlParser;
+use crate::data::loaders::config_parser_xml::ConfigParserXml;
+use crate::domain::types::{MetadataKind, TypeResolution};
 
 /// Провайдер документации конфигурационных типов
 pub struct ConfigurationDocumentationProvider {

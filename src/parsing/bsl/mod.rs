@@ -1,7 +1,4 @@
-//! BSL Parser module
-//!
-//! Парсер для языка 1С:Предприятие BSL (Built-in Script Language)
-//! Использует nom для построения AST (Abstract Syntax Tree)
+//! BSL parser namespace in the new flat structure
 
 pub mod ast;
 pub mod common;

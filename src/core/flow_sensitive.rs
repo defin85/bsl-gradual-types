@@ -12,11 +12,11 @@
 
 use crate::core::type_checker::TypeContext;
 use crate::core::type_narrowing::TypeNarrower;
-use crate::core::types::{
+use crate::domain::types::{
     Certainty, ConcreteType, ResolutionMetadata, ResolutionResult, ResolutionSource, TypeResolution,
 };
 use crate::core::union_types::UnionTypeManager;
-use crate::parser::ast::{BinaryOp, Expression, Statement};
+use crate::parsing::bsl::ast::{BinaryOp, Expression, Statement};
 use std::collections::{HashMap, HashSet};
 
 /// Состояние типов в конкретной точке программы

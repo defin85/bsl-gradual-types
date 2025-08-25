@@ -390,7 +390,7 @@ impl WebInterface {
         let page = request.page.unwrap_or(1);
         let per_page = request.per_page.unwrap_or(20).min(100);
         let total_count = search_results.len();
-        let total_pages = (total_count + per_page - 1) / per_page;
+        let total_pages = total_count.div_ceil(per_page);
 
         let start = (page - 1) * per_page;
         let end = (start + per_page).min(total_count);
@@ -800,8 +800,8 @@ impl CliInterface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::target::data::InMemoryTypeRepository;
-    use crate::target::domain::TypeResolutionService;
+    use crate::unified::data::InMemoryTypeRepository;
+    use crate::unified::domain::TypeResolutionService;
 
     #[tokio::test]
     async fn test_lsp_interface() {

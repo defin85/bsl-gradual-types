@@ -5,11 +5,11 @@
 //! что в then-ветке x имеет тип Строка.
 
 use crate::core::type_checker::TypeContext;
-use crate::core::types::{
+use crate::domain::types::{
     Certainty, ConcreteType, PrimitiveType, ResolutionMetadata, ResolutionResult, ResolutionSource,
     SpecialType, TypeResolution,
 };
-use crate::parser::ast::{BinaryOp, Expression};
+use crate::parsing::bsl::ast::{BinaryOp, Expression};
 
 /// Информация об уточнении типа переменной
 #[derive(Debug, Clone)]

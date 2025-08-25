@@ -1,7 +1,7 @@
 //! Кеширование фасетных шаблонов из синтакс-помощника
 
 use crate::core::facets::FacetRegistry;
-use crate::core::types::{FacetKind, Method, Property};
+use crate::domain::types::{FacetKind, Method, Property};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -10,9 +10,9 @@ use crate::core::platform_resolver::{
     CompletionItem as BslCompletion, CompletionKind, PlatformTypeResolver,
 };
 use crate::core::type_checker::{TypeChecker, TypeContext, TypeDiagnostic};
-use crate::core::types::{ConcreteType, ResolutionResult, TypeResolution};
-use crate::parser::ast::Program;
-use crate::parser::common::{Parser, ParserFactory, TextChange};
+use crate::domain::types::{ConcreteType, ResolutionResult, TypeResolution};
+use crate::parsing::bsl::ast::Program;
+use crate::parsing::bsl::common::{Parser, ParserFactory, TextChange};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

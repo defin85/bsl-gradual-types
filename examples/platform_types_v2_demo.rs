@@ -1,6 +1,6 @@
 //! Демонстрация новой системы типов платформы с syntax helper
 
-use bsl_gradual_types::adapters::platform_types_v2::PlatformTypesResolverV2;
+use bsl_gradual_types::data::loaders::platform_types_v2::PlatformTypesResolverV2;
 
 fn main() -> anyhow::Result<()> {
     println!("=== Демонстрация PlatformTypesResolverV2 ===\n");

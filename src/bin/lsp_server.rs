@@ -12,7 +12,7 @@ use tracing::{error, info};
 use clap::Parser;
 
 // Target architecture
-use bsl_gradual_types::target::system::{CentralSystemConfig, CentralTypeSystem};
+use bsl_gradual_types::system::{CentralSystemConfig, CentralTypeSystem};
 
 #[derive(Parser, Debug)]
 #[command(name = "lsp-server")]
@@ -316,7 +316,7 @@ impl LanguageServer for BslLanguageServer {
             None => return Ok(None),
         };
         let prefix = self.get_completion_prefix(text, position);
-        let req = bsl_gradual_types::architecture::presentation::LspCompletionRequest {
+        let req = bsl_gradual_types::unified::presentation::LspCompletionRequest {
             file_path: uri.to_string(),
             line: position.line,
             column: position.character,
@@ -370,7 +370,7 @@ impl LanguageServer for BslLanguageServer {
             None => return Ok(None),
         };
         let expr = self.get_completion_prefix(text, position);
-        let req = bsl_gradual_types::architecture::presentation::LspHoverRequest {
+        let req = bsl_gradual_types::unified::presentation::LspHoverRequest {
             file_path: uri.to_string(),
             line: position.line,
             column: position.character,

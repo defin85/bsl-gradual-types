@@ -6,7 +6,7 @@ fn main() -> Result<()> {
     println!("🚀 Простой тест интеграции ConfigurationGuidedParser");
 
     // Тест создания ConfigurationGuidedParser
-    use bsl_gradual_types::adapters::config_parser_guided_discovery::ConfigurationGuidedParser;
+    use bsl_gradual_types::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
 
     println!("\n=== Тест 1: Создание ConfigurationGuidedParser ===");
     let guided_parser = ConfigurationGuidedParser::new("test_path");

@@ -1,7 +1,7 @@
 //! BSL Type Analyzer CLI (target-only)
 
 use anyhow::Result;
-use bsl_gradual_types::target::system::{CentralSystemConfig, CentralTypeSystem};
+use bsl_gradual_types::system::{CentralSystemConfig, CentralTypeSystem};
 use clap::Parser;
 use tracing::info;
 

@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 
 use super::core::hierarchy::{AvailabilityContext, DocumentationSourceType};
 use super::core::providers::DocumentationProvider;
-use crate::core::types::FacetKind;
+use crate::domain::types::FacetKind;
 
 pub mod fuzzy;
 // Импорты провайдеров через re-exports
@@ -718,9 +718,9 @@ impl DocumentationSearchEngine {
         let page_size = pagination.page_size;
         let page_number = pagination.page_number;
 
-        let total_pages = (total_count + page_size - 1) / page_size;
+        let total_pages = total_count.div_ceil(page_size);
         let start_index = page_number * page_size;
-        let end_index = (start_index + page_size).min(total_count);
+        let _end_index = (start_index + page_size).min(total_count);
 
         let paginated = if start_index < total_count {
             documents
@@ -999,7 +999,7 @@ impl DocumentationSearchEngine {
                 index
                     .word_index
                     .entry(normalized_word)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(indexed_doc);
             }
         }
@@ -1086,6 +1086,7 @@ impl DocumentationSearchEngine {
     }
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for AdvancedSearchQuery {
     fn default() -> Self {
         Self {
@@ -1203,5 +1204,12 @@ impl Default for IndexingConfig {
             case_sensitive: false,
             index_code_examples: true,
         }
+    }
+}
+
+// Реализация значения по умолчанию для корректности API с new()
+impl Default for DocumentationSearchEngine {
+    fn default() -> Self {
+        Self::new()
     }
 }

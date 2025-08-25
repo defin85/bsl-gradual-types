@@ -10,14 +10,14 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::{info};
 
 use super::domain::{
     CompletionItem, CompletionKind, TypeCheckerService, TypeContext, TypeResolutionService,
     TypeSearchResult,
 };
-use crate::architecture::data::{RawTypeData, TypeSource};
-use crate::core::types::{FacetKind, TypeResolution};
+use crate::unified::data::{RawTypeData, TypeSource};
+use crate::domain::types::{FacetKind, TypeResolution};
 
 // === LSP TYPE SERVICE ===
 
@@ -294,6 +294,12 @@ impl LspTypeService {
             CompletionKind::Type => LspCompletionKind::Class,
             CompletionKind::Keyword => LspCompletionKind::Keyword,
             CompletionKind::Snippet => LspCompletionKind::Snippet,
+            // Новые виды — мэппинг в ближайшие LSP аналоги
+            CompletionKind::Global => LspCompletionKind::Module,
+            CompletionKind::Catalog => LspCompletionKind::Class,
+            CompletionKind::Document => LspCompletionKind::Class,
+            CompletionKind::Enum => LspCompletionKind::Enum,
+            CompletionKind::GlobalFunction => LspCompletionKind::Function,
         };
 
         LspCompletion {
@@ -592,7 +598,7 @@ impl WebTypeService {
         // Поиск через центральный сервис
         let search_results = self.resolution_service.search_types(query).await?;
 
-        // Фильтрация результатов
+        // Фильтрация результатов (по source/category/methods/properties/facets)
         let filtered_results = self.apply_search_filters(search_results, &filters).await?;
 
         // Конвертация в веб-формат
@@ -692,10 +698,65 @@ impl WebTypeService {
     async fn apply_search_filters(
         &self,
         results: Vec<TypeSearchResult>,
-        _filters: &SearchFilters,
+        filters: &SearchFilters,
     ) -> Result<Vec<TypeSearchResult>> {
-        // TODO: Реализовать фильтрацию
-        Ok(results)
+        use crate::unified::data::TypeSource;
+
+        let mut out = Vec::with_capacity(results.len());
+        'outer: for r in results.into_iter() {
+            let raw = &r.raw_data;
+
+            // Источник
+            if let Some(src) = &filters.source {
+                let matches = match (&raw.source, src) {
+                    (TypeSource::Platform { .. }, TypeSource::Platform { .. }) => true,
+                    (TypeSource::Configuration { .. }, TypeSource::Configuration { .. }) => true,
+                    (TypeSource::UserDefined { .. }, TypeSource::UserDefined { .. }) => true,
+                    _ => false,
+                };
+                if !matches {
+                    continue 'outer;
+                }
+            }
+
+            // Категория
+            if let Some(cat) = &filters.category {
+                if !raw.category_path.iter().any(|c| c.contains(cat)) {
+                    continue 'outer;
+                }
+            }
+
+            // Наличие методов/свойств
+            if let Some(has_methods) = filters.has_methods {
+                if has_methods && raw.methods.is_empty() {
+                    continue 'outer;
+                }
+                if !has_methods && !raw.methods.is_empty() {
+                    continue 'outer;
+                }
+            }
+            if let Some(has_properties) = filters.has_properties {
+                if has_properties && raw.properties.is_empty() {
+                    continue 'outer;
+                }
+                if !has_properties && !raw.properties.is_empty() {
+                    continue 'outer;
+                }
+            }
+
+            // Фасеты (если задан список, все перечисленные должны быть доступны)
+            if !filters.facets.is_empty() {
+                let available: std::collections::HashSet<_> =
+                    raw.available_facets.iter().map(|f| f.kind).collect();
+                if !filters.facets.iter().all(|k| available.contains(k)) {
+                    continue 'outer;
+                }
+            }
+
+            out.push(r);
+        }
+
+        Ok(out)
     }
 }
 
@@ -987,7 +1048,7 @@ impl CoverageCalculator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::target::data::{InMemoryTypeRepository, ParseMetadata, TypeSource};
+    use crate::unified::data::{InMemoryTypeRepository, ParseMetadata, TypeSource};
 
     #[tokio::test]
     async fn test_lsp_type_service() {

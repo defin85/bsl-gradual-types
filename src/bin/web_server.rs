@@ -11,17 +11,18 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use bsl_gradual_types::core::type_checker::{TypeChecker, TypeContext};
-use bsl_gradual_types::core::types::{ConcreteType, ResolutionResult, TypeResolution};
+use bsl_gradual_types::domain::types::{ConcreteType, ResolutionResult, TypeResolution};
 use bsl_gradual_types::documentation::core::providers::DocumentationProvider;
 use bsl_gradual_types::documentation::core::ProviderConfig;
 use bsl_gradual_types::documentation::{
     AdvancedSearchQuery, ConfigurationDocumentationProvider, DocumentationSearchEngine,
     PlatformDocumentationProvider,
 };
-use bsl_gradual_types::parser::common::ParserFactory;
-// Target architecture
-use bsl_gradual_types::architecture::presentation::{WebSearchFilters, WebSearchRequest};
-use bsl_gradual_types::target::system::{CentralSystemConfig, CentralTypeSystem};
+use bsl_gradual_types::parsing::bsl::common::ParserFactory;
+// Переход на плоскую архитектуру
+use bsl_gradual_types::presentation::{WebSearchFilters, WebSearchRequest};
+use bsl_gradual_types::system::{CentralSystemConfig, CentralTypeSystem};
+use bsl_gradual_types::application::documentation_service::DocumentationService;
 
 #[derive(Parser)]
 #[command(name = "bsl-web-server")]
@@ -523,6 +524,7 @@ async fn handle_get_type_details(
 async fn get_type_details(state: &AppState, type_name: &str) -> TypeDetails {
     // Target-only: CentralTypeSystem
     match state
+        .central
         .web_interface()
         .handle_type_details_request(type_name)
         .await
@@ -563,27 +565,21 @@ async fn get_type_details(state: &AppState, type_name: &str) -> TypeDetails {
                             description: Some(p.description),
                         })
                         .collect(),
-                    related_types: Vec::new(),
+                    related_types: resp.related_types,
                     usage_examples: Vec::new(),
-            };
+                };
         }
-        Err(e) => {
-            eprintln!("WebInterface type_details error: {}", e);
+        Err(_e) => {
+            TypeDetails {
+                name: type_name.to_string(),
+                category: "Type".to_string(),
+                description: None,
+                methods: vec![],
+                properties: vec![],
+                related_types: vec![],
+                usage_examples: vec![],
+            }
         }
-    }
-
-    // Заглушка на случай ошибки
-    TypeDetails {
-        name: type_name.to_string(),
-        category: "Unknown".to_string(),
-        description: Some("Type details from BSL Gradual Type System".to_string()),
-        methods: vec![],
-        properties: vec![],
-        related_types: vec![],
-        usage_examples: vec![
-            format!("// Пример использования {}", type_name),
-            format!("переменная = Новый {};", type_name),
-        ],
     }
 }
 

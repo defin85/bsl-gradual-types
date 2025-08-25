@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::core::types::{
+use crate::domain::types::{
     Attribute, Certainty, ConcreteType, ConfigurationType, FacetKind, MetadataKind,
     ResolutionMetadata, ResolutionResult, ResolutionSource, TabularSection, TypeResolution,
 };
@@ -126,8 +126,6 @@ impl ConfigurationGuidedParser {
 
         // Фаза 2: Парсинг объектов метаданных по ссылкам из Configuration.xml
         let mut resolutions = Vec::new();
-        let mut found_count = 0;
-        let mut missing_count = 0;
 
         for metadata_ref in &config_info.metadata_objects {
             match self.parse_metadata_by_reference(metadata_ref) {
@@ -135,13 +133,12 @@ impl ConfigurationGuidedParser {
                     resolutions.extend(self.create_type_resolutions(&metadata));
                     self.discovered_objects
                         .insert(metadata.qualified_name.clone(), metadata);
-                    found_count += 1;
                 }
                 Ok(None) => {
-                    missing_count += 1;
+                    // объект не найден по ссылке — пропускаем
                 }
                 Err(_) => {
-                    missing_count += 1;
+                    // ошибка парсинга конкретного объекта — продолжаем
                 }
             }
         }
@@ -181,12 +178,10 @@ impl ConfigurationGuidedParser {
                     match tag_name.as_str() {
                         "Configuration" => {
                             // Извлекаем UUID из атрибутов
-                            for attr in e.attributes() {
-                                if let Ok(attr) = attr {
-                                    if attr.key.as_ref() == b"uuid" {
-                                        if let Ok(uuid_value) = attr.unescape_value() {
-                                            config_info.uuid = Some(uuid_value.to_string());
-                                        }
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"uuid" {
+                                    if let Ok(uuid_value) = attr.unescape_value() {
+                                        config_info.uuid = Some(uuid_value.to_string());
                                     }
                                 }
                             }
@@ -198,9 +193,8 @@ impl ConfigurationGuidedParser {
 
                             // Обрабатываем объекты метаданных в ChildObjects
                             if in_child_objects {
-                                if let Some(kind) = self.xml_tag_to_metadata_kind(&tag) {
-                                    // Пока не знаем имя, создадим заготовку
-                                    // Имя получим в Event::Text
+                                if self.xml_tag_to_metadata_kind(&tag).is_some() {
+                                    // Пока не знаем имя, создадим заготовку позже в Event::Text
                                 }
                             }
                         }
@@ -214,9 +208,8 @@ impl ConfigurationGuidedParser {
                     }
 
                     if in_properties {
-                        match current_element.as_str() {
-                            "Name" => config_info.name = text,
-                            _ => {}
+                        if current_element.as_str() == "Name" {
+                            config_info.name = text;
                         }
                     } else if in_child_objects {
                         // Это имя объекта метаданных
@@ -477,17 +470,13 @@ impl ConfigurationGuidedParser {
                             }
                         } else if let Some(ref mut attr) = current_attribute {
                             if in_attribute_properties {
-                                match current_element.as_str() {
-                                    "Name" => {
-                                        attr.name = text;
-                                    }
-                                    _ => {}
+                                if current_element.as_str() == "Name" {
+                                    attr.name = text;
                                 }
                             }
                         } else if let Some(ref mut ts) = current_tabular_section {
-                            match current_element.as_str() {
-                                "Name" => ts.name = text,
-                                _ => {}
+                            if current_element.as_str() == "Name" {
+                                ts.name = text;
                             }
                         }
                     }

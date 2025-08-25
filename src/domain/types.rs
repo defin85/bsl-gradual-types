@@ -391,7 +391,7 @@ impl TypeResolution {
 
     /// Create TypeResolution from RawTypeData
     pub fn from_raw_data(raw_data: &crate::architecture::data::RawTypeData) -> Self {
-        use crate::architecture::data::TypeSource;
+        use crate::unified::data::TypeSource;
         use crate::core::types::*;
 
         // Конвертируем методы
@@ -501,7 +501,7 @@ impl TypeResolution {
 
     /// Convert TypeResolution to RawTypeData
     pub fn to_raw_data(&self) -> crate::architecture::data::RawTypeData {
-        use crate::architecture::data::{
+        use crate::unified::data::{
             RawMethodData, RawParameterData, RawPropertyData, TypeSource,
         };
 
@@ -581,7 +581,7 @@ impl TypeResolution {
             _ => {}
         }
 
-        crate::architecture::data::RawTypeData {
+        crate::unified::data::RawTypeData {
             id: name.clone(),
             russian_name: name.clone(),
             english_name: name.clone(),
@@ -600,7 +600,7 @@ impl TypeResolution {
                     properties: Vec::new(),
                 })
                 .collect(),
-            parse_metadata: crate::architecture::data::raw_models::ParseMetadata {
+            parse_metadata: crate::unified::data::ParseMetadata {
                 file_path: "unknown".to_string(),
                 line: 0,
                 column: 0,

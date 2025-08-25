@@ -1,6 +1,6 @@
 //! Общие типы и трейты для парсеров
 
-use crate::parser::ast::Program;
+use super::ast::Program;
 use anyhow::Result;
 
 /// Общий trait для всех парсеров BSL

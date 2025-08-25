@@ -4,8 +4,8 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::core::types::ConfigurationType as ConfigurationObjectType;
-use crate::core::types::{FacetKind, TypeResolution};
+use crate::domain::types::ConfigurationType as ConfigurationObjectType;
+use crate::domain::types::{FacetKind, TypeResolution};
 // Типы провайдеров будут определены ниже
 
 /// Полная иерархия типов документации
@@ -873,8 +873,6 @@ impl TypeHierarchy {
         _platform_provider: &crate::documentation::PlatformDocumentationProvider,
         _configuration_provider: &crate::documentation::ConfigurationDocumentationProvider,
     ) -> Result<Self> {
-        let start_time = std::time::Instant::now();
-
         let root_categories = Vec::new();
 
         // TODO: Добавляем платформенные типы
@@ -907,7 +905,7 @@ impl TypeHierarchy {
     }
 
     /// Построить навигационный индекс
-    fn build_navigation_index(categories: &[CategoryNode]) -> NavigationIndex {
+    fn build_navigation_index(_categories: &[CategoryNode]) -> NavigationIndex {
         // TODO: реализовать построение индексов
         NavigationIndex {
             by_id: HashMap::new(),
@@ -919,7 +917,7 @@ impl TypeHierarchy {
     }
 
     /// Подсчитать статистику иерархии
-    fn calculate_statistics(categories: &[CategoryNode]) -> HierarchyStatistics {
+    fn calculate_statistics(_categories: &[CategoryNode]) -> HierarchyStatistics {
         // TODO: реализовать подсчет статистики
         HierarchyStatistics {
             total_nodes: 0,

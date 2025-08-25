@@ -1,15 +1,15 @@
 //! Загрузчик данных из синтакс-помощника
-use crate::adapters::syntax_helper_parser::{
+use crate::data::loaders::syntax_helper_parser::{
     GlobalFunctionInfo, SyntaxHelperParser, SyntaxNode, TypeInfo,
 };
-use crate::architecture::data::type_repository::TypeRepository;
-use crate::core::types::{
+use crate::domain::types::{
     Certainty, ConcreteType, ExecutionContext, GlobalFunction, GlobalFunctionParameter, Method,
-    Parameter, PlatformType, Property, ResolutionMetadata, ResolutionResult, ResolutionSource,
+    PlatformType, Property, ResolutionMetadata, ResolutionResult, ResolutionSource,
     TypeResolution,
 };
 use anyhow::Result;
 use std::path::Path;
+use super::TypeRepository;
 
 pub struct SyntaxHelperLoader {
     type_repository: Box<dyn TypeRepository>,

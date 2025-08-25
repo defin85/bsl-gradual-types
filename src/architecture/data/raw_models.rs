@@ -1,4 +1,4 @@
-use crate::core::types::Facet;
+use crate::domain::types::Facet;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TypeSource {

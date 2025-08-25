@@ -1,5 +1,5 @@
 use bsl_gradual_types::core::types::FacetKind;
-use bsl_gradual_types::target::data::{
+use bsl_gradual_types::unified::data::{
     InMemoryTypeRepository, ParseMetadata, RawMethodData, RawParameterData, RawPropertyData,
     RawTypeData, TypeFilter, TypeSource,
 };

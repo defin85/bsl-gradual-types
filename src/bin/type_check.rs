@@ -1,7 +1,7 @@
 //! Simple CLI for testing type resolution (target-only)
 
-use bsl_gradual_types::architecture::presentation::{LspCompletionRequest, LspHoverRequest};
-use bsl_gradual_types::target::system::{CentralSystemConfig, CentralTypeSystem};
+use bsl_gradual_types::presentation::{LspCompletionRequest, LspHoverRequest};
+use bsl_gradual_types::system::{CentralSystemConfig, CentralTypeSystem};
 use clap::Parser;
 
 #[derive(Parser, Debug)]

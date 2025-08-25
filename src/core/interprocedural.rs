@@ -5,11 +5,11 @@
 
 use crate::core::dependency_graph::Scope;
 use crate::core::type_checker::{FunctionSignature, TypeContext};
-use crate::core::types::{
+use crate::domain::types::{
     Certainty, ConcreteType, PrimitiveType, ResolutionMetadata, ResolutionResult, ResolutionSource,
     TypeResolution,
 };
-use crate::parser::ast::{Expression, Parameter, Program, Statement};
+use crate::parsing::bsl::ast::{Expression, Parameter, Program, Statement};
 use std::collections::{HashMap, HashSet};
 
 /// Информация о вызове функции/процедуры

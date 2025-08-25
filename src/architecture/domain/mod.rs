@@ -3,7 +3,7 @@
 //! Центральная бизнес-логика для разрешения типов BSL
 //! Принципы: Single Responsibility, правильные абстракции, честная неопределённость
 
-use crate::core::types::PrimitiveType;
+use crate::domain::types::PrimitiveType;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -11,12 +11,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use crate::adapters::config_parser_guided_discovery::ConfigurationGuidedParser;
-use crate::architecture::data::stats::RepositoryStats;
-use crate::architecture::data::{RawTypeData, TypeRepository, TypeSource};
-use crate::core::types::{Certainty, ConcreteType, FacetKind, ResolutionResult, TypeResolution};
-use crate::parser::common::Parser;
-use crate::parser::tree_sitter_adapter::TreeSitterAdapter;
+use crate::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
+use crate::unified::data::stats::RepositoryStats;
+use crate::unified::data::{RawTypeData, TypeRepository, TypeSource};
+use crate::domain::types::{Certainty, ConcreteType, FacetKind, ResolutionResult, TypeResolution};
+use crate::parsing::bsl::tree_sitter_adapter::TreeSitterAdapter;
 
 /// Центральный сервис разрешения типов
 ///
@@ -76,523 +75,19 @@ pub trait TypeResolver: Send + Sync {
     /// Разрешить тип выражения
     async fn resolve(
         &self,
-        expression: &str,
-        context: &TypeContext,
-        repository: &dyn TypeRepository,
-    ) -> Result<TypeResolution>;
-
-    /// Получить автодополнение для префикса
-    async fn get_completions(
-        &self,
-        prefix: &str,
-        context: &TypeContext,
-        repository: &dyn TypeRepository,
-    ) -> Result<Vec<CompletionItem>>;
-}
-
-/// Результат автодополнения
-#[derive(Debug, Clone)]
-pub struct CompletionItem {
-    pub label: String,
-    pub detail: Option<String>,
-    pub documentation: Option<String>,
-    pub kind: CompletionKind,
-    pub insert_text: String,
-}
-
-/// Тип автодополнения
-#[derive(Debug, Clone, PartialEq)]
-pub enum CompletionKind {
-    Variable,
-    Function,
-    Method,
-    Property,
-    Type,
-    Keyword,
-    Snippet,
-}
-
-impl TypeResolutionService {
-    /// Создать новый сервис разрешения типов
-    pub fn new(repository: Arc<dyn TypeRepository>) -> Self {
-        let mut resolvers: Vec<Box<dyn TypeResolverAny>> = Vec::new();
-
-        // Добавляем стандартные резолверы
-        resolvers.push(Box::new(PlatformTypeResolver::new()));
-        resolvers.push(Box::new(ConfigurationTypeResolver::new()));
-        resolvers.push(Box::new(BslCodeResolver::new()));
-        resolvers.push(Box::new(BuiltinTypeResolver::new()));
-        resolvers.push(Box::new(ExpressionResolver::new()));
-
-        Self {
-            repository,
-            resolvers,
-            cache: Arc::new(RwLock::new(HashMap::new())),
-            metrics: Arc::new(RwLock::new(ResolutionMetrics::default())),
-        }
-    }
-
-    /// Разрешить тип выражения (основной API)
-    pub async fn resolve_expression(
-        &self,
-        expression: &str,
-        context: &TypeContext,
-    ) -> TypeResolution {
-        let start_time = std::time::Instant::now();
-
-        // Проверяем кеш
-        let cache_key = format!("{}:{:?}", expression, context.current_facet);
-        if let Some(cached) = self.get_from_cache(&cache_key).await {
-            self.increment_cache_hit().await;
-            return cached.resolution;
-        }
-
-        self.increment_cache_miss().await;
-
-        // Пытаемся разрешить через резолверы
-        for resolver in &self.resolvers {
-            if resolver.can_resolve(expression) {
-                match resolver
-                    .resolve(expression, context, self.repository.as_ref())
-                    .await
-                {
-                    Ok(resolution) => {
-                        // Кешируем успешное разрешение
-                        self.cache_resolution(&cache_key, &resolution).await;
-                        self.record_resolution_time(start_time.elapsed()).await;
-                        self.increment_successful_resolution().await;
-                        return resolution;
-                    }
-                    Err(e) => {
-                        warn!("⚠️ Resolver failed for '{}': {}", expression, e);
-                        continue;
-                    }
-                }
-            }
-        }
-
-        // Если никто не смог разрешить - честно возвращаем Unknown
-        self.increment_failed_resolution().await;
-        TypeResolution::unknown()
-    }
-
-    /// Получить автодополнение для префикса
-    pub async fn get_completions(
-        &self,
-        prefix: &str,
-        context: &TypeContext,
-    ) -> Vec<CompletionItem> {
-        let mut all_completions = Vec::new();
-
-        // Собираем автодополнение от всех резолверов
-        for resolver in &self.resolvers {
-            if let Ok(completions) = resolver
-                .get_completions(prefix, context, self.repository.as_ref())
-                .await
-            {
-                all_completions.extend(completions);
-            }
-        }
-
-        // Убираем дубликаты и сортируем
-        all_completions.sort_by(|a, b| a.label.cmp(&b.label));
-        all_completions.dedup_by(|a, b| a.label == b.label);
-
-        all_completions
-    }
-
-    /// Поиск типов по запросу
-    pub async fn search_types(&self, query: &str) -> Result<Vec<TypeSearchResult>> {
-        // Ищем в репозитории
-        let raw_types = self.repository.search_types(query).await?;
-
-        // Конвертируем в результаты поиска с релевантностью
-        let mut results = Vec::new();
-        for raw_type in raw_types {
-            let relevance = self.calculate_relevance(&raw_type.russian_name, query);
-            results.push(TypeSearchResult {
-                raw_data: raw_type.clone(),
-                relevance_score: relevance,
-                match_highlights: self.find_match_highlights(&raw_type.russian_name, query),
-            });
-        }
-
-        // Сортируем по релевантности
-        results.sort_by(|a, b| {
-            b.relevance_score
-                .partial_cmp(&a.relevance_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        Ok(results)
-    }
-
-    /// Получить метрики работы сервиса
-    pub async fn get_metrics(&self) -> ResolutionMetrics {
-        self.metrics.read().await.clone()
-    }
-
-    /// Получить статистику репозитория
-    pub async fn get_stats(&self) -> RepositoryStats {
-        self.repository.get_stats()
-    }
-
-    /// ПУБЛИЧНЫЙ МЕТОД: Получить все типы из репозитория
-    pub async fn get_all_types(&self) -> Result<Vec<TypeSearchResult>> {
-        let raw_types = self.repository.load_all_types().await?;
-
-        let mut results = Vec::new();
-        for raw_type in raw_types {
-            results.push(TypeSearchResult {
-                raw_data: raw_type,
-                relevance_score: 1.0,
-                match_highlights: Vec::new(),
-            });
-        }
-
-        Ok(results)
-    }
-
-    // === ПРИВАТНЫЕ МЕТОДЫ ===
-
-    async fn get_from_cache(&self, key: &str) -> Option<CachedTypeResolution> {
-        let cache = self.cache.read().await;
-        if let Some(cached) = cache.get(key) {
-            // Проверяем TTL (например, 1 час)
-            if cached.created_at.elapsed().as_secs() < 3600 {
-                return Some(cached.clone());
-            }
-        }
-        None
-    }
-
-    async fn cache_resolution(&self, key: &str, resolution: &TypeResolution) {
-        let mut cache = self.cache.write().await;
-        cache.insert(
-            key.to_string(),
-            CachedTypeResolution {
-                resolution: resolution.clone(),
-                created_at: std::time::Instant::now(),
-                access_count: 1,
-                last_accessed: std::time::Instant::now(),
-            },
-        );
-    }
-
-    async fn increment_cache_hit(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.cache_hits += 1;
-    }
-
-    async fn increment_cache_miss(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.cache_misses += 1;
-    }
-
-    async fn increment_successful_resolution(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.successful_resolutions += 1;
-        metrics.total_resolutions += 1;
-    }
-
-    async fn increment_failed_resolution(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.failed_resolutions += 1;
-        metrics.total_resolutions += 1;
-    }
-
-    async fn record_resolution_time(&self, duration: std::time::Duration) {
-        let mut metrics = self.metrics.write().await;
-        let time_ms = duration.as_millis() as f64;
-
-        // Простое скользящее среднее
-        if metrics.total_resolutions > 0 {
-            metrics.average_resolution_time_ms = (metrics.average_resolution_time_ms
-                * (metrics.total_resolutions - 1) as f64
-                + time_ms)
-                / metrics.total_resolutions as f64;
-        } else {
-            metrics.average_resolution_time_ms = time_ms;
-        }
-    }
-
-    fn calculate_relevance(&self, type_name: &str, query: &str) -> f32 {
-        let type_lower = type_name.to_lowercase();
-        let query_lower = query.to_lowercase();
-
-        // Точное совпадение
-        if type_lower == query_lower {
-            return 1.0;
-        }
-
-        // Начинается с запроса
-        if type_lower.starts_with(&query_lower) {
-            return 0.8;
-        }
-
-        // Содержит запрос
-        if type_lower.contains(&query_lower) {
-            return 0.6;
-        }
-
-        // Похожесть (простая реализация)
-        let similarity = self.simple_similarity(&type_lower, &query_lower);
-        similarity * 0.4
-    }
-
-    fn simple_similarity(&self, a: &str, b: &str) -> f32 {
-        let max_len = a.len().max(b.len());
-        if max_len == 0 {
-            return 1.0;
-        }
-
-        let common_chars = a
-            .chars()
-            .zip(b.chars())
-            .take_while(|(ch_a, ch_b)| ch_a == ch_b)
-            .count();
-
-        common_chars as f32 / max_len as f32
-    }
-
-    fn find_match_highlights(&self, text: &str, query: &str) -> Vec<TextSpan> {
-        let mut highlights = Vec::new();
-        let text_lower = text.to_lowercase();
-        let query_lower = query.to_lowercase();
-
-        if let Some(start) = text_lower.find(&query_lower) {
-            highlights.push(TextSpan {
-                start,
-                end: start + query.len(),
-                text: query.to_string(),
-            });
-        }
-
-        highlights
-    }
-}
-
-/// Результат поиска типов
-#[derive(Debug, Clone)]
-pub struct TypeSearchResult {
-    pub raw_data: RawTypeData,
-    pub relevance_score: f32,
-    pub match_highlights: Vec<TextSpan>,
-}
-
-/// Выделенный фрагмент текста
-#[derive(Debug, Clone)]
-pub struct TextSpan {
-    pub start: usize,
-    pub end: usize,
-    pub text: String,
-}
-
-// === СПЕЦИАЛИЗИРОВАННЫЕ РЕЗОЛВЕРЫ ===
-
-/// Резолвер платформенных типов (Массив, ТаблицаЗначений)
-pub struct PlatformTypeResolver {
-    platform_types_cache: Arc<RwLock<HashMap<String, TypeResolution>>>,
-}
-
-impl PlatformTypeResolver {
-    pub fn new() -> Self {
-        Self {
-            platform_types_cache: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    /// Инициализировать кеш из репозитория
-    pub async fn initialize_cache(&self, repository: &dyn TypeRepository) -> Result<()> {
-        println!("🔧 Инициализация PlatformTypeResolver кеша...");
-
-        let platform_types = repository
-            .load_types_filtered(&super::data::TypeFilter {
-                source: Some(TypeSource::Platform {
-                    version: "8.3".to_string(),
-                }),
-                ..Default::default()
-            })
-            .await?;
-
-        let mut cache = self.platform_types_cache.write().await;
-        for raw_type in platform_types {
-            let resolution = self.convert_raw_to_resolution(&raw_type)?;
-            cache.insert(raw_type.russian_name.clone(), resolution.clone());
-
-            // Добавляем английское имя
-            if !raw_type.english_name.is_empty() {
-                cache.insert(raw_type.english_name.clone(), resolution);
-            }
-        }
-
-        println!("✅ PlatformTypeResolver кеш готов: {} типов", cache.len());
-        Ok(())
-    }
-
-    fn convert_raw_to_resolution(&self, raw_type: &RawTypeData) -> Result<TypeResolution> {
-        Ok(TypeResolution {
-            certainty: Certainty::Known, // Платформенные типы всегда известны
-            result: ResolutionResult::Concrete(ConcreteType::Platform(
-                crate::core::types::PlatformType {
-                    name: raw_type.russian_name.clone(),
-                    methods: raw_type
-                        .methods
-                        .iter()
-                        .map(|m| crate::core::types::Method {
-                            name: m.name.clone(),
-                            is_function: m.is_function,
-                            parameters: m
-                                .parameters
-                                .iter()
-                                .map(|p| crate::core::types::Parameter {
-                                    name: p.name.clone(),
-                                    type_: Some(p.type_name.clone()),
-                                    optional: p.is_optional,
-                                    by_value: p.is_by_value,
-                                })
-                                .collect(),
-                            return_type: m.return_type.clone(),
-                        })
-                        .collect(),
-                    properties: raw_type
-                        .properties
-                        .iter()
-                        .map(|p| crate::core::types::Property {
-                            name: p.name.clone(),
-                            type_: p.type_name.clone(),
-                            readonly: p.is_readonly,
-                        })
-                        .collect(),
-                },
-            )),
-            source: crate::core::types::ResolutionSource::Static,
-            metadata: crate::core::types::ResolutionMetadata::default(),
-            active_facet: None,
-            available_facets: raw_type.available_facets.iter().map(|f| f.kind).collect(),
-        })
-    }
-}
-
-#[async_trait]
-impl TypeResolver for PlatformTypeResolver {
-    fn can_resolve(&self, expression: &str) -> bool {
-        // Платформенные типы: Массив, ТаблицаЗначений, Структура, etc.
-        let platform_patterns = [
-            "Массив",
-            "Array",
-            "ТаблицаЗначений",
-            "ValueTable",
-            "Структура",
-            "Structure",
-            "Соответствие",
-            "Map",
-            "СписокЗначений",
-            "ValueList",
-            "ДеревоЗначений",
-            "ValueTree",
-        ];
-
-        platform_patterns
-            .iter()
-            .any(|pattern| expression.contains(pattern))
-    }
-
-    async fn resolve(
-        &self,
-        expression: &str,
-        _context: &TypeContext,
-        _repository: &dyn TypeRepository,
-    ) -> Result<TypeResolution> {
-        let cache = self.platform_types_cache.read().await;
-
-        // Простое разрешение по имени (можно расширить)
-        let parts: Vec<&str> = expression.split('.').collect();
-        let base_type = parts[0];
-
-        if let Some(resolution) = cache.get(base_type) {
-            Ok(resolution.clone())
-        } else {
-            Ok(TypeResolution::unknown())
-        }
-    }
-
-    async fn get_completions(
-        &self,
-        prefix: &str,
-        _context: &TypeContext,
-        _repository: &dyn TypeRepository,
-    ) -> Result<Vec<CompletionItem>> {
-        let cache = self.platform_types_cache.read().await;
-        let mut completions = Vec::new();
-
-        for (name, _resolution) in cache.iter() {
-            if name.to_lowercase().starts_with(&prefix.to_lowercase()) {
-                completions.push(CompletionItem {
-                    label: name.clone(),
-                    detail: Some("Платформенный тип".to_string()),
-                    documentation: Some(format!("Платформенный тип {}", name)),
-                    kind: CompletionKind::Type,
-                    insert_text: name.clone(),
-                });
-            }
-        }
-
-        Ok(completions)
-    }
-}
-
-/// Резолвер конфигурационных типов (Справочники.Контрагенты)
-pub struct ConfigurationTypeResolver {
-    guided_parser: Arc<RwLock<Option<ConfigurationGuidedParser>>>,
-}
-
-impl ConfigurationTypeResolver {
-    pub fn new() -> Self {
-        Self {
-            guided_parser: Arc::new(RwLock::new(None)),
-        }
-    }
-
-    /// Инициализировать с конфигурацией
-    pub async fn initialize_with_config(&self, config_path: &str) -> Result<()> {
-        println!("🔧 Инициализация ConfigurationTypeResolver...");
-
-        let mut parser = ConfigurationGuidedParser::new(config_path);
-        let _config_types = parser.parse_with_configuration_guide()?;
-
-        *self.guided_parser.write().await = Some(parser);
-
-        println!("✅ ConfigurationTypeResolver готов");
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl TypeResolver for ConfigurationTypeResolver {
-    fn can_resolve(&self, expression: &str) -> bool {
-        // Конфигурационные типы: Справочники.*, Документы.*, etc.
-        expression.contains("Справочники.")
-            || expression.contains("Документы.")
-            || expression.contains("Перечисления.")
-            || expression.contains("РегистрыСведений.")
-    }
-
-    async fn resolve(
-        &self,
-        expression: &str,
+        _expression: &str,
         _context: &TypeContext,
         _repository: &dyn TypeRepository,
     ) -> Result<TypeResolution> {
         // TODO: Реализовать разрешение конфигурационных типов
         Ok(TypeResolution {
-            certainty: Certainty::Inferred(0.8), // Не 100% уверены без полной конфигурации
-            result: ResolutionResult::Dynamic,
-            source: crate::core::types::ResolutionSource::Inferred,
-            metadata: crate::core::types::ResolutionMetadata::default(),
-            active_facet: Some(FacetKind::Manager),
-            available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
-        })
+           certainty: Certainty::Inferred(0.8), // Не 100% уверены без полной конфигурации
+           result: ResolutionResult::Dynamic,
+           source: crate::domain::types::ResolutionSource::Inferred,
+           metadata: crate::domain::types::ResolutionMetadata::default(),
+           active_facet: Some(FacetKind::Manager),
+           available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+       })
     }
 
     async fn get_completions(
@@ -647,20 +142,20 @@ impl TypeResolver for BslCodeResolver {
 
     async fn resolve(
         &self,
-        expression: &str,
+        _expression: &str,
         _context: &TypeContext,
         _repository: &dyn TypeRepository,
     ) -> Result<TypeResolution> {
         let parser_opt = self.parser.read().await;
 
-        if let Some(parser) = parser_opt.as_ref() {
+        if let Some(_parser) = parser_opt.as_ref() {
             // TODO: Использовать tree-sitter для анализа выражения
             // Пока возвращаем базовое разрешение
             Ok(TypeResolution {
                 certainty: Certainty::Inferred(0.5),
                 result: ResolutionResult::Dynamic,
-                source: crate::core::types::ResolutionSource::Inferred,
-                metadata: crate::core::types::ResolutionMetadata::default(),
+            source: crate::domain::types::ResolutionSource::Inferred,
+            metadata: crate::domain::types::ResolutionMetadata::default(),
                 active_facet: None,
                 available_facets: Vec::new(),
             })
@@ -713,13 +208,13 @@ impl TypeResolver for BuiltinTypeResolver {
     ) -> Result<TypeResolution> {
         let primitive_type = if expression.contains("Строка") || expression.contains("String")
         {
-            crate::core::types::PrimitiveType::String
+            crate::domain::types::PrimitiveType::String
         } else if expression.contains("Число") || expression.contains("Number") {
-            crate::core::types::PrimitiveType::Number
+            crate::domain::types::PrimitiveType::Number
         } else if expression.contains("Булево") || expression.contains("Boolean") {
-            crate::core::types::PrimitiveType::Boolean
+            crate::domain::types::PrimitiveType::Boolean
         } else if expression.contains("Дата") || expression.contains("Date") {
-            crate::core::types::PrimitiveType::Date
+            crate::domain::types::PrimitiveType::Date
         } else {
             return Ok(TypeResolution::unknown());
         };
@@ -727,8 +222,8 @@ impl TypeResolver for BuiltinTypeResolver {
         Ok(TypeResolution {
             certainty: Certainty::Known,
             result: ResolutionResult::Concrete(ConcreteType::Primitive(primitive_type)),
-            source: crate::core::types::ResolutionSource::Static,
-            metadata: crate::core::types::ResolutionMetadata::default(),
+            source: crate::domain::types::ResolutionSource::Static,
+            metadata: crate::domain::types::ResolutionMetadata::default(),
             active_facet: None,
             available_facets: Vec::new(),
         })
@@ -1026,7 +521,7 @@ impl TypeCheckerService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::architecture::data::{InMemoryTypeRepository, ParseMetadata, TypeSource};
+    use crate::unified::data::{InMemoryTypeRepository, ParseMetadata, TypeSource};
 
     #[tokio::test]
     async fn test_type_resolution_service() {
@@ -1045,7 +540,7 @@ mod tests {
             properties: vec![],
             documentation: "Коллекция упорядоченных значений".to_string(),
             examples: vec![],
-            available_facets: vec![crate::core::types::Facet {
+            available_facets: vec![crate::domain::types::Facet {
                 kind: FacetKind::Object,
                 methods: vec![],
                 properties: vec![],
@@ -1129,5 +624,79 @@ impl TypeResolverAny for BuiltinTypeResolver {
 impl TypeResolverAny for ExpressionResolver {
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+/// Элемент автодополнения доменного слоя
+#[derive(Debug, Clone)]
+pub struct CompletionItem {
+    pub label: String,
+    pub detail: Option<String>,
+    pub documentation: Option<String>,
+    pub kind: CompletionKind,
+    pub insert_text: String,
+}
+
+/// Вид элемента автодополнения доменного слоя
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum CompletionKind {
+    // Общие виды
+    Variable,
+    Function,
+    Method,
+    Property,
+    Type,
+    Keyword,
+    Snippet,
+    // Платформенные/конфигурационные виды
+    Global,
+    Catalog,
+    Document,
+    Enum,
+    GlobalFunction,
+}
+
+impl From<crate::core::platform_resolver::CompletionItem> for CompletionItem {
+    fn from(src: crate::core::platform_resolver::CompletionItem) -> Self {
+        let kind = match src.kind {
+            crate::core::platform_resolver::CompletionKind::Global => CompletionKind::Global,
+            crate::core::platform_resolver::CompletionKind::Catalog => CompletionKind::Catalog,
+            crate::core::platform_resolver::CompletionKind::Document => CompletionKind::Document,
+            crate::core::platform_resolver::CompletionKind::Enum => CompletionKind::Enum,
+            crate::core::platform_resolver::CompletionKind::Method => CompletionKind::Method,
+            crate::core::platform_resolver::CompletionKind::Property => CompletionKind::Property,
+            crate::core::platform_resolver::CompletionKind::GlobalFunction => {
+                CompletionKind::GlobalFunction
+            }
+            crate::core::platform_resolver::CompletionKind::Variable => CompletionKind::Variable,
+            crate::core::platform_resolver::CompletionKind::Function => CompletionKind::Function,
+        };
+
+        CompletionItem {
+            label: src.label.clone(),
+            detail: src.detail,
+            documentation: src.documentation,
+            kind,
+            // По умолчанию вставляем метку
+            insert_text: src.label,
+        }
+    }
+}
+
+impl From<crate::core::resolution::Completion> for CompletionItem {
+    fn from(src: crate::core::resolution::Completion) -> Self {
+        let kind = match src.kind {
+            crate::core::resolution::CompletionKind::Type => CompletionKind::Type,
+            crate::core::resolution::CompletionKind::Method => CompletionKind::Method,
+            crate::core::resolution::CompletionKind::Property => CompletionKind::Property,
+            crate::core::resolution::CompletionKind::Function => CompletionKind::Function,
+        };
+        CompletionItem {
+            label: src.label.clone(),
+            detail: src.detail,
+            documentation: None,
+            kind,
+            insert_text: src.label,
+        }
     }
 }

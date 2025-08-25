@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::core::types::{
+use crate::domain::types::{
     Attribute, Certainty, ConcreteType, ResolutionMetadata, ResolutionResult, ResolutionSource,
     TabularSection, TypeResolution,
 };

@@ -1,6 +1,6 @@
 //! Бенчмарки для сравнения производительности парсеров синтакс-помощника
 
-use bsl_gradual_types::adapters::syntax_helper_parser::{OptimizationSettings, SyntaxHelperParser};
+use bsl_gradual_types::data::loaders::syntax_helper_parser::{OptimizationSettings, SyntaxHelperParser};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::fs;
 use std::path::PathBuf;

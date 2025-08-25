@@ -1,6 +1,6 @@
 //! Демонстрация парсера синтакс-помощника 1С
 
-use bsl_gradual_types::adapters::syntax_helper_parser::SyntaxHelperParser;
+use bsl_gradual_types::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 use std::path::Path;
 use tracing::{info, Level};
 use tracing_subscriber;

@@ -2,10 +2,10 @@
 //!
 //! Проверяет работу всех слоёв идеальной архитектуры
 
-use bsl_gradual_types::ideal::presentation::{
-    CliAnalysisRequest, CliOutputFormat, LspCompletionRequest, WebSearchRequest,
+use bsl_gradual_types::unified::presentation::{
+    CliAnalysisRequest, CliOutputFormat, LspCompletionRequest, LspHoverRequest, WebSearchRequest,
 };
-use bsl_gradual_types::ideal::system::{CentralSystemConfig, CentralTypeSystem};
+use bsl_gradual_types::unified::system::{CentralSystemConfig, CentralTypeSystem};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Тест hover
-    let hover_request = bsl_gradual_types::ideal::presentation::LspHoverRequest {
+    let hover_request = LspHoverRequest {
         file_path: "test.bsl".to_string(),
         line: 10,
         column: 5,

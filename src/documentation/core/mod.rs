@@ -20,7 +20,6 @@ pub use cache::{DocumentationCache, EvictionStrategy as CacheEvictionStrategy};
 pub use hierarchy::*;
 pub use providers::{EvictionStrategy as ProviderEvictionStrategy, ProviderConfig};
 pub use statistics::ProviderStatistics;
-pub use statistics::*;
 
 /// Центральная система документации BSL
 ///

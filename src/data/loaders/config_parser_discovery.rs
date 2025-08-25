@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::core::types::{
+use crate::domain::types::{
     Attribute, Certainty, ConcreteType, ConfigurationType, FacetKind, MetadataKind,
     ResolutionMetadata, ResolutionResult, ResolutionSource, TabularSection, TypeResolution,
 };
@@ -303,31 +303,22 @@ impl ConfigurationDiscoveryParser {
                     let text = e.unescape()?.into_owned();
 
                     if in_properties && !text.trim().is_empty() {
-                        match current_element.as_str() {
-                            "Name" => {
-                                // Парсим имя объекта только если еще не установлено
-                                if metadata.name.is_empty() {
-                                    metadata.name = text;
-                                    // Формируем qualified_name
-                                    metadata.qualified_name = format!(
-                                        "{}.{}",
-                                        self.get_kind_prefix(metadata.kind),
-                                        metadata.name
-                                    );
-                                }
+                        if current_element.as_str() == "Name" {
+                            // Парсим имя объекта только если еще не установлено
+                            if metadata.name.is_empty() {
+                                metadata.name = text;
+                                // Формируем qualified_name
+                                metadata.qualified_name = format!(
+                                    "{}.{}",
+                                    self.get_kind_prefix(metadata.kind),
+                                    metadata.name
+                                );
                             }
-                            _ => {}
                         }
                     } else if let Some(ref mut attr) = current_attribute {
-                        match current_element.as_str() {
-                            "Name" => attr.name = text,
-                            _ => {}
-                        }
+                        attr.name = text;
                     } else if let Some(ref mut ts) = current_tabular_section {
-                        match current_element.as_str() {
-                            "Name" => ts.name = text,
-                            _ => {}
-                        }
+                        ts.name = text;
                     }
                 }
                 Ok(Event::End(ref e)) => {

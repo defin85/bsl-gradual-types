@@ -1,5 +1,5 @@
 use super::TypeSource;
-use crate::core::types::FacetKind;
+use crate::domain::types::FacetKind;
 
 #[derive(Debug, Default)]
 pub struct TypeFilter {

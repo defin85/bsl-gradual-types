@@ -1,0 +1,55 @@
+﻿warning: unused variable: `out_dir`
+ --> build.rs:8:9
+  |
+8 |     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+  |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_out_dir`
+  |
+  = note: `#[warn(unused_variables)]` on by default
+System.Management.Automation.RemoteException
+src\target\..\architecture\application\mod.rs:13:21: warning: unused import: `warn`
+src\target\data\..\..\architecture\data\syntax_helper_loader.rs:8:5: warning: unused import: `Parameter`
+src\unified\..\architecture\application\mod.rs:13:21: warning: unused import: `warn`
+src\unified\data\..\..\architecture\data\syntax_helper_loader.rs:8:5: warning: unused import: `Parameter`
+src\documentation\core\mod.rs:23:9: warning: unused import: `statistics::*`
+src\target\..\architecture\domain\mod.rs:440:30: error[E0308]: mismatched types: expected `TypeSource`, found a different `TypeSource`
+src\target\..\architecture\domain\mod.rs:439:34: error[E0308]: mismatched types: expected `TypeFilter`, found a different `TypeFilter`
+src\documentation\core\cache.rs:208:13: warning: unused variable: `now`: help: if this is intentional, prefix it with an underscore: `_now`
+src\documentation\core\hierarchy.rs:876:13: warning: unused variable: `start_time`: help: if this is intentional, prefix it with an underscore: `_start_time`
+src\target\data\..\..\architecture\data\type_repository.rs:55:21: error[E0308]: mismatched types: expected `TypeSource`, found a different `TypeSource`
+src\target\data\..\..\architecture\data\type_repository.rs:56:21: error[E0308]: mismatched types: expected `TypeSource`, found a different `TypeSource`
+src\target\data\..\..\architecture\data\type_repository.rs:57:21: error[E0308]: mismatched types: expected `TypeSource`, found a different `TypeSource`
+src\target\data\..\..\architecture\data\type_repository.rs:90:64: error[E0308]: mismatched types: expected `RawTypeData`, found a different `RawTypeData`
+src\target\data\..\..\architecture\data\type_repository.rs:111:18: error[E0277]: a value of type `Vec<target::data::old_data::raw_models::RawTypeData>` cannot be built from an iterator over elements of type `unified::data::old_data::raw_models::RawTypeData`: value of type `Vec<target::data::old_data::raw_models::RawTypeData>` cannot be built from `std::iter::Iterator<Item=unified::data::old_data::raw_models::RawTypeData>`
+src\target\data\..\..\architecture\data\type_repository.rs:120:79: error[E0277]: a value of type `Vec<target::data::old_data::raw_models::RawTypeData>` cannot be built from an iterator over elements of type `unified::data::old_data::raw_models::RawTypeData`: value of type `Vec<target::data::old_data::raw_models::RawTypeData>` cannot be built from `std::iter::Iterator<Item=unified::data::old_data::raw_models::RawTypeData>`
+src\target\data\..\..\architecture\data\type_repository.rs:140:29: error[E0308]: mismatched types: expected `TypeSource`, found a different `TypeSource`
+src\target\data\..\..\architecture\data\type_repository.rs:144:29: error[E0308]: mismatched types: expected `TypeSource`, found a different `TypeSource`
+src\target\data\..\..\architecture\data\type_repository.rs:148:29: error[E0308]: mismatched types: expected `TypeSource`, found a different `TypeSource`
+src\target\data\..\..\architecture\data\type_repository.rs:202:16: error[E0308]: mismatched types: expected `RawTypeData`, found a different `RawTypeData`
+src\target\..\architecture\presentation\mod.rs:488:13: error[E0308]: mismatched types: expected `TypeSource`, found a different `TypeSource`
+src\target\..\architecture\system\mod.rs:168:70: error[E0308]: mismatched types: expected trait `unified::data::old_data::type_repository::TypeRepository`, found trait `target::data::old_data::type_repository::TypeRepository`
+src\target\..\architecture\domain\mod.rs:18:5: warning: unused import: `crate::parser::common::Parser`
+src\unified\..\architecture\domain\mod.rs:18:5: warning: unused import: `crate::parser::common::Parser`
+src\target\data\loaders\..\..\..\adapters\config_parser_guided_discovery.rs:129:17: warning: variable `found_count` is assigned to, but never used
+src\target\data\loaders\..\..\..\adapters\config_parser_guided_discovery.rs:130:17: warning: variable `missing_count` is assigned to, but never used
+src\target\data\loaders\..\..\..\adapters\config_parser_guided_discovery.rs:201:45: warning: unused variable: `kind`: help: if this is intentional, prefix it with an underscore: `_kind`
+src\target\data\loaders\..\..\..\adapters\config_parser_quick_xml.rs:166:17: warning: variable `in_internal_info` is assigned to, but never used
+src\target\data\loaders\..\..\..\adapters\config_parser_quick_xml.rs:179:43: warning: value assigned to `in_internal_info` is never read
+src\target\data\loaders\..\..\..\adapters\config_parser_quick_xml.rs:243:43: warning: value assigned to `in_internal_info` is never read
+src\target\..\architecture\domain\mod.rs:612:9: warning: unused variable: `expression`: help: if this is intentional, prefix it with an underscore: `_expression`
+src\target\..\architecture\domain\mod.rs:679:9: warning: unused variable: `expression`: help: if this is intentional, prefix it with an underscore: `_expression`
+src\target\..\architecture\domain\mod.rs:685:21: warning: unused variable: `parser`: help: if this is intentional, prefix it with an underscore: `_parser`
+src\unified\data\loaders\..\..\..\adapters\config_parser_guided_discovery.rs:129:17: warning: variable `found_count` is assigned to, but never used
+src\unified\data\loaders\..\..\..\adapters\config_parser_guided_discovery.rs:130:17: warning: variable `missing_count` is assigned to, but never used
+src\unified\data\loaders\..\..\..\adapters\config_parser_guided_discovery.rs:201:45: warning: unused variable: `kind`: help: if this is intentional, prefix it with an underscore: `_kind`
+src\unified\data\loaders\..\..\..\adapters\config_parser_quick_xml.rs:166:17: warning: variable `in_internal_info` is assigned to, but never used
+src\unified\data\loaders\..\..\..\adapters\config_parser_quick_xml.rs:179:43: warning: value assigned to `in_internal_info` is never read
+src\unified\data\loaders\..\..\..\adapters\config_parser_quick_xml.rs:243:43: warning: value assigned to `in_internal_info` is never read
+src\unified\..\architecture\domain\mod.rs:612:9: warning: unused variable: `expression`: help: if this is intentional, prefix it with an underscore: `_expression`
+src\unified\..\architecture\domain\mod.rs:679:9: warning: unused variable: `expression`: help: if this is intentional, prefix it with an underscore: `_expression`
+src\unified\..\architecture\domain\mod.rs:685:21: warning: unused variable: `parser`: help: if this is intentional, prefix it with an underscore: `_parser`
+src\documentation\core\hierarchy.rs:910:31: warning: unused variable: `categories`: help: if this is intentional, prefix it with an underscore: `_categories`
+src\documentation\core\hierarchy.rs:922:29: warning: unused variable: `categories`: help: if this is intentional, prefix it with an underscore: `_categories`
+src\documentation\platform\mod.rs:486:14: warning: unused variable: `key`: help: if this is intentional, prefix it with an underscore: `_key`
+src\documentation\platform\mod.rs:503:34: warning: unused variable: `query`: help: if this is intentional, prefix it with an underscore: `_query`
+src\documentation\search\mod.rs:723:13: warning: unused variable: `end_index`: help: if this is intentional, prefix it with an underscore: `_end_index`
+error: could not compile `bsl-gradual-types` (lib) due to 14 previous errors; 32 warnings emitted

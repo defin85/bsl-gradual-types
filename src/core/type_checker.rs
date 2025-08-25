@@ -8,10 +8,12 @@ use crate::core::standard_types::{
     is_boolean, is_number, is_string, platform_type, primitive_type, special_type,
 };
 use crate::core::type_narrowing::TypeNarrower;
-use crate::core::types::{Certainty, PrimitiveType, ResolutionResult, SpecialType, TypeResolution};
-use crate::parser::ast::*;
-use crate::parser::graph_builder::DependencyGraphBuilder;
-use crate::parser::visitor::AstVisitor;
+use crate::domain::types::{
+    Certainty, PrimitiveType, ResolutionResult, SpecialType, TypeResolution,
+};
+use crate::parsing::bsl::ast::*;
+use crate::parsing::bsl::graph_builder::DependencyGraphBuilder;
+use crate::parsing::bsl::visitor::AstVisitor;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

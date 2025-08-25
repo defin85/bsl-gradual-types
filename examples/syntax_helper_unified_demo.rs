@@ -1,8 +1,8 @@
 //! Демонстрация работы унифицированного парсера синтакс-помощника
 
 use anyhow::Result;
-use bsl_gradual_types::adapters::platform_types_v2::PlatformTypesResolverV2;
-use bsl_gradual_types::adapters::syntax_helper_parser::{
+use bsl_gradual_types::data::loaders::platform_types_v2::PlatformTypesResolverV2;
+use bsl_gradual_types::data::loaders::syntax_helper_parser::{
     OptimizationSettings, SyntaxHelperParser, SyntaxNode,
 };
 use bsl_gradual_types::core::types::FacetKind;

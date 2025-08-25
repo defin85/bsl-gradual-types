@@ -1,5 +1,5 @@
 use super::ast::*;
-use crate::adapters::config_parser_xml::ConfigParserXml;
+use crate::data::loaders::config_parser_xml::ConfigParserXml;
 use crate::core::{
     context::ContextResolver,
     types::{

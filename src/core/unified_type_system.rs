@@ -13,7 +13,7 @@ use super::platform_resolver::{CompletionItem, PlatformTypeResolver};
 use super::types::{
     Certainty, ConcreteType, FacetKind, ResolutionResult, ResolutionSource, TypeResolution,
 };
-use crate::adapters::config_parser_guided_discovery::ConfigurationGuidedParser;
+use crate::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
 
 /// Единая система типов BSL
 ///
@@ -259,7 +259,7 @@ impl UnifiedTypeSystem {
         let resolutions = self.type_resolutions.read().await;
 
         // Индексация для быстрого поиска
-        // TODO: Можно добавить дополнительные индексы по категориям, фасетам и т.д.
+        // TODO: Можно добавить дополнительные индексы по категориямм фасетам и т.д.
 
         println!("✅ Единый индекс построен для {} типов", resolutions.len());
         Ok(())

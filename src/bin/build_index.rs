@@ -26,7 +26,7 @@ use bsl_gradual_types::architecture::data::TypeRepository;
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    TypeRepository::check_version();
+    // TODO: возможно, сюда будет добавлена проверка версии репозитория типов при реализации
 
     tracing_subscriber::fmt().with_env_filter("info").init();
 

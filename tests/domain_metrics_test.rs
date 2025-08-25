@@ -1,7 +1,7 @@
-use bsl_gradual_types::target::data::{
+use bsl_gradual_types::unified::data::{
     InMemoryTypeRepository, ParseMetadata, RawTypeData, TypeSource,
 };
-use bsl_gradual_types::target::domain::{TypeContext, TypeResolutionService};
+use bsl_gradual_types::unified::domain::{TypeContext, TypeResolutionService};
 use std::sync::Arc;
 
 #[tokio::test]

@@ -9,7 +9,7 @@ use bsl_gradual_types::core::parallel_analysis::{
     ParallelAnalysisCLI, ParallelAnalysisConfig, ParallelAnalyzer,
 };
 use bsl_gradual_types::core::performance::{global_profiler, BenchmarkSuite, PerformanceOptimizer};
-use bsl_gradual_types::parser::common::ParserFactory;
+use bsl_gradual_types::parsing::bsl::common::ParserFactory;
 
 #[derive(Parser)]
 #[command(name = "bsl-profiler")]

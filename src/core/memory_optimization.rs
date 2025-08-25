@@ -9,7 +9,7 @@ use std::mem;
 use std::sync::Arc;
 
 use crate::core::type_checker::TypeContext;
-use crate::core::types::TypeResolution;
+use crate::domain::types::TypeResolution;
 
 /// Профиль использования памяти
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -408,3 +408,4 @@ mod tests {
             .contains("🧠 Отчет об оптимизации памяти"));
     }
 }
+

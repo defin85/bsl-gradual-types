@@ -12,8 +12,8 @@ use super::core::hierarchy::{
 use super::core::providers::{DocumentationProvider, ProviderConfig};
 use super::core::statistics::{InitializationStatus, ProviderStatistics};
 use super::search::AdvancedSearchQuery;
-use crate::adapters::syntax_helper_parser::SyntaxHelperParser;
-use crate::core::types::{FacetKind, Method, Property, TypeResolution};
+use crate::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use crate::domain::types::{FacetKind, Method, Property, TypeResolution};
 
 /// Провайдер документации платформенных типов
 ///
@@ -136,10 +136,10 @@ impl PlatformDocumentationProvider {
     /// Конвертировать SyntaxNode в TypeDocumentationFull
     async fn convert_syntax_node_to_documentation(
         &self,
-        node: &crate::adapters::syntax_helper_parser::SyntaxNode,
+        node: &crate::data::loaders::syntax_helper_parser::SyntaxNode,
     ) -> Result<TypeDocumentationFull> {
         use super::core::hierarchy::DocumentationSourceType;
-        use crate::adapters::syntax_helper_parser::SyntaxNode;
+        use crate::data::loaders::syntax_helper_parser::SyntaxNode;
         use crate::core::types::{
             Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult,
             ResolutionSource, TypeResolution,
@@ -256,7 +256,7 @@ impl PlatformDocumentationProvider {
                     parent_type: None,
                     child_types: Vec::new(),
 
-                    // === МЕТАДАННЫЕ ===
+                    // === МЕТАДАННЫ ===
                     source_file: Some(type_info.identity.catalog_path.clone()),
                     ui_metadata: UiMetadata {
                         icon: self.get_type_icon(&type_info.identity.russian_name),
@@ -287,7 +287,7 @@ impl PlatformDocumentationProvider {
     /// Построить корневую категорию платформенных типов
     async fn build_platform_root_category(&self) -> Result<RootCategoryNode> {
         use super::core::hierarchy::{CategoryStatistics, SubCategoryNode};
-        use crate::adapters::syntax_helper_parser::SyntaxNode;
+        use crate::data::loaders::syntax_helper_parser::SyntaxNode;
 
         let parser = self.syntax_parser.read().await;
         let database = parser.export_database();
@@ -483,7 +483,7 @@ impl DocumentationProvider for PlatformDocumentationProvider {
         }
 
         // Поиск по русскому названию
-        for (key, type_doc) in cache.iter() {
+        for (_, type_doc) in cache.iter() {
             if type_doc.russian_name.contains(type_id)
                 || type_doc.english_name.contains(type_id)
                 || type_id.contains(&type_doc.russian_name)
@@ -500,7 +500,7 @@ impl DocumentationProvider for PlatformDocumentationProvider {
         Ok(None)
     }
 
-    async fn search_types(&self, query: &AdvancedSearchQuery) -> Result<Vec<DocumentationNode>> {
+    async fn search_types(&self, _query: &AdvancedSearchQuery) -> Result<Vec<DocumentationNode>> {
         // TODO: Реализовать поиск в платформенных типах
         Ok(Vec::new())
     }
@@ -563,7 +563,7 @@ impl DocumentationProvider for PlatformDocumentationProvider {
 impl PlatformDocumentationProvider {
     /// Построить кеш типов из парсера
     async fn build_types_cache(&self) -> Result<()> {
-        use crate::adapters::syntax_helper_parser::SyntaxNode;
+        use crate::data::loaders::syntax_helper_parser::SyntaxNode;
 
         let parser = self.syntax_parser.read().await;
         let database = parser.export_database();

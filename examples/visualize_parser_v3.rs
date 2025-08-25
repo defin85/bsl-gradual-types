@@ -3,7 +3,7 @@
 //! Создаёт интерактивный HTML отчёт с иерархией типов, индексами и фасетами
 
 use anyhow::Result;
-use bsl_gradual_types::adapters::syntax_helper_parser::{
+use bsl_gradual_types::data::loaders::syntax_helper_parser::{
     OptimizationSettings, SyntaxHelperParser, SyntaxNode, TypeInfo,
 };
 use bsl_gradual_types::core::types::FacetKind;
@@ -160,7 +160,7 @@ fn collect_statistics(parser: &SyntaxHelperParser) -> Statistics {
 }
 
 fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
-    use bsl_gradual_types::adapters::syntax_helper_parser::CategoryInfo;
+    use bsl_gradual_types::data::loaders::syntax_helper_parser::CategoryInfo;
     let mut html = String::new();
 
     let database = parser.export_database();

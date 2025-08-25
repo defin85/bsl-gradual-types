@@ -5,7 +5,7 @@
 use super::syntax_helper_parser::{
     OptimizationSettings, SyntaxHelperDatabase, SyntaxHelperParser, SyntaxNode, TypeIndex, TypeInfo,
 };
-use crate::core::types::{
+use crate::domain::types::{
     Certainty, ConcreteType, Method, Parameter, PlatformType, Property, ResolutionMetadata,
     ResolutionResult, ResolutionSource, TypeResolution,
 };

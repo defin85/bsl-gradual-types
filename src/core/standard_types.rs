@@ -1,6 +1,6 @@
 //! Стандартные типы BSL
 
-use crate::core::types::{
+use crate::domain::types::{
     Certainty, ConcreteType, PlatformType, PrimitiveType as CorePrimitiveType, ResolutionResult,
     ResolutionSource, SpecialType, TypeResolution,
 };

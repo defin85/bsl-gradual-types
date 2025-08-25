@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::core::analysis_cache::AnalysisCacheManager;
 use crate::core::type_checker::{TypeChecker, TypeContext, TypeDiagnostic};
-use crate::parser::common::ParserFactory;
+use crate::parsing::bsl::common::ParserFactory;
 
 /// Результат анализа одного файла
 #[derive(Debug, Clone)]
@@ -448,13 +448,13 @@ impl ProjectAnalysisUtils {
 
     /// Группировать файлы по подсистемам
     pub fn group_files_by_subsystem(file_paths: &[PathBuf]) -> HashMap<String, Vec<PathBuf>> {
-        let mut groups = HashMap::new();
+        let mut groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
 
         for file_path in file_paths {
             let subsystem = Self::extract_subsystem_name(file_path);
             groups
                 .entry(subsystem)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(file_path.clone());
         }
 

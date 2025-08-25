@@ -231,7 +231,7 @@ cargo run --example test_simple
 cargo test --test config_parser_guided_test
 
 # Использование в коде
-use bsl_gradual_types::adapters::config_parser_guided_discovery::ConfigurationGuidedParser;
+use bsl_gradual_types::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
 
 let mut parser = ConfigurationGuidedParser::new("path/to/configuration");
 let type_resolutions = parser.parse_with_configuration_guide()?;

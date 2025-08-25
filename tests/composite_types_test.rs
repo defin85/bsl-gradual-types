@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use bsl_gradual_types::adapters::config_parser_xml::ConfigParserXml;
+    use bsl_gradual_types::data::loaders::config_parser_xml::ConfigParserXml;
     use bsl_gradual_types::core::types::{ConcreteType, ResolutionResult};
 
     #[test]

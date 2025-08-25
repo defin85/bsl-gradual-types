@@ -22,7 +22,7 @@ use std::sync::{
 };
 use tracing::{debug, info, warn};
 
-use crate::core::types::FacetKind;
+use crate::domain::types::FacetKind;
 
 // ============================================================================
 // Структуры данных
@@ -716,7 +716,7 @@ impl SyntaxHelperParser {
                     (func_part.trim().to_string(), None)
                 }
             } else {
-                // Если нет точки, пробуем извлечь из скобок
+                // Если нет точки, пробуем извлечьь из скобок
                 if title.contains(" (") {
                     let russian = title.split(" (").next().unwrap_or(&title).trim();
                     (russian.to_string(), None)
@@ -725,7 +725,7 @@ impl SyntaxHelperParser {
                 }
             }
         } else {
-            // Если нет точки, пробуем извлечь из скобок
+            // Если нет точки, пробуем извлечьь из скобок
             if title.contains(" (") {
                 let russian = title.split(" (").next().unwrap_or(&title).trim();
                 (russian.to_string(), None)

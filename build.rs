@@ -1,12 +1,7 @@
 //! Build script для bsl-gradual-types
 //! Создает заглушку для tree_sitter_bsl пока нет реальной библиотеки
 
-use std::env;
-use std::path::PathBuf;
-
 fn main() {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-
     // Проверяем наличие реальной tree-sitter-bsl библиотеки
     let tree_sitter_bsl_path = "../tree-sitter-bsl";
     let parser_c_path = format!("{}/src/parser.c", tree_sitter_bsl_path);

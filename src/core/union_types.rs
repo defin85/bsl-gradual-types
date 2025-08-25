@@ -3,7 +3,7 @@
 //! Этот модуль реализует продвинутую работу с union типами,
 //! включая их нормализацию, упрощение и вывод.
 
-use crate::core::types::{
+use crate::domain::types::{
     Certainty, ConcreteType, PrimitiveType, ResolutionMetadata, ResolutionResult, ResolutionSource,
     TypeResolution, WeightedType,
 };

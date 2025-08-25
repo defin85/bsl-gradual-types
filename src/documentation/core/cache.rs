@@ -205,8 +205,6 @@ impl DocumentationCache {
 
     /// Очистить просроченные записи
     pub async fn cleanup_expired(&self) {
-        let now = Utc::now();
-
         // Очищаем кеш типов
         {
             let mut cache = self.type_details_cache.write().await;

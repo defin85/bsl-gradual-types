@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::core::interprocedural::CallGraph;
 use crate::core::type_checker::{FunctionSignature, TypeContext};
-use crate::core::types::TypeResolution;
+use crate::domain::types::TypeResolution;
 
 /// Ключ кеша на основе хеша содержимого файла
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

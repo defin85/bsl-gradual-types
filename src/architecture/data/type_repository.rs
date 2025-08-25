@@ -1,6 +1,6 @@
 use super::stats::RepositoryStats;
 use super::RawTypeData;
-use crate::core::types::TypeResolution;
+use crate::domain::types::TypeResolution;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;

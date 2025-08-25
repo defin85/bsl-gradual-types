@@ -12,8 +12,8 @@ use super::application::{AnalysisTypeService, LspTypeService, WebTypeService};
 use super::data::{InMemoryTypeRepository, ParseMetadata, RawTypeData, TypeRepository, TypeSource};
 use super::domain::{TypeContext, TypeResolutionService};
 use super::presentation::{CliInterface, LspInterface, WebInterface};
-use crate::adapters::config_parser_guided_discovery::ConfigurationGuidedParser;
-use crate::core::types::TypeResolution;
+use crate::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
+use crate::domain::types::TypeResolution;
 
 /// Центральная система типов BSL
 ///
@@ -203,7 +203,7 @@ impl CentralTypeSystem {
     ///
     /// Пример
     /// ```ignore
-    /// use bsl_gradual_types::target::system::{CentralTypeSystem, CentralSystemConfig};
+    /// use bsl_gradual_types::unified::system::{CentralTypeSystem, CentralSystemConfig};
     /// # async fn run() -> anyhow::Result<()> {
     /// let cfg = CentralSystemConfig::default();
     /// let system = CentralTypeSystem::initialize_with_config(cfg).await?;
@@ -388,8 +388,10 @@ impl CentralTypeSystem {
     async fn initialize_domain_layer(&self) -> Result<()> {
         info!("🔧 Инициализация Domain Layer...");
 
-        // Инициализируем резолверы в TypeResolutionService
-        // TODO: Добавить публичные методы для инициализации резолверов
+        // Инициализируем резолверы в TypeResolutionService (кеши, tree-sitter)
+        if let Err(e) = self.resolution_service.initialize().await {
+            warn!("⚠️ Инициализация резолверов завершилась с ошибкой: {}", e);
+        }
 
         info!("✅ Domain Layer инициализирован");
         Ok(())

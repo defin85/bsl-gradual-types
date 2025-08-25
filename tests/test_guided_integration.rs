@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use bsl_gradual_types::adapters::config_parser_guided_discovery::ConfigurationGuidedParser;
+    use bsl_gradual_types::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
 
     #[test]
     fn test_configuration_guided_parser_creation() {

@@ -12,7 +12,7 @@
 - Ориентир: реализуется итеративно, совместно с текущим кодом
 
 ### Статус миграции (обновление v0.4.x)
-- Переключатель движка (Strangler) реализован для: LSP, Web, CLI (`--engine` и ENV `BSL_TYPES_ENGINE`). По умолчанию — legacy.
+- Legacy‑движок удалён; все компоненты работают в target‑режиме.
 - Центральная система (`CentralTypeSystem`) подключена и инициализирует слои Data → Domain → Application → Presentation.
 - Data Layer: InMemory `TypeRepository` с `save/load/search/filters` и корректной статистикой по источникам.
 - Domain Layer: базовые резолверы (Platform, Builtin, минимальный Expression), каркас BSL/tree‑sitter; минимальный `TypeCheckerService`.

@@ -31,6 +31,22 @@ pub enum CompletionKind {
     Function,
 }
 
+impl From<CompletionKind> for u8 {
+    fn from(kind: CompletionKind) -> Self {
+        match kind {
+            CompletionKind::Global => 1,
+            CompletionKind::Catalog => 2,
+            CompletionKind::Document => 3,
+            CompletionKind::Enum => 4,
+            CompletionKind::Method => 5,
+            CompletionKind::Property => 6,
+            CompletionKind::GlobalFunction => 7,
+            CompletionKind::Variable => 8,
+            CompletionKind::Function => 9,
+        }
+    }
+}
+
 /// Resolver that knows about platform types and configuration
 pub struct PlatformTypeResolver {
     /// Platform types resolver v2 with syntax helper data

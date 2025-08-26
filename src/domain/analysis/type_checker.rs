@@ -4,7 +4,7 @@ use crate::domain::analysis::dependency_graph::{Scope, TypeDependencyGraph};
 use crate::domain::analysis::flow_sensitive::FlowSensitiveAnalyzer;
 use crate::domain::analysis::interprocedural::{CallGraph, InterproceduralAnalyzer};
 use crate::domain::analysis::type_narrowing::TypeNarrower;
-use crate::domain::analysis_cache::AnalysisCacheManager;
+use crate::system::analysis_cache::AnalysisCacheManager;
 use crate::domain::standard_types::{
     is_boolean, is_number, is_string, platform_type, primitive_type, special_type,
 };

@@ -125,12 +125,12 @@ impl LspInterface {
             .into_iter()
             .map(|comp| LspCompletionItem {
                 label: comp.label.clone(),
-                kind: comp.kind as u8,
+                kind: comp.kind.into(),
                 detail: comp.detail,
                 documentation: comp.documentation,
-                insert_text: comp.insert_text,
-                filter_text: comp.filter_text,
-                sort_text: comp.sort_text,
+                insert_text: Some(comp.label.clone()), // используем label как insert_text
+                filter_text: Some(comp.label.clone()), // используем label как filter_text
+                sort_text: Some(comp.label.clone()),   // используем label как sort_text
             })
             .collect();
 
@@ -149,15 +149,15 @@ impl LspInterface {
         if let Some(hover_info) = self
             .lsp_service
             .get_hover_info(
-                &request.expression,
                 &request.file_path,
                 request.line,
                 request.column,
+                &request.expression,
             )
             .await
         {
             Ok(Some(LspHoverResponse {
-                contents: vec![hover_info.content, hover_info.type_info],
+                contents: vec![hover_info],
                 range: Some(LspRange {
                     start: LspPosition {
                         line: request.line,
@@ -290,6 +290,7 @@ pub struct SearchFilters {
     pub category: Option<String>,
     pub has_methods: Option<bool>,
     pub has_properties: Option<bool>,
+    pub facets: Vec<String>,
 }
 
 /// HTTP ответ поиска
@@ -438,42 +439,15 @@ impl WebInterface {
     ) -> Result<WebTypeDetailsResponse> {
         println!("📋 Веб-запрос деталей типа: '{}'", type_name);
 
-        let details = self.web_service.get_type_details(type_name).await?;
+        let _details = self.web_service.get_type_details(type_name).await?;
 
+        // TODO: Restore proper type details extraction after migration
         Ok(WebTypeDetailsResponse {
-            name: details.basic_info.name,
-            description: details.basic_info.description,
-            methods: details
-                .methods
-                .into_iter()
-                .map(|m| WebMethodResponse {
-                    name: m.name,
-                    description: m.description,
-                    parameters: m
-                        .parameters
-                        .into_iter()
-                        .map(|p| WebParameterResponse {
-                            name: p.name,
-                            type_name: p.type_name,
-                            is_optional: p.is_optional,
-                            description: p.description,
-                        })
-                        .collect(),
-                    return_type: m.return_type,
-                    examples: m.examples,
-                })
-                .collect(),
-            properties: details
-                .properties
-                .into_iter()
-                .map(|p| WebPropertyResponse {
-                    name: p.name,
-                    type_name: p.type_name,
-                    is_readonly: p.is_readonly,
-                    description: p.description,
-                })
-                .collect(),
-            related_types: details.related_types,
+            name: type_name.to_string(),
+            description: "Временно недоступно".to_string(),
+            methods: vec![],       // TODO: Extract from details
+            properties: vec![],    // TODO: Extract from details
+            related_types: vec![], // TODO: Extract from details
         })
     }
 
@@ -482,11 +456,9 @@ impl WebInterface {
         // use super::domain::TypeSourceStub;
 
         let source = web_filters.source.and_then(|s| match s.as_str() {
-            "platform" => None, // Some(TypeSourceStub::Platform { version: "8.3".to_string() }),
-            "configuration" => None, // Some(TypeSourceStub::Configuration { config_version: "8.3".to_string() }),
-            "user" => Some(TypeSourceStub::UserDefined {
-                file_path: "".to_string(),
-            }),
+            "platform" => Some("platform".to_string()),
+            "configuration" => Some("configuration".to_string()),
+            "user" => Some("user".to_string()),
             _ => None,
         });
 

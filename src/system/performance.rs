@@ -510,6 +510,7 @@ impl BenchmarkSuite {
                 variables: HashMap::new(),
                 functions: HashMap::new(),
                 current_scope: crate::domain::analysis::dependency_graph::Scope::Global,
+                scope_stack: vec![],
             };
 
             let mut analyzer = crate::domain::analysis::flow_sensitive::FlowSensitiveAnalyzer::new(context);

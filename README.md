@@ -148,21 +148,23 @@ curl "http://localhost:8080/api/stats"
 ### Слоистая архитектура
 ```
 ┌─────────────────────────────────────────┐
-│    IDE Integration (VSCode, Web)        │
+│    System (Coordination, Performance)   │
 ├─────────────────────────────────────────┤
-│    Application (LSP, CLI, Web Server)   │
+│    Application (Services, LSP)          │
 ├─────────────────────────────────────────┤
-│    Advanced Analysis (Flow, Union, IP)  │
+│    Presentation (Adapters, Interfaces)  │
 ├─────────────────────────────────────────┤
-│    Analysis (Parser, TypeChecker)       │
+│    Domain (Types, Analysis, Contracts)  │
 ├─────────────────────────────────────────┤
-│    Core (Types, Facets, Contracts)      │
+│    Data (Repository, Loaders)           │
+├─────────────────────────────────────────┤
+│    Parsing (BSL, Tree-sitter)           │
 └─────────────────────────────────────────┘
 ```
 
-### Ключевые модули
-- **Core**: `types.rs`, `flow_sensitive.rs`, `union_types.rs`, `interprocedural.rs`
-- **Parser**: `tree_sitter_adapter.rs` (на основе tree-sitter-bsl)
+### Ключевые модули (Плоская архитектура)
+- **Domain**: `types.rs`, `analysis/`, `resolvers/`, `contracts.rs`
+- **Parsing**: `bsl/tree_sitter_adapter.rs` (на основе tree-sitter-bsl)
 - **LSP**: `lsp_enhanced.rs` с инкрементальным парсингом
 - **Tools**: `profiler.rs`, `web_server.rs`
 

@@ -292,7 +292,7 @@ impl ConfigParserXml {
             MetadataKind::Catalog => crate::domain::types::MetadataKind::Catalog,
             MetadataKind::Document => crate::domain::types::MetadataKind::Document,
             MetadataKind::InformationRegister => {
-                crate::domain::types::MetadataKind::InformationRegister
+                crate::domain::types::MetadataKind::Register
             }
             MetadataKind::Enum => crate::domain::types::MetadataKind::Enum,
         };

@@ -6,7 +6,7 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
 
-use crate::domain::analysis::{TypeContext, TypeDiagnostic};
+use crate::domain::analysis::type_checker::{TypeContext, TypeDiagnostic, DiagnosticSeverity};
 use crate::domain::types::{Certainty, ConcreteType, ResolutionResult, TypeResolution};
 use crate::parsing::bsl::ast::Program;
 use std::collections::HashMap;

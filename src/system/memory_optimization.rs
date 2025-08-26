@@ -104,7 +104,10 @@ impl MemoryMonitor {
                 + context.variables.len()
                     * (mem::size_of::<String>() + mem::size_of::<TypeResolution>())
                 + context.functions.len()
-                    * mem::size_of::<(String, crate::core::type_checker::FunctionSignature)>();
+                    * mem::size_of::<(
+                        String,
+                        crate::domain::analysis::type_checker::FunctionSignature,
+                    )>();
 
             context_memory += ctx_size;
             total_memory += ctx_size;
@@ -408,4 +411,3 @@ mod tests {
             .contains("🧠 Отчет об оптимизации памяти"));
     }
 }
-

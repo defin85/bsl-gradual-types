@@ -1,7 +1,7 @@
 //! Демонстрация HTML рендеринга документации
 
 use anyhow::Result;
-use bsl_gradual_types::documentation::core::hierarchy::{CategoryNode, TypeHierarchy};
+use bsl_gradual_types::documentation::hierarchy::{CategoryNode, TypeHierarchy};
 use bsl_gradual_types::documentation::{
     AdvancedSearchQuery, DocumentationSearchEngine, RenderEngine,
 };
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
 
 /// Создать тестовую иерархию для демонстрации
 fn create_test_hierarchy() -> TypeHierarchy {
-    use bsl_gradual_types::documentation::core::hierarchy::{
+    use bsl_gradual_types::documentation::hierarchy::{
         DocumentationNode, HierarchyStatistics, NavigationIndex, RootCategoryNode, SubCategoryNode,
     };
     use std::collections::HashMap;

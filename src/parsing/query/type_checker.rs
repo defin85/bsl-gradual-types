@@ -1,11 +1,9 @@
 use super::ast::*;
 use crate::data::loaders::config_parser_xml::ConfigParserXml;
-use crate::core::{
-    context::ContextResolver,
-    types::{
-        ConcreteType, ConfigurationType, MetadataKind, PrimitiveType, ResolutionResult,
-        SpecialType, TypeResolution,
-    },
+use crate::domain::context::ContextResolver;
+use crate::domain::types::{
+    ConcreteType, ConfigurationType, MetadataKind, PrimitiveType, ResolutionResult,
+    SpecialType, TypeResolution,
 };
 use std::collections::HashMap;
 use std::path::Path;

@@ -5,12 +5,13 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use super::core::hierarchy::{
-    AvailabilityContext, CodeExample, DocumentationNode, MethodDocumentation,
-    PropertyDocumentation, RootCategoryNode, TypeDocumentationFull, UiMetadata,
-};
-use super::core::providers::{DocumentationProvider, ProviderConfig};
-use super::core::statistics::{InitializationStatus, ProviderStatistics};
+// TODO: Update imports after documentation system refactoring
+// use super::core::hierarchy::{
+//     AvailabilityContext, CodeExample, DocumentationNode, MethodDocumentation,
+//     PropertyDocumentation, RootCategoryNode, TypeDocumentationFull, UiMetadata,
+// };
+// use super::core::providers::{DocumentationProvider, ProviderConfig};
+// use super::core::statistics::{InitializationStatus, ProviderStatistics};
 use super::search::AdvancedSearchQuery;
 use crate::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 use crate::domain::types::{FacetKind, Method, Property, TypeResolution};
@@ -140,7 +141,7 @@ impl PlatformDocumentationProvider {
     ) -> Result<TypeDocumentationFull> {
         use super::core::hierarchy::DocumentationSourceType;
         use crate::data::loaders::syntax_helper_parser::SyntaxNode;
-        use crate::core::types::{
+        use crate::domain::types::{
             Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult,
             ResolutionSource, TypeResolution,
         };

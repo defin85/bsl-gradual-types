@@ -1,7 +1,7 @@
 //! Тест интеграции ConfigurationGuidedParser с PlatformTypeResolver
 
 use anyhow::Result;
-use bsl_gradual_types::core::platform_resolver::PlatformTypeResolver;
+use bsl_gradual_types::domain::resolvers::PlatformTypeResolver;
 
 fn main() -> Result<()> {
     println!("🚀 Тестирование интеграции ConfigurationGuidedParser");

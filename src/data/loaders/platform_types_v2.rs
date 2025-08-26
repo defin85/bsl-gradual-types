@@ -301,7 +301,7 @@ impl PlatformTypesResolverV2 {
 
     /// Creates standard type resolution
     fn create_standard_type(&self, type_name: &str) -> TypeResolution {
-        use crate::core::types::PrimitiveType;
+        use crate::domain::types::PrimitiveType;
 
         let primitive = match type_name {
             "String" | "Строка" => PrimitiveType::String,

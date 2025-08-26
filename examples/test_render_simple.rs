@@ -1,7 +1,7 @@
 //! Простой тест HTML рендеринга
 
 use anyhow::Result;
-use bsl_gradual_types::documentation::core::hierarchy::DocumentationSourceType;
+use bsl_gradual_types::documentation::hierarchy::DocumentationSourceType;
 use bsl_gradual_types::documentation::render::HtmlDocumentationRenderer;
 use bsl_gradual_types::documentation::search::{
     FacetValue, HighlightFragment, PaginationInfo, SearchFacet, SearchResultItem, SearchResults,

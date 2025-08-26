@@ -92,15 +92,15 @@ impl IncrementalParsingManager {
                     start_byte: self.position_to_byte_offset(new_content, range.start),
                     old_end_byte: self.position_to_byte_offset(new_content, range.end),
                     new_end_byte: self.position_to_byte_offset(new_content, range.end),
-                    start_position: crate::parser::common::Position {
+                    start_position: crate::parsing::bsl::common::Position {
                         row: range.start.line as usize,
                         column: range.start.character as usize,
                     },
-                    old_end_position: crate::parser::common::Position {
+                    old_end_position: crate::parsing::bsl::common::Position {
                         row: range.end.line as usize,
                         column: range.end.character as usize,
                     },
-                    new_end_position: crate::parser::common::Position {
+                    new_end_position: crate::parsing::bsl::common::Position {
                         row: range.end.line as usize,
                         column: range.end.character as usize,
                     },

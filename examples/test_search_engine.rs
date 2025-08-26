@@ -1,7 +1,7 @@
 //! Демонстрация системы поиска DocumentationSearchEngine
 
 use anyhow::Result;
-use bsl_gradual_types::documentation::core::{DocumentationProvider, ProviderConfig};
+use bsl_gradual_types::documentation::{DocumentationProvider, ProviderConfig};
 use bsl_gradual_types::documentation::{
     AdvancedSearchQuery, DocumentationSearchEngine, PlatformDocumentationProvider,
 };

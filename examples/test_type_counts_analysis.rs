@@ -1,9 +1,9 @@
 use anyhow::Result;
 use bsl_gradual_types::{
-    core::platform_resolver::PlatformTypeResolver,
+    domain::resolvers::PlatformTypeResolver,
     documentation::{
-        core::{
-            providers::ProviderConfig, BslDocumentationSystem, DocumentationConfig,
+        providers::{
+            ProviderConfig, BslDocumentationSystem, DocumentationConfig,
             DocumentationProvider,
         },
         platform::PlatformDocumentationProvider,
@@ -39,10 +39,10 @@ async fn main() -> Result<()> {
             // Показываем первые 10 типов
             for (i, doc_node) in provider_types.iter().take(10).enumerate() {
                 match doc_node {
-                    bsl_gradual_types::documentation::core::hierarchy::DocumentationNode::PlatformType(pt) => {
+                    bsl_gradual_types::documentation::hierarchy::DocumentationNode::PlatformType(pt) => {
                         println!("   └─ [{}] Platform: '{}'", i + 1, pt.base_info.russian_name);
                     },
-                    bsl_gradual_types::documentation::core::hierarchy::DocumentationNode::SubCategory(sc) => {
+                    bsl_gradual_types::documentation::hierarchy::DocumentationNode::SubCategory(sc) => {
                         println!("   └─ [{}] SubCategory: '{}' ({} дочерних)", i + 1, sc.name, sc.children.len());
                     },
                     _ => {
@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
 
                 for child in &category.children {
                     match child {
-                        bsl_gradual_types::documentation::core::hierarchy::DocumentationNode::SubCategory(sub_cat) => {
+                        bsl_gradual_types::documentation::hierarchy::DocumentationNode::SubCategory(sub_cat) => {
                             total_subcategories += 1;
                             if !sub_cat.children.is_empty() {
                                 non_empty_subcategories += 1;
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
                                 }
                             }
                         },
-                        bsl_gradual_types::documentation::core::hierarchy::DocumentationNode::PlatformType(_) => {
+                        bsl_gradual_types::documentation::hierarchy::DocumentationNode::PlatformType(_) => {
                             total_types_in_hierarchy += 1;
                         },
                         _ => {}

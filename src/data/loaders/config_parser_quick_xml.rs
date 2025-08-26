@@ -281,7 +281,7 @@ impl ConfigurationQuickXmlParser {
 
     /// Создать TypeResolution для всех фасетов объекта
     fn create_type_resolutions(&self, metadata: &ConfigurationMetadata) -> Vec<TypeResolution> {
-        use crate::core::types::FacetKind;
+        use crate::domain::types::FacetKind;
 
         let mut resolutions = Vec::new();
 

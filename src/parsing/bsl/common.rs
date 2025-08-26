@@ -42,13 +42,13 @@ pub struct ParserFactory;
 impl ParserFactory {
     /// Создать парсер (всегда tree-sitter)
     pub fn create() -> Box<dyn Parser> {
-        Box::new(crate::parser::tree_sitter_adapter::TreeSitterAdapter::new().unwrap())
+        Box::new(crate::parsing::bsl::tree_sitter_adapter::TreeSitterAdapter::new().unwrap())
     }
 
     /// Создать парсер по имени
     pub fn create_by_name(name: &str) -> Option<Box<dyn Parser>> {
         match name {
-            "tree-sitter" => crate::parser::tree_sitter_adapter::TreeSitterAdapter::new()
+            "tree-sitter" => crate::parsing::bsl::tree_sitter_adapter::TreeSitterAdapter::new()
                 .ok()
                 .map(|p| Box::new(p) as Box<dyn Parser>),
             _ => None,

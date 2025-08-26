@@ -469,16 +469,16 @@ impl WebInterface {
     }
 
     fn convert_web_filters(&self, web_filters: WebSearchFilters) -> SearchFilters {
-        use super::data::TypeSource;
+        use super::domain::TypeSourceStub;
 
         let source = web_filters.source.and_then(|s| match s.as_str() {
-            "platform" => Some(TypeSource::Platform {
+            "platform" => Some(TypeSourceStub::Platform {
                 version: "8.3".to_string(),
             }),
-            "configuration" => Some(TypeSource::Configuration {
+            "configuration" => Some(TypeSourceStub::Configuration {
                 config_version: "8.3".to_string(),
             }),
-            "user" => Some(TypeSource::UserDefined {
+            "user" => Some(TypeSourceStub::UserDefined {
                 file_path: "".to_string(),
             }),
             _ => None,

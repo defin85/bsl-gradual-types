@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use bsl_gradual_types::core::{
+    use bsl_gradual_types::application::{
         contracts::{ContractGenerator, ContractMode},
-        types::{Certainty, ConcreteType, PlatformType, ResolutionResult, TypeResolution},
     };
+    use bsl_gradual_types::domain::types::{Certainty, ConcreteType, PlatformType, ResolutionResult, TypeResolution};
 
     #[test]
     fn test_generate_contract_for_unknown_type() {

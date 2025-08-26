@@ -96,7 +96,7 @@ impl ConfigurationDocumentationProvider {
         &self,
         config_types: &[TypeResolution],
     ) -> Result<()> {
-        use crate::core::types::{ConcreteType, ResolutionResult};
+        use crate::domain::types::{ConcreteType, ResolutionResult};
 
         let mut cache = self.configuration_cache.write().await;
 

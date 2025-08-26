@@ -1,10 +1,10 @@
 //! Построение графа зависимостей из AST
 
-use crate::core::dependency_graph::{
+use crate::domain::analysis::dependency_graph::{
     DependencyEdge, DependencyNode, DependencyType, Scope, SourceLocation, TypeDependencyGraph,
 };
-use crate::parser::ast::*;
-use crate::parser::visitor::AstVisitor;
+use crate::parsing::bsl::ast::*;
+use crate::parsing::bsl::visitor::AstVisitor;
 
 /// Построитель графа зависимостей из AST
 pub struct DependencyGraphBuilder {

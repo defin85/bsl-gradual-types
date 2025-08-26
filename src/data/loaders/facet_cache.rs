@@ -1,6 +1,6 @@
 //! Кеширование фасетных шаблонов из синтакс-помощника
 
-use crate::core::facets::FacetRegistry;
+use crate::domain::analysis::facets::FacetRegistry;
 use crate::domain::types::{FacetKind, Method, Property};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

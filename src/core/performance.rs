@@ -466,7 +466,7 @@ impl BenchmarkSuite {
         for _ in 0..iterations {
             let start = Instant::now();
 
-            let mut parser = crate::parser::common::ParserFactory::create();
+            let mut parser = crate::parsing::bsl::common::ParserFactory::create();
             let _result = parser.parse(source_code);
 
             metrics.add_measurement(start.elapsed());
@@ -477,7 +477,7 @@ impl BenchmarkSuite {
 
     /// Запустить бенчмарк type checking
     pub fn benchmark_type_checking(
-        program: &crate::parser::ast::Program,
+        program: &crate::parsing::bsl::ast::Program,
         iterations: usize,
     ) -> ComponentMetrics {
         let mut metrics = ComponentMetrics::new("type_checking".to_string());
@@ -497,7 +497,7 @@ impl BenchmarkSuite {
 
     /// Запустить бенчмарк flow-sensitive анализа
     pub fn benchmark_flow_analysis(
-        program: &crate::parser::ast::Program,
+        program: &crate::parsing::bsl::ast::Program,
         iterations: usize,
     ) -> ComponentMetrics {
         let mut metrics = ComponentMetrics::new("flow_analysis".to_string());
@@ -554,7 +554,7 @@ impl BenchmarkSuite {
         let parsing_metrics = Self::benchmark_parsing(test_code, 50);
 
         // Парсим один раз для получения AST
-        let mut parser = crate::parser::common::ParserFactory::create();
+        let mut parser = crate::parsing::bsl::common::ParserFactory::create();
         if let Ok(program) = parser.parse(test_code) {
             // Type checking
             let type_checking_metrics = Self::benchmark_type_checking(&program, 20);

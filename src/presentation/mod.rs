@@ -1,4 +1,11 @@
-//! Flat architecture adapter for the presentation layer
-//! Temporary re-export of legacy architecture::presentation until full migration.
+//! Presentation layer (flat structure)  
+//! Protocol adapters and UI components
 
-pub use crate::architecture::presentation::*;
+pub mod adapters;
+pub mod interfaces;
+pub mod position;
+pub mod type_hints;
+
+// Re-export main components
+pub use adapters::*;
+pub use interfaces::*;

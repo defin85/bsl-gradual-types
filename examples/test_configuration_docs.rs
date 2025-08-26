@@ -1,7 +1,7 @@
 //! Тест системы документации конфигурационных типов
 
 use anyhow::Result;
-use bsl_gradual_types::documentation::core::{DocumentationProvider, ProviderConfig};
+use bsl_gradual_types::documentation::{DocumentationProvider, ProviderConfig};
 use bsl_gradual_types::documentation::ConfigurationDocumentationProvider;
 
 #[tokio::main]

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bsl_gradual_types::documentation::core::{BslDocumentationSystem, DocumentationConfig};
+use bsl_gradual_types::documentation::{BslDocumentationSystem, DocumentationConfig};
 
 /// Отладка структуры иерархии типов
 #[tokio::main]
@@ -28,11 +28,11 @@ async fn main() -> Result<()> {
         // Показываем первые 10 дочерних элементов
         for (j, child) in category.children.iter().take(10).enumerate() {
             match child {
-                bsl_gradual_types::documentation::core::hierarchy::DocumentationNode::SubCategory(sub_cat) => {
+                bsl_gradual_types::documentation::hierarchy::DocumentationNode::SubCategory(sub_cat) => {
                     println!("   └─ [{}] 📂 Подкатегория: '{}' ({} элементов)", 
                         j + 1, sub_cat.name, sub_cat.children.len());
                 },
-                bsl_gradual_types::documentation::core::hierarchy::DocumentationNode::PlatformType(platform_type) => {
+                bsl_gradual_types::documentation::hierarchy::DocumentationNode::PlatformType(platform_type) => {
                     println!("   └─ [{}] 🔧 Платформенный тип: '{}' (методов: {}, свойств: {})", 
                         j + 1, 
                         platform_type.base_info.russian_name,
@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
                         platform_type.base_info.properties.len()
                     );
                 },
-                bsl_gradual_types::documentation::core::hierarchy::DocumentationNode::ConfigurationType(config_type) => {
+                bsl_gradual_types::documentation::hierarchy::DocumentationNode::ConfigurationType(config_type) => {
                     println!("   └─ [{}] ⚙️ Конфигурационный тип: '{}'", 
                         j + 1, config_type.base_info.russian_name);
                 },

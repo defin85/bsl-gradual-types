@@ -1,7 +1,7 @@
 //! Тест новой системы документации
 
 use anyhow::Result;
-use bsl_gradual_types::documentation::core::{DocumentationConfig, PlatformConfig};
+use bsl_gradual_types::documentation::{DocumentationConfig, PlatformConfig};
 use bsl_gradual_types::documentation::BslDocumentationSystem;
 
 #[tokio::main]

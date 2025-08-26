@@ -1,7 +1,7 @@
 //! Тест единой архитектуры типов - UnifiedTypeSystem
 
 use anyhow::Result;
-use bsl_gradual_types::core::unified_type_system::{
+use bsl_gradual_types::system::unified::{
     LspTypeInterface, UnifiedSystemConfig, UnifiedTypeSystem, WebTypeInterface,
 };
 use std::sync::Arc;

@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use bsl_gradual_types::core::type_checker::{TypeChecker, TypeContext};
+use bsl_gradual_types::domain::analysis::{TypeChecker, TypeContext};
 use bsl_gradual_types::domain::types::{ConcreteType, ResolutionResult, TypeResolution};
 use bsl_gradual_types::documentation::core::providers::DocumentationProvider;
 use bsl_gradual_types::documentation::core::ProviderConfig;
@@ -225,7 +225,7 @@ async fn main() -> Result<()> {
 
 /// Анализ проекта для получения типов
 async fn analyze_project(project_path: &PathBuf) -> Result<TypeContext> {
-    use bsl_gradual_types::core::parallel_analysis::{ParallelAnalysisConfig, ParallelAnalyzer};
+    use bsl_gradual_types::system::analysis::{ParallelAnalysisConfig, ParallelAnalyzer};
 
     let config = ParallelAnalysisConfig {
         show_progress: false, // Отключаем для web сервера
@@ -237,10 +237,10 @@ async fn analyze_project(project_path: &PathBuf) -> Result<TypeContext> {
     let results = analyzer.analyze_project(project_path)?;
 
     // Объединяем все контексты типов
-    let mut combined_context = bsl_gradual_types::core::type_checker::TypeContext {
+    let mut combined_context = bsl_gradual_types::domain::analysis::TypeContext {
         variables: HashMap::new(),
         functions: HashMap::new(),
-        current_scope: bsl_gradual_types::core::dependency_graph::Scope::Global,
+        current_scope: bsl_gradual_types::domain::analysis::Scope::Global,
         scope_stack: vec![],
     };
 
@@ -637,7 +637,7 @@ fn estimate_memory_usage(context: &TypeContext) -> f64 {
     let funcs_size = context.functions.len()
         * mem::size_of::<(
             String,
-            bsl_gradual_types::core::type_checker::FunctionSignature,
+            bsl_gradual_types::domain::analysis::FunctionSignature,
         )>();
 
     (base_size + vars_size + funcs_size) as f64 / (1024.0 * 1024.0)

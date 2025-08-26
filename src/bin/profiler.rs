@@ -5,10 +5,10 @@ use clap::{Parser, Subcommand};
 use colored::*;
 use std::path::PathBuf;
 
-use bsl_gradual_types::core::parallel_analysis::{
+use bsl_gradual_types::system::analysis::{
     ParallelAnalysisCLI, ParallelAnalysisConfig, ParallelAnalyzer,
 };
-use bsl_gradual_types::core::performance::{global_profiler, BenchmarkSuite, PerformanceOptimizer};
+use bsl_gradual_types::system::performance::{global_profiler, BenchmarkSuite, PerformanceOptimizer};
 use bsl_gradual_types::parsing::bsl::common::ParserFactory;
 
 #[derive(Parser)]
@@ -118,16 +118,16 @@ async fn main() -> Result<()> {
                 println!("\n{}", "💡 Рекомендации по оптимизации:".yellow().bold());
                 for (i, suggestion) in suggestions.iter().enumerate() {
                     let priority_color = match suggestion.priority {
-                        bsl_gradual_types::core::performance::OptimizationPriority::Critical => {
+                        bsl_gradual_types::system::performance::OptimizationPriority::Critical => {
                             "red"
                         }
-                        bsl_gradual_types::core::performance::OptimizationPriority::High => {
+                        bsl_gradual_types::system::performance::OptimizationPriority::High => {
                             "yellow"
                         }
-                        bsl_gradual_types::core::performance::OptimizationPriority::Medium => {
+                        bsl_gradual_types::system::performance::OptimizationPriority::Medium => {
                             "blue"
                         }
-                        bsl_gradual_types::core::performance::OptimizationPriority::Low => "green",
+                        bsl_gradual_types::system::performance::OptimizationPriority::Low => "green",
                     };
 
                     println!(
@@ -169,7 +169,7 @@ async fn main() -> Result<()> {
 
             // Профилируем type checking
             let type_check_time = std::time::Instant::now();
-            let type_checker = bsl_gradual_types::core::type_checker::TypeChecker::new(
+            let type_checker = bsl_gradual_types::domain::analysis::TypeChecker::new(
                 file.file_name().unwrap().to_str().unwrap().to_string(),
             );
             let (context, diagnostics) = type_checker.check(&program);
@@ -201,7 +201,7 @@ async fn main() -> Result<()> {
                     println!("🚨 Диагностики:");
                     for diag in diagnostics.iter().take(5) {
                         let severity_color = match diag.severity {
-                            bsl_gradual_types::core::type_checker::DiagnosticSeverity::Error => {
+                            bsl_gradual_types::domain::analysis::DiagnosticSeverity::Error => {
                                 "red"
                             }
                             bsl_gradual_types::core::type_checker::DiagnosticSeverity::Warning => {

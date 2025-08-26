@@ -1,6 +1,6 @@
 //! Простой пример для тестирования автодополнения
 
-use bsl_gradual_types::core::platform_resolver::PlatformTypeResolver;
+use bsl_gradual_types::domain::resolvers::PlatformTypeResolver;
 
 fn main() {
     println!("=== Тестирование автодополнения ===\n");

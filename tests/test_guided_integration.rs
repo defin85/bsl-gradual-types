@@ -25,7 +25,7 @@ mod tests {
         println!("🚀 Тест компиляции типов интеграции");
 
         // Проверяем, что все типы доступны
-        use bsl_gradual_types::core::types::{
+        use bsl_gradual_types::domain::types::{
             Certainty, MetadataKind, ResolutionMetadata, ResolutionResult, ResolutionSource,
             TypeResolution,
         };

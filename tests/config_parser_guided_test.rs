@@ -1,7 +1,7 @@
 //! Простые unit-тесты для Configuration-guided Discovery парсера
 
 use bsl_gradual_types::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
-use bsl_gradual_types::core::types::MetadataKind;
+use bsl_gradual_types::domain::types::MetadataKind;
 
 #[test]
 fn test_parse_basic() {

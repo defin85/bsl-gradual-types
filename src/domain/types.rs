@@ -389,10 +389,12 @@ impl TypeResolution {
         }
     }
 
-    /// Create TypeResolution from RawTypeData
-    pub fn from_raw_data(raw_data: &crate::architecture::data::RawTypeData) -> Self {
-        use crate::unified::data::TypeSource;
-        use crate::core::types::*;
+    // Create TypeResolution from RawTypeData - TEMPORARILY DISABLED
+    // TEMPORARILY DISABLED DURING MIGRATION
+    /*
+    pub fn from_raw_data(raw_data: &crate::data::RawTypeData) -> Self {
+        use crate::data::TypeSource;
+        // Legacy import removed - types are now in domain
 
         // Конвертируем методы
         let methods: Vec<Method> = raw_data
@@ -497,11 +499,12 @@ impl TypeResolution {
                 .map(|facet| facet.kind)
                 .collect(),
         }
-    }
+    */
 
-    /// Convert TypeResolution to RawTypeData
-    pub fn to_raw_data(&self) -> crate::architecture::data::RawTypeData {
-        use crate::unified::data::{
+    // Convert TypeResolution to RawTypeData - TEMPORARILY DISABLED
+    /*
+    pub fn to_raw_data(&self) -> crate::data::RawTypeData {
+        use crate::data::{
             RawMethodData, RawParameterData, RawPropertyData, TypeSource,
         };
 
@@ -606,7 +609,7 @@ impl TypeResolution {
                 column: 0,
             },
         }
-    }
+    */
 }
 
 impl GlobalFunction {

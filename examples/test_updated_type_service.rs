@@ -1,7 +1,7 @@
 //! Тест обновленного TypeSystemService v2.0 на базе UnifiedTypeSystem
 
 use anyhow::Result;
-use bsl_gradual_types::core::type_system_service::{
+use bsl_gradual_types::system::services::{
     TypeSystemService, TypeSystemServiceConfig, TypeSystemServiceFactory,
 };
 

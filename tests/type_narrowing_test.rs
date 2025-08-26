@@ -1,6 +1,6 @@
-//! Интеграционные тесты для type narrowing
+//! Тесты для flow-sensitive анализа (type narrowing)
 
-use bsl_gradual_types::core::type_checker::{DiagnosticSeverity, TypeChecker};
+use bsl_gradual_types::domain::analysis::{DiagnosticSeverity, TypeChecker};
 use bsl_gradual_types::parser::BslParser;
 
 #[test]

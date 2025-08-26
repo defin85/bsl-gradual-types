@@ -2,10 +2,10 @@
 //!
 //! Проверяет работу всех слоёв идеальной архитектуры
 
-use bsl_gradual_types::unified::presentation::{
+use bsl_gradual_types::presentation::adapters::{
     CliAnalysisRequest, CliOutputFormat, LspCompletionRequest, LspHoverRequest, WebSearchRequest,
 };
-use bsl_gradual_types::unified::system::{CentralSystemConfig, CentralTypeSystem};
+use bsl_gradual_types::system::coordination::{CentralSystemConfig, CentralTypeSystem};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

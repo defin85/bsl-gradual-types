@@ -1,9 +1,9 @@
 //! Тесты межпроцедурного анализа типов
 
-use bsl_gradual_types::core::dependency_graph::Scope;
-use bsl_gradual_types::core::interprocedural::{CallGraph, InterproceduralAnalyzer};
-use bsl_gradual_types::core::type_checker::{TypeChecker, TypeContext};
-use bsl_gradual_types::core::types::{ConcreteType, PrimitiveType, ResolutionResult};
+use bsl_gradual_types::domain::analysis::Scope;
+use bsl_gradual_types::system::interprocedural::{CallGraph, InterproceduralAnalyzer};
+use bsl_gradual_types::domain::analysis::{TypeChecker, TypeContext};
+use bsl_gradual_types::domain::types::{ConcreteType, PrimitiveType, ResolutionResult};
 use bsl_gradual_types::parser::common::ParserFactory;
 use std::collections::HashMap;
 
@@ -83,7 +83,7 @@ fn test_interprocedural_function_return_analysis() {
                 .filter(|d| {
                     matches!(
                         d.severity,
-                        bsl_gradual_types::core::type_checker::DiagnosticSeverity::Error
+                        bsl_gradual_types::domain::analysis::DiagnosticSeverity::Error
                     )
                 })
                 .collect();

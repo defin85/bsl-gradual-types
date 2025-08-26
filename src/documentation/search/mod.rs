@@ -6,8 +6,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use super::core::hierarchy::{AvailabilityContext, DocumentationSourceType};
-use super::core::providers::DocumentationProvider;
+// TODO: Update imports after documentation system refactoring
+// use super::core::hierarchy::{AvailabilityContext, DocumentationSourceType};
+// use super::core::providers::DocumentationProvider;
 use crate::domain::types::FacetKind;
 
 pub mod fuzzy;

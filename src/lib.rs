@@ -3,24 +3,24 @@
 //! A gradual type system for 1C:Enterprise BSL language that combines
 //! static analysis with runtime contracts for comprehensive type safety.
 
-pub mod adapters;
+// === FLAT ARCHITECTURE MODULES ===
 pub mod data;
-pub mod core;
-pub mod unified;
-// Публичный модуль целевой архитектуры
-pub mod architecture;
-
-pub mod documentation;
-
-// Плоская структура модулей (адаптеры на период миграции на плоскую структуру)
+pub mod parsing;
 pub mod domain;
 pub mod application;
 pub mod presentation;
 pub mod system;
-pub mod parsing;
 
-pub use core::resolution::TypeResolver;
+// Data adapters for different sources
+pub mod adapters;
+
+// Main public API re-exports
 pub use domain::types;
+pub use domain::resolution_service::TypeResolver;
+pub use application::lsp_service::LspTypeService;
+pub use application::web_service::WebTypeService;
+pub use application::analysis_service::AnalysisService;
+// pub use application::documentation_service::DocumentationService; // TODO: Restore after migration
 pub use parsing::bsl::{BslParser, Expression, Statement};
 
 /// Version of the type system

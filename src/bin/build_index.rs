@@ -21,7 +21,7 @@ struct Args {
     output: Option<String>,
 }
 
-use bsl_gradual_types::architecture::data::TypeRepository;
+use bsl_gradual_types::data::repository::TypeRepository;
 
 fn main() -> Result<()> {
     let args = Args::parse();

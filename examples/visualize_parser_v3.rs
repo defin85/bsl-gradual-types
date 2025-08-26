@@ -6,7 +6,7 @@ use anyhow::Result;
 use bsl_gradual_types::data::loaders::syntax_helper_parser::{
     OptimizationSettings, SyntaxHelperParser, SyntaxNode, TypeInfo,
 };
-use bsl_gradual_types::core::types::FacetKind;
+use bsl_gradual_types::domain::types::FacetKind;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::fs;
 use std::path::Path;

@@ -1,7 +1,7 @@
 //! Демонстрация централизованного TypeSystemService
 
 use anyhow::Result;
-use bsl_gradual_types::core::type_system_service::{
+use bsl_gradual_types::system::services::{
     InitializationStage, TypeSystemService, TypeSystemServiceConfig, TypeSystemServiceFactory,
 };
 

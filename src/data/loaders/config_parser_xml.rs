@@ -287,17 +287,19 @@ impl ConfigParserXml {
     fn create_resolution(&self, object: MetadataObject, kind: &MetadataKind) -> TypeResolution {
         let qualified_name = format!("{}.{}", kind.to_prefix(), &object.name);
 
-        // Map our MetadataKind to core MetadataKind
-        let core_kind = match kind {
-            MetadataKind::Catalog => crate::core::types::MetadataKind::Catalog,
-            MetadataKind::Document => crate::core::types::MetadataKind::Document,
-            MetadataKind::InformationRegister => crate::core::types::MetadataKind::Register,
-            MetadataKind::Enum => crate::core::types::MetadataKind::Enum,
+        // Map our MetadataKind to domain MetadataKind
+        let domain_kind = match kind {
+            MetadataKind::Catalog => crate::domain::types::MetadataKind::Catalog,
+            MetadataKind::Document => crate::domain::types::MetadataKind::Document,
+            MetadataKind::InformationRegister => {
+                crate::domain::types::MetadataKind::InformationRegister
+            }
+            MetadataKind::Enum => crate::domain::types::MetadataKind::Enum,
         };
 
         // Create configuration type
-        let config_type = crate::core::types::ConfigurationType {
-            kind: core_kind,
+        let config_type = crate::domain::types::ConfigurationType {
+            kind: domain_kind,
             name: object.name.clone(),
             attributes: object.attributes.clone(),
             tabular_sections: object.tabular_sections.clone(),
@@ -313,13 +315,13 @@ impl ConfigParserXml {
                 column: None,
                 notes: object.synonym.map(|s| vec![s]).unwrap_or_default(),
             },
-            active_facet: Some(crate::core::types::FacetKind::Manager),
+            active_facet: Some(crate::domain::types::FacetKind::Manager),
             available_facets: self.get_facets_for_kind(kind),
         }
     }
 
-    fn get_facets_for_kind(&self, kind: &MetadataKind) -> Vec<crate::core::types::FacetKind> {
-        use crate::core::types::FacetKind;
+    fn get_facets_for_kind(&self, kind: &MetadataKind) -> Vec<crate::domain::types::FacetKind> {
+        use crate::domain::types::FacetKind;
 
         match kind {
             MetadataKind::Catalog => vec![

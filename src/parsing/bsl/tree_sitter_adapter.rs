@@ -3,8 +3,8 @@
 //! Этот модуль обеспечивает интеграцию tree-sitter-bsl парсера
 //! с нашей системой типов, конвертируя tree-sitter AST в наш формат.
 
-use crate::parser::ast::{BinaryOp, Expression, Parameter, Program, Statement, UnaryOp};
-use crate::parser::common::{Parser, TextChange};
+use crate::parsing::bsl::ast::{BinaryOp, Expression, Parameter, Program, Statement, UnaryOp};
+use crate::parsing::bsl::common::{Parser, TextChange};
 use anyhow::{Context, Result};
 use tree_sitter::{Language, Node, Parser as TSParser};
 

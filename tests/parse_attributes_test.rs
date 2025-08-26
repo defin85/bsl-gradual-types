@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use bsl_gradual_types::data::loaders::config_parser_xml::ConfigParserXml;
-    use bsl_gradual_types::core::types::{ConcreteType, ResolutionResult};
+    use bsl_gradual_types::domain::types::{ConcreteType, ResolutionResult};
 
     #[test]
     fn test_parse_catalog_attributes() {

@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use bsl_gradual_types::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
-use bsl_gradual_types::core::platform_resolver::PlatformTypeResolver;
+use bsl_gradual_types::domain::resolvers::PlatformTypeResolver;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -65,16 +65,16 @@ fn test_parser_only(args: &Args) -> Result<()> {
         let mut other_count = 0;
 
         for type_resolution in &config_types {
-            use bsl_gradual_types::core::types::{ConcreteType, ResolutionResult};
+            use bsl_gradual_types::domain::types::{ConcreteType, ResolutionResult};
 
             if let ResolutionResult::Concrete(ConcreteType::Configuration(config)) =
                 &type_resolution.result
             {
                 match config.kind {
-                    bsl_gradual_types::core::types::MetadataKind::Catalog => catalog_count += 1,
-                    bsl_gradual_types::core::types::MetadataKind::Document => document_count += 1,
-                    bsl_gradual_types::core::types::MetadataKind::Enum => enum_count += 1,
-                    bsl_gradual_types::core::types::MetadataKind::Register => register_count += 1,
+                    bsl_gradual_types::domain::types::MetadataKind::Catalog => catalog_count += 1,
+                    bsl_gradual_types::domain::types::MetadataKind::Document => document_count += 1,
+                    bsl_gradual_types::domain::types::MetadataKind::Enum => enum_count += 1,
+                    bsl_gradual_types::domain::types::MetadataKind::Register => register_count += 1,
                     _ => other_count += 1,
                 }
 

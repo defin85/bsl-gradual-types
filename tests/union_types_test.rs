@@ -1,10 +1,10 @@
 //! Тесты системы Union типов
 
-use bsl_gradual_types::core::types::{
+use bsl_gradual_types::domain::types::union::UnionTypeManager;
+use bsl_gradual_types::domain::types::{
     Certainty, ConcreteType, PrimitiveType, ResolutionMetadata, ResolutionResult, ResolutionSource,
     TypeResolution,
 };
-use bsl_gradual_types::core::union_types::UnionTypeManager;
 
 fn create_string_type() -> TypeResolution {
     TypeResolution {
@@ -100,11 +100,11 @@ fn test_empty_union() {
 #[test]
 fn test_union_compatibility() {
     let union_types = vec![
-        bsl_gradual_types::core::types::WeightedType {
+        bsl_gradual_types::domain::types::WeightedType {
             type_: ConcreteType::Primitive(PrimitiveType::String),
             weight: 0.6,
         },
-        bsl_gradual_types::core::types::WeightedType {
+        bsl_gradual_types::domain::types::WeightedType {
             type_: ConcreteType::Primitive(PrimitiveType::Number),
             weight: 0.4,
         },
@@ -132,11 +132,11 @@ fn test_union_compatibility() {
 #[test]
 fn test_most_likely_type() {
     let union_types = vec![
-        bsl_gradual_types::core::types::WeightedType {
+        bsl_gradual_types::domain::types::WeightedType {
             type_: ConcreteType::Primitive(PrimitiveType::String),
             weight: 0.3,
         },
-        bsl_gradual_types::core::types::WeightedType {
+        bsl_gradual_types::domain::types::WeightedType {
             type_: ConcreteType::Primitive(PrimitiveType::Number),
             weight: 0.7,
         },
@@ -178,11 +178,11 @@ fn test_add_type_to_union() {
 #[test]
 fn test_contains_type() {
     let union_types = vec![
-        bsl_gradual_types::core::types::WeightedType {
+        bsl_gradual_types::domain::types::WeightedType {
             type_: ConcreteType::Primitive(PrimitiveType::String),
             weight: 0.5,
         },
-        bsl_gradual_types::core::types::WeightedType {
+        bsl_gradual_types::domain::types::WeightedType {
             type_: ConcreteType::Primitive(PrimitiveType::Number),
             weight: 0.5,
         },
@@ -205,11 +205,11 @@ fn test_contains_type() {
 #[test]
 fn test_get_type_weight() {
     let union_types = vec![
-        bsl_gradual_types::core::types::WeightedType {
+        bsl_gradual_types::domain::types::WeightedType {
             type_: ConcreteType::Primitive(PrimitiveType::String),
             weight: 0.3,
         },
-        bsl_gradual_types::core::types::WeightedType {
+        bsl_gradual_types::domain::types::WeightedType {
             type_: ConcreteType::Primitive(PrimitiveType::Number),
             weight: 0.7,
         },
@@ -237,11 +237,11 @@ fn test_get_type_weight() {
 #[test]
 fn test_filter_union() {
     let union_types = vec![
-        bsl_gradual_types::core::types::WeightedType {
+        bsl_gradual_types::domain::types::WeightedType {
             type_: ConcreteType::Primitive(PrimitiveType::String),
             weight: 0.3,
         },
-        bsl_gradual_types::core::types::WeightedType {
+        bsl_gradual_types::domain::types::WeightedType {
             type_: ConcreteType::Primitive(PrimitiveType::Number),
             weight: 0.7,
         },

@@ -1,7 +1,7 @@
 //! Пример использования парсера запросов 1С
 
-use bsl_gradual_types::core::context::ContextResolver;
 use bsl_gradual_types::query::{parse_1c_batch_query, parse_1c_query, QueryTypeChecker};
+use bsl_gradual_types::system::context::ContextResolver;
 
 fn main() {
     println!("=== Демонстрация парсера запросов 1С ===\n");

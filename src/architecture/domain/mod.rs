@@ -11,11 +11,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use crate::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
-use crate::unified::data::stats::RepositoryStats;
-use crate::unified::data::{RawTypeData, TypeRepository, TypeSource};
 use crate::domain::types::{Certainty, ConcreteType, FacetKind, ResolutionResult, TypeResolution};
 use crate::parsing::bsl::tree_sitter_adapter::TreeSitterAdapter;
+use crate::unified::data::TypeRepository;
 
 /// Центральный сервис разрешения типов
 ///
@@ -81,13 +79,13 @@ pub trait TypeResolver: Send + Sync {
     ) -> Result<TypeResolution> {
         // TODO: Реализовать разрешение конфигурационных типов
         Ok(TypeResolution {
-           certainty: Certainty::Inferred(0.8), // Не 100% уверены без полной конфигурации
-           result: ResolutionResult::Dynamic,
-           source: crate::domain::types::ResolutionSource::Inferred,
-           metadata: crate::domain::types::ResolutionMetadata::default(),
-           active_facet: Some(FacetKind::Manager),
-           available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
-       })
+            certainty: Certainty::Inferred(0.8), // Не 100% уверены без полной конфигурации
+            result: ResolutionResult::Dynamic,
+            source: crate::domain::types::ResolutionSource::Inferred,
+            metadata: crate::domain::types::ResolutionMetadata::default(),
+            active_facet: Some(FacetKind::Manager),
+            available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+        })
     }
 
     async fn get_completions(
@@ -154,8 +152,8 @@ impl TypeResolver for BslCodeResolver {
             Ok(TypeResolution {
                 certainty: Certainty::Inferred(0.5),
                 result: ResolutionResult::Dynamic,
-            source: crate::domain::types::ResolutionSource::Inferred,
-            metadata: crate::domain::types::ResolutionMetadata::default(),
+                source: crate::domain::types::ResolutionSource::Inferred,
+                metadata: crate::domain::types::ResolutionMetadata::default(),
                 active_facet: None,
                 available_facets: Vec::new(),
             })
@@ -496,6 +494,233 @@ impl TypeResolver for ExpressionResolver {
     }
 }
 
+// === TYPE RESOLUTION SERVICE IMPLEMENTATION ===
+
+impl TypeResolutionService {
+    /// Создаёт новый сервис разрешения типов с заданным репозиторием
+    pub fn new(repository: Arc<dyn TypeRepository>) -> Self {
+        let mut resolvers: Vec<Box<dyn TypeResolverAny>> = Vec::new();
+
+        // Добавляем резолверы в порядке приоритета
+        resolvers.push(Box::new(BuiltinTypeResolver::new()));
+        resolvers.push(Box::new(BslCodeResolver::new()));
+        resolvers.push(Box::new(ExpressionResolver::new()));
+
+        Self {
+            repository,
+            resolvers,
+            cache: Arc::new(RwLock::new(HashMap::new())),
+            metrics: Arc::new(RwLock::new(ResolutionMetrics::default())),
+        }
+    }
+
+    /// Инициализация сервиса (подготовка резолверов)
+    pub async fn initialize(&self) -> Result<()> {
+        info!("🔧 Инициализация TypeResolutionService...");
+
+        // Инициализация BSL парсера
+        for resolver in &self.resolvers {
+            if let Some(bsl_resolver) = resolver.as_any().downcast_ref::<BslCodeResolver>() {
+                bsl_resolver.initialize_parser().await?;
+            }
+        }
+
+        info!("✅ TypeResolutionService готов");
+        Ok(())
+    }
+
+    /// Разрешить тип выражения
+    pub async fn resolve_expression(
+        &self,
+        expression: &str,
+        context: &TypeContext,
+    ) -> Result<TypeResolution> {
+        let start = std::time::Instant::now();
+
+        // Проверяем кеш
+        let cache_key = format!("{}:{:?}", expression, context.file_path);
+        {
+            let cache = self.cache.read().await;
+            if let Some(cached) = cache.get(&cache_key) {
+                let mut metrics = self.metrics.write().await;
+                metrics.cache_hits += 1;
+                // Не можем изменить cached.access_count, т.к. это за ссылкой
+                return Ok(cached.resolution.clone());
+            }
+        }
+
+        // Пытаемся разрешить через резолверы
+        let mut best_resolution = None;
+        let mut best_certainty = 0.0;
+
+        for resolver in &self.resolvers {
+            if resolver.can_resolve(expression) {
+                match resolver
+                    .resolve(expression, context, self.repository.as_ref())
+                    .await
+                {
+                    Ok(resolution) => {
+                        let certainty = match &resolution.certainty {
+                            Certainty::Known => 1.0,
+                            Certainty::Inferred(score) => *score,
+                            Certainty::Unknown => 0.0,
+                        };
+
+                        if certainty > best_certainty {
+                            best_certainty = certainty;
+                            best_resolution = Some(resolution);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Resolver failed for '{}': {}", expression, e);
+                    }
+                }
+            }
+        }
+
+        let resolution = best_resolution.unwrap_or_else(TypeResolution::unknown);
+        let elapsed = start.elapsed().as_millis() as f64;
+
+        // Обновляем кеш и метрики
+        {
+            let mut cache = self.cache.write().await;
+            cache.insert(
+                cache_key,
+                CachedTypeResolution {
+                    resolution: resolution.clone(),
+                    created_at: std::time::Instant::now(),
+                    access_count: 1,
+                    last_accessed: std::time::Instant::now(),
+                },
+            );
+        }
+
+        {
+            let mut metrics = self.metrics.write().await;
+            metrics.total_resolutions += 1;
+            metrics.cache_misses += 1;
+            metrics.average_resolution_time_ms = (metrics.average_resolution_time_ms
+                * (metrics.total_resolutions - 1) as f64
+                + elapsed)
+                / metrics.total_resolutions as f64;
+
+            if matches!(
+                resolution.certainty,
+                Certainty::Known | Certainty::Inferred(_)
+            ) {
+                metrics.successful_resolutions += 1;
+            } else {
+                metrics.failed_resolutions += 1;
+            }
+        }
+
+        Ok(resolution)
+    }
+
+    /// Получить автодополнения для префикса
+    pub async fn get_completions(
+        &self,
+        prefix: &str,
+        context: &TypeContext,
+    ) -> Result<Vec<CompletionItem>> {
+        let mut all_completions = Vec::new();
+
+        for resolver in &self.resolvers {
+            match resolver
+                .get_completions(prefix, context, self.repository.as_ref())
+                .await
+            {
+                Ok(mut completions) => all_completions.append(&mut completions),
+                Err(e) => warn!("Completion failed: {}", e),
+            }
+        }
+
+        // Убираем дубликаты по label
+        all_completions.sort_by(|a, b| a.label.cmp(&b.label));
+        all_completions.dedup_by(|a, b| a.label == b.label);
+
+        Ok(all_completions)
+    }
+
+    /// Поиск типов по запросу
+    pub async fn search_types(&self, query: &str) -> Result<Vec<TypeSearchResult>> {
+        let raw_results = self.repository.search_types(query).await?;
+
+        // Преобразуем RawTypeData в TypeSearchResult
+        let results = raw_results
+            .into_iter()
+            .map(|raw| {
+                TypeSearchResult {
+                    name: raw.russian_name.clone(),
+                    type_info: TypeResolution::unknown(), // TODO: implement proper conversion
+                    source: format!("{:?}", raw.source),
+                    description: Some(raw.documentation.clone()),
+                    raw_data: RawTypeDataForResult {
+                        russian_name: raw.russian_name.clone(),
+                        english_name: Some(raw.english_name.clone()),
+                        documentation: raw.documentation.clone(),
+                        category_path: raw.category_path.clone(),
+                        methods: raw
+                            .methods
+                            .into_iter()
+                            .map(|m| MethodStub {
+                                name: m.name,
+                                documentation: m.documentation,
+                                parameters: m
+                                    .parameters
+                                    .into_iter()
+                                    .map(|p| ParameterStub {
+                                        name: p.name,
+                                        type_name: p.type_name,
+                                        description: p.description,
+                                    })
+                                    .collect(),
+                                return_type: m.return_type,
+                                examples: m.examples,
+                            })
+                            .collect(),
+                        properties: raw
+                            .properties
+                            .into_iter()
+                            .map(|p| PropertyStub {
+                                name: p.name,
+                                type_name: p.type_name,
+                                description: p.description,
+                            })
+                            .collect(),
+                        examples: raw.examples.clone(),
+                        source: match raw.source {
+                            crate::architecture::data::TypeSource::Platform { version } => {
+                                TypeSourceStub::Platform { version }
+                            }
+                            crate::architecture::data::TypeSource::Configuration {
+                                config_version,
+                            } => TypeSourceStub::Configuration { config_version },
+                            crate::architecture::data::TypeSource::UserDefined { file_path } => {
+                                TypeSourceStub::UserDefined { file_path }
+                            }
+                        },
+                        available_facets: raw
+                            .available_facets
+                            .into_iter()
+                            .map(|f| FacetStub { kind: f.kind })
+                            .collect(),
+                    },
+                    relevance_score: 1.0,
+                    match_highlights: vec![],
+                }
+            })
+            .collect();
+
+        Ok(results)
+    }
+
+    /// Получить статистику работы сервиса
+    pub async fn get_stats(&self) -> ResolutionMetrics {
+        self.metrics.read().await.clone()
+    }
+}
+
 // === TYPE CHECKER SERVICE (минимальный) ===
 
 /// Минимальный сервис проверки совместимости типов (Domain)
@@ -521,7 +746,7 @@ impl TypeCheckerService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::unified::data::{InMemoryTypeRepository, ParseMetadata, TypeSource};
+    use crate::unified::data::{InMemoryTypeRepository, ParseMetadata, RawTypeData, TypeSource};
 
     #[tokio::test]
     async fn test_type_resolution_service() {
@@ -557,18 +782,6 @@ mod tests {
         // Создаём сервис
         let service = TypeResolutionService::new(repo);
 
-        // Инициализируем резолверы
-        if let Some(platform_resolver) = service
-            .resolvers
-            .iter()
-            .find_map(|r| r.as_any().downcast_ref::<PlatformTypeResolver>())
-        {
-            platform_resolver
-                .initialize_cache(service.repository.as_ref())
-                .await
-                .unwrap();
-        }
-
         // Тестируем разрешение типов
         let context = TypeContext {
             file_path: None,
@@ -597,17 +810,14 @@ trait TypeResolverAny: TypeResolver {
     fn as_any(&self) -> &dyn std::any::Any;
 }
 
-impl TypeResolverAny for PlatformTypeResolver {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
+// TODO: Define ConfigurationTypeResolver or import it
+/*
 impl TypeResolverAny for ConfigurationTypeResolver {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
+*/
 
 impl TypeResolverAny for BslCodeResolver {
     fn as_any(&self) -> &dyn std::any::Any {
@@ -635,6 +845,68 @@ pub struct CompletionItem {
     pub documentation: Option<String>,
     pub kind: CompletionKind,
     pub insert_text: String,
+}
+
+/// Результат поиска типов
+#[derive(Debug, Clone)]
+pub struct TypeSearchResult {
+    pub name: String,
+    pub type_info: TypeResolution,
+    pub source: String,
+    pub description: Option<String>,
+    // Поля для совместимости с application layer
+    pub raw_data: RawTypeDataForResult,
+    pub relevance_score: f64,
+    pub match_highlights: Vec<String>,
+}
+
+/// Упрощенная версия RawTypeData для результатов поиска
+#[derive(Debug, Clone)]
+pub struct RawTypeDataForResult {
+    pub russian_name: String,
+    pub english_name: Option<String>,
+    pub documentation: String,
+    pub category_path: Vec<String>,
+    pub methods: Vec<MethodStub>,
+    pub properties: Vec<PropertyStub>,
+    pub examples: Vec<String>,
+    pub source: TypeSourceStub,
+    pub available_facets: Vec<FacetStub>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MethodStub {
+    pub name: String,
+    pub documentation: String,
+    pub parameters: Vec<ParameterStub>,
+    pub return_type: Option<String>,
+    pub examples: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParameterStub {
+    pub name: String,
+    pub type_name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PropertyStub {
+    pub name: String,
+    pub type_name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeSourceStub {
+    Platform { version: String },
+    Configuration { config_version: String },
+    UserDefined { file_path: String },
+}
+
+#[derive(Debug, Clone)]
+pub struct FacetStub {
+    pub kind: FacetKind,
 }
 
 /// Вид элемента автодополнения доменного слоя

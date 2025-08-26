@@ -5,7 +5,7 @@ use bsl_gradual_types::data::loaders::platform_types_v2::PlatformTypesResolverV2
 use bsl_gradual_types::data::loaders::syntax_helper_parser::{
     OptimizationSettings, SyntaxHelperParser, SyntaxNode,
 };
-use bsl_gradual_types::core::types::FacetKind;
+use bsl_gradual_types::domain::types::FacetKind;
 use std::path::Path;
 
 fn main() -> Result<()> {

@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use bsl_gradual_types::core::platform_resolver::PlatformTypeResolver;
-    use bsl_gradual_types::core::types::FacetKind;
+    use bsl_gradual_types::domain::resolvers::PlatformTypeResolver;
+    use bsl_gradual_types::domain::types::FacetKind;
 
     #[test]
     fn test_catalog_has_facets() {

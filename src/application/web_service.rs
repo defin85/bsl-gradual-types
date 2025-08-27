@@ -13,16 +13,14 @@ use crate::presentation::SearchFilters;
 pub struct TypeSearchResult {
     pub name: String,
     pub description: String,
+    pub type_name: String,
+    pub category: String,
+    pub relevance_score: f64,
+    pub url: Option<String>,
 }
 
-/// Иерархия типов
-#[derive(Debug, Clone, Default)]
-pub struct TypeHierarchy {
-    pub root_types: Vec<String>,
-    pub categories: Vec<String>,
-    pub statistics: std::collections::HashMap<String, u32>,
-    pub total_types: usize,
-}
+// Используем единое определение TypeHierarchy из services.rs
+use super::services::TypeHierarchy;
 
 /// Результаты расширенного поиска
 #[derive(Debug, Clone, Default)]
@@ -39,7 +37,7 @@ impl SearchResults {
 
 impl std::ops::Index<usize> for SearchResults {
     type Output = TypeSearchResult;
-    
+
     fn index(&self, index: usize) -> &Self::Output {
         &self.items[index]
     }

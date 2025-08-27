@@ -172,8 +172,17 @@ impl std::ops::Index<usize> for SearchResults {
 pub struct TypeHierarchy {
     pub root_types: Vec<String>,
     pub categories: Vec<TypeCategory>,
-    pub statistics: std::collections::HashMap<String, u32>,
+    pub statistics: TypeHierarchyStatistics,
     pub total_types: usize,
+}
+
+/// Статистика иерархии типов
+#[derive(Debug, Default)]
+pub struct TypeHierarchyStatistics {
+    pub total_categories: usize,
+    pub total_types: usize,
+    pub platform_types: usize,
+    pub configuration_types: usize,
 }
 
 /// Категория типов

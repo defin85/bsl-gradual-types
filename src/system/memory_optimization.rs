@@ -355,17 +355,21 @@ mod tests {
         let mut variables = HashMap::new();
         variables.insert(
             "var1".to_string(),
-            crate::core::standard_types::primitive_type(crate::core::types::PrimitiveType::String),
+            crate::domain::standard_types::primitive_type(
+                crate::domain::types::PrimitiveType::String,
+            ),
         );
         variables.insert(
             "var2".to_string(),
-            crate::core::standard_types::primitive_type(crate::core::types::PrimitiveType::Number),
+            crate::domain::standard_types::primitive_type(
+                crate::domain::types::PrimitiveType::Number,
+            ),
         );
 
         TypeContext {
             variables,
             functions: HashMap::new(),
-            current_scope: crate::core::dependency_graph::Scope::Global,
+            current_scope: crate::domain::analysis::dependency_graph::Scope::Global,
             scope_stack: vec![],
         }
     }

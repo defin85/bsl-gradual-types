@@ -1,12 +1,12 @@
 //! Platform-aware type resolver
 
+use crate::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
+use crate::data::loaders::config_parser_xml::ConfigParserXml;
+use crate::data::loaders::platform_types_v2::PlatformTypesResolverV2;
 use crate::domain::types::{
     Certainty, ConcreteType, FacetKind, ResolutionMetadata, ResolutionResult, ResolutionSource,
     TypeResolution,
 };
-use crate::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
-use crate::data::loaders::config_parser_xml::ConfigParserXml;
-use crate::data::loaders::platform_types_v2::PlatformTypesResolverV2;
 use std::collections::HashMap;
 
 /// Completion item with metadata
@@ -16,6 +16,43 @@ pub struct CompletionItem {
     pub kind: CompletionKind,
     pub detail: Option<String>,
     pub documentation: Option<String>,
+    // Дополнительные поля для LSP
+    pub insert_text: Option<String>,
+    pub filter_text: Option<String>,
+    pub sort_text: Option<String>,
+}
+
+impl CompletionItem {
+    /// Создать элемент автодополнения с базовыми полями
+    pub fn new(label: String, kind: CompletionKind) -> Self {
+        Self {
+            insert_text: Some(label.clone()),
+            filter_text: Some(label.clone()),
+            sort_text: Some(label.clone()),
+            label,
+            kind,
+            detail: None,
+            documentation: None,
+        }
+    }
+
+    /// Создать элемент с дополнительными полями
+    pub fn with_details(
+        label: String,
+        kind: CompletionKind,
+        detail: Option<String>,
+        documentation: Option<String>,
+    ) -> Self {
+        Self {
+            insert_text: Some(label.clone()),
+            filter_text: Some(label.clone()),
+            sort_text: Some(label.clone()),
+            label,
+            kind,
+            detail,
+            documentation,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -550,12 +587,12 @@ impl PlatformTypeResolver {
                         (CompletionKind::GlobalFunction, "Глобальная функция")
                     };
 
-                    completions.push(CompletionItem {
-                        label: name.clone(),
+                    completions.push(CompletionItem::with_details(
+                        name.clone(),
                         kind,
-                        detail: Some(detail.to_string()),
-                        documentation: self.get_function_documentation(name),
-                    });
+                        Some(detail.to_string()),
+                        self.get_function_documentation(name),
+                    ));
                 }
             }
 
@@ -593,12 +630,12 @@ impl PlatformTypeResolver {
                             (CompletionKind::Method, "Глобальная функция")
                         };
 
-                        completions.push(CompletionItem {
-                            label: name.clone(),
+                        completions.push(CompletionItem::with_details(
+                            name.clone(),
                             kind,
-                            detail: Some(detail.to_string()),
-                            documentation: self.get_function_documentation(name),
-                        });
+                            Some(detail.to_string()),
+                            self.get_function_documentation(name),
+                        ));
                     }
                 }
             }
@@ -692,12 +729,12 @@ impl PlatformTypeResolver {
                 if let ResolutionResult::Concrete(ConcreteType::Configuration(config)) =
                     &resolution.result
                 {
-                    items.push(CompletionItem {
-                        label: config.name.clone(),
-                        kind: CompletionKind::Catalog,
-                        detail: Some("Справочник".to_string()),
-                        documentation: None,
-                    });
+                    items.push(CompletionItem::with_details(
+                        config.name.clone(),
+                        CompletionKind::Catalog,
+                        Some("Справочник".to_string()),
+                        None,
+                    ));
                 }
             }
         }
@@ -706,12 +743,12 @@ impl PlatformTypeResolver {
         if items.is_empty() {
             for name in &["Контрагенты", "Номенклатура", "Организации"]
             {
-                items.push(CompletionItem {
-                    label: name.to_string(),
-                    kind: CompletionKind::Catalog,
-                    detail: Some("Справочник (пример)".to_string()),
-                    documentation: Some("Пример справочника без конфигурации".to_string()),
-                });
+                items.push(CompletionItem::with_details(
+                    name.to_string(),
+                    CompletionKind::Catalog,
+                    Some("Справочник (пример)".to_string()),
+                    Some("Пример справочника без конфигурации".to_string()),
+                ));
             }
         }
 
@@ -727,12 +764,12 @@ impl PlatformTypeResolver {
                 if let ResolutionResult::Concrete(ConcreteType::Configuration(config)) =
                     &resolution.result
                 {
-                    items.push(CompletionItem {
-                        label: config.name.clone(),
-                        kind: CompletionKind::Document,
-                        detail: Some("Документ".to_string()),
-                        documentation: None,
-                    });
+                    items.push(CompletionItem::with_details(
+                        config.name.clone(),
+                        CompletionKind::Document,
+                        Some("Документ".to_string()),
+                        None,
+                    ));
                 }
             }
         }
@@ -744,12 +781,12 @@ impl PlatformTypeResolver {
                 "РеализацияТоваровУслуг",
                 "ПоступлениеТоваров",
             ] {
-                items.push(CompletionItem {
-                    label: name.to_string(),
-                    kind: CompletionKind::Document,
-                    detail: Some("Документ (пример)".to_string()),
-                    documentation: Some("Пример документа без конфигурации".to_string()),
-                });
+                items.push(CompletionItem::with_details(
+                    name.to_string(),
+                    CompletionKind::Document,
+                    Some("Документ (пример)".to_string()),
+                    Some("Пример документа без конфигурации".to_string()),
+                ));
             }
         }
 
@@ -765,12 +802,12 @@ impl PlatformTypeResolver {
                 if let ResolutionResult::Concrete(ConcreteType::Configuration(config)) =
                     &resolution.result
                 {
-                    items.push(CompletionItem {
-                        label: config.name.clone(),
-                        kind: CompletionKind::Enum,
-                        detail: Some("Перечисление".to_string()),
-                        documentation: None,
-                    });
+                    items.push(CompletionItem::with_details(
+                        config.name.clone(),
+                        CompletionKind::Enum,
+                        Some("Перечисление".to_string()),
+                        None,
+                    ));
                 }
             }
         }
@@ -817,12 +854,12 @@ impl PlatformTypeResolver {
                 "Метод()".to_string()
             };
 
-            completions.push(CompletionItem {
-                label: method.name.clone(),
-                kind: CompletionKind::Method,
-                detail: Some(detail),
-                documentation: method.return_type.map(|rt| format!("Возвращает: {}", rt)),
-            });
+            completions.push(CompletionItem::with_details(
+                method.name.clone(),
+                CompletionKind::Method,
+                Some(detail),
+                method.return_type.map(|rt| format!("Возвращает: {}", rt)),
+            ));
         }
 
         // Получаем свойства из PlatformTypesResolverV2
@@ -838,12 +875,12 @@ impl PlatformTypeResolver {
                 }
             );
 
-            completions.push(CompletionItem {
-                label: property.name.clone(),
-                kind: CompletionKind::Property,
-                detail: Some(detail),
-                documentation: None,
-            });
+            completions.push(CompletionItem::with_details(
+                property.name.clone(),
+                CompletionKind::Property,
+                Some(detail),
+                None,
+            ));
         }
 
         completions

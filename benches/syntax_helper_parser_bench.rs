@@ -1,9 +1,10 @@
 //! Бенчмарки для сравнения производительности парсеров синтакс-помощника
 
-use bsl_gradual_types::data::loaders::syntax_helper_parser::{OptimizationSettings, SyntaxHelperParser};
+use bsl_gradual_types::data::loaders::syntax_helper_parser::{
+    OptimizationSettings, SyntaxHelperParser,
+};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::fs;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 /// Создаёт тестовую директорию с HTML файлами
@@ -296,17 +297,6 @@ fn bench_indexing(c: &mut Criterion) {
     let temp_dir = create_test_directory(500);
     let test_path = temp_dir.path().join("test");
 
-    // Подготавливаем данные
-    let settings = OptimizationSettings {
-        max_threads: Some(1),
-        show_progress: false,
-        parallel_indexing: false,
-        ..Default::default()
-    };
-    let mut parser_single = SyntaxHelperParser::with_settings(settings);
-    parser_single.parse_directory(&test_path).unwrap();
-    let database = parser_single.export_database();
-
     group.bench_function("sequential_indexing", |b| {
         b.iter(|| {
             let settings = OptimizationSettings {
@@ -315,11 +305,8 @@ fn bench_indexing(c: &mut Criterion) {
                 parallel_indexing: false,
                 ..Default::default()
             };
-            let parser = SyntaxHelperParser::with_settings(settings);
-            // Импортируем узлы напрямую в DashMap
-            for (key, node) in &database.nodes {
-                parser.nodes.insert(key.clone(), node.clone());
-            }
+            let mut parser = SyntaxHelperParser::with_settings(settings);
+            parser.parse_directory(black_box(&test_path)).unwrap();
             // Экспортируем статистику для замера
             black_box(parser.get_stats());
         });
@@ -333,11 +320,8 @@ fn bench_indexing(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let parser = SyntaxHelperParser::with_settings(settings);
-            // Импортируем узлы
-            for (key, node) in &database.nodes {
-                parser.nodes.insert(key.clone(), node.clone());
-            }
+            let mut parser = SyntaxHelperParser::with_settings(settings);
+            parser.parse_directory(black_box(&test_path)).unwrap();
             // Экспортируем статистику для замера
             black_box(parser.get_stats());
         });

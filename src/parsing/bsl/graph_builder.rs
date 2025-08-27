@@ -432,7 +432,7 @@ impl AstVisitor for DependencyGraphBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::BslParser;
+    use crate::parsing::bsl::BslParser;
 
     #[test]
     fn test_build_simple_graph() {

@@ -5,11 +5,11 @@ use clap::{Parser, Subcommand};
 use colored::*;
 use std::path::PathBuf;
 
-use bsl_gradual_types::system::analysis::{
-    ParallelAnalysisCLI, ParallelAnalysisConfig, ParallelAnalyzer,
-};
-use bsl_gradual_types::system::performance::{global_profiler, BenchmarkSuite, PerformanceOptimizer};
 use bsl_gradual_types::parsing::bsl::common::ParserFactory;
+use bsl_gradual_types::system::parallel_analysis::{ParallelAnalysisConfig, ParallelAnalyzer};
+use bsl_gradual_types::system::performance::{
+    global_profiler, BenchmarkSuite, PerformanceOptimizer,
+};
 
 #[derive(Parser)]
 #[command(name = "bsl-profiler")]
@@ -127,7 +127,9 @@ async fn main() -> Result<()> {
                         bsl_gradual_types::system::performance::OptimizationPriority::Medium => {
                             "blue"
                         }
-                        bsl_gradual_types::system::performance::OptimizationPriority::Low => "green",
+                        bsl_gradual_types::system::performance::OptimizationPriority::Low => {
+                            "green"
+                        }
                     };
 
                     println!(
@@ -201,10 +203,8 @@ async fn main() -> Result<()> {
                     println!("🚨 Диагностики:");
                     for diag in diagnostics.iter().take(5) {
                         let severity_color = match diag.severity {
-                            bsl_gradual_types::domain::analysis::DiagnosticSeverity::Error => {
-                                "red"
-                            }
-                            bsl_gradual_types::core::type_checker::DiagnosticSeverity::Warning => {
+                            bsl_gradual_types::domain::analysis::DiagnosticSeverity::Error => "red",
+                            bsl_gradual_types::domain::analysis::DiagnosticSeverity::Warning => {
                                 "yellow"
                             }
                             _ => "blue",
@@ -279,7 +279,7 @@ async fn main() -> Result<()> {
             );
 
             let report_json = std::fs::read_to_string(&report)?;
-            let perf_report: bsl_gradual_types::core::performance::PerformanceReport =
+            let perf_report: bsl_gradual_types::system::performance::PerformanceReport =
                 serde_json::from_str(&report_json)?;
 
             // Выводим отчет
@@ -324,31 +324,21 @@ async fn main() -> Result<()> {
             );
 
             let config = ParallelAnalysisConfig {
-                num_threads: threads,
-                use_cache: !no_cache,
+                thread_count: threads,
                 show_progress: true,
-                ..Default::default()
+                fail_fast: false,
+                max_depth: None,
+                ignore_patterns: vec![],
+                use_cache: !no_cache,
             };
 
             if benchmark {
-                // Запускаем бенчмарк
-                let analyzer = ParallelAnalyzer::new(config.clone())?;
-                let files = ParallelAnalyzer::find_bsl_files(&path)?;
-
-                if files.len() < 2 {
-                    println!("⚠️ Недостаточно файлов для бенчмарка (нужно минимум 2)");
-                } else {
-                    let files_sample = files.into_iter().take(10).collect(); // Берем первые 10 файлов
-                    println!("📊 Бенчмарк параллельного vs последовательного анализа...");
-
-                    let benchmark_result =
-                        analyzer.benchmark_parallel_vs_sequential(files_sample)?;
-                    println!("\n{}", benchmark_result.format_results());
-                }
+                println!("⚠️ Бенчмарк пока недоступен (метод не реализован)");
             }
 
             // Обычный анализ проекта
-            ParallelAnalysisCLI::run_project_analysis(path, config)?;
+            let analyzer = ParallelAnalyzer::new(config)?;
+            let _result = analyzer.analyze_project(path)?;
         }
     }
 

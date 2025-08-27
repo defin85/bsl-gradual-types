@@ -232,12 +232,12 @@ impl EnhancedTypeAnalyzer {
             // Переменные из flow-sensitive анализа
             for (var_name, var_type) in &context.variables {
                 if var_name.starts_with(prefix) {
-                    completions.push(BslCompletion {
-                        label: var_name.clone(),
-                        kind: CompletionKind::Variable,
-                        detail: Some(Self::format_type_short(var_type)),
-                        documentation: Some(Self::format_type_info(var_type)),
-                    });
+                    completions.push(BslCompletion::with_details(
+                        var_name.clone(),
+                        CompletionKind::Variable,
+                        Some(Self::format_type_short(var_type)),
+                        Some(Self::format_type_info(var_type)),
+                    ));
                 }
             }
 
@@ -260,12 +260,12 @@ impl EnhancedTypeAnalyzer {
                             .join(", ")
                     );
 
-                    completions.push(BslCompletion {
-                        label: func_name.clone(),
-                        kind: CompletionKind::Function,
-                        detail: Some(Self::format_type_short(&signature.return_type)),
-                        documentation: Some(doc),
-                    });
+                    completions.push(BslCompletion::with_details(
+                        func_name.clone(),
+                        CompletionKind::Function,
+                        Some(Self::format_type_short(&signature.return_type)),
+                        Some(doc),
+                    ));
                 }
             }
         }

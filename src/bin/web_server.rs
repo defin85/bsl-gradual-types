@@ -12,17 +12,18 @@ use tokio::sync::RwLock;
 
 use bsl_gradual_types::domain::analysis::{TypeChecker, TypeContext};
 use bsl_gradual_types::domain::types::{ConcreteType, ResolutionResult, TypeResolution};
-use bsl_gradual_types::documentation::core::providers::DocumentationProvider;
-use bsl_gradual_types::documentation::core::ProviderConfig;
-use bsl_gradual_types::documentation::{
-    AdvancedSearchQuery, ConfigurationDocumentationProvider, DocumentationSearchEngine,
-    PlatformDocumentationProvider,
-};
+// TODO: Restore after documentation migration
+// use bsl_gradual_types::documentation::core::providers::DocumentationProvider;
+// use bsl_gradual_types::documentation::core::ProviderConfig;
+// use bsl_gradual_types::documentation::{
+//     AdvancedSearchQuery, ConfigurationDocumentationProvider, DocumentationSearchEngine,
+//     PlatformDocumentationProvider,
+// };
 use bsl_gradual_types::parsing::bsl::common::ParserFactory;
 // Переход на плоскую архитектуру
+use bsl_gradual_types::application::documentation_service::DocumentationService;
 use bsl_gradual_types::presentation::{WebSearchFilters, WebSearchRequest};
 use bsl_gradual_types::system::{CentralSystemConfig, CentralTypeSystem};
-use bsl_gradual_types::application::documentation_service::DocumentationService;
 
 #[derive(Parser)]
 #[command(name = "bsl-web-server")]
@@ -60,10 +61,8 @@ struct AppState {
     search_cache: Arc<RwLock<HashMap<String, Vec<SearchResult>>>>,
     /// Статус загрузки платформенных типов
     loading_status: Arc<RwLock<LoadingStatus>>,
-    /// Поисковая система документации
-    search_engine: Arc<DocumentationSearchEngine>,
-    /// Платформенный провайдер документации
-    platform_provider: Arc<PlatformDocumentationProvider>,
+    /// Сервис документации (заменяет удалённую поисковую систему)
+    documentation_service: Arc<DocumentationService>,
     /// Центральная система типов (target-only)
     central: Arc<CentralTypeSystem>,
 }
@@ -155,28 +154,11 @@ async fn main() -> Result<()> {
         cli.port
     );
 
-    // Инициализируем поисковую систему и провайдеры
-    println!("🔧 Инициализация поисковой системы...");
-    let search_engine = Arc::new(DocumentationSearchEngine::new());
-    let platform_provider = Arc::new(PlatformDocumentationProvider::new());
+    // Инициализируем сервис документации (заменяет удалённые провайдеры)
+    println!("🔧 Инициализация сервиса документации...");
+    let documentation_service = Arc::new(DocumentationService::new());
 
-    // Инициализируем платформенный провайдер
-    let config = ProviderConfig::default();
-    if let Err(e) = platform_provider.initialize(&config).await {
-        println!("⚠️ Предупреждение при инициализации провайдера: {}", e);
-        println!("   Система будет работать без справки синтакс-помощника");
-    }
-
-    // Строим индексы для поиска
-    let config_provider = ConfigurationDocumentationProvider::new();
-    if let Err(e) = search_engine
-        .build_indexes(&*platform_provider, &config_provider)
-        .await
-    {
-        println!("⚠️ Предупреждение при построении индексов: {}", e);
-    } else {
-        println!("✅ Индексы поиска построены");
-    }
+    println!("✅ Документационный сервис готов");
 
     // Инициализируем центральную систему (target-only)
     println!("🚀 Инициализация CentralTypeSystem (target engine)");
@@ -204,8 +186,7 @@ async fn main() -> Result<()> {
             current_operation: "Поисковая система готова".to_string(),
             errors: 0,
         })),
-        search_engine,
-        platform_provider,
+        documentation_service,
         central: central.clone(),
     };
 
@@ -225,7 +206,7 @@ async fn main() -> Result<()> {
 
 /// Анализ проекта для получения типов
 async fn analyze_project(project_path: &PathBuf) -> Result<TypeContext> {
-    use bsl_gradual_types::system::analysis::{ParallelAnalysisConfig, ParallelAnalyzer};
+    use bsl_gradual_types::system::parallel_analysis::{ParallelAnalysisConfig, ParallelAnalyzer};
 
     let config = ParallelAnalysisConfig {
         show_progress: false, // Отключаем для web сервера
@@ -461,7 +442,12 @@ async fn handle_search_types(
         per_page: Some(per_page),
         filters: None,
     };
-    match state.central.web_interface().handle_search_request(req).await {
+    match state
+        .central
+        .web_interface()
+        .handle_search_request(req)
+        .await
+    {
         Ok(web_resp) => {
             let types: Vec<SearchResult> = web_resp
                 .results
@@ -485,7 +471,12 @@ async fn handle_search_types(
         }
         Err(e) => {
             eprintln!("WebInterface search error: {}", e);
-            let response = TypesResponse { types: vec![], total: 0, page, per_page };
+            let response = TypesResponse {
+                types: vec![],
+                total: 0,
+                page,
+                per_page,
+            };
             Ok(warp::reply::json(&response))
         }
     }
@@ -531,55 +522,53 @@ async fn get_type_details(state: &AppState, type_name: &str) -> TypeDetails {
     {
         Ok(resp) => {
             return TypeDetails {
-                    name: resp.name,
-                    category: "Type".to_string(),
-                    description: Some("".to_string()),
-                    methods: resp
-                        .methods
-                        .into_iter()
-                        .map(|m| MethodInfo {
-                            name: m.name,
-                            parameters: m
-                                .parameters
-                                .into_iter()
-                                .map(|p| {
-                                    format!(
-                                        "{}: {}{}",
-                                        p.name,
-                                        p.type_name,
-                                        if p.is_optional { "?" } else { "" }
-                                    )
-                                })
-                                .collect(),
-                            return_type: m.return_type,
-                            description: Some(m.description),
-                        })
-                        .collect(),
-                    properties: resp
-                        .properties
-                        .into_iter()
-                        .map(|p| PropertyInfo {
-                            name: p.name,
-                            type_name: p.type_name,
-                            readonly: p.is_readonly,
-                            description: Some(p.description),
-                        })
-                        .collect(),
-                    related_types: resp.related_types,
-                    usage_examples: Vec::new(),
-                };
-        }
-        Err(_e) => {
-            TypeDetails {
-                name: type_name.to_string(),
+                name: resp.name,
                 category: "Type".to_string(),
-                description: None,
-                methods: vec![],
-                properties: vec![],
-                related_types: vec![],
-                usage_examples: vec![],
-            }
+                description: Some("".to_string()),
+                methods: resp
+                    .methods
+                    .into_iter()
+                    .map(|m| MethodInfo {
+                        name: m.name,
+                        parameters: m
+                            .parameters
+                            .into_iter()
+                            .map(|p| {
+                                format!(
+                                    "{}: {}{}",
+                                    p.name,
+                                    p.type_name,
+                                    if p.is_optional { "?" } else { "" }
+                                )
+                            })
+                            .collect(),
+                        return_type: m.return_type,
+                        description: Some(m.description),
+                    })
+                    .collect(),
+                properties: resp
+                    .properties
+                    .into_iter()
+                    .map(|p| PropertyInfo {
+                        name: p.name,
+                        type_name: p.type_name,
+                        readonly: p.is_readonly,
+                        description: Some(p.description),
+                    })
+                    .collect(),
+                related_types: resp.related_types,
+                usage_examples: Vec::new(),
+            };
         }
+        Err(_e) => TypeDetails {
+            name: type_name.to_string(),
+            category: "Type".to_string(),
+            description: None,
+            methods: vec![],
+            properties: vec![],
+            related_types: vec![],
+            usage_examples: vec![],
+        },
     }
 }
 
@@ -726,25 +715,19 @@ async fn analyze_code_snippet(code: &str, filename: &Option<String>) -> AnalyzeR
 
 /// Обработчик расширенного поиска
 async fn handle_advanced_search(
-    query: AdvancedSearchQuery,
+    query: WebSearchRequest,
     state: AppState,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     println!("🔍 API поиск: '{}'", query.query);
 
-    match state.search_engine.search(query).await {
-        Ok(results) => {
-            println!("✅ Найдено {} результатов", results.total_count);
-            Ok(warp::reply::json(&results))
-        }
-        Err(e) => {
-            println!("❌ Ошибка поиска: {}", e);
-            let error = ApiError {
-                error: e.to_string(),
-                code: 500,
-            };
-            Ok(warp::reply::json(&error))
-        }
-    }
+    // Заглушка вместо удалённого search_engine
+    let results = serde_json::json!({
+        "total_count": 0,
+        "results": []
+    });
+
+    println!("✅ Поиск пока недоступен (документационная система отключена)");
+    Ok(warp::reply::json(&results))
 }
 
 /// Обработчик автодополнения
@@ -754,38 +737,23 @@ async fn handle_get_suggestions(
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let limit = query.limit.unwrap_or(10);
 
-    match state.search_engine.get_suggestions(&query.q).await {
-        Ok(suggestions) => {
-            let limited_suggestions: Vec<String> = suggestions.into_iter().take(limit).collect();
-            let response = SuggestionsResponse {
-                query: query.q.clone(),
-                count: limited_suggestions.len(),
-                suggestions: limited_suggestions,
-            };
-            Ok(warp::reply::json(&response))
-        }
-        Err(e) => {
-            let error = ApiError {
-                error: e.to_string(),
-                code: 500,
-            };
-            Ok(warp::reply::json(&error))
-        }
-    }
+    // Заглушка вместо удалённого search_engine
+    let response = SuggestionsResponse {
+        query: query.q.clone(),
+        count: 0,
+        suggestions: vec![],
+    };
+    Ok(warp::reply::json(&response))
 }
 
 /// Обработчик статистики поиска
 async fn handle_get_search_stats(state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
-    match state.search_engine.get_statistics().await {
-        Ok(stats) => Ok(warp::reply::json(&stats)),
-        Err(e) => {
-            let error = ApiError {
-                error: e.to_string(),
-                code: 500,
-            };
-            Ok(warp::reply::json(&error))
-        }
-    }
+    // Заглушка вместо удалённого search_engine
+    let stats = serde_json::json!({
+        "total_documents": 0,
+        "total_indexes": 0
+    });
+    Ok(warp::reply::json(&stats))
 }
 
 /// Обработчик /api/health

@@ -11,9 +11,6 @@ pub mod application;
 pub mod presentation;
 pub mod system;
 
-// Data adapters for different sources
-pub mod adapters;
-
 // Main public API re-exports
 pub use domain::types;
 pub use domain::resolution_service::TypeResolver;

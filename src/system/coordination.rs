@@ -12,12 +12,14 @@ use tracing::{info, warn};
 use crate::data::TypeSource;
 
 // TODO: Restore imports after migration
-use crate::application::services::{AnalysisTypeService, LspTypeService, WebTypeService};
+use crate::application::lsp_service::LspTypeService;
+use crate::application::services::AnalysisTypeService;
+use crate::application::web_service::WebTypeService;
 use crate::domain::{
     InMemoryTypeRepository, ParseMetadata, RawTypeData, TypeContext, TypeRepository,
     TypeResolutionService,
 };
-use crate::presentation::interfaces::{CliInterface, LspInterface, WebInterface};
+use crate::presentation::adapters::{CliInterface, LspInterface, WebInterface};
 // use super::data::{InMemoryTypeRepository, ParseMetadata, RawTypeData, TypeRepository};
 // use super::domain::{TypeContext, TypeResolutionService};
 // use super::presentation::{CliInterface, LspInterface, WebInterface};
@@ -582,7 +584,7 @@ impl CentralTypeSystem {
 
         // Метрики производительности Web
         let web_metrics = self.web_service.get_performance_metrics().await;
-        metrics.average_web_response_ms = web_metrics.average_response_time_ms;
+        metrics.average_web_response_ms = web_metrics.average_response_time;
         // Метрики домена можно пробросить позже при необходимости
 
         Ok(())

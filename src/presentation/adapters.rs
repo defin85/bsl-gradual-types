@@ -128,9 +128,9 @@ impl LspInterface {
                 kind: comp.kind.into(),
                 detail: comp.detail,
                 documentation: comp.documentation,
-                insert_text: Some(comp.label.clone()), // используем label как insert_text
-                filter_text: Some(comp.label.clone()), // используем label как filter_text
-                sort_text: Some(comp.label.clone()),   // используем label как sort_text
+                insert_text: comp.insert_text.unwrap_or_else(|| comp.label.clone()), // используем insert_text или label
+                filter_text: comp.filter_text.or_else(|| Some(comp.label.clone())),   // используем filter_text или label
+                sort_text: comp.sort_text.or_else(|| Some(comp.label.clone())),       // используем sort_text или label
             })
             .collect();
 
@@ -405,7 +405,7 @@ impl WebInterface {
         let start = (page - 1) * per_page;
         let end = (start + per_page).min(total_count);
         let page_results = if start < total_count {
-            search_results[start..end].to_vec()
+            search_results.items[start..end].to_vec()
         } else {
             Vec::new()
         };
@@ -417,8 +417,8 @@ impl WebInterface {
                 name: result.type_name.clone(),
                 category: result.category,
                 description: result.description,
-                relevance_score: result.relevance_score,
-                url: result.url,
+                relevance_score: result.relevance_score as f32,
+                url: result.url.unwrap_or_default(),
                 tags: vec![], // TODO: получить теги
             })
             .collect();

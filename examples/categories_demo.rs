@@ -1,4 +1,4 @@
-//! Тестирование парсинга категорий и группировки типов
+//! Демонстрация парсинга категорий и группировки типов
 
 use anyhow::Result;
 use bsl_gradual_types::data::loaders::syntax_helper_parser::{
@@ -7,7 +7,7 @@ use bsl_gradual_types::data::loaders::syntax_helper_parser::{
 use std::path::Path;
 
 fn main() -> Result<()> {
-    println!("=== Тестирование парсинга категорий ===\n");
+    println!("=== Демонстрация парсинга категорий ===\n");
 
     let syntax_helper_path = Path::new("examples/syntax_helper/rebuilt.shcntx_ru/objects");
 

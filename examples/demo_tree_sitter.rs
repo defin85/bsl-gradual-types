@@ -1,7 +1,6 @@
 //! Демонстрация работы tree-sitter парсера BSL
 
-use bsl_gradual_types::parser::common::Parser;
-use bsl_gradual_types::parser::ParserFactory;
+use bsl_gradual_types::parsing::bsl::{ParserFactory, Statement};
 
 fn main() -> anyhow::Result<()> {
     println!("=== Демонстрация tree-sitter парсера BSL ===\n");
@@ -57,7 +56,7 @@ fn main() -> anyhow::Result<()> {
 
             // Выводим информацию о найденных элементах
             for (i, stmt) in program.statements.iter().enumerate() {
-                use bsl_gradual_types::parser::ast::Statement;
+                use bsl_gradual_types::parsing::bsl::Statement;
                 match stmt {
                     Statement::ProcedureDecl {
                         name,

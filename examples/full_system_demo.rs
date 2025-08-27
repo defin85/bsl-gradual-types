@@ -1,6 +1,6 @@
-//! Комплексный тест революционной архитектуры
+//! Комплексная демонстрация архитектуры системы
 //!
-//! Проверяет работу всех слоёв идеальной архитектуры
+//! Показывает работу всех слоёв архитектуры BSL gradual types
 
 use bsl_gradual_types::presentation::adapters::{
     CliAnalysisRequest, CliOutputFormat, LspCompletionRequest, LspHoverRequest, WebSearchRequest,
@@ -9,7 +9,7 @@ use bsl_gradual_types::system::coordination::{CentralSystemConfig, CentralTypeSy
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    println!("🧪 КОМПЛЕКСНОЕ ТЕСТИРОВАНИЕ РЕВОЛЮЦИОННОЙ АРХИТЕКТУРЫ");
+    println!("🧪 КОМПЛЕКСНАЯ ДЕМОНСТРАЦИЯ АРХИТЕКТУРЫ СИСТЕМЫ");
     println!("{}", "=".repeat(60));
 
     // === ТЕСТ 1: СОЗДАНИЕ И ИНИЦИАЛИЗАЦИЯ ===

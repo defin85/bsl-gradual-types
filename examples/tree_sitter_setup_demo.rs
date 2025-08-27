@@ -1,9 +1,9 @@
-//! Тестовый пример для проверки tree-sitter интеграции
+//! Демонстрация настройки tree-sitter интеграции
 
 use std::fs;
 
 fn main() {
-    println!("Testing tree-sitter-bsl integration...");
+    println!("Демонстрация настройки tree-sitter-bsl...\n");
 
     // Проверяем наличие грамматики
     let grammar_path = "../tree-sitter-bsl";

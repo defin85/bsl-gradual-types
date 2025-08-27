@@ -1,11 +1,11 @@
-//! Тест REST API endpoints для поисковой системы
+//! Демонстрация REST API endpoints для поисковой системы
 
 use anyhow::Result;
 use serde_json::json;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("🌐 Тестирование REST API endpoints");
+    println!("🌐 Демонстрация REST API endpoints");
 
     // Запускаем веб-сервер в фоне (потребуется отдельный процесс)
     println!("📋 Для полного тестирования запустите веб-сервер:");

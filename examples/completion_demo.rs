@@ -1,9 +1,9 @@
-//! Простой пример для тестирования автодополнения
+//! Демонстрация автодополнения для BSL типов
 
 use bsl_gradual_types::domain::resolvers::PlatformTypeResolver;
 
 fn main() {
-    println!("=== Тестирование автодополнения ===\n");
+    println!("=== Демонстрация автодополнения ===\n");
 
     let resolver = PlatformTypeResolver::new();
 

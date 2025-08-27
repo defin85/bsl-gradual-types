@@ -1,9 +1,9 @@
-//! Простая проверка Configuration-guided Discovery парсера
+//! Демонстрация Configuration-guided Discovery парсера
 
 use bsl_gradual_types::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
 
 fn main() {
-    println!("🧪 Простой тест Configuration-guided парсера");
+    println!("🧪 Демо Configuration-guided парсера");
 
     let mut parser = ConfigurationGuidedParser::new("tests/fixtures/xml_full");
 

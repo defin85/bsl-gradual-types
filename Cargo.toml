@@ -114,16 +114,53 @@ path = "src/bin/web_server.rs"
 
 # Examples
 [[example]]
-name = "query_demo"
-path = "examples/query_demo.rs"
+name = "guided_parser_demo"
+path = "examples/guided_parser_demo.rs"
 
 [[example]]
-name = "syntax_helper_parser_demo"
-path = "examples/syntax_helper_parser_demo.rs"
+name = "completion_demo"
+path = "examples/completion_demo.rs"
 
 [[example]]
-name = "platform_types_v2_demo"
-path = "examples/platform_types_v2_demo.rs"
+name = "categories_demo"
+path = "examples/categories_demo.rs"
+
+[[example]]
+name = "api_endpoints_demo"
+path = "examples/api_endpoints_demo.rs"
+
+[[example]]
+name = "full_system_demo"
+path = "examples/full_system_demo.rs"
+
+# Temporarily disabled examples that need import fixes
+# [[example]]
+# name = "query_demo"
+# path = "examples/query_demo.rs"
+
+# [[example]]
+# name = "syntax_helper_parser_demo" 
+# path = "examples/syntax_helper_parser_demo.rs"
+
+# [[example]]
+# name = "platform_types_v2_demo"
+# path = "examples/platform_types_v2_demo.rs"
+
+# [[example]]
+# name = "demo_tree_sitter"
+# path = "examples/demo_tree_sitter.rs"
+
+# [[example]]
+# name = "fuzzy_search_demo"
+# path = "examples/fuzzy_search_demo.rs"
+
+# [[example]]
+# name = "tree_sitter_setup_demo"
+# path = "examples/tree_sitter_setup_demo.rs"
+
+# [[example]]
+# name = "tree_sitter_detailed_demo"
+# path = "examples/tree_sitter_detailed_demo.rs"
 
 
 

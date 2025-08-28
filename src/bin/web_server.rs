@@ -325,6 +325,14 @@ async fn start_web_server(port: u16, app_state: AppState, static_dir: PathBuf) -
                         .and(warp::get())
                         .and(with_state(app_state.clone()))
                         .and_then(handle_get_categories),
+                )
+                .or(
+                    // GET /api/v1/hierarchy - иерархия типов
+                    warp::path("v1")
+                        .and(warp::path("hierarchy"))
+                        .and(warp::get())
+                        .and(with_state(app_state.clone()))
+                        .and_then(handle_get_hierarchy),
                 ),
         )
         .with(cors);
@@ -372,8 +380,6 @@ struct SuggestionsQuery {
     q: String,
     limit: Option<usize>,
 }
-
-
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -478,8 +484,6 @@ async fn handle_search_types(
 }
 
 // Поиск типов перенесён в WebInterface (target-only)
-
-
 
 /// Обработчик получения деталей типа
 async fn handle_get_type_details(
@@ -794,9 +798,38 @@ async fn handle_get_categories(_state: AppState) -> Result<impl warp::Reply, war
     Ok(warp::reply::json(&response))
 }
 
+/// Обработчик иерархии типов
+async fn handle_get_hierarchy(state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
+    // Используем CentralTypeSystem для получения иерархии
+    match state
+        .central
+        .web_interface()
+        .handle_hierarchy_request()
+        .await
+    {
+        Ok(hierarchy) => Ok(warp::reply::json(&hierarchy)),
+        Err(e) => {
+            eprintln!("Ошибка получения иерархии: {}", e);
+
+            // Возвращаем базовую структуру
+            let response = serde_json::json!({
+                "categories": [],
+                "total_types": 0,
+                "statistics": {
+                    "total_categories": 0,
+                    "total_types": 0,
+                    "platform_types": 0,
+                    "configuration_types": 0
+                }
+            });
+            Ok(warp::reply::json(&response))
+        }
+    }
+}
+
 /// Обработчик главной страницы
 async fn handle_index() -> Result<impl warp::Reply, warp::Rejection> {
-    let html = generate_index_html();
+    let html = bsl_gradual_types::presentation::web_ui::generate_enhanced_index_html();
     Ok(warp::reply::html(html))
 }
 

@@ -3,10 +3,12 @@
 //! Временная заглушка на время миграции архитектуры
 //! TODO: Восстановить функциональность после завершения миграции
 
-use anyhow::Result;
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::RwLock;
+use std::sync::Arc;
+
+// Импорт для компиляции
+use anyhow::Result;
 
 use crate::domain::resolvers::platform::{CompletionItem, PlatformTypeResolver};
 use super::types::{
@@ -161,10 +163,6 @@ impl UnifiedTypeSystem {
         // Разрешаем через platform resolver
         let mut platform_resolver = self.platform_resolver.write().await;
         let resolution = platform_resolver.resolve_expression(expression);
-
-        // Кешируем результат
-        self.cache_resolution(expression, &resolution).await;
-
         resolution
     }
 
@@ -173,26 +171,7 @@ impl UnifiedTypeSystem {
         let resolutions = self.type_resolutions.read().await;
         resolutions
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
-    }
-
-    /// Получить автодополнение
-    pub async fn get_completions(&self, expression: &str) -> Vec<CompletionItem> {
-        self.increment_resolution_requests().await;
-
-        let platform_resolver = self.platform_resolver.write().await;
-        platform_resolver.get_completions(expression)
-    }
-
-    /// Найти типы по паттерну (для поиска)
-    pub async fn find_types_by_pattern(&self, pattern: &str) -> Vec<TypeResolution> {
-        let resolutions = self.type_resolutions.read().await;
-
-        resolutions
-            .iter()
-            .filter(|(name, _)| name.to_lowercase().contains(&pattern.to_lowercase()))
-            .map(|(_, resolution)| resolution.clone())
+            .map(|(key, resolution)| (key.clone(), resolution.clone()))
             .collect()
     }
 
@@ -278,6 +257,7 @@ impl UnifiedTypeSystem {
         None
     }
 
+    #[allow(dead_code)]
     async fn cache_resolution(&self, expression: &str, resolution: &TypeResolution) {
         let mut cache = self.resolution_cache.write().await;
 
@@ -371,9 +351,10 @@ impl LspTypeInterface {
         self.unified_system.resolve_expression(expression).await
     }
 
-    /// Автодополнение для LSP
+    /// Получить автодополнения для выражения
     pub async fn get_completions(&self, expression: &str) -> Vec<CompletionItem> {
-        self.unified_system.get_completions(expression).await
+        let platform_resolver = self.unified_system.platform_resolver.read().await;
+        platform_resolver.get_completions(expression)
     }
 
     /// Получить тип переменной в контексте
@@ -417,13 +398,18 @@ impl WebTypeInterface {
 
     /// Найти типы по запросу
     pub async fn search_types(&self, query: &str) -> Vec<TypeDisplayInfo> {
-        let matching_resolutions = self.unified_system.find_types_by_pattern(query).await;
+        let all_resolutions = self.unified_system.get_all_type_resolutions().await;
+        
+        let matching_resolutions: Vec<_> = all_resolutions
+            .into_iter()
+            .filter(|(name, _)| name.to_lowercase().contains(&query.to_lowercase()))
+            .collect();
 
         matching_resolutions
             .into_iter()
             .enumerate()
-            .map(|(i, resolution)| {
-                TypeDisplayInfo::from_resolution(format!("search_result_{}", i), resolution)
+            .map(|(i, (name, resolution))| {
+                TypeDisplayInfo::from_resolution(format!("search_result_{}_{}", i, name), resolution)
             })
             .collect()
     }

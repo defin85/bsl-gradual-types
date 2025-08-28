@@ -3,29 +3,25 @@
 //! Временная заглушка на время миграции архитектуры
 //! TODO: Восстановить функциональность после завершения миграции
 
-use anyhow::Result;
 use serde::Serialize;
 use std::sync::Arc;
-use tracing::{info, warn};
 
-// Import TypeSource from data layer
+// Импорты, необходимые для компиляции
+use crate::domain::{
+    InMemoryTypeRepository, RawTypeData, TypeContext, TypeRepository,
+    TypeResolutionService, ConcreteType,
+};
 use crate::data::TypeSource;
-
-// TODO: Restore imports after migration
+use crate::domain::types::{TypeResolution, ResolutionResult};
 use crate::application::lsp_service::LspTypeService;
 use crate::application::services::AnalysisTypeService;
 use crate::application::web_service::WebTypeService;
-use crate::domain::{
-    InMemoryTypeRepository, ParseMetadata, RawTypeData, TypeContext, TypeRepository,
-    TypeResolutionService,
-};
 use crate::presentation::adapters::{CliInterface, LspInterface, WebInterface};
-// use super::data::{InMemoryTypeRepository, ParseMetadata, RawTypeData, TypeRepository};
-// use super::domain::{TypeContext, TypeResolutionService};
-// use super::presentation::{CliInterface, LspInterface, WebInterface};
 
+// Остальные импорты временно удалены
+use anyhow::Result;
 use crate::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
-use crate::domain::types::TypeResolution;
+use tracing::{info, warn};
 
 /// Центральная система типов BSL
 ///
@@ -48,6 +44,7 @@ pub struct CentralTypeSystem {
     web_service: Arc<WebTypeService>,
 
     /// Сервис для анализа проектов (аналитика)
+    #[allow(dead_code)]
     analysis_service: Arc<AnalysisTypeService>,
 
     // === PRESENTATION LAYER ===
@@ -391,7 +388,7 @@ impl CentralTypeSystem {
         }
 
         // Сохраняем в репозиторий
-        // self.repository.save_types(all_types).await?; // TODO: Restore after trait fix
+        self.repository.save_types(all_types)?;
 
         info!("✅ Data Layer инициализирован");
         Ok(())
@@ -440,10 +437,10 @@ impl CentralTypeSystem {
 
         // Конвертируем TypeResolution в RawTypeData
         let mut raw_types = Vec::new();
-        // for (name, resolution) in platform_globals {
-        //     let raw_type = self.convert_resolution_to_raw_data(name, resolution)?;
-        //     raw_types.push(raw_type);
-        // }
+        for (name, resolution) in platform_globals {
+            let raw_type = self.convert_resolution_to_raw_data(name.to_string(), resolution)?;
+            raw_types.push(raw_type);
+        }
 
         Ok(raw_types)
     }
@@ -456,103 +453,162 @@ impl CentralTypeSystem {
 
         // Конвертируем TypeResolution в RawTypeData
         let mut raw_types = Vec::new();
-        // for resolution in config_resolutions {
-        //     // TODO: Restore proper conversion after migration
-        //     // Temporarily commented out due to structure mismatches
-        // }
+        for resolution in config_resolutions {
+            // Получаем правильное имя типа из TypeResolution
+            let name = self.get_configuration_type_name(&resolution);
+            let raw_type = self.convert_resolution_to_raw_data(name, &resolution)?;
+            raw_types.push(raw_type);
+        }
 
         Ok(raw_types)
     }
-    //         let source = match &resolution.result {
-    //             crate::domain::types::ResolutionResult::Concrete(
-    //                 crate::domain::types::ConcreteType::Platform(_),
-    //             ) => TypeSource::Platform {
-    //                 platform_version: "8.3".to_string(),
-    //             },
-    //             crate::domain::types::ResolutionResult::Concrete(
-    //                 crate::domain::types::ConcreteType::Configuration(_),
-    //             ) => TypeSource::Configuration {
-    //                 config_version: "8.3".to_string(),
-    //             },
-    //             _ => TypeSource::Platform {
-    //                 platform_version: "8.3".to_string(),
-    //             },
-    //         };
-    //
-    //         let mut methods = Vec::new();
-    //         let mut properties = Vec::new();
-    //
-    //         if let crate::domain::types::ResolutionResult::Concrete(
-    //             crate::domain::types::ConcreteType::Platform(platform_type),
-    //         ) = &resolution.result
-    //         {
-    //             methods = platform_type
-    //                 .methods
-    //                 .iter()
-    //                 .map(|method| {
-    //                     let params: Vec<crate::data::RawParameterData> = method
-    //                         .parameters
-    //                         .iter()
-    //                         .map(|param| crate::data::RawParameterData {
-    //                             name: param.name.clone(),
-    //                             type_name: param.type_.clone().unwrap_or_else(String::new),
-    //                             description: String::new(),
-    //                             is_optional: false, // Not available in source, using default
-    //                             is_by_value: true,  // Not available in source, using default
-    //                         })
-    //                         .collect();
-    //
-    //                     crate::data::RawMethodData {
-    //                         name: method.name.clone(),
-    //                         documentation: String::new(),
-    //                         parameters: params.clone(),
-    //                         return_type: method.return_type.clone(),
-    //                         return_type_name: method.return_type.clone(),
-    //                         params,
-    //                         is_function: method.return_type.is_some(),
-    //                         examples: Vec::new(),
-    //                     }
-    //                 })
-    //                 .collect();
-    //
-    //             properties = platform_type
-    //                 .properties
-    //                 .iter()
-    //                 .map(|prop| crate::data::RawPropertyData {
-    //                     name: prop.name.clone(),
-    //                     type_name: prop.type_.clone(),
-    //                     is_read_only: false, // Default value, cannot be determined from PlatformType
-    //                     description: "".to_string(), // Default value, cannot be determined from PlatformType
-    //                 })
-    //                 .collect();
-    //         }
-    //
-    //         Ok(RawTypeData {
-    //             id: name.to_string(),
-    //             russian_name: name.to_string(),
-    //             english_name: name.to_string(), // TODO: получить из данных
-    //             source,
-    //             category_path: vec!["Платформа".to_string()], // TODO: определить категорию
-    //             methods,
-    //             properties,
-    //             documentation: format!("Платформенный тип: {}", name),
-    //             examples: vec![format!("объект = Новый {};", name)],
-    //             available_facets: resolution
-    //                 .available_facets
-    //                 .iter()
-    //                 .map(|kind| crate::domain::types::Facet {
-    //                     kind: *kind,
-    //                     methods: vec![],
-    //                     properties: vec![],
-    //                 })
-    //                 .collect(),
-    //             parse_metadata: ParseMetadata {
-    //                 file_path: format!("{}.html", name),
-    //                 line: 0,
-    //                 column: 0,
-    //             },
-    //         })
-    //     }
+
+    /// Получить правильное имя конфигурационного типа с учетом фасета
+    fn get_configuration_type_name(&self, resolution: &TypeResolution) -> String {
+        if let ResolutionResult::Concrete(ConcreteType::Configuration(config_type)) = &resolution.result {
+            let prefix = match config_type.kind {
+                crate::domain::types::MetadataKind::Catalog => "Справочники",
+                crate::domain::types::MetadataKind::Document => "Документы",
+                crate::domain::types::MetadataKind::Register => "РегистрыСведений",
+                crate::domain::types::MetadataKind::Enum => "Перечисления",
+                crate::domain::types::MetadataKind::Report => "Отчеты",
+                crate::domain::types::MetadataKind::DataProcessor => "Обработки",
+                crate::domain::types::MetadataKind::ChartOfAccounts => "ПланыСчетов",
+                crate::domain::types::MetadataKind::ChartOfCharacteristicTypes => "ПланыВидовХарактеристик",
+            };
+            
+            // Формируем имя с учетом фасета
+            match resolution.active_facet {
+                Some(crate::domain::types::FacetKind::Manager) => {
+                    format!("{}.{}", prefix, config_type.name)
+                }
+                Some(crate::domain::types::FacetKind::Object) => {
+                    let object_prefix = match config_type.kind {
+                        crate::domain::types::MetadataKind::Catalog => "СправочникОбъект",
+                        crate::domain::types::MetadataKind::Document => "ДокументОбъект",
+                        _ => "Объект",
+                    };
+                    format!("{}.{}", object_prefix, config_type.name)
+                }
+                Some(crate::domain::types::FacetKind::Reference) => {
+                    let ref_prefix = match config_type.kind {
+                        crate::domain::types::MetadataKind::Catalog => "СправочникСсылка",
+                        crate::domain::types::MetadataKind::Document => "ДокументСсылка",
+                        _ => "Ссылка",
+                    };
+                    format!("{}.{}", ref_prefix, config_type.name)
+                }
+                _ => format!("{}.{}", prefix, config_type.name),
+            }
+        } else {
+            "UnknownConfigType".to_string()
+        }
+    }
+
+    fn convert_resolution_to_raw_data(
+        &self,
+        name: String,
+        resolution: &TypeResolution,
+    ) -> Result<RawTypeData> {
+        let source = match &resolution.result {
+            crate::domain::types::ResolutionResult::Concrete(
+                crate::domain::types::ConcreteType::Platform(_),
+            ) => TypeSource::Platform {
+                platform_version: "8.3".to_string(),
+            },
+            crate::domain::types::ResolutionResult::Concrete(
+                crate::domain::types::ConcreteType::Configuration(_),
+            ) => TypeSource::Configuration {
+                config_version: "8.3".to_string(),
+            },
+            _ => TypeSource::Platform {
+                platform_version: "8.3".to_string(),
+            },
+        };
+
+        let mut methods = Vec::new();
+        let mut properties = Vec::new();
+
+        if let crate::domain::types::ResolutionResult::Concrete(
+            crate::domain::types::ConcreteType::Platform(platform_type),
+        ) = &resolution.result
+        {
+            methods = platform_type
+                .methods
+                .iter()
+                .map(|method| {
+                    let params: Vec<crate::data::RawParameterData> = method
+                        .parameters
+                        .iter()
+                        .map(|param| crate::data::RawParameterData {
+                            name: param.name.clone(),
+                            type_name: param.type_.clone().unwrap_or_default(),
+                            description: String::new(),
+                            is_optional: false, // Not available in source, using default
+                            is_by_value: true,  // Not available in source, using default
+                        })
+                        .collect();
+
+                    crate::data::RawMethodData {
+                        name: method.name.clone(),
+                        signature: format!("{}({})", method.name, params.iter().map(|p| format!("{}: {}", p.name, p.type_name)).collect::<Vec<_>>().join(", ")),
+                        documentation: None,
+                        return_type: method.return_type.clone(),
+                        parameters: params,
+                    }
+                })
+                .collect();
+
+            properties = platform_type
+                .properties
+                .iter()
+                .map(|prop| crate::data::RawPropertyData {
+                    name: prop.name.clone(),
+                    type_name: prop.type_.clone(),
+                    description: "".to_string(), // Default value, cannot be determined from PlatformType
+                    is_read_only: false, // Default value, cannot be determined from PlatformType
+                })
+                .collect();
+        }
+
+        // Определяем категорию на основе типа
+        let category_path = if let ResolutionResult::Concrete(ConcreteType::Configuration(config_type)) = &resolution.result {
+            match config_type.kind {
+                crate::domain::types::MetadataKind::Catalog => vec!["Конфигурация".to_string(), "Справочники".to_string()],
+                crate::domain::types::MetadataKind::Document => vec!["Конфигурация".to_string(), "Документы".to_string()],
+                crate::domain::types::MetadataKind::Register => vec!["Конфигурация".to_string(), "Регистры сведений".to_string()],
+                crate::domain::types::MetadataKind::Enum => vec!["Конфигурация".to_string(), "Перечисления".to_string()],
+                _ => vec!["Конфигурация".to_string()],
+            }
+        } else {
+            vec!["Платформа".to_string()]
+        };
+
+        let documentation = if let ResolutionResult::Concrete(ConcreteType::Configuration(config_type)) = &resolution.result {
+            format!("Конфигурационный тип: {} ({})", name, match config_type.kind {
+                crate::domain::types::MetadataKind::Catalog => "Справочник",
+                crate::domain::types::MetadataKind::Document => "Документ",
+                crate::domain::types::MetadataKind::Register => "Регистр сведений",
+                crate::domain::types::MetadataKind::Enum => "Перечисление",
+                _ => "Объект метаданных",
+            })
+        } else {
+            format!("Платформенный тип: {}", name)
+        };
+
+        Ok(RawTypeData {
+            name: name.to_string(),
+            source_location: Some(format!("{}.html", name)),
+            documentation: Some(documentation),
+            methods,
+            properties,
+            metadata: std::collections::HashMap::new(),
+            source,
+            russian_name: name.to_string(),
+            english_name: name.to_string(), // TODO: получить из данных
+            category_path,
+        })
+    }
     //
     // === УПРАВЛЕНИЕ СОСТОЯНИЕМ ===
 

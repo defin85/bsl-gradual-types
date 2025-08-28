@@ -3,8 +3,7 @@
 //! Временная заглушка на время миграции архитектуры
 //! TODO: Восстановить функциональность после завершения миграции
 
-use std::sync::Arc;
-use anyhow::Result;
+// Импорты временно удалены до завершения миграции
 
 // TODO: Restore documentation system imports after migration
 // use crate::documentation::core::{

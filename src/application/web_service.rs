@@ -1,7 +1,6 @@
 //! Web Type Service - сервис для веб-интерфейса с богатыми данными
 
 use anyhow::Result;
-use std::sync::Arc;
 
 // Временно используем заглушки пока не создадим сервисы в domain/
 // use crate::domain::{TypeResolutionService, TypeSearchResult};

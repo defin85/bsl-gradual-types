@@ -1,5 +1,6 @@
 //! Application services - заглушки для завершения миграции
 
+// Импорт для компиляции
 use anyhow::Result;
 
 /// Метрики производительности
@@ -77,10 +78,10 @@ impl LspTypeService {
 
     pub async fn get_completions_fast(
         &self,
-        position: &str,
-        file_path: &str,
-        line: u32,
-        column: u32,
+        _position: &str,
+        _file_path: &str,
+        _line: u32,
+        _column: u32,
     ) -> Result<Vec<crate::domain::resolvers::platform::CompletionItem>> {
         // TODO: Implement with all parameters
         Ok(vec![])
@@ -88,10 +89,10 @@ impl LspTypeService {
 
     pub async fn get_hover_info(
         &self,
-        expression: &str,
-        file_path: &str,
-        line: u32,
-        column: u32,
+        _expression: &str,
+        _file_path: &str,
+        _line: u32,
+        _column: u32,
     ) -> Result<Option<String>> {
         // TODO: Implement with all parameters
         Ok(None)

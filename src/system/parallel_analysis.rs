@@ -97,10 +97,13 @@ impl Default for ParallelAnalysisConfig {
 /// Параллельный анализатор BSL проектов
 pub struct ParallelAnalyzer {
     /// Конфигурация
+    #[allow(dead_code)]
     config: ParallelAnalysisConfig,
     /// Кеш результатов
+    #[allow(dead_code)]
     cache: Option<Arc<Mutex<AnalysisCacheManager>>>,
     /// Type checker
+    #[allow(dead_code)]
     type_checker: Arc<TypeChecker>,
 }
 

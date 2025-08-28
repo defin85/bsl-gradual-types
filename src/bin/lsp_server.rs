@@ -18,6 +18,7 @@ use bsl_gradual_types::system::{CentralSystemConfig, CentralTypeSystem};
 #[derive(Parser, Debug)]
 #[command(name = "lsp-server")]
 #[command(about = "BSL Language Server (target engine)", long_about = None)]
+#[allow(dead_code)]
 struct Args {}
 
 /// BSL Language Server backend (target-only)
@@ -80,7 +81,7 @@ impl BslLanguageServer {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for BslLanguageServer {
-    async fn initialize(&self, params: InitializeParams) -> JsonRpcResult<InitializeResult> {
+    async fn initialize(&self, _params: InitializeParams) -> JsonRpcResult<InitializeResult> {
         info!("Initializing BSL Language Server");
         Ok(InitializeResult {
             capabilities: ServerCapabilities {

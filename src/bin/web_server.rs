@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use bsl_gradual_types::domain::analysis::{TypeChecker, TypeContext};
-use bsl_gradual_types::domain::types::{ConcreteType, ResolutionResult, TypeResolution};
+use bsl_gradual_types::domain::types::TypeResolution;
 // TODO: Restore after documentation migration
 // use bsl_gradual_types::documentation::core::providers::DocumentationProvider;
 // use bsl_gradual_types::documentation::core::ProviderConfig;
@@ -22,7 +22,7 @@ use bsl_gradual_types::domain::types::{ConcreteType, ResolutionResult, TypeResol
 use bsl_gradual_types::parsing::bsl::common::ParserFactory;
 // Переход на плоскую архитектуру
 use bsl_gradual_types::application::documentation_service::DocumentationService;
-use bsl_gradual_types::presentation::{WebSearchFilters, WebSearchRequest};
+use bsl_gradual_types::presentation::adapters::WebSearchRequest;
 use bsl_gradual_types::system::{CentralSystemConfig, CentralTypeSystem};
 
 #[derive(Parser)]
@@ -62,7 +62,7 @@ struct AppState {
     /// Статус загрузки платформенных типов
     loading_status: Arc<RwLock<LoadingStatus>>,
     /// Сервис документации (заменяет удалённую поисковую систему)
-    documentation_service: Arc<DocumentationService>,
+    _documentation_service: Arc<DocumentationService>,
     /// Центральная система типов (target-only)
     central: Arc<CentralTypeSystem>,
 }
@@ -186,7 +186,7 @@ async fn main() -> Result<()> {
             current_operation: "Поисковая система готова".to_string(),
             errors: 0,
         })),
-        documentation_service,
+        _documentation_service: documentation_service,
         central: central.clone(),
     };
 
@@ -373,12 +373,7 @@ struct SuggestionsQuery {
     limit: Option<usize>,
 }
 
-/// Ответ API с ошибкой
-#[derive(Serialize)]
-struct ApiError {
-    error: String,
-    code: u16,
-}
+
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -429,7 +424,7 @@ struct CategoryInfo {
 /// Обработчик поиска типов
 async fn handle_search_types(
     query: SearchQuery,
-    state: AppState,
+    _state: AppState,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let search_term = query.search.unwrap_or_default();
     let page = query.page.unwrap_or(1);
@@ -442,7 +437,7 @@ async fn handle_search_types(
         per_page: Some(per_page),
         filters: None,
     };
-    match state
+    match _state
         .central
         .web_interface()
         .handle_search_request(req)
@@ -484,30 +479,14 @@ async fn handle_search_types(
 
 // Поиск типов перенесён в WebInterface (target-only)
 
-/// Форматирование типа для отображения
-fn format_type_result(type_res: &TypeResolution) -> String {
-    match &type_res.result {
-        ResolutionResult::Concrete(ConcreteType::Primitive(primitive)) => {
-            format!("{:?}", primitive)
-        }
-        ResolutionResult::Concrete(ConcreteType::Platform(platform)) => platform.name.clone(),
-        ResolutionResult::Union(union_types) => {
-            let names: Vec<String> = union_types
-                .iter()
-                .map(|wt| format!("{:?}", wt.type_))
-                .collect();
-            format!("Union({})", names.join(" | "))
-        }
-        _ => "Dynamic".to_string(),
-    }
-}
+
 
 /// Обработчик получения деталей типа
 async fn handle_get_type_details(
     type_name: String,
-    state: AppState,
+    _state: AppState,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-    let details = get_type_details(&state, &type_name).await;
+    let details = get_type_details(&_state, &type_name).await;
     Ok(warp::reply::json(&details))
 }
 
@@ -716,7 +695,7 @@ async fn analyze_code_snippet(code: &str, filename: &Option<String>) -> AnalyzeR
 /// Обработчик расширенного поиска
 async fn handle_advanced_search(
     query: WebSearchRequest,
-    state: AppState,
+    _state: AppState,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     println!("🔍 API поиск: '{}'", query.query);
 
@@ -733,9 +712,9 @@ async fn handle_advanced_search(
 /// Обработчик автодополнения
 async fn handle_get_suggestions(
     query: SuggestionsQuery,
-    state: AppState,
+    _state: AppState,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-    let limit = query.limit.unwrap_or(10);
+    let _limit = query.limit.unwrap_or(10);
 
     // Заглушка вместо удалённого search_engine
     let response = SuggestionsResponse {
@@ -747,7 +726,7 @@ async fn handle_get_suggestions(
 }
 
 /// Обработчик статистики поиска
-async fn handle_get_search_stats(state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handle_get_search_stats(_state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
     // Заглушка вместо удалённого search_engine
     let stats = serde_json::json!({
         "total_documents": 0,
@@ -778,7 +757,7 @@ async fn handle_health(state: AppState) -> Result<impl warp::Reply, warp::Reject
 }
 
 /// Обработчик списка категорий
-async fn handle_get_categories(state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handle_get_categories(_state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
     // Пока простая реализация - возвращаем фиксированный список
     let categories = vec![
         CategoryInfo {

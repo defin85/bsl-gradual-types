@@ -5,6 +5,7 @@ use crate::domain::analysis::TypeContext;
 
 /// Type computation engine for complex type operations
 pub struct TypeComputationEngine {
+    #[allow(dead_code)]
     context: TypeContext,
 }
 

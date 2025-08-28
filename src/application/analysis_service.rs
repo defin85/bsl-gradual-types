@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use std::path::Path;
-use std::sync::Arc;
 
 // Временно используем заглушки пока не создадим сервисы в domain/
 // use crate::domain::{TypeCheckerService, TypeResolutionService};
@@ -29,13 +28,13 @@ impl AnalysisService {
     }
 
     /// Анализировать проект (временная заглушка)
-    pub async fn analyze_project(&self, project_path: &Path) -> Result<ProjectAnalysisResult> {
+    pub async fn analyze_project(&self, _project_path: &Path) -> Result<ProjectAnalysisResult> {
         // TODO: Implement project analysis
         Ok(ProjectAnalysisResult::default())
     }
 
     /// Получить метрики проекта
-    pub async fn get_project_metrics(&self, project_path: &Path) -> Result<ProjectMetrics> {
+    pub async fn get_project_metrics(&self, _project_path: &Path) -> Result<ProjectMetrics> {
         // TODO: Implement metrics collection
         Ok(ProjectMetrics::default())
     }

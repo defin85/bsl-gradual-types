@@ -41,6 +41,7 @@ pub struct TypeSystemService {
     web_interface: WebTypeInterface,
 
     /// Конфигурация сервиса
+    #[allow(dead_code)]
     config: Arc<RwLock<TypeSystemServiceConfig>>,
 
     /// Статистика использования
@@ -272,7 +273,7 @@ impl TypeSystemService {
     // === API ДЛЯ ВЕБ-СЕРВЕРА ===
 
     /// Выполнить поиск (для веб-сервера)
-    pub async fn search(&self, query: AdvancedSearchQuery) -> Result<SearchResults> {
+    pub async fn search(&self, _query: AdvancedSearchQuery) -> Result<SearchResults> {
         self.increment_search_requests().await;
         // TODO: Интеграция поиска через UnifiedTypeSystem
         // Пока возвращаем заглушку
@@ -448,6 +449,7 @@ impl InitializationState {
         }
     }
 
+    #[allow(dead_code)]
     fn add_error(&mut self, error: String) {
         self.errors.push(error);
         self.current_stage = InitializationStage::Failed;

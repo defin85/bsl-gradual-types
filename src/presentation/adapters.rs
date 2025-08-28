@@ -3,12 +3,20 @@
 //! Временная заглушка на время миграции архитектуры
 //! TODO: Восстановить функциональность после завершения миграции
 
-use crate::application::{AnalysisTypeService, LspTypeService, WebTypeService};
-use crate::domain::{InMemoryTypeRepository, TypeCheckerService, TypeResolutionService};
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
+
+// Остальные импорты временно удалены - они не используются в текущей заглушке
+// use crate::application::{AnalysisTypeService, LspTypeService, WebTypeService};
+// use crate::domain::TypeCheckerService;
+use anyhow::Result;
 use std::sync::Arc;
 use tracing::info;
+
+// Временные импорты для компиляции
+use crate::application::LspTypeService;
+use crate::domain::TypeCheckerService;
+use crate::application::services::AnalysisTypeService;
+use crate::application::web_service::WebTypeService;
 
 // TODO: Restore imports after migration
 // use super::application::SearchFilters;
@@ -786,8 +794,8 @@ mod tests {
     async fn test_lsp_interface() {
         // TODO: Restore test after migration
         /*
-        let repo = Arc::new(InMemoryTypeRepository::new());
-        let resolution_service = Arc::new(TypeResolutionService::new(repo));
+        // let repo = Arc::new(InMemoryTypeRepository::new());
+        // let resolution_service = Arc::new(TypeResolutionService::new(repo));
         let lsp_service = Arc::new(LspTypeService::new(resolution_service));
 
         let lsp_interface = LspInterface::new(lsp_service);
@@ -814,8 +822,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_interface() {
-        let repo = Arc::new(InMemoryTypeRepository::new());
-        let resolution_service = Arc::new(TypeResolutionService::new(repo));
+        // let repo = Arc::new(InMemoryTypeRepository::new());
+        // let resolution_service = Arc::new(TypeResolutionService::new(repo));
         let web_service = Arc::new(WebTypeService::new());
 
         let web_interface = WebInterface::new(web_service);
@@ -841,8 +849,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cli_interface() {
-        let repo = Arc::new(InMemoryTypeRepository::new());
-        let resolution_service = Arc::new(TypeResolutionService::new(repo));
+        // let repo = Arc::new(InMemoryTypeRepository::new());
+        // let resolution_service = Arc::new(TypeResolutionService::new(repo));
         let analysis_service = Arc::new(AnalysisTypeService::new());
 
         let cli_interface = CliInterface::new(analysis_service);

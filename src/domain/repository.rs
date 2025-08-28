@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use std::sync::Arc;
+use std::sync::RwLock;
 use crate::domain::search::RawTypeData;
 use crate::domain::types::TypeResolution;
 use crate::domain::analysis::type_checker::TypeContext;
@@ -13,6 +14,9 @@ pub trait TypeRepository: Send + Sync {
     
     /// Получить типы конфигурации
     fn get_configuration_types(&self, config_path: &str) -> Result<Vec<RawTypeData>>;
+    
+    /// Сохранить типы в репозиторий
+    fn save_types(&self, types: Vec<RawTypeData>) -> Result<()>;
     
     /// Получить статистику репозитория
     fn get_stats(&self) -> RepositoryStats;
@@ -29,34 +33,69 @@ pub struct RepositoryStats {
 
 /// In-memory реализация репозитория для тестирования
 pub struct InMemoryTypeRepository {
-    // TODO: Implement after migration complete
+    platform_types: RwLock<Vec<RawTypeData>>,
+    configuration_types: RwLock<Vec<RawTypeData>>,
 }
 
 impl InMemoryTypeRepository {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            platform_types: RwLock::new(Vec::new()),
+            configuration_types: RwLock::new(Vec::new()),
+        }
     }
 }
 
 impl TypeRepository for InMemoryTypeRepository {
     fn get_platform_types(&self) -> Result<Vec<RawTypeData>> {
-        // TODO: Implement after migration complete
-        Ok(vec![])
+        let types = self.platform_types.read().unwrap();
+        Ok(types.clone())
     }
     
     fn get_configuration_types(&self, _config_path: &str) -> Result<Vec<RawTypeData>> {
-        // TODO: Implement after migration complete
-        Ok(vec![])
+        let types = self.configuration_types.read().unwrap();
+        Ok(types.clone())
+    }
+    
+    fn save_types(&self, types: Vec<RawTypeData>) -> Result<()> {
+        // Разделяем типы по источникам
+        let mut platform_types = self.platform_types.write().unwrap();
+        let mut config_types = self.configuration_types.write().unwrap();
+        
+        for type_data in types {
+            match &type_data.source {
+                crate::data::TypeSource::Platform { .. } => {
+                    platform_types.push(type_data);
+                }
+                crate::data::TypeSource::Configuration { .. } => {
+                    config_types.push(type_data);
+                }
+                _ => {
+                    // По умолчанию считаем платформенным
+                    platform_types.push(type_data);
+                }
+            }
+        }
+        
+        Ok(())
     }
     
     fn get_stats(&self) -> RepositoryStats {
-        // TODO: Implement actual stats
-        RepositoryStats::default()
+        let platform_count = self.platform_types.read().unwrap().len();
+        let config_count = self.configuration_types.read().unwrap().len();
+        
+        RepositoryStats {
+            total_types: platform_count + config_count,
+            platform_types: platform_count,
+            configuration_types: config_count,
+            user_defined_types: 0, // TODO: Добавить поддержку пользовательских типов
+        }
     }
 }
 
 /// Сервис разрешения типов
 pub struct TypeResolutionService {
+    #[allow(dead_code)]
     repository: Arc<dyn TypeRepository>,
 }
 

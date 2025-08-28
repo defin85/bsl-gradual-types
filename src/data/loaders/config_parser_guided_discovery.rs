@@ -769,6 +769,7 @@ impl ConfigurationGuidedParser {
     }
 
     /// Получить отображаемое название типа
+    #[allow(dead_code)]
     fn get_kind_display_name(&self, kind: MetadataKind) -> &str {
         match kind {
             MetadataKind::Catalog => "Справочник",

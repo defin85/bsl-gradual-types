@@ -13,10 +13,10 @@ use std::sync::Arc;
 use tracing::info;
 
 // Временные импорты для компиляции
-use crate::application::LspTypeService;
-use crate::domain::TypeCheckerService;
 use crate::application::services::AnalysisTypeService;
 use crate::application::web_service::WebTypeService;
+use crate::application::LspTypeService;
+use crate::domain::TypeCheckerService;
 
 // TODO: Restore imports after migration
 // use super::application::SearchFilters;
@@ -137,8 +137,8 @@ impl LspInterface {
                 detail: comp.detail,
                 documentation: comp.documentation,
                 insert_text: comp.insert_text.unwrap_or_else(|| comp.label.clone()), // используем insert_text или label
-                filter_text: comp.filter_text.or_else(|| Some(comp.label.clone())),   // используем filter_text или label
-                sort_text: comp.sort_text.or_else(|| Some(comp.label.clone())),       // используем sort_text или label
+                filter_text: comp.filter_text.or_else(|| Some(comp.label.clone())), // используем filter_text или label
+                sort_text: comp.sort_text.or_else(|| Some(comp.label.clone())), // используем sort_text или label
             })
             .collect();
 
@@ -356,9 +356,52 @@ impl WebInterface {
         Self { web_service }
     }
 
-    /// Обработать запрос иерархии типов
+    /// Получить доступ к WebTypeService (для внутренних нужд CentralTypeSystem)
+    pub fn get_web_service(&self) -> &WebTypeService {
+        &self.web_service
+    }
+
+    /// Обработать запрос иерархии типов с переданными данными
+    pub async fn handle_hierarchy_request_with_types(
+        &self,
+        all_types: &std::collections::HashMap<String, crate::domain::types::TypeResolution>,
+    ) -> Result<WebHierarchyResponse> {
+        info!("🌳 Веб-запрос иерархии типов с внешними данными");
+
+        let hierarchy = self
+            .web_service
+            .build_type_hierarchy_with_types(all_types)
+            .await?;
+
+        // Конвертируем в HTTP API формат
+        let categories = hierarchy
+            .categories
+            .into_iter()
+            .map(|cat| WebCategoryItem {
+                id: cat.id.clone(),
+                name: cat.name.clone(),
+                description: cat.description,
+                types_count: cat.types.len(),
+                subcategories_count: cat.subcategories.len(),
+                url: format!("/categories/{}", urlencoding::encode(&cat.id)),
+            })
+            .collect();
+
+        Ok(WebHierarchyResponse {
+            categories,
+            total_types: hierarchy.total_types,
+            statistics: WebHierarchyStatsResponse {
+                total_categories: hierarchy.statistics.total_categories,
+                total_types: hierarchy.statistics.total_types,
+                platform_types: hierarchy.statistics.platform_types,
+                configuration_types: hierarchy.statistics.configuration_types,
+            },
+        })
+    }
+
+    /// Обработать запрос иерархии типов (fallback метод)
     pub async fn handle_hierarchy_request(&self) -> Result<WebHierarchyResponse> {
-        info!("🌳 Веб-запрос иерархии типов");
+        info!("🌳 Веб-запрос иерархии типов (fallback)");
 
         let hierarchy = self.web_service.build_type_hierarchy().await?;
 
@@ -822,9 +865,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_interface() {
-        // let repo = Arc::new(InMemoryTypeRepository::new());
-        // let resolution_service = Arc::new(TypeResolutionService::new(repo));
-        let web_service = Arc::new(WebTypeService::new());
+        let repo = Arc::new(crate::domain::repository::InMemoryTypeRepository::new());
+        let resolution_service =
+            Arc::new(crate::domain::repository::TypeResolutionService::new(repo));
+        let web_service = Arc::new(WebTypeService::new(resolution_service));
 
         let web_interface = WebInterface::new(web_service);
 

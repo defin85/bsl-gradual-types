@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 
-// Временно используем заглушки пока не создадим сервисы в domain/
-// use crate::domain::{TypeResolutionService, TypeSearchResult};
+// ✅ УБИРАЕМ неправильный импорт - теперь resolvers приватен
+// use crate::domain::resolvers::platform::PlatformTypeResolver; // ❌ НЕ КОМПИЛИРУЕТСЯ
 use crate::domain::types::TypeResolution;
 use crate::presentation::SearchFilters;
 
@@ -60,34 +60,107 @@ pub struct TypeStatistics {
 
 /// Сервис типов для веб-интерфейса (богатые данные)
 pub struct WebTypeService {
-    // /// Центральный сервис разрешения
-    // resolution_service: Arc<TypeResolutionService>,
+    /// Центральный сервис разрешения типов (обязательный!)
+    resolution_service: std::sync::Arc<crate::domain::repository::TypeResolutionService>,
 }
 
 impl WebTypeService {
-    /// Создать новый веб сервис
-    pub fn new(/* resolution_service: Arc<TypeResolutionService> */) -> Self {
-        Self {
-            // resolution_service 
-        }
+    /// Создать новый веб сервис с обязательным resolution_service
+    pub fn new(
+        resolution_service: std::sync::Arc<crate::domain::repository::TypeResolutionService>,
+    ) -> Self {
+        Self { resolution_service }
     }
 
-    /// Поиск типов для веб-интерфейса (временная заглушка)
-    pub async fn search_types(&self, _query: &str) -> Result<Vec<TypeSearchResult>> {
-        // TODO: Implement when TypeResolutionService is available
-        Ok(vec![])
+    /// Поиск типов для веб-интерфейса
+    pub async fn search_types(&self, query: &str) -> Result<Vec<String>> {
+        // ✅ ИСПОЛЬЗУЕМ только resolution_service - никаких fallback'ов!
+        let results = self.resolution_service.search_types(query);
+        Ok(results)
     }
 
-    /// Получить детальную информацию о типе для веб UI (временная заглушка)
-    pub async fn get_type_details(&self, _expression: &str) -> Result<Option<TypeResolution>> {
-        // TODO: Implement when TypeResolutionService is available
-        Ok(None)
+    /// Получить детали типа
+    pub async fn get_type_details(&self, type_name: &str) -> Result<Option<TypeResolution>> {
+        // ✅ ИСПОЛЬЗУЕМ только resolution_service - никаких fallback'ов!
+        let platform_globals = self.resolution_service.get_all_platform_globals();
+        Ok(platform_globals.get(type_name).cloned())
     }
 
+    /// Получить детальную информацию о типе для веб UI
+    pub async fn get_type_completions(
+        &self,
+        expression: &str,
+    ) -> Result<Vec<crate::domain::CompletionItem>> {
+        // ✅ ИСПОЛЬЗУЕМ только resolution_service - никаких fallback'ов!
+        let completions = self.resolution_service.get_completions(expression);
+        Ok(completions)
+    }
     /// Построить иерархию типов
+    /// Построить иерархию типов с использованием переданных данных
+    pub async fn build_type_hierarchy_with_types(
+        &self,
+        all_types: &std::collections::HashMap<String, TypeResolution>,
+    ) -> Result<TypeHierarchy> {
+        // Группируем типы по категориям
+        let mut hierarchy = TypeHierarchy::default();
+        let mut platform_types = Vec::new();
+
+        for (name, _resolution) in all_types {
+            platform_types.push(name.clone());
+
+            let category_name = if name.starts_with("Справочники") || name.starts_with("Catalogs")
+            {
+                "Справочники"
+            } else if name.starts_with("Документы") || name.starts_with("Documents") {
+                "Документы"
+            } else if name.starts_with("Перечисления") || name.starts_with("Enums") {
+                "Перечисления"
+            } else if name.starts_with("Регистры") || name.contains("Registers") {
+                "Регистры"
+            } else {
+                "Глобальные объекты"
+            };
+
+            // Добавляем в соответствующую категорию
+            if !hierarchy
+                .categories
+                .iter()
+                .any(|c| &c.name == category_name)
+            {
+                hierarchy.categories.push(super::services::TypeCategory {
+                    id: category_name.to_lowercase().replace(" ", "_"),
+                    name: category_name.to_string(),
+                    description: format!("Категория {}", category_name),
+                    types: Vec::new(),
+                    subcategories: Vec::new(),
+                });
+            }
+
+            // Находим категорию и добавляем тип
+            if let Some(cat) = hierarchy
+                .categories
+                .iter_mut()
+                .find(|c| &c.name == category_name)
+            {
+                cat.types.push(name.clone());
+            }
+        }
+
+        // Обновляем статистику
+        hierarchy.total_types = platform_types.len();
+        hierarchy.root_types = platform_types;
+        hierarchy.statistics.total_categories = hierarchy.categories.len();
+        hierarchy.statistics.total_types = hierarchy.total_types;
+        hierarchy.statistics.platform_types = hierarchy.total_types;
+        hierarchy.statistics.configuration_types = 0;
+
+        Ok(hierarchy)
+    }
+
     pub async fn build_type_hierarchy(&self) -> Result<TypeHierarchy> {
-        // TODO: Implement type hierarchy building
-        Ok(TypeHierarchy::default())
+        // ✅ ИСПОЛЬЗУЕМ только resolution_service - никаких fallback'ов!
+        let platform_globals = self.resolution_service.get_all_platform_globals();
+        self.build_type_hierarchy_with_types(platform_globals).await
     }
 
     /// Расширенный поиск типов

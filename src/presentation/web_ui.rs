@@ -1,8 +1,5 @@
 //! Улучшенная HTML страница с иерархическим отображением типов BSL
 
-use serde_json::json;
-use std::collections::HashMap;
-
 /// Генерация улучшенной HTML главной страницы с иерархией типов
 pub fn generate_enhanced_index_html() -> String {
     r#"

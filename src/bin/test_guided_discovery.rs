@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use bsl_gradual_types::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
-use bsl_gradual_types::domain::resolvers::PlatformTypeResolver;
+use bsl_gradual_types::data::loaders::platform_types_repository::PlatformTypesRepository; // РЕФАКТОРИНГ: Используем V2
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -103,7 +103,14 @@ fn test_with_integration(args: &Args) -> Result<()> {
     println!("\n=== 🔗 Тест с интеграцией в PlatformTypeResolver ===");
 
     let start_time = std::time::Instant::now();
-    let resolver = PlatformTypeResolver::with_guided_config(&args.config_path)?;
+    // РЕФАКТОРИНГ: Создаем guided parser напрямую (старый resolver удален)
+    let mut guided_parser = ConfigurationGuidedParser::new(&args.config_path);
+    
+    // Parse configuration using guided discovery approach  
+    let config_types = guided_parser.parse_with_configuration_guide()?;
+    
+    // Также создаем platform resolver для подсчетов
+    let platform_resolver = PlatformTypesRepository::new();
     let elapsed = start_time.elapsed();
 
     println!(
@@ -112,7 +119,7 @@ fn test_with_integration(args: &Args) -> Result<()> {
     );
     println!(
         "📊 Platform globals: {}",
-        resolver.get_platform_globals_count()
+        platform_resolver.get_platform_globals_count()
     );
 
     // Тест основных platform globals
@@ -127,7 +134,7 @@ fn test_with_integration(args: &Args) -> Result<()> {
 
     println!("\n🔍 Проверка platform globals:");
     for global in &globals_to_test {
-        if resolver.has_platform_global(global) {
+        if platform_resolver.has_platform_global(global) {
             println!("  ✅ {}", global);
         } else {
             println!("  ❌ {}", global);
@@ -138,7 +145,7 @@ fn test_with_integration(args: &Args) -> Result<()> {
         println!("\n📊 Подробная статистика resolver'а:");
         println!(
             "  - Platform globals: {}",
-            resolver.get_platform_globals_count()
+            platform_resolver.get_platform_globals_count()
         );
 
         // Дополнительные статистики можно добавить позже

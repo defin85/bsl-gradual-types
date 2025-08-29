@@ -800,14 +800,29 @@ async fn handle_get_categories(_state: AppState) -> Result<impl warp::Reply, war
 
 /// Обработчик иерархии типов
 async fn handle_get_hierarchy(state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
-    // Используем CentralTypeSystem для получения иерархии
-    match state
-        .central
-        .web_interface()
-        .handle_hierarchy_request()
-        .await
-    {
-        Ok(hierarchy) => Ok(warp::reply::json(&hierarchy)),
+    // Используем данные из CentralTypeSystem напрямую
+    match state.central.get_type_hierarchy().await {
+        Ok(hierarchy) => {
+            // Конвертируем в веб-формат
+            let response = serde_json::json!({
+                "categories": hierarchy.categories.iter().map(|cat| serde_json::json!({
+                    "id": cat.id,
+                    "name": cat.name,
+                    "description": cat.description,
+                    "types_count": cat.types.len(),
+                    "subcategories_count": cat.subcategories.len(),
+                    "url": format!("/categories/{}", urlencoding::encode(&cat.id))
+                })).collect::<Vec<_>>(),
+                "total_types": hierarchy.total_types,
+                "statistics": {
+                    "total_categories": hierarchy.statistics.total_categories,
+                    "total_types": hierarchy.statistics.total_types,
+                    "platform_types": hierarchy.statistics.platform_types,
+                    "configuration_types": hierarchy.statistics.configuration_types
+                }
+            });
+            Ok(warp::reply::json(&response))
+        }
         Err(e) => {
             eprintln!("Ошибка получения иерархии: {}", e);
 

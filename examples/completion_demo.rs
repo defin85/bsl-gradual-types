@@ -1,11 +1,11 @@
 //! Демонстрация автодополнения для BSL типов
 
-use bsl_gradual_types::domain::resolvers::PlatformTypeResolver;
+use bsl_gradual_types::data::loaders::platform_types_v2::PlatformTypesResolverV2; // РЕФАКТОРИНГ: Используем V2
 
 fn main() {
     println!("=== Демонстрация автодополнения ===\n");
 
-    let resolver = PlatformTypeResolver::new();
+    let resolver = PlatformTypesResolverV2::new(); // РЕФАКТОРИНГ: Используем V2
 
     // Тест 1: Автодополнение после "Массив."
     println!("1. Автодополнение для 'Массив.':");

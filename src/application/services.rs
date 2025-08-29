@@ -82,7 +82,7 @@ impl LspTypeService {
         _file_path: &str,
         _line: u32,
         _column: u32,
-    ) -> Result<Vec<crate::domain::resolvers::platform::CompletionItem>> {
+    ) -> Result<Vec<crate::domain::CompletionItem>> {
         // TODO: Implement with all parameters
         Ok(vec![])
     }

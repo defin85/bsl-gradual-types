@@ -7,16 +7,35 @@
 //! - Межпроцедурный анализ для лучшего автодополнения
 
 use crate::domain::analysis::type_checker::{TypeChecker, TypeContext, TypeDiagnostic};
-use crate::domain::resolvers::platform::{
-    CompletionItem as BslCompletion, CompletionKind, PlatformTypeResolver,
-};
+// ✅ ИСПОЛЬЗУЕМ правильные импорты через domain экспорты
 use crate::domain::types::{ConcreteType, ResolutionResult, TypeResolution};
+use crate::domain::{CompletionItem as BslCompletion, CompletionKind};
 use crate::parsing::bsl::ast::Program;
 use crate::parsing::bsl::common::{Parser, ParserFactory, TextChange};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp::lsp_types::*;
+
+/// Расширенное автодополнение с дополнительной информацией от flow-sensitive анализа
+#[derive(Debug, Clone)]
+pub struct EnhancedCompletion {
+    /// Базовое автодополнение
+    pub completion: BslCompletion,
+    /// Дополнительная информация от enhanced analyzer
+    pub enhanced_info: Option<String>,
+    /// Flow-sensitive тип переменной/выражения
+    pub flow_sensitive_type: Option<TypeResolution>,
+}
+
+/// Контекст для автодополнения
+#[derive(Debug, Clone)]
+pub struct CompletionContext {
+    /// URI документа
+    pub uri: String,
+    /// Префикс для автодополнения
+    pub prefix: String,
+}
 
 /// Состояние документа с кешированными результатами анализа
 #[derive(Debug, Clone)]
@@ -163,19 +182,18 @@ pub struct EnhancedTypeAnalyzer {
     parsing_manager: IncrementalParsingManager,
     /// Кеш результатов анализа для быстрого доступа
     analysis_cache: HashMap<String, (TypeContext, Vec<TypeDiagnostic>)>,
-}
-
-impl Default for EnhancedTypeAnalyzer {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// ✅ Сервис разрешения типов (заменяет прямое обращение к PlatformTypeResolver)
+    type_resolution_service: std::sync::Arc<crate::domain::repository::TypeResolutionService>,
 }
 
 impl EnhancedTypeAnalyzer {
-    pub fn new() -> Self {
+    pub fn new(
+        type_resolution_service: std::sync::Arc<crate::domain::repository::TypeResolutionService>,
+    ) -> Self {
         Self {
             parsing_manager: IncrementalParsingManager::new(),
             analysis_cache: HashMap::new(),
+            type_resolution_service,
         }
     }
 
@@ -216,34 +234,48 @@ impl EnhancedTypeAnalyzer {
 
     /// Получить автодополнения с учетом типов из продвинутого анализа
     pub fn get_enhanced_completions(
-        &self,
-        uri: &str,
+        &mut self,
+        _source: &str,
         _position: Position,
-        prefix: &str,
-        platform_resolver: &PlatformTypeResolver,
-    ) -> Vec<BslCompletion> {
+        context: CompletionContext,
+    ) -> Vec<EnhancedCompletion> {
         let mut completions = Vec::new();
 
-        // Добавляем стандартные completion из platform resolver
-        completions.extend(platform_resolver.get_completions(prefix));
+        // Используем TypeResolutionService для получения базовых completion
+        let base_completions = self
+            .type_resolution_service
+            .get_completions(&context.prefix);
+        for completion in base_completions {
+            completions.push(EnhancedCompletion {
+                completion,
+                enhanced_info: None,
+                flow_sensitive_type: None,
+            });
+        }
 
         // Добавляем completion на основе локального контекста типов
-        if let Some((context, _)) = self.analysis_cache.get(uri) {
+        if let Some((analysis_context, _)) = self.analysis_cache.get(&context.uri) {
             // Переменные из flow-sensitive анализа
-            for (var_name, var_type) in &context.variables {
-                if var_name.starts_with(prefix) {
-                    completions.push(BslCompletion::with_details(
+            for (var_name, var_type) in &analysis_context.variables {
+                if var_name.starts_with(&context.prefix) {
+                    let completion = BslCompletion::with_details(
                         var_name.clone(),
                         CompletionKind::Variable,
                         Some(Self::format_type_short(var_type)),
                         Some(Self::format_type_info(var_type)),
-                    ));
+                    );
+
+                    completions.push(EnhancedCompletion {
+                        completion,
+                        enhanced_info: Some(Self::format_type_info(var_type)),
+                        flow_sensitive_type: Some(var_type.clone()),
+                    });
                 }
             }
 
             // Функции из межпроцедурного анализа
-            for (func_name, signature) in &context.functions {
-                if func_name.starts_with(prefix) {
+            for (func_name, signature) in &analysis_context.functions {
+                if func_name.starts_with(&context.prefix) {
                     let doc = format!(
                         "Функция: {} -> {}\nПараметры: {}",
                         func_name,
@@ -260,12 +292,18 @@ impl EnhancedTypeAnalyzer {
                             .join(", ")
                     );
 
-                    completions.push(BslCompletion::with_details(
+                    let completion = BslCompletion::with_details(
                         func_name.clone(),
                         CompletionKind::Function,
                         Some(Self::format_type_short(&signature.return_type)),
-                        Some(doc),
-                    ));
+                        Some(doc.clone()),
+                    );
+
+                    completions.push(EnhancedCompletion {
+                        completion,
+                        enhanced_info: Some(doc),
+                        flow_sensitive_type: Some(signature.return_type.clone()),
+                    });
                 }
             }
         }
@@ -485,17 +523,15 @@ pub struct DocumentManager {
     analyzer: Arc<RwLock<EnhancedTypeAnalyzer>>,
 }
 
-impl Default for DocumentManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl DocumentManager {
-    pub fn new() -> Self {
+    pub fn new(
+        type_resolution_service: std::sync::Arc<crate::domain::repository::TypeResolutionService>,
+    ) -> Self {
         Self {
             documents: Arc::new(RwLock::new(HashMap::new())),
-            analyzer: Arc::new(RwLock::new(EnhancedTypeAnalyzer::new())),
+            analyzer: Arc::new(RwLock::new(EnhancedTypeAnalyzer::new(
+                type_resolution_service,
+            ))),
         }
     }
 
@@ -556,10 +592,13 @@ impl DocumentManager {
         uri: &str,
         position: Position,
         prefix: &str,
-        platform_resolver: &PlatformTypeResolver,
-    ) -> Vec<BslCompletion> {
-        let analyzer = self.analyzer.read().await;
-        analyzer.get_enhanced_completions(uri, position, prefix, platform_resolver)
+    ) -> Vec<EnhancedCompletion> {
+        let mut analyzer = self.analyzer.write().await;
+        let context = CompletionContext {
+            uri: uri.to_string(),
+            prefix: prefix.to_string(),
+        };
+        analyzer.get_enhanced_completions("", position, context)
     }
 
     /// Получить статистику для мониторинга
@@ -624,7 +663,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_document_manager() {
-        let manager = DocumentManager::new();
+        // Создаем TypeResolutionService для теста
+        let repository =
+            std::sync::Arc::new(crate::domain::repository::InMemoryTypeRepository::new());
+        let type_resolution_service = std::sync::Arc::new(
+            crate::domain::repository::TypeResolutionService::new(repository),
+        );
+        let manager = DocumentManager::new(type_resolution_service);
 
         let result = manager
             .update_document(

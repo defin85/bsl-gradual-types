@@ -10,35 +10,59 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::domain::resolvers::platform::CompletionItem;
-use crate::domain::analysis::type_checker::TypeContext;
-use crate::domain::search::{AdvancedSearchQuery, SearchResults, TypeHierarchy};
 use super::types::TypeResolution;
-use super::unified_type_system::{
-    LspTypeInterface, TypeDetailedInfo, TypeDisplayInfo, UnifiedSystemConfig, UnifiedTypeSystem,
-    WebTypeInterface,
-};
-// TODO: Implement TypeHierarchy in documentation_service  
+use crate::domain::analysis::type_checker::TypeContext;
+use crate::domain::resolvers::platform::CompletionItem;
+use crate::domain::search::{AdvancedSearchQuery, SearchResults, TypeHierarchy};
+use crate::system::coordination::CentralTypeSystem;
+// TODO: Implement TypeHierarchy in documentation_service
 // use crate::application::documentation_service::TypeHierarchy;
 // TODO: Implement search functionality in documentation_service
 // use crate::documentation::{AdvancedSearchQuery, SearchResults};
 
+/// Временные структуры для совместимости во время миграции от UnifiedTypeSystem к CentralTypeSystem
+/// TODO: Удалить после полной миграции
+#[derive(Debug, Clone, Default)]
+pub struct MigrationCompatibilityStats {
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+    pub total_queries: u64,
+    pub average_response_time_ms: f64,
+}
+
+/// Временная структура для отображения типа в веб-интерфейсе
+#[derive(Debug, Clone)]
+pub struct MigrationTypeDisplayInfo {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+    pub description: Option<String>,
+}
+
+/// Временная структура для детальной информации о типе в веб-интерфейсе
+#[derive(Debug, Clone)]
+pub struct MigrationTypeDetailedInfo {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+    pub description: Option<String>,
+    pub methods: Vec<String>,
+    pub properties: Vec<String>,
+    pub constructors: Vec<String>,
+}
+
+/// Центральный сервис системы типов BSL v2.0
+
 /// Центральный сервис системы типов BSL v2.0
 ///
-/// Фасад над UnifiedTypeSystem для удобного использования в LSP и веб-сервере.
+/// Фасад над CentralTypeSystem для удобного использования в LSP и веб-сервере.
 /// Предоставляет high-level API и статистику использования.
 pub struct TypeSystemService {
     /// Состояние инициализации
     initialization_state: Arc<RwLock<InitializationState>>,
 
-    /// Единая система типов (источник истины)
-    unified_system: Arc<UnifiedTypeSystem>,
-
-    /// LSP интерфейс
-    lsp_interface: LspTypeInterface,
-
-    /// Веб интерфейс
-    web_interface: WebTypeInterface,
+    /// Центральная система типов (координатор архитектуры)
+    central_system: Arc<CentralTypeSystem>,
 
     /// Конфигурация сервиса
     #[allow(dead_code)]
@@ -153,30 +177,32 @@ pub struct ServiceUsageStats {
 }
 
 impl TypeSystemService {
-    /// Создать новый экземпляр сервиса на базе UnifiedTypeSystem
+    /// Создать новый экземпляр сервиса на базе CentralTypeSystem
     pub fn new(config: TypeSystemServiceConfig) -> Self {
-        // Конвертируем конфигурацию для UnifiedTypeSystem
-        let unified_config = UnifiedSystemConfig {
-            syntax_helper_path: config.syntax_helper_path.clone(),
+        // Создаем центральную систему типов с default конфигом
+        let default_config = crate::system::coordination::CentralSystemConfig {
+            html_path: "examples/syntax_helper/rebuilt.shcntx_ru".to_string(),
             configuration_path: config.project_config_path.clone(),
-            use_guided_discovery: config.use_guided_discovery,
-            cache_ttl_seconds: config.cache_settings.cache_ttl_seconds,
-            max_cache_size: config.cache_settings.max_cache_size,
             verbose_logging: false,
+            cache_settings: crate::system::coordination::CacheSettings {
+                enable_repository_cache: true,
+                enable_resolution_cache: true,
+                enable_lsp_cache: true,
+                max_cache_size: config.cache_settings.max_cache_size,
+                cache_ttl_seconds: config.cache_settings.cache_ttl_seconds,
+            },
+            performance_settings: crate::system::coordination::PerformanceSettings {
+                enable_parallel_parsing: true,
+                max_parser_threads: 4,
+                lsp_response_timeout_ms: 5000,
+                web_request_timeout_ms: 10000,
+            },
         };
-
-        // Создаем единую систему типов
-        let unified_system = Arc::new(UnifiedTypeSystem::new(unified_config));
-
-        // Создаем интерфейсы
-        let lsp_interface = LspTypeInterface::new(unified_system.clone());
-        let web_interface = WebTypeInterface::new(unified_system.clone());
+        let central_system = Arc::new(CentralTypeSystem::new(default_config));
 
         Self {
             initialization_state: Arc::new(RwLock::new(InitializationState::new())),
-            unified_system,
-            lsp_interface,
-            web_interface,
+            central_system,
             config: Arc::new(RwLock::new(config)),
             usage_stats: Arc::new(RwLock::new(ServiceUsageStats::default())),
         }
@@ -200,7 +226,7 @@ impl TypeSystemService {
         )
         .await;
 
-        match self.unified_system.initialize().await {
+        match self.central_system.initialize().await {
             Ok(_) => {
                 self.set_stage(
                     InitializationStage::Ready,
@@ -235,19 +261,31 @@ impl TypeSystemService {
     /// Резолвить выражение (для LSP)
     pub async fn resolve_expression(&self, expression: &str) -> TypeResolution {
         self.increment_lsp_requests().await;
-        self.lsp_interface.resolve_expression(expression).await
+        // Используем CentralTypeSystem вместо legacy интерфейса
+        self.central_system.resolve_expression(expression).await
     }
 
     /// Получить автодополнение (для LSP)
     pub async fn get_completions(&self, expression: &str) -> Vec<CompletionItem> {
         self.increment_completion_requests().await;
-        self.lsp_interface.get_completions(expression).await
+        // Используем CentralTypeSystem вместо legacy интерфейса
+        let type_names = self.central_system.search_types(expression).await;
+        type_names
+            .into_iter()
+            .map(|name| {
+                CompletionItem::new(
+                    name,
+                    crate::domain::resolvers::platform::CompletionKind::Global,
+                )
+            })
+            .collect()
     }
 
     /// Получить тип переменной в контексте (для LSP)
     pub async fn get_variable_type(&self, variable_name: &str, context: &str) -> TypeResolution {
         self.increment_lsp_requests().await;
-        self.lsp_interface
+        // Используем CentralTypeSystem вместо legacy интерфейса
+        self.central_system
             .get_variable_type(variable_name, context)
             .await
     }
@@ -259,7 +297,8 @@ impl TypeSystemService {
         to_type: &TypeResolution,
     ) -> bool {
         self.increment_lsp_requests().await;
-        self.lsp_interface
+        // Используем CentralTypeSystem вместо legacy интерфейса
+        self.central_system
             .check_assignment_compatibility(from_type, to_type)
             .await
     }
@@ -299,21 +338,51 @@ impl TypeSystemService {
     }
 
     /// Получить все типы для отображения (для веб-сервера)
-    pub async fn get_all_types_for_display(&self) -> Vec<TypeDisplayInfo> {
+    pub async fn get_all_types_for_display(&self) -> Vec<MigrationTypeDisplayInfo> {
         self.increment_web_requests().await;
-        self.web_interface.get_all_types_for_display().await
+        // Используем CentralTypeSystem вместо legacy интерфейса
+        let all_types = self.central_system.get_all_types().await;
+        all_types
+            .into_iter()
+            .map(|name| MigrationTypeDisplayInfo {
+                id: name.clone(),
+                name: name.clone(),
+                category: "Платформенный".to_string(),
+                description: None,
+            })
+            .collect()
     }
 
     /// Поиск типов через веб интерфейс
-    pub async fn search_types_for_display(&self, query: &str) -> Vec<TypeDisplayInfo> {
+    pub async fn search_types_for_display(&self, query: &str) -> Vec<MigrationTypeDisplayInfo> {
         self.increment_web_requests().await;
-        self.web_interface.search_types(query).await
+        // Используем CentralTypeSystem вместо legacy интерфейса
+        let found_types = self.central_system.search_types(query).await;
+        found_types
+            .into_iter()
+            .map(|name| MigrationTypeDisplayInfo {
+                id: name.clone(),
+                name: name.clone(),
+                category: "Найденный".to_string(),
+                description: None,
+            })
+            .collect()
     }
 
     /// Получить детальную информацию о типе
-    pub async fn get_type_details(&self, type_id: &str) -> Option<TypeDetailedInfo> {
+    pub async fn get_type_details(&self, type_id: &str) -> Option<MigrationTypeDetailedInfo> {
         self.increment_web_requests().await;
-        self.web_interface.get_type_details(type_id).await
+        // Используем CentralTypeSystem вместо legacy интерфейса
+        let type_info = self.central_system.get_type_info(type_id).await?;
+        Some(MigrationTypeDetailedInfo {
+            id: type_id.to_string(),
+            name: type_info.name,
+            category: type_info.category,
+            description: type_info.description,
+            methods: type_info.methods,
+            properties: type_info.properties,
+            constructors: type_info.constructors,
+        })
     }
 
     /// Получить иерархию типов (для веб-сервера)
@@ -335,7 +404,8 @@ impl TypeSystemService {
 
     /// Получить статистику производительности
     pub async fn get_performance_stats(&self) -> Result<PerformanceStats> {
-        let unified_stats = self.unified_system.get_statistics().await;
+        // TODO: Получить статистику из CentralTypeSystem.get_type_statistics()
+        let unified_stats = MigrationCompatibilityStats::default();
         let usage_stats = self.get_usage_stats().await;
 
         let cache_hit_ratio = if unified_stats.cache_hits + unified_stats.cache_misses > 0 {
@@ -353,9 +423,10 @@ impl TypeSystemService {
         })
     }
 
-    /// Получить статистику единой системы типов
-    pub async fn get_unified_system_stats(&self) -> super::unified_type_system::UnifiedSystemStats {
-        self.unified_system.get_statistics().await
+    /// Получить статистику единой системы типов  
+    pub async fn get_unified_system_stats(&self) -> MigrationCompatibilityStats {
+        // TODO: Получить статистику из CentralTypeSystem.get_type_statistics()
+        MigrationCompatibilityStats::default()
     }
 
     // === ПРИВАТНЫЕ МЕТОДЫ ===
@@ -407,7 +478,7 @@ pub struct PerformanceStats {
     pub total_requests: u64,
 
     /// Статистика единой системы типов
-    pub unified_system_stats: super::unified_type_system::UnifiedSystemStats,
+    pub unified_system_stats: MigrationCompatibilityStats,
 
     /// Использование памяти
     pub memory_usage_mb: f64,

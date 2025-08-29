@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-// Временно используем domain пока не завершим миграцию
-use crate::domain::resolvers::platform::CompletionItem;
+// ✅ ИСПОЛЬЗУЕМ правильный импорт через domain экспорты
+use crate::domain::CompletionItem;
 use crate::domain::types::TypeResolution;
 
 /// Метрики производительности LSP сервиса

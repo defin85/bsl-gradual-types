@@ -1,11 +1,12 @@
 #[cfg(test)]
 mod tests {
-    use bsl_gradual_types::domain::resolvers::PlatformTypeResolver;
+    use super::*;
+    use bsl_gradual_types::data::loaders::platform_types_v2::PlatformTypesResolverV2; // РЕФАКТОРИНГ: Используем V2
     use bsl_gradual_types::domain::types::FacetKind;
 
     #[test]
     fn test_catalog_has_facets() {
-        let mut resolver = PlatformTypeResolver::new();
+        let mut resolver = PlatformTypesResolverV2::new(); // РЕФАКТОРИНГ: Используем V2
 
         // Debug: check if "Справочники" is loaded
         println!(
@@ -40,7 +41,7 @@ mod tests {
 
     #[test]
     fn test_document_has_facets() {
-        let mut resolver = PlatformTypeResolver::new();
+        let mut resolver = PlatformTypesResolverV2::new() // РЕФАКТОРИНГ: Используем V2;
 
         let resolution = resolver.resolve_expression("Документы.ЗаказПокупателя");
 
@@ -50,7 +51,7 @@ mod tests {
 
     #[test]
     fn test_enum_has_limited_facets() {
-        let mut resolver = PlatformTypeResolver::new();
+        let mut resolver = PlatformTypesResolverV2::new() // РЕФАКТОРИНГ: Используем V2;
 
         let resolution = resolver.resolve_expression("Перечисления.СтатусыЗаказов");
 
@@ -63,7 +64,7 @@ mod tests {
 
     #[test]
     fn test_platform_types_have_no_facets() {
-        let mut resolver = PlatformTypeResolver::new();
+        let mut resolver = PlatformTypesResolverV2::new() // РЕФАКТОРИНГ: Используем V2;
 
         let resolution = resolver.resolve_expression("Справочники");
 
@@ -74,7 +75,7 @@ mod tests {
 
     #[test]
     fn test_facet_switching() {
-        let mut resolver = PlatformTypeResolver::new();
+        let mut resolver = PlatformTypesResolverV2::new() // РЕФАКТОРИНГ: Используем V2;
         let mut resolution = resolver.resolve_expression("Справочники.Контрагенты");
 
         // Default should be Manager
@@ -95,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_facet_inference_from_context() {
-        let resolver = PlatformTypeResolver::new();
+        let resolver = PlatformTypesResolverV2::new() // РЕФАКТОРИНГ: Используем V2;
 
         // Test constructor pattern
         assert_eq!(

@@ -2,12 +2,16 @@
 
 use crate::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
 use crate::data::loaders::config_parser_xml::ConfigParserXml;
-use crate::data::loaders::platform_types_v2::PlatformTypesResolverV2;
+use crate::data::loaders::platform_types_repository::PlatformTypesRepository;
 use crate::domain::types::{
     Certainty, ConcreteType, FacetKind, ResolutionMetadata, ResolutionResult, ResolutionSource,
     TypeResolution,
 };
 use std::collections::HashMap;
+use std::sync::OnceLock;
+
+/// Глобальный синглтон PlatformTypeResolver
+static PLATFORM_RESOLVER: OnceLock<PlatformTypeResolver> = OnceLock::new();
 
 /// Completion item with metadata
 #[derive(Debug, Clone)]
@@ -85,17 +89,19 @@ impl From<CompletionKind> for u8 {
 }
 
 /// Resolver that knows about platform types and configuration
-pub struct PlatformTypeResolver {
-    /// Platform types resolver v2 with syntax helper data
-    platform_resolver: PlatformTypesResolverV2,
+pub(crate) struct PlatformTypeResolver {
+    /// Platform types repository with syntax helper data
+    platform_resolver: PlatformTypesRepository,
 
     /// Platform global types
     platform_globals: HashMap<String, TypeResolution>,
 
     /// Configuration types from XML parser
+    #[allow(dead_code)]
     config_parser: Option<ConfigParserXml>,
 
     /// Configuration-guided Discovery parser
+    #[allow(dead_code)]
     guided_parser: Option<ConfigurationGuidedParser>,
 
     /// Cached resolutions
@@ -103,14 +109,24 @@ pub struct PlatformTypeResolver {
 }
 
 impl Default for PlatformTypeResolver {
+    #[allow(deprecated)]
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl PlatformTypeResolver {
-    pub fn new() -> Self {
-        let mut platform_resolver = PlatformTypesResolverV2::new();
+    /// Получить глобальный экземпляр синглтона
+    pub(crate) fn instance() -> &'static PlatformTypeResolver {
+        PLATFORM_RESOLVER.get_or_init(|| {
+            println!("🔥 Инициализация PlatformTypeResolver синглтона");
+            Self::initialize()
+        })
+    }
+
+    /// Инициализация синглтона (вызывается только один раз)
+    fn initialize() -> Self {
+        let mut platform_resolver = PlatformTypesRepository::new();
 
         // Try to load syntax helper data from HTML directory
         let html_dir_path = "examples/syntax_helper/rebuilt.shcntx_ru";
@@ -172,7 +188,22 @@ impl PlatformTypeResolver {
         }
     }
 
+    /// Создать новый экземпляр (deprecated - используйте instance())
+    #[deprecated(note = "Используйте PlatformTypeResolver::instance() для получения синглтона")]
+    pub fn new() -> Self {
+        // Для обратной совместимости создаем копию синглтона
+        let instance = Self::instance();
+        Self {
+            platform_resolver: PlatformTypesRepository::new(), // Новый repository
+            platform_globals: instance.platform_globals.clone(),
+            config_parser: None,
+            guided_parser: None,
+            cache: HashMap::new(),
+        }
+    }
+
     /// Initialize with configuration
+    #[allow(deprecated, dead_code)]
     pub fn with_config(config_path: &str) -> anyhow::Result<Self> {
         let mut resolver = Self::new();
         let mut parser = ConfigParserXml::new(config_path);
@@ -197,6 +228,7 @@ impl PlatformTypeResolver {
     }
 
     /// Initialize with configuration using guided discovery
+    #[allow(deprecated, dead_code)]
     pub fn with_guided_config(config_path: &str) -> anyhow::Result<Self> {
         let mut resolver = Self::new();
         let mut guided_parser = ConfigurationGuidedParser::new(config_path);
@@ -315,22 +347,25 @@ impl PlatformTypeResolver {
     }
 
     /// Get count of loaded platform globals (for debugging)
-    pub fn get_platform_globals_count(&self) -> usize {
+    #[allow(dead_code)]
+    pub(crate) fn get_platform_globals_count(&self) -> usize {
         self.platform_globals.len()
     }
 
     /// Получить все platform globals для отображения в иерархии
-    pub fn get_platform_globals(&self) -> &HashMap<String, TypeResolution> {
+    pub(crate) fn get_platform_globals(&self) -> &HashMap<String, TypeResolution> {
         &self.platform_globals
     }
 
     /// Check if a specific global is loaded (for debugging)
-    pub fn has_platform_global(&self, key: &str) -> bool {
+    #[allow(dead_code)]
+    pub(crate) fn has_platform_global(&self, key: &str) -> bool {
         self.platform_globals.contains_key(key)
     }
 
     /// Resolve a dotted expression like "Справочники.Контрагенты"
-    pub fn resolve_expression(&mut self, expression: &str) -> TypeResolution {
+    #[allow(dead_code)]
+    pub(crate) fn resolve_expression(&mut self, expression: &str) -> TypeResolution {
         // Check cache first
         if let Some(cached) = self.cache.get(expression) {
             return cached.clone();
@@ -370,6 +405,46 @@ impl PlatformTypeResolver {
         self.cache
             .insert(expression.to_string(), resolution.clone());
         resolution
+    }
+
+    /// Immutable версия resolve_expression (без записи в кэш)
+    /// Используется для работы с синглтоном из TypeResolutionService
+    pub(crate) fn resolve_expression_immutable(&self, expression: &str) -> TypeResolution {
+        // Сначала проверяем кэш (только чтение)
+        if let Some(cached) = self.cache.get(expression) {
+            return cached.clone();
+        }
+
+        let parts: Vec<&str> = expression.split('.').collect();
+
+        match parts.as_slice() {
+            [] => self.unknown_resolution("Empty expression"),
+
+            // Single identifier - check if it's a platform global
+            [name] => self
+                .platform_globals
+                .get(*name)
+                .cloned()
+                .unwrap_or_else(|| {
+                    self.unknown_resolution(&format!("Unknown identifier: {}", name))
+                }),
+
+            // Dotted access like "Справочники.Контрагенты"
+            [base, member] => self.resolve_member_access(base, member),
+
+            // Deeper access like "Справочники.Контрагенты.НайтиПоКоду"
+            [_base, _member, _method] => {
+                // TODO: Resolve method on configuration object
+                self.unknown_resolution(&format!(
+                    "Method resolution not implemented: {}",
+                    expression
+                ))
+            }
+
+            _ => self
+                .unknown_resolution(&format!("Complex expression not supported: {}", expression)),
+        }
+        // НЕ записываем в кэш - это immutable версия
     }
 
     /// Resolve member access like "Справочники.Контрагенты"
@@ -507,6 +582,7 @@ impl PlatformTypeResolver {
     }
 
     /// Switch to a different facet for a type resolution
+    #[allow(dead_code)]
     pub fn switch_facet(
         &self,
         mut resolution: TypeResolution,
@@ -534,6 +610,7 @@ impl PlatformTypeResolver {
     }
 
     /// Determine facet from context (e.g., "НовыйЭлемент" -> Constructor facet)
+    #[allow(dead_code)]
     pub fn infer_facet_from_context(&self, expression: &str) -> Option<FacetKind> {
         // Check for constructor patterns
         if expression.contains(".СоздатьЭлемент") || expression.contains(".CreateItem")
@@ -561,7 +638,7 @@ impl PlatformTypeResolver {
     }
 
     /// Get completions for a partial expression
-    pub fn get_completions(&self, prefix: &str) -> Vec<CompletionItem> {
+    pub(crate) fn get_completions(&self, prefix: &str) -> Vec<CompletionItem> {
         let mut completions = Vec::new();
 
         // Parse the prefix to understand context

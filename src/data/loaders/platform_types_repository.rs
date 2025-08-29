@@ -1,5 +1,5 @@
-//! Platform types resolver using syntax helper data
-//!
+//! Platform types repository using syntax helper data
+//!  
 //! Uses optimized syntax helper parser to extract platform types from documentation
 
 use super::syntax_helper_parser::{
@@ -13,8 +13,8 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Enhanced platform types resolver using syntax helper data
-pub struct PlatformTypesResolverV2 {
+/// Platform types repository using syntax helper data
+pub struct PlatformTypesRepository {
     /// Парсер документации
     parser: SyntaxHelperParser,
     /// База данных типов
@@ -23,7 +23,7 @@ pub struct PlatformTypesResolverV2 {
     type_index: Option<TypeIndex>,
 }
 
-impl PlatformTypesResolverV2 {
+impl PlatformTypesRepository {
     /// Creates new resolver with default settings
     pub fn new() -> Self {
         Self {
@@ -374,9 +374,224 @@ impl PlatformTypesResolverV2 {
 
         stats
     }
+
+    /// Enhanced version: Gets platform globals with hardcoded managers
+    pub fn get_platform_globals_enhanced(&self) -> HashMap<String, TypeResolution> {
+        let mut globals = self.get_platform_globals();
+
+        // Add hardcoded platform managers if not loaded from file
+        if !globals.contains_key("Справочники") {
+            Self::add_platform_managers(&mut globals);
+        }
+
+        globals
+    }
+
+    /// Add hardcoded platform managers (moved from PlatformTypeResolver)
+    fn add_platform_managers(globals: &mut HashMap<String, TypeResolution>) {
+        // Russian names
+        globals.insert(
+            "Справочники".to_string(),
+            Self::create_manager_type("Справочники"),
+        );
+        globals.insert(
+            "Документы".to_string(),
+            Self::create_manager_type("Документы"),
+        );
+        globals.insert(
+            "Перечисления".to_string(),
+            Self::create_manager_type("Перечисления"),
+        );
+        globals.insert(
+            "РегистрыСведений".to_string(),
+            Self::create_manager_type("РегистрыСведений"),
+        );
+        globals.insert(
+            "РегистрыНакопления".to_string(),
+            Self::create_manager_type("РегистрыНакопления"),
+        );
+        globals.insert(
+            "РегистрыБухгалтерии".to_string(),
+            Self::create_manager_type("РегистрыБухгалтерии"),
+        );
+        globals.insert(
+            "РегистрыРасчета".to_string(),
+            Self::create_manager_type("РегистрыРасчета"),
+        );
+
+        // English names
+        globals.insert(
+            "Catalogs".to_string(),
+            Self::create_manager_type("Catalogs"),
+        );
+        globals.insert(
+            "Documents".to_string(),
+            Self::create_manager_type("Documents"),
+        );
+        globals.insert("Enums".to_string(), Self::create_manager_type("Enums"));
+        globals.insert(
+            "InformationRegisters".to_string(),
+            Self::create_manager_type("InformationRegisters"),
+        );
+        globals.insert(
+            "AccumulationRegisters".to_string(),
+            Self::create_manager_type("AccumulationRegisters"),
+        );
+        globals.insert(
+            "AccountingRegisters".to_string(),
+            Self::create_manager_type("AccountingRegisters"),
+        );
+        globals.insert(
+            "CalculationRegisters".to_string(),
+            Self::create_manager_type("CalculationRegisters"),
+        );
+    }
+
+    /// Create a manager type resolution (moved from PlatformTypeResolver)
+    fn create_manager_type(name: &str) -> TypeResolution {
+        TypeResolution {
+            certainty: Certainty::Known,
+            result: ResolutionResult::Concrete(ConcreteType::Platform(PlatformType {
+                name: name.to_string(),
+                methods: vec![],
+                properties: vec![],
+            })),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata {
+                file: Some("platform:managers".to_string()),
+                line: None,
+                column: None,
+                notes: vec![format!("Platform manager type: {}", name)],
+            },
+            active_facet: None,
+            available_facets: vec![],
+        }
+    }
+
+    /// Enhanced resolve method that supports expressions
+    pub fn resolve_expression(&mut self, expression: &str) -> TypeResolution {
+        // Try direct type resolution first
+        let direct_result = self.resolve(expression);
+        if !matches!(direct_result.certainty, Certainty::Unknown) {
+            return direct_result;
+        }
+
+        // Try expression parsing (simplified version from PlatformTypeResolver)
+        if let Some((base, member)) = self.parse_member_access(expression) {
+            return self.resolve_member_access(&base, &member);
+        }
+
+        // Fallback to unknown
+        TypeResolution::unknown()
+    }
+
+    /// Parse member access like "Справочники.Контрагенты"
+    fn parse_member_access(&self, expression: &str) -> Option<(String, String)> {
+        let parts: Vec<&str> = expression.split('.').collect();
+        if parts.len() == 2 {
+            Some((parts[0].to_string(), parts[1].to_string()))
+        } else {
+            None
+        }
+    }
+
+    /// Resolve member access like "Справочники.Контрагенты"  
+    fn resolve_member_access(&self, base: &str, member: &str) -> TypeResolution {
+        use crate::domain::types::{ConfigurationType, FacetKind, MetadataKind};
+
+        match base {
+            "Справочники" | "Catalogs" => {
+                let qualified_name = format!("Справочники.{}", member);
+                TypeResolution {
+                    certainty: Certainty::Inferred(0.8),
+                    result: ResolutionResult::Concrete(ConcreteType::Configuration(
+                        ConfigurationType {
+                            kind: MetadataKind::Catalog,
+                            name: member.to_string(),
+                            attributes: vec![],
+                            tabular_sections: vec![],
+                        },
+                    )),
+                    source: ResolutionSource::Inferred,
+                    metadata: ResolutionMetadata {
+                        file: Some("platform:catalogs".to_string()),
+                        line: None,
+                        column: None,
+                        notes: vec![format!("Inferred catalog type: {}", qualified_name)],
+                    },
+                    active_facet: Some(FacetKind::Manager),
+                    available_facets: vec![
+                        FacetKind::Manager,
+                        FacetKind::Object,
+                        FacetKind::Reference,
+                        FacetKind::Constructor,
+                    ],
+                }
+            }
+            "Документы" | "Documents" => {
+                let qualified_name = format!("Документы.{}", member);
+                TypeResolution {
+                    certainty: Certainty::Inferred(0.8),
+                    result: ResolutionResult::Concrete(ConcreteType::Configuration(
+                        ConfigurationType {
+                            kind: MetadataKind::Document,
+                            name: member.to_string(),
+                            attributes: vec![],
+                            tabular_sections: vec![],
+                        },
+                    )),
+                    source: ResolutionSource::Inferred,
+                    metadata: ResolutionMetadata {
+                        file: Some("platform:documents".to_string()),
+                        line: None,
+                        column: None,
+                        notes: vec![format!("Inferred document type: {}", qualified_name)],
+                    },
+                    active_facet: Some(FacetKind::Manager),
+                    available_facets: vec![
+                        FacetKind::Manager,
+                        FacetKind::Object,
+                        FacetKind::Reference,
+                        FacetKind::Constructor,
+                    ],
+                }
+            }
+            "Перечисления" | "Enums" => {
+                let qualified_name = format!("Перечисления.{}", member);
+                TypeResolution {
+                    certainty: Certainty::Inferred(0.8),
+                    result: ResolutionResult::Concrete(ConcreteType::Configuration(
+                        ConfigurationType {
+                            kind: MetadataKind::Enum,
+                            name: member.to_string(),
+                            attributes: vec![],
+                            tabular_sections: vec![],
+                        },
+                    )),
+                    source: ResolutionSource::Inferred,
+                    metadata: ResolutionMetadata {
+                        file: Some("platform:enums".to_string()),
+                        line: None,
+                        column: None,
+                        notes: vec![format!("Inferred enum type: {}", qualified_name)],
+                    },
+                    active_facet: Some(FacetKind::Manager),
+                    available_facets: vec![FacetKind::Manager, FacetKind::Reference],
+                }
+            }
+            _ => {
+                let mut resolution = TypeResolution::unknown();
+                resolution
+                    .metadata
+                    .notes
+                    .push(format!("Unknown base type: {}", base));
+                resolution
+            }
+        }
+    }
 }
 
-impl Default for PlatformTypesResolverV2 {
+impl Default for PlatformTypesRepository {
     fn default() -> Self {
         Self::new()
     }
@@ -388,14 +603,14 @@ mod tests {
 
     #[test]
     fn test_resolver_creation() {
-        let resolver = PlatformTypesResolverV2::new();
+        let resolver = PlatformTypesRepository::new();
         assert!(resolver.database.is_none());
         assert!(resolver.type_index.is_none());
     }
 
     #[test]
     fn test_standard_types() {
-        let resolver = PlatformTypesResolverV2::new();
+        let resolver = PlatformTypesRepository::new();
 
         let string_type = resolver.resolve("Строка");
         assert_eq!(string_type.certainty, Certainty::Known);
@@ -413,7 +628,41 @@ mod tests {
             ..Default::default()
         };
 
-        let resolver = PlatformTypesResolverV2::with_settings(settings);
+        let resolver = PlatformTypesRepository::with_settings(settings);
         assert!(resolver.database.is_none());
+    }
+}
+
+// РЕФАКТОРИНГ: Дополнительные методы для совместимости с UnifiedTypeSystem
+impl PlatformTypesRepository {
+    /// Получить количество платформенных глобальных типов
+    pub fn get_platform_globals_count(&self) -> usize {
+        self.get_platform_globals_enhanced().len()
+    }
+
+    /// Проверить, есть ли платформенный глобальный объект
+    pub fn has_platform_global(&self, key: &str) -> bool {
+        self.get_platform_globals_enhanced().contains_key(key)
+    }
+
+    /// Получить автодополнение для выражения (базовая реализация)
+    pub fn get_completions(
+        &self,
+        _expression: &str,
+    ) -> Vec<crate::domain::CompletionItem> {
+        // Базовая реализация - возвращаем все глобальные объекты как варианты
+        let globals = self.get_platform_globals_enhanced();
+        globals
+            .keys()
+            .map(|name| crate::domain::CompletionItem {
+                label: name.clone(),
+                kind: crate::domain::CompletionKind::Global,
+                detail: Some("Платформенный объект".to_string()),
+                documentation: None,
+                insert_text: Some(name.clone()),
+                filter_text: Some(name.clone()),
+                sort_text: Some(name.clone()),
+            })
+            .collect()
     }
 }

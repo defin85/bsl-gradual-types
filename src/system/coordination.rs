@@ -7,20 +7,20 @@ use serde::Serialize;
 use std::sync::Arc;
 
 // Импорты, необходимые для компиляции
-use crate::domain::{
-    InMemoryTypeRepository, RawTypeData, TypeContext, TypeRepository,
-    TypeResolutionService, ConcreteType,
-};
-use crate::data::TypeSource;
-use crate::domain::types::{TypeResolution, ResolutionResult};
 use crate::application::lsp_service::LspTypeService;
 use crate::application::services::AnalysisTypeService;
 use crate::application::web_service::WebTypeService;
+use crate::data::TypeSource;
+use crate::domain::types::{ResolutionResult, TypeResolution};
+use crate::domain::{
+    ConcreteType, InMemoryTypeRepository, RawTypeData, TypeContext, TypeRepository,
+    TypeResolutionService,
+};
 use crate::presentation::adapters::{CliInterface, LspInterface, WebInterface};
 
 // Остальные импорты временно удалены
-use anyhow::Result;
 use crate::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
+use anyhow::Result;
 use tracing::{info, warn};
 
 /// Центральная система типов BSL
@@ -167,6 +167,29 @@ pub struct ComponentHealth {
     pub last_error: Option<String>,
 }
 
+/// Структура для статистики типов (для совместимости)
+#[derive(Debug, Clone)]
+pub struct TypeStatistics {
+    pub total_types: usize,
+    pub platform_types: usize,
+    pub user_defined_types: usize,
+    pub composite_types: usize,
+    pub union_types: usize,
+    pub cache_hit_rate: f32,
+    pub average_query_time: f64,
+}
+
+/// Структура для информации о типе (для совместимости)
+#[derive(Debug, Clone)]
+pub struct TypeInfo {
+    pub name: String,
+    pub category: String,
+    pub description: Option<String>,
+    pub methods: Vec<String>,
+    pub properties: Vec<String>,
+    pub constructors: Vec<String>,
+}
+
 impl CentralTypeSystem {
     /// Создать новую центральную систему типов
     pub fn new(config: CentralSystemConfig) -> Self {
@@ -178,7 +201,7 @@ impl CentralTypeSystem {
 
         // Создаём Application Layer
         let lsp_service = Arc::new(LspTypeService::new());
-        let web_service = Arc::new(WebTypeService::new());
+        let web_service = Arc::new(WebTypeService::new(resolution_service.clone()));
         let analysis_service = Arc::new(AnalysisTypeService::new());
 
         // Создаём Presentation Layer
@@ -297,6 +320,21 @@ impl CentralTypeSystem {
         &self.web_interface
     }
 
+    /// Получить иерархию типов с использованием данных системы
+    pub async fn get_type_hierarchy(&self) -> Result<crate::application::services::TypeHierarchy> {
+        let all_types = self.get_all_types_with_resolutions().await;
+
+        // Используем напрямую WebTypeService, минуя WebInterface
+        // WebInterface предназначен для HTTP API и урезает данные
+        let hierarchy = self
+            .web_interface
+            .get_web_service()
+            .build_type_hierarchy_with_types(&all_types)
+            .await?;
+
+        Ok(hierarchy)
+    }
+
     /// Получить CLI интерфейс
     pub fn cli_interface(&self) -> &CliInterface {
         &self.cli_interface
@@ -370,6 +408,104 @@ impl CentralTypeSystem {
         Ok(())
     }
 
+    /// Получить статистику типов (для совместимости с TypeSystemService)
+    pub async fn get_type_statistics(&self) -> Result<TypeStatistics> {
+        let metrics = self.get_system_metrics().await;
+
+        Ok(TypeStatistics {
+            total_types: metrics.total_types,
+            platform_types: metrics.platform_types,
+            user_defined_types: metrics.user_defined_types,
+            composite_types: 0, // TODO: добавить в SystemMetrics когда будет реализовано
+            union_types: 0,     // TODO: добавить в SystemMetrics когда будет реализовано
+            cache_hit_rate: metrics.cache_hit_rate as f32,
+            average_query_time: metrics.average_lsp_response_ms,
+        })
+    }
+
+    /// Получить детальную информацию о типе
+    pub async fn get_type_info(&self, type_name: &str) -> Option<TypeInfo> {
+        // ✅ ИСПОЛЬЗУЕМ собственный resolution_service вместо прямого обращения к синглтону
+        self.resolution_service.get_type_info(type_name)
+    }
+
+    /// Поиск типов по запросу
+    pub async fn search_types(&self, query: &str) -> Vec<String> {
+        // ✅ ИСПОЛЬЗУЕМ собственный resolution_service вместо прямого обращения к синглтону
+        self.resolution_service.search_types(query)
+    }
+
+    /// Получить все доступные типы
+    /// Получить все типы с их разрешениями через resolution_service
+    pub async fn get_all_types_with_resolutions(
+        &self,
+    ) -> std::collections::HashMap<String, TypeResolution> {
+        // ✅ ИСПОЛЬЗУЕМ собственный resolution_service вместо прямого обращения к синглтону
+        self.resolution_service.get_all_platform_globals().clone()
+    }
+
+    pub async fn get_all_types(&self) -> Vec<String> {
+        let types_map = self.get_all_types_with_resolutions().await;
+        types_map.keys().cloned().collect()
+    }
+
+    /// Разрешить выражение в тип (для LSP)
+    pub async fn resolve_expression(&self, expression: &str) -> TypeResolution {
+        // ✅ ИСПОЛЬЗУЕМ собственный resolution_service вместо создания нового экземпляра
+        self.resolution_service
+            .resolve_expression_async(expression)
+            .await
+    }
+
+    /// Получить тип переменной в контексте (для LSP)
+    pub async fn get_variable_type(&self, variable_name: &str, _context: &str) -> TypeResolution {
+        // Пока просто резолвим имя переменной как выражение
+        // TODO: Добавить полноценную поддержку контекста
+        // ✅ ИСПОЛЬЗУЕМ собственный resolution_service вместо создания нового экземпляра
+        self.resolution_service
+            .resolve_expression_async(variable_name)
+            .await
+    }
+
+    /// Проверить совместимость типов (для LSP)
+    pub async fn check_assignment_compatibility(
+        &self,
+        from_type: &TypeResolution,
+        to_type: &TypeResolution,
+    ) -> bool {
+        // Простая проверка совместимости на основе результата разрешения типов
+        // TODO: Расширить логику проверки совместимости
+        match (&from_type.result, &to_type.result) {
+            // Точное совпадение типов
+            (result1, result2) if result1 == result2 => true,
+            // Union типы - проверяем пересечение
+            (
+                crate::domain::types::ResolutionResult::Union(types1),
+                crate::domain::types::ResolutionResult::Union(types2),
+            ) => types1
+                .iter()
+                .any(|t1| types2.iter().any(|t2| t1.type_ == t2.type_)),
+            // Один из типов Union - проверяем включение
+            (
+                crate::domain::types::ResolutionResult::Concrete(concrete),
+                crate::domain::types::ResolutionResult::Union(union),
+            )
+            | (
+                crate::domain::types::ResolutionResult::Union(union),
+                crate::domain::types::ResolutionResult::Concrete(concrete),
+            ) => union.iter().any(|t| &t.type_ == concrete),
+            // В остальных случаях не совместимы
+            _ => false,
+        }
+    }
+
+    /// Обновить конфигурацию и перезагрузить данные
+    pub async fn update_config(&self, _config: &str) -> Result<()> {
+        // В текущей версии конфигурация задается при создании CentralTypeSystem
+        // Этот метод просто перезагружает данные
+        self.reload_data().await
+    }
+
     // === ПРИВАТНЫЕ МЕТОДЫ ИНИЦИАЛИЗАЦИИ ===
 
     async fn initialize_data_layer(&self) -> Result<()> {
@@ -431,9 +567,8 @@ impl CentralTypeSystem {
     async fn load_platform_types(&self) -> Result<Vec<RawTypeData>> {
         info!("📄 Загрузка платформенных типов из HTML...");
 
-        // Используем существующий PlatformTypeResolver для загрузки данных
-        let platform_resolver = crate::domain::resolvers::platform::PlatformTypeResolver::new();
-        let platform_globals = platform_resolver.get_platform_globals();
+        // ✅ ИСПОЛЬЗУЕМ собственный resolution_service вместо прямого обращения к синглтону
+        let platform_globals = self.resolution_service.get_all_platform_globals();
 
         // Конвертируем TypeResolution в RawTypeData
         let mut raw_types = Vec::new();
@@ -465,7 +600,9 @@ impl CentralTypeSystem {
 
     /// Получить правильное имя конфигурационного типа с учетом фасета
     fn get_configuration_type_name(&self, resolution: &TypeResolution) -> String {
-        if let ResolutionResult::Concrete(ConcreteType::Configuration(config_type)) = &resolution.result {
+        if let ResolutionResult::Concrete(ConcreteType::Configuration(config_type)) =
+            &resolution.result
+        {
             let prefix = match config_type.kind {
                 crate::domain::types::MetadataKind::Catalog => "Справочники",
                 crate::domain::types::MetadataKind::Document => "Документы",
@@ -474,9 +611,11 @@ impl CentralTypeSystem {
                 crate::domain::types::MetadataKind::Report => "Отчеты",
                 crate::domain::types::MetadataKind::DataProcessor => "Обработки",
                 crate::domain::types::MetadataKind::ChartOfAccounts => "ПланыСчетов",
-                crate::domain::types::MetadataKind::ChartOfCharacteristicTypes => "ПланыВидовХарактеристик",
+                crate::domain::types::MetadataKind::ChartOfCharacteristicTypes => {
+                    "ПланыВидовХарактеристик"
+                }
             };
-            
+
             // Формируем имя с учетом фасета
             match resolution.active_facet {
                 Some(crate::domain::types::FacetKind::Manager) => {
@@ -551,7 +690,15 @@ impl CentralTypeSystem {
 
                     crate::data::RawMethodData {
                         name: method.name.clone(),
-                        signature: format!("{}({})", method.name, params.iter().map(|p| format!("{}: {}", p.name, p.type_name)).collect::<Vec<_>>().join(", ")),
+                        signature: format!(
+                            "{}({})",
+                            method.name,
+                            params
+                                .iter()
+                                .map(|p| format!("{}: {}", p.name, p.type_name))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
                         documentation: None,
                         return_type: method.return_type.clone(),
                         parameters: params,
@@ -572,29 +719,47 @@ impl CentralTypeSystem {
         }
 
         // Определяем категорию на основе типа
-        let category_path = if let ResolutionResult::Concrete(ConcreteType::Configuration(config_type)) = &resolution.result {
-            match config_type.kind {
-                crate::domain::types::MetadataKind::Catalog => vec!["Конфигурация".to_string(), "Справочники".to_string()],
-                crate::domain::types::MetadataKind::Document => vec!["Конфигурация".to_string(), "Документы".to_string()],
-                crate::domain::types::MetadataKind::Register => vec!["Конфигурация".to_string(), "Регистры сведений".to_string()],
-                crate::domain::types::MetadataKind::Enum => vec!["Конфигурация".to_string(), "Перечисления".to_string()],
-                _ => vec!["Конфигурация".to_string()],
-            }
-        } else {
-            vec!["Платформа".to_string()]
-        };
+        let category_path =
+            if let ResolutionResult::Concrete(ConcreteType::Configuration(config_type)) =
+                &resolution.result
+            {
+                match config_type.kind {
+                    crate::domain::types::MetadataKind::Catalog => {
+                        vec!["Конфигурация".to_string(), "Справочники".to_string()]
+                    }
+                    crate::domain::types::MetadataKind::Document => {
+                        vec!["Конфигурация".to_string(), "Документы".to_string()]
+                    }
+                    crate::domain::types::MetadataKind::Register => {
+                        vec!["Конфигурация".to_string(), "Регистры сведений".to_string()]
+                    }
+                    crate::domain::types::MetadataKind::Enum => {
+                        vec!["Конфигурация".to_string(), "Перечисления".to_string()]
+                    }
+                    _ => vec!["Конфигурация".to_string()],
+                }
+            } else {
+                vec!["Платформа".to_string()]
+            };
 
-        let documentation = if let ResolutionResult::Concrete(ConcreteType::Configuration(config_type)) = &resolution.result {
-            format!("Конфигурационный тип: {} ({})", name, match config_type.kind {
-                crate::domain::types::MetadataKind::Catalog => "Справочник",
-                crate::domain::types::MetadataKind::Document => "Документ",
-                crate::domain::types::MetadataKind::Register => "Регистр сведений",
-                crate::domain::types::MetadataKind::Enum => "Перечисление",
-                _ => "Объект метаданных",
-            })
-        } else {
-            format!("Платформенный тип: {}", name)
-        };
+        let documentation =
+            if let ResolutionResult::Concrete(ConcreteType::Configuration(config_type)) =
+                &resolution.result
+            {
+                format!(
+                    "Конфигурационный тип: {} ({})",
+                    name,
+                    match config_type.kind {
+                        crate::domain::types::MetadataKind::Catalog => "Справочник",
+                        crate::domain::types::MetadataKind::Document => "Документ",
+                        crate::domain::types::MetadataKind::Register => "Регистр сведений",
+                        crate::domain::types::MetadataKind::Enum => "Перечисление",
+                        _ => "Объект метаданных",
+                    }
+                )
+            } else {
+                format!("Платформенный тип: {}", name)
+            };
 
         Ok(RawTypeData {
             name: name.to_string(),

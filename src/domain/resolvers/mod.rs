@@ -1,6 +1,6 @@
 //! Resolvers for different type sources
 
-pub mod platform;
+pub(crate) mod platform;
 
-// Re-export for convenience
-pub use platform::PlatformTypeResolver;
+// CompletionItem и CompletionKind нужно экспортировать для TypeResolutionService
+pub use platform::{CompletionItem, CompletionKind};

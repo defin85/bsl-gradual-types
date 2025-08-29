@@ -16,7 +16,7 @@ struct Args {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Только парсер (без интеграции с PlatformTypeResolver)
+    /// Только парсер (без интеграции с TypeResolutionService)
     #[arg(long)]
     parser_only: bool,
 
@@ -100,7 +100,7 @@ fn test_parser_only(args: &Args) -> Result<()> {
 }
 
 fn test_with_integration(args: &Args) -> Result<()> {
-    println!("\n=== 🔗 Тест с интеграцией в PlatformTypeResolver ===");
+    println!("\n=== 🔗 Тест с интеграцией в TypeResolutionService ===");
 
     let start_time = std::time::Instant::now();
     // РЕФАКТОРИНГ: Создаем guided parser напрямую (старый resolver удален)
@@ -114,7 +114,7 @@ fn test_with_integration(args: &Args) -> Result<()> {
     let elapsed = start_time.elapsed();
 
     println!(
-        "✅ PlatformTypeResolver с guided discovery создан за {:?}",
+        "✅ TypeResolutionService с guided discovery создан за {:?}",
         elapsed
     );
     println!(

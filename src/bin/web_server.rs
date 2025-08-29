@@ -175,6 +175,32 @@ async fn main() -> Result<()> {
             }),
     );
 
+    // Отладочная информация о загруженных типах
+    let all_types = central.get_all_types_with_resolutions().await;
+    println!(
+        "📊 Загружено типов в CentralTypeSystem: {}",
+        all_types.len()
+    );
+
+    // Показать несколько примеров типов
+    let mut type_samples: Vec<String> = all_types.keys().take(10).cloned().collect();
+    type_samples.sort();
+    println!("🔍 Примеры типов: {}", type_samples.join(", "));
+
+    // Проверяем, работает ли иерархия
+    match central.get_type_hierarchy().await {
+        Ok(hierarchy) => {
+            println!(
+                "🌳 Иерархия работает: {} категорий, {} типов",
+                hierarchy.categories.len(),
+                hierarchy.total_types
+            );
+        }
+        Err(e) => {
+            println!("❌ Иерархия не работает: {}", e);
+        }
+    }
+
     let app_state = AppState {
         type_context: Arc::new(RwLock::new(None)),
         search_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -761,41 +787,101 @@ async fn handle_health(state: AppState) -> Result<impl warp::Reply, warp::Reject
 }
 
 /// Обработчик списка категорий
-async fn handle_get_categories(_state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
-    // Пока простая реализация - возвращаем фиксированный список
-    let categories = vec![
-        CategoryInfo {
-            name: "Универсальные коллекции".to_string(),
-            path: "Global context/Universal collections".to_string(),
-            types_count: 15,
-            subcategories: 0,
-        },
-        CategoryInfo {
-            name: "Справочники".to_string(),
-            path: "Catalogs".to_string(),
-            types_count: 8,
-            subcategories: 2,
-        },
-        CategoryInfo {
-            name: "Документы".to_string(),
-            path: "Documents".to_string(),
-            types_count: 6,
-            subcategories: 1,
-        },
-        CategoryInfo {
-            name: "Перечисления".to_string(),
-            path: "Enums".to_string(),
-            types_count: 4,
-            subcategories: 0,
-        },
-    ];
+async fn handle_get_categories(state: AppState) -> Result<impl warp::Reply, warp::Rejection> {
+    // Получаем реальные данные из CentralTypeSystem
+    match state.central.get_type_hierarchy().await {
+        Ok(hierarchy) => {
+            let categories: Vec<CategoryInfo> = hierarchy
+                .categories
+                .iter()
+                .map(|cat| CategoryInfo {
+                    name: cat.name.clone(),
+                    path: format!("categories/{}", cat.id),
+                    types_count: cat.types.len(),
+                    subcategories: cat.subcategories.len(),
+                })
+                .collect();
 
-    let response = CategoriesResponse {
-        total_count: categories.len(),
-        categories,
-    };
+            let response = CategoriesResponse {
+                total_count: categories.len(),
+                categories,
+            };
 
-    Ok(warp::reply::json(&response))
+            Ok(warp::reply::json(&response))
+        }
+        Err(e) => {
+            eprintln!("Ошибка получения категорий: {}", e);
+
+            // Fallback на простую реализацию при ошибке
+            let categories = vec![
+                CategoryInfo {
+                    name: "Универсальные коллекции".to_string(),
+                    path: "Global context/Universal collections".to_string(),
+                    types_count: 15,
+                    subcategories: 0,
+                },
+                CategoryInfo {
+                    name: "Справочники".to_string(),
+                    path: "Catalogs".to_string(),
+                    types_count: 8,
+                    subcategories: 2,
+                },
+                CategoryInfo {
+                    name: "Документы".to_string(),
+                    path: "Documents".to_string(),
+                    types_count: 6,
+                    subcategories: 1,
+                },
+                CategoryInfo {
+                    name: "Перечисления".to_string(),
+                    path: "Enums".to_string(),
+                    types_count: 4,
+                    subcategories: 0,
+                },
+            ];
+
+            let response = CategoriesResponse {
+                total_count: categories.len(),
+                categories,
+            };
+
+            Ok(warp::reply::json(&response))
+        }
+    }
+}
+
+// ============================================================================
+// Вспомогательные функции для иерархии
+// ============================================================================
+
+/// Рекурсивная отладочная печать иерархии
+fn print_hierarchy_debug(
+    categories: &[bsl_gradual_types::application::services::TypeCategory],
+    level: usize,
+) {
+    for cat in categories {
+        let indent = "  ".repeat(level);
+        println!("{}📁 {}: {} типов", indent, cat.name, cat.types.len());
+        if !cat.subcategories.is_empty() {
+            print_hierarchy_debug(&cat.subcategories, level + 1);
+        }
+    }
+}
+
+/// Конвертация категории в JSON с поддержкой подкатегорий
+fn convert_category_to_json(
+    cat: &bsl_gradual_types::application::services::TypeCategory,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": cat.id,
+        "name": cat.name,
+        "description": cat.description,
+        "types_count": cat.types.len(),
+        "subcategories_count": cat.subcategories.len(),
+        "url": format!("/categories/{}", urlencoding::encode(&cat.id)),
+        "types": cat.types,
+        "subcategories": cat.subcategories.iter().map(convert_category_to_json).collect::<Vec<_>>()
+    })
 }
 
 /// Обработчик иерархии типов
@@ -803,16 +889,18 @@ async fn handle_get_hierarchy(state: AppState) -> Result<impl warp::Reply, warp:
     // Используем данные из CentralTypeSystem напрямую
     match state.central.get_type_hierarchy().await {
         Ok(hierarchy) => {
-            // Конвертируем в веб-формат
+            println!(
+                "🌳 Иерархия загружена: {} категорий, {} типов",
+                hierarchy.categories.len(),
+                hierarchy.total_types
+            );
+
+            // Выводим детали по категориям для отладки (рекурсивно)
+            print_hierarchy_debug(&hierarchy.categories, 0);
+
+            // Конвертируем в веб-формат (с поддержкой подкатегорий)
             let response = serde_json::json!({
-                "categories": hierarchy.categories.iter().map(|cat| serde_json::json!({
-                    "id": cat.id,
-                    "name": cat.name,
-                    "description": cat.description,
-                    "types_count": cat.types.len(),
-                    "subcategories_count": cat.subcategories.len(),
-                    "url": format!("/categories/{}", urlencoding::encode(&cat.id))
-                })).collect::<Vec<_>>(),
+                "categories": hierarchy.categories.iter().map(|cat| convert_category_to_json(cat)).collect::<Vec<_>>(),
                 "total_types": hierarchy.total_types,
                 "statistics": {
                     "total_categories": hierarchy.statistics.total_categories,
@@ -824,7 +912,7 @@ async fn handle_get_hierarchy(state: AppState) -> Result<impl warp::Reply, warp:
             Ok(warp::reply::json(&response))
         }
         Err(e) => {
-            eprintln!("Ошибка получения иерархии: {}", e);
+            eprintln!("❌ Ошибка получения иерархии: {}", e);
 
             // Возвращаем базовую структуру
             let response = serde_json::json!({
@@ -849,6 +937,7 @@ async fn handle_index() -> Result<impl warp::Reply, warp::Rejection> {
 }
 
 /// Генерация HTML главной страницы
+#[allow(dead_code)]
 fn generate_index_html() -> String {
     r#"
 <!DOCTYPE html>

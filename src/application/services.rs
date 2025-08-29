@@ -187,7 +187,7 @@ pub struct TypeHierarchyStatistics {
 }
 
 /// Категория типов
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TypeCategory {
     pub id: String,
     pub name: String,

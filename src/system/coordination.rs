@@ -436,12 +436,121 @@ impl CentralTypeSystem {
     }
 
     /// Получить все доступные типы
-    /// Получить все типы с их разрешениями через resolution_service
+    /// Получить все типы с их разрешениями из репозитория
     pub async fn get_all_types_with_resolutions(
         &self,
     ) -> std::collections::HashMap<String, TypeResolution> {
-        // ✅ ИСПОЛЬЗУЕМ собственный resolution_service вместо прямого обращения к синглтону
-        self.resolution_service.get_all_platform_globals().clone()
+        // ✅ ИСПОЛЬЗУЕМ репозиторий как единственный источник истины
+        // Получаем все типы (платформенные + конфигурационные) из repository
+        let all_raw_types = self.repository.get_all_types();
+
+        // Конвертируем RawTypeData в TypeResolution
+        let mut result = std::collections::HashMap::new();
+        for raw_type in all_raw_types {
+            let resolution = self.convert_raw_data_to_resolution(&raw_type);
+            result.insert(raw_type.name.clone(), resolution);
+        }
+
+        result
+    }
+
+    /// Конвертировать RawTypeData в TypeResolution
+    fn convert_raw_data_to_resolution(&self, raw_type: &RawTypeData) -> TypeResolution {
+        use crate::domain::types::{
+            Certainty, ConcreteType, ResolutionMetadata, ResolutionResult, ResolutionSource,
+        };
+
+        let concrete_type = match &raw_type.source {
+            crate::data::TypeSource::Platform { .. } => {
+                // Конвертируем в PlatformType
+                let methods = raw_type
+                    .methods
+                    .iter()
+                    .map(|method| crate::domain::types::Method {
+                        name: method.name.clone(),
+                        parameters: method
+                            .parameters
+                            .iter()
+                            .map(|param| crate::domain::types::Parameter {
+                                name: param.name.clone(),
+                                type_: Some(param.type_name.clone()),
+                                optional: param.is_optional,
+                                by_value: param.is_by_value,
+                            })
+                            .collect(),
+                        return_type: method.return_type.clone(),
+                        is_function: method.return_type.is_some(),
+                    })
+                    .collect();
+
+                let properties = raw_type
+                    .properties
+                    .iter()
+                    .map(|prop| crate::domain::types::Property {
+                        name: prop.name.clone(),
+                        type_: prop.type_name.clone(),
+                        readonly: prop.is_read_only,
+                    })
+                    .collect();
+
+                ConcreteType::Platform(crate::domain::types::PlatformType {
+                    name: raw_type.name.clone(),
+                    methods,
+                    properties,
+                })
+            }
+            crate::data::TypeSource::Configuration { .. } => {
+                // Определяем тип метаданных по пути категорий
+                let metadata_kind = if raw_type.category_path.contains(&"Справочники".to_string())
+                {
+                    crate::domain::types::MetadataKind::Catalog
+                } else if raw_type.category_path.contains(&"Документы".to_string()) {
+                    crate::domain::types::MetadataKind::Document
+                } else if raw_type
+                    .category_path
+                    .contains(&"Регистры сведений".to_string())
+                {
+                    crate::domain::types::MetadataKind::Register
+                } else if raw_type.category_path.contains(&"Перечисления".to_string()) {
+                    crate::domain::types::MetadataKind::Enum
+                } else {
+                    crate::domain::types::MetadataKind::Catalog // По умолчанию
+                };
+
+                ConcreteType::Configuration(crate::domain::types::ConfigurationType {
+                    kind: metadata_kind,
+                    name: raw_type.name.clone(),
+                    attributes: vec![], // TODO: парсить из RawTypeData когда будет готово
+                    tabular_sections: vec![], // TODO: парсить из RawTypeData когда будет готово
+                })
+            }
+            _ => {
+                // По умолчанию считаем платформенным типом
+                ConcreteType::Platform(crate::domain::types::PlatformType {
+                    name: raw_type.name.clone(),
+                    methods: vec![],
+                    properties: vec![],
+                })
+            }
+        };
+
+        TypeResolution {
+            certainty: Certainty::Known,
+            result: ResolutionResult::Concrete(concrete_type),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata {
+                file: raw_type.source_location.clone(),
+                line: None,
+                column: None,
+                notes: raw_type
+                    .documentation
+                    .as_ref()
+                    .map(|doc| vec![doc.clone()])
+                    .unwrap_or_default(),
+            },
+            active_facet: None,
+            available_facets: vec![],
+        }
     }
 
     pub async fn get_all_types(&self) -> Vec<String> {
@@ -573,7 +682,7 @@ impl CentralTypeSystem {
         // Конвертируем TypeResolution в RawTypeData
         let mut raw_types = Vec::new();
         for (name, resolution) in platform_globals {
-            let raw_type = self.convert_resolution_to_raw_data(name.to_string(), resolution)?;
+            let raw_type = self.convert_resolution_to_raw_data(name.to_string(), &resolution)?;
             raw_types.push(raw_type);
         }
 

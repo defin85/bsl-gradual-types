@@ -1,4 +1,4 @@
-//! Unit-тесты интеграции ConfigurationGuidedParser с PlatformTypeResolver
+//! Unit-тесты интеграции ConfigurationGuidedParser с TypeResolutionService
 
 #[cfg(test)]
 mod tests {

@@ -1,7 +1,7 @@
 //! Центральный сервис типов BSL - единая точка ответственности
 //!
 //! TypeSystemService объединяет:
-//! - Platform types (PlatformTypeResolver)  
+//! - Platform types (через TypeRepository) ✅  
 //! - Documentation system (PlatformDocumentationProvider)
 //! - Search engine (DocumentationSearchEngine)
 //! - Configuration parsing (ConfigurationGuidedParser)
@@ -12,7 +12,7 @@ use tokio::sync::RwLock;
 
 use super::types::TypeResolution;
 use crate::domain::analysis::type_checker::TypeContext;
-use crate::domain::resolvers::platform::CompletionItem;
+use crate::domain::repository::CompletionItem;
 use crate::domain::search::{AdvancedSearchQuery, SearchResults, TypeHierarchy};
 use crate::system::coordination::CentralTypeSystem;
 // TODO: Implement TypeHierarchy in documentation_service
@@ -273,10 +273,7 @@ impl TypeSystemService {
         type_names
             .into_iter()
             .map(|name| {
-                CompletionItem::new(
-                    name,
-                    crate::domain::resolvers::platform::CompletionKind::Global,
-                )
+                CompletionItem::new(name, crate::domain::repository::CompletionKind::Global)
             })
             .collect()
     }

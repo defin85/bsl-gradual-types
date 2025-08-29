@@ -182,7 +182,7 @@ pub struct EnhancedTypeAnalyzer {
     parsing_manager: IncrementalParsingManager,
     /// Кеш результатов анализа для быстрого доступа
     analysis_cache: HashMap<String, (TypeContext, Vec<TypeDiagnostic>)>,
-    /// ✅ Сервис разрешения типов (заменяет прямое обращение к PlatformTypeResolver)
+    /// ✅ Сервис разрешения типов
     type_resolution_service: std::sync::Arc<crate::domain::repository::TypeResolutionService>,
 }
 

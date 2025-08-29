@@ -8,7 +8,7 @@ async fn test_type_resolution_service_methods() {
         Arc::new(InMemoryTypeRepository::new());
     let resolution_service = Arc::new(TypeResolutionService::new(repository));
 
-    // Инициализируем сервис (загружает PlatformTypeResolver)
+    // Инициализируем сервис с repository pattern ✅
     resolution_service
         .initialize()
         .await

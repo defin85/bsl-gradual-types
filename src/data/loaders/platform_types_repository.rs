@@ -387,7 +387,7 @@ impl PlatformTypesRepository {
         globals
     }
 
-    /// Add hardcoded platform managers (moved from PlatformTypeResolver)
+    /// Add hardcoded platform managers
     fn add_platform_managers(globals: &mut HashMap<String, TypeResolution>) {
         // Russian names
         globals.insert(
@@ -447,7 +447,7 @@ impl PlatformTypesRepository {
         );
     }
 
-    /// Create a manager type resolution (moved from PlatformTypeResolver)
+    /// Create a manager type resolution
     fn create_manager_type(name: &str) -> TypeResolution {
         TypeResolution {
             certainty: Certainty::Known,
@@ -476,7 +476,7 @@ impl PlatformTypesRepository {
             return direct_result;
         }
 
-        // Try expression parsing (simplified version from PlatformTypeResolver)
+        // Try expression parsing (simplified version)
         if let Some((base, member)) = self.parse_member_access(expression) {
             return self.resolve_member_access(&base, &member);
         }
@@ -646,10 +646,7 @@ impl PlatformTypesRepository {
     }
 
     /// Получить автодополнение для выражения (базовая реализация)
-    pub fn get_completions(
-        &self,
-        _expression: &str,
-    ) -> Vec<crate::domain::CompletionItem> {
+    pub fn get_completions(&self, _expression: &str) -> Vec<crate::domain::CompletionItem> {
         // Базовая реализация - возвращаем все глобальные объекты как варианты
         let globals = self.get_platform_globals_enhanced();
         globals
@@ -664,5 +661,10 @@ impl PlatformTypesRepository {
                 sort_text: Some(name.clone()),
             })
             .collect()
+    }
+
+    /// Получить базу данных синтакс-помощника для построения иерархий
+    pub fn get_syntax_helper_database(&self) -> Option<&SyntaxHelperDatabase> {
+        self.database.as_ref()
     }
 }

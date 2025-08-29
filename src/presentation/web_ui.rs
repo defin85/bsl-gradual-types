@@ -123,6 +123,57 @@ pub fn generate_enhanced_index_html() -> String {
         .category-types.expanded {
             display: block;
         }
+
+        /* Стили для корневых категорий */
+        .tree-root-category {
+            margin-bottom: 8px;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            background: #0d1117;
+        }
+
+        .tree-root-category .category-header {
+            background: #161b22;
+            border-radius: 8px 8px 0 0;
+            font-weight: 600;
+            font-size: 1.1em;
+            padding: 12px 20px;
+            border-bottom: 1px solid #30363d;
+        }
+
+        .tree-root-category .category-header:hover {
+            background: #21262d;
+        }
+
+        .tree-root-category .category-header.expanded {
+            border-bottom: 1px solid #30363d;
+        }
+
+        .root-category-icon {
+            margin-right: 10px;
+            font-size: 16px;
+            transition: transform 0.2s;
+        }
+
+        .tree-root-category .category-header.expanded .root-category-icon {
+            transform: rotate(90deg);
+        }
+
+        .tree-root-category .category-count {
+            background: #58a6ff;
+            color: white;
+            font-weight: 600;
+            padding: 4px 12px;
+            border-radius: 12px;
+        }
+
+        .tree-root-category .category-types {
+            margin-left: 0;
+            border-left: none;
+            padding: 8px;
+            background: #0d1117;
+            border-radius: 0 0 8px 8px;
+        }
         
         .type-item {
             display: flex;
@@ -526,6 +577,7 @@ pub fn generate_enhanced_index_html() -> String {
         let currentTypes = [];
         let currentCategory = null;
         let currentType = null;
+        let hierarchyData = null; // Кеш для данных иерархии
         
         // Категории типов BSL (базовая структура)
         const typeCategories = {
@@ -609,23 +661,222 @@ pub fn generate_enhanced_index_html() -> String {
             const treeContainer = document.getElementById('typeTree');
             
             try {
-                // Пытаемся получить категории из API
-                let categories;
-                try {
-                    const response = await fetch('/api/v1/categories');
-                    categories = await response.json();
-                } catch {
-                    // Используем статические данные
-                    categories = { categories: [] };
-                }
+                // Получаем иерархию из API
+                const response = await fetch('/api/v1/hierarchy');
+                const data = await response.json();
+                hierarchyData = data; // Сохраняем глобально для использования
                 
-                // Строим дерево
-                const treeHTML = buildTypeTree(typeCategories);
-                treeContainer.innerHTML = treeHTML;
+                if (data.categories && data.categories.length > 0) {
+                    // Строим дерево из реальных данных
+                    const treeHTML = buildRealTypeTree(data.categories);
+                    treeContainer.innerHTML = treeHTML;
+                    
+                    console.log(`🌳 Загружено ${data.categories.length} категорий, ${data.total_types} типов`);
+                    
+                    // Выводим статистику по категориям для отладки
+                    for (const cat of data.categories) {
+                        console.log(`  📁 ${cat.name}: ${cat.types_count} типов`);
+                    }
+                } else {
+                    // Fallback на статические данные
+                    console.warn('⚠️ Нет данных от API, используем fallback');
+                    const treeHTML = buildTypeTree(typeCategories);
+                    treeContainer.innerHTML = treeHTML;
+                }
                 
             } catch (error) {
                 console.error('Ошибка загрузки дерева типов:', error);
-                treeContainer.innerHTML = '<div class="error">❌ Ошибка загрузки типов</div>';
+                // Fallback на статические данные при ошибке
+                const treeHTML = buildTypeTree(typeCategories);
+                treeContainer.innerHTML = treeHTML;
+            }
+        }
+        
+        // Построение дерева из реальных данных API
+        function buildRealTypeTree(categories) {
+            return buildCategoryTree(categories, 0);
+        }
+
+        // Рекурсивная функция для построения дерева категорий
+        function buildCategoryTree(categories, level = 0) {
+            let html = '';
+            
+            for (const category of categories) {
+                // Специальная обработка для корневых категорий (Платформенные/Конфигурационные типы)
+                const isRootCategory = level === 0 && (category.id === 'platform_types' || category.id === 'configuration_types');
+                const categoryClass = isRootCategory ? 'tree-root-category' : 'tree-category';
+                const iconClass = isRootCategory ? 'root-category-icon' : 'category-icon';
+                const marginLeft = level > 0 ? `style="margin-left: ${level * 20}px;"` : '';
+                
+                html += `
+                    <div class="${categoryClass}" ${marginLeft}>
+                        <div class="category-header" onclick="toggleRealCategory('${category.id}')">
+                            <span class="${iconClass}">▶</span>
+                            <span class="category-name">${getCategoryIcon(category.name, isRootCategory)} ${category.name}</span>
+                            <span class="category-count">${category.types ? category.types.length : 0}</span>
+                        </div>
+                        <div class="category-types" id="real-category-${category.id}">`;
+                
+                // Если есть подкатегории, рекурсивно добавляем их
+                if (category.subcategories && category.subcategories.length > 0) {
+                    html += buildCategoryTree(category.subcategories, level + 1);
+                } else {
+                    html += `<!-- Типы будут загружены при раскрытии -->`;
+                }
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            }
+            
+            return html;
+        }
+        
+        // Получить иконку для категории
+        function getCategoryIcon(categoryName, isRoot = false) {
+            if (isRoot) {
+                if (categoryName.includes('Платформенные')) return '🏗️';
+                if (categoryName.includes('Конфигурационные')) return '⚙️';
+                return '📦';
+            }
+            
+            if (categoryName.includes('коллекции') || categoryName.includes('Collections')) return '📦';
+            if (categoryName.includes('Файлы') || categoryName.includes('Files')) return '📁';
+            if (categoryName.includes('Интернет') || categoryName.includes('Internet')) return '🌐';
+            if (categoryName.includes('XML') || categoryName.includes('JSON')) return '📄';
+            if (categoryName.includes('Базовые') || categoryName.includes('Basic')) return '🔤';
+            if (categoryName.includes('Системные') || categoryName.includes('System')) return '⚙️';
+            if (categoryName.includes('Справочники') || categoryName.includes('Catalogs')) return '📇';
+            if (categoryName.includes('Документы') || categoryName.includes('Documents')) return '📋';
+            if (categoryName.includes('Перечисления') || categoryName.includes('Enums')) return '📊';
+            if (categoryName.includes('Регистры') || categoryName.includes('Registers')) return '📈';
+            if (categoryName.includes('Отчеты')) return '📊';
+            if (categoryName.includes('Обработки')) return '🔧';
+            return '🔧';
+        }
+        
+        // Переключение реальной категории
+        async function toggleRealCategory(categoryId) {
+            const header = document.querySelector(`[onclick="toggleRealCategory('${categoryId}')"]`);
+            const content = document.getElementById(`real-category-${categoryId}`);
+            const icon = header.querySelector('.category-icon, .root-category-icon');
+            
+            if (content.classList.contains('expanded')) {
+                content.classList.remove('expanded');
+                header.classList.remove('expanded');
+                icon.textContent = '▶';
+            } else {
+                content.classList.add('expanded');
+                header.classList.add('expanded');
+                icon.textContent = '▼';
+                
+                // Загружаем типы для этой категории
+                await loadTypesForRealCategory(categoryId, content);
+            }
+        }
+        
+        // Загрузка типов для реальной категории
+        async function loadTypesForRealCategory(categoryId, container) {
+            if (container.children.length > 0) {
+                return; // Уже загружено
+            }
+            
+            container.innerHTML = '<div style="padding: 10px 20px; color: #8b949e;">🔄 Загрузка...</div>';
+            
+            try {
+                // Рекурсивно ищем категорию в иерархии
+                const category = findCategoryById(hierarchyData?.categories || [], categoryId);
+                
+                if (category) {
+                    let content = '';
+                    
+                    // Если есть подкатегории, показываем их
+                    if (category.subcategories && category.subcategories.length > 0) {
+                        content = buildCategoryTree(category.subcategories, 1);
+                    }
+                    
+                    // Если есть типы, добавляем их
+                    if (category.types && category.types.length > 0) {
+                        const typeItems = category.types.map(typeName => `
+                            <div class="type-item" onclick="selectType('${typeName}')">
+                                <span class="type-icon">🔧</span>
+                                <span>${typeName}</span>
+                            </div>
+                        `).join('');
+                        content += typeItems;
+                    }
+                    
+                    container.innerHTML = content || '<div style="padding: 10px 20px; color: #8b949e;">Нет типов</div>';
+                    
+                    const typeCount = category.types ? category.types.length : 0;
+                    const subcatCount = category.subcategories ? category.subcategories.length : 0;
+                    console.log(`✅ Загружено для категории "${category.name}": ${subcatCount} подкатегорий, ${typeCount} типов`);
+                } else {
+                    // Fallback: загружаем через поиск если нет данных в иерархии
+                    console.warn(`⚠️ Категория "${categoryId}" не найдена в иерархии, используем поиск`);
+                    await loadTypesForRealCategoryFallback(categoryId, container);
+                }
+                
+            } catch (error) {
+                console.error('Ошибка загрузки типов для категории:', error);
+                container.innerHTML = '<div style="padding: 10px 20px; color: #f85149;">❌ Ошибка загрузки</div>';
+            }
+        }
+
+        // Рекурсивный поиск категории по ID
+        function findCategoryById(categories, targetId) {
+            for (const category of categories) {
+                if (category.id === targetId) {
+                    return category;
+                }
+                if (category.subcategories && category.subcategories.length > 0) {
+                    const found = findCategoryById(category.subcategories, targetId);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+        
+        // Fallback функция для загрузки типов через поиск
+        async function loadTypesForRealCategoryFallback(categoryId, container) {
+            try {
+                // Получаем типы через поиск по категории
+                let searchQuery = '';
+                if (categoryId.includes('универсальные_коллекции')) {
+                    searchQuery = 'Массив|Структура|Соответствие|Таблица|Список';
+                } else if (categoryId.includes('файлы')) {
+                    searchQuery = 'Файл|Текстов|Двоичные|Поток';
+                } else if (categoryId.includes('интернет')) {
+                    searchQuery = 'HTTP|WS|FTP';
+                } else if (categoryId.includes('xml')) {
+                    searchQuery = 'XML|JSON|XDTO';
+                } else if (categoryId.includes('базовые')) {
+                    searchQuery = 'Строка|Число|Дата|Булево|Уникальный';
+                } else {
+                    searchQuery = '*'; // Все остальные
+                }
+                
+                const response = await fetch(`/api/types?search=${encodeURIComponent(searchQuery)}&per_page=50`);
+                const data = await response.json();
+                
+                if (data.types && data.types.length > 0) {
+                    const typeItems = data.types.map(type => `
+                        <div class="type-item" onclick="selectType('${type.name}')">
+                            <span class="type-icon">🔧</span>
+                            <span>${type.name}</span>
+                        </div>
+                    `).join('');
+                    
+                    container.innerHTML = typeItems;
+                    console.log(`✅ Fallback: найдено ${data.types.length} типов через поиск для "${categoryId}"`);
+                } else {
+                    container.innerHTML = '<div style="padding: 10px 20px; color: #8b949e;">Нет типов</div>';
+                }
+                
+            } catch (error) {
+                console.error('Ошибка fallback загрузки:', error);
+                container.innerHTML = '<div style="padding: 10px 20px; color: #f85149;">❌ Ошибка загрузки</div>';
             }
         }
         
@@ -881,7 +1132,7 @@ pub fn generate_enhanced_index_html() -> String {
         // Выполнение поиска
         async function performSearch(query) {
             if (!query.trim()) {
-                await loadTypeTree();
+                await loadTypeTree(); // Возвращаемся к иерархии при пустом поиске
                 return;
             }
             
@@ -896,6 +1147,9 @@ pub fn generate_enhanced_index_html() -> String {
                         <div class="empty-state">
                             <div class="empty-state-icon">🔍</div>
                             <p>Типы не найдены</p>
+                            <button class="btn" onclick="loadTypeTree()" style="margin-top: 10px;">
+                                🔄 Вернуться к дереву
+                            </button>
                         </div>
                     `;
                     return;
@@ -914,6 +1168,9 @@ pub fn generate_enhanced_index_html() -> String {
                         <h3 style="color: #58a6ff; margin: 0 20px 15px; font-size: 14px;">
                             🔍 Результаты поиска (${data.types.length})
                         </h3>
+                        <button class="btn" onclick="loadTypeTree()" style="margin: 0 20px 10px; font-size: 12px;">
+                            🔄 Вернуться к дереву
+                        </button>
                         ${searchResults}
                     </div>
                 `;

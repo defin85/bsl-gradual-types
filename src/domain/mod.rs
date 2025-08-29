@@ -7,7 +7,7 @@ pub mod contracts;
 pub mod events;
 pub mod repository;
 pub mod resolution_service;
-mod resolvers;        // ✅ ПРИВАТНЫЙ - недоступен для Application Layer
+mod resolvers; // ✅ ПРИВАТНЫЙ - недоступен для Application Layer
 pub mod search;
 pub mod standard_types;
 pub mod type_system_service;
@@ -19,7 +19,8 @@ pub use repository::{
     InMemoryTypeRepository, TypeCheckerService, TypeRepository, TypeResolutionService,
 };
 pub use resolution_service::TypeResolver;
-pub use resolvers::{CompletionItem, CompletionKind}; // ✅ Экспортируем для TypeResolutionService
+// ✅ Экспортируем из repository
+pub use repository::{CompletionItem, CompletionKind};
 pub use search::{
     AdvancedSearchQuery, ParseMetadata, RawMethodData, RawParameterData, RawPropertyData,
     RawTypeData, SearchResults, TypeHierarchy, TypeSearchResult,

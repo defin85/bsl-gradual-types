@@ -137,7 +137,7 @@ impl WebTypeService {
             subcategories: self.create_main_platform_categories(),
         };
 
-        let mut configuration_root = super::services::TypeCategory {
+        let configuration_root = super::services::TypeCategory {
             id: "configuration_types".to_string(),
             name: "Конфигурационные типы".to_string(),
             description: "Типы объектов метаданных конфигурации".to_string(),

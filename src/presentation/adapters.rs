@@ -845,7 +845,7 @@ mod tests {
         */
 
         // Тестируем автодополнение
-        let completion_request = LspCompletionRequest {
+        let _completion_request = LspCompletionRequest {
             file_path: "test.bsl".to_string(),
             line: 10,
             column: 5,
@@ -873,7 +873,7 @@ mod tests {
         let web_interface = WebInterface::new(web_service);
 
         // Тестируем иерархию
-        let hierarchy = web_interface.handle_hierarchy_request().await.unwrap();
+        let _hierarchy = web_interface.handle_hierarchy_request().await.unwrap();
 
         // Тестируем поиск
         let search_request = WebSearchRequest {
@@ -883,7 +883,7 @@ mod tests {
             filters: None,
         };
 
-        let search_response = web_interface
+        let _search_response = web_interface
             .handle_search_request(search_request)
             .await
             .unwrap();

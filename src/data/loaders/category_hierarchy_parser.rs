@@ -274,10 +274,10 @@ mod tests {
 
     #[test]
     fn test_html_title_extraction() {
-        let mut parser = CategoryHierarchyParser::new("test");
+        let _parser = CategoryHierarchyParser::new("test");
 
         // Создаём временный HTML файл для теста
-        let test_html = r#"<html><body><h1 class="V8SH_pagetitle">Прикладные объекты</h1><p class="V8SH_title">Прикладные объекты</p>Описание категории<HR></body></html>"#;
+        let _test_html = r#"<html><body><h1 class="V8SH_pagetitle">Прикладные объекты</h1><p class="V8SH_title">Прикладные объекты</p>Описание категории<HR></body></html>"#;
 
         // В реальном тесте нужно было бы создать файл, но для демо показываем логику
         assert!(true); // Placeholder для демонстрации структуры тестов

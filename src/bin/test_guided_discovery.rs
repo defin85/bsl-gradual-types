@@ -105,10 +105,10 @@ fn test_with_integration(args: &Args) -> Result<()> {
     let start_time = std::time::Instant::now();
     // РЕФАКТОРИНГ: Создаем guided parser напрямую (старый resolver удален)
     let mut guided_parser = ConfigurationGuidedParser::new(&args.config_path);
-    
-    // Parse configuration using guided discovery approach  
-    let config_types = guided_parser.parse_with_configuration_guide()?;
-    
+
+    // Parse configuration using guided discovery approach
+    let _config_types = guided_parser.parse_with_configuration_guide()?;
+
     // Также создаем platform resolver для подсчетов
     let platform_resolver = PlatformTypesRepository::new();
     let elapsed = start_time.elapsed();

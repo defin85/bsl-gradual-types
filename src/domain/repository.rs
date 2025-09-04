@@ -420,7 +420,7 @@ impl TypeResolutionService {
     pub fn get_syntax_helper_database(
         &self,
     ) -> Option<&crate::data::loaders::syntax_helper_parser::SyntaxHelperDatabase> {
-        // ✅ ИСПОЛЬЗУЕМ repository через CentralTypeSystem вместо синглтона
+        // ✅ ИСПОЛЬЗУЕМ repository через SystemCoordinator вместо legacy CentralTypeSystem
         // В текущем контексте возвращаем None - база данных строится
         // из репозитория по мере необходимости
 
@@ -428,28 +428,6 @@ impl TypeResolutionService {
         // Пока возвращаем None как признак того, что нужно строить базу
         // из get_all_platform_globals()
         None
-    }
-
-    /// Получить информацию о конкретном типе (для CentralTypeSystem)
-    pub fn get_type_info(&self, type_name: &str) -> Option<crate::system::coordination::TypeInfo> {
-        let platform_globals = self.get_all_platform_globals();
-        let resolution = platform_globals.get(type_name)?;
-
-        if !matches!(
-            resolution.certainty,
-            crate::domain::types::Certainty::Unknown
-        ) {
-            Some(crate::system::coordination::TypeInfo {
-                name: type_name.to_string(),
-                category: format!("{:?}", resolution.result),
-                description: resolution.metadata.notes.first().cloned(),
-                methods: Vec::new(), // TODO: реализовать через анализ metadata когда будет готово
-                properties: Vec::new(), // TODO: реализовать через анализ metadata когда будет готово
-                constructors: Vec::new(), // TODO: добавить когда будет готово
-            })
-        } else {
-            None
-        }
     }
 
     /// Конвертировать RawTypeData в TypeResolution

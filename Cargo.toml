@@ -89,14 +89,6 @@ insta = "1.34"
 cc = "1.0"
 
 [[bin]]
-name = "bsl-analyzer"
-path = "src/bin/analyzer.rs"
-
-[[bin]]
-name = "build-index"
-path = "src/bin/build_index.rs"
-
-[[bin]]
 name = "lsp-server"
 path = "src/bin/lsp_server.rs"
 
@@ -104,13 +96,10 @@ path = "src/bin/lsp_server.rs"
 name = "type-check"
 path = "src/bin/type_check.rs"
 
-[[bin]]
-name = "bsl-profiler"
-path = "src/bin/profiler.rs"
-
-[[bin]]
-name = "bsl-web-server"
-path = "src/bin/web_server.rs"
+# Note: web_server.rs temporarily disabled due to architecture migration
+# [[bin]]
+# name = "bsl-web-server"
+# path = "src/bin/web_server.rs"
 
 # Examples
 [[example]]

@@ -12,7 +12,8 @@ use tracing::{error, info};
 use clap::Parser;
 
 // ✅ ИСПРАВЛЕНО: Clean Architecture - используем Application Layer
-use bsl_gradual_types::system::{SystemCoordinator, TypeSystemService};
+use bsl_gradual_types::application::TypeSystemService;
+use bsl_gradual_types::system::SystemCoordinator;
 
 // ✅ ИСПРАВЛЕНО: временные структуры удалены, используем TypeSystemService API
 
@@ -119,7 +120,10 @@ impl LanguageServer for BslLanguageServer {
                         vec![Diagnostic {
                             range: Range::new(Position::new(0, 0), Position::new(0, 1)),
                             severity: Some(DiagnosticSeverity::INFORMATION),
-                            message: format!("✅ BSL файл проанализирован успешно ({})", analysis.file_path),
+                            message: format!(
+                                "✅ BSL файл проанализирован успешно ({})",
+                                analysis.file_path
+                            ),
                             source: Some("bsl-gradual-types".to_string()),
                             ..Default::default()
                         }]
@@ -258,7 +262,11 @@ impl LanguageServer for BslLanguageServer {
         };
 
         // Получаем автодополнение через TypeSystemService
-        match self.type_service.get_completion(&file_content, position.line, position.character).await {
+        match self
+            .type_service
+            .get_completion(&file_content, position.line, position.character)
+            .await
+        {
             Ok(completions) => {
                 // Преобразуем наши CompletionItem в LSP CompletionItem
                 let lsp_completions: Vec<tower_lsp::lsp_types::CompletionItem> = completions
@@ -311,7 +319,11 @@ impl LanguageServer for BslLanguageServer {
         };
 
         // Получаем информацию о символе через TypeSystemService
-        match self.type_service.get_hover_info(&file_content, position.line, position.character).await {
+        match self
+            .type_service
+            .get_hover_info(&file_content, position.line, position.character)
+            .await
+        {
             Ok(hover_info) => {
                 if let Some(info) = hover_info {
                     Ok(Some(Hover {

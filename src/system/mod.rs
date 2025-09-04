@@ -11,5 +11,5 @@ pub mod system_coordinator;
 // Re-export simplified components (specific imports to avoid conflicts)
 pub use basic_observability::{BasicObservability, SimpleMetrics, StructuredLogger};
 pub use parser_coordinator::ParserCoordinator;
-pub use simple_cache::{AnalysisCache, FileHash};
-pub use system_coordinator::{CompletionItem, SymbolInfo, SystemCoordinator, TypeSystemService};
+pub use simple_cache::{AnalysisCache, AnalysisResult, FileHash};
+pub use system_coordinator::{SymbolInfo, SystemCoordinator};

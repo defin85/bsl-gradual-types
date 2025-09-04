@@ -134,7 +134,7 @@ async fn test_lsp_file_analysis() {
 #[test]
 fn test_completion_items_structure() {
     // Тест структуры элементов автодополнения
-    use bsl_gradual_types::system::CompletionItem;
+    use bsl_gradual_types::application::CompletionItem;
 
     let item = CompletionItem {
         label: "ТестоваяФункция".to_string(),

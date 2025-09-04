@@ -389,8 +389,7 @@ impl TypeResolution {
         }
     }
 
-    // Create TypeResolution from RawTypeData - TEMPORARILY DISABLED
-    // TEMPORARILY DISABLED DURING MIGRATION
+    // CLEANUP: Legacy conversion methods removed - use domain types directly
     /*
     pub fn from_raw_data(raw_data: &crate::data::RawTypeData) -> Self {
         use crate::data::TypeSource;

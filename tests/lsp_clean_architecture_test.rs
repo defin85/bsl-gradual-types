@@ -61,7 +61,7 @@ fn test_architecture_layers_separation() {
     let coordinator = SystemCoordinator::new();
 
     // Application Layer: TypeSystemService
-    let type_service = coordinator.type_service();
+    let _type_service = coordinator.type_service();
 
     // Presentation Layer: будет использовать TypeSystemService
     // (в реальном LSP Server: BslLanguageServer::new(client, type_service))

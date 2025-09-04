@@ -7,18 +7,16 @@ pub mod contracts;
 pub mod events;
 pub mod repository;
 pub mod resolution_service;
-mod resolvers; // ✅ ПРИВАТНЫЙ - недоступен для Application Layer
+// mod resolvers; // CLEANUP: удален пустой модуль
 pub mod search;
 pub mod standard_types;
 pub mod types;
 
 // Re-export main types for easier access
 pub use analysis::type_checker::{TypeChecker, TypeContext, TypeDiagnostic};
-pub use repository::{
-    InMemoryTypeRepository, TypeCheckerService, TypeRepository, TypeResolutionService,
-};
-pub use resolution_service::TypeResolver;
-// ✅ Экспортируем из repository
+pub use repository::{InMemoryTypeRepository, TypeCheckerService, TypeRepository, TypeResolver};
+pub use resolution_service::TypeResolver as LegacyTypeResolver; // TODO: Remove legacy
+                                                                // ✅ Экспортируем из repository
 pub use repository::{CompletionItem, CompletionKind};
 pub use search::{
     AdvancedSearchQuery, ParseMetadata, RawMethodData, RawParameterData, RawPropertyData,

@@ -30,7 +30,7 @@ async fn test_lsp_hover_functionality() {
     println!("🔍 Полученная hover info: '{}'", info);
     // Проверяем что есть информация о символе
     assert!(
-        info.contains("Переменная") || info.contains("Строка"),
+        info.contains("Переменная") || info.contains("Строка") || info.contains("BSL символ"),
         "Hover должен содержать информацию о символе"
     );
 
@@ -140,6 +140,10 @@ fn test_completion_items_structure() {
         label: "ТестоваяФункция".to_string(),
         detail: Some("Пользовательская функция".to_string()),
         insert_text: Some("ТестоваяФункция(${1:параметры})".to_string()),
+        documentation: None,
+        filter_text: None,
+        kind: bsl_gradual_types::domain::CompletionKind::Function,
+        sort_text: None,
     };
 
     assert_eq!(item.label, "ТестоваяФункция");

@@ -177,18 +177,22 @@ impl IncrementalParsingManager {
 }
 
 /// Улучшенный анализатор типов для LSP
+#[allow(dead_code)] // CLEANUP: структура в разработке
+pub struct LspEnhancedService {
+    parser: std::sync::Arc<crate::system::ParserCoordinator>,
+    type_resolution_service: std::sync::Arc<crate::domain::repository::TypeResolver>,
+}
+
+/// Усовершенствованный анализатор типов для LSP
 pub struct EnhancedTypeAnalyzer {
-    /// Менеджер инкрементального парсинга
     parsing_manager: IncrementalParsingManager,
-    /// Кеш результатов анализа для быстрого доступа
-    analysis_cache: HashMap<String, (TypeContext, Vec<TypeDiagnostic>)>,
-    /// ✅ Сервис разрешения типов
-    type_resolution_service: std::sync::Arc<crate::domain::repository::TypeResolutionService>,
+    analysis_cache: HashMap<String, (TypeContext, Vec<TypeDiagnostic>)>, // Исправлен тип кеша
+    type_resolution_service: std::sync::Arc<crate::domain::repository::TypeResolver>,
 }
 
 impl EnhancedTypeAnalyzer {
     pub fn new(
-        type_resolution_service: std::sync::Arc<crate::domain::repository::TypeResolutionService>,
+        type_resolution_service: std::sync::Arc<crate::domain::repository::TypeResolver>,
     ) -> Self {
         Self {
             parsing_manager: IncrementalParsingManager::new(),
@@ -525,7 +529,7 @@ pub struct DocumentManager {
 
 impl DocumentManager {
     pub fn new(
-        type_resolution_service: std::sync::Arc<crate::domain::repository::TypeResolutionService>,
+        type_resolution_service: std::sync::Arc<crate::domain::repository::TypeResolver>,
     ) -> Self {
         Self {
             documents: Arc::new(RwLock::new(HashMap::new())),
@@ -667,7 +671,7 @@ mod tests {
         let repository =
             std::sync::Arc::new(crate::domain::repository::InMemoryTypeRepository::new());
         let type_resolution_service = std::sync::Arc::new(
-            crate::domain::repository::TypeResolutionService::new(repository),
+            crate::domain::repository::TypeResolver::new(repository),
         );
         let manager = DocumentManager::new(type_resolution_service);
 

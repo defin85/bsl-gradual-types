@@ -1,17 +1,10 @@
-//! Application layer (flat structure)
-//! Specialized services for different use cases
+//! Application layer (Phase 4: API Unification)
+//! Unified TypeSystemService as single entry point for all clients
 
-pub mod analysis_service;
-pub mod code_actions;
 pub mod documentation_service;
-pub mod lsp_enhanced;
-pub mod lsp_service;
-pub mod services;
 pub mod type_system_service;
-pub mod web_service;
 
-// Re-export main services
-pub use lsp_service::LspTypeService;
-pub use services::AnalysisTypeService;
-pub use type_system_service::{TypeSystemService, CompletionItem}; // Main unified service
-pub use web_service::WebTypeService;
+// === Phase 4: Unified API ===
+// Main unified service - single entry point for all clients
+pub use type_system_service::TypeSystemService;
+pub use crate::domain::CompletionItem;

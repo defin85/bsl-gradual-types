@@ -7,7 +7,7 @@ use tempfile::NamedTempFile;
 #[tokio::test]
 async fn test_real_analyze_file() {
     // Создаём временный BSL файл
-    let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+    let temp_file = NamedTempFile::new().expect("Failed to create temp file");
     let bsl_content = r#"
     // Простой BSL код для тестирования
     Процедура ТестоваяПроцедура()
@@ -43,7 +43,7 @@ async fn test_real_analyze_file() {
 fn test_coordinator_creation() {
     // Простейший тест - может ли координатор создаться
     let coordinator = SystemCoordinator::new();
-    let service = coordinator.type_service();
+    let _service = coordinator.type_service();
 
     // Если дошли сюда без panic - уже хорошо
     println!("✅ SystemCoordinator создан успешно");

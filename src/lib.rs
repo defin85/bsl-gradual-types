@@ -14,10 +14,8 @@ pub mod system;
 // Main public API re-exports
 pub use domain::types;
 pub use domain::resolution_service::TypeResolver;
-pub use application::lsp_service::LspTypeService;
-pub use application::web_service::WebTypeService;
-pub use application::analysis_service::AnalysisService;
-// pub use application::documentation_service::DocumentationService; // TODO: Restore after migration
+pub use application::TypeSystemService; // CLEANUP: unified API
+pub use application::documentation_service::DocumentationService;
 pub use parsing::bsl::{BslParser, Expression, Statement};
 
 /// Version of the type system

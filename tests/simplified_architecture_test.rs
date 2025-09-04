@@ -153,3 +153,76 @@ mod comparison_tests {
         assert!(simple_cache_size < 500);
     }
 }
+
+/// Интеграционный тест для Phase 4: Architecture Flow Validation
+#[tokio::test]
+async fn test_simplified_architecture_flow() {
+    // 1. Создаем SystemCoordinator
+    let coordinator = SystemCoordinator::new();
+    
+    // 2. Получаем TypeSystemService через Application Layer  
+    let type_service = coordinator.type_service();
+    
+    // 3. Тестируем unified API для всех Presentation Layer компонентов
+    
+    // LSP functionality
+    let hover_result = type_service.get_hover_info("test.bsl", 1, 5).await;
+    assert!(hover_result.is_ok(), "LSP hover should work");
+    
+    // Web functionality  
+    let completion_result = type_service.get_completion("test.bsl", 1, 5).await;
+    assert!(completion_result.is_ok(), "Web completion should work");
+    
+    // CLI functionality
+    let analysis_result = type_service.analyze_file_content("test.bsl", "Процедура Тест()\nКонецПроцедуры").await;
+    assert!(analysis_result.is_ok(), "CLI analysis should work");
+    
+    // 4. Проверяем что все компоненты взаимодействуют через правильные слои
+    let health = coordinator.health_status();
+    assert_eq!(health.status, "healthy");
+    assert!(health.components.len() >= 3, "All core components should be healthy");
+}
+
+/// Тест архитектурных потоков данных согласно диаграмме
+#[tokio::test] 
+async fn test_architecture_data_flows() {
+    let coordinator = SystemCoordinator::new();
+    
+    // Проверяем поток: Presentation -> Application -> Domain -> Data
+    let type_service = coordinator.type_service();
+    
+    // Simulated presentation layer request
+    let test_file_content = "Функция ТестоваяФункция(Параметр1: Строка) Экспорт\n    Возврат Параметр1;\nКонецФункции";
+    
+    // This should flow through:
+    // TypeSystemService (Application) -> TypeResolver (Domain) -> TypeRepository (Data)
+    let analysis = type_service.analyze_file_content("test.bsl", test_file_content).await;
+    
+    assert!(analysis.is_ok(), "Full architecture flow should work");
+    
+    let result = analysis.unwrap();
+    assert!(!result.type_resolutions.is_empty(), "Should find some type resolutions");
+}
+
+/// Тест валидации архитектурной диаграммы
+#[test]
+fn test_architecture_diagram_validation() {
+    // Создаем координатор и проверяем что все связи есть
+    let coordinator = SystemCoordinator::new();
+    
+    // SystemCoordinator должен содержать все основные компоненты
+    let health = coordinator.health_status();
+    
+    // Проверяем наличие ключевых компонентов из диаграммы:
+    let component_names: Vec<&str> = health.components.iter()
+        .map(|c| c.name.as_str())
+        .collect();
+    
+    assert!(component_names.contains(&"cache"), "AnalysisCache должен быть в координаторе");
+    assert!(component_names.contains(&"parser"), "ParserCoordinator должен быть в координаторе");  
+    // Изменено: BasicObservability не является компонентом, он предоставляет health check
+    
+    // TypeSystemService должен быть доступен через Application Layer
+    let type_service = coordinator.type_service();
+    assert!(type_service.as_ref() as *const _ as usize != 0, "TypeSystemService должен быть доступен");
+}

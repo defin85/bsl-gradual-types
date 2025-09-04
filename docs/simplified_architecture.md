@@ -264,6 +264,107 @@ impl BasicObservability {
 
 ---
 
+## 🧠 Core Type System Design (BSL Specific)
+
+### **🎯 TypeResolution - Центральная абстракция**
+
+**Не просто "тип", а "разрешение типа" с уровнем уверенности:**
+
+```rust
+struct TypeResolution {
+    // 🎯 Ключевое отличие: уровень уверенности
+    certainty: Certainty,           // Known | Inferred(0.0-1.0) | Unknown
+    
+    result: ResolutionResult,       // Concrete | Union | Dynamic | Conditional
+    source: ResolutionSource,       // Static | Inferred | Runtime
+    metadata: ResolutionMetadata,   // Debugging info
+    
+    // 🎭 Фасетная система (BSL-специфичное)
+    active_facet: Option<FacetKind>, 
+    available_facets: Vec<FacetKind>,
+}
+
+enum Certainty {
+    Known,              // 100% уверенности (статический анализ)
+    Inferred(f32),      // 0.0-1.0 (градуальная типизация)
+    Unknown,            // Runtime определение
+}
+```
+
+**🎯 Преимущества подхода:**
+- ✅ **Честность о неопределенности** - система не притворяется, что знает больше
+- ✅ **Градуальная миграция** - от dynamic к static постепенно
+- ✅ **Качественная диагностика** - показывает уверенность пользователю
+- ✅ **Flow-sensitive анализ** - сужение типов в условиях
+
+### **🎭 Фасетная система (1C-специфичная)**
+
+**Один тип = множество представлений:**
+
+```rust
+// Пример: Справочник "Контрагенты"
+enum FacetKind {
+    Manager,    // Справочники.Контрагенты - создание, поиск
+    Object,     // СправочникОбъект.Контрагенты - изменяемый объект  
+    Reference,  // СправочникСсылка.Контрагенты - ссылка на элемент
+    Metadata,   // Метаданные.Справочники.Контрагенты - описание структуры
+}
+
+// Автоматическое переключение контекста:
+контрагент.Наименование           // Reference facet
+контрагент.Записать()             // Object facet (если изменяемый)
+Справочники.Контрагенты.Создать() // Manager facet
+```
+
+**🎯 Решает проблемы:**
+- ✅ **Полиморфизм 1C объектов** - правильное автодополнение
+- ✅ **Контекстные методы** - `.Записать()` только для Object
+- ✅ **IntelliSense качество** - показывает релевантные методы
+
+### **🔀 Union Types с весами**
+
+**Обработка неопределенности через взвешенные типы:**
+
+```rust
+// Вместо "String или Number" → "String 60%, Number 40%"
+struct WeightedType {
+    type_: ConcreteType,
+    weight: f32,              // Вероятность 0.0-1.0
+}
+
+// Пример из анализа кода:
+переменная = ?(условие, "текст", 123);
+// → Union<String 50%, Number 50%>
+
+// Сужение в условиях:
+Если ТипЗнч(переменная) = Тип("Строка") Тогда
+    // → переменная теперь String 100%
+    переменная.ВРег()  // ✅ Доступны строковые методы
+КонецЕсли;
+```
+
+**🎯 Автоматические упрощения:**
+- ✅ **Числовые типы** → объединяются в Number
+- ✅ **Фильтрация** типов с весом < 5%
+- ✅ **Ограничение** максимум 5 типов в union
+- ✅ **Нормализация** и пересчет весов
+
+### **⚡ Simplified vs Enterprise Type System**
+
+| Aspect | Simplified Implementation | Enterprise Potential |
+|--------|--------------------------|---------------------|
+| **Union Types** | Basic WeightedType, 5 max | Sophisticated inference |
+| **Flow Analysis** | Simple condition tracking | Full flow-sensitive analysis |
+| **Facet System** | Manual assignment | Automatic context detection |
+| **Certainty** | 3 levels (Known/Inferred/Unknown) | Fine-grained confidence scoring |
+| **Performance** | O(n) simple checks | O(log n) with smart caching |
+
+**📊 Implementation Complexity:**
+- **Simple**: 800-1200 LOC для core типизации
+- **Enterprise**: 3000-5000 LOC с продвинутым анализом
+
+---
+
 ## 📊 Comparison: Complex vs Simple
 
 | Aspect | Complex Architecture | Simple Architecture | Savings |
@@ -549,7 +650,107 @@ SystemCoordinator
 ├→ Event Bus & Domain Events
 ├→ Advanced Security
 └→ Plugin Architecture
+├→ Advanced Type Analysis (see next section)
 ```
+
+---
+
+### 🧠 **Type System Evolution: Simple → Enterprise**
+
+#### **📊 Simple Type System (Current)**
+```rust
+// TypeResolver - базовый функционал
+struct TypeResolver {
+    platform_types: HashMap<String, PlatformType>,
+    config_types: HashMap<String, ConfigurationType>,
+}
+
+impl TypeResolver {
+    // Простое разрешение типов
+    fn resolve(&self, expr: &str) -> TypeResolution {
+        // Статический lookup в таблицах
+        // Union types только при явной неоднозначности
+        // Базовые фасеты (Manager/Object/Reference)
+    }
+}
+
+// Характеристики:
+// ✅ 1000-1500 LOC
+// ✅ O(1) lookup для большинства случаев  
+// ✅ Поддержка union с весами
+// ⚠️ Простая flow-sensitive логика
+// ⚠️ Ограниченный inference
+```
+
+#### **🚀 Enterprise Type System (Migration Target)**  
+```rust
+// TypeAnalysisEngine - продвинутый анализ
+struct TypeAnalysisEngine {
+    resolver: TypeResolver,           // базовый (сохраняется)
+    flow_analyzer: FlowSensitiveAnalyzer,
+    inference_engine: TypeInferenceEngine,
+    contract_generator: ContractGenerator,
+    dependency_graph: DependencyGraph,
+}
+
+impl TypeAnalysisEngine {
+    // Продвинутое разрешение с контекстом
+    fn resolve_advanced(&self, expr: &AST, context: &AnalysisContext) -> TypeResolution {
+        // Анализ потока управления
+        // Межпроцедурный анализ  
+        // Автоматический inference фасетов
+        // Генерация runtime контрактов
+    }
+}
+
+// Характеристики:
+// ✅ 5000-8000 LOC
+// ✅ Субсекундный анализ для крупных файлов
+// ✅ 95%+ точность inference
+// ✅ Автоматические runtime контракты
+// ✅ Flow-sensitive type narrowing
+```
+
+#### **🔄 Migration Path для Type System**
+
+**Phase 1: Сохранить Simple TypeResolver как core**
+```rust
+// TypeResolver остается простым и надежным
+// Enterprise components добавляются как decorators/wrappers
+struct TypeAnalysisEngine {
+    core_resolver: TypeResolver,  // ✅ EXISTING - zero changes
+    advanced_features: AdvancedTypeFeatures, // ✅ NEW - additive only
+}
+```
+
+**Phase 2: Добавить Flow-Sensitive Analysis**
+```rust
+// Декорировать результаты TypeResolver
+impl TypeAnalysisEngine {
+    fn resolve_with_flow(&self, expr: &AST, context: &FlowContext) -> TypeResolution {
+        let base_resolution = self.core_resolver.resolve(expr);
+        self.flow_analyzer.refine_type(base_resolution, context)
+    }
+}
+```
+
+**Phase 3: Inference Engine как Enhancement**
+```rust
+// Inference работает поверх базового resolver
+impl TypeInferenceEngine {
+    fn infer_missing_types(&self, ast: &AST) -> Vec<TypeResolution> {
+        // Использует TypeResolver.resolve() как отправную точку
+        // Добавляет inference для неразрешенных случаев
+    }
+}
+```
+
+#### **💡 Ключевые принципы миграции типизации:**
+
+1. **🏗️ Preserve Core**: TypeResolver простой и надежный навсегда
+2. **🎭 Additive Enhancement**: Новые фичи как decorators/wrappers  
+3. **⚡ Performance**: Enterprise features только при необходимости
+4. **🧪 A/B Testing**: Можно сравнивать Simple vs Advanced results
 
 ---
 

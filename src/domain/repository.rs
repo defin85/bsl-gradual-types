@@ -78,6 +78,7 @@ pub enum CompletionKind {
     EnumMember,
     Constant,
     Struct,
+    Type,
     Event,
     Operator,
     TypeParameter,
@@ -112,6 +113,7 @@ impl From<CompletionKind> for u8 {
             CompletionKind::EnumMember => 20,
             CompletionKind::Constant => 21,
             CompletionKind::Struct => 22,
+            CompletionKind::Type => 26,
             CompletionKind::Event => 23,
             CompletionKind::Operator => 24,
             CompletionKind::TypeParameter => 25,
@@ -225,12 +227,12 @@ impl TypeRepository for InMemoryTypeRepository {
 }
 
 /// Сервис разрешения типов
-pub struct TypeResolutionService {
+pub struct TypeResolver {
     #[allow(dead_code)]
     repository: Arc<dyn TypeRepository>,
 }
 
-impl TypeResolutionService {
+impl TypeResolver {
     pub fn new(repository: Arc<dyn TypeRepository>) -> Self {
         Self { repository }
     }
@@ -240,7 +242,7 @@ impl TypeResolutionService {
         // ✅ Убираем инициализацию через синглтон
         // Теперь всё работает через repository pattern
 
-        println!("TypeResolutionService initialized with repository-only pattern");
+        println!("TypeResolver initialized with repository-only pattern");
         Ok(())
     }
 

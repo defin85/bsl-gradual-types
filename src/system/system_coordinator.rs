@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tracing::info;
 
 use crate::application::TypeSystemService; // MOVED to Application Layer
-use crate::domain::repository::{InMemoryTypeRepository, TypeRepository, TypeResolutionService};
+use crate::domain::repository::{InMemoryTypeRepository, TypeRepository, TypeResolver};
 
 use super::basic_observability::BasicObservability;
 use super::parser_coordinator::ParserCoordinator;
@@ -27,7 +27,7 @@ pub struct SystemCoordinator {
 
     // === DOMAIN LAYER (для будущего расширения) ===
     #[allow(dead_code)]
-    type_resolver: Arc<TypeResolutionService>,
+    type_resolver: Arc<TypeResolver>,
     #[allow(dead_code)]
     repository: Arc<dyn TypeRepository>,
 }
@@ -46,7 +46,7 @@ impl SystemCoordinator {
 
         // 4. Domain layer (unchanged)
         let repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
-        let type_resolver = Arc::new(TypeResolutionService::new(repository.clone()));
+        let type_resolver = Arc::new(TypeResolver::new(repository.clone()));
 
         // 5. Unified application service (moved to Application Layer)
         let type_service = Arc::new(TypeSystemService::new(

@@ -676,8 +676,33 @@ impl CentralTypeSystem {
     async fn load_platform_types(&self) -> Result<Vec<RawTypeData>> {
         info!("📄 Загрузка платформенных типов из HTML...");
 
-        // ✅ ИСПОЛЬЗУЕМ собственный resolution_service вместо прямого обращения к синглтону
-        let platform_globals = self.resolution_service.get_all_platform_globals();
+        // ✅ ИСПОЛЬЗУЕМ PlatformTypesRepository напрямую для первичной загрузки
+        use crate::data::loaders::platform_types_repository::PlatformTypesRepository;
+        let mut platform_repo = PlatformTypesRepository::new();
+
+        // Пытаемся загрузить данные из указанного в конфигурации пути
+        if std::path::Path::new(&self.config.html_path).exists() {
+            match platform_repo.load_from_directory(&self.config.html_path) {
+                Ok(_) => {
+                    info!(
+                        "✅ Загружена база данных синтаксис-помощника из: {}",
+                        self.config.html_path
+                    );
+                }
+                Err(e) => {
+                    warn!("⚠️ Ошибка загрузки из {}: {}", self.config.html_path, e);
+                    info!("📦 Используем базовые хардкодированные типы");
+                }
+            }
+        } else {
+            info!("📦 Путь к HTML не найден, используем базовые хардкодированные типы");
+        }
+
+        let platform_globals = platform_repo.get_platform_globals_enhanced();
+        info!(
+            "✅ Загружено {} платформенных типов из PlatformTypesRepository",
+            platform_globals.len()
+        );
 
         // Конвертируем TypeResolution в RawTypeData
         let mut raw_types = Vec::new();

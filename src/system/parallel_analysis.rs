@@ -1,7 +1,10 @@
-//! Параллельный анализ модулей с использованием rayon
+//! DEPRECATED: Параллельный анализ модулей с использованием rayon
 //!
-//! Этот модуль предоставляет возможности для параллельной обработки
-//! множественных BSL файлов с оптимальным использованием CPU ресурсов.
+//! ⚠️ УСТАРЕВШИЙ КОД - НЕ ИСПОЛЬЗУЕТСЯ В SystemCoordinator
+//! Этот модуль заменен на упрощенную архитектуру SystemCoordinator.
+//! Сохранен для совместимости со старыми бинарными файлами.
+
+#![allow(dead_code, unused_imports)]
 
 use anyhow::Result;
 use rayon::prelude::*;
@@ -9,7 +12,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::system::analysis_cache::AnalysisCacheManager;
+use crate::system::simple_cache::AnalysisCache; // Используем новый простой кеш
 use crate::domain::analysis::type_checker::{TypeChecker, TypeContext, TypeDiagnostic};
 use crate::parsing::bsl::common::ParserFactory;
 
@@ -99,9 +102,9 @@ pub struct ParallelAnalyzer {
     /// Конфигурация
     #[allow(dead_code)]
     config: ParallelAnalysisConfig,
-    /// Кеш результатов
+    /// Кеш результатов (DEPRECATED)
     #[allow(dead_code)]
-    cache: Option<Arc<Mutex<AnalysisCacheManager>>>,
+    cache: Option<String>, // Заглушка вместо AnalysisCacheManager
     /// Type checker
     #[allow(dead_code)]
     type_checker: Arc<TypeChecker>,

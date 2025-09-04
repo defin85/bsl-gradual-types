@@ -10,7 +10,6 @@ pub mod resolution_service;
 mod resolvers; // ✅ ПРИВАТНЫЙ - недоступен для Application Layer
 pub mod search;
 pub mod standard_types;
-pub mod type_system_service;
 pub mod types;
 
 // Re-export main types for easier access

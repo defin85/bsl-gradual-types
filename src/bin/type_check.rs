@@ -1,76 +1,57 @@
-//! Simple CLI for testing type resolution (target-only)
+//! Simple CLI for testing type resolution - MIGRATED TO SystemCoordinator
 
-use bsl_gradual_types::presentation::{LspCompletionRequest, LspHoverRequest};
-use bsl_gradual_types::system::{CentralSystemConfig, CentralTypeSystem};
+use bsl_gradual_types::system::SystemCoordinator;
 use clap::Parser;
+use tracing_subscriber;
 
 #[derive(Parser, Debug)]
 #[command(name = "type-check")]
-#[command(about = "BSL Type Checker - test type resolution for expressions (target)")]
+#[command(about = "BSL Type Checker - MIGRATED to SystemCoordinator")]
 struct Args {
-    /// Expression to resolve (e.g., "Справочники.Контрагенты")
-    /// Or use --complete to get completions
-    expression: String,
-
-    /// Path to configuration XML (optional)
-    #[arg(short, long)]
-    config: Option<String>,
+    /// File to analyze
+    file: String,
 
     /// Verbose output
     #[arg(short, long)]
     verbose: bool,
-
-    /// Get completions for the expression
-    #[arg(long)]
-    complete: bool,
 }
 
 fn main() {
     let args = Args::parse();
-    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+    // Инициализируем логирование если включен verbose режим
+    if args.verbose {
+        tracing_subscriber::fmt::init();
+    }
+
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+
     rt.block_on(async {
-        let mut cfg = CentralSystemConfig::default();
-        if let Some(ref path) = args.config {
-            cfg.configuration_path = Some(path.clone());
-        }
-        let central = CentralTypeSystem::new(cfg);
-        if let Err(e) = central.initialize().await {
-            eprintln!("Initialization error: {}", e);
-        }
-        if args.complete {
-            let req = LspCompletionRequest {
-                file_path: "cli".to_string(),
-                line: 0,
-                column: 0,
-                prefix: args.expression.clone(),
-                trigger_character: None,
-            };
-            match central.lsp_interface().handle_completion_request(req).await {
-                Ok(resp) => {
-                    if resp.items.is_empty() {
-                        println!("No completions found");
-                    } else {
-                        println!("Completions:");
-                        for it in resp.items {
-                            println!("  • {}", it.label);
-                        }
+        // Создаём новый SystemCoordinator
+        let coordinator = SystemCoordinator::new();
+
+        println!("🚀 BSL Type Checker (SystemCoordinator)");
+        println!("📁 Анализируем файл: {}", args.file);
+
+        // Анализируем файл
+        match coordinator.type_service().analyze_file(&args.file).await {
+            Ok(analysis) => {
+                println!("✅ Анализ завершён успешно!");
+                println!("📊 Результаты:");
+                println!("   • Файл: {}", analysis.file_path);
+                println!("   • Типов найдено: {}", analysis.type_resolutions.len());
+                println!("   • Время анализа: {} мс", analysis.analysis_duration_ms);
+
+                if args.verbose {
+                    println!("\n🔍 Детали:");
+                    for (expr, resolution) in &analysis.type_resolutions {
+                        println!("   {} → {:?}", expr, resolution);
                     }
                 }
-                Err(e) => eprintln!("Completion error: {}", e),
             }
-        } else {
-            let req = LspHoverRequest {
-                file_path: "cli".to_string(),
-                line: 0,
-                column: 0,
-                expression: args.expression.clone(),
-            };
-            match central.lsp_interface().handle_hover_request(req).await {
-                Ok(Some(h)) => {
-                    println!("{}", h.contents.join("\n\n"));
-                }
-                Ok(None) => println!("Type unknown"),
-                Err(e) => eprintln!("Hover error: {}", e),
+            Err(e) => {
+                eprintln!("❌ Ошибка анализа: {}", e);
+                std::process::exit(1);
             }
         }
     });

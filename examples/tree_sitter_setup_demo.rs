@@ -1,7 +1,5 @@
 //! Демонстрация настройки tree-sitter интеграции
 
-use std::fs;
-
 fn main() {
     println!("Демонстрация настройки tree-sitter-bsl...\n");
 

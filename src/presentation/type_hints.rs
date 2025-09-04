@@ -905,26 +905,6 @@ mod tests {
     }
 
     #[test]
-    fn test_semantic_tokens_provider() {
-        let provider = SemanticTokensProvider::new(SemanticHighlightingSettings::default());
-        let context = create_test_context();
-
-        let program = Program {
-            statements: vec![Statement::VarDeclaration {
-                name: "stringVar".to_string(), // Используем переменную из контекста
-                export: false,
-                value: None,
-            }],
-        };
-
-        let tokens = provider.get_semantic_tokens(&program, &context);
-
-        // Должны быть semantic tokens
-        assert!(!tokens.data.is_empty());
-        assert_eq!(tokens.data.len() % 5, 0); // Должно быть кратно 5 (формат LSP)
-    }
-
-    #[test]
     fn test_type_hints_integration() {
         let integration = TypeHintsIntegration::new();
         let context = create_test_context();

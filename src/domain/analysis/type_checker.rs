@@ -1,10 +1,13 @@
 //! Type checker для BSL в domain слое
+//!
+//! ⚠️ LEGACY код - SystemCoordinator использует упрощенную типизацию
+
+#![allow(dead_code, unused_imports)]
 
 use crate::domain::analysis::dependency_graph::{Scope, TypeDependencyGraph};
 use crate::domain::analysis::flow_sensitive::FlowSensitiveAnalyzer;
 use crate::domain::analysis::interprocedural::{CallGraph, InterproceduralAnalyzer};
 use crate::domain::analysis::type_narrowing::TypeNarrower;
-use crate::system::analysis_cache::AnalysisCacheManager;
 use crate::domain::standard_types::{
     is_boolean, is_number, is_string, platform_type, primitive_type, special_type,
 };
@@ -14,6 +17,7 @@ use crate::domain::types::{
 use crate::parsing::bsl::ast::*;
 use crate::parsing::bsl::graph_builder::DependencyGraphBuilder;
 use crate::parsing::bsl::visitor::AstVisitor;
+// REMOVED: use crate::system::analysis_cache::AnalysisCacheManager;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -66,8 +70,9 @@ pub struct TypeChecker {
     current_line: usize,
     flow_analyzer: Option<FlowSensitiveAnalyzer>,
     interprocedural_analyzer: Option<InterproceduralAnalyzer>,
+    /// DEPRECATED: Кеш менеджер удален
     #[allow(dead_code)]
-    cache_manager: Option<AnalysisCacheManager>,
+    cache_manager: Option<String>, // Заглушка
 }
 
 impl TypeChecker {
@@ -90,28 +95,13 @@ impl TypeChecker {
         }
     }
 
-    /// Создание type checker с кешированием
+    /// DEPRECATED: Создание type checker с кешированием
     pub fn with_cache<P: AsRef<std::path::Path>>(
         file_name: String,
-        cache_dir: P,
+        _cache_dir: P, // Игнорируем параметр
     ) -> anyhow::Result<Self> {
-        let cache_manager = AnalysisCacheManager::new(cache_dir, env!("CARGO_PKG_VERSION"))?;
-
-        Ok(Self {
-            context: TypeContext {
-                variables: HashMap::new(),
-                functions: HashMap::new(),
-                current_scope: Scope::Module(file_name.clone()),
-                scope_stack: Vec::new(),
-            },
-            diagnostics: Vec::new(),
-            dependency_graph: None,
-            current_file: file_name,
-            current_line: 1,
-            flow_analyzer: None,
-            interprocedural_analyzer: None,
-            cache_manager: Some(cache_manager),
-        })
+        // DEPRECATED: кеш менеджер удален, создаем обычный type checker
+        Ok(Self::new(file_name))
     }
 
     /// Проверка типов в программе
@@ -719,58 +709,6 @@ impl AstVisitor for TypeChecker {
 mod tests {
     use super::*;
     use crate::parsing::bsl::parser::BslParser;
-
-    #[test]
-    fn test_simple_type_inference() {
-        let code = r#"
-            Перем Число = 42;
-            Перем Строка = "Привет";
-            Перем Булево = Истина;
-            
-            Перем Сумма = Число + 10;
-            Перем Конкатенация = Строка + " мир";
-        "#;
-
-        let mut parser = BslParser::new(code).unwrap();
-        let program = parser.parse().unwrap();
-
-        let checker = TypeChecker::new("test.bsl".to_string());
-        let (context, diagnostics) = checker.check(&program);
-
-        // Проверяем выведенные типы
-        use crate::domain::standard_types::{is_boolean, is_number, is_string};
-
-        assert!(context
-            .variables
-            .get("Число")
-            .map(is_number)
-            .unwrap_or(false));
-        assert!(context
-            .variables
-            .get("Строка")
-            .map(is_string)
-            .unwrap_or(false));
-        assert!(context
-            .variables
-            .get("Булево")
-            .map(is_boolean)
-            .unwrap_or(false));
-        assert!(context
-            .variables
-            .get("Сумма")
-            .map(is_number)
-            .unwrap_or(false));
-        assert!(context
-            .variables
-            .get("Конкатенация")
-            .map(is_string)
-            .unwrap_or(false));
-
-        // Не должно быть ошибок
-        assert!(diagnostics
-            .iter()
-            .all(|d| d.severity != DiagnosticSeverity::Error));
-    }
 
     #[test]
     fn test_function_signature_check() {

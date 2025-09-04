@@ -118,10 +118,6 @@ name = "guided_parser_demo"
 path = "examples/guided_parser_demo.rs"
 
 [[example]]
-name = "completion_demo"
-path = "examples/completion_demo.rs"
-
-[[example]]
 name = "categories_demo"
 path = "examples/categories_demo.rs"
 
@@ -129,9 +125,10 @@ path = "examples/categories_demo.rs"
 name = "api_endpoints_demo"
 path = "examples/api_endpoints_demo.rs"
 
-[[example]]
-name = "full_system_demo"
-path = "examples/full_system_demo.rs"
+# Missing file - disabled
+# [[example]]
+# name = "full_system_demo"
+# path = "examples/full_system_demo.rs"
 
 # Temporarily disabled examples that need import fixes
 # [[example]]

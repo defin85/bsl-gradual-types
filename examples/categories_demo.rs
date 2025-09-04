@@ -39,7 +39,7 @@ fn main() -> Result<()> {
             println!("\n📋 Типы в категории '{}':", category.name);
 
             let mut types_in_category = Vec::new();
-            for (path, node) in &database.nodes {
+            for (_path, node) in &database.nodes {
                 if let SyntaxNode::Type(type_info) = node {
                     if type_info.identity.category_path == category.name {
                         types_in_category.push(&type_info.identity.russian_name);

@@ -1,7 +1,6 @@
 //! Application layer (Phase 4: API Unification)
 //! Unified TypeSystemService as single entry point for all clients
 
-pub mod documentation_service;
 pub mod type_system_service;
 
 // === Phase 4: Unified API ===

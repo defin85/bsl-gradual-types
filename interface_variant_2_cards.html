@@ -1,0 +1,383 @@
+<!-- BSL Type System - Card-Based Type Explorer -->
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BSL Type Explorer - Card View</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .search-bar {
+            max-width: 600px;
+            margin: 0 auto 40px;
+            position: relative;
+        }
+
+        .search-bar input {
+            width: 100%;
+            padding: 15px 50px 15px 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 25px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s ease;
+        }
+
+        .search-bar input:focus {
+            border-color: #007bff;
+        }
+
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 25px;
+        }
+
+        .type-card {
+            background: white;
+            border-radius: 16px;
+            padding: 25px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            border-left: 6px solid;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .type-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+        }
+
+        .card-known {
+            border-left-color: #28a745;
+        }
+
+        .card-inferred {
+            border-left-color: #ffc107;
+        }
+
+        .card-unknown {
+            border-left-color: #dc3545;
+        }
+
+        .type-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .type-name {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .certainty-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: bold;
+            color: white;
+            margin-left: auto;
+        }
+
+        .badge-known {
+            background: #28a745;
+        }
+
+        .badge-inferred {
+            background: #ffc107;
+        }
+
+        .badge-unknown {
+            background: #dc3545;
+        }
+
+        .type-details {
+            margin-bottom: 20px;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #f1f3f4;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #6c757d;
+        }
+
+        .detail-value {
+            color: #2c3e50;
+        }
+
+        .facets-section {
+            margin-bottom: 20px;
+        }
+
+        .facet-tag {
+            display: inline-block;
+            padding: 4px 10px;
+            margin: 3px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 500;
+            color: white;
+        }
+
+        .facet-manager {
+            background: #007bff;
+        }
+
+        .facet-object {
+            background: #28a745;
+        }
+
+        .facet-reference {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .facet-collection {
+            background: #17a2b8;
+        }
+
+        .facet-metadata {
+            background: #6f42c1;
+        }
+
+        .union-types {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+
+        .union-type {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .weight-bar {
+            width: 100px;
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-left: 15px;
+        }
+
+        .weight-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #007bff, #0056b3);
+            transition: width 0.5s ease;
+        }
+
+        .flow-sensitive {
+            background: linear-gradient(45deg, #ff6b6b, #feca57);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .flow-step {
+            display: inline-block;
+            padding: 4px 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            margin-right: 8px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🃏 BSL Type Explorer</h1>
+            <p>Card-Based Type Visualization with Facets & Gradual Typing</p>
+        </div>
+
+        <div class="search-bar">
+            <input type="text" placeholder="Поиск типов... (например: Массив, Справочники, Строка)">
+        </div>
+
+        <div class="cards-grid">
+            <!-- Карточка 1: Platform Type с фасетами -->
+            <div class="type-card card-known">
+                <div class="type-header">
+                    <div class="type-name">Массив (Array)</div>
+                    <div class="certainty-badge badge-known">Known 100%</div>
+                </div>
+
+                <div class="type-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Категория:</span>
+                        <span class="detail-value">Platform Type</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Источник:</span>
+                        <span class="detail-value">Static Analysis</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Методы:</span>
+                        <span class="detail-value">15 методов</span>
+                    </div>
+                </div>
+
+                <div class="facets-section">
+                    <strong>Доступные фасеты:</strong><br>
+                    <span class="facet-tag facet-object">Object</span>
+                    <span class="facet-tag facet-collection">Collection</span>
+                </div>
+
+                <div style="background: #e8f5e8; padding: 10px; border-radius: 6px;">
+                    <small><strong>Популярные методы:</strong> Добавить(), Удалить(), Количество(), Найти()</small>
+                </div>
+            </div>
+
+            <!-- Карточка 2: Configuration Type -->
+            <div class="type-card card-known">
+                <div class="type-header">
+                    <div class="type-name">Справочники.Номенклатура</div>
+                    <div class="certainty-badge badge-known">Known 100%</div>
+                </div>
+
+                <div class="type-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Категория:</span>
+                        <span class="detail-value">Configuration Type</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Вид:</span>
+                        <span class="detail-value">Справочник</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Реквизиты:</span>
+                        <span class="detail-value">8 реквизитов</span>
+                    </div>
+                </div>
+
+                <div class="facets-section">
+                    <strong>Активные фасеты:</strong><br>
+                    <span class="facet-tag facet-manager">Manager</span>
+                    <span class="facet-tag facet-reference">Reference</span>
+                    <span class="facet-tag facet-object">Object</span>
+                    <span class="facet-tag facet-metadata">Metadata</span>
+                </div>
+
+                <div style="background: #fff3cd; padding: 10px; border-radius: 6px; border-left: 3px solid #ffc107;">
+                    <small><strong>1C Специфика:</strong> Иерархический справочник с поддержкой групп</small>
+                </div>
+            </div>
+
+            <!-- Карточка 3: Union Type -->
+            <div class="type-card card-inferred">
+                <div class="type-header">
+                    <div class="type-name">РезультатОперации</div>
+                    <div class="certainty-badge badge-inferred">Inferred 85%</div>
+                </div>
+
+                <div class="type-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Категория:</span>
+                        <span class="detail-value">Union Type</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Источник:</span>
+                        <span class="detail-value">Flow Analysis</span>
+                    </div>
+                </div>
+
+                <div class="union-types">
+                    <strong>Возможные типы:</strong>
+                    <div class="union-type">
+                        <span>Булево</span>
+                        <div class="weight-bar">
+                            <div class="weight-fill" style="width: 70%"></div>
+                        </div>
+                        <span>70%</span>
+                    </div>
+                    <div class="union-type">
+                        <span>Неопределено</span>
+                        <div class="weight-bar">
+                            <div class="weight-fill" style="width: 30%"></div>
+                        </div>
+                        <span>30%</span>
+                    </div>
+                </div>
+
+                <div class="flow-sensitive">
+                    <strong>🔄 Flow-Sensitive Analysis:</strong><br>
+                    <span class="flow-step">Init: Неопределено</span>
+                    <span class="flow-step">Check: Булево</span>
+                    <span class="flow-step">Final: Булево</span>
+                </div>
+            </div>
+
+            <!-- Карточка 4: Dynamic Type -->
+            <div class="type-card card-unknown">
+                <div class="type-header">
+                    <div class="type-name">ДинамическийОбъект</div>
+                    <div class="certainty-badge badge-unknown">Unknown</div>
+                </div>
+
+                <div class="type-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Категория:</span>
+                        <span class="detail-value">Dynamic Type</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Источник:</span>
+                        <span class="detail-value">Runtime</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Контракт:</span>
+                        <span class="detail-value">Runtime Validation</span>
+                    </div>
+                </div>
+
+                <div style="background: #f8d7da; padding: 10px; border-radius: 6px; border-left: 3px solid #dc3545;">
+                    <small><strong>⚠️ Требует runtime проверки:</strong> Тип определяется во время выполнения</small>
+                </div>
+
+                <div style="background: #d1ecf1; padding: 10px; border-radius: 6px; margin-top: 10px;">
+                    <small><strong>💡 Рекомендация:</strong> Добавить явную типизацию или контракты</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

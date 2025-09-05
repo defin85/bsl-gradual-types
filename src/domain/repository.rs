@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::RwLock;
 
 /// Элемент автодополнения (совместимый с LSP)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct CompletionItem {
     pub label: String,
     pub kind: CompletionKind,
@@ -54,7 +54,7 @@ impl CompletionItem {
 }
 
 /// Тип элемента автодополнения
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub enum CompletionKind {
     Text,
     Method,

@@ -55,9 +55,6 @@ tower-lsp = "0.20"
 lsp-types = "0.95"
 url = "2.5"
 
-# Web server support
-warp = "0.3"
-
 # HTML parsing (for syntax helper)
 scraper = "0.18"
 zip = "0.6"
@@ -79,6 +76,19 @@ num_cpus = "1.17.0"
 # Optional ML support (for future)
 # candle = { version = "0.3", optional = true }
 
+# Leptos web UI (условные зависимости)
+leptos = { version = "0.6", features = ["csr"], optional = true }
+leptos_meta = { version = "0.6", features = ["csr"], optional = true }
+leptos_router = { version = "0.6", features = ["csr"], optional = true }
+leptos_axum = { version = "0.6", optional = true }
+axum = { version = "0.7", optional = true }
+tower = { version = "0.4", optional = true }
+tower-http = { version = "0.5", features = ["fs"], optional = true }
+gloo-net = { version = "0.5", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+log = { version = "0.4", optional = true }
+
 [dev-dependencies]
 criterion = "0.5"
 pretty_assertions = "1.4"
@@ -96,10 +106,9 @@ path = "src/bin/lsp_server.rs"
 name = "type-check"
 path = "src/bin/type_check.rs"
 
-# Note: web_server.rs temporarily disabled due to architecture migration
-# [[bin]]
-# name = "bsl-web-server"
-# path = "src/bin/web_server.rs"
+[[bin]]
+name = "web-server"
+path = "src/bin/web_server.rs"
 
 # Examples
 [[example]]
@@ -114,12 +123,20 @@ path = "examples/categories_demo.rs"
 name = "api_endpoints_demo"
 path = "examples/api_endpoints_demo.rs"
 
-# Missing file - disabled
+# Временно отключенные примеры из-за миграции архитектуры
 # [[example]]
 # name = "full_system_demo"
 # path = "examples/full_system_demo.rs"
 
-# Temporarily disabled examples that need import fixes
+# Features
+[features]
+default = ["lsp", "mcp"]
+lsp = []
+mcp = []
+ml-predictions = []  # Future feature
+web-ui = ["leptos", "leptos_meta", "leptos_router", "leptos_axum", "axum", "tower", "tower-http", "gloo-net", "wasm-bindgen", "console_error_panic_hook", "log"]
+
+# Временно отключенные примеры из-за необходимости исправления импортов
 # [[example]]
 # name = "query_demo"
 # path = "examples/query_demo.rs"
@@ -168,8 +185,10 @@ codegen-units = 1
 inherits = "dev"
 opt-level = 1
 
-[features]
-default = ["lsp", "mcp"]
-lsp = []
-mcp = []
-ml-predictions = []  # Future feature
+# Leptos configuration  
+[package.metadata.leptos]
+output-name = "bsl-type-system"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+env = "DEV"
+bin-features = ["web-ui"]

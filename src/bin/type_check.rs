@@ -1,23 +1,12 @@
-//! Simple CLI for testing type resolution - MIGRATED TO SystemCoordinator
+//! Enhanced CLI for BSL type checking - Uses SystemCoordinator + new CLI layer
 
 use bsl_gradual_types::system::SystemCoordinator;
+use bsl_gradual_types::presentation::cli::{TypeCheckArgs, CliFormatter};
 use clap::Parser;
 use tracing_subscriber;
 
-#[derive(Parser, Debug)]
-#[command(name = "type-check")]
-#[command(about = "BSL Type Checker - MIGRATED to SystemCoordinator")]
-struct Args {
-    /// File to analyze
-    file: String,
-
-    /// Verbose output
-    #[arg(short, long)]
-    verbose: bool,
-}
-
 fn main() {
-    let args = Args::parse();
+    let args = TypeCheckArgs::parse();
 
     // Инициализируем логирование если включен verbose режим
     if args.verbose {

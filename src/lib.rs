@@ -15,7 +15,6 @@ pub mod system;
 pub use domain::types;
 pub use domain::resolution_service::TypeResolver;
 pub use application::TypeSystemService; // CLEANUP: unified API
-pub use application::documentation_service::DocumentationService;
 pub use parsing::bsl::{BslParser, Expression, Statement};
 
 /// Version of the type system

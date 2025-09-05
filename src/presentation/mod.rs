@@ -1,11 +1,17 @@
-//! Presentation layer (flat structure)  
+//! Presentation layer - organized by interface type
 //! Protocol adapters and UI components
 
-pub mod code_actions;
-pub mod lsp_enhanced;
-pub mod position;
-pub mod type_hints;
-pub mod web_ui;
+// LSP interface components
+pub mod lsp;
+
+// Web interface components  
+pub mod web;
+
+// CLI interface components
+pub mod cli;
+
+// Re-exports for backward compatibility
+pub use lsp::{enhanced, code_actions, type_hints, position};
 
 /// Фильтры для поиска
 #[derive(Debug, Clone)]

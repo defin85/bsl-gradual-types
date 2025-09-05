@@ -1,0 +1,564 @@
+<!-- BSL Type System - Analytical Table View -->
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BSL Type Analysis - Table View</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f8f9fa;
+            color: #333;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 25px;
+        }
+
+        .filters-toolbar {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 25px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .filter-group label {
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #6c757d;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            padding: 8px 12px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            outline: none;
+        }
+
+        .table-container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 1200px;
+        }
+
+        th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 12px;
+            text-align: left;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        th:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+            cursor: pointer;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #f1f3f4;
+            vertical-align: top;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .type-name {
+            font-weight: bold;
+            color: #2c3e50;
+            font-size: 1.1em;
+        }
+
+        .type-category {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 500;
+            color: white;
+        }
+
+        .category-platform {
+            background: #007bff;
+        }
+
+        .category-config {
+            background: #28a745;
+        }
+
+        .category-union {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .category-dynamic {
+            background: #dc3545;
+        }
+
+        .certainty-bar {
+            width: 100px;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .certainty-fill {
+            height: 100%;
+            transition: width 0.5s ease;
+            border-radius: 10px;
+        }
+
+        .certainty-known {
+            background: linear-gradient(90deg, #28a745, #20c997);
+        }
+
+        .certainty-inferred {
+            background: linear-gradient(90deg, #ffc107, #ffb347);
+        }
+
+        .certainty-unknown {
+            background: linear-gradient(90deg, #dc3545, #e74c3c);
+        }
+
+        .certainty-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.8em;
+            font-weight: bold;
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+
+        .facets-cell {
+            max-width: 200px;
+        }
+
+        .facet-tag {
+            display: inline-block;
+            padding: 2px 6px;
+            margin: 2px;
+            border-radius: 8px;
+            font-size: 0.7em;
+            font-weight: 500;
+            color: white;
+        }
+
+        .facet-manager {
+            background: #007bff;
+        }
+
+        .facet-object {
+            background: #28a745;
+        }
+
+        .facet-reference {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .facet-collection {
+            background: #17a2b8;
+        }
+
+        .facet-metadata {
+            background: #6f42c1;
+        }
+
+        .union-display {
+            font-size: 0.9em;
+            max-width: 180px;
+        }
+
+        .union-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 3px;
+        }
+
+        .flow-indicator {
+            text-align: center;
+            font-size: 1.2em;
+        }
+
+        .flow-yes {
+            color: #28a745;
+        }
+
+        .flow-no {
+            color: #6c757d;
+        }
+
+        .actions-cell {
+            text-align: center;
+        }
+
+        .action-btn {
+            background: none;
+            border: none;
+            color: #007bff;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin: 0 2px;
+        }
+
+        .action-btn:hover {
+            background: #f8f9fa;
+        }
+
+        .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 BSL Type Analysis - Analytical Table</h1>
+            <p>Comprehensive type analysis with facets, certainty levels, and flow-sensitive data</p>
+
+            <div class="summary-stats">
+                <div class="stat-card">
+                    <div class="stat-number">87</div>
+                    <div class="stat-label">Total Types</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">76</div>
+                    <div class="stat-label">Known Types</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">8</div>
+                    <div class="stat-label">Inferred Types</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">3</div>
+                    <div class="stat-label">Unknown Types</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">23</div>
+                    <div class="stat-label">Flow-Sensitive</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="filters-toolbar">
+            <div class="filter-group">
+                <label>Категория:</label>
+                <select>
+                    <option>Все категории</option>
+                    <option>Platform Types</option>
+                    <option>Configuration Types</option>
+                    <option>Union Types</option>
+                    <option>Dynamic Types</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Уровень определённости:</label>
+                <select>
+                    <option>Все уровни</option>
+                    <option>Known (100%)</option>
+                    <option>Inferred (50-99%)</option>
+                    <option>Unknown (0-49%)</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Фасеты:</label>
+                <select>
+                    <option>Все фасеты</option>
+                    <option>Manager</option>
+                    <option>Object</option>
+                    <option>Reference</option>
+                    <option>Collection</option>
+                    <option>Metadata</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Поиск:</label>
+                <input type="text" placeholder="Имя типа...">
+            </div>
+
+            <div class="filter-group">
+                <label>Flow-Sensitive:</label>
+                <select>
+                    <option>Все</option>
+                    <option>Только Flow-Sensitive</option>
+                    <option>Static Only</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Тип</th>
+                            <th>Категория</th>
+                            <th>Определённость</th>
+                            <th>Фасеты</th>
+                            <th>Union Types</th>
+                            <th>Flow</th>
+                            <th>Источник</th>
+                            <th>Методы/Свойства</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>
+                                <div class="type-name">Массив</div>
+                                <small style="color: #6c757d;">Array</small>
+                            </td>
+                            <td>
+                                <span class="type-category category-platform">Platform</span>
+                            </td>
+                            <td>
+                                <div class="certainty-bar">
+                                    <div class="certainty-fill certainty-known" style="width: 100%"></div>
+                                    <div class="certainty-text">100%</div>
+                                </div>
+                            </td>
+                            <td class="facets-cell">
+                                <span class="facet-tag facet-object">Object</span>
+                                <span class="facet-tag facet-collection">Collection</span>
+                            </td>
+                            <td>-</td>
+                            <td class="flow-indicator">
+                                <span class="flow-no">✗</span>
+                            </td>
+                            <td>Static Analysis</td>
+                            <td>15 методов</td>
+                            <td class="actions-cell">
+                                <button class="action-btn">👁️</button>
+                                <button class="action-btn">📋</button>
+                                <button class="action-btn">🔗</button>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td>
+                                <div class="type-name">Справочники.Номенклатура</div>
+                                <small style="color: #6c757d;">Catalogs.Items</small>
+                            </td>
+                            <td>
+                                <span class="type-category category-config">Config</span>
+                            </td>
+                            <td>
+                                <div class="certainty-bar">
+                                    <div class="certainty-fill certainty-known" style="width: 100%"></div>
+                                    <div class="certainty-text">100%</div>
+                                </div>
+                            </td>
+                            <td class="facets-cell">
+                                <span class="facet-tag facet-manager">Manager</span>
+                                <span class="facet-tag facet-reference">Reference</span>
+                                <span class="facet-tag facet-object">Object</span>
+                                <span class="facet-tag facet-metadata">Metadata</span>
+                            </td>
+                            <td>-</td>
+                            <td class="flow-indicator">
+                                <span class="flow-no">✗</span>
+                            </td>
+                            <td>Configuration</td>
+                            <td>8 реквизитов, 12 методов</td>
+                            <td class="actions-cell">
+                                <button class="action-btn">👁️</button>
+                                <button class="action-btn">📋</button>
+                                <button class="action-btn">🔗</button>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td>
+                                <div class="type-name">РезультатОперации</div>
+                                <small style="color: #6c757d;">OperationResult</small>
+                            </td>
+                            <td>
+                                <span class="type-category category-union">Union</span>
+                            </td>
+                            <td>
+                                <div class="certainty-bar">
+                                    <div class="certainty-fill certainty-inferred" style="width: 85%"></div>
+                                    <div class="certainty-text">85%</div>
+                                </div>
+                            </td>
+                            <td class="facets-cell">
+                                <span class="facet-tag facet-object">Object</span>
+                            </td>
+                            <td>
+                                <div class="union-display">
+                                    <div class="union-item">
+                                        <span>Булево</span>
+                                        <span>70%</span>
+                                    </div>
+                                    <div class="union-item">
+                                        <span>Неопределено</span>
+                                        <span>30%</span>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="flow-indicator">
+                                <span class="flow-yes">✓</span>
+                            </td>
+                            <td>Flow Analysis</td>
+                            <td>Зависит от контекста</td>
+                            <td class="actions-cell">
+                                <button class="action-btn">👁️</button>
+                                <button class="action-btn">📋</button>
+                                <button class="action-btn">🔗</button>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td>
+                                <div class="type-name">ДинамическийОбъект</div>
+                                <small style="color: #6c757d;">DynamicObject</small>
+                            </td>
+                            <td>
+                                <span class="type-category category-dynamic">Dynamic</span>
+                            </td>
+                            <td>
+                                <div class="certainty-bar">
+                                    <div class="certainty-fill certainty-unknown" style="width: 30%"></div>
+                                    <div class="certainty-text">30%</div>
+                                </div>
+                            </td>
+                            <td class="facets-cell">
+                                <span class="facet-tag facet-object">Object</span>
+                            </td>
+                            <td>
+                                <div class="union-display">
+                                    <div class="union-item">
+                                        <span>Структура</span>
+                                        <span>60%</span>
+                                    </div>
+                                    <div class="union-item">
+                                        <span>ДанныеФормы</span>
+                                        <span>40%</span>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="flow-indicator">
+                                <span class="flow-yes">✓</span>
+                            </td>
+                            <td>Runtime</td>
+                            <td>Runtime Validation</td>
+                            <td class="actions-cell">
+                                <button class="action-btn">👁️</button>
+                                <button class="action-btn">📋</button>
+                                <button class="action-btn">🔗</button>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td>
+                                <div class="type-name">Строка</div>
+                                <small style="color: #6c757d;">String</small>
+                            </td>
+                            <td>
+                                <span class="type-category category-platform">Platform</span>
+                            </td>
+                            <td>
+                                <div class="certainty-bar">
+                                    <div class="certainty-fill certainty-known" style="width: 100%"></div>
+                                    <div class="certainty-text">100%</div>
+                                </div>
+                            </td>
+                            <td class="facets-cell">
+                                <span class="facet-tag facet-object">Object</span>
+                            </td>
+                            <td>-</td>
+                            <td class="flow-indicator">
+                                <span class="flow-no">✗</span>
+                            </td>
+                            <td>Static Analysis</td>
+                            <td>20+ методов</td>
+                            <td class="actions-cell">
+                                <button class="action-btn">👁️</button>
+                                <button class="action-btn">📋</button>
+                                <button class="action-btn">🔗</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

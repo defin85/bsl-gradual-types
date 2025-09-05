@@ -2,6 +2,7 @@
 
 #[cfg(feature = "web-ui")]
 use axum::{
+    response::Html,
     routing::get,
     Router,
     Json,
@@ -34,8 +35,8 @@ async fn main() {
 }
 
 #[cfg(feature = "web-ui")]
-async fn index() -> &'static str {
-    r#"
+async fn index() -> Html<&'static str> {
+    Html(r#"
 <!DOCTYPE html>
 <html>
 <head>
@@ -63,19 +64,39 @@ async fn index() -> &'static str {
     </div>
 </body>
 </html>
-    "#
+    "#)
 }
 
 #[cfg(feature = "web-ui")]
 async fn get_metrics() -> Json<Value> {
     // Заглушка для метрик - в реальности здесь будет вызов SystemCoordinator
     Json(json!({
-        "total_types": 87,
         "known_types": 76,
         "inferred_types": 8,
         "unknown_types": 3,
-        "flow_sensitive_types": 23,
-        "status": "ok"
+        "platform_types": [
+            {"name": "Массив", "description": "95% certainty"},
+            {"name": "Соответствие", "description": "90% certainty"},
+            {"name": "СписокЗначений", "description": "98% certainty"}
+        ],
+        "config_types": [
+            {"name": "Справочники.Номенклатура", "description": "Known"},
+            {"name": "Документы.ПоступлениеТоваров", "description": "Known"}
+        ],
+        "union_types": [
+            {"name": "ТипЗначения", "description": "Строка (60%) | Число (40%)"},
+            {"name": "РезультатОбработки", "description": "Булево (70%) | Неопределено (30%)"}
+        ],
+        "flow_sensitive_types": [
+            {"name": "Переменная1", "description": "Неопределено → Строка"},
+            {"name": "Результат", "description": "Неопределено → Число → Строка"}
+        ],
+        "health": {
+            "components_active": 6,
+            "components_total": 8,
+            "cache_hit_rate": 94,
+            "analysis_speed_ms": 125
+        }
     }))
 }
 

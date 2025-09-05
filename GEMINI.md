@@ -10,15 +10,74 @@
 
 ## Архитектура
 
-Проект имеет сложную, хорошо документированную многоуровневую архитектуру, описанную в `docs/architecture_layers_diagram.md`. Она включает в себя следующие слои:
-- **System Layer**: Координация, кеширование и управление производительностью.
-- **Presentation Layer**: Внешние интерфейсы (LSP, Web, CLI).
-- **Application Layer**: Бизнес-логика для конкретных сервисов (LSP, Web).
-- **Domain Layer**: Ядро бизнес-логики, включая разрешение типов, анализ и контракты.
-- **Infrastructure Layer**: Сквозные утилиты (парсеры, утилиты файловой системы).
-- **Data Layer**: Управление данными, репозитории и загрузчики.
+Проект использует упрощенную, "правильно подобранную" (right-sized) архитектуру, основные принципы которой изложены в `docs/simplified_architecture.md`. Этот подход фокусируется на необходимых компонентах, избегая излишней сложности.
 
-Архитектура спроектирована с учетом принципов Clean Architecture, SOLID и использует DI (Dependency Injection) для слабой связности компонентов.
+### Основные компоненты:
+- **SystemCoordinator**: Единая точка координации, управляющая жизненным циклом и зависимостями.
+- **AnalysisCache**: Простое кеширование в памяти (LRU) для результатов анализа.
+- **ParserCoordinator**: Координатор парсинга, использующий `TreeSitter` как основной парсер и `Regex` в качестве запасного варианта.
+- **BasicObservability**: Обеспечивает базовые возможности для логирования и сбора метрик.
+- **TypeSystemService**: Высокоуровневый API, предоставляющий единый интерфейс для внешних клиентов (LSP, Web, CLI).
+- **TypeResolver**: Ядро системы, отвечающее за анализ и разрешение типов.
+- **TypeRepository**: Абстракция для хранения и получения данных о типах.
+
+### Диаграмма упрощенной архитектуры:
+```mermaid
+graph TB
+    subgraph "🎯 System Layer (Simplified)"
+        SystemCoordinator["🎯 SystemCoordinator<br/>- Single coordination point<br/>- DI management<br/>- Lifecycle control"]
+        
+        AnalysisCache["💾 AnalysisCache<br/>- Simple LRU in-memory<br/>- File hash keys<br/>- TTL eviction"]
+        
+        ParserCoordinator["🎨 ParserCoordinator<br/>- TreeSitter (primary)<br/>- Regex fallback<br/>- Simple selection logic"]
+        
+        BasicObservability["📊 BasicObservability<br/>- Structured logging<br/>- Basic metrics<br/>- Health endpoint"]
+    end
+
+    subgraph "🌐 Presentation Layer"
+        LSPServer["🔌 LSP Server<br/>- Language Server Protocol<br/>- VS Code integration"]
+        
+        WebInterface["🌐 Web Interface<br/>- Simple HTML dashboard<br/>- Type visualization"]
+        
+        CLITool["⚙️ CLI Tool<br/>- Command line interface<br/>- Batch analysis"]
+    end
+
+    subgraph "🔧 Application Layer" 
+        TypeSystemService["🎭 TypeSystemService<br/>- High-level API<br/>- Business operations<br/>- Unified interface"]
+    end
+
+    subgraph "🧠 Domain Layer"
+        TypeResolver["🧠 TypeResolver<br/>- Core type analysis<br/>- Resolution algorithms<br/>- Business logic"]
+        
+        TypeRepository["📚 TypeRepository<br/>- Type storage<br/>- Query interface<br/>- Data abstraction"]
+    end
+
+    subgraph "💾 Data Layer"
+        PlatformTypes["📄 Platform Types<br/>- 1C platform metadata<br/>- HTML parsing<br/>- Type definitions"]
+        
+        ConfigData["⚙️ Configuration<br/>- XML metadata<br/>- Settings<br/>- User preferences"]
+    end
+
+    %% Simple flow
+    SystemCoordinator --> AnalysisCache
+    SystemCoordinator --> ParserCoordinator  
+    SystemCoordinator --> BasicObservability
+    SystemCoordinator --> TypeSystemService
+    
+    LSPServer --> TypeSystemService
+    WebInterface --> TypeSystemService
+    CLITool --> TypeSystemService
+    
+    TypeSystemService --> AnalysisCache
+    TypeSystemService --> TypeResolver
+    
+    TypeResolver --> TypeRepository
+    TypeRepository --> PlatformTypes
+    TypeRepository --> ConfigData
+    
+    ParserCoordinator --> TypeResolver
+```
+
 
 ## Ключевые технологии
 

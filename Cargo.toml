@@ -12,6 +12,11 @@ categories = ["development-tools", "parser-implementations"]
 [workspace]
 members = []
 
+[lib]
+name = "bsl_gradual_types_lib"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 # Core dependencies
 anyhow = "1.0"
@@ -133,8 +138,8 @@ path = "examples/api_endpoints_demo.rs"
 default = ["lsp", "mcp"]
 lsp = []
 mcp = []
-ml-predictions = []  # Future feature
-web-ui = ["leptos", "leptos_meta", "leptos_router", "leptos_axum", "axum", "tower", "tower-http", "gloo-net", "wasm-bindgen", "console_error_panic_hook", "log"]
+ssr = ["leptos/ssr", "leptos_meta/ssr", "leptos_router/ssr", "leptos_axum", "axum", "tokio", "tower", "tower-http", "log"]
+web-ui = ["leptos", "leptos_meta", "leptos_router", "gloo-net", "wasm-bindgen", "console_error_panic_hook", "log"]
 
 # Временно отключенные примеры из-за необходимости исправления импортов
 # [[example]]

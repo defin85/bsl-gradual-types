@@ -4,156 +4,96 @@
 use leptos::*;
 
 #[cfg(feature = "web-ui")]
-use crate::presentation::web::components::api::{ApiClient, DashboardMetrics};
+use crate::presentation::web::components::api::{ApiClient, DashboardMetrics, CategoryType, ArchitectureHealth};
+
 #[cfg(feature = "web-ui")]
 use crate::presentation::web::components::common::MetricCard;
 
 #[cfg(feature = "web-ui")]
 #[component]
 pub fn Dashboard() -> impl IntoView {
-    let (metrics, set_metrics) = create_signal(None::<DashboardMetrics>);
-    let (loading, set_loading) = create_signal(true);
-    
-    // Загружаем данные при монтировании
-    create_effect(move |_| {
-        spawn_local(async move {
-            match ApiClient::get_dashboard_metrics().await {
-                Ok(data) => {
-                    set_metrics.set(Some(data));
-                    set_loading.set(false);
-                },
-                Err(e) => {
-                    log::error!("Failed to load metrics: {}", e);
-                    set_loading.set(false);
-                }
+    let metrics = create_resource(
+        || (),
+        |_| async move { ApiClient::get_dashboard_metrics().await }
+    );
+
+    let metrics_percentages = create_memo(move |_| {
+        metrics.get().and_then(|res| res.ok()).map(|m| {
+            let total = m.known_types + m.inferred_types + m.unknown_types;
+            if total == 0 {
+                return (0, 0, 0);
             }
-        });
+            let known_percent = (m.known_types * 100) / total;
+            let inferred_percent = (m.inferred_types * 100) / total;
+            let unknown_percent = 100 - known_percent - inferred_percent;
+            (known_percent, inferred_percent, unknown_percent)
+        })
     });
-    
+
     view! {
-        <div class="dashboard">
-            <div class="dashboard-header">
-                <h1>"🎯 BSL Type System Dashboard"</h1>
-                <p>"Gradual Typing with Facets & Flow-Sensitive Analysis"</p>
+        <div class="container">
+            <div class="header">
+                <h1>"🎯 BSL Gradual Type System"</h1>
+                <p>"<strong>Executive Dashboard</strong> - Overview of Type Analysis"</p>
+                <p>"Simplified Architecture | Real-time Type Intelligence"</p>
             </div>
-            
-            {move || {
-                if loading.get() {
-                    view! {
-                        <div class="loading">
-                            <div class="spinner"></div>
-                            <p>"Загрузка метрик..."</p>
-                        </div>
-                    }.into_view()
-                } else if let Some(m) = metrics.get() {
-                    view! {
-                        <div class="metrics-grid">
-                            <MetricCard
-                                title="Total Types"
-                                value=m.total_types
-                                icon="📊"
-                                color="blue"
-                            />
-                            <MetricCard
-                                title="Known Types"
-                                value=m.known_types
-                                icon="✅"
-                                color="green"
-                            />
-                            <MetricCard
-                                title="Inferred Types"
-                                value=m.inferred_types
-                                icon="🔍"
-                                color="yellow"
-                            />
-                            <MetricCard
-                                title="Unknown Types"
-                                value=m.unknown_types
-                                icon="❓"
-                                color="red"
-                            />
-                            <MetricCard
-                                title="Flow-Sensitive"
-                                value=m.flow_sensitive_types
-                                icon="🔄"
-                                color="purple"
-                            />
-                        </div>
-                        
-                        <TypeOverview />
-                        <RecentActivity />
-                    }.into_view()
-                } else {
-                    view! {
-                        <div class="error">
-                            <p>"Ошибка загрузки данных"</p>
-                        </div>
-                    }.into_view()
-                }
-            }}
-            
+
+            <Suspense
+                fallback=move || view! { <div class="loading">"Загрузка..."</div> }
+            >
+                {move || {
+                    metrics.get().map(|res| match res {
+                        Ok(m) => {
+                            let (known, inferred, unknown) = metrics_percentages.get().unwrap_or((0,0,0));
+                            view! {
+                                <div>
+                                    <div class="dashboard-grid">
+                                        <MetricCard title="Known Types" value=known icon="✅" color="green" />
+                                        <MetricCard title="Inferred Types" value=inferred icon="🔍" color="yellow" />
+                                        <MetricCard title="Unknown Types" value=unknown icon="❓" color="red" />
+                                    </div>
+                                    <TypeCategories metrics=m.clone() />
+                                    <ArchitectureHealth health=m.health.clone() />
+                                </div>
+                            }.into_view()
+                        },
+                        Err(_) => view! { <div class="error">"Ошибка загрузки данных"</div> }.into_view()
+                    })
+                }}
+            </Suspense>
+
             <style>
-                ".dashboard {
-                    max-width: 1400px;
-                    margin: 0 auto;
+                {
+                    "body {
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    }
+                    .container {
+                        max-width: 1400px;
+                        margin: 0 auto;
+                        padding: 20px;
+                    }
+                    .header {
+                        background: rgba(255, 255, 255, 0.95);
+                        border-radius: 12px;
+                        padding: 30px;
+                        margin-bottom: 30px;
+                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+                        text-align: center;
+                    }
+                    .dashboard-grid {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr 1fr;
+                        gap: 20px;
+                        margin-bottom: 30px;
+                    }
+                    .loading, .error {
+                        text-align: center;
+                        padding: 50px;
+                        background: white;
+                        border-radius: 12px;
+                        color: black;
+                    }"
                 }
-                
-                .dashboard-header {
-                    text-align: center;
-                    margin-bottom: 40px;
-                    padding: 30px;
-                    background: white;
-                    border-radius: 12px;
-                    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-                }
-                
-                .dashboard-header h1 {
-                    font-size: 2.5em;
-                    margin-bottom: 10px;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
-                }
-                
-                .dashboard-header p {
-                    color: #6c757d;
-                    font-size: 1.2em;
-                }
-                
-                .metrics-grid {
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-                    gap: 20px;
-                    margin-bottom: 40px;
-                }
-                
-                .loading {
-                    text-align: center;
-                    padding: 60px;
-                }
-                
-                .spinner {
-                    width: 40px;
-                    height: 40px;
-                    border: 4px solid #f3f3f3;
-                    border-top: 4px solid #007bff;
-                    border-radius: 50%;
-                    animation: spin 1s linear infinite;
-                    margin: 0 auto 20px;
-                }
-                
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-                
-                .error {
-                    text-align: center;
-                    padding: 40px;
-                    background: #f8d7da;
-                    border-radius: 8px;
-                    color: #721c24;
-                }"
             </style>
         </div>
     }
@@ -161,64 +101,32 @@ pub fn Dashboard() -> impl IntoView {
 
 #[cfg(feature = "web-ui")]
 #[component]
-fn TypeOverview() -> impl IntoView {
+fn TypeCategories(metrics: DashboardMetrics) -> impl IntoView {
     view! {
         <div class="type-overview">
             <h2>"🎭 Type Categories"</h2>
-            <div class="overview-grid">
-                <div class="overview-section">
-                    <h3>"🔧 Platform Types"</h3>
-                    <p>"Массив, Строка, Число, Булево"</p>
-                </div>
-                <div class="overview-section">
-                    <h3>"⚙️ Configuration Types"</h3>
-                    <p>"Справочники, Документы, Регистры"</p>
-                </div>
-                <div class="overview-section">
-                    <h3>"🎯 Union Types"</h3>
-                    <p>"Градуальная типизация с весами"</p>
-                </div>
-                <div class="overview-section">
-                    <h3>"🔄 Flow-Sensitive"</h3>
-                    <p>"Типы, изменяющиеся по потоку"</p>
-                </div>
+            <div class="categories-grid">
+                <CategoryColumn title="🔧 Platform Types" types=metrics.platform_types />
+                <CategoryColumn title="⚙️ Configuration Types" types=metrics.config_types />
+                <CategoryColumn title="🎯 Union Types" types=metrics.union_types />
+                <CategoryColumn title="🔄 Flow-Sensitive Analysis" types=metrics.flow_sensitive_types />
             </div>
-            
             <style>
-                ".type-overview {
-                    background: white;
-                    padding: 30px;
-                    border-radius: 12px;
-                    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-                    margin-bottom: 30px;
+                {
+                    ".type-overview {
+                        background: rgba(255, 255, 255, 0.95);
+                        border-radius: 12px;
+                        padding: 30px;
+                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+                        margin-bottom: 30px;
+                    }
+                    .categories-grid {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 30px;
+                        margin-top: 20px;
+                    }"
                 }
-                
-                .type-overview h2 {
-                    margin-bottom: 20px;
-                    color: #2c3e50;
-                }
-                
-                .overview-grid {
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-                    gap: 20px;
-                }
-                
-                .overview-section {
-                    padding: 20px;
-                    background: #f8f9fa;
-                    border-radius: 8px;
-                    border-left: 4px solid #007bff;
-                }
-                
-                .overview-section h3 {
-                    margin-bottom: 10px;
-                    color: #495057;
-                }
-                
-                .overview-section p {
-                    color: #6c757d;
-                }"
             </style>
         </div>
     }
@@ -226,60 +134,56 @@ fn TypeOverview() -> impl IntoView {
 
 #[cfg(feature = "web-ui")]
 #[component]
-fn RecentActivity() -> impl IntoView {
+fn CategoryColumn(title: &'static str, types: Vec<CategoryType>) -> impl IntoView {
     view! {
-        <div class="recent-activity">
-            <h2>"📈 Architecture Health"</h2>
-            <div class="health-stats">
-                <div class="health-item">
-                    <span class="health-label">"Components:"</span>
-                    <span class="health-value">"6/8 active"</span>
-                </div>
-                <div class="health-item">
-                    <span class="health-label">"Cache Hit Rate:"</span>
-                    <span class="health-value">"94%"</span>
-                </div>
-                <div class="health-item">
-                    <span class="health-label">"Analysis Speed:"</span>
-                    <span class="health-value">"125ms avg"</span>
-                </div>
-            </div>
-            
+        <div>
+            <h3>{title}</h3>
+            {types.into_iter().map(|t| view! {
+                <p>
+                    <span class="facet-indicator"></span>
+                    <strong>{t.name}</strong>" - "{t.description}
+                </p>
+            }).collect_view()}
             <style>
-                ".recent-activity {
-                    background: white;
-                    padding: 30px;
-                    border-radius: 12px;
-                    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-                }
-                
-                .recent-activity h2 {
-                    margin-bottom: 20px;
-                    color: #2c3e50;
-                }
-                
-                .health-stats {
-                    display: flex;
-                    gap: 30px;
-                    flex-wrap: wrap;
-                }
-                
-                .health-item {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 5px;
-                }
-                
-                .health-label {
-                    color: #6c757d;
-                    font-size: 0.9em;
-                }
-                
-                .health-value {
-                    font-weight: bold;
-                    font-size: 1.2em;
-                    color: #28a745;
+            {
+                ".facet-indicator {
+                    display: inline-block;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 50%;
+                    margin-right: 8px;
+                    background: #007bff;
                 }"
+            }
+            </style>
+        </div>
+    }
+}
+
+#[cfg(feature = "web-ui")]
+#[component]
+fn ArchitectureHealth(health: ArchitectureHealth) -> impl IntoView {
+    view! {
+        <div class="health-check">
+            <h3>"🏗️ Architecture Health"</h3>
+            <p>
+                {format!(
+                    "Components: {}/{} active | Cache Hit Rate: {}% | Analysis Speed: {}ms avg",
+                    health.components_active,
+                    health.components_total,
+                    health.cache_hit_rate,
+                    health.analysis_speed_ms
+                )}
+            </p>
+            <style>
+                {
+                    ".health-check {
+                        margin-top: 30px;
+                        padding: 20px;
+                        background: #f8f9fa;
+                        border-radius: 8px;
+                    }"
+                }
             </style>
         </div>
     }

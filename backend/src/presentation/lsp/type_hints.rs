@@ -109,27 +109,19 @@ impl TypeHintsProvider {
 
             Statement::If {
                 condition,
-                then_branch,
-                else_if_branches,
-                else_branch,
+                then_body,
+                else_body,
             } => {
                 // Hints для условий
                 hints.extend(self.process_expression(condition, type_context, range));
 
                 // Рекурсивно обрабатываем ветки
-                for stmt in then_branch {
+                for stmt in then_body {
                     hints.extend(self.process_statement(stmt, type_context, range));
                 }
 
-                for (cond, branch) in else_if_branches {
-                    hints.extend(self.process_expression(cond, type_context, range));
-                    for stmt in branch {
-                        hints.extend(self.process_statement(stmt, type_context, range));
-                    }
-                }
-
-                if let Some(branch) = else_branch {
-                    for stmt in branch {
+                if let Some(else_stmts) = else_body {
+                    for stmt in else_stmts {
                         hints.extend(self.process_statement(stmt, type_context, range));
                     }
                 }
@@ -847,8 +839,7 @@ mod tests {
         let program = Program {
             statements: vec![Statement::VarDeclaration {
                 name: "stringVar".to_string(),
-                export: false,
-                value: None,
+                type_hint: None,
             }],
         };
 

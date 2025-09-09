@@ -112,16 +112,16 @@ impl IncrementalParsingManager {
                     old_end_byte: self.position_to_byte_offset(new_content, range.end),
                     new_end_byte: self.position_to_byte_offset(new_content, range.end),
                     start_position: crate::parsing::bsl::common::Position {
-                        row: range.start.line as usize,
-                        column: range.start.character as usize,
+                        line: range.start.line,
+                        column: range.start.character,
                     },
                     old_end_position: crate::parsing::bsl::common::Position {
-                        row: range.end.line as usize,
-                        column: range.end.character as usize,
+                        line: range.end.line,
+                        column: range.end.character,
                     },
                     new_end_position: crate::parsing::bsl::common::Position {
-                        row: range.end.line as usize,
-                        column: range.end.character as usize,
+                        line: range.end.line,
+                        column: range.end.character,
                     },
                 })
             })
@@ -133,12 +133,16 @@ impl IncrementalParsingManager {
                 Ok(ast) => ast,
                 Err(_) => {
                     // Fallback к полному парсингу
-                    self.parser.parse(new_content)?
+                    self.parser
+                        .parse(new_content)
+                        .map_err(|e| anyhow::anyhow!(e))?
                 }
             }
         } else {
             // Полный парсинг для новых файлов
-            self.parser.parse(new_content)?
+            self.parser
+                .parse(new_content)
+                .map_err(|e| anyhow::anyhow!(e))?
         };
 
         // Обновляем кеш

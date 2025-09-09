@@ -18,6 +18,12 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+version = "0.4.2"
+edition = "2021"
+authors = ["BSL Type System Team"]
+license = "MIT"
+
 [workspace.dependencies]
 # Core dependencies - shared across all crates
 anyhow = "1.0"
@@ -53,10 +59,29 @@ notify = "6.1"
 globset = "0.4"
 lru = "0.12"
 
+# Frontend dependencies
+leptos = { version = "0.8", features = ["csr"] }
+leptos_meta = "0.8"
+leptos_router = "0.8"
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+gloo-net = "0.5"
+web-sys = "0.3"
+
+# Backend-specific dependencies
+colored = "2.0"
+tree-sitter = "0.25"
+tempfile = "3.8"
+
 # Дополнительные зависимости
 chrono = { version = "0.4.41", features = ["serde"] }
 rayon = "1.8"
 scraper = "0.18"
+
+# Development dependencies
+criterion = "0.5"
+pretty_assertions = "1.4"
+insta = "1.34"
 
 # Internal crates (defined here for workspace reference)
 bsl-shared = { path = "shared" }
@@ -71,11 +96,11 @@ cc = "1.0"
 
 # === Development Tools ===
 [dev-dependencies]
-criterion = "0.5"
-pretty_assertions = "1.4"
-tempfile = "3.8"
-insta = "1.34"
-tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
+criterion = { workspace = true }
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+insta = { workspace = true }
+tokio = { workspace = true }
 bsl-backend = { path = "backend" }
 bsl-shared = { path = "shared" }
 

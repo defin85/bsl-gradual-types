@@ -1,6 +1,7 @@
 [build]
 target = "index.html"
 dist = "../target/site"
+no_sri = true
 
 [watch]
 watch = ["src"]

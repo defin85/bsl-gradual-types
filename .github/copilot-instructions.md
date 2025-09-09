@@ -41,6 +41,20 @@ BSL Gradual Type System is an enterprise-ready gradual typing system for the 1C:
 - **Conventions**: Integration tests in `tests/` named `*_test.rs`; unit tests in-module behind `#[cfg(test)]`.
 - **Fixtures**: Prefer deterministic fixtures in `tests/fixtures/` and `tests/test_xml/`.
 
+## Terminal Usage Guidelines
+- **Avoid Background Terminals**: Do not use `isBackground=true` for initial commands unless explicitly requested by user.
+- **Reuse Existing Terminals**: Always check existing terminal output with `get_terminal_output` before creating new terminals.
+- **Terminal Management**: 
+  - Use `get_terminal_output` to check status of known terminal IDs
+  - Get terminal IDs from context or previous command outputs
+  - Prefer short-running commands with `isBackground=false`
+- **Long-Running Processes**: Only start background processes (servers, watchers) when user explicitly requests them.
+- **Examples**:
+  - ✅ `cargo build` (short command, no background)
+  - ✅ `trunk build --release` (build command, no background)
+  - ❌ `trunk serve` (server, only if user requests it)
+  - ❌ Multiple terminals for simple commands
+
 ## Commit & Pull Request Guidelines
 - **Commits**: Follow Conventional style (`type(scope): short description`). Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`. Scopes: `core`, `parser`, `lsp`, `cli`, `vscode`, `web`, `docs`.
 - **Branches**: Use `feature/<name>` or `fix/<name>`.

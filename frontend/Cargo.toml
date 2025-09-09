@@ -1,28 +1,34 @@
 [package]
 name = "bsl-frontend"
-version = "0.4.2"
-edition = "2021"
-authors = ["BSL Type System Team"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "Web frontend for BSL Gradual Type System"
-license = "MIT"
 
 [lib]
 crate-type = ["cdylib"]
-path = "lib.rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bsl-frontend"
+path = "src/main.rs"
 
 [dependencies]
 bsl-shared = { workspace = true }
 
 # Leptos and web dependencies
-leptos = { version = "0.6", features = ["csr"] }
-leptos_meta = { version = "0.6", features = ["csr"] }
-leptos_router = { version = "0.6", features = ["csr"] }
+leptos = { workspace = true }
+leptos_meta = { workspace = true }
+leptos_router = { workspace = true }
 
 # WASM dependencies
-wasm-bindgen = "0.2"
-console_error_panic_hook = "0.1"
-gloo-net = "0.5"
+wasm-bindgen = { workspace = true }
+console_error_panic_hook = { workspace = true }
+gloo-net = { workspace = true }
+web-sys = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+urlencoding = { workspace = true }

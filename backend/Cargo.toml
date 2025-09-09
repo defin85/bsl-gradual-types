@@ -1,10 +1,10 @@
 [package]
 name = "bsl-backend"
-version = "0.4.2"
-edition = "2021"
-authors = ["BSL Type System Team"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "Backend server for BSL Gradual Type System"
-license = "MIT"
 
 [features]
 default = []
@@ -12,15 +12,15 @@ web-ui = []
 
 [lib]
 name = "bsl_backend"
-path = "lib.rs"
+path = "src/lib.rs"
 
 [[bin]]
 name = "bsl-web-server"
-path = "main.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "bsl-lsp-server"
-path = "bin/lsp_server.rs"
+path = "src/bin/lsp_server.rs"
 
 [dependencies]
 bsl-shared = { workspace = true }
@@ -78,13 +78,13 @@ chrono = { workspace = true }
 rayon = { workspace = true }
 
 # Цветной вывод
-colored = "2.0"
+colored = { workspace = true }
 
 # Tree-sitter
-tree-sitter = "0.25"
+tree-sitter = { workspace = true }
 
 # HTML parsing
 scraper = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3.8"
+tempfile = { workspace = true }

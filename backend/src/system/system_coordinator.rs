@@ -83,6 +83,11 @@ impl SystemCoordinator {
         Ok(())
     }
 
+    /// Получить сервис типов для веб-интерфейса
+    pub fn get_type_service(&self) -> Arc<TypeSystemService> {
+        self.type_service.clone()
+    }
+
     /// Получить unified API для всех интерфейсов
     pub fn type_service(&self) -> Arc<TypeSystemService> {
         self.type_service.clone()

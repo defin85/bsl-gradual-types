@@ -89,7 +89,12 @@ bsl-backend = { path = "backend" }
 bsl-frontend = { path = "frontend" }
 bsl-cli = { path = "cli" }
 
-# No [lib] section - this is now a pure workspace project
+# Dependencies for root crate (to enable re-exports for tests)
+[dependencies]
+bsl-backend = { path = "backend" }
+bsl-shared = { path = "shared" }
+
+# This is now a pure workspace project with lib support for tests
 # === Build Tools ===
 [build-dependencies]
 cc = "1.0"

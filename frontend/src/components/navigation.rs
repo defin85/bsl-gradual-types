@@ -3,6 +3,7 @@
 use leptos::prelude::*;
 
 #[component]
+#[allow(non_snake_case)]
 pub fn Navigation() -> impl IntoView {
     view! {
         <nav class="main-nav">

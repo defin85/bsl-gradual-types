@@ -437,6 +437,7 @@ impl TypeResolver {
     }
 
     /// Конвертировать RawTypeData в TypeResolution
+    #[allow(dead_code)]
     fn convert_raw_data_to_type_resolution(&self, _raw_type: &RawTypeData) -> TypeResolution {
         // TODO: Re-implement after TypeSource is moved to shared
         TypeResolution::unknown()

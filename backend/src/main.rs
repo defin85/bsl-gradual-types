@@ -1,17 +1,25 @@
 //! CSR server: serves API and static SPA (no SSR)
+
+#[cfg(feature = "web-ui")]
 use axum::{
     extract::{Query, State},
     response::{IntoResponse, Json},
     routing::get,
     Router,
 };
+#[cfg(feature = "web-ui")]
 use bsl_backend::{application::TypeSystemService, system::SystemCoordinator};
+#[cfg(feature = "web-ui")]
 use bsl_shared::domain::types::{Certainty, ResolutionResult};
+#[cfg(feature = "web-ui")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "web-ui")]
 use std::sync::Arc;
+#[cfg(feature = "web-ui")]
 use tower_http::services::{ServeDir, ServeFile};
 
 // --- DTOs for API ---
+#[cfg(feature = "web-ui")]
 #[derive(Serialize, Clone)]
 pub struct ApiMetrics {
     pub total_types: usize,
@@ -20,6 +28,7 @@ pub struct ApiMetrics {
     pub unknown_types: usize,
 }
 
+#[cfg(feature = "web-ui")]
 #[derive(Serialize, Clone)]
 pub struct ApiType {
     pub id: String,
@@ -31,27 +40,32 @@ pub struct ApiType {
     pub union_types: Option<Vec<ApiUnionType>>,
 }
 
+#[cfg(feature = "web-ui")]
 #[derive(Serialize, Clone)]
 pub struct ApiUnionType {
     pub type_name: String,
     pub weight: u8,
 }
 
+#[cfg(feature = "web-ui")]
 #[derive(Deserialize)]
 pub struct SearchQuery {
     q: String,
 }
 
+#[cfg(feature = "web-ui")]
 #[derive(Clone)]
 struct AppState {
     type_service: Arc<TypeSystemService>,
 }
 
+#[cfg(feature = "web-ui")]
 #[tokio::main]
-async fn main() {
-    // Initialize system
-    let coordinator = Arc::new(SystemCoordinator::new());
-    let type_service = coordinator.type_service();
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt::init();
+
+    let system_coord = Arc::new(SystemCoordinator::new());
+    let type_service = system_coord.get_type_service();
 
     let app_state = AppState {
         type_service: type_service.clone(),
@@ -77,8 +91,17 @@ async fn main() {
     axum::serve(listener, app.into_make_service())
         .await
         .unwrap();
+    Ok(())
 }
 
+#[cfg(not(feature = "web-ui"))]
+fn main() {
+    println!("BSL Type System - LSP only mode");
+    println!("Web UI disabled. Use --features web-ui to enable.");
+    println!("This would start the LSP server...");
+}
+
+#[cfg(feature = "web-ui")]
 async fn get_metrics(State(state): State<AppState>) -> impl IntoResponse {
     let all_types = state.type_service.get_all_platform_globals();
 
@@ -102,6 +125,7 @@ async fn get_metrics(State(state): State<AppState>) -> impl IntoResponse {
     })
 }
 
+#[cfg(feature = "web-ui")]
 async fn get_types(State(state): State<AppState>) -> impl IntoResponse {
     let all_types = state.type_service.get_all_platform_globals();
 
@@ -163,6 +187,7 @@ async fn get_types(State(state): State<AppState>) -> impl IntoResponse {
     Json(api_types)
 }
 
+#[cfg(feature = "web-ui")]
 async fn search_types(
     State(state): State<AppState>,
     Query(query): Query<SearchQuery>,

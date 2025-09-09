@@ -126,8 +126,6 @@ impl TypeHintsProvider {
                     }
                 }
             }
-
-            _ => {}
         }
 
         hints

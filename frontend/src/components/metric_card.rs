@@ -3,6 +3,7 @@
 use leptos::prelude::*;
 
 #[component]
+#[allow(non_snake_case)]
 pub fn MetricCard(
     #[prop(into)] value: Signal<String>,
     #[prop(into)] title: Signal<String>,

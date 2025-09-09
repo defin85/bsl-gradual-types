@@ -7,8 +7,9 @@ license.workspace = true
 description = "Backend server for BSL Gradual Type System"
 
 [features]
-default = []
-web-ui = []
+default = ["web-ui"]  # По умолчанию включаем веб-интерфейс
+web-ui = ["dep:axum", "dep:tower-http"]  # Feature веб-сервера зависит от этих библиотек
+lsp-only = []  # Только LSP без веб-интерфейса
 
 [lib]
 name = "bsl_backend"
@@ -39,11 +40,11 @@ indexmap = { workspace = true }
 dashmap = { workspace = true }
 arc-swap = { workspace = true }
 
-# Web server
-axum = { workspace = true }
+# Web server (optional)
+axum = { workspace = true, optional = true }
 tokio = { workspace = true }
 tower = { workspace = true }
-tower-http = { workspace = true }
+tower-http = { workspace = true, optional = true }
 
 # Parsing
 quick-xml = { workspace = true }

@@ -162,6 +162,7 @@ impl Default for FacetRegistry {
 /// Basic context resolver (simplified)
 #[derive(Debug)]
 pub struct ContextResolver {
+    #[allow(dead_code)]
     contexts: HashMap<String, TypeContext>,
 }
 

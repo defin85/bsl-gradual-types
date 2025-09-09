@@ -61,11 +61,11 @@ pub mod common {
         fn parse(&self, content: &str) -> Result<super::ast::Program, String>;
         fn parse_incremental(
             &self,
-            content: &str,
-            changes: &[TextChange],
+            _content: &str,
+            _changes: &[TextChange],
         ) -> Result<super::ast::Program, String> {
             // Fallback to full parse
-            self.parse(content)
+            self.parse(_content)
         }
     }
 
@@ -89,15 +89,11 @@ pub mod common {
     }
 }
 
-pub struct BslParser {
-    content: String,
-}
+pub struct BslParser;
 
 impl BslParser {
-    pub fn new(content: &str) -> Result<Self, String> {
-        Ok(Self {
-            content: content.to_string(),
-        })
+    pub fn new(_content: &str) -> Result<Self, String> {
+        Ok(Self)
     }
 
     pub fn parse(&self) -> Result<ast::Program, String> {
@@ -107,7 +103,7 @@ impl BslParser {
 }
 
 impl common::Parser for BslParser {
-    fn parse(&self, content: &str) -> Result<ast::Program, String> {
+    fn parse(&self, _content: &str) -> Result<ast::Program, String> {
         Ok(ast::Program { statements: vec![] })
     }
 }

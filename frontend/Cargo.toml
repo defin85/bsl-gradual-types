@@ -10,10 +10,6 @@ description = "Web frontend for BSL Gradual Type System"
 crate-type = ["cdylib"]
 path = "src/lib.rs"
 
-[[bin]]
-name = "bsl-frontend"
-path = "src/main.rs"
-
 [dependencies]
 bsl-shared = { workspace = true }
 

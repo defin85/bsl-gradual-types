@@ -1,10 +1,15 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BSL Gradual Types</title>
-    <link data-trunk rel="rust" data-wasm-opt="z" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BSL Type System</title>
+    <base href="/" />
+    <!-- Trunk will compile the current crate to WASM and inject the script -->
+    <link data-trunk rel="rust" data-cargo-features="web-ui" data-cargo-no-default-features="true" />
+    <link data-trunk rel="copy-dir" href="static" />
   </head>
-  <body></body>
+  <body>
+    <noscript>Для работы требуется включенный JavaScript.</noscript>
+  </body>
 </html>

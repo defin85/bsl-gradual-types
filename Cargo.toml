@@ -10,29 +10,33 @@ keywords = ["1c", "bsl", "type-system", "gradual-typing", "static-analysis"]
 categories = ["development-tools", "parser-implementations"]
 
 [workspace]
-members = []
+members = [
+    "shared",
+    "backend", 
+    "frontend",
+    "cli"
+]
+resolver = "2"
 
-[lib]
-name = "bsl_gradual_types_lib"
-path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-# Core dependencies
+[workspace.dependencies]
+# Core dependencies - shared across all crates
 anyhow = "1.0"
-thiserror = "1.0"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-clap = { version = "4.4", features = ["derive"] }
-
-# Data structures
+thiserror = "1.0" 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 indexmap = "2.0"
+clap = { version = "4.4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Additional backend dependencies
 dashmap = "6.0"
 arc-swap = "1.6"
-
-# Parsing
+axum = "0.7"
+tokio = { version = "1.0", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+tower-lsp = "0.20"
 quick-xml = { version = "0.31", features = ["serialize", "overlapped-lists"] }
 roxmltree = "0.19"
 encoding_rs = "0.8"
@@ -40,143 +44,42 @@ encoding_rs_io = "0.1"
 nom = "7.1"
 regex = "1.10"
 urlencoding = "2.1"
-
-# Tree-sitter support - используем последнюю доступную версию
-tree-sitter = "0.25"
-tree-sitter-loader = "0.25"
+url = "2.5"
+indicatif = "0.17"
+sha2 = "0.10"
 cc = "1.0"
-
-# File system
 walkdir = "2.5"
 notify = "6.1"
 globset = "0.4"
-
-# Async runtime (for LSP/MCP)
-tokio = { version = "1.35", features = ["full"] }
-async-trait = "0.1"
-
-# LSP support
-tower-lsp = "0.20"
-lsp-types = "0.95"
-url = "2.5"
-
-# HTML parsing (for syntax helper)
-scraper = "0.18"
-zip = "0.6"
-
-# Parallel processing
-rayon = "1.8"
-indicatif = "0.17"
-
-# Caching
 lru = "0.12"
-bincode = "1.3"
-sha2 = "0.10"
 
-# CLI output
-colored = "2.0"
+# Дополнительные зависимости
 chrono = { version = "0.4.41", features = ["serde"] }
-num_cpus = "1.17.0"
+rayon = "1.8"
+scraper = "0.18"
 
-# Optional ML support (for future)
-# candle = { version = "0.3", optional = true }
+# Internal crates (defined here for workspace reference)
+bsl-shared = { path = "shared" }
+bsl-backend = { path = "backend" }
+bsl-frontend = { path = "frontend" }
+bsl-cli = { path = "cli" }
 
-# Leptos web UI (условные зависимости)
-leptos = { version = "0.6", features = ["csr"], optional = true }
-leptos_meta = { version = "0.6", features = ["csr"], optional = true }
-leptos_router = { version = "0.6", features = ["csr"], optional = true }
-leptos_axum = { version = "0.6", optional = true }
-axum = { version = "0.7", optional = true }
-tower = { version = "0.4", optional = true }
-tower-http = { version = "0.5", features = ["fs"], optional = true }
-gloo-net = { version = "0.5", optional = true }
-wasm-bindgen = { version = "0.2", optional = true }
-console_error_panic_hook = { version = "0.1", optional = true }
-log = { version = "0.4", optional = true }
+# No [lib] section - this is now a pure workspace project
+# === Build Tools ===
+[build-dependencies]
+cc = "1.0"
 
+# === Development Tools ===
 [dev-dependencies]
 criterion = "0.5"
 pretty_assertions = "1.4"
 tempfile = "3.8"
 insta = "1.34"
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
+bsl-backend = { path = "backend" }
+bsl-shared = { path = "shared" }
 
-[build-dependencies]
-cc = "1.0"
-
-[[bin]]
-name = "lsp-server"
-path = "src/bin/lsp_server.rs"
-
-[[bin]]
-name = "type-check"
-path = "src/bin/type_check.rs"
-
-[[bin]]
-name = "web-server"
-path = "src/bin/web_server.rs"
-
-# Examples
-[[example]]
-name = "guided_parser_demo"
-path = "examples/guided_parser_demo.rs"
-
-[[example]]
-name = "categories_demo"
-path = "examples/categories_demo.rs"
-
-[[example]]
-name = "api_endpoints_demo"
-path = "examples/api_endpoints_demo.rs"
-
-# Временно отключенные примеры из-за миграции архитектуры
-# [[example]]
-# name = "full_system_demo"
-# path = "examples/full_system_demo.rs"
-
-# Features
-[features]
-default = ["lsp", "mcp"]
-lsp = []
-mcp = []
-ssr = ["leptos/ssr", "leptos_meta/ssr", "leptos_router/ssr", "leptos_axum", "axum", "tokio", "tower", "tower-http", "log"]
-web-ui = ["leptos", "leptos_meta", "leptos_router", "gloo-net", "wasm-bindgen", "console_error_panic_hook", "log"]
-
-# Временно отключенные примеры из-за необходимости исправления импортов
-# [[example]]
-# name = "query_demo"
-# path = "examples/query_demo.rs"
-
-# [[example]]
-# name = "syntax_helper_parser_demo" 
-# path = "examples/syntax_helper_parser_demo.rs"
-
-# [[example]]
-# name = "platform_types_v2_demo"
-# path = "examples/platform_types_v2_demo.rs"
-
-# [[example]]
-# name = "demo_tree_sitter"
-# path = "examples/demo_tree_sitter.rs"
-
-# [[example]]
-# name = "fuzzy_search_demo"
-# path = "examples/fuzzy_search_demo.rs"
-
-# [[example]]
-# name = "tree_sitter_setup_demo"
-# path = "examples/tree_sitter_setup_demo.rs"
-
-# [[example]]
-# name = "tree_sitter_detailed_demo"
-# path = "examples/tree_sitter_detailed_demo.rs"
-
-
-
-# Benchmarks
-[[bench]]
-name = "syntax_helper_parser_bench"
-harness = false
-
+# === Performance Profiles ===
 [profile.dev]
 opt-level = 0
 debug = true
@@ -189,11 +92,3 @@ codegen-units = 1
 [profile.dev-fast]
 inherits = "dev"
 opt-level = 1
-
-# Leptos configuration  
-[package.metadata.leptos]
-output-name = "bsl-type-system"
-site-root = "target/site"
-site-pkg-dir = "pkg"
-env = "DEV"
-bin-features = ["web-ui"]

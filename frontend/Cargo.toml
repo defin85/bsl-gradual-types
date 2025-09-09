@@ -1,0 +1,28 @@
+[package]
+name = "bsl-frontend"
+version = "0.4.2"
+edition = "2021"
+authors = ["BSL Type System Team"]
+description = "Web frontend for BSL Gradual Type System"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+path = "lib.rs"
+
+[dependencies]
+bsl-shared = { workspace = true }
+
+# Leptos and web dependencies
+leptos = { version = "0.6", features = ["csr"] }
+leptos_meta = { version = "0.6", features = ["csr"] }
+leptos_router = { version = "0.6", features = ["csr"] }
+
+# WASM dependencies
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+gloo-net = "0.5"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }

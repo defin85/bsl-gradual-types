@@ -3,8 +3,8 @@
 //! Проверяет что LSP Server правильно работает с TypeSystemService (Application Layer)
 //! согласно Clean Architecture принципам
 
-use bsl_gradual_types::application::TypeSystemService;
-use bsl_gradual_types::system::SystemCoordinator;
+use bsl_backend::application::TypeSystemService;
+use bsl_backend::system::SystemCoordinator;
 use std::io::Write;
 use std::sync::Arc;
 use tempfile::NamedTempFile;

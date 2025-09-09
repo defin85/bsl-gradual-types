@@ -1,0 +1,90 @@
+[package]
+name = "bsl-backend"
+version = "0.4.2"
+edition = "2021"
+authors = ["BSL Type System Team"]
+description = "Backend server for BSL Gradual Type System"
+license = "MIT"
+
+[features]
+default = []
+web-ui = []
+
+[lib]
+name = "bsl_backend"
+path = "lib.rs"
+
+[[bin]]
+name = "bsl-web-server"
+path = "main.rs"
+
+[[bin]]
+name = "bsl-lsp-server"
+path = "bin/lsp_server.rs"
+
+[dependencies]
+bsl-shared = { workspace = true }
+
+# Core dependencies
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+
+# Data structures
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+dashmap = { workspace = true }
+arc-swap = { workspace = true }
+
+# Web server
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+# Parsing
+quick-xml = { workspace = true }
+roxmltree = { workspace = true }
+encoding_rs = { workspace = true }
+encoding_rs_io = { workspace = true }
+nom = { workspace = true }
+regex = { workspace = true }
+urlencoding = { workspace = true }
+url = { workspace = true }
+indicatif = { workspace = true }
+sha2 = { workspace = true }
+
+# Tree-sitter support
+cc = { workspace = true }
+
+# File system
+walkdir = { workspace = true }
+notify = { workspace = true }
+globset = { workspace = true }
+
+# Cache
+lru = { workspace = true }
+
+# LSP
+tower-lsp = { workspace = true }
+
+# Время и даты
+chrono = { workspace = true }
+
+# Параллельные вычисления
+rayon = { workspace = true }
+
+# Цветной вывод
+colored = "2.0"
+
+# Tree-sitter
+tree-sitter = "0.25"
+
+# HTML parsing
+scraper = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.8"

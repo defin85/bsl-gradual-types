@@ -1,0 +1,27 @@
+[package]
+name = "bsl-cli"
+version = "0.4.2"
+edition = "2021"
+authors = ["BSL Type System Team"]
+description = "Command line tools for BSL Gradual Type System"
+license = "MIT"
+
+[[bin]]
+name = "bsl-type-check"
+path = "main.rs"
+
+[dependencies]
+bsl-shared = { workspace = true }
+bsl-backend = { workspace = true }
+
+# CLI dependencies
+clap = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Other dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["rt-multi-thread"] }

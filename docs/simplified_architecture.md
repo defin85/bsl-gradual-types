@@ -853,3 +853,69 @@ SystemCoordinator {
 **Start Simple → Measure Performance → Migrate Selectively**
 
 **Архитектурный задел в Simple версии - ОТЛИЧНЫЙ!** 🚀
+
+---
+
+## 🏗️ Crate Organization Strategy
+
+### 🤔 Слои VS Крейты: Важное различие
+
+**Слои** — это **логическое разделение** (архитектурные границы)  
+**Крейты** — это **физическое разделение** (единицы компиляции)
+
+### 🎯 Рекомендуемый подход: НЕ выносить каждый слой в отдельный крейт
+
+**Почему НЕ нужно создавать крейт для каждого слоя:**
+- ❌ **Over-engineering** для нашего размера проекта
+- ❌ **Сложность сборки** (6+ крейтов вместо 4)
+- ❌ **Circular dependencies** между слоями
+- ❌ **Усложнение DI** и координации
+
+### ✅ ЛУЧШЕ: Объединить слои по **ролям**
+
+```
+shared/          # Domain + некоторые Application типы
+├── domain/      # TypeResolver, TypeRepository
+├── types/       # ResolutionResult, Certainty
+└── api/         # DTO для API
+
+backend/         # System + Application + Presentation (server)  
+├── system/      # SystemCoordinator, AnalysisCache
+├── application/ # TypeSystemService
+├── parsing/     # ParserCoordinator 
+├── presentation/# LSP Server, Web routes
+└── data/        # Platform types, Config
+
+frontend/        # Presentation (web UI)
+├── components/  # Leptos компоненты
+├── pages/       # Страницы
+└── api/         # HTTP клиент
+
+cli/             # Presentation (command line)
+├── commands/    # Команды CLI
+└── main.rs      # Entry point
+```
+
+### 🎯 Роли крейтов
+
+**shared/** — "чистые" типы и domain логика
+- ✅ Без I/O, сети, файловой системы
+- ✅ Компилируется и под WASM, и под native
+- ✅ Переиспользуется всеми крейтами
+
+**backend/** — все "серверные" слои в одном крейте
+- ✅ System + Application + Server-side Presentation
+- ✅ Внутри организовано по модулям/папкам
+- ✅ Единая сборка, простая координация
+
+**frontend/**, **cli/** — специализированные презентационные слои
+
+### 💡 Принцип организации
+
+**Слои помогают организовать код внутри крейтов, крейты помогают изолировать роли и зависимости.**
+
+Оставляем **логические слои внутри крейтов**, не выносим их в отдельные крейты. Это дает:
+- 🎯 **Простоту** — 4 крейта вместо 6-8
+- ⚡ **Быстроту сборки** — меньше межкрейтовых зависимостей  
+- 🧩 **Гибкость** — слои остаются, но в рамках логических границ
+- 📦 **Переиспользование** — shared крейт содержит общую логику

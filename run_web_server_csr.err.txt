@@ -1,0 +1,25 @@
+warning: unused import: `FacetKind`
+ --> src\presentation\web\components\type_cards.rs:8:80
+  |
+8 |     domain::types::{ConcreteType, ResolutionResult, TypeResolution, Certainty, FacetKind},
+  |                                                                                ^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused imports: `ApiError` and `FacetKind`
+ --> src\presentation\web\components\type_table.rs:8:32
+  |
+8 |     domain::types::{Certainty, FacetKind, ResolutionResult, TypeResolution},
+  |                                ^^^^^^^^^
+9 |     presentation::web::components::api::{ApiClient, ApiError},
+  |                                                     ^^^^^^^^
+
+warning: unused import: `ApiError`
+ --> src\presentation\web\components\type_graph.rs:9:53
+  |
+9 |     presentation::web::components::api::{ApiClient, ApiError},
+  |                                                     ^^^^^^^^
+
+warning: `bsl-gradual-types` (lib) generated 3 warnings (run `cargo fix --lib -p bsl-gradual-types` to apply 3 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.54s
+     Running `target\debug\web-server.exe`

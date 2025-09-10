@@ -1,0 +1,39 @@
+# Конфигурация веб-сервера BSL Gradual Types
+
+[server]
+# Адрес и порт для веб-сервера
+host = "127.0.0.1"
+port = 8080
+
+# Путь к статическим файлам фронтенда
+static_dir = "../frontend/dist"
+
+# Настройки CORS
+[cors]
+# Разрешенные источники (origins)
+allowed_origins = ["http://localhost:8080", "http://127.0.0.1:8080"]
+
+# Разрешенные методы HTTP
+allowed_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+
+# Разрешенные заголовки
+allowed_headers = ["Content-Type", "Authorization", "Accept"]
+
+# Настройки логирования
+[logging]
+# Уровень логирования: error, warn, info, debug, trace
+level = "info"
+
+# Формат логов: compact, pretty, json
+format = "compact"
+
+# Настройки API
+[api]
+# Префикс для API эндпоинтов
+prefix = "/api"
+
+# Таймаут для запросов (в секундах)
+timeout = 30
+
+# Максимальный размер тела запроса (в байтах)
+max_body_size = 1048576  # 1MB

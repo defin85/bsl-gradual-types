@@ -11,7 +11,7 @@ use std::time::Instant;
 async fn main() -> Result<()> {
     println!("🧪 ДЕМОНСТРАЦИЯ НОВОЙ СИСТЕМНОЙ АРХИТЕКТУРЫ");
     println!("{}", "=".repeat(60));
-    println!("📊 SystemCoordinator (6-8 компонентов) vs CentralTypeSystem (25-30)");
+    println!("📊 SystemCoordinator (6-8 компонентов) - упрощённая архитектура");
     println!();
 
     // === ТЕСТ 1: СОЗДАНИЕ СИСТЕМЫ ===

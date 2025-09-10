@@ -1,12 +1,12 @@
 # Архитектурная диаграмма BSL Gradual Type System
 
-## 🔧 КРИТИЧЕСКОЕ УЛУЧШЕНИЕ: Декомпозиция CentralTypeSystem
+## 🔧 АРХИТЕКТУРНОЕ УЛУЧШЕНИЕ: Переход к SystemCoordinator
 
-### ❌ Проблема God Object (выявлена Grok)
+### ✅ Решение God Object проблемы
 
 **Было**: `CentralTypeSystem` координировал 9+ компонентов:
 ```
-CentralTypeSystem
+CentralTypeSystem (устарел)
 ├── TypeSystemService  
 ├── AnalysisCacheManager
 ├── ParallelAnalysisEngine  
@@ -90,7 +90,7 @@ impl InitCoordinator {
     fn setup_thread_pools(&self) { /* ... */ }
 }
 
-// Phase 2: Перенести логику из CentralTypeSystem
+// Phase 2: Логика перенесена из устаревшего CentralTypeSystem
 impl RuntimeCoordinator {
     fn coordinate_analysis(&self) { /* ... */ }
     fn manage_performance(&self) { /* ... */ }

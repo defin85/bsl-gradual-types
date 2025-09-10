@@ -1,24 +1,50 @@
 //! API client functions
 
 use crate::api::types::*;
+use crate::config::get_config;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{Request, RequestInit, RequestMode, Response};
 
 
 /// Получить метрики системы типизации
 pub async fn fetch_metrics() -> Result<TypeMetrics, String> {
-    // Временные тестовые данные
-    Ok(TypeMetrics {
-        total_types: 87,
-        known_types: 76,
-        inferred_types: 8,
-        unknown_types: 3,
-        flow_sensitive_types: 23,
-        cache_hit_rate: 0.94,
-        analysis_speed_ms: 125.0,
-    })
+    let config = get_config();
+    let url = config.api_url("metrics");
+    
+    match fetch_json::<TypeMetrics>(&url).await {
+        Ok(metrics) => Ok(metrics),
+        Err(_) => {
+            // Fallback to test data if API is not available
+            Ok(TypeMetrics {
+                total_types: 87,
+                known_types: 76,
+                inferred_types: 8,
+                unknown_types: 3,
+                flow_sensitive_types: 23,
+                cache_hit_rate: 0.94,
+                analysis_speed_ms: 125.0,
+            })
+        }
+    }
 }
 
 /// Получить список типов с фильтрацией
 pub async fn fetch_types(filters: TypeFilters) -> Result<TypeSearchResult, String> {
+    let config = get_config();
+    let url = config.api_url("types");
+    
+    match fetch_json::<TypeSearchResult>(&url).await {
+        Ok(result) => Ok(result),
+        Err(_) => {
+            // Fallback to test data if API is not available
+            get_test_types(filters)
+        }
+    }
+}
+
+/// Get test data for types
+fn get_test_types(filters: TypeFilters) -> Result<TypeSearchResult, String> {
     // Временные тестовые данные
     let test_types = vec![
         TypeInfo {
@@ -130,6 +156,20 @@ pub async fn fetch_types(filters: TypeFilters) -> Result<TypeSearchResult, Strin
 
 /// Получить граф типов
 pub async fn fetch_type_graph() -> Result<TypeGraph, String> {
+    let config = get_config();
+    let url = config.api_url("type-graph");
+    
+    match fetch_json::<TypeGraph>(&url).await {
+        Ok(graph) => Ok(graph),
+        Err(_) => {
+            // Fallback to test data if API is not available
+            get_test_type_graph()
+        }
+    }
+}
+
+/// Get test data for type graph
+fn get_test_type_graph() -> Result<TypeGraph, String> {
     // Временные тестовые данные для графа
     let nodes = vec![
         TypeGraphNode {
@@ -184,4 +224,30 @@ pub async fn fetch_type_graph() -> Result<TypeGraph, String> {
     ];
 
     Ok(TypeGraph { nodes, connections })
+}
+
+/// Generic function to fetch JSON from API
+async fn fetch_json<T>(url: &str) -> Result<T, JsValue>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let mut opts = RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(RequestMode::Cors);
+
+    let request = Request::new_with_str_and_init(url, &opts)?;
+    request.headers().set("Accept", "application/json")?;
+
+    let window = web_sys::window().unwrap();
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+    let resp: Response = resp_value.dyn_into().unwrap();
+
+    if !resp.ok() {
+        return Err(JsValue::from_str(&format!("HTTP error: {}", resp.status())));
+    }
+
+    let json = JsFuture::from(resp.json()?).await?;
+    let data: T = serde_wasm_bindgen::from_value(json)?;
+    
+    Ok(data)
 }

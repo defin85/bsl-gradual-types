@@ -6,7 +6,6 @@ use anyhow::Result;
 use std::sync::Arc;
 use tracing::info;
 
-use crate::application::TypeSystemService; // MOVED to Application Layer
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository, TypeResolver};
 
 use super::basic_observability::BasicObservability;
@@ -22,8 +21,8 @@ pub struct SystemCoordinator {
     parser: Arc<ParserCoordinator>,
     observability: Arc<BasicObservability>,
 
-    // === APPLICATION LAYER ===
-    type_service: Arc<TypeSystemService>,
+    // === APPLICATION LAYER (removed to break circular dependency) ===
+    // type_service will be created externally and injected when needed
 
     // === DOMAIN LAYER (для будущего расширения) ===
     #[allow(dead_code)]
@@ -48,18 +47,12 @@ impl SystemCoordinator {
         let repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
         let type_resolver = Arc::new(TypeResolver::new(repository.clone()));
 
-        // 5. Unified application service (moved to Application Layer)
-        let type_service = Arc::new(TypeSystemService::new(
-            type_resolver.clone(),
-            cache.clone(),
-            parser.clone(),
-        ));
+        // 5. Application service creation moved to external coordinator
 
         Self {
             cache,
             parser,
             observability,
-            type_service,
             type_resolver,
             repository,
         }
@@ -76,21 +69,13 @@ impl SystemCoordinator {
         info!("💾 SystemCoordinator: прогрев кеша...");
         self.cache.warm_cache()?;
 
-        info!("🎭 SystemCoordinator: инициализация сервиса типов...");
-        self.type_service.initialize()?;
-
         info!("✅ SystemCoordinator: система готова!");
         Ok(())
     }
 
-    /// Получить сервис типов для веб-интерфейса
-    pub fn get_type_service(&self) -> Arc<TypeSystemService> {
-        self.type_service.clone()
-    }
-
-    /// Получить unified API для всех интерфейсов
-    pub fn type_service(&self) -> Arc<TypeSystemService> {
-        self.type_service.clone()
+    /// Получить компоненты для создания TypeSystemService
+    pub fn get_components(&self) -> (Arc<TypeResolver>, Arc<AnalysisCache>, Arc<ParserCoordinator>) {
+        (self.type_resolver.clone(), self.cache.clone(), self.parser.clone())
     }
 
     /// Health check

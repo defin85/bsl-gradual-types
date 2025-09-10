@@ -361,8 +361,12 @@ async fn main() -> Result<()> {
     // ✅ ИСПРАВЛЕНО: SystemCoordinator как IoC Container
     let coordinator = Arc::new(SystemCoordinator::new());
 
-    // ✅ ИСПРАВЛЕНО: получаем TypeSystemService через DI
-    let type_service = coordinator.type_service();
+    // ✅ ИСПРАВЛЕНО: создаем TypeSystemService через компоненты
+    let (type_resolver, cache, parser) = coordinator.get_components();
+    let type_service = Arc::new(TypeSystemService::new(type_resolver, cache, parser));
+    
+    // Initialize the type service
+    type_service.initialize()?;
 
     // Создаём stdin/stdout для коммуникации с клиентом
     let stdin = tokio::io::stdin();

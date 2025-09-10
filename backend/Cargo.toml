@@ -44,7 +44,7 @@ arc-swap = { workspace = true }
 axum = { workspace = true, optional = true }
 tokio = { workspace = true }
 tower = { workspace = true }
-tower-http = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true, features = ["cors"] }
 
 # Parsing
 quick-xml = { workspace = true }
@@ -71,6 +71,11 @@ lru = { workspace = true }
 
 # LSP
 tower-lsp = { workspace = true }
+
+# Configuration
+toml = "0.8"
+
+
 
 # Время и даты
 chrono = { workspace = true }

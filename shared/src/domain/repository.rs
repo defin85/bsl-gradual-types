@@ -263,7 +263,7 @@ impl TypeResolver {
         Ok(TypeResolution::unknown())
     }
 
-    /// Получить все платформенные глобальные типы (для CentralTypeSystem)
+    /// Получить все платформенные глобальные типы (для SystemCoordinator)
     pub fn get_all_platform_globals(&self) -> std::collections::HashMap<String, TypeResolution> {
         // TODO: Re-implement after TypeSource is moved to shared
         /*
@@ -322,7 +322,7 @@ impl TypeResolver {
         }
     }
 
-    /// Асинхронное разрешение выражений (для CentralTypeSystem)
+    /// Асинхронное разрешение выражений (для SystemCoordinator)
     pub async fn resolve_expression_async(&self, expression: &str) -> TypeResolution {
         // ✅ ИСПОЛЬЗУЕМ repository вместо синглтона
         // Пока простая реализация - ищем точное совпадение по имени
@@ -426,7 +426,7 @@ impl TypeResolver {
     pub fn get_syntax_helper_database(
         &self,
     ) -> Option<()> {  // TODO: Return proper type after moving to shared
-        // ✅ ИСПОЛЬЗУЕМ repository через SystemCoordinator вместо legacy CentralTypeSystem
+        // ✅ ИСПОЛЬЗУЕМ repository через SystemCoordinator вместо устаревшего CentralTypeSystem
         // В текущем контексте возвращаем None - база данных строится
         // из репозитория по мере необходимости
 

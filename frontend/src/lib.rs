@@ -4,6 +4,7 @@
 
 pub mod api;
 pub mod components;
+pub mod config;
 pub mod pages;
 pub mod utils;
 
@@ -21,5 +22,9 @@ use leptos::prelude::*;
 #[wasm_bindgen(start)]
 pub fn main() {
     console_error_panic_hook::set_once();
+    
+    // Initialize configuration
+    config::init_config();
+    
     mount_to_body(|| view! { <App/> })
 }

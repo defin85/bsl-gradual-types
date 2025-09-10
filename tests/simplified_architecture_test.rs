@@ -124,10 +124,7 @@ mod comparison_tests {
         let _simple = SystemCoordinator::new();
         let simple_time = start.elapsed();
 
-        // TODO: Compare with CentralTypeSystem when we migrate
-        // let start = Instant::now();
-        // let _complex = CentralTypeSystem::new(config);
-        // let complex_time = start.elapsed();
+        // SystemCoordinator provides simplified initialization
 
         println!("⚡ Simple initialization: {:?}", simple_time);
         // println!("🐌 Complex initialization: {:?}", complex_time);

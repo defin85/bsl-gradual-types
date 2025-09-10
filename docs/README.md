@@ -80,7 +80,7 @@ cargo test
 
 ## 🔧 Режим выполнения
 
-Проект работает в целевом режиме (target) на основе `CentralTypeSystem`. Переключатель движка legacy/target удалён. Для настройки загрузки конфигурации используйте опцию `--config path/to/cf` в соответствующих бинарях (например, `bsl-web-server`, `type-check`, `bsl-analyzer`).
+Проект работает в целевом режиме (target) на основе `SystemCoordinator`. Переключатель движка legacy/target удалён. Для настройки загрузки конфигурации используйте опцию `--config path/to/cf` в соответствующих бинарях (например, `bsl-web-server`, `type-check`, `bsl-analyzer`).
 
 
 ## 📖 Дополнительные ресурсы

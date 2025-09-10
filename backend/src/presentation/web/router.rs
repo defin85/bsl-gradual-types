@@ -1,0 +1,33 @@
+//! Web router configuration
+//!
+//! Настройка маршрутов для веб-сервера
+
+use axum::{
+    routing::get,
+    Router,
+};
+use tower_http::services::{ServeDir, ServeFile};
+
+use super::handlers::{AppState, get_metrics, get_types, search_types};
+
+/// Create web application router
+pub fn create_router(app_state: AppState, static_path: &str, enable_cors: bool) -> Router {
+    let index_path = format!("{}/index.html", static_path);
+    let static_dir = ServeDir::new(static_path)
+        .not_found_service(ServeFile::new(&index_path));
+
+    let mut app = Router::new()
+        .route("/api/metrics", get(get_metrics))
+        .route("/api/types", get(get_types))
+        .route("/api/search", get(search_types))
+        .fallback_service(static_dir)
+        .with_state(app_state);
+    
+    // Add CORS if enabled
+    if enable_cors {
+        use tower_http::cors::CorsLayer;
+        app = app.layer(CorsLayer::permissive());
+    }
+
+    app
+}

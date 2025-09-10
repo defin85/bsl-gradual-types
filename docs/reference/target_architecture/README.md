@@ -13,7 +13,7 @@
 
 ### Статус миграции (обновление v0.4.x)
 - Legacy‑движок удалён; все компоненты работают в target‑режиме.
-- Центральная система (`CentralTypeSystem`) подключена и инициализирует слои Data → Domain → Application → Presentation.
+- Центральная система (`SystemCoordinator`) подключена и инициализирует слои Data → Domain → Application → Presentation.
 - Data Layer: InMemory `TypeRepository` с `save/load/search/filters` и корректной статистикой по источникам.
 - Domain Layer: базовые резолверы (Platform, Builtin, минимальный Expression), каркас BSL/tree‑sitter; минимальный `TypeCheckerService`.
 - Application/Presentation: LSP‑проксирование hover/completion через `LspInterface`; Web – поисковые ручки `/api/types` и детали `/api/types/{name}` в target‑режиме через `WebInterface`; CLI – базовая интеграция.

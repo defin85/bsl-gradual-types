@@ -1,0 +1,21 @@
+[package]
+name = "test-leptos"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+leptos = { version = "0.8", features = ["csr"] }
+console_log = "1"
+log = "0.4"
+wasm-bindgen = "0.2.101"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3.78", features = ["console"] }
+
+[lib]
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "test-leptos"
+path = "src/main.rs"

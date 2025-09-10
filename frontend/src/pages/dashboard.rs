@@ -1,54 +1,147 @@
 //! Dashboard page
 
-use crate::components::MetricCard;
-use leptos::prelude::*;
+use crate::api::{fetch_metrics, types::*};
 
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+
+/// Страница дашборда с метриками системы типизации
 #[component]
 #[allow(non_snake_case)]
 pub fn Dashboard() -> impl IntoView {
+    let metrics = RwSignal::new(None::<TypeMetrics>);
+    let loading = RwSignal::new(false);
+    let error = RwSignal::new(None::<String>);
+
+    // Загружаем метрики при монтировании компонента
+    let load_metrics = move || {
+        loading.set(true);
+        error.set(None);
+        
+        spawn_local(async move {
+            match fetch_metrics().await {
+                Ok(result) => {
+                    metrics.set(Some(result));
+                    loading.set(false);
+                },
+                Err(err) => {
+                    error.set(Some(err));
+                    loading.set(false);
+                }
+            }
+        });
+    };
+
+    Effect::new(move |_| {
+        load_metrics();
+    });
+
     view! {
         <main class="main-content">
             <div class="dashboard-header">
-                <h1>"Type System Dashboard"</h1>
-                <p>"Анализ и визуализация типов BSL"</p>
+                <h1>"🎯 BSL Gradual Type System"</h1>
+                <p><strong>"Executive Dashboard"</strong>" - Overview of Type Analysis"</p>
+                <p>"Simplified Architecture | Real-time Type Intelligence"</p>
             </div>
 
-            <div class="dashboard-grid">
-                <MetricCard
-                    value=Signal::derive(|| "150".to_string())
-                    title=Signal::derive(|| "Known Types".to_string())
-                    color=Signal::derive(|| "#28a745".to_string())
-                />
-                <MetricCard
-                    value=Signal::derive(|| "45".to_string())
-                    title=Signal::derive(|| "Inferred Types".to_string())
-                    color=Signal::derive(|| "#ffc107".to_string())
-                />
-                <MetricCard
-                    value=Signal::derive(|| "12".to_string())
-                    title=Signal::derive(|| "Unknown Types".to_string())
-                    color=Signal::derive(|| "#dc3545".to_string())
-                />
-                <MetricCard
-                    value=Signal::derive(|| "85%".to_string())
-                    title=Signal::derive(|| "Coverage".to_string())
-                    color=Signal::derive(|| "#17a2b8".to_string())
-                />
-            </div>
+            {move || {
+                if loading.get() {
+                    view! {
+                        <div class="loading">
+                            <p>"🔄 Загрузка метрик..."</p>
+                        </div>
+                    }.into_any()
+                } else if let Some(err) = error.get() {
+                    view! {
+                        <div class="error">
+                            <p>"❌ Ошибка загрузки: " {err}</p>
+                            <button on:click=move |_| load_metrics()>"Повторить"</button>
+                        </div>
+                    }.into_any()
+                } else if let Some(m) = metrics.get() {
+                    let known_percentage = if m.total_types > 0 { 
+                        (m.known_types as f32 / m.total_types as f32 * 100.0) as u32 
+                    } else { 0 };
+                    let inferred_percentage = if m.total_types > 0 { 
+                        (m.inferred_types as f32 / m.total_types as f32 * 100.0) as u32 
+                    } else { 0 };
+                    let unknown_percentage = if m.total_types > 0 { 
+                        (m.unknown_types as f32 / m.total_types as f32 * 100.0) as u32 
+                    } else { 0 };
+                    
+                    view! {
+                        <div>
+                            <div class="dashboard-grid">
+                                <div class="metric-card">
+                                    <div class="metric-number" style="color: #28a745;">{known_percentage}"%"</div>
+                                    <div class="metric-label">"Known Types"</div>
+                                    <div class="certainty-bar">
+                                        <div class="certainty-fill" style=format!("width: {}%; background: linear-gradient(90deg, #28a745, #20c997);", known_percentage)></div>
+                                    </div>
+                                </div>
+                                
+                                <div class="metric-card">
+                                    <div class="metric-number" style="color: #ffc107;">{inferred_percentage}"%"</div>
+                                    <div class="metric-label">"Inferred Types"</div>
+                                    <div class="certainty-bar">
+                                        <div class="certainty-fill" style=format!("width: {}%; background: linear-gradient(90deg, #ffc107, #fd7e14);", inferred_percentage)></div>
+                                    </div>
+                                </div>
+                                
+                                <div class="metric-card">
+                                    <div class="metric-number" style="color: #dc3545;">{unknown_percentage}"%"</div>
+                                    <div class="metric-label">"Unknown Types"</div>
+                                    <div class="certainty-bar">
+                                        <div class="certainty-fill" style=format!("width: {}%; background: linear-gradient(90deg, #dc3545, #e83e8c);", unknown_percentage)></div>
+                                    </div>
+                                </div>
+                            </div>
 
-            <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);">
-                <h2 style="margin-bottom: 1rem;">"🚀 Система запущена и работает!"</h2>
-                <p>"Модульная архитектура готова к масштабированию."</p>
-                <button
-                    style="margin-top: 1rem; padding: 0.5rem 1rem; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;"
-                    on:click=move |_| {
-                        web_sys::console::log_1(&"✅ Тестовая кнопка нажата!".into());
-                        let window = web_sys::window().unwrap();
-                        window.alert_with_message("🎉 Модульная архитектура работает!").unwrap();
-                    }>
-                    "Тест взаимодействия"
-                </button>
-            </div>
+                            <div class="type-overview" style="background: rgba(255, 255, 255, 0.95); border-radius: 12px; padding: 30px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);">
+                                <h2>"🎭 Type Categories"</h2>
+
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 20px;">
+                                    <div>
+                                        <h3>"🔧 Platform Types"</h3>
+                                        <p><span class="facet-indicator" style="background: #007bff;"></span>"Массив (Array) - 95% certainty"</p>
+                                        <p><span class="facet-indicator" style="background: #28a745;"></span>"Соответствие (Map) - 90% certainty"</p>
+                                        <p><span class="facet-indicator" style="background: #17a2b8;"></span>"СписокЗначений - 98% certainty"</p>
+
+                                        <h3 style="margin-top: 20px;">"⚙️ Configuration Types"</h3>
+                                        <p><span class="facet-indicator" style="background: #ffc107;"></span>"Справочники.Номенклатура - Known"</p>
+                                        <p><span class="facet-indicator" style="background: #28a745;"></span>"Документы.ПоступлениеТоваров - Known"</p>
+                                    </div>
+
+                                    <div>
+                                        <h3>"🎯 Union Types"</h3>
+                                        <p><strong>"ТипЗначения:"</strong>" Строка (60%) | Число (40%)"</p>
+                                        <p><strong>"РезультатОбработки:"</strong>" Булево (70%) | Неопределено (30%)"</p>
+
+                                        <h3 style="margin-top: 20px;">"🔄 Flow-Sensitive Analysis"</h3>
+                                        <p><strong>"Переменная1:"</strong>" Неопределено → Строка"</p>
+                                        <p><strong>"Результат:"</strong>" Неопределено → Число → Строка"</p>
+                                    </div>
+                                </div>
+
+                                <div style="margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                                    <h3>"🏗️ Architecture Health"</h3>
+                                    <p>
+                                        <strong>"Components:"</strong>" 6/8 active | "
+                                        <strong>"Cache Hit Rate:"</strong>" " {format!("{:.0}%", m.cache_hit_rate * 100.0)} " | "
+                                        <strong>"Analysis Speed:"</strong>" " {format!("{:.0}ms avg", m.analysis_speed_ms)}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    }.into_any()
+                } else {
+                    view! {
+                        <div class="loading">
+                            <p>"Инициализация..."</p>
+                        </div>
+                    }.into_any()
+                }
+            }}
         </main>
     }
 }

@@ -44,9 +44,19 @@
       "Bash(npm run compile:*)",
       "Bash(tsc:*)",
       "Bash(npx tsc:*)",
-      "Bash(vsce package:*)"
+      "Bash(vsce package:*)",
+      "Bash(go install:*)",
+      "mcp__language-server__diagnostics",
+      "mcp__language-server__hover",
+      "mcp__language-server__definition",
+      "mcp__language-server__references",
+      "mcp__language-server__edit_file"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "language-server"
+  ]
 }

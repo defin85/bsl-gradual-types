@@ -18,7 +18,7 @@ impl RawTypeData {
             name,
             full_name,
             category,
-            description: None,
+            description: None, // тест MCP редактирования
         }
     }
 }

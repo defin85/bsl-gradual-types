@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "language-server": {
+      "command": "mcp-language-server",
+      "args": [
+        "--workspace",
+        "C:\\1CProject\\bsl-gradual-types",
+        "--lsp",
+        "rust-analyzer"
+      ]
+    }
+  }
+}

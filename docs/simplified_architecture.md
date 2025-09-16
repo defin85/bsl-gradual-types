@@ -6,7 +6,7 @@
 
 ---
 
-## 🤔 Проблема с текущей архитектурой
+## 🤔 Проблема с текущей архитектурой (без изменений)
 
 ### **Что получилось сложного:**
 - 25-30 компонентов
@@ -37,34 +37,29 @@
 ```rust
 // 6-8 компонентов вместо 25-30
 struct SimplifiedBSLTypeSystem {
-    // 1. Coordination (1 компонент)
-    coordinator: SystemCoordinator,
-    
-    // 2. Caching (1 компонент) 
+    // 1. System Layer (в backend)
+    system_coordinator: SystemCoordinator,
     cache: AnalysisCache,
-    
-    // 3. Parsing (1 компонент)
-    parser: ParserCoordinator,
-    
-    // 4. Observability (1 компонент)
+    parser_coordinator: ParserCoordinator,
     observability: BasicObservability,
     
-    // 5. Core Domain (без изменений)
+    // 2. Application Layer (в shared и backend)
+    analysis_engine: AnalysisEngine,       // НОВОЕ: Чистый оркестратор анализа
+    type_service: TypeSystemService,       // Обёртка для API (Web/LSP)
+    
+    // 3. Core Domain (без изменений)
     type_resolver: TypeResolver,
     repository: TypeRepository,
-    
-    // 6. API Interface (1 компонент)
-    api_service: TypeSystemService,
 }
 ```
 
 ---
 
-## 🏗️ Simplified Architecture Diagram
+## 🏗️ Simplified Architecture Diagram (Актуализирована)
 
 ```mermaid
 graph TB
-    subgraph "🎯 System Layer (Simplified)"
+    subgraph "🎯 System Layer (в `backend`)"
         SystemCoordinator["🎯 SystemCoordinator<br/>- Single coordination point<br/>- DI management<br/>- Lifecycle control"]
         
         AnalysisCache["💾 AnalysisCache<br/>- Simple LRU in-memory<br/>- File hash keys<br/>- TTL eviction"]
@@ -74,31 +69,36 @@ graph TB
         BasicObservability["📊 BasicObservability<br/>- Structured logging<br/>- Basic metrics<br/>- Health endpoint"]
     end
 
-    subgraph "🌐 Presentation Layer"
-        LSPServer["🔌 LSP Server<br/>- Language Server Protocol<br/>- VS Code integration"]
+    subgraph "🌐 Presentation Layer (Адаптеры)"
+        LSPServer["🔌 LSP Server (`backend`)<br/>- Language Server Protocol<br/>- VS Code integration"]
         
-        WebInterface["🌐 Web Interface<br/>- Simple HTML dashboard<br/>- Type visualization"]
+        WebInterface["🌐 Web Interface (`backend`)<br/>- Simple HTML dashboard<br/>- Type visualization"]
         
-        CLITool["⚙️ CLI Tool<br/>- Command line interface<br/>- Batch analysis"]
+        CLITool["⚙️ CLI Tool (`cli`)<br/>- Command line interface<br/>- Batch analysis"]
     end
 
     subgraph "🔧 Application Layer" 
-        TypeSystemService["🎭 TypeSystemService<br/>- High-level API<br/>- Business operations<br/>- Unified interface"]
+        subgraph "`backend`"
+            TypeSystemService["🎭 TypeSystemService<br/>- High-level API (Web, LSP)<br/>- Управляет кэшем<br/>- **Использует AnalysisEngine**"]
+        end
+        subgraph "`shared`"
+            AnalysisEngine["🚀 AnalysisEngine<br/>- **Чистая оркестрация анализа**<br/>- Use Case: 'Analyze File'<br/>- Не зависит от Web/CLI"]
+        end
     end
 
-    subgraph "🧠 Domain Layer"
+    subgraph "🧠 Domain Layer (`shared`)"
         TypeResolver["🧠 TypeResolver<br/>- Core type analysis<br/>- Resolution algorithms<br/>- Business logic"]
         
         TypeRepository["📚 TypeRepository<br/>- Type storage<br/>- Query interface<br/>- Data abstraction"]
     end
 
-    subgraph "💾 Data Layer"
+    subgraph "💾 Data Layer (`shared`)"
         PlatformTypes["📄 Platform Types<br/>- 1C platform metadata<br/>- HTML parsing<br/>- Type definitions"]
         
         ConfigData["⚙️ Configuration<br/>- XML metadata<br/>- Settings<br/>- User preferences"]
     end
 
-    %% Simple flow
+    %% Flow
     SystemCoordinator --> AnalysisCache
     SystemCoordinator --> ParserCoordinator  
     SystemCoordinator --> BasicObservability
@@ -106,16 +106,18 @@ graph TB
     
     LSPServer --> TypeSystemService
     WebInterface --> TypeSystemService
-    CLITool --> TypeSystemService
     
+    TypeSystemService --> AnalysisEngine
     TypeSystemService --> AnalysisCache
-    TypeSystemService --> TypeResolver
+
+    CLITool --> AnalysisEngine
+    
+    AnalysisEngine --> TypeResolver
+    AnalysisEngine --> ParserCoordinator
     
     TypeResolver --> TypeRepository
     TypeRepository --> PlatformTypes
     TypeRepository --> ConfigData
-    
-    ParserCoordinator --> TypeResolver
     
     %% Styling
     classDef systemStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
@@ -126,145 +128,110 @@ graph TB
     
     class SystemCoordinator,AnalysisCache,ParserCoordinator,BasicObservability systemStyle
     class LSPServer,WebInterface,CLITool presentationStyle
-    class TypeSystemService applicationStyle
+    class TypeSystemService,AnalysisEngine applicationStyle
     class TypeResolver,TypeRepository domainStyle
     class PlatformTypes,ConfigData dataStyle
 ```
 
 ---
 
-## 🔧 Component Details
+## 🔧 Component Details (Актуализированы и Упрощены)
 
-### **🎯 SystemCoordinator** 
-```rust
-struct SystemCoordinator {
-    cache: AnalysisCache,
-    parser: ParserCoordinator,
-    observability: BasicObservability,
-    type_service: TypeSystemService,
-}
+### **🎯 SystemCoordinator** (в `backend`)
+-   **Структура:** Содержит экземпляры всех ключевых системных сервисов (`AnalysisCache`, `ParserCoordinator`, `BasicObservability`, `TypeSystemService`).
+-   **Назначение:** Является "точкой сборки" (Composition Root) и управляет жизненным циклом серверного приложения.
 
-impl SystemCoordinator {
-    fn new() -> Self {
-        let cache = AnalysisCache::new(1000); // Simple LRU
-        let parser = ParserCoordinator::with_fallback();
-        let observability = BasicObservability::default();
-        let type_service = TypeSystemService::new(cache.clone());
-        
-        Self { cache, parser, observability, type_service }
-    }
-    
-    fn start(&self) -> Result<(), StartupError> {
-        self.observability.log_startup();
-        self.cache.warm_cache()?;
-        self.type_service.initialize()?;
-        Ok(())
-    }
-}
-```
+### **🚀 AnalysisEngine** (в `shared`)
+-   **Структура:** Содержит `TypeResolver` и `ParserCoordinator`. Не зависит от `backend`.
+-   **Назначение:** Реализует чистый сценарий "проанализировать файл". Является переиспользуемым ядром для всех адаптеров (`cli`, `backend`).
+
+### **🎭 TypeSystemService** (в `backend`)
+-   **Структура:** Содержит `AnalysisEngine` и специфичные для `backend` компоненты (`AnalysisCache`).
+-   **Назначение:** Предоставляет высокоуровневый API для `LSP Server` и `Web Interface`. Использует `AnalysisEngine` для выполнения анализа, добавляя поверх него логику кэширования и обработки сетевых запросов.
 
 ### **💾 AnalysisCache (Simple)**
-```rust
-struct AnalysisCache {
-    storage: LruCache<FileHash, AnalysisResult>,
-    ttl_tracker: HashMap<FileHash, Instant>,
-}
-
-impl AnalysisCache {
-    fn new(capacity: usize) -> Self {
-        Self {
-            storage: LruCache::new(capacity),
-            ttl_tracker: HashMap::new(),
-        }
-    }
-    
-    fn get(&mut self, file_hash: &FileHash) -> Option<AnalysisResult> {
-        // Simple TTL check
-        if let Some(timestamp) = self.ttl_tracker.get(file_hash) {
-            if timestamp.elapsed() > Duration::from_secs(300) {
-                self.storage.remove(file_hash);
-                self.ttl_tracker.remove(file_hash);
-                return None;
-            }
-        }
-        
-        self.storage.get(file_hash).cloned()
-    }
-    
-    fn insert(&mut self, file_hash: FileHash, result: AnalysisResult) {
-        self.storage.insert(file_hash, result);
-        self.ttl_tracker.insert(file_hash, Instant::now());
-    }
-}
-```
+-   **Структура:** Основан на LRU-кэше (`LruCache`) с отслеживанием времени жизни (TTL).
+-   **Назначение:** Кэширует в памяти результаты анализа файлов для ускорения повторных запросов.
 
 ### **🎨 ParserCoordinator (Simple)**
-```rust
-struct ParserCoordinator {
-    tree_sitter: TreeSitterParser,
-    regex_fallback: RegexParser,
-}
+-   **Структура:** Содержит основной парсер (`TreeSitter`) и запасной (`Regex`).
+-   **Назначение:** Управляет процессом парсинга исходного кода, используя простую стратегию "попробовать основной, при ошибке — запасной".
 
-impl ParserCoordinator {
-    fn with_fallback() -> Self {
-        Self {
-            tree_sitter: TreeSitterParser::new(),
-            regex_fallback: RegexParser::new(),
-        }
-    }
-    
-    fn parse(&self, content: &str) -> ParseResult {
-        // Simple strategy: try TreeSitter, fallback to Regex
-        match self.tree_sitter.parse(content) {
-            Ok(result) => Ok(result),
-            Err(tree_sitter_error) => {
-                log::warn!("TreeSitter failed: {}, falling back to regex", tree_sitter_error);
-                self.regex_fallback.parse(content)
-            }
-        }
-    }
-}
-```
-
-### **📊 BasicObservability** 
-```rust
-struct BasicObservability {
-    logger: StructuredLogger,
-    metrics: SimpleMetrics,
-}
-
-impl BasicObservability {
-    fn default() -> Self {
-        Self {
-            logger: StructuredLogger::new(),
-            metrics: SimpleMetrics::new(),
-        }
-    }
-    
-    fn log_analysis(&self, file_path: &Path, duration: Duration) {
-        self.logger.info("analysis_completed", json!({
-            "file": file_path.display(),
-            "duration_ms": duration.as_millis(),
-            "timestamp": Utc::now()
-        }));
-        
-        self.metrics.increment("analyses_total");
-        self.metrics.observe("analysis_duration_ms", duration.as_millis() as f64);
-    }
-    
-    fn health_check(&self) -> HealthStatus {
-        HealthStatus {
-            status: "healthy".to_string(),
-            uptime: self.metrics.uptime(),
-            cache_size: self.metrics.cache_size(),
-        }
-    }
-}
-```
+### **📊 BasicObservability**
+-   **Структура:** Включает в себя структурированный логгер и сборщик простых метрик.
+-   **Назначение:** Обеспечивает базовый мониторинг работы приложения (логирование, метрики производительности, эндпоинт состояния).
 
 ---
 
-## 🧠 Core Type System Design (BSL Specific)
+## 🏗️ Crate Organization Strategy (Актуализирована) 
+
+### 🤔 Слои VS Крейты: Важное различие
+
+**Слои** — это **логическое разделение** (архитектурные границы)  
+**Крейты** — это **физическое разделение** (единицы компиляции)
+
+### 🎯 Рекомендуемый подход: НЕ выносить каждый слой в отдельный крейт
+
+**Почему НЕ нужно создавать крейт для каждого слоя:**
+- ❌ **Over-engineering** для нашего размера проекта
+- ❌ **Сложность сборки** (6+ крейтов вместо 4)
+- ❌ **Circular dependencies** между слоями
+- ❌ **Усложнение DI** и координации
+
+### ✅ ЛУЧШЕ: Объединить слои по **ролям**
+
+```
+shared/          # Domain + Application (Core Analysis Logic)
+├── domain/      # TypeResolver, TypeRepository
+├── types/       # ResolutionResult, Certainty
+├── api/         # DTO для API (контракты)
+└── engine/      # НОВОЕ: AnalysisEngine (чистый оркестратор анализа)
+
+backend/         # System + Application (Web/LSP Specific) + Presentation (server)  
+├── system/      # SystemCoordinator, AnalysisCache
+├── application/ # TypeSystemService (использует shared::engine::AnalysisEngine)
+├── parsing/     # ParserCoordinator (или его инициализация/использование)
+├── presentation/# LSP Server, Web routes
+└── data/        # Platform types, Config
+
+frontend/        # Presentation (web UI)
+├── components/  # Leptos компоненты
+├── pages/       # Страницы
+└── api/         # HTTP клиент
+
+cli/             # Presentation (command line)
+├── commands/    # Команды CLI
+├── args.rs      # НОВОЕ: Аргументы CLI и форматтеры
+└── main.rs      # Entry point (использует shared::engine::AnalysisEngine)
+```
+
+
+### 🎯 Роли крейтов
+
+**shared/** — "чистые" типы и domain логика + **общий оркестратор анализа**
+- ✅ Без I/O, сети, файловой системы (прямого доступа)
+- ✅ Компилируется и под WASM, и под native
+- ✅ Переиспользуется всеми крейтами
+
+**backend/** — все "серверные" слои в одном крейте (System + Application + Server-side Presentation)
+- ✅ Внутри организовано по модулям/папкам
+- ✅ Единая сборка, простая координация
+
+**frontend/**, **cli/** — специализированные презентационные слои
+
+### 💡 Принцип организации
+
+**Слои помогают организовать код внутри крейтов, крейты помогают изолировать роли и зависимости.**
+
+Оставляем **логические слои внутри крейтов**, не выносим их в отдельные крейты. Это дает:
+- 🎯 **Простоту** — 4 крейта вместо 6-8
+- ⚡ **Быстроту сборки** — меньше межкрейтовых зависимостей  
+- 🧩 **Гибкость** — слои остаются, но в рамках логических границ
+- 📦 **Переиспользование** — shared крейт содержит общую логику
+
+---
+
+## 🧠 Core Type System Design (BSL Specific) (без изменений) 
 
 ### **🎯 TypeResolution - Центральная абстракция**
 
@@ -363,9 +330,9 @@ struct WeightedType {
 - **Simple**: 800-1200 LOC для core типизации
 - **Enterprise**: 3000-5000 LOC с продвинутым анализом
 
----
+--- 
 
-## 📊 Comparison: Complex vs Simple
+## 📊 Comparison: Complex vs Simple (без изменений) 
 
 | Aspect | Complex Architecture | Simple Architecture | Savings |
 |--------|---------------------|-------------------|---------|
@@ -378,49 +345,15 @@ struct WeightedType {
 | **Development Time** | 6+ months | 2-3 months | **60%** |
 | **Learning Curve** | High | Low | **Major** |
 
----
+--- 
 
-## 🚀 Migration Path: Complex → Simple
+## 🚀 Migration Path: Complex → Simple (без изменений) 
 
-### **Phase 1: Simplify Coordinators**
-```rust
-// Before: 4 specialized coordinators
-InitCoordinator + RuntimeCoordinator + ConfigCoordinator + ObservabilityCoordinator
+*(Этот раздел оставлен для исторического контекста и демонстрации возможности масштабирования)*
 
-// After: 1 unified coordinator  
-SystemCoordinator
-```
+--- 
 
-### **Phase 2: Simplify Caching**
-```rust
-// Before: Multi-level caching
-AdvancedAnalysisCache { L1HotCache + L2PersistentCache + CacheStrategy }
-
-// After: Simple caching
-AnalysisCache { LruCache + TTL }
-```
-
-### **Phase 3: Simplify Parsing**
-```rust
-// Before: Strategy pattern
-UnifiedParserCoordinator { TreeSitterStrategy + SyntaxHelperStrategy + RegexFallback }
-
-// After: Simple fallback
-ParserCoordinator { TreeSitter + Regex }
-```
-
-### **Phase 4: Simplify Observability**
-```rust
-// Before: Enterprise stack
-LoggingManager + MetricsCollector + HealthChecker + CircuitBreaker + EventBus
-
-// After: Basic observability
-BasicObservability { Logger + SimpleMetrics + HealthEndpoint }
-```
-
----
-
-## 🎯 When to Use Each Architecture
+## 🎯 When to Use Each Architecture (без изменений) 
 
 ### **✅ Use Simple Architecture When:**
 - Team size: 1-3 developers
@@ -438,9 +371,9 @@ BasicObservability { Logger + SimpleMetrics + HealthEndpoint }
 - Performance: need sub-second response times
 - Maintenance: have dedicated DevOps/SRE
 
----
+--- 
 
-## 🏆 Recommendation
+## 🏆 Recommendation (без изменений) 
 
 **For BSL Gradual Type System, I recommend starting with the Simple Architecture:**
 
@@ -456,466 +389,5 @@ BasicObservability { Logger + SimpleMetrics + HealthEndpoint }
 - Add complexity only where proven necessary 🎯
 
 **Remember**: "Perfect is the enemy of good" 😊
-
+```
 ---
-
-## 💡 Next Steps
-
-1. **Validate with users**: Do we need enterprise-grade features?
-2. **Performance testing**: Is simple cache fast enough?
-3. **Prototype both approaches**: Build simplified version first
-4. **Measure and compare**: Real metrics over theoretical benefits
-
-**The goal**: Right-sized architecture for the actual problem domain! 🎯
-
----
-
-## 🔄 MIGRATION POTENTIAL: Simple → Enterprise
-
-### 🤔 **Критический вопрос: "А можно ли будет перейти к Enterprise?"**
-
-**Краткий ответ: ДА, но с некоторыми оговорками! ✅**
-
----
-
-### 📋 **Architecture Foundation Analysis**
-
-#### **✅ Что ХОРОШО заложено в Simple для миграции:**
-
-**🏗️ Clean Architecture Layers** - **ПОЛНАЯ СОВМЕСТИМОСТЬ**
-```rust
-// Simple сохраняет все слои Clean Architecture:
-🎯 System Layer → Enterprise может добавить специализированные координаторы  
-🌐 Presentation → Легко добавить новые API (GraphQL, gRPC)
-🔧 Application → Command/Query separation добавляется естественно
-🧠 Domain → TypeResolver остается без изменений
-💾 Data → Repositories уже абстрагированы
-```
-
-**🎯 SystemCoordinator как Composition Root** - **ИДЕАЛЬНЫЙ ЗАДЕЛ**
-```rust
-// Текущий SystemCoordinator:
-struct SystemCoordinator {
-    cache: AnalysisCache,           // → AdvancedAnalysisCache  
-    parser: ParserCoordinator,      // → UnifiedParserCoordinator
-    observability: BasicObservability, // → Full observability stack
-    type_service: TypeSystemService,   // остается
-}
-
-// Легко расширяется до:
-struct SystemCoordinator {
-    init: InitCoordinator,          // NEW: lifecycle management
-    runtime: RuntimeCoordinator,    // NEW: analysis orchestration  
-    config: ConfigCoordinator,      // NEW: configuration
-    observability: ObservabilityCoordinator, // UPGRADED
-    api_gateway: BSLApiGateway,     // NEW: unified API
-}
-```
-
-**🔌 Trait-Based Design** - **ОТЛИЧНАЯ ОСНОВА**
-```rust
-// Simple уже использует traits:
-trait TypeRepository { /* ... */ }
-trait Parser { /* ... */ }
-
-// Enterprise просто добавляет новые implementations:
-impl TypeRepository for PostgresRepository { /* ... */ }
-impl TypeRepository for EventStoreRepository { /* ... */ }
-impl Parser for TreeSitterStrategy { /* ... */ }
-impl Parser for SyntaxHelperStrategy { /* ... */ }
-```
-
-#### **⚠️ Что ПОТРЕБУЕТ РЕФАКТОРИНГА:**
-
-**💾 Caching Architecture** - **СРЕДНЯЯ СЛОЖНОСТЬ**
-```rust
-// Simple: Монолитный cache
-struct AnalysisCache {
-    storage: LruCache<FileHash, AnalysisResult>,
-    ttl_tracker: HashMap<FileHash, Instant>,
-}
-
-// Enterprise: Нужно разделить на L1+L2
-struct AdvancedAnalysisCache {
-    l1_hot: InMemoryCache,       // HOT data
-    l2_persistent: DiskCache,    // WARM data  
-    strategy: CacheStrategy,     // Intelligence
-}
-
-// МИГРАЦИЯ: Wrapper pattern
-impl AnalysisCache {
-    fn migrate_to_advanced(self) -> AdvancedAnalysisCache {
-        AdvancedAnalysisCache::with_existing_data(self.storage)
-    }
-}
-```
-
-**🎨 Parser Selection** - **ПРОСТАЯ МИГРАЦИЯ**
-```rust
-// Simple: Hardcoded fallback
-fn parse(&self, content: &str) -> ParseResult {
-    match self.tree_sitter.parse(content) {
-        Ok(result) => Ok(result),
-        Err(_) => self.regex_fallback.parse(content),
-    }
-}
-
-// Enterprise: Strategy pattern
-fn parse(&self, content: &str) -> ParseResult {
-    let best_strategy = self.select_best_strategy(content);
-    best_strategy.parse(content)
-}
-
-// МИГРАЦИЯ: Обернуть текущую логику в DefaultStrategy
-```
-
-**📊 Observability** - **ЛЕГКОЕ РАСШИРЕНИЕ**
-```rust
-// Simple: Basic metrics
-struct BasicObservability {
-    logger: StructuredLogger,
-    metrics: SimpleMetrics,
-}
-
-// Enterprise: Добавить компоненты
-struct ObservabilityCoordinator {
-    logging: LoggingManager,      // UPGRADED
-    metrics: MetricsCollector,    // UPGRADED
-    health: HealthChecker,        // NEW
-    circuit_breaker: CircuitBreaker, // NEW
-    event_bus: EventBus,          // NEW
-}
-
-// МИГРАЦИЯ: BasicObservability становится частью LoggingManager
-```
-
----
-
-### 🗺️ **Detailed Migration Roadmap**
-
-#### **Phase 1: Foundation (1-2 weeks)**
-```rust
-// Подготовить интерфейсы для расширения
-trait CacheStrategy {
-    fn should_cache(&self, key: &FileHash) -> bool;
-    fn eviction_policy(&self) -> EvictionPolicy;
-}
-
-trait ParserStrategy {
-    fn confidence(&self, content: &BSLContent) -> f64;
-    fn parse(&self, content: &BSLContent) -> ParseResult;
-}
-
-// Simple архитектура начинает использовать эти traits
-```
-
-#### **Phase 2: Cache Enhancement (2-3 weeks)**
-```rust
-// Шаг 1: Добавить L2 cache рядом с существующим
-struct AnalysisCache {
-    l1_memory: LruCache<FileHash, AnalysisResult>, // existing
-    l2_disk: Option<DiskCache<FileHash, AnalysisResult>>, // NEW
-    ttl_tracker: HashMap<FileHash, Instant>,
-}
-
-// Шаг 2: Постепенно переключить на L2
-// Шаг 3: Добавить cache strategies
-```
-
-#### **Phase 3: Parser Strategies (2-3 weeks)**
-```rust
-// Шаг 1: Обернуть текущие парсеры в strategies
-struct CurrentTreeSitterStrategy(TreeSitterParser);
-struct CurrentRegexStrategy(RegexParser);
-
-// Шаг 2: Добавить ParserCoordinator с strategy selection
-// Шаг 3: Добавить новые strategies (SyntaxHelper, etc.)
-```
-
-#### **Phase 4: Coordinators Split (3-4 weeks)**
-```rust
-// Постепенно выделить ответственности из SystemCoordinator
-SystemCoordinator 
-├→ InitCoordinator::extract_initialization_logic()
-├→ RuntimeCoordinator::extract_analysis_orchestration()  
-├→ ConfigCoordinator::extract_configuration_management()
-└→ ObservabilityCoordinator::extract_monitoring_logic()
-```
-
-#### **Phase 5: Enterprise Features (4-6 weeks)**
-```rust
-// Добавить продвинутые возможности
-├→ BSLApiGateway (unified API)
-├→ Circuit Breakers & Resilience  
-├→ Event Bus & Domain Events
-├→ Advanced Security
-└→ Plugin Architecture
-├→ Advanced Type Analysis (see next section)
-```
-
----
-
-### 🧠 **Type System Evolution: Simple → Enterprise**
-
-#### **📊 Simple Type System (Current)**
-```rust
-// TypeResolver - базовый функционал
-struct TypeResolver {
-    platform_types: HashMap<String, PlatformType>,
-    config_types: HashMap<String, ConfigurationType>,
-}
-
-impl TypeResolver {
-    // Простое разрешение типов
-    fn resolve(&self, expr: &str) -> TypeResolution {
-        // Статический lookup в таблицах
-        // Union types только при явной неоднозначности
-        // Базовые фасеты (Manager/Object/Reference)
-    }
-}
-
-// Характеристики:
-// ✅ 1000-1500 LOC
-// ✅ O(1) lookup для большинства случаев  
-// ✅ Поддержка union с весами
-// ⚠️ Простая flow-sensitive логика
-// ⚠️ Ограниченный inference
-```
-
-#### **🚀 Enterprise Type System (Migration Target)**  
-```rust
-// TypeAnalysisEngine - продвинутый анализ
-struct TypeAnalysisEngine {
-    resolver: TypeResolver,           // базовый (сохраняется)
-    flow_analyzer: FlowSensitiveAnalyzer,
-    inference_engine: TypeInferenceEngine,
-    contract_generator: ContractGenerator,
-    dependency_graph: DependencyGraph,
-}
-
-impl TypeAnalysisEngine {
-    // Продвинутое разрешение с контекстом
-    fn resolve_advanced(&self, expr: &AST, context: &AnalysisContext) -> TypeResolution {
-        // Анализ потока управления
-        // Межпроцедурный анализ  
-        // Автоматический inference фасетов
-        // Генерация runtime контрактов
-    }
-}
-
-// Характеристики:
-// ✅ 5000-8000 LOC
-// ✅ Субсекундный анализ для крупных файлов
-// ✅ 95%+ точность inference
-// ✅ Автоматические runtime контракты
-// ✅ Flow-sensitive type narrowing
-```
-
-#### **🔄 Migration Path для Type System**
-
-**Phase 1: Сохранить Simple TypeResolver как core**
-```rust
-// TypeResolver остается простым и надежным
-// Enterprise components добавляются как decorators/wrappers
-struct TypeAnalysisEngine {
-    core_resolver: TypeResolver,  // ✅ EXISTING - zero changes
-    advanced_features: AdvancedTypeFeatures, // ✅ NEW - additive only
-}
-```
-
-**Phase 2: Добавить Flow-Sensitive Analysis**
-```rust
-// Декорировать результаты TypeResolver
-impl TypeAnalysisEngine {
-    fn resolve_with_flow(&self, expr: &AST, context: &FlowContext) -> TypeResolution {
-        let base_resolution = self.core_resolver.resolve(expr);
-        self.flow_analyzer.refine_type(base_resolution, context)
-    }
-}
-```
-
-**Phase 3: Inference Engine как Enhancement**
-```rust
-// Inference работает поверх базового resolver
-impl TypeInferenceEngine {
-    fn infer_missing_types(&self, ast: &AST) -> Vec<TypeResolution> {
-        // Использует TypeResolver.resolve() как отправную точку
-        // Добавляет inference для неразрешенных случаев
-    }
-}
-```
-
-#### **💡 Ключевые принципы миграции типизации:**
-
-1. **🏗️ Preserve Core**: TypeResolver простой и надежный навсегда
-2. **🎭 Additive Enhancement**: Новые фичи как decorators/wrappers  
-3. **⚡ Performance**: Enterprise features только при необходимости
-4. **🧪 A/B Testing**: Можно сравнивать Simple vs Advanced results
-
----
-
-### 📊 **Migration Risk Assessment**
-
-| Component | Migration Complexity | Risk Level | Estimated Effort |
-|-----------|---------------------|------------|------------------|
-| **Clean Architecture** | ✅ No change | 🟢 Low | 0 days |
-| **SystemCoordinator** | ✅ Extensions only | 🟢 Low | 2-3 days |
-| **TypeResolver/Repository** | ✅ Interface compatible | 🟢 Low | 1-2 days |
-| **Simple Cache → L1+L2** | ⚠️ Structural change | 🟡 Medium | 5-7 days |
-| **Parser fallback → Strategy** | ⚠️ Logic refactor | 🟡 Medium | 3-5 days |
-| **Basic → Full Observability** | ✅ Additive changes | 🟢 Low | 4-6 days |
-| **Add Enterprise Features** | ✅ New components | 🟢 Low | 10-15 days |
-
-**🎯 ИТОГО: 25-40 дней (~6-8 недель) для полной миграции**
-
----
-
-### 🔧 **Migration Strategy: Strangler Fig Pattern**
-
-**Идея**: Постепенно заменять компоненты, сохраняя работоспособность
-
-```rust
-// Phase 1: Dual implementations
-struct HybridAnalysisCache {
-    simple_cache: AnalysisCache,      // existing
-    advanced_cache: Option<AdvancedAnalysisCache>, // new
-    migration_percentage: f64,         // 0.0 → 1.0
-}
-
-impl HybridAnalysisCache {
-    fn get(&self, key: &FileHash) -> Option<AnalysisResult> {
-        if self.should_use_advanced() {
-            self.advanced_cache.as_ref()?.get(key)
-        } else {
-            self.simple_cache.get(key)
-        }
-    }
-    
-    fn should_use_advanced(&self) -> bool {
-        random::<f64>() < self.migration_percentage
-    }
-}
-```
-
-**Преимущества подхода:**
-- ✅ **Zero downtime** миграция
-- ✅ **A/B testing** новых компонентов
-- ✅ **Easy rollback** при проблемах
-- ✅ **Gradual learning** новой архитектуры
-
----
-
-### 🎯 **Architecture Evolution Example**
-
-```rust
-// Month 1: Simple Architecture
-SystemCoordinator {
-    cache: AnalysisCache,
-    parser: ParserCoordinator,
-    observability: BasicObservability,
-}
-
-// Month 6: Hybrid Architecture  
-SystemCoordinator {
-    cache: HybridCache { simple + advanced },
-    parser: StrategyCoordinator { fallback + strategies },
-    observability: EnhancedObservability,
-}
-
-// Month 12: Full Enterprise
-SystemCoordinator {
-    init: InitCoordinator,
-    runtime: RuntimeCoordinator, 
-    config: ConfigCoordinator,
-    observability: ObservabilityCoordinator,
-    api_gateway: BSLApiGateway,
-}
-```
-
----
-
-### 🏆 **Migration Verdict**
-
-#### **✅ ХОРОШИЕ НОВОСТИ:**
-- **Clean Architecture foundation** идеально подходит
-- **SystemCoordinator pattern** легко расширяется
-- **Trait-based design** обеспечивает гибкость
-- **6-8 недель** для полной миграции (реалистично!)
-
-#### **⚠️ CHALLENGES:**
-- Cache архитектура требует рефакторинга
-- Parser logic нужно перепроектировать под strategies
-- Некоторые компоненты потребуют переписывания
-
-#### **🎯 РЕКОМЕНДАЦИЯ:**
-**ДА, миграция возможна и относительно безболезненна!**
-
-**Start Simple → Measure Performance → Migrate Selectively**
-
-**Архитектурный задел в Simple версии - ОТЛИЧНЫЙ!** 🚀
-
----
-
-## 🏗️ Crate Organization Strategy
-
-### 🤔 Слои VS Крейты: Важное различие
-
-**Слои** — это **логическое разделение** (архитектурные границы)  
-**Крейты** — это **физическое разделение** (единицы компиляции)
-
-### 🎯 Рекомендуемый подход: НЕ выносить каждый слой в отдельный крейт
-
-**Почему НЕ нужно создавать крейт для каждого слоя:**
-- ❌ **Over-engineering** для нашего размера проекта
-- ❌ **Сложность сборки** (6+ крейтов вместо 4)
-- ❌ **Circular dependencies** между слоями
-- ❌ **Усложнение DI** и координации
-
-### ✅ ЛУЧШЕ: Объединить слои по **ролям**
-
-```
-shared/          # Domain + некоторые Application типы
-├── domain/      # TypeResolver, TypeRepository
-├── types/       # ResolutionResult, Certainty
-└── api/         # DTO для API
-
-backend/         # System + Application + Presentation (server)  
-├── system/      # SystemCoordinator, AnalysisCache
-├── application/ # TypeSystemService
-├── parsing/     # ParserCoordinator 
-├── presentation/# LSP Server, Web routes
-└── data/        # Platform types, Config
-
-frontend/        # Presentation (web UI)
-├── components/  # Leptos компоненты
-├── pages/       # Страницы
-└── api/         # HTTP клиент
-
-cli/             # Presentation (command line)
-├── commands/    # Команды CLI
-└── main.rs      # Entry point
-```
-
-### 🎯 Роли крейтов
-
-**shared/** — "чистые" типы и domain логика
-- ✅ Без I/O, сети, файловой системы
-- ✅ Компилируется и под WASM, и под native
-- ✅ Переиспользуется всеми крейтами
-
-**backend/** — все "серверные" слои в одном крейте
-- ✅ System + Application + Server-side Presentation
-- ✅ Внутри организовано по модулям/папкам
-- ✅ Единая сборка, простая координация
-
-**frontend/**, **cli/** — специализированные презентационные слои
-
-### 💡 Принцип организации
-
-**Слои помогают организовать код внутри крейтов, крейты помогают изолировать роли и зависимости.**
-
-Оставляем **логические слои внутри крейтов**, не выносим их в отдельные крейты. Это дает:
-- 🎯 **Простоту** — 4 крейта вместо 6-8
-- ⚡ **Быстроту сборки** — меньше межкрейтовых зависимостей  
-- 🧩 **Гибкость** — слои остаются, но в рамках логических границ
-- 📦 **Переиспользование** — shared крейт содержит общую логику

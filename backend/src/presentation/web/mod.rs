@@ -6,5 +6,5 @@
 pub mod handlers;
 pub mod router;
 
-pub use handlers::{AppState, ApiMetrics, ApiType, ApiUnionType, SearchQuery};
+pub use handlers::{AppState, SearchQuery};
 pub use router::create_router;

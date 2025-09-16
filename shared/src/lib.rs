@@ -6,6 +6,7 @@
 pub mod api;
 pub mod domain;
 pub mod types;
+pub mod engine;
 
 // Re-export main types (simplified according to architecture specification)
 pub use api::*;

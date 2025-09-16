@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Система типизации - Единый интерфейс</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Header Navigation -->
+    <header class="header">
+        <div class="container">
+            <div class="header__content">
+                <h1 class="header__title">Система типизации</h1>
+                <nav class="mode-tabs">
+                    <button class="mode-tab active" data-mode="dashboard">
+                        📊 Dashboard
+                    </button>
+                    <button class="mode-tab" data-mode="cards">
+                        🃏 Карточки
+                    </button>
+                    <button class="mode-tab" data-mode="table">
+                        📋 Таблица
+                    </button>
+                    <button class="mode-tab" data-mode="graph">
+                        🕸️ Граф
+                    </button>
+                </nav>
+                <div class="search-box">
+                    <input type="text" id="search" placeholder="Поиск типов..." class="form-control">
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+        <div class="container">
+            <div class="layout">
+                <!-- Sidebar -->
+                <aside class="sidebar" id="sidebar">
+                    <div class="sidebar__header">
+                        <h3>Фильтры</h3>
+                        <button class="sidebar__toggle" id="sidebarToggle">×</button>
+                    </div>
+                    
+                    <div class="filter-section">
+                        <h4>Категории</h4>
+                        <div class="filter-group" id="categoryFilters">
+                            <!-- Categories will be populated by JS -->
+                        </div>
+                    </div>
+
+                    <div class="filter-section">
+                        <h4>Определенность</h4>
+                        <div class="filter-group">
+                            <label class="filter-item">
+                                <input type="checkbox" value="high" checked>
+                                <span>Высокая (≥80%)</span>
+                            </label>
+                            <label class="filter-item">
+                                <input type="checkbox" value="medium" checked>
+                                <span>Средняя (30-79%)</span>
+                            </label>
+                            <label class="filter-item">
+                                <input type="checkbox" value="low" checked>
+                                <span>Низкая (<30%)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="filter-section">
+                        <h4>Дополнительно</h4>
+                        <div class="filter-group">
+                            <label class="filter-item">
+                                <input type="checkbox" value="flow-sensitive">
+                                <span>Flow-sensitive</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <button class="btn btn--outline btn--sm" id="clearFilters">
+                        Сбросить фильтры
+                    </button>
+                </aside>
+
+                <!-- Content Area -->
+                <div class="content">
+                    <!-- Dashboard Mode -->
+                    <div class="mode-content active" id="dashboard-mode">
+                        <div class="dashboard-grid">
+                            <div class="metric-card">
+                                <div class="metric-card__icon">📈</div>
+                                <div class="metric-card__content">
+                                    <h3 class="metric-card__title">Всего типов</h3>
+                                    <div class="metric-card__value" id="totalTypes">5</div>
+                                    <div class="metric-card__subtitle">активных в системе</div>
+                                </div>
+                            </div>
+
+                            <div class="metric-card">
+                                <div class="metric-card__icon">🎯</div>
+                                <div class="metric-card__content">
+                                    <h3 class="metric-card__title">Определенность</h3>
+                                    <div class="metric-card__progress">
+                                        <div class="progress-ring">
+                                            <svg class="progress-ring__svg" width="60" height="60">
+                                                <circle class="progress-ring__circle-bg" cx="30" cy="30" r="25"></circle>
+                                                <circle class="progress-ring__circle" cx="30" cy="30" r="25" 
+                                                        style="--progress: 75"></circle>
+                                            </svg>
+                                            <span class="progress-ring__text">75%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="metric-card">
+                                <div class="metric-card__icon">🔄</div>
+                                <div class="metric-card__content">
+                                    <h3 class="metric-card__title">Flow-sensitive</h3>
+                                    <div class="metric-card__value" id="flowSensitive">2</div>
+                                    <div class="metric-card__subtitle">из 5 типов</div>
+                                </div>
+                            </div>
+
+                            <div class="metric-card">
+                                <div class="metric-card__icon">⚡</div>
+                                <div class="metric-card__content">
+                                    <h3 class="metric-card__title">Производительность</h3>
+                                    <div class="metric-card__value">125ms</div>
+                                    <div class="metric-card__subtitle">скорость анализа</div>
+                                    <div class="metric-card__extra">Cache hit: 94%</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="dashboard-charts">
+                            <div class="chart-card">
+                                <h3>Распределение по категориям</h3>
+                                <div class="category-distribution" id="categoryChart"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Cards Mode -->
+                    <div class="mode-content" id="cards-mode">
+                        <div class="cards-grid" id="cardsContainer">
+                            <!-- Cards will be populated by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Table Mode -->
+                    <div class="mode-content" id="table-mode">
+                        <div class="table-container">
+                            <table class="data-table" id="typesTable">
+                                <thead>
+                                    <tr>
+                                        <th data-sort="name">Название <span class="sort-indicator">↕</span></th>
+                                        <th data-sort="category">Категория <span class="sort-indicator">↕</span></th>
+                                        <th data-sort="certainty">Определенность <span class="sort-indicator">↕</span></th>
+                                        <th data-sort="facets">Фасеты</th>
+                                        <th data-sort="flow_sensitive">Flow-sensitive</th>
+                                        <th>Действия</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tableBody">
+                                    <!-- Table rows will be populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Graph Mode -->
+                    <div class="mode-content" id="graph-mode">
+                        <div class="graph-container">
+                            <div class="graph-canvas" id="graphCanvas">
+                                <svg id="graphSvg" width="100%" height="500">
+                                    <!-- Graph will be populated by JS -->
+                                </svg>
+                            </div>
+                            <div class="graph-controls">
+                                <button class="btn btn--sm" id="zoomIn">🔍+</button>
+                                <button class="btn btn--sm" id="zoomOut">🔍-</button>
+                                <button class="btn btn--sm" id="resetZoom">🔄</button>
+                            </div>
+                        </div>
+                        <div class="graph-details" id="graphDetails">
+                            <h3>Детали узла</h3>
+                            <p>Выберите узел для просмотра деталей</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal for detailed type information -->
+    <div class="modal hidden" id="typeModal">
+        <div class="modal__backdrop" id="modalBackdrop"></div>
+        <div class="modal__content">
+            <div class="modal__header">
+                <h2 id="modalTitle">Детали типа</h2>
+                <button class="modal__close" id="modalClose">×</button>
+            </div>
+            <div class="modal__body" id="modalBody">
+                <!-- Modal content will be populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile menu toggle -->
+    <button class="mobile-menu-toggle" id="mobileMenuToggle">☰</button>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use tracing::info;
 
-use bsl_shared::domain::repository::TypeResolver;
+use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{TypeResolution, ConcreteType, PrimitiveType};
 use bsl_shared::domain::{CompletionItem, CompletionKind};
 use crate::system::{AnalysisCache, AnalysisResult, ParserCoordinator};

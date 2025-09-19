@@ -1,5 +1,7 @@
 //! Frontend configuration
 
+use std::sync::OnceLock;
+
 /// Frontend configuration
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -61,18 +63,15 @@ fn get_api_base_url() -> Option<String> {
 }
 
 /// Global configuration instance
-static mut CONFIG: Option<Config> = None;
+static CONFIG: OnceLock<Config> = OnceLock::new();
 
 /// Get global configuration
 pub fn get_config() -> &'static Config {
-    unsafe {
-        CONFIG.get_or_insert_with(Config::new)
-    }
+    CONFIG.get_or_init(Config::new)
 }
 
 /// Initialize configuration (call once at startup)
 pub fn init_config() {
-    unsafe {
-        CONFIG = Some(Config::new());
-    }
+    // OnceLock автоматически инициализируется при первом вызове get_config()
+    let _ = get_config();
 }

@@ -1,0 +1,1 @@
+// This file is obsolete. TypeContext is now defined in `shared/src/domain/types.rs`.

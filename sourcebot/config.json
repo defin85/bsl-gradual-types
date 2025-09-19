@@ -1,0 +1,11 @@
+{
+    "$schema": "https://raw.githubusercontent.com/sourcebot-dev/sourcebot/main/schemas/v3/index.json",
+    "connections": {
+        "bsl-project": {
+            "type": "github",
+            "repos": [
+                "defin85/bsl-gradual-types"
+            ]
+        }
+    }
+}

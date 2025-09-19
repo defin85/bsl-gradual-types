@@ -4,7 +4,7 @@ mod args;
 
 use clap::Parser;
 use tracing_subscriber;
-use args::{CliArgs, CliFormatter};
+use args::CliArgs;
 use bsl_shared::engine::AnalysisEngine;
 
 #[tokio::main]
@@ -19,7 +19,7 @@ async fn main() {
     println!("📁 Анализируем файл: {}", args.file);
 
     // Step 1: Create the analysis engine
-    match AnalysisEngine::new() {
+    match AnalysisEngine::new("./syntax_helper", "./config") {
         Ok(engine) => {
             // Step 2: Analyze the file
             match engine.analyze_file(&args.file).await {

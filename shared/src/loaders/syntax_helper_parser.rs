@@ -22,7 +22,7 @@ use std::sync::{
 };
 use tracing::{debug, info, warn};
 
-use bsl_shared::domain::types::FacetKind;
+use crate::domain::types::FacetKind;
 
 // ============================================================================
 // Структуры данных
@@ -143,7 +143,7 @@ pub struct ConstructorInfo {
 }
 
 /// Информация о параметре
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParameterInfo {
     pub name: String,
     pub type_name: Option<String>,
@@ -153,7 +153,7 @@ pub struct ParameterInfo {
 }
 
 /// Информация о глобальной функции
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GlobalFunctionInfo {
     pub name: String,
     pub english_name: Option<String>,

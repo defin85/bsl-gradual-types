@@ -18,4 +18,16 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 indexmap = { workspace = true }
 
+# Dependencies for loaders
+dashmap = { workspace = true }
+quick-xml = { workspace = true }
+scraper = { workspace = true }
+rayon = { workspace = true }
+indicatif = { workspace = true }
+walkdir = { workspace = true }
+tracing = { workspace = true }
+
 # No heavy dependencies for WASM compatibility
+
+[dev-dependencies]
+tempfile = { workspace = true }

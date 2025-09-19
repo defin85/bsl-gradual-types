@@ -3,10 +3,12 @@
 //! Единая точка координации всех компонентов системы типов согласно Simple Architecture
 
 use anyhow::Result;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tracing::info;
 
-use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository, TypeResolver};
+use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+use bsl_shared::domain::resolver::TypeResolver;
+use crate::application::type_system_service::TypeSystemService;
 
 use super::basic_observability::BasicObservability;
 use super::parser_coordinator::ParserCoordinator;
@@ -29,6 +31,9 @@ pub struct SystemCoordinator {
     type_resolver: Arc<TypeResolver>,
     #[allow(dead_code)]
     repository: Arc<dyn TypeRepository>,
+
+    // === CACHED APPLICATION SERVICE ===
+    type_service_cache: Mutex<Option<Arc<TypeSystemService>>>,
 }
 
 impl SystemCoordinator {
@@ -55,6 +60,7 @@ impl SystemCoordinator {
             observability,
             type_resolver,
             repository,
+            type_service_cache: Mutex::new(None),
         }
     }
 
@@ -76,6 +82,23 @@ impl SystemCoordinator {
     /// Получить компоненты для создания TypeSystemService
     pub fn get_components(&self) -> (Arc<TypeResolver>, Arc<AnalysisCache>, Arc<ParserCoordinator>) {
         (self.type_resolver.clone(), self.cache.clone(), self.parser.clone())
+    }
+
+    /// Создать TypeSystemService (singleton)
+    pub fn type_service(&self) -> Arc<TypeSystemService> {
+        let mut cache = self.type_service_cache.lock().unwrap();
+        if let Some(service) = cache.as_ref() {
+            return service.clone();
+        }
+
+        let service = Arc::new(TypeSystemService::new(
+            self.type_resolver.clone(),
+            self.cache.clone(),
+            self.parser.clone(),
+        ));
+
+        *cache = Some(service.clone());
+        service
     }
 
     /// Health check

@@ -1,0 +1,1 @@
+// This file is obsolete. Diagnostic types are now defined in `shared/src/domain/types.rs`.

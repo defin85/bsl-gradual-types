@@ -1,11 +1,17 @@
 //! The core analysis engine, independent of any specific adapter (backend, CLI, etc.).
 
 use anyhow::Result;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use crate::loaders::syntax_helper_parser::SyntaxHelperParser;
-use crate::domain::repository::TypeResolver;
+
+use crate::domain::repository::{InMemoryTypeRepository, TypeRepository};
+use crate::domain::resolver::TypeResolver;
 use crate::domain::types::TypeResolution;
+use crate::loaders::{
+    ConfigurationGuidedParser, SyntaxHelperParser, 
+    convert_syntax_helper_to_raw
+};
 
 /// A simplified, self-contained analysis result for the CLI.
 #[derive(Debug, Clone)]
@@ -19,20 +25,38 @@ pub struct CliAnalysisResult {
 /// It orchestrates parsing and type resolution.
 pub struct AnalysisEngine {
     resolver: Arc<TypeResolver>,
-    // TODO: Add other necessary components like parsers
 }
 
 impl AnalysisEngine {
     /// Creates a new analysis engine.
-    /// This will initialize syntax helper parsers and other necessary components.
-    pub fn new() -> Result<Self> {
-        // For now, create a default resolver.
-        // In the future, this should be configured.
-        let resolver = Arc::new(TypeResolver::new());
-        // TODO: Initialize and load syntax helper here
-        // let mut syntax_helper = SyntaxHelperParser::new();
-        // syntax_helper.parse_directory("path/to/syntax/helper")?;
-        // resolver.load_platform_types(syntax_helper.export_database());
+    pub fn new(syntax_helper_path: &str, config_path: &str) -> Result<Self> {
+        
+        let mut syntax_parser = SyntaxHelperParser::new();
+        let _config_parser = ConfigurationGuidedParser::new(config_path);
+
+        // Run parsers to load data
+        if Path::new(syntax_helper_path).exists() {
+            syntax_parser.parse_directory(syntax_helper_path)?;
+        }
+        
+        // This parser needs to be implemented to return Vec<DiscoveredMetadata>
+        // let discovered_metadata = if Path::new(config_path).exists() {
+        //     config_parser.parse_with_configuration_guide()?
+        // } else {
+        //     vec![]
+        // };
+
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        
+        // Convert and load platform types
+        let platform_raw_data = convert_syntax_helper_to_raw(&syntax_parser.export_database());
+        repository.load_types(platform_raw_data)?;
+        
+        // Convert and load configuration types
+        // let config_raw_data = convert_discovered_metadata_to_raw(&discovered_metadata);
+        // repository.load_types(config_raw_data)?;
+
+        let resolver = Arc::new(TypeResolver::new(repository));
 
         Ok(Self { resolver })
     }
@@ -42,25 +66,20 @@ impl AnalysisEngine {
         let start_time = std::time::Instant::now();
         let path_str = path.as_ref().display().to_string();
 
-        // Step 1: Read file content (can be done here for simplicity)
         let _content = std::fs::read_to_string(path.as_ref())
             .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", path_str, e))?;
 
-        // Step 2: Parse the content (placeholder)
-        // let ast = self.parser.parse(&content)?;
-        
-        // Step 3: Resolve types (placeholder)
-        // let resolutions = self.resolver.resolve_types_in_ast(&ast)?;
-        
-        // --- MOCK IMPLEMENTATION ---
-        let mut resolutions = Vec::new();
-        resolutions.push((
+        // MOCK IMPLEMENTATION
+        let mut resolutions_map = HashMap::new();
+        resolutions_map.insert(
             "ПеременнаяА".to_string(),
-            TypeResolution::known(crate::domain::types::ConcreteType::Primitive(
-                crate::domain::types::PrimitiveType::String,
-            )),
-        ));
-        // --- END MOCK ---
+            self.resolver.resolve_expression_async("Строка").await,
+        );
+        resolutions_map.insert(
+            "ПеременнаяБ".to_string(),
+            self.resolver.resolve_expression_async("Справочники.Контрагенты").await,
+        );
+        let resolutions: Vec<(String, TypeResolution)> = resolutions_map.into_iter().collect();
 
         let result = CliAnalysisResult {
             file_path: path_str,
@@ -69,11 +88,5 @@ impl AnalysisEngine {
         };
 
         Ok(result)
-    }
-}
-
-impl Default for AnalysisEngine {
-    fn default() -> Self {
-        Self::new().expect("Failed to create default AnalysisEngine")
     }
 }

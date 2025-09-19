@@ -9,6 +9,7 @@ Cargo.lock
 .vscode/
 *.swp
 *.swo
+*.tmp.*
 *~
 
 # OS
@@ -29,6 +30,11 @@ test-output/
 
 # Documentation build
 docs/_build/
+
+# Sourcebot data
+sourcebot/.sourcebot/
+sourcebot/*.tmp.*
+sourcebot/config.json.tmp.*
 
 examples/syntax_helper/rebuilt.shcntx_ru
 examples/syntax_helper/rebuilt.shlang_ru

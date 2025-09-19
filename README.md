@@ -6,6 +6,8 @@
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/yourusername/bsl-gradual-types/releases)
 
 > 🏆 **Enterprise-ready система градуальной типизации для языка 1С:Предприятие BSL**
+>
+> ✨ Обновлено 19 января 2025 - улучшенная архитектура и исправление warnings
 
 ## 🚀 Быстрый старт
 

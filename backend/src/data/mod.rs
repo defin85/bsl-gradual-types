@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 // Подключаем загрузчики данных
-pub mod loaders;
+
 
 /// Source of type information
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -231,7 +231,7 @@ async fn fetch_json<T>(url: &str) -> Result<T, JsValue>
 where
     T: serde::de::DeserializeOwned,
 {
-    let mut opts = RequestInit::new();
+    let opts = RequestInit::new();
     opts.set_method("GET");
     opts.set_mode(RequestMode::Cors);
 

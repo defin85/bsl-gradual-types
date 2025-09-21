@@ -1,4 +1,4 @@
-//! Search bar component for filtering types
+//! Enhanced search bar component for filtering types
 
 use crate::api::types::*;
 use leptos::prelude::*;
@@ -213,5 +213,48 @@ pub fn SimpleSearchBar(
                 on:input=handle_input
             />
         </div>
+    }
+}
+
+/// Компонент поиска для header'а
+#[component]
+#[allow(non_snake_case)]
+pub fn HeaderSearchBar(
+    /// RwSignal для текста поиска
+    #[prop(into)] search_query: RwSignal<String>,
+    /// Колбэк для обработки поиска
+    on_search: Callback<String>,
+) -> impl IntoView {
+    let input_ref = NodeRef::<html::Input>::new();
+
+    let handle_input = move |_| {
+        if let Some(input) = input_ref.get() {
+            let value = input.value();
+            search_query.set(value.clone());
+            on_search.run(value);
+        }
+    };
+
+    let on_search_clone = on_search;
+    let handle_keydown = move |ev: web_sys::KeyboardEvent| {
+        if ev.key() == "Escape" {
+            if let Some(input) = input_ref.get() {
+                input.set_value("");
+                search_query.set(String::new());
+                on_search_clone.run(String::new());
+            }
+        }
+    };
+
+    view! {
+        <input
+            type="text"
+            placeholder="Поиск типов..."
+            node_ref=input_ref
+            value=move || search_query.get()
+            on:input=handle_input
+            on:keydown=handle_keydown
+            class="form-control"
+        />
     }
 }

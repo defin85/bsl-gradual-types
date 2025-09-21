@@ -1,13 +1,14 @@
-# BSL Type System — Leptos Frontend (CSR Only)
+# BSL Type System — Интегрированный Frontend (CSR + Backend)
 
-Этот документ описывает реализацию веб‑интерфейса на Leptos в режиме CSR (Client‑Side Rendering). SSR полностью убран: сервер не рендерит HTML, а только отдаёт статические ассеты (WASM/JS/CSS) и обслуживает REST API.
+Этот документ описывает реализацию интегрированного веб‑интерфейса где Backend = REST API + Static WASM files. Никаких отдельных серверов - все в одном процессе.
 
 ## Обзор
 
-- Архитектура: SPA на Leptos (WASM), данные через REST API.
-- Сервер: Axum — только API и раздача статических файлов; без `leptos_axum`, без SSR‑роутов.
-- Сборка фронта: Trunk компилирует Rust → WASM и кладёт файлы в `target/site`.
-- Роутинг: клиентский (`leptos_router`), SPA‑fallback на `index.html`.
+- **Интегрированная архитектура**: Один сервер обслуживает и API endpoints и статические WASM файлы.
+- **Backend**: Axum сервер в `bsl-backend` с fallback на статические файлы из `target/site/`.
+- **Frontend**: Leptos SPA (WASM) собирается в `target/site/` и интегрируется в backend.
+- **API**: REST endpoints доступны по маршрутам `/api/*`.
+- **Роутинг**: клиентский (`leptos_router`), SPA‑fallback на `index.html`.
 
 ## Структура проекта (Workspace в `src/presentation`)
 
@@ -190,7 +191,7 @@ cd ../backend
 cargo run --bin web-server --features "web-ui,web-server"
 
 # Dev-режим с HMR (по желанию):
-cd src/presentation/frontend && trunk serve --features web-ui --open
+cargo run -p bsl-backend --bin bsl-web-server -- --port 3001 --enable-cors true
 # и отдельно запустить API (cd ../backend && cargo run); настроить прокси /api в Trunk
 ```
 

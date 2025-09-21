@@ -84,9 +84,10 @@ cargo clippy   # Статический анализ
 cargo run --bin bsl-lsp-server
 ```
 
-#### Web сервер
+#### Интегрированный Web сервер (API + Frontend)
 ```bash
-cargo run --bin bsl-web-server -- --port 8080
+cargo run -p bsl-backend --bin bsl-web-server -- --port 3001 --enable-cors true
+# Доступен на: http://127.0.0.1:3001
 ```
 
 #### CLI инструменты
@@ -118,18 +119,17 @@ npm test
 npm run lint  # TypeScript проверка
 ```
 
-### Frontend (Leptos WASM)
+### Frontend (интегрированный в backend)
 ```bash
+# Сборка WASM файлов (если нужно обновить frontend)
 cd frontend
-
-# Установка trunk для WASM сборки
-cargo install trunk
-
-# Разработка с hot reload
-trunk serve
-
-# Продакшн сборка
 trunk build --release
+
+# Интегрированный веб-сервер (API + Static WASM files)
+cargo run -p bsl-backend --bin bsl-web-server -- --port 3001 --enable-cors true
+
+# Доступ к веб-интерфейсу
+# http://127.0.0.1:3001
 ```
 
 ## Configuration-guided Discovery
@@ -235,12 +235,12 @@ cargo clippy --workspace --all-targets --all-features
 ### Web API тестирование
 ```bash
 # Запуск сервера
-cargo run --bin bsl-web-server -- --port 8080
+cargo run -p bsl-backend --bin bsl-web-server -- --port 3001 --enable-cors true
 
 # Тестирование API
-curl "http://localhost:8080/api/types?search=Массив"
-curl "http://localhost:8080/api/health"
-curl -X POST "http://localhost:8080/api/analyze" \
+curl "http://localhost:3001/api/types?search=Массив"
+curl "http://localhost:3001/api/health"
+curl -X POST "http://localhost:3001/api/analyze" \
   -H "Content-Type: application/json" \
   -d '{"code": "Функция Тест() Возврат 42; КонецФункции"}'
 ```

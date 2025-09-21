@@ -84,10 +84,13 @@ pretty_assertions = "1.4"
 insta = "1.34"
 
 # Internal crates (defined here for workspace reference)
-bsl-shared = { path = "shared" }
+bsl-shared = { path = "shared", default-features = true }
 bsl-backend = { path = "backend" }
 bsl-frontend = { path = "frontend" }
 bsl-cli = { path = "cli" }
+
+# Force single getrandom version with proper WASM features
+getrandom = { version = "0.3", features = ["wasm_js"] }
 
 # Dependencies for root crate (to enable re-exports for tests)
 [dependencies]

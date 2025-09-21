@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
-bsl-shared = { workspace = true }
+bsl-shared = { workspace = true, features = ["wasm"] }
 
 # Leptos and web dependencies
 leptos = { workspace = true }
@@ -30,3 +30,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde-wasm-bindgen = "0.6"
 urlencoding = { workspace = true }
+
+# WASM random support - use workspace version
+getrandom = { workspace = true }

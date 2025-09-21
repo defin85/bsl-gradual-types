@@ -9,7 +9,10 @@ use wasm_bindgen::JsCast;
 /// Страница графового представления типов
 #[component]
 #[allow(non_snake_case)]
-pub fn GraphPage() -> impl IntoView {
+pub fn GraphPage(
+    /// Поисковый запрос для фильтрации
+    #[prop(optional)] _search_query: Option<RwSignal<String>>,
+) -> impl IntoView {
     let graph = RwSignal::new(TypeGraph { nodes: vec![], connections: vec![] });
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);

@@ -9,8 +9,11 @@
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
+#[cfg(feature = "loaders")]
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+#[cfg(feature = "loaders")]
 use rayon::prelude::*;
+#[cfg(feature = "scrapers")]
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

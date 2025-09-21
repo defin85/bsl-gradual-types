@@ -8,7 +8,10 @@ use leptos::task::spawn_local;
 /// Страница табличного представления типов
 #[component]
 #[allow(non_snake_case)]
-pub fn TablePage() -> impl IntoView {
+pub fn TablePage(
+    /// Поисковый запрос для фильтрации
+    #[prop(optional)] _search_query: Option<RwSignal<String>>,
+) -> impl IntoView {
     let filters = RwSignal::new(TypeFilters::default());
     let types = RwSignal::new(Vec::<TypeInfo>::new());
     let loading = RwSignal::new(false);

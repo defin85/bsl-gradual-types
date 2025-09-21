@@ -1,7 +1,7 @@
-//! Web API presentation layer
+//! Web Interface presentation layer
 //!
-//! Backend только предоставляет REST API для frontend.
-//! UI компоненты находятся в frontend/ крейте.
+//! Интегрированная архитектура: Backend = REST API + Static WASM files.
+//! Обслуживает и API endpoints (/api/*) и статические файлы frontend.
 
 pub mod handlers;
 pub mod router;

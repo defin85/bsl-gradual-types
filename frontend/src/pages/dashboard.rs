@@ -8,7 +8,10 @@ use leptos::task::spawn_local;
 /// Страница дашборда с метриками системы типизации
 #[component]
 #[allow(non_snake_case)]
-pub fn Dashboard() -> impl IntoView {
+pub fn Dashboard(
+    /// Поисковый запрос для фильтрации
+    #[prop(optional)] _search_query: Option<RwSignal<String>>,
+) -> impl IntoView {
     let metrics = RwSignal::new(None::<TypeMetrics>);
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);

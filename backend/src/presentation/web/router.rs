@@ -7,14 +7,22 @@ use axum::{
     Router,
 };
 use tower_http::services::{ServeDir, ServeFile};
+use std::collections::HashMap;
 
 use super::handlers::{AppState, get_metrics, get_types, search_types};
 
 /// Create web application router
 pub fn create_router(app_state: AppState, static_path: &str, enable_cors: bool) -> Router {
     let index_path = format!("{}/index.html", static_path);
+
+    // Configure MIME types for WASM and JS files
+    let mut mime_overrides = HashMap::new();
+    mime_overrides.insert("wasm", "application/wasm");
+    mime_overrides.insert("js", "application/javascript");
+
     let static_dir = ServeDir::new(static_path)
-        .not_found_service(ServeFile::new(&index_path));
+        .not_found_service(ServeFile::new(&index_path))
+        .append_index_html_on_directories(true);
 
     let mut app = Router::new()
         .route("/api/metrics", get(get_metrics))

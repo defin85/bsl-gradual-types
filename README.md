@@ -21,9 +21,9 @@ cargo build --release
 echo 'Функция Тест() Возврат "привет"; КонецФункции' > test.bsl
 ./target/release/bsl-analyzer --file test.bsl
 
-# 3. Запуск web интерфейса
-./target/release/bsl-web-server --port 8080
-# Открыть http://localhost:8080
+# 3. Запуск интегрированного web интерфейса
+cargo run -p bsl-backend --bin bsl-web-server -- --port 3001 --enable-cors true
+# Открыть http://localhost:3001
 
 # 4. VSCode расширение
 cd vscode-extension
@@ -74,7 +74,7 @@ cargo run --bin bsl-profiler benchmark
 cargo run --bin bsl-profiler project /path/to/1c --threads 4
 
 # Web type browser
-cargo run --bin bsl-web-server -- --port 8080
+cargo run -p bsl-backend --bin bsl-web-server -- --port 3001 --enable-cors true
 
 # Конфигурация (опционально)
 cargo run --bin bsl-web-server -- --config path/to/cf --port 8080
@@ -131,18 +131,18 @@ code --install-extension bsl-gradual-types-1.0.0.vsix
 cargo run --bin bsl-web-server --port 8080
 
 # Поиск типов
-curl "http://localhost:8080/api/types?search=Массив"
+curl "http://localhost:3001/api/types?search=Массив"
 
 # Статус здоровья (health)
-curl "http://localhost:8080/api/health"
+curl "http://localhost:3001/api/health"
 
 # Анализ кода
-curl -X POST "http://localhost:8080/api/analyze" \
+curl -X POST "http://localhost:3001/api/analyze" \
   -H "Content-Type: application/json" \
   -d '{"code": "Функция Тест() Возврат 42; КонецФункции"}'
 
 # Статистика системы
-curl "http://localhost:8080/api/stats"
+curl "http://localhost:3001/api/stats"
 ```
 
 ## 🏗️ Архитектура

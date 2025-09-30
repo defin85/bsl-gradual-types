@@ -9,7 +9,7 @@ use anyhow::Result;
 use tracing::info;
 
 use bsl_shared::engine::AnalysisEngine;
-use bsl_shared::domain::types::TypeResolution;
+use bsl_shared::domain::types::{TypeResolution, ResolutionResult};
 use bsl_shared::domain::{CompletionItem, CompletionKind};
 use crate::system::{AnalysisCache, AnalysisResult, ParserCoordinator};
 use crate::application::TypeInferenceService;
@@ -62,6 +62,151 @@ impl TypeSystemService {
     pub fn get_all_platform_globals(&self) -> std::collections::HashMap<String, TypeResolution> {
         // Делегируем в TypeInferenceService (Application Layer)
         self.inference_service.get_all_platform_globals()
+    }
+
+    /// Phase 5: Получить все типы с преобразованием в DTO (Web API)
+    pub fn get_all_types_as_dto(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> bsl_shared::api::dtos::AnalysisResultDto {
+        use bsl_shared::api::dtos::{AnalysisResultDto, TypeDto, CategoryDto, MetricsDto, PaginationDto, UnionComponentDto};
+        use bsl_shared::domain::types::{Certainty, ResolutionResult};
+
+        // 1. Получаем все типы из Domain
+        let all_types = self.inference_service.get_all_platform_globals();
+
+        // 2. Применяем пагинацию и преобразуем в DTO
+        let type_dtos: Vec<TypeDto> = all_types
+            .iter()
+            .skip(offset)
+            .take(limit)
+            .map(|(name, res)| {
+                // Определение категории и источника
+                let (category, source) = match &res.source {
+                    bsl_shared::domain::types::ResolutionSource::Static => {
+                        ("Platform".to_string(), "Static Analysis".to_string())
+                    }
+                    _ => ("Configuration".to_string(), "Configuration".to_string()),
+                };
+
+                // Расчет certainty
+                let certainty_val = match res.certainty {
+                    Certainty::Known => 100,
+                    Certainty::Inferred(val) => (val * 100.0) as u8,
+                    Certainty::Unknown => 30,
+                };
+
+                // Извлечение union types
+                let union_types = if let ResolutionResult::Union(types) = &res.result {
+                    Some(
+                        types
+                            .iter()
+                            .map(|wt| UnionComponentDto {
+                                type_name: format!("{:?}", wt.type_),
+                                probability: (wt.weight * 100.0) as u8,
+                            })
+                            .collect(),
+                    )
+                } else {
+                    None
+                };
+
+                TypeDto {
+                    id: name.clone(),
+                    name: name.clone(),
+                    category,
+                    certainty: certainty_val,
+                    certainty_text: format!("{:?} {}%", res.certainty, certainty_val),
+                    facets: res.available_facets.iter().map(|f| format!("{:?}", f)).collect(),
+                    methods_count: None,
+                    methods: Vec::new(),
+                    attributes_count: None,
+                    source,
+                    flow_sensitive: false, // TODO: добавить flow-sensitive анализ
+                    description: self.generate_type_description(res),
+                    union_types,
+                    flow_analysis: None,
+                    connections: None,
+                    warning: None,
+                    recommendation: None,
+                }
+            })
+            .collect();
+
+        // 3. Генерируем метрики
+        let metrics = MetricsDto {
+            total_types: all_types.len(),
+            certainty_high: type_dtos.iter().filter(|t| t.certainty > 80).count(),
+            certainty_medium: type_dtos
+                .iter()
+                .filter(|t| t.certainty > 40 && t.certainty <= 80)
+                .count(),
+            certainty_low: type_dtos.iter().filter(|t| t.certainty <= 40).count(),
+            flow_sensitive: type_dtos.iter().filter(|t| t.flow_sensitive).count(),
+            cache_hit_rate: format!("{:.1}%", self.cache.get_hit_rate()),
+            analysis_speed: "125ms".to_string(), // TODO: реальная метрика
+        };
+
+        // 4. Генерируем категории
+        let mut categories = std::collections::HashMap::new();
+        categories.insert(
+            "Platform".to_string(),
+            CategoryDto {
+                color: "#3498db".to_string(),
+                icon: "🔧".to_string(),
+                count: type_dtos.iter().filter(|t| t.category == "Platform").count(),
+            },
+        );
+        categories.insert(
+            "Configuration".to_string(),
+            CategoryDto {
+                color: "#e74c3c".to_string(),
+                icon: "⚙️".to_string(),
+                count: type_dtos
+                    .iter()
+                    .filter(|t| t.category == "Configuration")
+                    .count(),
+            },
+        );
+
+        // 5. Генерируем информацию о пагинации
+        let total_items = all_types.len();
+        let current_page = (offset / limit) + 1;
+        let total_pages = (total_items + limit - 1) / limit;
+        let has_prev = current_page > 1;
+        let has_next = current_page < total_pages;
+
+        let pagination = Some(PaginationDto {
+            current_page,
+            page_size: limit,
+            total_items,
+            total_pages,
+            has_prev,
+            has_next,
+        });
+
+        // 6. Возвращаем полную структуру
+        AnalysisResultDto {
+            types: type_dtos,
+            categories,
+            metrics,
+            connections: Vec::new(),
+            pagination,
+        }
+    }
+
+    /// Генерация описания типа
+    fn generate_type_description(&self, resolution: &TypeResolution) -> String {
+        match &resolution.result {
+            ResolutionResult::Concrete(concrete) => {
+                format!("Конкретный тип: {:?}", concrete)
+            }
+            ResolutionResult::Union(types) => {
+                format!("Union тип из {} вариантов", types.len())
+            }
+            ResolutionResult::Dynamic => "Динамический тип".to_string(),
+        }
     }
 
     /// CLI операции - файловый анализ

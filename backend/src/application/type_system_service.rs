@@ -9,7 +9,7 @@ use anyhow::Result;
 use tracing::info;
 
 use bsl_shared::engine::AnalysisEngine;
-use bsl_shared::domain::types::{TypeResolution, ConcreteType, PrimitiveType};
+use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::{CompletionItem, CompletionKind};
 use crate::system::{AnalysisCache, AnalysisResult, ParserCoordinator};
 use crate::application::TypeInferenceService;
@@ -87,40 +87,128 @@ impl TypeSystemService {
         Ok(analysis_result)
     }
 
-    /// Анализ содержимого файла без чтения с диска
+    /// Анализ содержимого файла без чтения с диска (Phase 4: улучшенная реализация)
     pub async fn analyze_file_content(
         &self,
         file_path: &str,
         content: &str,
     ) -> Result<AnalysisResult> {
+        let start_time = std::time::Instant::now();
         info!("🔍 Анализ содержимого файла: {}", file_path);
 
-        let _parse_result = self
+        // 1. Проверка кэша (Application Layer логика)
+        let cache_key = format!("{}:{}", file_path, self.hash_content(content));
+        if let Some(cached_result) = self.cache.get_analysis(&cache_key) {
+            info!("💾 Кэш попадание для файла: {}", file_path);
+            return Ok(cached_result);
+        }
+
+        // 2. Парсинг файла
+        let parse_result = self
             .parser
             .parse(content)
             .map_err(|e| anyhow::anyhow!("Ошибка парсинга содержимого {}: {}", file_path, e))?;
 
-        // Простая эмуляция анализа типов для тестирования
+        info!("📝 Парсинг успешен, найдено операторов: {}", parse_result.statements.len());
+
+        // 3. Извлечение переменных и типов из AST
         let mut type_resolutions = HashMap::new();
-        if content.contains("Функция") || content.contains("Процедура") {
-            // Если найдена функция или процедура, добавляем простое разрешение типа
-            type_resolutions.insert(
-                "detected_function".to_string(),
-                TypeResolution::known(ConcreteType::Primitive(
-                    PrimitiveType::String
-                ))
-            );
+
+        // Простая эвристика: извлекаем переменные с типами
+        for line in content.lines() {
+            // Паттерн: Перем ИмяПеременной: ТипДанных
+            if line.trim().starts_with("Перем ") {
+                if let Some(type_hint) = self.extract_type_from_var_declaration(line) {
+                    let var_name = self.extract_var_name(line).unwrap_or("unknown".to_string());
+
+                    // Используем TypeInferenceService для разрешения типа
+                    let resolution = self.inference_service.resolve_expression_async(&type_hint).await;
+                    type_resolutions.insert(var_name, resolution);
+                }
+            }
+
+            // Паттерн: Функция ИмяФункции() Возврат Тип;
+            if line.trim().starts_with("Функция ") || line.trim().starts_with("Процедура ") {
+                if let Some(return_type) = self.extract_return_type(line) {
+                    let func_name = self.extract_function_name(line).unwrap_or("unknown".to_string());
+
+                    let resolution = self.inference_service.resolve_expression_async(&return_type).await;
+                    type_resolutions.insert(format!("return_{}", func_name), resolution);
+                }
+            }
         }
+
+        let analysis_duration_ms = start_time.elapsed().as_millis();
 
         let analysis_result = AnalysisResult {
             file_path: file_path.to_string(),
             type_resolutions,
-            analysis_duration_ms: 0,
+            analysis_duration_ms: analysis_duration_ms as u64,
             cached_at: std::time::Instant::now(),
         };
 
-        info!("✅ Анализ содержимого {} завершён", file_path);
+        // 4. Сохранение в кэш
+        self.cache.store_analysis(cache_key, analysis_result.clone());
+
+        info!("✅ Анализ содержимого {} завершён за {}ms", file_path, analysis_duration_ms);
         Ok(analysis_result)
+    }
+
+    // === HELPER METHODS FOR FILE ANALYSIS ===
+
+    /// Хэширование содержимого для кэш-ключа
+    fn hash_content(&self, content: &str) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        content.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Извлечение имени переменной из объявления
+    fn extract_var_name(&self, line: &str) -> Option<String> {
+        // Перем ИмяПеременной: Тип
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let var_name = parts[1].trim_end_matches(':');
+            return Some(var_name.to_string());
+        }
+        None
+    }
+
+    /// Извлечение типа из объявления переменной
+    fn extract_type_from_var_declaration(&self, line: &str) -> Option<String> {
+        // Перем ИмяПеременной: Тип
+        if let Some(colon_pos) = line.find(':') {
+            let type_part = &line[colon_pos + 1..];
+            let type_name = type_part.split(';').next()?.trim();
+            return Some(type_name.to_string());
+        }
+        None
+    }
+
+    /// Извлечение имени функции
+    fn extract_function_name(&self, line: &str) -> Option<String> {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let func_name = parts[1].trim_end_matches('(');
+            return Some(func_name.to_string());
+        }
+        None
+    }
+
+    /// Извлечение типа возврата функции
+    fn extract_return_type(&self, line: &str) -> Option<String> {
+        // Ищем "Возврат" в строке
+        if let Some(return_pos) = line.find("Возврат") {
+            let return_part = &line[return_pos + "Возврат".len()..];
+            let type_name = return_part.split(';').next()?.trim();
+            if !type_name.is_empty() {
+                return Some(type_name.to_string());
+            }
+        }
+        None
     }
 
     /// LSP операции - получить информацию о символе в позиции (hover)

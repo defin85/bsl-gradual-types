@@ -15,6 +15,9 @@ pub struct AnalysisCache {
     storage: lru::LruCache<FileHash, AnalysisResult>,
     ttl_tracker: HashMap<FileHash, Instant>,
     default_ttl: Duration,
+    // Phase 4: Добавляем простой String-based кеш для упрощенного API
+    string_cache: std::sync::Mutex<lru::LruCache<String, AnalysisResult>>,
+    string_stats: std::sync::Mutex<(usize, usize)>, // (hits, misses)
 }
 
 /// Хеш файла для кеширования  
@@ -62,6 +65,8 @@ impl AnalysisCache {
             storage: lru::LruCache::new(std::num::NonZeroUsize::new(capacity).unwrap()),
             ttl_tracker: HashMap::new(),
             default_ttl: Duration::from_secs(300), // 5 минут TTL
+            string_cache: std::sync::Mutex::new(lru::LruCache::new(std::num::NonZeroUsize::new(capacity).unwrap())),
+            string_stats: std::sync::Mutex::new((0, 0)),
         }
     }
 
@@ -124,6 +129,37 @@ impl AnalysisCache {
             "Cache cleanup: removed {} expired entries",
             self.ttl_tracker.len().saturating_sub(self.storage.len())
         );
+    }
+
+    // === Phase 4: Simplified String-based API ===
+
+    /// Получить результат анализа из кэша по строковому ключу
+    pub fn get_analysis(&self, key: &str) -> Option<AnalysisResult> {
+        let mut cache = self.string_cache.lock().unwrap();
+        if let Some(result) = cache.get(key) {
+            let mut stats = self.string_stats.lock().unwrap();
+            stats.0 += 1; // hits
+            return Some(result.clone());
+        }
+        let mut stats = self.string_stats.lock().unwrap();
+        stats.1 += 1; // misses
+        None
+    }
+
+    /// Сохранить результат анализа в кэш по строковому ключу
+    pub fn store_analysis(&self, key: String, result: AnalysisResult) {
+        let mut cache = self.string_cache.lock().unwrap();
+        cache.put(key, result);
+    }
+
+    /// Получить hit rate кэша
+    pub fn get_hit_rate(&self) -> f64 {
+        let (hits, misses) = *self.string_stats.lock().unwrap();
+        let total = hits + misses;
+        if total == 0 {
+            return 0.0;
+        }
+        (hits as f64 / total as f64) * 100.0
     }
 }
 

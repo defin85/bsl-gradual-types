@@ -9,11 +9,8 @@
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
-#[cfg(feature = "loaders")]
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-#[cfg(feature = "loaders")]
 use rayon::prelude::*;
-#[cfg(feature = "scrapers")]
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -25,7 +22,8 @@ use std::sync::{
 };
 use tracing::{debug, info, warn};
 
-use crate::domain::types::FacetKind;
+// Импорт из shared крейта (Domain Layer)
+use bsl_shared::domain::types::FacetKind;
 
 // ============================================================================
 // Структуры данных
@@ -276,6 +274,58 @@ impl SyntaxHelperParser {
         }
     }
 
+    /// Парсит синтаксис-помощник, автоматически определяя структуру
+    pub fn parse_syntax_helper<P: AsRef<Path>>(&mut self, base_path: P) -> Result<()> {
+        let base_path = base_path.as_ref();
+        info!("🚀 Начинаем парсинг синтаксис-помощника из {:?}", base_path);
+
+        // Проверяем стандартную структуру синтаксис-помощника 1С
+        let context_help_path = base_path.join("rebuilt.shcntx_ru");
+        let language_help_path = base_path.join("rebuilt.shlang_ru");
+
+        let mut parsed_something = false;
+
+        // Парсим контекстную справку (объекты, методы, свойства)
+        if context_help_path.exists() {
+            info!("📚 Найдена контекстная справка (shcntx_ru), запускаем парсинг...");
+            match self.parse_directory(&context_help_path) {
+                Ok(()) => {
+                    info!("✅ Парсинг контекстной справки завершен");
+                    parsed_something = true;
+                }
+                Err(e) => {
+                    warn!("⚠️ Ошибка парсинга контекстной справки: {}", e);
+                }
+            }
+        }
+
+        // Парсим справку по языку (примитивные типы, операторы)
+        if language_help_path.exists() {
+            info!("📖 Найдена справка по языку (shlang_ru), запускаем парсинг...");
+            match self.parse_directory(&language_help_path) {
+                Ok(()) => {
+                    info!("✅ Парсинг справки по языку завершен");
+                    parsed_something = true;
+                }
+                Err(e) => {
+                    warn!("⚠️ Ошибка парсинга справки по языку: {}", e);
+                }
+            }
+        }
+
+        // Fallback: если стандартных папок нет, парсим как единую папку
+        if !parsed_something && base_path.exists() {
+            info!("📚 Стандартные папки не найдены, парсим как единую папку...");
+            self.parse_directory(base_path)?;
+        }
+
+        if !parsed_something {
+            warn!("📁 Не найдено подходящих файлов для парсинга в {:?}", base_path);
+        }
+
+        Ok(())
+    }
+
     /// Парсит каталог с прогресс-баром
     pub fn parse_directory<P: AsRef<Path>>(&mut self, base_path: P) -> Result<()> {
         let base_path = base_path.as_ref();
@@ -398,9 +448,28 @@ impl SyntaxHelperParser {
                         }
                     }
 
-                    // Фильтруем только HTML файлы
-                    if path.extension().and_then(|s| s.to_str()) == Some("html") {
-                        Some(path.to_path_buf())
+                    // Фильтруем HTML файлы и файлы без расширения, которые содержат HTML
+                    if path.is_file() {
+                        let extension = path.extension().and_then(|s| s.to_str());
+                        if extension == Some("html") {
+                            // Обычные .html файлы
+                            Some(path.to_path_buf())
+                        } else if extension.is_none() {
+                            // Файлы без расширения - проверяем, содержат ли HTML
+                            if let Ok(first_line) = std::fs::read_to_string(path).map(|content| {
+                                content.lines().next().unwrap_or("").to_lowercase()
+                            }) {
+                                if first_line.contains("<html") || first_line.contains("<!doctype") {
+                                    Some(path.to_path_buf())
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }

@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 
 // Подключаем загрузчики данных
+pub mod loaders;
+pub mod adapters;
 
 
 /// Source of type information

@@ -441,6 +441,32 @@ impl TypeSystemService {
         Ok(completions)
     }
 
+    /// Phase 5: Получить метрики типов для Web API
+    pub fn get_metrics_summary(&self) -> serde_json::Value {
+        use bsl_shared::domain::types::Certainty;
+
+        let all_types = self.inference_service.get_all_platform_globals();
+
+        let mut known = 0;
+        let mut inferred = 0;
+        let mut unknown = 0;
+
+        for res in all_types.values() {
+            match res.certainty {
+                Certainty::Known => known += 1,
+                Certainty::Inferred(_) => inferred += 1,
+                Certainty::Unknown => unknown += 1,
+            }
+        }
+
+        serde_json::json!({
+            "total_types": all_types.len(),
+            "known_types": known,
+            "inferred_types": inferred,
+            "unknown_types": unknown,
+        })
+    }
+
     // === МЕТОДЫ АНАЛИЗА КОНТЕКСТА ===
 
     /// Анализирует контекст для умного автодополнения

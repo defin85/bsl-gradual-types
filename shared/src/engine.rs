@@ -1,4 +1,7 @@
 //! The core analysis engine, independent of any specific adapter (backend, CLI, etc.).
+//!
+//! Phase 3: Simplified - no Infrastructure dependencies
+//! Infrastructure initialization moved to SystemCoordinator (backend)
 
 use anyhow::Result;
 use std::collections::HashMap;
@@ -9,16 +12,6 @@ use tracing::{info, warn};
 use crate::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use crate::domain::resolver::TypeResolver;
 use crate::domain::types::TypeResolution;
-// TEMPORARY: Эти импорты будут удалены в Phase 3 рефакторинга
-// AnalysisEngine не должен создавать Infrastructure компоненты
-// TODO Phase 3: Переместить инициализацию в SystemCoordinator (backend)
-use crate::loaders::{
-    SyntaxHelperParser,
-    convert_syntax_helper_to_raw
-};
-
-// HACK: Временно используем stub версию SyntaxHelperParser до Phase 3
-// В будущем эта логика переедет в backend/system/system_coordinator.rs
 
 /// A simplified, self-contained analysis result for the CLI.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -30,55 +23,46 @@ pub struct CliAnalysisResult {
 
 /// The core analysis engine.
 /// It orchestrates parsing and type resolution.
+///
+/// Phase 3: Simplified - no Infrastructure dependencies, receives pre-initialized components
 pub struct AnalysisEngine {
     resolver: Arc<TypeResolver>,
     repository: Arc<dyn TypeRepository>,
 }
 
 impl AnalysisEngine {
-    /// Creates a new analysis engine with explicit initialization.
+    /// Creates a new analysis engine with pre-initialized components (Phase 3)
+    ///
+    /// No I/O operations, no Infrastructure - pure Domain orchestration
+    pub fn new(resolver: Arc<TypeResolver>, repository: Arc<dyn TypeRepository>) -> Self {
+        info!("✨ AnalysisEngine: создан с готовыми компонентами (Phase 3)");
+        Self {
+            resolver,
+            repository,
+        }
+    }
+
+    /// DEPRECATED: Old initialization method with Infrastructure dependencies
+    ///
+    /// This method will be removed in future versions. Use `new()` instead.
+    /// Infrastructure initialization is now in SystemCoordinator (backend).
+    #[deprecated(
+        since = "0.4.3",
+        note = "Use AnalysisEngine::new() with pre-initialized components. Infrastructure moved to SystemCoordinator."
+    )]
+    #[allow(dead_code)]
     pub async fn new_with_init(
-        syntax_helper_path: Option<&Path>,
+        _syntax_helper_path: Option<&Path>,
         _config_path: Option<&Path>,
     ) -> Result<Self> {
-        info!("🚀 AnalysisEngine: инициализация Domain Layer...");
+        warn!("⚠️ AnalysisEngine::new_with_init() is deprecated!");
+        warn!("⚠️ Infrastructure initialization moved to SystemCoordinator");
+        warn!("⚠️ Use AnalysisEngine::new() with pre-initialized components");
 
-        let mut syntax_parser = SyntaxHelperParser::new();
-
-        // Загружаем синтаксис-помощник если путь указан
-        if let Some(syntax_path) = syntax_helper_path {
-            info!("📂 Загружаем синтаксис-помощник: {}", syntax_path.display());
-
-            match syntax_parser.parse_syntax_helper(syntax_path) {
-                Ok(()) => {
-                    info!("✅ Парсинг синтаксис-помощника завершен успешно");
-                }
-                Err(e) => {
-                    warn!("⚠️ Ошибка парсинга синтаксис-помощника: {}", e);
-                    info!("📦 Будем использовать базовые типы платформы 1С...");
-                }
-            }
-        }
-
-        // Создаем repository и resolver
+        // Stub implementation for backward compatibility
         let repository = Arc::new(InMemoryTypeRepository::new());
-
-        // Загружаем данные в репозиторий
-        let database = syntax_parser.export_database();
-        if !database.nodes.is_empty() {
-            let platform_raw_data = convert_syntax_helper_to_raw(&database);
-            repository.load_types(platform_raw_data)?;
-
-            let stats = repository.get_stats();
-            info!("📊 Загружено {} типов из синтаксис-помощника", stats.total_types);
-        } else {
-            // Загружаем базовые типы
-            Self::load_fallback_types(&repository)?;
-        }
-
         let resolver = Arc::new(TypeResolver::new(repository.clone()));
 
-        info!("✅ AnalysisEngine: Domain Layer готов!");
         Ok(Self {
             resolver,
             repository,
@@ -94,85 +78,6 @@ impl AnalysisEngine {
     /// Получить repository для TypeInferenceService
     pub fn get_repository(&self) -> Arc<dyn TypeRepository> {
         self.repository.clone()
-    }
-
-    /// Загрузка базовых типов как fallback
-    fn load_fallback_types(repository: &Arc<InMemoryTypeRepository>) -> Result<()> {
-        use crate::domain::types::{RawTypeData, RawDataSource};
-
-        info!("📦 Загружаем базовые типы платформы 1С...");
-
-        let basic_types = vec![
-            RawTypeData {
-                name: "Строка".to_string(),
-                english_name: "String".to_string(),
-                description: "Базовый тип Строка".to_string(),
-                category: "Примитивные типы".to_string(),
-                source: RawDataSource::Platform,
-                methods: Vec::new(),
-                properties: Vec::new(),
-                facets: Vec::new(),
-                kind: None,
-                attributes: Vec::new(),
-                tabular_sections: Vec::new(),
-            },
-            RawTypeData {
-                name: "Число".to_string(),
-                english_name: "Number".to_string(),
-                description: "Базовый тип Число".to_string(),
-                category: "Примитивные типы".to_string(),
-                source: RawDataSource::Platform,
-                methods: Vec::new(),
-                properties: Vec::new(),
-                facets: Vec::new(),
-                kind: None,
-                attributes: Vec::new(),
-                tabular_sections: Vec::new(),
-            },
-            RawTypeData {
-                name: "Булево".to_string(),
-                english_name: "Boolean".to_string(),
-                description: "Базовый тип Булево".to_string(),
-                category: "Примитивные типы".to_string(),
-                source: RawDataSource::Platform,
-                methods: Vec::new(),
-                properties: Vec::new(),
-                facets: Vec::new(),
-                kind: None,
-                attributes: Vec::new(),
-                tabular_sections: Vec::new(),
-            },
-            RawTypeData {
-                name: "Дата".to_string(),
-                english_name: "Date".to_string(),
-                description: "Базовый тип Дата".to_string(),
-                category: "Примитивные типы".to_string(),
-                source: RawDataSource::Platform,
-                methods: Vec::new(),
-                properties: Vec::new(),
-                facets: Vec::new(),
-                kind: None,
-                attributes: Vec::new(),
-                tabular_sections: Vec::new(),
-            },
-            RawTypeData {
-                name: "Неопределено".to_string(),
-                english_name: "Undefined".to_string(),
-                description: "Базовый тип Неопределено".to_string(),
-                category: "Примитивные типы".to_string(),
-                source: RawDataSource::Platform,
-                methods: Vec::new(),
-                properties: Vec::new(),
-                facets: Vec::new(),
-                kind: None,
-                attributes: Vec::new(),
-                tabular_sections: Vec::new(),
-            },
-        ];
-
-        repository.load_types(basic_types)?;
-        info!("✅ Загружено {} базовых типов", 5);
-        Ok(())
     }
 
     /// Analyzes a single BSL file.

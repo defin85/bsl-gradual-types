@@ -6,10 +6,14 @@
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
 use std::path::Path;
-use tracing::info;
+use tracing::{info, warn};
 
 use bsl_shared::engine::AnalysisEngine;
+use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+use bsl_shared::domain::resolver::TypeResolver;
 use crate::application::type_system_service::TypeSystemService;
+use crate::data::loaders::SyntaxHelperParser;
+use crate::data::adapters::convert_syntax_helper_to_raw;
 
 use super::basic_observability::BasicObservability;
 use super::parser_coordinator::ParserCoordinator;
@@ -63,16 +67,56 @@ impl SystemCoordinator {
     pub async fn start_with_paths(
         &self,
         syntax_helper_path: Option<&Path>,
-        config_path: Option<&Path>,
+        _config_path: Option<&Path>,
     ) -> Result<(), StartupError> {
         self.observability.log_startup();
 
         info!("🎯 SystemCoordinator: инициализация System Layer...");
 
-        // Создаем AnalysisEngine который управляет Domain Layer
-        let analysis_engine = AnalysisEngine::new_with_init(syntax_helper_path, config_path)
-            .await
-            .map_err(|e| StartupError::PlatformTypesError(e))?;
+        // === PHASE 3: Infrastructure инициализация в SystemCoordinator ===
+
+        // 1. Создаем Infrastructure компоненты (Data Layer)
+        info!("📦 SystemCoordinator: инициализация Data Layer loaders...");
+        let mut syntax_parser = SyntaxHelperParser::new();
+
+        // 2. Загружаем синтаксис-помощник если путь указан
+        if let Some(syntax_path) = syntax_helper_path {
+            info!("📂 Загружаем синтаксис-помощник: {}", syntax_path.display());
+
+            match syntax_parser.parse_syntax_helper(syntax_path) {
+                Ok(()) => {
+                    info!("✅ Парсинг синтаксис-помощника завершен успешно");
+                }
+                Err(e) => {
+                    warn!("⚠️ Ошибка парсинга синтаксис-помощника: {}", e);
+                    info!("📦 Будем использовать базовые типы платформы 1С...");
+                }
+            }
+        }
+
+        // 3. Создаем Domain Layer компоненты
+        info!("🧠 SystemCoordinator: инициализация Domain Layer...");
+        let repository = Arc::new(InMemoryTypeRepository::new());
+
+        // 4. Загружаем данные в репозиторий (через Adapters)
+        let database = syntax_parser.export_database();
+        if !database.nodes.is_empty() {
+            let platform_raw_data = convert_syntax_helper_to_raw(&database);
+            repository.load_types(platform_raw_data)
+                .map_err(|e| StartupError::PlatformTypesError(e))?;
+
+            let stats = repository.get_stats();
+            info!("📊 Загружено {} типов из синтаксис-помощника", stats.total_types);
+        } else {
+            // Загружаем базовые типы как fallback
+            Self::load_fallback_types(&repository)?;
+        }
+
+        // 5. Создаем Domain resolver
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+
+        // 6. Создаем упрощенный AnalysisEngine (без Infrastructure зависимостей)
+        let analysis_engine = AnalysisEngine::new(resolver, repository);
 
         // Кешируем AnalysisEngine
         {
@@ -84,6 +128,54 @@ impl SystemCoordinator {
         self.cache.warm_cache()?;
 
         info!("✅ SystemCoordinator: система готова!");
+        Ok(())
+    }
+
+    /// Загрузка базовых типов как fallback
+    fn load_fallback_types(repository: &Arc<InMemoryTypeRepository>) -> Result<(), StartupError> {
+        use bsl_shared::domain::types::{RawTypeData, RawDataSource};
+
+        info!("📦 Загружаем базовые типы платформы 1С...");
+
+        let basic_types = vec![
+            RawTypeData {
+                name: "Строка".to_string(),
+                english_name: "String".to_string(),
+                description: "Строковый тип данных".to_string(),
+                category: "Примитивные типы".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "Число".to_string(),
+                english_name: "Number".to_string(),
+                description: "Числовой тип данных".to_string(),
+                category: "Примитивные типы".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "Булево".to_string(),
+                english_name: "Boolean".to_string(),
+                description: "Логический тип данных".to_string(),
+                category: "Примитивные типы".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "Дата".to_string(),
+                english_name: "Date".to_string(),
+                description: "Тип данных для работы с датой и временем".to_string(),
+                category: "Примитивные типы".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ];
+
+        repository.load_types(basic_types)
+            .map_err(|e| StartupError::PlatformTypesError(e))?;
+
+        info!("✅ Базовые типы загружены: 4 типа");
         Ok(())
     }
 

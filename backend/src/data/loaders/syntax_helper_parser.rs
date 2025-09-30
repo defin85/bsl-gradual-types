@@ -31,6 +31,7 @@ use bsl_shared::domain::types::FacetKind;
 
 /// Узел в иерархии синтакс-помощника
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum SyntaxNode {
     /// Категория типов (например "Таблица значений")
     Category(CategoryInfo),
@@ -38,7 +39,7 @@ pub enum SyntaxNode {
     Type(TypeInfo),
     /// Метод типа
     Method(MethodInfo),
-    /// Свойство типа  
+    /// Свойство типа
     Property(PropertyInfo),
     /// Конструктор типа
     Constructor(ConstructorInfo),

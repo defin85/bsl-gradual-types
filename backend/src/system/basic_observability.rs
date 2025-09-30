@@ -42,15 +42,17 @@ pub struct ComponentHealth {
     pub details: Option<String>,
 }
 
-impl BasicObservability {
-    pub fn default() -> Self {
+impl Default for BasicObservability {
+    fn default() -> Self {
         Self {
             logger: StructuredLogger::new(),
             metrics: SimpleMetrics::new(),
             start_time: Instant::now(),
         }
     }
+}
 
+impl BasicObservability {
     /// Логирование запуска системы
     pub fn log_startup(&self) {
         self.logger.info(

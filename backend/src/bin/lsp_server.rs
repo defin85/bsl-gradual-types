@@ -201,12 +201,8 @@ impl LanguageServer for BslLanguageServer {
         let _ = (version, changes); // не используем, пока нет инкрементального анализатора в target
 
         // Базовые диагностики (пусто)
-        let base_diagnostics: Result<Vec<Diagnostic>, anyhow::Error> = Ok(Vec::new());
-
-        let all_diagnostics: Vec<Diagnostic> = base_diagnostics.unwrap_or_else(|e| {
-            error!("Failed to incrementally analyze document {}: {}", uri, e);
-            Vec::new()
-        });
+        // TODO: интегрировать с analyze_file для получения реальных диагностик
+        let all_diagnostics: Vec<Diagnostic> = Vec::new();
 
         // Берём актуальный текст документа
         let documents = self.documents.read().await;

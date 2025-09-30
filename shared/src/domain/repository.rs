@@ -59,9 +59,12 @@ pub enum CompletionKind {
 pub trait TypeRepository: Send + Sync {
     /// Загрузить типы в репозиторий
     fn load_types(&self, types: Vec<RawTypeData>) -> Result<()>;
-    
+
     /// Получить все типы из репозитория
     fn get_all_types(&self) -> Vec<RawTypeData>;
+
+    /// Найти тип по имени
+    fn find_type(&self, name: &str) -> Option<RawTypeData>;
 
     /// Получить статистику
     fn get_stats(&self) -> RepositoryStats;
@@ -101,6 +104,13 @@ impl TypeRepository for InMemoryTypeRepository {
 
     fn get_all_types(&self) -> Vec<RawTypeData> {
         self.types.read().unwrap().clone()
+    }
+
+    fn find_type(&self, name: &str) -> Option<RawTypeData> {
+        let types = self.types.read().unwrap();
+        types.iter()
+            .find(|t| t.name == name || t.english_name == name)
+            .cloned()
     }
 
     fn get_stats(&self) -> RepositoryStats {

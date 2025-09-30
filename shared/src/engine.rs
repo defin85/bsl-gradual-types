@@ -32,6 +32,7 @@ pub struct CliAnalysisResult {
 /// It orchestrates parsing and type resolution.
 pub struct AnalysisEngine {
     resolver: Arc<TypeResolver>,
+    repository: Arc<dyn TypeRepository>,
 }
 
 impl AnalysisEngine {
@@ -75,16 +76,24 @@ impl AnalysisEngine {
             Self::load_fallback_types(&repository)?;
         }
 
-        let resolver = Arc::new(TypeResolver::new(repository));
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
 
         info!("✅ AnalysisEngine: Domain Layer готов!");
-        Ok(Self { resolver })
+        Ok(Self {
+            resolver,
+            repository,
+        })
     }
 
 
     /// Получить resolver для TypeSystemService
     pub fn get_resolver(&self) -> Arc<TypeResolver> {
         self.resolver.clone()
+    }
+
+    /// Получить repository для TypeInferenceService
+    pub fn get_repository(&self) -> Arc<dyn TypeRepository> {
+        self.repository.clone()
     }
 
     /// Загрузка базовых типов как fallback
@@ -178,11 +187,11 @@ impl AnalysisEngine {
         let mut resolutions_map = HashMap::new();
         resolutions_map.insert(
             "ПеременнаяА".to_string(),
-            self.resolver.resolve_expression_async("Строка").await,
+            self.resolver.resolve_expression_sync("Строка"),
         );
         resolutions_map.insert(
             "ПеременнаяБ".to_string(),
-            self.resolver.resolve_expression_async("Справочники.Контрагенты").await,
+            self.resolver.resolve_expression_sync("Справочники.Контрагенты"),
         );
         let resolutions: Vec<(String, TypeResolution)> = resolutions_map.into_iter().collect();
 

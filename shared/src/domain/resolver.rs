@@ -1,13 +1,13 @@
-//! Application Layer: Type Resolver Service
+//! Domain Layer: Type Resolver
+//!
+//! Чистая бизнес-логика разрешения типов без Application concerns
 
 use std::sync::Arc;
-use anyhow::Result;
-use crate::domain::repository::{CompletionItem, TypeRepository};
-use crate::domain::types::{TypeResolution, RawTypeData};
+use crate::domain::repository::TypeRepository;
+use crate::domain::types::TypeResolution;
 
-/// Сервис разрешения типов
+/// Чистый Domain resolver - только бизнес-логика типизации
 pub struct TypeResolver {
-    #[allow(dead_code)]
     repository: Arc<dyn TypeRepository>,
 }
 
@@ -16,97 +16,35 @@ impl TypeResolver {
         Self { repository }
     }
 
-    /// Инициализировать сервис разрешения типов  
-    pub async fn initialize(&self) -> Result<()> {
-        println!("TypeResolver initialized with repository-only pattern");
-        Ok(())
-    }
-
-    /// Получить все платформенные типы через репозиторий
-    pub fn get_platform_types(&self) -> Result<Vec<RawTypeData>> {
-        // TODO: Re-implement after TypeSource is moved to shared
-        Ok(vec![])
-    }
-
-    /// Разрешить выражение в типе
-    pub async fn resolve_expression(
-        &self,
-        _expression: &str,
-    ) -> Result<TypeResolution> {
-        // TODO: Implement expression resolution
-        Ok(TypeResolution::unknown())
-    }
-
-    /// Получить все платформенные глобальные типы (для SystemCoordinator)
-    pub fn get_all_platform_globals(&self) -> std::collections::HashMap<String, TypeResolution> {
-        // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: получаем данные из репозитория и преобразуем в TypeResolution
-        let raw_types = self.repository.get_all_types();
-        let mut result = std::collections::HashMap::new();
-
-        for raw_type in raw_types {
-            // Преобразуем RawTypeData в TypeResolution
-            let resolution = TypeResolution::known(
-                // Создаем правильный PlatformType
-                crate::domain::types::ConcreteType::Platform(
-                    crate::domain::types::PlatformType {
-                        name: raw_type.name.clone()
-                    }
-                )
-            );
-            result.insert(raw_type.name, resolution);
+    /// Синхронное разрешение выражения (чистая Domain логика)
+    pub fn resolve_expression_sync(&self, expression: &str) -> TypeResolution {
+        // 1. Прямой поиск в repository
+        if let Some(raw_type) = self.repository.find_type(expression) {
+            return self.create_resolution_from_raw(&raw_type);
         }
 
-        result
-    }
-
-    /// Получить автодополнения для запроса (для WebTypeService)
-    pub fn get_completions(&self, query: &str) -> Vec<CompletionItem> {
-        let all_types = self.get_all_platform_globals();
-        let mut completions = Vec::new();
-
-        for (name, resolution) in &all_types {
-            if name.to_lowercase().contains(&query.to_lowercase()) {
-                let item = CompletionItem::with_details(
-                    name.clone(),
-                    self.determine_completion_kind(&resolution),
-                    Some(format!("{:?}", resolution.result)),
-                    resolution.metadata.notes.first().cloned(),
-                );
-                completions.push(item);
-            }
-        }
-        completions
-    }
-
-    /// Определить тип автодополнения на основе TypeResolution
-    fn determine_completion_kind(&self, resolution: &TypeResolution) -> crate::domain::repository::CompletionKind {
-        use crate::domain::types::{ConcreteType, ResolutionResult};
-
-        match &resolution.result {
-            ResolutionResult::Concrete(ConcreteType::Platform(_)) => crate::domain::repository::CompletionKind::Global,
-            ResolutionResult::Concrete(ConcreteType::Configuration(config)) => match config.kind {
-                crate::domain::types::MetadataKind::Catalog => crate::domain::repository::CompletionKind::Catalog,
-                crate::domain::types::MetadataKind::Document => crate::domain::repository::CompletionKind::Document,
-                crate::domain::types::MetadataKind::Enum => crate::domain::repository::CompletionKind::Enum,
-                _ => crate::domain::repository::CompletionKind::Global,
-            },
-            _ => crate::domain::repository::CompletionKind::Global,
-        }
-    }
-
-    /// Асинхронное разрешение выражений (для SystemCoordinator)
-    pub async fn resolve_expression_async(&self, expression: &str) -> TypeResolution {
-        let all_types = self.get_all_platform_globals();
-
-        if let Some(resolution) = all_types.get(expression) {
-            return resolution.clone();
-        }
-
+        // 2. Парсинг и разрешение составных имен (Справочники.Контрагенты)
         if let Some((base, member)) = self.parse_member_access(expression) {
             return self.resolve_member_access(&base, &member);
         }
-        
+
+        // 3. Union types (пока не реализовано)
+        if expression.contains(',') {
+            // TODO: resolve_union_type
+        }
+
         TypeResolution::unknown()
+    }
+
+    /// Преобразование RawTypeData в TypeResolution (чистая логика)
+    fn create_resolution_from_raw(&self, raw_type: &crate::domain::types::RawTypeData) -> TypeResolution {
+        TypeResolution::known(
+            crate::domain::types::ConcreteType::Platform(
+                crate::domain::types::PlatformType {
+                    name: raw_type.name.clone()
+                }
+            )
+        )
     }
 
     /// Парсинг доступа к членам вида \"Base.Member\"
@@ -180,40 +118,49 @@ impl TypeResolver {
         }
     }
 
-    /// Поиск типов по запросу (для WebTypeService)
-    pub fn search_types(&self, query: &str) -> Vec<String> {
-        let completions = self.get_completions(query);
-        completions.into_iter().map(|c| c.label).collect()
+    // ===== Дополнительные Domain методы =====
+
+    /// Проверить совместимость присваивания типов (Domain логика)
+    pub fn is_assignment_compatible(&self, from: &TypeResolution, to: &TypeResolution) -> bool {
+        use crate::domain::types::{ResolutionResult, Certainty};
+
+        // Если "to" - Unknown, то любое присваивание допустимо (градуальная типизация)
+        if matches!(to.certainty, Certainty::Unknown) {
+            return true;
+        }
+
+        // Если "from" - Unknown, допускаем присваивание с предупреждением
+        if matches!(from.certainty, Certainty::Unknown) {
+            return true;
+        }
+
+        // Точное совпадение типов
+        match (&from.result, &to.result) {
+            (ResolutionResult::Concrete(from_type), ResolutionResult::Concrete(to_type)) => {
+                // Простое сравнение типов (можно расширить)
+                format!("{:?}", from_type) == format!("{:?}", to_type)
+            }
+            (ResolutionResult::Union(_), _) => {
+                // Union type - более сложная логика
+                // TODO: проверить, что все члены union совместимы с to
+                false
+            }
+            _ => false,
+        }
     }
 
-    /// Получить базу данных синтакс-помощника для построения иерархий
-    pub fn get_syntax_helper_database(
+    /// Сужение типа на основе условия (flow-sensitive анализ)
+    /// Например: Если ТипЗнч(x) = Тип("Строка"), то x: Строка
+    pub fn narrow_type(
         &self,
-    ) -> Option<()> {  // TODO: Return proper type after moving to shared
-        None
-    }
-
-    /// Конвертировать RawTypeData в TypeResolution
-    #[allow(dead_code)]
-    fn convert_raw_data_to_type_resolution(&self, _raw_type: &RawTypeData) -> TypeResolution {
-        // TODO: Re-implement after TypeSource is moved to shared
-        TypeResolution::unknown()
-    }
-}
-
-/// Сервис проверки типов
-pub struct TypeCheckerService {
-    // TODO: Implement after migration complete
-}
-
-impl TypeCheckerService {
-    pub fn new() -> Self {
-        Self {}
-    }
-
-    /// Проверить совместимость присваивания типов
-    pub fn is_assignment_compatible(&self, _from: &TypeResolution, _to: &TypeResolution) -> bool {
-        // TODO: Implement proper type compatibility check
-        true
+        current: &TypeResolution,
+        type_check: &str,
+    ) -> TypeResolution {
+        // TODO: Implement proper type narrowing
+        // Сейчас просто возвращаем новый тип
+        if let Some(raw_type) = self.repository.find_type(type_check) {
+            return self.create_resolution_from_raw(&raw_type);
+        }
+        current.clone()
     }
 }

@@ -11,7 +11,7 @@ pub mod web;
 pub mod cli;
 
 // Re-exports for backward compatibility
-pub use lsp::{enhanced, code_actions, type_hints, position};
+pub use lsp::{/* enhanced, */ code_actions, type_hints, position};
 
 /// Фильтры для поиска
 #[derive(Debug, Clone)]

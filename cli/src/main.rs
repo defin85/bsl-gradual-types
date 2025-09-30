@@ -125,9 +125,14 @@ async fn complete_command(
 ) -> anyhow::Result<()> {
     println!("{} {}", "💡 Автодополнения для:".yellow().bold(), expression.cyan());
 
-    let engine = create_analysis_engine().await?;
-    let resolver = engine.get_resolver();
-    let completions = resolver.get_completions(expression);
+    // Phase 4+: используем SystemCoordinator и TypeSystemService
+    let coordinator = bsl_backend::system::SystemCoordinator::new();
+    coordinator.start().await?;
+
+    let type_service = coordinator.type_service()
+        .ok_or_else(|| anyhow::anyhow!("TypeSystemService не доступен"))?;
+
+    let completions = type_service.get_type_completions(expression).await?;
 
     let output = CliFormatter::format_completions(&completions, format, limit);
     println!("{}", output);
@@ -139,9 +144,15 @@ async fn complete_command(
 async fn info_command(expression: &str, format: &OutputFormat) -> anyhow::Result<()> {
     println!("{} {}", "ℹ️  Информация о типе:".blue().bold(), expression.cyan());
 
-    let engine = create_analysis_engine().await?;
-    let resolver = engine.get_resolver();
-    let resolution = resolver.resolve_expression_async(expression).await;
+    // Phase 4+: используем SystemCoordinator и TypeSystemService
+    let coordinator = bsl_backend::system::SystemCoordinator::new();
+    coordinator.start().await?;
+
+    let type_service = coordinator.type_service()
+        .ok_or_else(|| anyhow::anyhow!("TypeSystemService не доступен"))?;
+
+    let resolution = type_service.get_type_details(expression).await?
+        .ok_or_else(|| anyhow::anyhow!("Тип '{}' не найден", expression))?;
 
     let output = CliFormatter::format_type_info(expression, &resolution, format);
     println!("{}", output);

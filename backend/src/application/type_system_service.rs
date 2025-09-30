@@ -168,7 +168,7 @@ impl TypeSystemService {
         // 5. Генерируем информацию о пагинации
         let total_items = all_types.len();
         let current_page = (offset / limit) + 1;
-        let total_pages = (total_items + limit - 1) / limit;
+        let total_pages = total_items.div_ceil(limit);
         let has_prev = current_page > 1;
         let has_next = current_page < total_pages;
 

@@ -9,7 +9,6 @@ mod formatters;
 use clap::Parser;
 use colored::*;
 use std::path::Path;
-use tracing_subscriber;
 
 use args::{CliArgs, Commands, OutputFormat};
 use formatters::CliFormatter;

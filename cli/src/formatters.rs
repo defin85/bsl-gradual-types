@@ -3,7 +3,6 @@
 //! Согласно архитектурной диаграмме: CLI Tool (Presentation Layer)
 
 use colored::*;
-use serde_json;
 use bsl_shared::engine::CliAnalysisResult;
 use bsl_shared::domain::types::{TypeResolution, Certainty, ResolutionResult};
 use crate::args::OutputFormat;

@@ -193,11 +193,10 @@ impl ConfigurationGuidedParser {
                             current_element = tag.to_string();
 
                             // Обрабатываем объекты метаданных в ChildObjects
-                            if in_child_objects {
-                                if self.xml_tag_to_metadata_kind(&tag).is_some() {
+                            if in_child_objects
+                                && self.xml_tag_to_metadata_kind(tag).is_some() {
                                     // Пока не знаем имя, создадим заготовку позже в Event::Text
                                 }
-                            }
                         }
                     }
                 }
@@ -331,7 +330,7 @@ impl ConfigurationGuidedParser {
             if path.is_file() {
                 if let Some(file_name) = path.file_stem() {
                     if file_name == target_name
-                        && path.extension().map_or(false, |ext| ext == "xml")
+                        && path.extension().is_some_and(|ext| ext == "xml")
                     {
                         return Ok(Some(path));
                     }
@@ -354,7 +353,7 @@ impl ConfigurationGuidedParser {
         metadata_ref: &MetadataReference,
     ) -> Result<Option<DiscoveredMetadata>> {
         // Парсим XML файл объекта
-        let content = fs::read_to_string(&xml_file_path)
+        let content = fs::read_to_string(xml_file_path)
             .with_context(|| format!("Не удается прочитать файл: {}", xml_file_path.display()))?;
 
         let mut reader = Reader::from_str(&content);
@@ -421,13 +420,11 @@ impl ConfigurationGuidedParser {
                             current_element = tag.to_string();
 
                             // Извлекаем UUID из корневого элемента
-                            if tag == &metadata_ref.xml_tag {
-                                for attr in e.attributes() {
-                                    if let Ok(attr) = attr {
-                                        if attr.key.as_ref() == b"uuid" {
-                                            if let Ok(uuid_value) = attr.unescape_value() {
-                                                metadata.uuid = Some(uuid_value.to_string());
-                                            }
+                            if tag == metadata_ref.xml_tag {
+                                for attr in e.attributes().flatten() {
+                                    if attr.key.as_ref() == b"uuid" {
+                                        if let Ok(uuid_value) = attr.unescape_value() {
+                                            metadata.uuid = Some(uuid_value.to_string());
                                         }
                                     }
                                 }
@@ -470,11 +467,10 @@ impl ConfigurationGuidedParser {
                                 _ => {}
                             }
                         } else if let Some(ref mut attr) = current_attribute {
-                            if in_attribute_properties {
-                                if current_element.as_str() == "Name" {
+                            if in_attribute_properties
+                                && current_element.as_str() == "Name" {
                                     attr.name = text;
                                 }
-                            }
                         } else if let Some(ref mut ts) = current_tabular_section {
                             if current_element.as_str() == "Name" {
                                 ts.name = text;
@@ -486,7 +482,7 @@ impl ConfigurationGuidedParser {
                     let tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
 
                     match tag_name.as_str() {
-                        "Properties" if !current_attribute.is_some() => {
+                        "Properties" if current_attribute.is_none() => {
                             in_properties = false;
                         }
                         "Properties" if current_attribute.is_some() => {

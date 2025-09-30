@@ -35,6 +35,12 @@ pub struct SystemCoordinator {
     type_service_cache: Mutex<Option<Arc<TypeSystemService>>>,
 }
 
+impl Default for SystemCoordinator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SystemCoordinator {
     /// Создать новый системный координатор
     pub fn new() -> Self {
@@ -103,7 +109,7 @@ impl SystemCoordinator {
         if !database.nodes.is_empty() {
             let platform_raw_data = convert_syntax_helper_to_raw(&database);
             repository.load_types(platform_raw_data)
-                .map_err(|e| StartupError::PlatformTypesError(e))?;
+                .map_err(StartupError::PlatformTypesError)?;
 
             let stats = repository.get_stats();
             info!("📊 Загружено {} типов из синтаксис-помощника", stats.total_types);
@@ -173,7 +179,7 @@ impl SystemCoordinator {
         ];
 
         repository.load_types(basic_types)
-            .map_err(|e| StartupError::PlatformTypesError(e))?;
+            .map_err(StartupError::PlatformTypesError)?;
 
         info!("✅ Базовые типы загружены: 4 типа");
         Ok(())

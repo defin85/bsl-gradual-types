@@ -21,15 +21,14 @@ pub struct RawTypeData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum RawDataSource {
+    #[default]
     Platform,
     Configuration,
     UserDefined,
 }
 
-impl Default for RawDataSource {
-    fn default() -> Self { RawDataSource::Platform }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RawMethodData {

@@ -11,6 +11,7 @@ pub mod adapters;
 
 /// Source of type information
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum TypeSource {
     /// Type from 1C platform
     Platform {
@@ -26,14 +27,10 @@ pub enum TypeSource {
         line: usize,
     },
     /// Built-in type (primitives, etc.)
+    #[default]
     Builtin,
 }
 
-impl Default for TypeSource {
-    fn default() -> Self {
-        TypeSource::Builtin
-    }
-}
 
 impl TypeSource {
     /// Create platform type source

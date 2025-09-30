@@ -3,8 +3,48 @@
 //! NOTE: Этот модуль будет постепенно удален в процессе рефакторинга.
 //! Infrastructure компоненты переносятся в backend/src/data/
 
-pub mod config_parser_guided_discovery;
 pub mod converters;
+
+// TEMPORARY: Stub module для config_parser
+// TODO Phase 1.2: Удалить после обновления converters.rs в Phase 1.3
+pub mod config_parser_guided_discovery {
+    use std::path::PathBuf;
+    use crate::domain::types::MetadataKind;
+
+    #[derive(Debug, Clone)]
+    pub struct DiscoveredMetadata {
+        pub name: String,
+        pub kind: MetadataKind,
+        pub qualified_name: String,
+        pub file_path: PathBuf,
+        pub reference_source: ReferenceSource,
+        pub synonym: Option<String>,
+        pub uuid: Option<String>,
+        pub attributes: Vec<AttributeInfo>,
+        pub tabular_sections: Vec<TabularSectionInfo>,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum ReferenceSource {
+        ConfigurationChildObjects,
+        DirectoryDiscovery,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct AttributeInfo {
+        pub name: String,
+        pub type_definition: String,
+        pub synonym: Option<String>,
+        pub mandatory: bool,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct TabularSectionInfo {
+        pub name: String,
+        pub synonym: Option<String>,
+        pub attributes: Vec<AttributeInfo>,
+    }
+}
 
 // TEMPORARY: Stub module для обратной совместимости
 // TODO Phase 1.1: Удалить после обновления всех импортов
@@ -123,7 +163,6 @@ pub mod syntax_helper_parser {
 }
 
 // Re-export key components (для обратной совместимости)
-pub use config_parser_guided_discovery::ConfigurationGuidedParser;
 pub use converters::*;
 
 // TEMPORARY: Re-export stub типов для обратной совместимости

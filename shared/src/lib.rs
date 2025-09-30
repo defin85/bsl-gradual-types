@@ -7,7 +7,8 @@ pub mod api;
 pub mod domain;
 pub mod types;
 pub mod engine;
-pub mod loaders;
+// УДАЛЕНО Phase 1: loaders переехали в backend/src/data/
+// pub mod loaders;
 
 // Re-export main types (simplified according to architecture specification)
 pub use api::*;

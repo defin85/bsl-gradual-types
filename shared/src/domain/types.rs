@@ -1,7 +1,6 @@
 //! Core type definitions for the gradual type system
 
 use serde::{Deserialize, Serialize};
-use crate::loaders::syntax_helper_parser::GlobalFunctionInfo;
 
 // --- RawTypeData and its components ---
 // This structure is designed to hold all information from all parsers.
@@ -133,13 +132,38 @@ pub struct WeightedType {
     pub weight: f32,
 }
 
+/// Информация о глобальной функции (определена в Domain Layer)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GlobalFunctionInfo {
+    pub name: String,
+    pub english_name: Option<String>,
+    pub description: Option<String>,
+    pub parameters: Vec<ParameterInfo>,
+    pub return_type: Option<String>,
+    pub return_description: Option<String>,
+    pub polymorphic: bool,
+    pub pure: bool,
+    pub contexts: Vec<String>,
+    pub category: Option<String>,
+}
+
+/// Информация о параметре функции
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParameterInfo {
+    pub name: String,
+    pub type_name: Option<String>,
+    pub is_optional: bool,
+    pub default_value: Option<String>,
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ConcreteType {
     Platform(PlatformType),
     Configuration(ConfigurationType),
     Primitive(PrimitiveType),
     Special(SpecialType),
-    GlobalFunction(GlobalFunctionInfo), // FIXED
+    GlobalFunction(GlobalFunctionInfo),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

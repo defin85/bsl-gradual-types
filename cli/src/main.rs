@@ -160,21 +160,18 @@ async fn info_command(expression: &str, format: &OutputFormat) -> anyhow::Result
     Ok(())
 }
 
-/// Создание AnalysisEngine согласно архитектурной диаграмме
-async fn create_analysis_engine() -> anyhow::Result<AnalysisEngine> {
-    // Используем новый API с инициализацией
-    let syntax_helper_path = std::env::var("BSL_SYNTAX_HELPER_PATH")
-        .ok()
-        .map(|p| Path::new(&p).to_owned());
+/// Создание AnalysisEngine через SystemCoordinator (Phase 3)
+/// Возвращает Arc для избежания клонирования тяжелых объектов
+async fn create_analysis_engine() -> anyhow::Result<std::sync::Arc<AnalysisEngine>> {
+    // Phase 3: используем SystemCoordinator для инициализации Infrastructure
+    let coordinator = bsl_backend::system::SystemCoordinator::new();
 
-    let config_path = std::env::var("BSL_CONFIG_PATH")
-        .ok()
-        .map(|p| Path::new(&p).to_owned());
+    // Инициализация системы
+    coordinator.start().await?;
 
-    let engine = AnalysisEngine::new_with_init(
-        syntax_helper_path.as_deref(),
-        config_path.as_deref(),
-    ).await?;
+    // Получаем AnalysisEngine из координатора
+    let engine = coordinator.analysis_engine()
+        .ok_or_else(|| anyhow::anyhow!("AnalysisEngine не доступен"))?;
 
     Ok(engine)
 }

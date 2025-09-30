@@ -220,6 +220,12 @@ impl SystemCoordinator {
         }
     }
 
+    /// Получить AnalysisEngine для CLI/прямого использования
+    pub fn analysis_engine(&self) -> Option<Arc<AnalysisEngine>> {
+        let cache = self.analysis_engine_cache.lock().unwrap();
+        cache.clone()
+    }
+
     /// Health check
     pub fn health_status(&self) -> crate::system::basic_observability::HealthStatus {
         self.observability.health_check()

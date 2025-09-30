@@ -19,14 +19,10 @@ use crate::application::TypeInferenceService;
 /// Phase 4: Заменяет LspTypeService + WebTypeService + AnalysisService
 /// единым unified API для всех презентационных слоев
 pub struct TypeSystemService {
-    // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: использует AnalysisEngine вместо прямого доступа к Domain Layer
-    analysis_engine: Arc<AnalysisEngine>,
-
     // Application Layer: Type Inference Service для high-level операций
     inference_service: Arc<TypeInferenceService>,
 
     // System Layer компоненты
-    #[allow(dead_code)] // CLEANUP: планируется использование в будущем
     cache: Arc<AnalysisCache>,
     parser: Arc<ParserCoordinator>,
 }
@@ -44,7 +40,6 @@ impl TypeSystemService {
         let inference_service = Arc::new(TypeInferenceService::new(resolver, repository));
 
         Self {
-            analysis_engine,
             inference_service,
             cache,
             parser,

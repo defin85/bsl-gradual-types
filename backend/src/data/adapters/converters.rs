@@ -1,11 +1,10 @@
 //! Functions to convert parsed data into the common `RawTypeData` format.
 
-use crate::domain::types::{
+use bsl_shared::domain::types::{
     RawTypeData, RawDataSource, RawMethodData, RawPropertyData, RawAttributeData,
     RawTabularSectionData, TypeResolution
 };
-use crate::loaders::syntax_helper_parser::{SyntaxHelperDatabase, SyntaxNode, TypeInfo};
-use crate::loaders::config_parser_guided_discovery::DiscoveredMetadata;
+use crate::data::loaders::{SyntaxHelperDatabase, SyntaxNode, TypeInfo, DiscoveredMetadata};
 
 /// Converts a full SyntaxHelperDatabase into a vector of RawTypeData.
 pub fn convert_syntax_helper_to_raw(db: &SyntaxHelperDatabase) -> Vec<RawTypeData> {

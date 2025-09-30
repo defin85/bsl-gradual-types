@@ -12,7 +12,6 @@ docker run `
     -p 3000:3000 `
     -d `
     --pull=always `
-    --rm `
     -v "${PWD}:/data" `
     -v "C:\1CProject\bsl-gradual-types:/repo" `
     -e CONFIG_PATH=/data/config.json `

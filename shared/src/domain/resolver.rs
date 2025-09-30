@@ -39,8 +39,24 @@ impl TypeResolver {
 
     /// Получить все платформенные глобальные типы (для SystemCoordinator)
     pub fn get_all_platform_globals(&self) -> std::collections::HashMap<String, TypeResolution> {
-        // TODO: Re-implement after TypeSource is moved to shared
-        std::collections::HashMap::new()
+        // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: получаем данные из репозитория и преобразуем в TypeResolution
+        let raw_types = self.repository.get_all_types();
+        let mut result = std::collections::HashMap::new();
+
+        for raw_type in raw_types {
+            // Преобразуем RawTypeData в TypeResolution
+            let resolution = TypeResolution::known(
+                // Создаем правильный PlatformType
+                crate::domain::types::ConcreteType::Platform(
+                    crate::domain::types::PlatformType {
+                        name: raw_type.name.clone()
+                    }
+                )
+            );
+            result.insert(raw_type.name, resolution);
+        }
+
+        result
     }
 
     /// Получить автодополнения для запроса (для WebTypeService)

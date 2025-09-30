@@ -361,10 +361,13 @@ async fn main() -> Result<()> {
     // ✅ ИСПРАВЛЕНО: SystemCoordinator как IoC Container
     let coordinator = Arc::new(SystemCoordinator::new());
 
-    // ✅ ИСПРАВЛЕНО: создаем TypeSystemService через компоненты
-    let (type_resolver, cache, parser) = coordinator.get_components();
-    let type_service = Arc::new(TypeSystemService::new(type_resolver, cache, parser));
-    
+    // ✅ Инициализируем SystemCoordinator с Domain Layer
+    coordinator.start().await.map_err(|e| anyhow::anyhow!("Failed to start coordinator: {}", e))?;
+
+    // ✅ ИСПРАВЛЕНО: создаем TypeSystemService через SystemCoordinator согласно новой архитектуре
+    let type_service = coordinator.type_service()
+        .ok_or_else(|| anyhow::anyhow!("Failed to create TypeSystemService: AnalysisEngine not initialized"))?;
+
     // Initialize the type service
     type_service.initialize()?;
 

@@ -5,6 +5,40 @@ use crate::config::get_config;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response};
+use serde::{Deserialize, Serialize};
+
+/// Backend DTO structures to match the shared API
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalysisResultDto {
+    pub types: Vec<TypeInfo>,
+    pub categories: std::collections::HashMap<String, CategoryInfo>,
+    pub metrics: BackendMetrics,
+    pub connections: Vec<TypeConnection>,
+    pub pagination: Option<BackendPagination>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendMetrics {
+    pub total_types: usize,
+    pub certainty_high: usize,
+    pub certainty_medium: usize,
+    pub certainty_low: usize,
+    pub flow_sensitive: usize,
+    pub cache_hit_rate: String,
+    pub analysis_speed: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendPagination {
+    pub current_page: usize,
+    pub page_size: usize,
+    pub total_items: usize,
+    pub total_pages: usize,
+    pub has_prev: bool,
+    pub has_next: bool,
+}
 
 
 /// Получить метрики системы типизации
@@ -29,15 +63,61 @@ pub async fn fetch_metrics() -> Result<TypeMetrics, String> {
     }
 }
 
-/// Получить список типов с фильтрацией
+/// Получить список типов с фильтрацией и пагинацией
 pub async fn fetch_types(filters: TypeFilters) -> Result<TypeSearchResult, String> {
     let config = get_config();
-    let url = config.api_url("types");
-    
-    match fetch_json::<TypeSearchResult>(&url).await {
-        Ok(result) => Ok(result),
-        Err(_) => {
-            // Fallback to test data if API is not available
+
+    // Используем поиск API или обычный API с пагинацией
+    let url = if let Some(ref query) = filters.search_query {
+        if !query.is_empty() {
+            // Используем search API для конкретных запросов
+            format!("{}?q={}&limit={}&offset={}",
+                config.api_url("search"),
+                query,
+                filters.page_size,
+                filters.offset())
+        } else {
+            // Для пустого поиска используем обычный API с пагинацией
+            format!("{}?limit={}&offset={}",
+                config.api_url("types"),
+                filters.page_size,
+                filters.offset())
+        }
+    } else {
+        // Загружаем типы с пагинацией
+        format!("{}?limit={}&offset={}",
+            config.api_url("types"),
+            filters.page_size,
+            filters.offset())
+    };
+
+    // Backend возвращает AnalysisResultDto, нужно преобразовать в TypeSearchResult
+    match fetch_json::<AnalysisResultDto>(&url).await {
+        Ok(analysis_result) => {
+            // Преобразуем AnalysisResultDto в TypeSearchResult
+            let result = TypeSearchResult {
+                types: analysis_result.types,
+                categories: analysis_result.categories,
+                metrics: convert_metrics(analysis_result.metrics),
+                connections: analysis_result.connections,
+                pagination: analysis_result.pagination.map(|p| PaginationInfo {
+                    current_page: p.current_page,
+                    page_size: p.page_size,
+                    total_items: p.total_items,
+                    total_pages: p.total_pages,
+                    has_next: p.has_next,
+                    has_prev: p.has_prev,
+                }),
+            };
+
+            // Логируем успешную загрузку для отладки
+            web_sys::console::log_1(&format!("✅ Загружено {} типов из API", result.types.len()).into());
+            Ok(result)
+        },
+        Err(e) => {
+            // Логируем ошибку для отладки
+            web_sys::console::error_1(&format!("❌ Ошибка API: {:?}", e).into());
+            // Возвращаем тестовые данные как fallback
             get_test_types(filters)
         }
     }
@@ -45,83 +125,40 @@ pub async fn fetch_types(filters: TypeFilters) -> Result<TypeSearchResult, Strin
 
 /// Get test data for types
 fn get_test_types(filters: TypeFilters) -> Result<TypeSearchResult, String> {
-    // Временные тестовые данные
+    // Временные тестовые данные в новом формате
     let test_types = vec![
         TypeInfo {
-            name: "Array".to_string(),
-            display_name: "Массив".to_string(),
-            category: TypeCategory::Platform,
-            certainty: Certainty::Known,
-            facets: vec![FacetKind::Object, FacetKind::Collection],
-            active_facet: Some(FacetKind::Object),
-            union_types: None,
-            is_flow_sensitive: false,
+            id: "array".to_string(),
+            name: "Массив".to_string(),
+            category: "Platform".to_string(),
+            certainty: 100,
+            certainty_text: "Known 100%".to_string(),
+            facets: vec!["Object".to_string(), "Collection".to_string()],
             source: "Static Analysis".to_string(),
-            methods_count: Some(15),
-            properties_count: None,
-            description: Some("Коллекция элементов с индексным доступом".to_string()),
+            flow_sensitive: false,
+            description: "Коллекция элементов с индексным доступом".to_string(),
         },
         TypeInfo {
-            name: "Catalogs.Items".to_string(),
-            display_name: "Справочники.Номенклатура".to_string(),
-            category: TypeCategory::Configuration,
-            certainty: Certainty::Known,
-            facets: vec![FacetKind::Manager, FacetKind::Reference, FacetKind::Object, FacetKind::Metadata],
-            active_facet: Some(FacetKind::Reference),
-            union_types: None,
-            is_flow_sensitive: false,
+            id: "catalogs_items".to_string(),
+            name: "Справочники.Номенклатура".to_string(),
+            category: "Configuration".to_string(),
+            certainty: 100,
+            certainty_text: "Known 100%".to_string(),
+            facets: vec!["Manager".to_string(), "Reference".to_string(), "Object".to_string()],
             source: "Configuration".to_string(),
-            methods_count: Some(12),
-            properties_count: Some(8),
-            description: Some("Иерархический справочник с поддержкой групп".to_string()),
+            flow_sensitive: false,
+            description: "Иерархический справочник с поддержкой групп".to_string(),
         },
         TypeInfo {
-            name: "OperationResult".to_string(),
-            display_name: "РезультатОперации".to_string(),
-            category: TypeCategory::Union,
-            certainty: Certainty::Inferred(0.85),
-            facets: vec![FacetKind::Object],
-            active_facet: Some(FacetKind::Object),
-            union_types: Some(vec![
-                WeightedType { type_name: "Булево".to_string(), weight: 0.7 },
-                WeightedType { type_name: "Неопределено".to_string(), weight: 0.3 },
-            ]),
-            is_flow_sensitive: true,
-            source: "Flow Analysis".to_string(),
-            methods_count: None,
-            properties_count: None,
-            description: Some("Результат операции с возможными значениями".to_string()),
-        },
-        TypeInfo {
-            name: "DynamicObject".to_string(),
-            display_name: "ДинамическийОбъект".to_string(),
-            category: TypeCategory::Dynamic,
-            certainty: Certainty::Inferred(0.3),
-            facets: vec![FacetKind::Object],
-            active_facet: Some(FacetKind::Object),
-            union_types: Some(vec![
-                WeightedType { type_name: "Структура".to_string(), weight: 0.6 },
-                WeightedType { type_name: "ДанныеФормы".to_string(), weight: 0.4 },
-            ]),
-            is_flow_sensitive: true,
-            source: "Runtime".to_string(),
-            methods_count: None,
-            properties_count: None,
-            description: Some("Динамический объект с runtime определением типа".to_string()),
-        },
-        TypeInfo {
-            name: "String".to_string(),
-            display_name: "Строка".to_string(),
-            category: TypeCategory::Platform,
-            certainty: Certainty::Known,
-            facets: vec![FacetKind::Object],
-            active_facet: Some(FacetKind::Object),
-            union_types: None,
-            is_flow_sensitive: false,
+            id: "string".to_string(),
+            name: "Строка".to_string(),
+            category: "Platform".to_string(),
+            certainty: 100,
+            certainty_text: "Known 100%".to_string(),
+            facets: vec!["Object".to_string()],
             source: "Static Analysis".to_string(),
-            methods_count: Some(20),
-            properties_count: None,
-            description: Some("Строковый тип данных".to_string()),
+            flow_sensitive: false,
+            description: "Строковый тип данных".to_string(),
         },
     ];
 
@@ -131,26 +168,50 @@ fn get_test_types(filters: TypeFilters) -> Result<TypeSearchResult, String> {
         .filter(|t| {
             if let Some(ref query) = filters.search_query {
                 if !query.is_empty() {
-                    return t.name.to_lowercase().contains(&query.to_lowercase()) ||
-                           t.display_name.to_lowercase().contains(&query.to_lowercase());
+                    return t.name.to_lowercase().contains(&query.to_lowercase());
                 }
             }
             if let Some(ref category) = filters.category {
-                if t.category != *category {
+                if t.get_category() != *category {
                     return false;
                 }
             }
-            if filters.flow_sensitive_only && !t.is_flow_sensitive {
+            if filters.flow_sensitive_only && !t.is_flow_sensitive() {
                 return false;
             }
             true
         })
         .collect();
 
+    // Создаем мок-данные в формате backend API
+    let mut categories = std::collections::HashMap::new();
+    categories.insert("Platform".to_string(), CategoryInfo {
+        color: "#3498db".to_string(),
+        icon: "🔧".to_string(),
+        count: 2,
+    });
+    categories.insert("Configuration".to_string(), CategoryInfo {
+        color: "#e74c3c".to_string(),
+        icon: "⚙️".to_string(),
+        count: 1,
+    });
+
+    let pagination = PaginationInfo::new(filters.page, filters.page_size, filtered_types.len());
+
     Ok(TypeSearchResult {
-        filtered_count: filtered_types.len() as u32,
-        total_count: 5,
         types: filtered_types,
+        categories,
+        metrics: TypeSummaryMetrics {
+            total_types: 3,
+            certainty_high: 3,
+            certainty_medium: 0,
+            certainty_low: 0,
+            flow_sensitive: 0,
+            cache_hit_rate: "N/A".to_string(),
+            analysis_speed: "N/A".to_string(),
+        },
+        connections: vec![],
+        pagination: Some(pagination),
     })
 }
 
@@ -175,18 +236,15 @@ fn get_test_type_graph() -> Result<TypeGraph, String> {
         TypeGraphNode {
             id: "array".to_string(),
             type_info: TypeInfo {
-                name: "Array".to_string(),
-                display_name: "Массив".to_string(),
-                category: TypeCategory::Platform,
-                certainty: Certainty::Known,
-                facets: vec![FacetKind::Object, FacetKind::Collection],
-                active_facet: Some(FacetKind::Object),
-                union_types: None,
-                is_flow_sensitive: false,
+                id: "array".to_string(),
+                name: "Массив".to_string(),
+                category: "Platform".to_string(),
+                certainty: 100,
+                certainty_text: "Known 100%".to_string(),
+                facets: vec!["Object".to_string(), "Collection".to_string()],
                 source: "Static Analysis".to_string(),
-                methods_count: Some(15),
-                properties_count: None,
-                description: None,
+                flow_sensitive: false,
+                description: "Коллекция элементов с индексным доступом".to_string(),
             },
             x: 200.0,
             y: 150.0,
@@ -195,18 +253,15 @@ fn get_test_type_graph() -> Result<TypeGraph, String> {
         TypeGraphNode {
             id: "catalogs".to_string(),
             type_info: TypeInfo {
-                name: "Catalogs.Items".to_string(),
-                display_name: "Справочники.Номенклатура".to_string(),
-                category: TypeCategory::Configuration,
-                certainty: Certainty::Known,
-                facets: vec![FacetKind::Manager, FacetKind::Reference, FacetKind::Object],
-                active_facet: Some(FacetKind::Reference),
-                union_types: None,
-                is_flow_sensitive: false,
+                id: "catalogs_items".to_string(),
+                name: "Справочники.Номенклатура".to_string(),
+                category: "Configuration".to_string(),
+                certainty: 100,
+                certainty_text: "Known 100%".to_string(),
+                facets: vec!["Manager".to_string(), "Reference".to_string(), "Object".to_string()],
                 source: "Configuration".to_string(),
-                methods_count: Some(12),
-                properties_count: Some(8),
-                description: None,
+                flow_sensitive: false,
+                description: "Иерархический справочник с поддержкой групп".to_string(),
             },
             x: 500.0,
             y: 180.0,
@@ -250,4 +305,17 @@ where
     let data: T = serde_wasm_bindgen::from_value(json)?;
     
     Ok(data)
+}
+
+/// Convert backend metrics to frontend format
+fn convert_metrics(backend_metrics: BackendMetrics) -> TypeSummaryMetrics {
+    TypeSummaryMetrics {
+        total_types: backend_metrics.total_types as u32,
+        certainty_high: backend_metrics.certainty_high as u32,
+        certainty_medium: backend_metrics.certainty_medium as u32,
+        certainty_low: backend_metrics.certainty_low as u32,
+        flow_sensitive: backend_metrics.flow_sensitive as u32,
+        cache_hit_rate: backend_metrics.cache_hit_rate,
+        analysis_speed: backend_metrics.analysis_speed,
+    }
 }

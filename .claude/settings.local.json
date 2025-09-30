@@ -50,7 +50,9 @@
       "mcp__language-server__hover",
       "mcp__language-server__definition",
       "mcp__language-server__references",
-      "mcp__language-server__edit_file"
+      "mcp__language-server__edit_file",
+      "Bash(git mv:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

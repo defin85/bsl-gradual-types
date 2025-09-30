@@ -1,34 +1,120 @@
 # BSL Gradual Type System
 
+*Система градуальной типизации для языка 1С:Предприятие (BSL)*
+
 [![CI](https://github.com/yourusername/bsl-gradual-types/workflows/BSL%20Gradual%20Type%20System%20CI/badge.svg)](https://github.com/yourusername/bsl-gradual-types/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70+-brightgreen.svg)](https://www.rust-lang.org/)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/yourusername/bsl-gradual-types/releases)
 
-> 🏆 **Enterprise-ready система градуальной типизации для языка 1С:Предприятие BSL**
->
-> ✨ Обновлено 19 января 2025 - улучшенная архитектура и исправление warnings
+## 📋 Обзор
+
+**BSL Gradual Type System** — современная система статического анализа и типизации для языка программирования 1С:Предприятие (BSL). Система обеспечивает:
+
+- 🔍 **Анализ типов** с поддержкой flow-sensitive анализа
+- 🌐 **Веб-интерфейс** для визуализации и исследования типов
+- 🔧 **LSP сервер** для интеграции с редакторами кода
+- ⚡ **Высокая производительность** для enterprise проектов
+- 📚 **Автоматический парсинг** документации платформы 1С
 
 ## 🚀 Быстрый старт
 
+### 1️⃣ Установка
 ```bash
-# 1. Клонирование и сборка
 git clone https://github.com/yourusername/bsl-gradual-types.git
 cd bsl-gradual-types
 cargo build --release
+```
 
-# 2. Анализ BSL файла
+### 2️⃣ Веб-интерфейс (рекомендуется)
+```bash
+# Базовый запуск
+cargo run -p bsl-backend --bin bsl-web-server -- --port 3001
+# Открыть: http://localhost:3001
+
+# С указанием синтаксис-помощника 1С
+cargo run -p bsl-backend --bin bsl-web-server -- \
+  --syntax-helper-path "examples/syntax_helper/rebuilt.shcntx_ru" \
+  --port 3001
+```
+
+### 3️⃣ CLI анализ
+```bash
 echo 'Функция Тест() Возврат "привет"; КонецФункции' > test.bsl
-./target/release/bsl-analyzer --file test.bsl
+cargo run -p cli --bin bsl-type-check -- test.bsl --verbose
+```
 
-# 3. Запуск интегрированного web интерфейса
-cargo run -p bsl-backend --bin bsl-web-server -- --port 3001 --enable-cors true
-# Открыть http://localhost:3001
-
-# 4. VSCode расширение
+### 4️⃣ VSCode расширение
+```bash
 cd vscode-extension
 npm install && npm run compile && vsce package
 code --install-extension bsl-gradual-types-1.0.0.vsix
+```
+
+## ⚙️ Конфигурация
+
+### 📁 Подготовка ресурсов
+
+**Требуемые ресурсы:**
+- **Синтаксис-помощник 1С** - HTML файлы документации платформы
+- **Конфигурация проекта** - XML файлы метаданных 1С (Configuration.xml)
+
+**Получение синтаксис-помощника:**
+1. Откройте Конфигуратор 1С
+2. Меню "Справка" → "Содержание справки"
+3. Экспортируйте как `.shcntx_ru.zip`
+4. **Распакуйте ZIP в папку** `./syntax_helper/`
+
+### 🛠️ CLI аргументы
+
+```bash
+# Веб-сервер
+cargo run -p bsl-backend --bin bsl-web-server -- [OPTIONS]
+
+ОСНОВНЫЕ ОПЦИИ:
+  --syntax-helper-path <PATH>  Путь к HTML файлам синтаксис-помощника
+                               (абсолютный или относительный)
+  --project-path <PATH>        Путь к конфигурации 1С
+                               (абсолютный или относительный)
+  --port <PORT>                Порт сервера (по умолчанию: 8080)
+  --enable-cors                Включить CORS для разработки
+  --log-level <LEVEL>          Уровень логирования
+
+# CLI анализ
+cargo run -p cli --bin bsl-type-check -- <FILE> [--verbose]
+```
+
+**Примеры путей:**
+```bash
+# Относительные пути (от корня проекта)
+--syntax-helper-path "./syntax_helper"
+--syntax-helper-path "examples/syntax_helper/rebuilt.shcntx_ru"
+
+# Абсолютные пути
+--syntax-helper-path "C:/1C/Platform/8.3.24/bin/ru_RU"
+--syntax-helper-path "/opt/1cv8/8.3.24/share/doc/1cv8/ru_RU"
+```
+
+### 🌍 Переменные окружения
+
+```bash
+export BSL_SYNTAX_HELPER_PATH="/path/to/syntax/helper"
+export BSL_CONFIG_PATH="/path/to/config"
+export BSL_LOG_LEVEL=debug
+cargo run -p bsl-backend --bin bsl-web-server
+```
+
+### 📊 API
+
+```bash
+# Получить все типы
+curl "http://localhost:3001/api/types"
+
+# Поиск типов
+curl "http://localhost:3001/api/search?q=Строка"
+
+# Метрики и здоровье системы
+curl "http://localhost:3001/api/metrics"
+curl "http://localhost:3001/api/health"
 ```
 
 ## ✨ Ключевые возможности
@@ -59,35 +145,9 @@ code --install-extension bsl-gradual-types-1.0.0.vsix
 - **Автоматические стандартные атрибуты** (Код, Наименование, Дата, Период)
 - **Поддержка иерархии и владельцев** справочников
 
-## 🔧 CLI Инструменты
+## 🛠️ Инструменты разработки
 
-```bash
-# Проверка типов (выражение или автодополнение)
-cargo run --bin type-check -- "Справочники.Контрагенты"
-cargo run --bin type-check -- --complete "Справочники."
-
-# LSP сервер для IDE
-cargo run --bin lsp-server
-
-# Performance профилирование
-cargo run --bin bsl-profiler benchmark
-cargo run --bin bsl-profiler project /path/to/1c --threads 4
-
-# Web type browser
-cargo run -p bsl-backend --bin bsl-web-server -- --port 3001 --enable-cors true
-
-# Конфигурация (опционально)
-cargo run --bin bsl-web-server -- --config path/to/cf --port 8080
-
-# Configuration-guided Discovery парсер (NEW!)
-cargo run --example test_simple
-cargo test --test config_parser_guided_test
-
-# Analyzer CLI
-cargo run --bin bsl-analyzer -- --file module.bsl
-```
-
-## 💻 VSCode Extension
+### 💻 VSCode Extension
 
 ### Сборка расширения
 ```bash
@@ -124,26 +184,6 @@ code --install-extension bsl-gradual-types-1.0.0.vsix
 }
 ```
 
-## 🌐 Web API
-
-```bash
-# Запуск web сервера
-cargo run --bin bsl-web-server --port 8080
-
-# Поиск типов
-curl "http://localhost:3001/api/types?search=Массив"
-
-# Статус здоровья (health)
-curl "http://localhost:3001/api/health"
-
-# Анализ кода
-curl -X POST "http://localhost:3001/api/analyze" \
-  -H "Content-Type: application/json" \
-  -d '{"code": "Функция Тест() Возврат 42; КонецФункции"}'
-
-# Статистика системы
-curl "http://localhost:3001/api/stats"
-```
 
 ## 🏗️ Архитектура
 
@@ -291,4 +331,6 @@ MIT License - см. [LICENSE](LICENSE)
 
 ---
 
-**🚀 Готов к использованию в 1С проектах! Enterprise-grade система типов с modern tooling.**
+⭐ **Понравился проект? Поставьте звездочку на GitHub!**
+
+**BSL Gradual Type System** — enterprise-ready решение для анализа типов в 1С:Предприятие проектах.

@@ -3,8 +3,6 @@
 //! NOTE: Этот модуль будет постепенно удален в процессе рефакторинга.
 //! Infrastructure компоненты переносятся в backend/src/data/
 
-pub mod converters;
-
 // TEMPORARY: Stub module для config_parser
 // TODO Phase 1.2: Удалить после обновления converters.rs в Phase 1.3
 pub mod config_parser_guided_discovery {
@@ -162,8 +160,24 @@ pub mod syntax_helper_parser {
     }
 }
 
-// Re-export key components (для обратной совместимости)
-pub use converters::*;
+// TEMPORARY: Stub functions для converters (Phase 1.3)
+// TODO Phase 3: Удалить после переноса логики в SystemCoordinator
+use crate::domain::types::{RawTypeData, TypeResolution};
+
+pub fn convert_syntax_helper_to_raw(db: &syntax_helper_parser::SyntaxHelperDatabase) -> Vec<RawTypeData> {
+    // STUB: Реальная логика в backend/src/data/adapters/converters.rs
+    db.nodes.values().map(|_| RawTypeData::default()).collect()
+}
+
+pub fn convert_discovered_metadata_to_raw(metadata: &[config_parser_guided_discovery::DiscoveredMetadata]) -> Vec<RawTypeData> {
+    // STUB: Реальная логика в backend/src/data/adapters/converters.rs
+    metadata.iter().map(|_| RawTypeData::default()).collect()
+}
+
+pub fn convert_resolutions_to_raw(_resolutions: &[TypeResolution]) -> Vec<RawTypeData> {
+    // STUB
+    vec![]
+}
 
 // TEMPORARY: Re-export stub типов для обратной совместимости
 // TODO Phase 1.1: Удалить после Phase 3

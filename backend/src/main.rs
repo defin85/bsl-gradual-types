@@ -2,7 +2,6 @@
 
 #[cfg(feature = "web-ui")]
 use bsl_backend::{
-    application::TypeSystemService,
     config::{load_config, CliConfig},
     system::SystemCoordinator,
     presentation::web::{AppState, create_router},
@@ -35,6 +34,10 @@ struct Args {
     #[arg(long, value_name = "PATH")]
     project_path: Option<PathBuf>,
 
+    /// Path to 1C syntax helper directory
+    #[arg(long, value_name = "PATH")]
+    syntax_helper_path: Option<PathBuf>,
+
     /// Enable CORS for development
     #[arg(long)]
     enable_cors: Option<bool>,
@@ -61,6 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         port: args.port,
         static_files_path: args.static_files_path,
         project_path: args.project_path,
+        syntax_helper_path: args.syntax_helper_path,
         enable_cors: args.enable_cors,
         log_level: args.log_level,
         config_file: args.config,
@@ -75,16 +79,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let system_coord = Arc::new(SystemCoordinator::new());
-    
-    // Create TypeSystemService using components from SystemCoordinator
-    let (type_resolver, cache, parser) = system_coord.get_components();
-    let type_service = Arc::new(TypeSystemService::new(type_resolver, cache, parser));
-    
-    // Initialize the type service
-    type_service.initialize()?;
+
+    // 🚀 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: запускаем полную инициализацию с парсингом синтаксис-помощника
+    system_coord.start_with_paths(
+        config.syntax_helper_path.as_deref(),
+        config.project_path.as_deref()
+    ).await?;
+
+    // Create TypeSystemService using SystemCoordinator's singleton method
+    let type_service = system_coord.type_service()
+        .expect("AnalysisEngine should be initialized after start_with_paths");
 
     let app_state = AppState {
         type_service: type_service.clone(),
+        system_coordinator: system_coord.clone(), // ВРЕМЕННО для отладки
     };
 
     // Static SPA from configured path or default

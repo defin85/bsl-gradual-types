@@ -13,6 +13,8 @@ pub struct AnalysisResultDto {
     pub categories: HashMap<String, CategoryDto>,
     pub metrics: MetricsDto,
     pub connections: Vec<ConnectionDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<PaginationDto>,
 }
 
 /// Detailed information about a single type.
@@ -98,4 +100,16 @@ pub struct ConnectionDto {
     pub target: String, // id of the target type
     #[serde(rename = "type")]
     pub connection_type: String,
+}
+
+/// Pagination information for paged responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaginationDto {
+    pub current_page: usize,
+    pub page_size: usize,
+    pub total_items: usize,
+    pub total_pages: usize,
+    pub has_prev: bool,
+    pub has_next: bool,
 }

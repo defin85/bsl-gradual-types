@@ -1,7 +1,7 @@
 //! Table page for tabular type analysis
 
 use crate::api::{fetch_types, types::*};
-use crate::components::{SearchBar, TypeTable};
+use crate::components::{SearchBar, TableView};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -12,8 +12,9 @@ pub fn TablePage(
     /// Поисковый запрос для фильтрации
     #[prop(optional)] _search_query: Option<RwSignal<String>>,
 ) -> impl IntoView {
-    let filters = RwSignal::new(TypeFilters::default());
+    let filters = RwSignal::new(TypeFilters::new());
     let types = RwSignal::new(Vec::<TypeInfo>::new());
+    let search_result = RwSignal::new(None::<TypeSearchResult>);
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
     let selected_type = RwSignal::new(None::<TypeInfo>);
@@ -26,7 +27,8 @@ pub fn TablePage(
         spawn_local(async move {
             match fetch_types(filters.get()).await {
                 Ok(result) => {
-                    types.set(result.types);
+                    types.set(result.types.clone());
+                    search_result.set(Some(result));
                     loading.set(false);
                 },
                 Err(err) => {
@@ -47,15 +49,22 @@ pub fn TablePage(
         load_types();
     };
 
-    let handle_row_click = move |type_info: TypeInfo| {
-        selected_type.set(Some(type_info.clone()));
-        web_sys::console::log_1(&format!("Selected type: {}", type_info.display_name).into());
+    let handle_page_change = move |page: usize| {
+        let mut current_filters = filters.get();
+        current_filters.page = page;
+        filters.set(current_filters);
+        load_types();
     };
 
-    let handle_action = move |(action, type_info): (String, TypeInfo)| {
+    let _handle_row_click = move |type_info: TypeInfo| {
+        selected_type.set(Some(type_info.clone()));
+        web_sys::console::log_1(&format!("Selected type: {}", type_info.name).into());
+    };
+
+    let _handle_action = move |(action, type_info): (String, TypeInfo)| {
         match action.as_str() {
             "view" => {
-                web_sys::console::log_1(&format!("View type: {}", type_info.display_name).into());
+                web_sys::console::log_1(&format!("View type: {}", type_info.name).into());
                 // Открыть детальный просмотр
             },
             "copy" => {
@@ -74,10 +83,10 @@ pub fn TablePage(
     let stats = Signal::derive(move || {
         let types_list = types.get();
         let total = types_list.len() as u32;
-        let known = types_list.iter().filter(|t| matches!(t.certainty, Certainty::Known)).count() as u32;
-        let inferred = types_list.iter().filter(|t| matches!(t.certainty, Certainty::Inferred(_))).count() as u32;
-        let unknown = types_list.iter().filter(|t| matches!(t.certainty, Certainty::Unknown)).count() as u32;
-        let flow_sensitive = types_list.iter().filter(|t| t.is_flow_sensitive).count() as u32;
+        let known = types_list.iter().filter(|t| matches!(t.get_certainty(), Certainty::Known)).count() as u32;
+        let inferred = types_list.iter().filter(|t| matches!(t.get_certainty(), Certainty::Inferred(_))).count() as u32;
+        let unknown = types_list.iter().filter(|t| matches!(t.get_certainty(), Certainty::Unknown)).count() as u32;
+        let flow_sensitive = types_list.iter().filter(|t| t.is_flow_sensitive()).count() as u32;
         
         (total, known, inferred, unknown, flow_sensitive)
     });
@@ -134,28 +143,23 @@ pub fn TablePage(
                     }.into_any()
                 } else {
                     let types_signal = Signal::derive(move || types.get());
+                    let search_result_signal = Signal::derive(move || search_result.get());
                     view! {
                         <div>
-                            <TypeTable 
+                            <TableView
                                 types=types_signal
-                                on_row_click=Callback::new(handle_row_click)
-                                on_action=Callback::new(handle_action)
+                                search_result=search_result_signal
+                                on_page_change=Callback::new(handle_page_change)
                             />
                             
                             {move || {
                                 if let Some(selected) = selected_type.get() {
                                     view! {
                                         <div class="selected-type-info">
-                                            <h3>"Выбранный тип: " {selected.display_name}</h3>
-                                            <p>"Категория: " {selected.category.as_str()}</p>
-                                            <p>"Уверенность: " {selected.certainty.as_percentage()}</p>
-                                            {if let Some(description) = selected.description {
-                                                view! {
-                                                    <p>"Описание: " {description}</p>
-                                                }.into_any()
-                                            } else {
-                                                view! {}.into_any()
-                                            }}
+                                            <h3>"Выбранный тип: " {selected.name.clone()}</h3>
+                                            <p>"Категория: " {selected.category.clone()}</p>
+                                            <p>"Уверенность: " {selected.get_certainty().as_percentage()}</p>
+                                            <p>"Описание: " {selected.description.clone()}</p>
                                         </div>
                                     }.into_any()
                                 } else {

@@ -224,3 +224,57 @@ pub enum DiagnosticSeverity {
 
 #[derive(Debug, Clone)]
 pub struct FunctionSignature{}
+
+// === DISPLAY IMPLEMENTATIONS ===
+
+use std::fmt;
+
+impl fmt::Display for ConcreteType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConcreteType::Platform(platform) => write!(f, "{}", platform.name),
+            ConcreteType::Configuration(config) => {
+                write!(f, "{}.{}", config.kind.display_name(), config.name)
+            }
+            ConcreteType::Primitive(primitive) => write!(f, "{}", primitive.display_name()),
+            ConcreteType::Special(special) => write!(f, "{}", special.display_name()),
+            ConcreteType::GlobalFunction(func) => write!(f, "{}()", func.name),
+        }
+    }
+}
+
+impl PrimitiveType {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            PrimitiveType::String => "Строка",
+            PrimitiveType::Number => "Число",
+            PrimitiveType::Boolean => "Булево",
+            PrimitiveType::Date => "Дата",
+        }
+    }
+}
+
+impl SpecialType {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            SpecialType::Undefined => "Неопределено",
+            SpecialType::Null => "Null",
+            SpecialType::Type => "Тип",
+        }
+    }
+}
+
+impl MetadataKind {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            MetadataKind::Catalog => "Справочники",
+            MetadataKind::Document => "Документы",
+            MetadataKind::Enum => "Перечисления",
+            MetadataKind::Report => "Отчеты",
+            MetadataKind::DataProcessor => "Обработки",
+            MetadataKind::Register => "Регистры",
+            MetadataKind::ChartOfAccounts => "ПланыСчетов",
+            MetadataKind::ChartOfCharacteristicTypes => "ПланыВидовХарактеристик",
+        }
+    }
+}

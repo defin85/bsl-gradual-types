@@ -14,6 +14,7 @@ pub fn CardsPage(
 ) -> impl IntoView {
     let filters = RwSignal::new(TypeFilters::default());
     let types = RwSignal::new(Vec::<TypeInfo>::new());
+    let search_result = RwSignal::new(None::<TypeSearchResult>);
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
 
@@ -25,7 +26,8 @@ pub fn CardsPage(
         spawn_local(async move {
             match fetch_types(filters.get()).await {
                 Ok(result) => {
-                    types.set(result.types);
+                    types.set(result.types.clone());
+                    search_result.set(Some(result));
                     loading.set(false);
                 },
                 Err(err) => {
@@ -47,7 +49,7 @@ pub fn CardsPage(
     };
 
     let handle_card_click = move |type_info: TypeInfo| {
-        web_sys::console::log_1(&format!("Clicked on type: {}", type_info.display_name).into());
+        web_sys::console::log_1(&format!("Clicked on type: {}", type_info.name).into());
         // Здесь можно добавить логику для открытия детального просмотра
     };
 
@@ -83,7 +85,13 @@ pub fn CardsPage(
                     view! {
                         <div>
                             <div class="results-summary">
-                                <p>{move || format!("Найдено типов: {}", types.get().len())}</p>
+                                <p>{move || {
+                                    if let Some(result) = search_result.get() {
+                                        format!("Найдено типов: {} (показано: {})", result.metrics.total_types, types.get().len())
+                                    } else {
+                                        format!("Найдено типов: {}", types.get().len())
+                                    }
+                                }}</p>
                             </div>
                             
                             <TypeCardsGrid 

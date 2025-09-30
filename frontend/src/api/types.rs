@@ -96,21 +96,64 @@ pub struct WeightedType {
     pub weight: f32, // 0.0-1.0
 }
 
-/// Информация о типе
+/// Информация о типе (совместимо с backend API)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeInfo {
+    pub id: String,
     pub name: String,
-    pub display_name: String,
-    pub category: TypeCategory,
-    pub certainty: Certainty,
-    pub facets: Vec<FacetKind>,
-    pub active_facet: Option<FacetKind>,
-    pub union_types: Option<Vec<WeightedType>>,
-    pub is_flow_sensitive: bool,
+    pub category: String, // "Platform", "Configuration", etc.
+    pub certainty: u32, // 0-100
+    #[serde(rename = "certaintyText")]
+    pub certainty_text: String, // "Known 100%", "Inferred 85%", etc.
+    pub facets: Vec<String>,
     pub source: String,
-    pub methods_count: Option<u32>,
-    pub properties_count: Option<u32>,
-    pub description: Option<String>,
+    #[serde(rename = "flowSensitive")]
+    pub flow_sensitive: bool,
+    pub description: String,
+}
+
+/// Вспомогательная структура для обратной совместимости
+impl TypeInfo {
+    pub fn display_name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn get_category(&self) -> TypeCategory {
+        match self.category.as_str() {
+            "Platform" => TypeCategory::Platform,
+            "Configuration" => TypeCategory::Configuration,
+            "Union" => TypeCategory::Union,
+            "Dynamic" => TypeCategory::Dynamic,
+            _ => TypeCategory::Platform,
+        }
+    }
+
+    pub fn get_certainty(&self) -> Certainty {
+        if self.certainty == 100 {
+            Certainty::Known
+        } else if self.certainty == 0 {
+            Certainty::Unknown
+        } else {
+            Certainty::Inferred(self.certainty as f32 / 100.0)
+        }
+    }
+
+    pub fn is_flow_sensitive(&self) -> bool {
+        self.flow_sensitive
+    }
+
+    pub fn get_facets(&self) -> Vec<FacetKind> {
+        self.facets.iter().filter_map(|f| {
+            match f.as_str() {
+                "Manager" => Some(FacetKind::Manager),
+                "Object" => Some(FacetKind::Object),
+                "Reference" => Some(FacetKind::Reference),
+                "Collection" => Some(FacetKind::Collection),
+                "Metadata" => Some(FacetKind::Metadata),
+                _ => None,
+            }
+        }).collect()
+    }
 }
 
 /// Метрики системы типизации
@@ -120,8 +163,11 @@ pub struct TypeMetrics {
     pub known_types: u32,
     pub inferred_types: u32,
     pub unknown_types: u32,
+    #[serde(default)]
     pub flow_sensitive_types: u32,
+    #[serde(default)]
     pub cache_hit_rate: f32,
+    #[serde(default)]
     pub analysis_speed_ms: f32,
 }
 
@@ -133,14 +179,99 @@ pub struct TypeFilters {
     pub certainty_level: Option<String>,
     pub facet: Option<FacetKind>,
     pub flow_sensitive_only: bool,
+    pub page: usize,
+    pub page_size: usize,
 }
 
-/// Результат поиска типов
+impl TypeFilters {
+    pub fn new() -> Self {
+        Self {
+            search_query: None,
+            category: None,
+            certainty_level: None,
+            facet: None,
+            flow_sensitive_only: false,
+            page: 1,
+            page_size: 50,
+        }
+    }
+
+    pub fn offset(&self) -> usize {
+        (self.page - 1) * self.page_size
+    }
+}
+
+/// Результат поиска типов (совместимо с backend API)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeSearchResult {
     pub types: Vec<TypeInfo>,
-    pub total_count: u32,
-    pub filtered_count: u32,
+    pub categories: std::collections::HashMap<String, CategoryInfo>,
+    pub metrics: TypeSummaryMetrics,
+    pub connections: Vec<TypeConnection>,
+    pub pagination: Option<PaginationInfo>,
+}
+
+/// Информация о пагинации
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginationInfo {
+    pub current_page: usize,
+    pub page_size: usize,
+    pub total_items: usize,
+    pub total_pages: usize,
+    pub has_next: bool,
+    pub has_prev: bool,
+}
+
+impl PaginationInfo {
+    pub fn new(current_page: usize, page_size: usize, total_items: usize) -> Self {
+        let total_pages = (total_items + page_size - 1) / page_size;
+        Self {
+            current_page,
+            page_size,
+            total_items,
+            total_pages,
+            has_next: current_page < total_pages,
+            has_prev: current_page > 1,
+        }
+    }
+}
+
+/// Информация о категории типов
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CategoryInfo {
+    pub color: String,
+    pub icon: String,
+    pub count: u32,
+}
+
+/// Сводные метрики для списка типов
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypeSummaryMetrics {
+    #[serde(rename = "totalTypes")]
+    pub total_types: u32,
+    #[serde(rename = "certaintyHigh")]
+    pub certainty_high: u32,
+    #[serde(rename = "certaintyMedium")]
+    pub certainty_medium: u32,
+    #[serde(rename = "certaintyLow")]
+    pub certainty_low: u32,
+    #[serde(rename = "flowSensitive")]
+    pub flow_sensitive: u32,
+    #[serde(rename = "cacheHitRate")]
+    pub cache_hit_rate: String,
+    #[serde(rename = "analysisSpeed")]
+    pub analysis_speed: String,
+}
+
+/// Вспомогательные методы для TypeSearchResult
+impl TypeSearchResult {
+    pub fn total_count(&self) -> u32 {
+        self.metrics.total_types
+    }
+
+    pub fn filtered_count(&self) -> u32 {
+        self.types.len() as u32
+    }
 }
 
 /// Узел графа типов
@@ -195,7 +326,7 @@ impl ConnectionType {
 }
 
 /// Граф типов
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TypeGraph {
     pub nodes: Vec<TypeGraphNode>,
     pub connections: Vec<TypeConnection>,

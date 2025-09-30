@@ -10,7 +10,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::domain::types::{
+// Импорты из shared крейта (Domain Layer)
+use bsl_shared::domain::types::{
     Attribute, Certainty, ConcreteType, ConfigurationType, FacetKind, MetadataKind,
     ResolutionMetadata, ResolutionResult, ResolutionSource, TabularSection, TypeResolution,
 };

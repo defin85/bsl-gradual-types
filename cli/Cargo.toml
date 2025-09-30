@@ -7,7 +7,7 @@ license.workspace = true
 description = "Command line tools for BSL Gradual Type System"
 
 [[bin]]
-name = "bsl-type-check"
+name = "bsl-cli"
 path = "src/main.rs"
 
 [dependencies]

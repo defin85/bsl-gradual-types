@@ -51,9 +51,9 @@ fn get_api_base_url() -> Option<String> {
         location.port()
     ) {
         let base_url = if port.is_empty() {
-            format!("{}://{}", protocol, hostname)
+            format!("{}://{}", protocol.trim_end_matches(':'), hostname)
         } else {
-            format!("{}://{}:{}", protocol, hostname, port)
+            format!("{}://{}:{}", protocol.trim_end_matches(':'), hostname, port)
         };
         
         Some(base_url)

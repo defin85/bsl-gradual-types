@@ -14,8 +14,12 @@ async fn test_lsp_clean_architecture() {
     // Arrange: создаем SystemCoordinator как IoC Container
     let coordinator = SystemCoordinator::new();
 
+    // Инициализируем систему
+    coordinator.start().await.expect("SystemCoordinator should start");
+
     // Act: получаем TypeSystemService через DI
-    let type_service: Arc<TypeSystemService> = coordinator.type_service();
+    let type_service: Arc<TypeSystemService> = coordinator.type_service()
+        .expect("TypeSystemService should be available");
 
     // Assert: проверяем что можем создать временный файл и проанализировать его
     let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
@@ -43,9 +47,14 @@ async fn test_system_coordinator_as_ioc_container() {
     // ✅ ПРАВИЛЬНАЯ РОЛЬ: SystemCoordinator как IoC Container
     let coordinator = SystemCoordinator::new();
 
+    // Инициализируем систему
+    coordinator.start().await.expect("SystemCoordinator should start");
+
     // SystemCoordinator предоставляет зависимости через DI
-    let type_service_1 = coordinator.type_service();
-    let type_service_2 = coordinator.type_service();
+    let type_service_1 = coordinator.type_service()
+        .expect("TypeSystemService should be available");
+    let type_service_2 = coordinator.type_service()
+        .expect("TypeSystemService should be available");
 
     // Проверяем что это один и тот же экземпляр (singleton через Arc)
     assert!(Arc::ptr_eq(&type_service_1, &type_service_2));

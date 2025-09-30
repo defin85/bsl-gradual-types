@@ -14,6 +14,8 @@ pub struct WebServerConfig {
     pub static_files_path: Option<PathBuf>,
     /// Path to BSL project configuration
     pub project_path: Option<PathBuf>,
+    /// Path to 1C syntax helper directory
+    pub syntax_helper_path: Option<PathBuf>,
     /// Enable CORS for development
     pub enable_cors: bool,
     /// Log level
@@ -27,6 +29,7 @@ impl Default for WebServerConfig {
             port: 8080,
             static_files_path: None,
             project_path: None,
+            syntax_helper_path: None,
             enable_cors: true,
             log_level: "info".to_string(),
         }
@@ -98,6 +101,9 @@ impl WebServerConfig {
         if let Some(project_path) = cli_config.project_path {
             self.project_path = Some(project_path);
         }
+        if let Some(syntax_helper_path) = cli_config.syntax_helper_path {
+            self.syntax_helper_path = Some(syntax_helper_path);
+        }
         if let Some(cors) = cli_config.enable_cors {
             self.enable_cors = cors;
         }
@@ -114,6 +120,7 @@ pub struct CliConfig {
     pub port: Option<u16>,
     pub static_files_path: Option<PathBuf>,
     pub project_path: Option<PathBuf>,
+    pub syntax_helper_path: Option<PathBuf>,
     pub enable_cors: Option<bool>,
     pub log_level: Option<String>,
     pub config_file: Option<PathBuf>,

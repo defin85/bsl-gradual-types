@@ -8,30 +8,34 @@ use std::collections::HashMap;
 use anyhow::Result;
 use tracing::info;
 
-use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::domain::types::{TypeResolution, ConcreteType, PrimitiveType};
 use bsl_shared::domain::{CompletionItem, CompletionKind};
 use crate::system::{AnalysisCache, AnalysisResult, ParserCoordinator};
 
 /// Унифицированный сервис системы типов для Application Layer
-/// 
+///
 /// Phase 4: Заменяет LspTypeService + WebTypeService + AnalysisService
 /// единым unified API для всех презентационных слоев
 pub struct TypeSystemService {
-    resolver: Arc<TypeResolver>,
+    // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: использует AnalysisEngine вместо прямого доступа к Domain Layer
+    analysis_engine: Arc<AnalysisEngine>,
+
+    // System Layer компоненты
     #[allow(dead_code)] // CLEANUP: планируется использование в будущем
     cache: Arc<AnalysisCache>,
     parser: Arc<ParserCoordinator>,
 }
 
 impl TypeSystemService {
+    /// Конструктор согласно архитектурной диаграмме
     pub fn new(
-        resolver: Arc<TypeResolver>,
+        analysis_engine: Arc<AnalysisEngine>,
         cache: Arc<AnalysisCache>,
         parser: Arc<ParserCoordinator>,
     ) -> Self {
         Self {
-            resolver,
+            analysis_engine,
             cache,
             parser,
         }
@@ -46,7 +50,8 @@ impl TypeSystemService {
 
     /// Получить все платформенные глобальные типы (для Web API)
     pub fn get_all_platform_globals(&self) -> std::collections::HashMap<String, TypeResolution> {
-        self.resolver.get_all_platform_globals()
+        // Делегируем вызов AnalysisEngine, который обращается к Domain Layer
+        self.analysis_engine.get_resolver().get_all_platform_globals()
     }
 
     /// CLI операции - файловый анализ
@@ -172,14 +177,14 @@ impl TypeSystemService {
     /// Web операции - поиск типов
     pub async fn search_types(&self, query: &str) -> Result<Vec<String>> {
         info!("🌐 Web поиск типов: {}", query);
-        let results = self.resolver.search_types(query);
+        let results = self.analysis_engine.get_resolver().search_types(query);
         Ok(results)
     }
 
     /// Web операции - получить детали типа
     pub async fn get_type_details(&self, type_name: &str) -> Result<Option<TypeResolution>> {
         info!("🌐 Web детали типа: {}", type_name);
-        let platform_globals = self.resolver.get_all_platform_globals();
+        let platform_globals = self.analysis_engine.get_resolver().get_all_platform_globals();
         Ok(platform_globals.get(type_name).cloned())
     }
 
@@ -189,7 +194,7 @@ impl TypeSystemService {
         expression: &str,
     ) -> Result<Vec<CompletionItem>> {
         info!("🌐 Web автодополнения для: {}", expression);
-        let completions = self.resolver.get_completions(expression);
+        let completions = self.analysis_engine.get_resolver().get_completions(expression);
         Ok(completions)
     }
 

@@ -14,9 +14,9 @@ pub fn TypeCard(
 ) -> impl IntoView {
     let card_class = move || {
         let info = type_info.get();
-        match info.category {
+        match info.get_category() {
             TypeCategory::Platform => "type-card card-known",
-            TypeCategory::Configuration => "type-card card-known", 
+            TypeCategory::Configuration => "type-card card-known",
             TypeCategory::Union => "type-card card-inferred",
             TypeCategory::Dynamic => "type-card card-unknown",
         }
@@ -24,7 +24,7 @@ pub fn TypeCard(
 
     let certainty_badge_class = move || {
         let info = type_info.get();
-        match info.certainty {
+        match info.get_certainty() {
             Certainty::Known => "certainty-badge badge-known",
             Certainty::Inferred(_) => "certainty-badge badge-inferred",
             Certainty::Unknown => "certainty-badge badge-unknown",
@@ -40,44 +40,35 @@ pub fn TypeCard(
     view! {
         <div class=card_class on:click=handle_click>
             <div class="type-header">
-                <div class="type-name">{move || type_info.get().display_name}</div>
+                <div class="type-name">{move || type_info.get().name.clone()}</div>
                 <div class=certainty_badge_class>
-                    {move || type_info.get().certainty.as_percentage()}
+                    {move || type_info.get().get_certainty().as_percentage()}
                 </div>
             </div>
 
             <div class="type-details">
                 <div class="detail-row">
                     <span class="detail-label">"Категория:"</span>
-                    <span class="detail-value">{move || type_info.get().category.as_str()}</span>
+                    <span class="detail-value">{move || type_info.get().category.clone()}</span>
                 </div>
                 <div class="detail-row">
                     <span class="detail-label">"Источник:"</span>
                     <span class="detail-value">{move || type_info.get().source.clone()}</span>
                 </div>
-                {move || {
-                    let info = type_info.get();
-                    if let Some(methods) = info.methods_count {
-                        view! {
-                            <div class="detail-row">
-                                <span class="detail-label">"Методы:"</span>
-                                <span class="detail-value">{format!("{} методов", methods)}</span>
-                            </div>
-                        }.into_any()
-                    } else {
-                        view! {}.into_any()
-                    }
-                }}
+                <div class="detail-row">
+                    <span class="detail-label">"Уверенность:"</span>
+                    <span class="detail-value">{move || type_info.get().certainty_text.clone()}</span>
+                </div>
             </div>
 
             <div class="facets-section">
                 <strong>"Доступные фасеты:"</strong><br/>
                 {move || {
                     type_info.get().facets.into_iter().map(|facet| {
-                        let facet_class = format!("facet-tag facet-{}", facet.as_str().to_lowercase());
+                        let facet_class = format!("facet-tag facet-{}", facet.to_lowercase());
                         view! {
-                            <span class=facet_class style=move || format!("background: {}; color: white;", facet.color())>
-                                {facet.as_str()}
+                            <span class=facet_class>
+                                {facet.clone()}
                             </span>
                         }
                     }).collect::<Vec<_>>()
@@ -86,37 +77,11 @@ pub fn TypeCard(
 
             {move || {
                 let info = type_info.get();
-                if let Some(union_types) = info.union_types {
-                    view! {
-                        <div class="union-types">
-                            <strong>"Возможные типы:"</strong>
-                            {union_types.into_iter().map(|weighted_type| {
-                                view! {
-                                    <div class="union-type">
-                                        <span>{weighted_type.type_name}</span>
-                                        <div class="weight-bar">
-                                            <div class="weight-fill" style=move || format!("width: {}%", weighted_type.weight * 100.0)></div>
-                                        </div>
-                                        <span>{format!("{:.0}%", weighted_type.weight * 100.0)}</span>
-                                    </div>
-                                }
-                            }).collect::<Vec<_>>()}
-                        </div>
-                    }.into_any()
-                } else {
-                    view! {}.into_any()
-                }
-            }}
-
-            {move || {
-                let info = type_info.get();
-                if info.is_flow_sensitive {
+                if info.is_flow_sensitive() {
                     view! {
                         <div class="flow-sensitive">
                             <strong>"🔄 Flow-Sensitive Analysis"</strong><br/>
-                            <span class="flow-step">"Init: Неопределено"</span>
-                            <span class="flow-step">"Check: " {info.category.as_str()}</span>
-                            <span class="flow-step">"Final: " {info.category.as_str()}</span>
+                            <span class="flow-step">"Тип может изменяться в ходе выполнения"</span>
                         </div>
                     }.into_any()
                 } else {
@@ -124,32 +89,11 @@ pub fn TypeCard(
                 }
             }}
 
-            {move || {
-                let info = type_info.get();
-                if let Some(description) = info.description {
-                    let style_class = match info.category {
-                        TypeCategory::Platform => "background: #e8f5e8; padding: 10px; border-radius: 6px;",
-                        TypeCategory::Configuration => "background: #fff3cd; padding: 10px; border-radius: 6px; border-left: 3px solid #ffc107;",
-                        TypeCategory::Union => "background: #d1ecf1; padding: 10px; border-radius: 6px; margin-top: 10px;",
-                        TypeCategory::Dynamic => "background: #f8d7da; padding: 10px; border-radius: 6px; border-left: 3px solid #dc3545;",
-                    };
-                    
-                    let prefix = match info.category {
-                        TypeCategory::Platform => "Популярные методы:",
-                        TypeCategory::Configuration => "1C Специфика:",
-                        TypeCategory::Union => "💡 Рекомендация:",
-                        TypeCategory::Dynamic => "⚠️ Требует runtime проверки:",
-                    };
-                    
-                    view! {
-                        <div style=style_class>
-                            <small><strong>{prefix}</strong>" " {description}</small>
-                        </div>
-                    }.into_any()
-                } else {
-                    view! {}.into_any()
-                }
-            }}
+            <div class="description-section">
+                <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; border-left: 3px solid #007bff;">
+                    <small><strong>"Описание:"</strong>" " {move || type_info.get().description.clone()}</small>
+                </div>
+            </div>
         </div>
     }
 }

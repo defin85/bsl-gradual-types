@@ -41,26 +41,15 @@ pub fn TypeTable(
 
         types_list.sort_by(|a, b| {
             let comparison = match col {
-                SortColumn::Name => a.display_name.cmp(&b.display_name),
-                SortColumn::Category => a.category.as_str().cmp(b.category.as_str()),
+                SortColumn::Name => a.name.cmp(&b.name),
+                SortColumn::Category => a.category.cmp(&b.category),
                 SortColumn::Certainty => {
-                    let a_val = match a.certainty {
-                        Certainty::Known => 100.0,
-                        Certainty::Inferred(val) => val * 100.0,
-                        Certainty::Unknown => 0.0,
-                    };
-                    let b_val = match b.certainty {
-                        Certainty::Known => 100.0,
-                        Certainty::Inferred(val) => val * 100.0,
-                        Certainty::Unknown => 0.0,
-                    };
-                    a_val.partial_cmp(&b_val).unwrap_or(std::cmp::Ordering::Equal)
+                    a.certainty.cmp(&b.certainty)
                 },
                 SortColumn::Source => a.source.cmp(&b.source),
                 SortColumn::Methods => {
-                    let a_methods = a.methods_count.unwrap_or(0);
-                    let b_methods = b.methods_count.unwrap_or(0);
-                    a_methods.cmp(&b_methods)
+                    // Since we don't have methods_count in new structure, use 0
+                    std::cmp::Ordering::Equal
                 },
             };
 
@@ -200,72 +189,50 @@ fn TypeTableRow(
     view! {
         <tr on:click=handle_row_click>
             <td>
-                <div class="type-name">{move || type_info.get().display_name}</div>
-                <small style="color: #6c757d;">{move || type_info.get().name}</small>
+                <div class="type-name">{move || type_info.get().name.clone()}</div>
+                <small style="color: #6c757d;">{move || type_info.get().id.clone()}</small>
             </td>
             <td>
-                <span 
+                <span
                     class="category-badge"
-                    style=move || format!("background: {}; color: white;", type_info.get().category.color())
+                    style=move || format!("background: {}; color: white;", type_info.get().get_category().color())
                 >
-                    {move || type_info.get().category.as_str()}
+                    {move || type_info.get().category.clone()}
                 </span>
             </td>
             <td>
                 <div class="certainty-bar">
-                    <div 
+                    <div
                         class="certainty-fill"
                         style=move || {
                             let info = type_info.get();
-                            let width = match info.certainty {
-                                Certainty::Known => 100.0,
-                                Certainty::Inferred(val) => val * 100.0,
-                                Certainty::Unknown => 0.0,
-                            };
-                            format!("width: {}%; background: {};", width, info.certainty.color())
+                            let width = info.certainty as f32;
+                            format!("width: {}%; background: {};", width, info.get_certainty().color())
                         }
                     ></div>
-                    <div class="certainty-text">{move || type_info.get().certainty.as_percentage()}</div>
+                    <div class="certainty-text">{move || type_info.get().get_certainty().as_percentage()}</div>
                 </div>
             </td>
             <td class="facets-cell">
                 {move || {
                     type_info.get().facets.into_iter().map(|facet| {
                         view! {
-                            <span 
+                            <span
                                 class="facet-tag"
-                                style=move || format!("background: {}; color: white; margin: 2px;", facet.color())
+                                style="background: #007bff; color: white; margin: 2px;"
                             >
-                                {facet.as_str()}
+                                {facet}
                             </span>
                         }
                     }).collect::<Vec<_>>()
                 }}
             </td>
             <td>
-                {move || {
-                    let info = type_info.get();
-                    if let Some(union_types) = info.union_types {
-                        view! {
-                            <div class="union-display">
-                                {union_types.into_iter().map(|weighted_type| {
-                                    view! {
-                                        <div class="union-item">
-                                            <span>{weighted_type.type_name}</span>
-                                            <span>{format!("{:.0}%", weighted_type.weight * 100.0)}</span>
-                                        </div>
-                                    }
-                                }).collect::<Vec<_>>()}
-                            </div>
-                        }.into_any()
-                    } else {
-                        view! { <span>"-"</span> }.into_any()
-                    }
-                }}
+                <span>"-"</span>
             </td>
             <td class="flow-indicator">
                 {move || {
-                    if type_info.get().is_flow_sensitive {
+                    if type_info.get().is_flow_sensitive() {
                         view! { <span class="flow-yes">"✓"</span> }.into_any()
                     } else {
                         view! { <span class="flow-no">"✗"</span> }.into_any()
@@ -274,18 +241,7 @@ fn TypeTableRow(
             </td>
             <td>{move || type_info.get().source}</td>
             <td>
-                {move || {
-                    let info = type_info.get();
-                    if let Some(methods) = info.methods_count {
-                        if let Some(props) = info.properties_count {
-                            format!("{} реквизитов, {} методов", props, methods)
-                        } else {
-                            format!("{} методов", methods)
-                        }
-                    } else {
-                        "Runtime Validation".to_string()
-                    }
-                }}
+                "Runtime Validation"
             </td>
             <td class="actions-cell">
                 <button class="action-btn" on:click=handle_action("view")>"👁️"</button>

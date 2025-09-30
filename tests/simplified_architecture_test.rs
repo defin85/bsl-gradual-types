@@ -25,7 +25,7 @@ async fn test_system_coordinator_startup() {
 
     // Проверяем что unified API доступен
     let type_service = coordinator.type_service();
-    assert!(type_service.as_ref() as *const _ as usize != 0);
+    assert!(type_service.is_some());
 }
 
 #[test]
@@ -160,8 +160,12 @@ async fn test_simplified_architecture_flow() {
     // 1. Создаем SystemCoordinator
     let coordinator = SystemCoordinator::new();
 
+    // Инициализируем систему
+    coordinator.start().await.expect("SystemCoordinator should start");
+
     // 2. Получаем TypeSystemService через Application Layer
-    let type_service = coordinator.type_service();
+    let type_service = coordinator.type_service()
+        .expect("TypeSystemService should be available");
 
     // 3. Тестируем unified API для всех Presentation Layer компонентов
 
@@ -193,8 +197,12 @@ async fn test_simplified_architecture_flow() {
 async fn test_architecture_data_flows() {
     let coordinator = SystemCoordinator::new();
 
+    // Инициализируем систему
+    coordinator.start().await.expect("SystemCoordinator should start");
+
     // Проверяем поток: Presentation -> Application -> Domain -> Data
-    let type_service = coordinator.type_service();
+    let type_service = coordinator.type_service()
+        .expect("TypeSystemService should be available");
 
     // Simulated presentation layer request
     let test_file_content =
@@ -216,10 +224,13 @@ async fn test_architecture_data_flows() {
 }
 
 /// Тест валидации архитектурной диаграммы
-#[test]
-fn test_architecture_diagram_validation() {
+#[tokio::test]
+async fn test_architecture_diagram_validation() {
     // Создаем координатор и проверяем что все связи есть
     let coordinator = SystemCoordinator::new();
+
+    // Инициализируем систему
+    coordinator.start().await.expect("SystemCoordinator should start");
 
     // SystemCoordinator должен содержать все основные компоненты
     let health = coordinator.health_status();
@@ -240,7 +251,7 @@ fn test_architecture_diagram_validation() {
     // TypeSystemService должен быть доступен через Application Layer
     let type_service = coordinator.type_service();
     assert!(
-        type_service.as_ref() as *const _ as usize != 0,
+        type_service.is_some(),
         "TypeSystemService должен быть доступен"
     );
 }

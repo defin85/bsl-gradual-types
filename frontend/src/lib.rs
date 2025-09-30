@@ -7,9 +7,10 @@ pub mod components;
 pub mod config;
 pub mod pages;
 pub mod utils;
+pub mod app;
 
 // Re-export main app component
-pub use pages::app::App;
+pub use app::App;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;

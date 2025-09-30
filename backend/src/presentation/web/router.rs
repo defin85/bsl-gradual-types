@@ -9,7 +9,7 @@ use axum::{
 use tower_http::services::{ServeDir, ServeFile};
 use std::collections::HashMap;
 
-use super::handlers::{AppState, get_metrics, get_types, search_types};
+use super::handlers::{AppState, get_metrics, get_types, search_types, health_check};
 
 /// Create web application router
 pub fn create_router(app_state: AppState, static_path: &str, enable_cors: bool) -> Router {
@@ -25,6 +25,7 @@ pub fn create_router(app_state: AppState, static_path: &str, enable_cors: bool) 
         .append_index_html_on_directories(true);
 
     let mut app = Router::new()
+        .route("/api/health", get(health_check))
         .route("/api/metrics", get(get_metrics))
         .route("/api/types", get(get_types))
         .route("/api/search", get(search_types))

@@ -45,15 +45,15 @@ pub fn GraphPage(
         load_graph();
     });
 
-    let handle_node_click = move |type_info: TypeInfo| {
-        web_sys::console::log_1(&format!("Clicked node: {}", type_info.display_name).into());
+    let _handle_node_click = move |type_info: TypeInfo| {
+        web_sys::console::log_1(&format!("Clicked node: {}", type_info.name).into());
         // Найдем узел в графе
         if let Some(node) = graph.get().nodes.iter().find(|n| n.type_info.name == type_info.name) {
             selected_node.set(Some(node.clone()));
         }
     };
 
-    let handle_connection_click = move |connection: TypeConnection| {
+    let _handle_connection_click = move |connection: TypeConnection| {
         web_sys::console::log_1(&format!("Clicked connection: {} -> {}", connection.from, connection.to).into());
     };
 
@@ -90,10 +90,10 @@ pub fn GraphPage(
         // Фильтруем узлы по режиму отображения
         current_graph.nodes = current_graph.nodes.into_iter().filter(|node| {
             match mode.as_str() {
-                "known" => matches!(node.type_info.certainty, Certainty::Known),
-                "union" => matches!(node.type_info.category, TypeCategory::Union),
-                "flow" => node.type_info.is_flow_sensitive,
-                "config" => matches!(node.type_info.category, TypeCategory::Configuration),
+                "known" => matches!(node.type_info.get_certainty(), Certainty::Known),
+                "union" => matches!(node.type_info.get_category(), TypeCategory::Union),
+                "flow" => node.type_info.is_flow_sensitive(),
+                "config" => matches!(node.type_info.get_category(), TypeCategory::Configuration),
                 _ => true, // "all"
             }
         }).collect();
@@ -102,7 +102,7 @@ pub fn GraphPage(
         if !query.is_empty() {
             current_graph.nodes = current_graph.nodes.into_iter().filter(|node| {
                 node.type_info.name.to_lowercase().contains(&query.to_lowercase()) ||
-                node.type_info.display_name.to_lowercase().contains(&query.to_lowercase())
+                node.type_info.name.to_lowercase().contains(&query.to_lowercase())
             }).collect();
         }
         
@@ -197,10 +197,10 @@ pub fn GraphPage(
                 } else {
                     view! {
                         <div style="flex: 1; position: relative; background: #1a1a2e;">
-                            <GraphView 
-                                graph=filtered_graph
-                                on_node_click={std::sync::Arc::new(handle_node_click) as std::sync::Arc<dyn Fn(TypeInfo) + Send + Sync>}
-                                on_connection_click={std::sync::Arc::new(handle_connection_click) as std::sync::Arc<dyn Fn(TypeConnection) + Send + Sync>}
+                            <GraphView
+                                types=Signal::derive(move || {
+                                    filtered_graph.get().nodes.into_iter().map(|node| node.type_info).collect()
+                                })
                             />
                             
                             <div class="graph-stats" style="position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.8); padding: 15px; border-radius: 8px; color: white; border: 1px solid rgba(255, 255, 255, 0.2);">
@@ -211,7 +211,7 @@ pub fn GraphPage(
                                     if let Some(node) = selected_node.get() {
                                         view! {
                                             <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2);">
-                                                <p><strong>"Выбран: "</strong> {node.type_info.display_name}</p>
+                                                <p><strong>"Выбран: "</strong> {node.type_info.name.clone()}</p>
                                                 <p>"Связей: " {node.connections.len()}</p>
                                             </div>
                                         }.into_any()

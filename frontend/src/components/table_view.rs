@@ -1,7 +1,7 @@
 //! Enhanced Table view component with sorting and pagination
 
 use crate::api::types::*;
-use crate::components::Pagination;
+use crate::components::{Pagination, TypeDetailsModal};
 use leptos::prelude::*;
 
 #[derive(Debug, Clone)]
@@ -24,6 +24,10 @@ pub fn TableView(
 ) -> impl IntoView {
     let sort_column = RwSignal::new(None::<String>);
     let sort_order = RwSignal::new(SortOrder::None);
+
+    // State for modal
+    let selected_type = RwSignal::new(None::<TypeInfo>);
+    let is_closing = RwSignal::new(false);
 
     // Handle sort column click
     let handle_sort = move |column: String| {
@@ -87,15 +91,40 @@ pub fn TableView(
 
     let handle_action = move |action: String, type_info: TypeInfo| {
         match action.as_str() {
-            "view" => web_sys::console::log_1(&format!("View type: {}", type_info.name).into()),
+            "view" => {
+                is_closing.set(false); // Reset closing flag when opening
+                selected_type.set(Some(type_info));
+            },
             "copy" => web_sys::console::log_1(&format!("Copy type: {}", type_info.name).into()),
             "link" => web_sys::console::log_1(&format!("Link to type: {}", type_info.name).into()),
             _ => {}
         }
     };
 
+    let close_modal = move |_: ()| {
+        if !is_closing.get() {
+            is_closing.set(true);
+
+            // Defer closing to next tick to allow event handlers to complete
+            leptos::task::spawn_local(async move {
+                // Small delay to ensure DOM events complete
+                gloo_timers::future::TimeoutFuture::new(50).await;
+                selected_type.set(None);
+                is_closing.set(false);
+            });
+        }
+    };
+
     view! {
         <div class="table-view">
+            // Top pagination (sticky)
+            <div class="pagination-top-sticky">
+                <Pagination
+                    pagination=Signal::derive(move || search_result.get().and_then(|r| r.pagination))
+                    on_page_change=on_page_change
+                />
+            </div>
+
             // Summary information
             <div class="table-summary">
                 <p class="results-info">
@@ -268,10 +297,10 @@ pub fn TableView(
                 }
             }}
 
-            // Pagination
-            <Pagination
-                pagination=Signal::derive(move || search_result.get().and_then(|r| r.pagination))
-                on_page_change=on_page_change
+            // Modal for type details
+            <TypeDetailsModal
+                type_info=Signal::derive(move || selected_type.get())
+                on_close=Callback::new(close_modal)
             />
         </div>
     }

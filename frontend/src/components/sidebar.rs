@@ -14,18 +14,53 @@ pub fn Sidebar(
 ) -> impl IntoView {
     let sidebar_open = RwSignal::new(true);
 
-    // Handle category filter change
-    let handle_category_change = move |category: Option<TypeCategory>| {
+    // Handle category filter changes
+    let handle_platform_change = move |checked: bool| {
         let mut new_filters = filters.get();
-        new_filters.category = category;
+        new_filters.show_platform = checked;
         filters.set(new_filters.clone());
         on_filters_change.run(new_filters);
     };
 
-    // Handle certainty filter change
-    let handle_certainty_change = move |certainty_level: Option<String>| {
+    let handle_configuration_change = move |checked: bool| {
         let mut new_filters = filters.get();
-        new_filters.certainty_level = certainty_level;
+        new_filters.show_configuration = checked;
+        filters.set(new_filters.clone());
+        on_filters_change.run(new_filters);
+    };
+
+    let handle_union_change = move |checked: bool| {
+        let mut new_filters = filters.get();
+        new_filters.show_union = checked;
+        filters.set(new_filters.clone());
+        on_filters_change.run(new_filters);
+    };
+
+    let handle_dynamic_change = move |checked: bool| {
+        let mut new_filters = filters.get();
+        new_filters.show_dynamic = checked;
+        filters.set(new_filters.clone());
+        on_filters_change.run(new_filters);
+    };
+
+    // Handle certainty filter changes
+    let handle_high_certainty_change = move |checked: bool| {
+        let mut new_filters = filters.get();
+        new_filters.show_high_certainty = checked;
+        filters.set(new_filters.clone());
+        on_filters_change.run(new_filters);
+    };
+
+    let handle_medium_certainty_change = move |checked: bool| {
+        let mut new_filters = filters.get();
+        new_filters.show_medium_certainty = checked;
+        filters.set(new_filters.clone());
+        on_filters_change.run(new_filters);
+    };
+
+    let handle_low_certainty_change = move |checked: bool| {
+        let mut new_filters = filters.get();
+        new_filters.show_low_certainty = checked;
         filters.set(new_filters.clone());
         on_filters_change.run(new_filters);
     };
@@ -64,10 +99,10 @@ pub fn Sidebar(
                         <label class="filter-item">
                             <input
                                 type="checkbox"
-                                checked=move || matches!(filters.get().category, Some(TypeCategory::Platform))
+                                prop:checked=move || filters.get().show_platform
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
-                                    handle_category_change(if checked { Some(TypeCategory::Platform) } else { None });
+                                    handle_platform_change(checked);
                                 }
                             />
                             <span>"🔧 Platform"</span>
@@ -75,10 +110,10 @@ pub fn Sidebar(
                         <label class="filter-item">
                             <input
                                 type="checkbox"
-                                checked=move || matches!(filters.get().category, Some(TypeCategory::Configuration))
+                                prop:checked=move || filters.get().show_configuration
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
-                                    handle_category_change(if checked { Some(TypeCategory::Configuration) } else { None });
+                                    handle_configuration_change(checked);
                                 }
                             />
                             <span>"⚙️ Configuration"</span>
@@ -86,10 +121,10 @@ pub fn Sidebar(
                         <label class="filter-item">
                             <input
                                 type="checkbox"
-                                checked=move || matches!(filters.get().category, Some(TypeCategory::Union))
+                                prop:checked=move || filters.get().show_union
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
-                                    handle_category_change(if checked { Some(TypeCategory::Union) } else { None });
+                                    handle_union_change(checked);
                                 }
                             />
                             <span>"🔗 Union"</span>
@@ -97,10 +132,10 @@ pub fn Sidebar(
                         <label class="filter-item">
                             <input
                                 type="checkbox"
-                                checked=move || matches!(filters.get().category, Some(TypeCategory::Dynamic))
+                                prop:checked=move || filters.get().show_dynamic
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
-                                    handle_category_change(if checked { Some(TypeCategory::Dynamic) } else { None });
+                                    handle_dynamic_change(checked);
                                 }
                             />
                             <span>"🌟 Dynamic"</span>
@@ -115,10 +150,10 @@ pub fn Sidebar(
                         <label class="filter-item">
                             <input
                                 type="checkbox"
-                                checked=move || filters.get().certainty_level.as_ref().map_or(true, |level| level == "high")
+                                prop:checked=move || filters.get().show_high_certainty
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
-                                    handle_certainty_change(if checked { Some("high".to_string()) } else { None });
+                                    handle_high_certainty_change(checked);
                                 }
                             />
                             <span>"Высокая (≥80%)"</span>
@@ -126,10 +161,10 @@ pub fn Sidebar(
                         <label class="filter-item">
                             <input
                                 type="checkbox"
-                                checked=move || filters.get().certainty_level.as_ref().map_or(true, |level| level == "medium")
+                                prop:checked=move || filters.get().show_medium_certainty
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
-                                    handle_certainty_change(if checked { Some("medium".to_string()) } else { None });
+                                    handle_medium_certainty_change(checked);
                                 }
                             />
                             <span>"Средняя (30-79%)"</span>
@@ -137,10 +172,10 @@ pub fn Sidebar(
                         <label class="filter-item">
                             <input
                                 type="checkbox"
-                                checked=move || filters.get().certainty_level.as_ref().map_or(true, |level| level == "low")
+                                prop:checked=move || filters.get().show_low_certainty
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
-                                    handle_certainty_change(if checked { Some("low".to_string()) } else { None });
+                                    handle_low_certainty_change(checked);
                                 }
                             />
                             <span>"Низкая (<30%)"</span>
@@ -155,7 +190,7 @@ pub fn Sidebar(
                         <label class="filter-item">
                             <input
                                 type="checkbox"
-                                checked=move || filters.get().flow_sensitive_only
+                                prop:checked=move || filters.get().flow_sensitive_only
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
                                     handle_flow_sensitive_change(checked);

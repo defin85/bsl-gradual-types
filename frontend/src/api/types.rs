@@ -110,6 +110,20 @@ pub struct TypeInfo {
     #[serde(rename = "flowSensitive")]
     pub flow_sensitive: bool,
     pub description: String,
+
+    // Методы и атрибуты типа (из TypeMetadataLookup)
+    #[serde(default)]
+    pub methods: Vec<String>,
+    #[serde(rename = "methodsCount")]
+    pub methods_count: Option<usize>,
+    #[serde(rename = "attributesCount")]
+    pub attributes_count: Option<usize>,
+    #[serde(default)]
+    pub properties: Vec<String>,
+
+    // Enum values for platform enumeration types
+    #[serde(default, rename = "enumValues")]
+    pub enum_values: Vec<String>,
 }
 
 /// Вспомогательная структура для обратной совместимости
@@ -172,23 +186,43 @@ pub struct TypeMetrics {
 }
 
 /// Фильтры для поиска типов
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct TypeFilters {
     pub search_query: Option<String>,
-    pub category: Option<TypeCategory>,
-    pub certainty_level: Option<String>,
+    // Категории - отдельные флаги вместо Option<TypeCategory>
+    pub show_platform: bool,
+    pub show_configuration: bool,
+    pub show_union: bool,
+    pub show_dynamic: bool,
+    // Уровни определённости - отдельные флаги
+    pub show_high_certainty: bool,
+    pub show_medium_certainty: bool,
+    pub show_low_certainty: bool,
     pub facet: Option<FacetKind>,
     pub flow_sensitive_only: bool,
     pub page: usize,
     pub page_size: usize,
 }
 
+impl Default for TypeFilters {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TypeFilters {
     pub fn new() -> Self {
         Self {
             search_query: None,
-            category: None,
-            certainty_level: None,
+            // По умолчанию все флаги false = показать всё
+            show_platform: false,
+            show_configuration: false,
+            show_union: false,
+            show_dynamic: false,
+            // По умолчанию все уровни false = показать всё
+            show_high_certainty: false,
+            show_medium_certainty: false,
+            show_low_certainty: false,
             facet: None,
             flow_sensitive_only: false,
             page: 1,

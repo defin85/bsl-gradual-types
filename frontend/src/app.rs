@@ -170,6 +170,7 @@ pub fn App() -> impl IntoView {
                                                 <CardsView
                                                     types=Signal::derive(move || types.get())
                                                     search_result=Signal::derive(move || search_result.get())
+                                                    on_page_change=Callback::new(handle_page_change)
                                                 />
                                             </div>
                                         }.into_any(),

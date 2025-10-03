@@ -40,6 +40,7 @@ fn convert_type_info_to_raw(type_info: &TypeInfo) -> RawTypeData {
         methods,
         properties,
         facets: type_info.metadata.available_facets.clone(),
+        enum_values: type_info.structure.enum_values.clone(),
         ..Default::default()
     }
 }

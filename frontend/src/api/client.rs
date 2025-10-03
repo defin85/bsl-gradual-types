@@ -67,8 +67,8 @@ pub async fn fetch_metrics() -> Result<TypeMetrics, String> {
 pub async fn fetch_types(filters: TypeFilters) -> Result<TypeSearchResult, String> {
     let config = get_config();
 
-    // Используем поиск API или обычный API с пагинацией
-    let url = if let Some(ref query) = filters.search_query {
+    // Построение URL с новыми булевыми флагами
+    let base_url = if let Some(ref query) = filters.search_query {
         if !query.is_empty() {
             // Используем search API для конкретных запросов
             format!("{}?q={}&limit={}&offset={}",
@@ -90,6 +90,50 @@ pub async fn fetch_types(filters: TypeFilters) -> Result<TypeSearchResult, Strin
             filters.page_size,
             filters.offset())
     };
+
+    // Добавляем параметры фильтрации на основе булевых флагов
+    let mut url = base_url;
+
+    // Категории - добавляем параметры для включённых категорий
+    // ТОЛЬКО если хотя бы один флаг включён (иначе показываем всё)
+    let any_category_checked = filters.show_platform || filters.show_configuration ||
+                               filters.show_union || filters.show_dynamic;
+
+    if any_category_checked {
+        if filters.show_platform {
+            url.push_str("&category=Platform");
+        }
+        if filters.show_configuration {
+            url.push_str("&category=Configuration");
+        }
+        if filters.show_union {
+            url.push_str("&category=Union");
+        }
+        if filters.show_dynamic {
+            url.push_str("&category=Dynamic");
+        }
+    }
+
+    // Уровни определённости - аналогично
+    let any_certainty_checked = filters.show_high_certainty || filters.show_medium_certainty ||
+                               filters.show_low_certainty;
+
+    if any_certainty_checked {
+        if filters.show_high_certainty {
+            url.push_str("&certainty_level=high");
+        }
+        if filters.show_medium_certainty {
+            url.push_str("&certainty_level=medium");
+        }
+        if filters.show_low_certainty {
+            url.push_str("&certainty_level=low");
+        }
+    }
+
+    // Flow-sensitive фильтр
+    if filters.flow_sensitive_only {
+        url.push_str("&flow_sensitive_only=true");
+    }
 
     // Backend возвращает AnalysisResultDto, нужно преобразовать в TypeSearchResult
     match fetch_json::<AnalysisResultDto>(&url).await {
@@ -137,6 +181,11 @@ fn get_test_types(filters: TypeFilters) -> Result<TypeSearchResult, String> {
             source: "Static Analysis".to_string(),
             flow_sensitive: false,
             description: "Коллекция элементов с индексным доступом".to_string(),
+            methods: vec!["Добавить".to_string(), "Удалить".to_string()],
+            methods_count: Some(2),
+            attributes_count: None,
+            properties: vec![],
+            enum_values: vec![],
         },
         TypeInfo {
             id: "catalogs_items".to_string(),
@@ -148,6 +197,11 @@ fn get_test_types(filters: TypeFilters) -> Result<TypeSearchResult, String> {
             source: "Configuration".to_string(),
             flow_sensitive: false,
             description: "Иерархический справочник с поддержкой групп".to_string(),
+            methods: vec![],
+            methods_count: Some(0),
+            attributes_count: Some(5),
+            properties: vec![],
+            enum_values: vec![],
         },
         TypeInfo {
             id: "string".to_string(),
@@ -159,26 +213,62 @@ fn get_test_types(filters: TypeFilters) -> Result<TypeSearchResult, String> {
             source: "Static Analysis".to_string(),
             flow_sensitive: false,
             description: "Строковый тип данных".to_string(),
+            methods: vec![],
+            methods_count: Some(0),
+            attributes_count: None,
+            properties: vec![],
+            enum_values: vec![],
         },
     ];
 
-    // Применяем фильтры
+    // Применяем фильтры с новыми булевыми флагами
     let filtered_types: Vec<TypeInfo> = test_types
         .into_iter()
         .filter(|t| {
+            // Поисковый запрос
             if let Some(ref query) = filters.search_query {
-                if !query.is_empty() {
-                    return t.name.to_lowercase().contains(&query.to_lowercase());
-                }
-            }
-            if let Some(ref category) = filters.category {
-                if t.get_category() != *category {
+                if !query.is_empty() && !t.name.to_lowercase().contains(&query.to_lowercase()) {
                     return false;
                 }
             }
+
+            // Фильтр по категориям
+            // Если все категории unchecked, показываем всё
+            let any_category_checked = filters.show_platform || filters.show_configuration ||
+                                       filters.show_union || filters.show_dynamic;
+            if any_category_checked {
+                let category = t.get_category();
+                let category_match = match category {
+                    TypeCategory::Platform => filters.show_platform,
+                    TypeCategory::Configuration => filters.show_configuration,
+                    TypeCategory::Union => filters.show_union,
+                    TypeCategory::Dynamic => filters.show_dynamic,
+                };
+                if !category_match {
+                    return false;
+                }
+            }
+
+            // Фильтр по уровню определённости
+            // Если все уровни unchecked, показываем всё
+            let any_certainty_checked = filters.show_high_certainty || filters.show_medium_certainty ||
+                                       filters.show_low_certainty;
+            if any_certainty_checked {
+                let certainty_percent = t.certainty;
+                let certainty_match =
+                    (certainty_percent >= 80 && filters.show_high_certainty) ||
+                    (certainty_percent >= 30 && certainty_percent < 80 && filters.show_medium_certainty) ||
+                    (certainty_percent < 30 && filters.show_low_certainty);
+                if !certainty_match {
+                    return false;
+                }
+            }
+
+            // Flow-sensitive фильтр
             if filters.flow_sensitive_only && !t.is_flow_sensitive() {
                 return false;
             }
+
             true
         })
         .collect();
@@ -245,6 +335,11 @@ fn get_test_type_graph() -> Result<TypeGraph, String> {
                 source: "Static Analysis".to_string(),
                 flow_sensitive: false,
                 description: "Коллекция элементов с индексным доступом".to_string(),
+                methods: vec!["Добавить".to_string(), "Удалить".to_string()],
+                methods_count: Some(2),
+                attributes_count: None,
+                properties: vec![],
+                enum_values: vec![],
             },
             x: 200.0,
             y: 150.0,
@@ -261,7 +356,12 @@ fn get_test_type_graph() -> Result<TypeGraph, String> {
                 facets: vec!["Manager".to_string(), "Reference".to_string(), "Object".to_string()],
                 source: "Configuration".to_string(),
                 flow_sensitive: false,
+                methods: vec![],
+                methods_count: Some(0),
+                attributes_count: Some(5),
                 description: "Иерархический справочник с поддержкой групп".to_string(),
+                properties: vec![],
+                enum_values: vec![],
             },
             x: 500.0,
             y: 180.0,

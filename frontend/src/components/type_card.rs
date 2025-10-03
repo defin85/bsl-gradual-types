@@ -77,6 +77,41 @@ pub fn TypeCard(
 
             {move || {
                 let info = type_info.get();
+                if !info.methods.is_empty() {
+                    let methods_to_show: Vec<String> = info.methods.iter().take(5).cloned().collect();
+                    let has_more = info.methods.len() > 5;
+                    let remaining_count = if has_more { info.methods.len() - 5 } else { 0 };
+
+                    view! {
+                        <div class="methods-section">
+                            <strong>"📋 Методы (" {info.methods.len()} "):"</strong><br/>
+                            <div style="margin-top: 8px;">
+                                {methods_to_show.into_iter().map(|method| {
+                                    view! {
+                                        <span class="method-tag">
+                                            {method}
+                                        </span>
+                                    }
+                                }).collect::<Vec<_>>()}
+                                {if has_more {
+                                    view! {
+                                        <span class="method-tag" style="background: #e0e0e0; color: #666;">
+                                            "+" {remaining_count} " ещё"
+                                        </span>
+                                    }.into_any()
+                                } else {
+                                    view! {}.into_any()
+                                }}
+                            </div>
+                        </div>
+                    }.into_any()
+                } else {
+                    view! {}.into_any()
+                }
+            }}
+
+            {move || {
+                let info = type_info.get();
                 if info.is_flow_sensitive() {
                     view! {
                         <div class="flow-sensitive">

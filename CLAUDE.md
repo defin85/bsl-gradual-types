@@ -2,48 +2,98 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 📋 Содержание
+
+1. [Архитектура проекта](#архитектура-проекта)
+2. [Команды разработки](#команды-разработки)
+3. [Архитектурная диаграмма](#архитектурная-диаграмма)
+4. [Компоненты архитектуры](#компоненты-архитектуры)
+5. [Анализ кода](#анализ-кода)
+6. [MCP Инструментарий](#mcp-инструментарий)
+7. [Научные основы](#научные-основы)
+
+---
+
 ## Архитектура проекта
 
-BSL Gradual Type System - система градуальной типизации для языка 1С:Предприятие с Right-Sized Architecture философией:
+BSL Gradual Type System - система градуальной типизации для языка 1С:Предприятие с Right-Sized Architecture философией.
 
-**Философия**: Start simple, scale up по необходимости (6-8 компонентов вместо 25-30).
+### 📚 Научные основы
 
-### Workspace структура
-- **shared/** - общие типы, доменная логика и AnalysisEngine (bsl-shared)
-- **backend/** - серверная часть с LSP, web API и SystemCoordinator (bsl-backend)
-- **frontend/** - веб-интерфейс на Leptos WASM (bsl-frontend)
-- **cli/** - CLI инструменты (bsl-cli)
-- **vscode-extension/** - VSCode расширение с TypeScript
+Проект основан на исследованиях в области статической типизации для 1С:Предприятие:
 
-### Ключевые компоненты упрощенной архитектуры
+**Balyuk, A. S., & Popova, V. A. (2021).** *Static type-checking for programs developed on the platform 1C:Enterprise.* CEUR Workshop Proceedings, Vol-2984. [https://ceur-ws.org/Vol-2984/paper13.pdf](https://ceur-ws.org/Vol-2984/paper13.pdf)
+
+Ключевые концепции из статьи, применённые в проекте:
+- **Фасетная система типов** — множественное наследование функциональности объектов 1С (Manager, Object, Reference, Selection, List)
+- **Configuration Types Tree (CTT)** — упрощённый формат для описания типов конфигурации
+- **Три категории типовых ошибок:**
+  1. Некорректная передача параметров методам
+  2. Обращение к несуществующим свойствам объектов
+  3. Обработка простых типов как коллекций
+
+Валидация этих ошибок реализована в модуле [shared/src/domain/validators.rs](shared/src/domain/validators.rs).
+
+### 🎯 Философия: Right-Sized Architecture
+
+**Start simple, scale up по необходимости** — 6-8 компонентов вместо 25-30.
+
+### 📦 Workspace структура
+
+```
+bsl-gradual-types/
+├── shared/          # Чистая доменная логика + AnalysisEngine
+│   ├── domain/      # TypeResolver, TypeRepository, types
+│   ├── engine/      # AnalysisEngine - переиспользуемое ядро
+│   └── api/         # DTO и контракты для API
+│
+├── backend/         # Все серверные слои в одном крейте
+│   ├── system/      # SystemCoordinator, AnalysisCache, Observability
+│   ├── application/ # TypeSystemService (использует shared::engine)
+│   ├── presentation/# LSP Server, Web routes
+│   └── data/        # Platform types, Config loaders
+│
+├── frontend/        # Веб-интерфейс на Leptos WASM
+├── cli/             # CLI инструменты
+└── vscode-extension/# VSCode расширение (TypeScript)
+```
+
+### 🔑 Ключевые компоненты
 
 #### System Layer (в backend)
-- **SystemCoordinator** - единая точка координации и DI management
-- **AnalysisCache** - простое LRU кеширование в памяти с TTL
-- **ParserCoordinator** - TreeSitter (основной) + Regex (fallback)
-- **BasicObservability** - структурированное логирование и базовые метрики
+- **SystemCoordinator** — единая точка координации и DI management
+- **AnalysisCache** — простое LRU кеширование в памяти с TTL
+- **ParserCoordinator** — TreeSitter (основной) + Regex (fallback)
+- **BasicObservability** — структурированное логирование и базовые метрики
 
 #### Application Layer
-- **AnalysisEngine** (в shared) - чистый оркестратор анализа без зависимостей от backend
-- **TypeSystemService** (в backend) - высокоуровневый API для Web/LSP, использует AnalysisEngine
+- **AnalysisEngine** (в shared) — чистый оркестратор анализа без зависимостей от backend
+- **TypeSystemService** (в backend) — высокоуровневый API для Web/LSP, использует AnalysisEngine
 
 #### Domain Layer (в shared)
-- **TypeResolver** - центральная логика анализа типов с flow-sensitive анализом
-- **TypeRepository** - абстракция для работы с данными
+- **TypeResolver** — центральная логика анализа типов с flow-sensitive анализом
+- **TypeRepository** — абстракция для работы с данными
 
-### Центральная абстракция: TypeResolution
+### 🎯 Центральная абстракция: TypeResolution
+
 ```rust
 struct TypeResolution {
     certainty: Certainty,        // Known | Inferred(0.0-1.0) | Unknown
     result: ResolutionResult,    // Concrete | Union | Dynamic
-    active_facet: FacetKind,     // Manager | Object | Reference | Metadata (1С-специфичное)
+    active_facet: FacetKind,     // Manager | Object | Reference | Metadata
 }
 ```
 
-**Фасетная система** - один тип 1С имеет множество представлений:
-- Справочники.Контрагенты (Manager) - создание, поиск
-- СправочникОбъект.Контрагенты (Object) - изменяемый объект
-- СправочникСсылка.Контрагенты (Reference) - ссылка на элемент
+**Фасетная система** — один тип 1С имеет множество представлений:
+- `Справочники.Контрагенты` (Manager) — создание, поиск
+- `СправочникОбъект.Контрагенты` (Object) — изменяемый объект
+- `СправочникСсылка.Контрагенты` (Reference) — ссылка на элемент
+- `СправочникВыборка.Контрагенты` (Selection) — обход элементов
+- `СправочникСписок.Контрагенты` (List) — управление списком в форме
+
+*Selection и List добавлены на основе статьи Balyuk & Popova (2021)*
+
+---
 
 ## Команды разработки
 
@@ -86,8 +136,16 @@ cargo run --bin bsl-lsp-server
 
 #### Интегрированный Web сервер (API + Frontend)
 ```bash
-cargo run -p bsl-backend --bin bsl-web-server -- --port 3001 --enable-cors true
-# Доступен на: http://127.0.0.1:3001
+# Базовый запуск (только примитивные типы)
+cargo run -p bsl-backend --bin bsl-web-server -- --port 3002 --enable-cors true
+
+# С парсингом Синтаксис-помощника (полные типы платформы)
+# Передаём родительскую папку - парсер автоматически найдёт обе подпапки:
+#   - rebuilt.shcntx_ru (контекстная справка: объекты, методы, свойства)
+#   - rebuilt.shlang_ru (справка по языку: примитивные типы, операторы)
+cargo run -p bsl-backend --bin bsl-web-server -- --port 3002 --enable-cors true --syntax-helper-path examples/syntax_helper
+
+# Доступен на: http://127.0.0.1:3002
 ```
 
 #### CLI инструменты
@@ -233,46 +291,192 @@ cargo clippy --workspace --all-targets --all-features
 ```
 
 ### Web API тестирование
+
+**ВАЖНО: Работа с кириллицей в URL через bash**
+
+GitBash на Windows требует URL-кодирования для кириллических символов. Используй URL-encoded строки:
+
+```bash
+# ❌ НЕ РАБОТАЕТ - кириллица напрямую
+curl "http://localhost:3002/api/search?q=Массив"
+
+# ✅ РАБОТАЕТ - URL-encoded кириллица
+curl "http://localhost:3002/api/search?q=%D0%9C%D0%B0%D1%81%D1%81%D0%B8%D0%B2"
+
+# Конвертация: используй онлайн URL encoder или Python
+python3 -c "import urllib.parse; print(urllib.parse.quote('УровеньИспользованияЗащищенногоСоединенияFTP'))"
+```
+
+**Примеры API запросов:**
+
 ```bash
 # Запуск сервера
-cargo run -p bsl-backend --bin bsl-web-server -- --port 3001 --enable-cors true
+cargo run -p bsl-backend --bin bsl-web-server -- --port 3002 --enable-cors true
 
-# Тестирование API
-curl "http://localhost:3001/api/types?search=Массив"
-curl "http://localhost:3001/api/health"
-curl -X POST "http://localhost:3001/api/analyze" \
+# Health check
+curl "http://localhost:3002/api/health"
+
+# Поиск типа (латиница - работает без encoding)
+curl "http://localhost:3002/api/types?search=Array"
+
+# Поиск типа (кириллица - требует URL encoding)
+curl "http://localhost:3002/api/search?q=%D0%9C%D0%B0%D1%81%D1%81%D0%B8%D0%B2" | jq '.'
+
+# Анализ кода
+curl -X POST "http://localhost:3002/api/analyze" \
   -H "Content-Type: application/json" \
   -d '{"code": "Функция Тест() Возврат 42; КонецФункции"}'
 ```
 
+---
+
+## Архитектурная диаграмма
+
+### 🏗️ Simplified Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph "🎯 System Layer (в `backend`)"
+        SystemCoordinator["🎯 SystemCoordinator<br/>- Single coordination point<br/>- DI management<br/>- Lifecycle control"]
+        
+        AnalysisCache["💾 AnalysisCache<br/>- Simple LRU in-memory<br/>- File hash keys<br/>- TTL eviction"]
+        
+        ParserCoordinator["🎨 ParserCoordinator<br/>- TreeSitter (primary)<br/>- Regex fallback<br/>- Simple selection logic"]
+        
+        BasicObservability["📊 BasicObservability<br/>- Structured logging<br/>- Basic metrics<br/>- Health endpoint"]
+    end
+
+    subgraph "🌐 Presentation Layer (Адаптеры)"
+        LSPServer["🔌 LSP Server (`backend`)<br/>- Language Server Protocol<br/>- VS Code integration"]
+        
+        WebInterface["🌐 Web Interface (`backend`)<br/>- Simple HTML dashboard<br/>- Type visualization"]
+        
+        CLITool["⚙️ CLI Tool (`cli`)<br/>- Command line interface<br/>- Batch analysis"]
+    end
+
+    subgraph "🔧 Application Layer" 
+        subgraph "`backend`"
+            TypeSystemService["🎭 TypeSystemService<br/>- High-level API (Web, LSP)<br/>- Управляет кэшем<br/>- **Использует AnalysisEngine**"]
+        end
+        subgraph "`shared`"
+            AnalysisEngine["🚀 AnalysisEngine<br/>- **Чистая оркестрация анализа**<br/>- Use Case: 'Analyze File'<br/>- Не зависит от Web/CLI"]
+        end
+    end
+
+    subgraph "🧠 Domain Layer (`shared`)"
+        TypeResolver["🧠 TypeResolver<br/>- Core type analysis<br/>- Resolution algorithms<br/>- Business logic"]
+
+        TypeMetadataLookup["🔍 TypeMetadataLookup<br/>- Bridge: TypeResolution → RawTypeData<br/>- Get methods/properties<br/>- Validation support"]
+
+        TypeRepository["📚 TypeRepository<br/>- Type storage<br/>- Query interface<br/>- Data abstraction"]
+    end
+
+    subgraph "💾 Data Layer (`shared`)"
+        PlatformTypes["📄 Platform Types<br/>- 1C platform metadata<br/>- HTML parsing<br/>- Type definitions"]
+        
+        ConfigData["⚙️ Configuration<br/>- XML metadata<br/>- Settings<br/>- User preferences"]
+    end
+
+    %% Flow
+    SystemCoordinator --> AnalysisCache
+    SystemCoordinator --> ParserCoordinator  
+    SystemCoordinator --> BasicObservability
+    SystemCoordinator --> TypeSystemService
+    
+    LSPServer --> TypeSystemService
+    WebInterface --> TypeSystemService
+    
+    TypeSystemService --> AnalysisEngine
+    TypeSystemService --> AnalysisCache
+
+    CLITool --> AnalysisEngine
+    
+    AnalysisEngine --> TypeResolver
+    AnalysisEngine --> ParserCoordinator
+
+    TypeResolver --> TypeRepository
+    TypeMetadataLookup --> TypeRepository
+    TypeRepository --> PlatformTypes
+    TypeRepository --> ConfigData
+
+    %% TypeMetadataLookup используется для получения методов/свойств
+    TypeSystemService -.-> TypeMetadataLookup
+    AnalysisEngine -.-> TypeMetadataLookup
+    
+    %% Styling
+    classDef systemStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef presentationStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef applicationStyle fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef domainStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef dataStyle fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    
+    class SystemCoordinator,AnalysisCache,ParserCoordinator,BasicObservability systemStyle
+    class LSPServer,WebInterface,CLITool presentationStyle
+    class TypeSystemService,AnalysisEngine applicationStyle
+    class TypeResolver,TypeMetadataLookup,TypeRepository domainStyle
+    class PlatformTypes,ConfigData dataStyle
+```
+
+### 📊 Описание потоков данных
+
+**Presentation → Application:**
+- LSP Server, Web Interface → TypeSystemService
+- CLI Tool → AnalysisEngine (напрямую)
+
+**Application → Domain:**
+- TypeSystemService → AnalysisEngine → TypeResolver
+- AnalysisEngine → ParserCoordinator
+
+**Domain → Data:**
+- TypeResolver → TypeRepository → PlatformTypes/ConfigData
+
+**System Management:**
+- SystemCoordinator координирует все backend компоненты
+
+---
+
 ## Компоненты архитектуры
 
-### Организация кода по слоям (в рамках крейтов)
+### 🔧 Детальное описание компонентов
 
-**shared/** - чистая доменная логика + общий оркестратор:
-```
-shared/
-├── domain/      # TypeResolver, TypeRepository, types
-├── engine/      # AnalysisEngine - переиспользуемое ядро анализа
-└── api/         # DTO и контракты для API
-```
+#### 🎯 SystemCoordinator (в `backend`)
+- **Структура:** Содержит экземпляры всех ключевых системных сервисов
+- **Назначение:** Composition Root, управление жизненным циклом приложения
+- **Зависимости:** AnalysisCache, ParserCoordinator, BasicObservability, TypeSystemService
 
-**backend/** - все серверные слои в одном крейте:
-```
-backend/
-├── system/      # SystemCoordinator, AnalysisCache, BasicObservability
-├── application/ # TypeSystemService (использует shared::engine)
-├── presentation/# LSP Server, Web routes
-└── data/        # Platform types, Config loaders
-```
+#### 🚀 AnalysisEngine (в `shared`)
+- **Структура:** Содержит TypeResolver и ParserCoordinator
+- **Назначение:** Чистый сценарий "проанализировать файл"
+- **Особенность:** Не зависит от backend, переиспользуется всеми адаптерами
 
-### Ключевые принципы
+#### 🎭 TypeSystemService (в `backend`)
+- **Структура:** Содержит AnalysisEngine и backend-специфичные компоненты
+- **Назначение:** Высокоуровневый API для LSP/Web с кэшированием
+- **Использует:** AnalysisEngine, AnalysisCache
 
-1. **AnalysisEngine** (shared) - чистый оркестратор без I/O зависимостей
-2. **TypeSystemService** (backend) - высокоуровневый API с кэшированием
-3. **SystemCoordinator** - единая точка координации всех компонентов
-4. **Фасетная система** - автоматическое переключение контекста 1С объектов
-5. **Градуальная типизация** - честность о неопределенности типов
+#### 💾 AnalysisCache
+- **Структура:** LRU-кэш с TTL отслеживанием
+- **Назначение:** Кэширование результатов анализа файлов в памяти
+- **Ключи:** File hash для быстрого lookup
+
+#### 🎨 ParserCoordinator
+- **Структура:** TreeSitter (primary) + Regex (fallback)
+- **Назначение:** Парсинг исходного кода с простой стратегией fallback
+- **Логика:** Попытка основного парсера → при ошибке → запасной
+
+#### 📊 BasicObservability
+- **Структура:** Структурированный логгер + простые метрики
+- **Назначение:** Мониторинг работы приложения
+- **Функции:** Логирование, метрики производительности, health endpoint
+
+### 🎯 Ключевые принципы архитектуры
+
+1. **AnalysisEngine** (shared) — чистый оркестратор без I/O зависимостей
+2. **TypeSystemService** (backend) — высокоуровневый API с кэшированием
+3. **SystemCoordinator** — единая точка координации всех компонентов
+4. **Фасетная система** — автоматическое переключение контекста 1С объектов
+5. **Градуальная типизация** — честность о неопределенности типов
+6. **Слои внутри крейтов** — логическое разделение без физической фрагментации
 
 ## MCP Инструментарий
 

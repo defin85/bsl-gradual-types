@@ -33,3 +33,4 @@ urlencoding = { workspace = true }
 
 # WASM random support - use workspace version
 getrandom = { workspace = true }
+gloo-timers = { version = "0.3.0", features = ["futures"] }

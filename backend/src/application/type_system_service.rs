@@ -10,7 +10,7 @@ use tracing::info;
 
 use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::domain::types::{TypeResolution, ResolutionResult};
-use bsl_shared::domain::{CompletionItem, CompletionKind};
+use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup};
 use crate::system::{AnalysisCache, AnalysisResult, ParserCoordinator};
 use crate::application::TypeInferenceService;
 
@@ -21,6 +21,9 @@ use crate::application::TypeInferenceService;
 pub struct TypeSystemService {
     // Application Layer: Type Inference Service для high-level операций
     inference_service: Arc<TypeInferenceService>,
+
+    // Domain Layer: TypeMetadataLookup - мост между TypeResolution и RawTypeData
+    metadata_lookup: TypeMetadataLookup,
 
     // System Layer компоненты
     cache: Arc<AnalysisCache>,
@@ -37,10 +40,14 @@ impl TypeSystemService {
         // Создаем TypeInferenceService на основе AnalysisEngine
         let resolver = analysis_engine.get_resolver();
         let repository = analysis_engine.get_repository();
-        let inference_service = Arc::new(TypeInferenceService::new(resolver, repository));
+        let inference_service = Arc::new(TypeInferenceService::new(resolver.clone(), repository.clone()));
+
+        // Создаем TypeMetadataLookup для получения методов/свойств из RawTypeData
+        let metadata_lookup = TypeMetadataLookup::new(repository);
 
         Self {
             inference_service,
+            metadata_lookup,
             cache,
             parser,
         }
@@ -64,6 +71,9 @@ impl TypeSystemService {
         &self,
         limit: usize,
         offset: usize,
+        category_filter: Option<String>,
+        certainty_filter: Option<String>,
+        flow_sensitive_only: bool,
     ) -> bsl_shared::api::dtos::AnalysisResultDto {
         use bsl_shared::api::dtos::{AnalysisResultDto, TypeDto, CategoryDto, MetricsDto, PaginationDto, UnionComponentDto};
         use bsl_shared::domain::types::{Certainty, ResolutionResult};
@@ -71,11 +81,9 @@ impl TypeSystemService {
         // 1. Получаем все типы из Domain
         let all_types = self.inference_service.get_all_platform_globals();
 
-        // 2. Применяем пагинацию и преобразуем в DTO
-        let type_dtos: Vec<TypeDto> = all_types
+        // 2. Сначала преобразуем в DTO (чтобы знать категорию), потом фильтруем, потом пагинируем
+        let all_type_dtos: Vec<TypeDto> = all_types
             .iter()
-            .skip(offset)
-            .take(limit)
             .map(|(name, res)| {
                 // Определение категории и источника
                 let (category, source) = match &res.source {
@@ -107,6 +115,26 @@ impl TypeSystemService {
                     None
                 };
 
+                // Получаем методы и свойства через TypeMetadataLookup
+                let methods = self.metadata_lookup.get_methods(res);
+                let properties = self.metadata_lookup.get_properties(res);
+                let raw_type = self.metadata_lookup.get_raw_type(res);
+
+                // Извлекаем реальное описание из RawTypeData
+                let description = raw_type.as_ref()
+                    .map(|rt| rt.description.clone())
+                    .unwrap_or_else(|| self.generate_type_description(res));
+
+                // Извлекаем enum values для платформенных перечислений
+                let enum_values = raw_type.as_ref()
+                    .and_then(|rt| {
+                        if rt.enum_values.is_empty() {
+                            None
+                        } else {
+                            Some(rt.enum_values.clone())
+                        }
+                    });
+
                 TypeDto {
                     id: name.clone(),
                     name: name.clone(),
@@ -114,12 +142,14 @@ impl TypeSystemService {
                     certainty: certainty_val,
                     certainty_text: format!("{:?} {}%", res.certainty, certainty_val),
                     facets: res.available_facets.iter().map(|f| format!("{:?}", f)).collect(),
-                    methods_count: None,
-                    methods: Vec::new(),
-                    attributes_count: None,
+                    methods_count: Some(methods.len()),
+                    methods: methods.iter().map(|m| m.name.clone()).collect(),
+                    attributes_count: raw_type.as_ref().map(|rt| rt.attributes.len()),
+                    properties: properties.iter().map(|p| p.name.clone()).collect(),
+                    enum_values,
                     source,
                     flow_sensitive: false, // TODO: добавить flow-sensitive анализ
-                    description: self.generate_type_description(res),
+                    description,
                     union_types,
                     flow_analysis: None,
                     connections: None,
@@ -129,9 +159,50 @@ impl TypeSystemService {
             })
             .collect();
 
-        // 3. Генерируем метрики
+        // 3. Применяем фильтры
+        let filtered_types: Vec<TypeDto> = all_type_dtos
+            .into_iter()
+            .filter(|t| {
+                // Фильтр по категории
+                if let Some(ref cat) = category_filter {
+                    if &t.category != cat {
+                        return false;
+                    }
+                }
+
+                // Фильтр по определённости
+                if let Some(ref cert) = certainty_filter {
+                    let passes = match cert.as_str() {
+                        "high" => t.certainty >= 80,
+                        "medium" => t.certainty >= 30 && t.certainty < 80,
+                        "low" => t.certainty < 30,
+                        _ => true,
+                    };
+                    if !passes {
+                        return false;
+                    }
+                }
+
+                // Фильтр по flow-sensitive
+                if flow_sensitive_only && !t.flow_sensitive {
+                    return false;
+                }
+
+                true
+            })
+            .collect();
+
+        // 4. Применяем пагинацию
+        let type_dtos: Vec<TypeDto> = filtered_types
+            .iter()
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect();
+
+        // 5. Генерируем метрики (используем отфильтрованные данные)
         let metrics = MetricsDto {
-            total_types: all_types.len(),
+            total_types: filtered_types.len(),
             certainty_high: type_dtos.iter().filter(|t| t.certainty > 80).count(),
             certainty_medium: type_dtos
                 .iter()
@@ -165,8 +236,8 @@ impl TypeSystemService {
             },
         );
 
-        // 5. Генерируем информацию о пагинации
-        let total_items = all_types.len();
+        // 6. Генерируем информацию о пагинации (используем отфильтрованные данные)
+        let total_items = filtered_types.len();
         let current_page = (offset / limit) + 1;
         let total_pages = total_items.div_ceil(limit);
         let has_prev = current_page > 1;
@@ -417,6 +488,142 @@ impl TypeSystemService {
         info!("🌐 Web поиск типов: {}", query);
         let results = self.inference_service.search_types(query);
         Ok(results)
+    }
+
+    /// Phase 5: Поиск типов с преобразованием в DTO (Web API)
+    pub async fn search_types_as_dto(&self, query: &str) -> Result<bsl_shared::api::dtos::AnalysisResultDto> {
+        use bsl_shared::api::dtos::{AnalysisResultDto, TypeDto, CategoryDto, MetricsDto, UnionComponentDto};
+        use bsl_shared::domain::types::{Certainty, ResolutionResult};
+
+        info!("🌐 Web поиск типов с DTO: {}", query);
+
+        // 1. Получаем все типы и фильтруем по запросу
+        let all_types = self.inference_service.get_all_platform_globals();
+        let query_lower = query.to_lowercase();
+
+        let filtered_types: Vec<(&String, &TypeResolution)> = all_types
+            .iter()
+            .filter(|(name, _)| name.to_lowercase().contains(&query_lower))
+            .collect();
+
+        // 2. Преобразуем в DTO
+        let type_dtos: Vec<TypeDto> = filtered_types
+            .iter()
+            .map(|(name, res)| {
+                let (category, source) = match &res.source {
+                    bsl_shared::domain::types::ResolutionSource::Static => {
+                        ("Platform".to_string(), "Static Analysis".to_string())
+                    }
+                    _ => ("Configuration".to_string(), "Configuration".to_string()),
+                };
+
+                let certainty_val = match res.certainty {
+                    Certainty::Known => 100,
+                    Certainty::Inferred(val) => (val * 100.0) as u8,
+                    Certainty::Unknown => 30,
+                };
+
+                let union_types = if let ResolutionResult::Union(types) = &res.result {
+                    Some(
+                        types
+                            .iter()
+                            .map(|wt| UnionComponentDto {
+                                type_name: format!("{:?}", wt.type_),
+                                probability: (wt.weight * 100.0) as u8,
+                            })
+                            .collect(),
+                    )
+                } else {
+                    None
+                };
+
+                // Получаем методы и свойства через TypeMetadataLookup
+                let methods = self.metadata_lookup.get_methods(res);
+                let properties = self.metadata_lookup.get_properties(res);
+                let raw_type = self.metadata_lookup.get_raw_type(res);
+
+                // Извлекаем реальное описание из RawTypeData
+                let description = raw_type.as_ref()
+                    .map(|rt| rt.description.clone())
+                    .unwrap_or_else(|| self.generate_type_description(res));
+
+                // Извлекаем enum values для платформенных перечислений
+                let enum_values = raw_type.as_ref()
+                    .and_then(|rt| {
+                        if rt.enum_values.is_empty() {
+                            None
+                        } else {
+                            Some(rt.enum_values.clone())
+                        }
+                    });
+
+                TypeDto {
+                    id: (*name).clone(),
+                    name: (*name).clone(),
+                    category,
+                    certainty: certainty_val,
+                    certainty_text: format!("{:?} {}%", res.certainty, certainty_val),
+                    facets: res.available_facets.iter().map(|f| format!("{:?}", f)).collect(),
+                    methods_count: Some(methods.len()),
+                    methods: methods.iter().map(|m| m.name.clone()).collect(),
+                    attributes_count: raw_type.as_ref().map(|rt| rt.attributes.len()),
+                    properties: properties.iter().map(|p| p.name.clone()).collect(),
+                    enum_values,
+                    source,
+                    flow_sensitive: false,
+                    description,
+                    union_types,
+                    flow_analysis: None,
+                    connections: None,
+                    warning: None,
+                    recommendation: None,
+                }
+            })
+            .collect();
+
+        // 3. Генерируем метрики
+        let metrics = MetricsDto {
+            total_types: type_dtos.len(),
+            certainty_high: type_dtos.iter().filter(|t| t.certainty > 80).count(),
+            certainty_medium: type_dtos
+                .iter()
+                .filter(|t| t.certainty > 40 && t.certainty <= 80)
+                .count(),
+            certainty_low: type_dtos.iter().filter(|t| t.certainty <= 40).count(),
+            flow_sensitive: type_dtos.iter().filter(|t| t.flow_sensitive).count(),
+            cache_hit_rate: format!("{:.1}%", self.cache.get_hit_rate()),
+            analysis_speed: "125ms".to_string(),
+        };
+
+        // 4. Генерируем категории
+        let mut categories = std::collections::HashMap::new();
+        categories.insert(
+            "Platform".to_string(),
+            CategoryDto {
+                color: "#3498db".to_string(),
+                icon: "🔧".to_string(),
+                count: type_dtos.iter().filter(|t| t.category == "Platform").count(),
+            },
+        );
+        categories.insert(
+            "Configuration".to_string(),
+            CategoryDto {
+                color: "#e74c3c".to_string(),
+                icon: "⚙️".to_string(),
+                count: type_dtos
+                    .iter()
+                    .filter(|t| t.category == "Configuration")
+                    .count(),
+            },
+        );
+
+        Ok(AnalysisResultDto {
+            types: type_dtos,
+            categories,
+            metrics,
+            connections: vec![],
+            pagination: None, // Поиск без пагинации
+        })
     }
 
     /// Web операции - получить детали типа

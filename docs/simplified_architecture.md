@@ -88,7 +88,9 @@ graph TB
 
     subgraph "🧠 Domain Layer (`shared`)"
         TypeResolver["🧠 TypeResolver<br/>- Core type analysis<br/>- Resolution algorithms<br/>- Business logic"]
-        
+
+        TypeMetadataLookup["🔍 TypeMetadataLookup<br/>- Bridge: TypeResolution → RawTypeData<br/>- Get methods/properties<br/>- Validation support"]
+
         TypeRepository["📚 TypeRepository<br/>- Type storage<br/>- Query interface<br/>- Data abstraction"]
     end
 
@@ -114,10 +116,15 @@ graph TB
     
     AnalysisEngine --> TypeResolver
     AnalysisEngine --> ParserCoordinator
-    
+
     TypeResolver --> TypeRepository
+    TypeMetadataLookup --> TypeRepository
     TypeRepository --> PlatformTypes
     TypeRepository --> ConfigData
+
+    %% TypeMetadataLookup используется для получения методов/свойств
+    TypeSystemService -.-> TypeMetadataLookup
+    AnalysisEngine -.-> TypeMetadataLookup
     
     %% Styling
     classDef systemStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
@@ -129,7 +136,7 @@ graph TB
     class SystemCoordinator,AnalysisCache,ParserCoordinator,BasicObservability systemStyle
     class LSPServer,WebInterface,CLITool presentationStyle
     class TypeSystemService,AnalysisEngine applicationStyle
-    class TypeResolver,TypeRepository domainStyle
+    class TypeResolver,TypeMetadataLookup,TypeRepository domainStyle
     class PlatformTypes,ConfigData dataStyle
 ```
 
@@ -146,8 +153,17 @@ graph TB
 -   **Назначение:** Реализует чистый сценарий "проанализировать файл". Является переиспользуемым ядром для всех адаптеров (`cli`, `backend`).
 
 ### **🎭 TypeSystemService** (в `backend`)
--   **Структура:** Содержит `AnalysisEngine` и специфичные для `backend` компоненты (`AnalysisCache`).
--   **Назначение:** Предоставляет высокоуровневый API для `LSP Server` и `Web Interface`. Использует `AnalysisEngine` для выполнения анализа, добавляя поверх него логику кэширования и обработки сетевых запросов.
+-   **Структура:** Содержит `AnalysisEngine` и специфичные для `backend` компоненты (`AnalysisCache`, `TypeMetadataLookup`).
+-   **Назначение:** Предоставляет высокоуровневый API для `LSP Server` и `Web Interface`. Использует `AnalysisEngine` для выполнения анализа, добавляя поверх него логику кэширования и обработки сетевых запросов. Использует `TypeMetadataLookup` для обогащения данных методами/свойствами из RawTypeData.
+
+### **🔍 TypeMetadataLookup** (в `shared`)
+-   **Структура:** Содержит ссылку на `TypeRepository`.
+-   **Назначение:** Мост между `TypeResolution` (результат анализа) и `RawTypeData` (полная документация). Предоставляет методы для получения методов, свойств, описаний из RawTypeData на основе TypeResolution. Используется для валидации и обогащения API ответов.
+-   **Ключевые методы:**
+    - `get_methods(resolution)` - получить методы типа
+    - `get_properties(resolution)` - получить свойства типа
+    - `get_raw_type(resolution)` - получить полную RawTypeData
+    - `has_member(resolution, name)` - проверить существование метода/свойства
 
 ### **💾 AnalysisCache (Simple)**
 -   **Структура:** Основан на LRU-кэше (`LruCache`) с отслеживанием времени жизни (TTL).

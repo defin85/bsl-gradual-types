@@ -12,6 +12,7 @@ pub mod sidebar;
 pub mod cards_view;
 pub mod table_view;
 pub mod pagination;
+pub mod type_details_modal;
 
 pub use navigation::Navigation;
 pub use metric_card::MetricCard;
@@ -25,3 +26,4 @@ pub use sidebar::Sidebar;
 pub use cards_view::CardsView;
 pub use table_view::TableView;
 pub use pagination::Pagination;
+pub use type_details_modal::TypeDetailsModal;

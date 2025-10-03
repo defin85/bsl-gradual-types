@@ -24,6 +24,9 @@ pub struct SearchQuery {
 pub struct PaginationQuery {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+    pub category: Option<String>,
+    pub certainty_level: Option<String>,
+    pub flow_sensitive_only: Option<bool>,
 }
 
 #[derive(Clone)]
@@ -49,17 +52,24 @@ pub async fn get_types(
     let offset = params.offset.unwrap_or(0);
 
     // Вся бизнес-логика и DTO конверсия теперь в Application Layer
-    let result = state.type_service.get_all_types_as_dto(limit, offset);
+    let result = state.type_service.get_all_types_as_dto(
+        limit,
+        offset,
+        params.category,
+        params.certainty_level,
+        params.flow_sensitive_only.unwrap_or(false),
+    );
     Json(result)
 }
 
-/// Search types by query (оставляем пока без изменений)
+/// Search types by query
+/// Phase 5: Thin handler - делегирует всю логику в TypeSystemService
 pub async fn search_types(
     State(state): State<AppState>,
     Query(query): Query<SearchQuery>,
 ) -> impl IntoResponse {
-    match state.type_service.search_types(&query.q).await {
-        Ok(results) => Json(results).into_response(),
+    match state.type_service.search_types_as_dto(&query.q).await {
+        Ok(result) => Json(result).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

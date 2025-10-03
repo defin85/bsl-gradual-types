@@ -2,12 +2,14 @@
 //!
 //! Infrastructure компоненты для загрузки данных из внешних источников
 
+pub mod syntax_helper;
 pub mod syntax_helper_parser;
 pub mod config_parser;
 
 // Re-exports для удобства использования
-pub use syntax_helper_parser::{
-    SyntaxHelperParser,
+pub use syntax_helper_parser::SyntaxHelperParser;
+
+pub use syntax_helper::{
     SyntaxHelperDatabase,
     SyntaxNode,
     TypeInfo,
@@ -23,7 +25,6 @@ pub use syntax_helper_parser::{
     TypeMetadata,
     CodeExample,
     OptimizationSettings,
-    ParsingStats,
 };
 
 pub use config_parser::{

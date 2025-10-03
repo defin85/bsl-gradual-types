@@ -33,6 +33,11 @@ pub struct TypeDto {
     pub methods: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes_count: Option<usize>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<String>,
+    /// Enum values for platform enumeration types (e.g., "Авто (Auto)", "НеИспользовать (DontUse)")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enum_values: Option<Vec<String>>,
     pub source: String,
     pub flow_sensitive: bool,
     pub description: String,

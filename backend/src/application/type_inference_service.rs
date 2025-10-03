@@ -64,13 +64,16 @@ impl TypeInferenceService {
         let mut result = std::collections::HashMap::new();
 
         for raw_type in raw_types {
-            let resolution = TypeResolution::known(
+            let mut resolution = TypeResolution::known(
                 ConcreteType::Platform(
                     bsl_shared::domain::types::PlatformType {
                         name: raw_type.name.clone()
                     }
                 )
             );
+            // Копируем фасеты из RawTypeData
+            resolution.available_facets = raw_type.facets.clone();
+
             result.insert(raw_type.name, resolution);
         }
 

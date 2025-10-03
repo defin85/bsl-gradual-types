@@ -38,13 +38,16 @@ impl TypeResolver {
 
     /// Преобразование RawTypeData в TypeResolution (чистая логика)
     fn create_resolution_from_raw(&self, raw_type: &crate::domain::types::RawTypeData) -> TypeResolution {
-        TypeResolution::known(
+        let mut resolution = TypeResolution::known(
             crate::domain::types::ConcreteType::Platform(
                 crate::domain::types::PlatformType {
                     name: raw_type.name.clone()
                 }
             )
-        )
+        );
+        // Копируем фасеты из RawTypeData
+        resolution.available_facets = raw_type.facets.clone();
+        resolution
     }
 
     /// Парсинг доступа к членам вида \"Base.Member\"

@@ -18,6 +18,8 @@ pub struct RawTypeData {
     pub kind: Option<MetadataKind>,
     pub attributes: Vec<RawAttributeData>,
     pub tabular_sections: Vec<RawTabularSectionData>,
+    /// Enum values for platform enumeration types (e.g., "Авто (Auto)", "НеИспользовать (DontUse)")
+    pub enum_values: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,7 +70,15 @@ pub struct RawTabularSectionData {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FacetKind {
-    Manager, Object, Reference, Metadata, Constructor, Collection, Singleton,
+    Manager,     // Создание, поиск (СправочникМенеджер)
+    Object,      // Изменяемый объект (СправочникОбъект)
+    Reference,   // Ссылка на элемент (СправочникСсылка)
+    Metadata,    // Метаданные
+    Constructor, // Конструктор
+    Collection,  // Коллекция
+    Singleton,   // Одиночный объект
+    Selection,   // Обход элементов (СправочникВыборка) - из статьи Balyuk & Popova
+    List,        // Управление списком в форме (СправочникСписок) - из статьи Balyuk & Popova
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,6 +118,18 @@ impl TypeResolution {
             active_facet: None,
             available_facets: vec![],
         }
+    }
+
+    /// Создать TypeResolution из RawTypeData с сохранением всех метаданных (в т.ч. фасетов)
+    pub fn from_raw_type(raw_type: &RawTypeData) -> Self {
+        let mut resolution = Self::known(
+            ConcreteType::Platform(PlatformType {
+                name: raw_type.name.clone(),
+            })
+        );
+        // Копируем фасеты из RawTypeData
+        resolution.available_facets = raw_type.facets.clone();
+        resolution
     }
 }
 
@@ -298,6 +320,33 @@ impl MetadataKind {
             MetadataKind::Register => "Регистры",
             MetadataKind::ChartOfAccounts => "ПланыСчетов",
             MetadataKind::ChartOfCharacteristicTypes => "ПланыВидовХарактеристик",
+        }
+    }
+}
+
+impl FacetKind {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            FacetKind::Manager => "Менеджер",
+            FacetKind::Object => "Объект",
+            FacetKind::Reference => "Ссылка",
+            FacetKind::Metadata => "Метаданные",
+            FacetKind::Constructor => "Конструктор",
+            FacetKind::Collection => "Коллекция",
+            FacetKind::Singleton => "Одиночный",
+            FacetKind::Selection => "Выборка",
+            FacetKind::List => "Список",
+        }
+    }
+
+    pub fn platform_suffix(&self) -> &'static str {
+        match self {
+            FacetKind::Manager => "Менеджер",
+            FacetKind::Object => "Объект",
+            FacetKind::Reference => "Ссылка",
+            FacetKind::Selection => "Выборка",
+            FacetKind::List => "Список",
+            _ => "",
         }
     }
 }

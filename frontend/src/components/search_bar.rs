@@ -34,39 +34,9 @@ pub fn SearchBar(
         }
     };
 
-    let handle_category_change = move |ev: Event| {
-        let target = ev.target().unwrap();
-        let select = target.dyn_into::<web_sys::HtmlSelectElement>().unwrap();
-        let value = select.value();
-        
-        filters.update(|f| {
-            f.category = match value.as_str() {
-                "Platform" => Some(TypeCategory::Platform),
-                "Configuration" => Some(TypeCategory::Configuration),
-                "Union" => Some(TypeCategory::Union),
-                "Dynamic" => Some(TypeCategory::Dynamic),
-                _ => None,
-            };
-        });
-        
-        if let Some(callback) = on_filters_change {
-            callback.run(filters.get());
-        }
-    };
-
-    let handle_certainty_change = move |ev: Event| {
-        let target = ev.target().unwrap();
-        let select = target.dyn_into::<web_sys::HtmlSelectElement>().unwrap();
-        let value = select.value();
-        
-        filters.update(|f| {
-            f.certainty_level = if value == "all" { None } else { Some(value) };
-        });
-        
-        if let Some(callback) = on_filters_change {
-            callback.run(filters.get());
-        }
-    };
+    // Примечание: Фильтры по категориям и certainty теперь управляются через Sidebar
+    // с булевыми флагами. Эти обработчики оставлены для обратной совместимости,
+    // но в текущей версии интерфейса используются чекбоксы в Sidebar.
 
     let handle_facet_change = move |ev: Event| {
         let target = ev.target().unwrap();
@@ -105,36 +75,18 @@ pub fn SearchBar(
 
     view! {
         <div class="search-bar">
-            <input 
+            <input
                 type="text"
                 placeholder=placeholder_text
                 node_ref=search_input_ref
                 on:input=handle_search_input
             />
         </div>
-        
+
+        // Примечание: Фильтры категорий и certainty теперь находятся в Sidebar
+        // Этот компонент SearchBar остался для обратной совместимости,
+        // но в текущей версии используется только поле поиска
         <div class="filters-toolbar">
-            <div class="filter-group">
-                <label>"Категория:"</label>
-                <select on:change=handle_category_change>
-                    <option value="all">"Все категории"</option>
-                    <option value="Platform">"Platform Types"</option>
-                    <option value="Configuration">"Configuration Types"</option>
-                    <option value="Union">"Union Types"</option>
-                    <option value="Dynamic">"Dynamic Types"</option>
-                </select>
-            </div>
-
-            <div class="filter-group">
-                <label>"Уровень определённости:"</label>
-                <select on:change=handle_certainty_change>
-                    <option value="all">"Все уровни"</option>
-                    <option value="known">"Known (100%)"</option>
-                    <option value="inferred">"Inferred (50-99%)"</option>
-                    <option value="unknown">"Unknown (0-49%)"</option>
-                </select>
-            </div>
-
             <div class="filter-group">
                 <label>"Фасеты:"</label>
                 <select on:change=handle_facet_change>
@@ -149,7 +101,7 @@ pub fn SearchBar(
 
             <div class="filter-group">
                 <label>
-                    <input 
+                    <input
                         type="checkbox"
                         on:change=handle_flow_sensitive_change
                     />
@@ -158,7 +110,7 @@ pub fn SearchBar(
             </div>
 
             <div class="filter-group">
-                <button 
+                <button
                     class="filter-reset-btn"
                     on:click=move |_| {
                         filters.set(TypeFilters::default());

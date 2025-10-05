@@ -1,6 +1,6 @@
 //! Dashboard page
 
-use crate::api::{fetch_metrics, types::*};
+use crate::api::*;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -12,7 +12,7 @@ pub fn Dashboard(
     /// Поисковый запрос для фильтрации
     #[prop(optional)] _search_query: Option<RwSignal<String>>,
 ) -> impl IntoView {
-    let metrics = RwSignal::new(None::<TypeMetrics>);
+    let metrics = RwSignal::new(None::<MetricsDto>);
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
 
@@ -62,14 +62,15 @@ pub fn Dashboard(
                         </div>
                     }.into_any()
                 } else if let Some(m) = metrics.get() {
-                    let known_percentage = if m.total_types > 0 { 
-                        (m.known_types as f32 / m.total_types as f32 * 100.0) as u32 
+                    let total = m.known_types() + m.inferred_types() + m.unknown_types();
+                    let known_percentage = if total > 0 {
+                        (m.known_types() as f32 / total as f32 * 100.0) as u32
                     } else { 0 };
-                    let inferred_percentage = if m.total_types > 0 { 
-                        (m.inferred_types as f32 / m.total_types as f32 * 100.0) as u32 
+                    let inferred_percentage = if total > 0 {
+                        (m.inferred_types() as f32 / total as f32 * 100.0) as u32
                     } else { 0 };
-                    let unknown_percentage = if m.total_types > 0 { 
-                        (m.unknown_types as f32 / m.total_types as f32 * 100.0) as u32 
+                    let unknown_percentage = if total > 0 {
+                        (m.unknown_types() as f32 / total as f32 * 100.0) as u32
                     } else { 0 };
                     
                     view! {
@@ -130,8 +131,8 @@ pub fn Dashboard(
                                     <h3>"🏗️ Architecture Health"</h3>
                                     <p>
                                         <strong>"Components:"</strong>" 6/8 active | "
-                                        <strong>"Cache Hit Rate:"</strong>" " {format!("{:.0}%", m.cache_hit_rate * 100.0)} " | "
-                                        <strong>"Analysis Speed:"</strong>" " {format!("{:.0}ms avg", m.analysis_speed_ms)}
+                                        <strong>"Cache Hit Rate:"</strong>" " {m.cache_hit_rate.clone()} " | "
+                                        <strong>"Analysis Speed:"</strong>" " {format!("{:.0}ms avg", m.analysis_speed_ms())}
                                     </p>
                                 </div>
                             </div>

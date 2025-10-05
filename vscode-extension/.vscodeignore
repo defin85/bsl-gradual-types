@@ -1,0 +1,52 @@
+# Source files
+src/**
+**/*.ts
+!out/**/*.js
+
+# Development files
+.vscode/
+.vscode-test/
+.gitignore
+.git/
+.github/
+
+# Test files
+test/**
+**/*.test.ts
+**/*.spec.ts
+
+# Build artifacts
+*.map
+tsconfig.json
+tsconfig.*.json
+
+# Documentation
+*.md
+!README.md
+!CHANGELOG.md
+
+# Dependencies - exclude node_modules from VSIX
+node_modules/**
+
+# Binaries - ONLY include LSP server
+bin/bsl-analyzer.exe
+bin/query_type.exe
+bin/build_unified_index.exe
+bin/incremental_update.exe
+bin/check_type_compatibility.exe
+bin/extract_platform_docs.exe
+bin/extract_hybrid_docs.exe
+bin/bsl-mcp-server.exe
+bin/syntaxcheck.exe
+# Keep only: bin/lsp_server.exe
+
+# Misc
+.eslintrc.json
+.prettierrc
+*.log
+*.vsix
+package-lock.json
+
+# Images - keep only necessary ones
+images/**
+!images/bsl-analyzer-logo.png

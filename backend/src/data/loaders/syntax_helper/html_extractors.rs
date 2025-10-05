@@ -264,6 +264,122 @@ impl HtmlExtractor {
         enum_values
     }
 
+    /// КРИТИЧНЫЙ МЕТОД: Извлечение методов из HTML
+    ///
+    /// Извлекает методы из HTML в формате:
+    /// ```html
+    /// <p class="V8SH_chapter">Методы:</p>
+    /// <a href="Array/methods/UBound770.html">ВГраница (UBound)</a><br>
+    /// <a href="Array/methods/Add772.html">Добавить (Add)</a><br>
+    /// ```
+    pub fn extract_methods_from_html(&self, document: &Html) -> Vec<(String, String)> {
+        self.extract_section_links(document, "Методы")
+    }
+
+    /// КРИТИЧНЫЙ МЕТОД: Извлечение свойств из HTML
+    ///
+    /// Извлекает свойства из HTML в формате:
+    /// ```html
+    /// <p class="V8SH_chapter">Свойства:</p>
+    /// <a href="...">Имя (Name)</a><br>
+    /// ```
+    pub fn extract_properties_from_html(&self, document: &Html) -> Vec<(String, String)> {
+        self.extract_section_links(document, "Свойства")
+    }
+
+    /// Общий метод для извлечения ссылок из раздела (Методы, Свойства, Конструкторы)
+    ///
+    /// Возвращает: Vec<(русское_имя, английское_имя)>
+    fn extract_section_links(&self, document: &Html, section_name: &str) -> Vec<(String, String)> {
+        let mut items = Vec::new();
+
+        // Ищем заголовок раздела
+        if let Ok(chapter_selector) = Selector::parse("p.V8SH_chapter") {
+            let mut found_section = false;
+            let mut current_chapter: Option<ElementRef> = None;
+
+            for chapter in document.select(&chapter_selector) {
+                let chapter_text = chapter.text().collect::<String>().trim().to_string();
+
+                if chapter_text == section_name || chapter_text.starts_with(section_name) {
+                    found_section = true;
+                    current_chapter = Some(chapter);
+                    debug!("🔍 Найден раздел '{}' в HTML", section_name);
+                    break;
+                }
+            }
+
+            if !found_section {
+                debug!("⚠️  Раздел '{}' не найден в HTML", section_name);
+                return items;
+            }
+
+            // Извлекаем все <a> элементы после заголовка до следующего заголовка
+            if let Some(chapter_elem) = current_chapter {
+                let mut collect = false;
+
+                // Обходим все элементы документа
+                for element in document.root_element().descendants() {
+                    // Проверяем, достигли ли мы нужного заголовка
+                    if let Some(elem_ref) = ElementRef::wrap(element) {
+                        if elem_ref == chapter_elem {
+                            collect = true;
+                            continue;
+                        }
+
+                        // Если встретили следующий заголовок, прекращаем сбор
+                        if collect {
+                            if let Some(elem) = ElementRef::wrap(element) {
+                                if elem.value().name() == "p" {
+                                    if let Some(class) = elem.value().attr("class") {
+                                        if class.contains("V8SH_chapter") {
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                // Собираем текст из <a> элементов
+                                if elem.value().name() == "a" {
+                                    let link_text = elem.text().collect::<String>().trim().to_string();
+                                    if !link_text.is_empty() {
+                                        // Парсим формат "Добавить (Add)" -> ("Добавить", "Add")
+                                        let (russian, english) = self.parse_bilingual_name(&link_text);
+                                        items.push((russian, english));
+                                        debug!("✓ Извлечено из '{}': {} ({})", section_name, items.last().unwrap().0, items.last().unwrap().1);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if items.is_empty() {
+            debug!("⚠️  Не удалось извлечь элементы из раздела '{}'", section_name);
+        } else {
+            debug!("✓ Извлечено {} элементов из '{}'", items.len(), section_name);
+        }
+
+        items
+    }
+
+    /// Парсит двуязычное имя формата "Русское (English)" -> ("Русское", "English")
+    fn parse_bilingual_name(&self, text: &str) -> (String, String) {
+        // Ищем паттерн "Русское (English)"
+        if let Some(pos) = text.rfind('(') {
+            if let Some(end_pos) = text.rfind(')') {
+                if end_pos > pos {
+                    let russian = text[..pos].trim().to_string();
+                    let english = text[pos + 1..end_pos].trim().to_string();
+                    return (russian, english);
+                }
+            }
+        }
+        // Если формат не распознан, возвращаем как есть
+        (text.to_string(), String::new())
+    }
+
     pub fn extract_links(&self, document: &Html) -> Vec<String> {
         let mut links = Vec::new();
 

@@ -1,6 +1,6 @@
 //! Sidebar component with filters
 
-use crate::api::types::*;
+use crate::api::*;
 use leptos::prelude::*;
 
 /// Sidebar with filtering options

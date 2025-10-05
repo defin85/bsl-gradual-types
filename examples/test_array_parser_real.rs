@@ -33,7 +33,7 @@ fn main() {
             if !type_info.structure.methods.is_empty() {
                 println!("  Первые 9 методов:");
                 for method in type_info.structure.methods.iter().take(9) {
-                    println!("    - {}", method);
+                    println!("    - {:?}", method);
                 }
             } else {
                 println!("  ❌ ПРОБЛЕМА: методы не извлечены!");

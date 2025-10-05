@@ -1,10 +1,24 @@
 //! Graph page for network visualization of type relationships
 
-use crate::api::{fetch_type_graph, types::*};
+use crate::api::*;
 use crate::components::GraphView;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
+use std::collections::HashSet;
+
+#[derive(Clone, Debug)]
+struct SimpleGraph {
+    nodes: Vec<SimpleNode>,
+    connections: Vec<ConnectionDto>,
+}
+
+#[derive(Clone, Debug)]
+struct SimpleNode {
+    id: String,
+    type_info: TypeDto,
+    connections: Vec<String>,
+}
 
 /// Страница графового представления типов
 #[component]
@@ -13,10 +27,10 @@ pub fn GraphPage(
     /// Поисковый запрос для фильтрации
     #[prop(optional)] _search_query: Option<RwSignal<String>>,
 ) -> impl IntoView {
-    let graph = RwSignal::new(TypeGraph { nodes: vec![], connections: vec![] });
+    let graph = RwSignal::new(SimpleGraph { nodes: vec![], connections: vec![] });
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
-    let selected_node = RwSignal::new(None::<TypeGraphNode>);
+    let selected_node = RwSignal::new(None::<SimpleNode>);
     let display_mode = RwSignal::new("all".to_string());
     let connection_type_filter = RwSignal::new("all".to_string());
     let connection_depth = RwSignal::new("all".to_string());
@@ -26,11 +40,13 @@ pub fn GraphPage(
     let load_graph = move || {
         loading.set(true);
         error.set(None);
-        
+
         spawn_local(async move {
             match fetch_type_graph().await {
-                Ok(result) => {
-                    graph.set(result);
+                Ok(connections) => {
+                    // Создаем упрощенный граф из списка связей
+                    let nodes = vec![]; // TODO: построить узлы из connections
+                    graph.set(SimpleGraph { nodes, connections });
                     loading.set(false);
                 },
                 Err(err) => {
@@ -45,7 +61,7 @@ pub fn GraphPage(
         load_graph();
     });
 
-    let _handle_node_click = move |type_info: TypeInfo| {
+    let _handle_node_click = move |type_info: TypeDto| {
         web_sys::console::log_1(&format!("Clicked node: {}", type_info.name).into());
         // Найдем узел в графе
         if let Some(node) = graph.get().nodes.iter().find(|n| n.type_info.name == type_info.name) {
@@ -53,8 +69,8 @@ pub fn GraphPage(
         }
     };
 
-    let _handle_connection_click = move |connection: TypeConnection| {
-        web_sys::console::log_1(&format!("Clicked connection: {} -> {}", connection.from, connection.to).into());
+    let _handle_connection_click = move |connection: ConnectionDto| {
+        web_sys::console::log_1(&format!("Clicked connection: {} -> {}", connection.source, connection.target).into());
     };
 
     let handle_display_mode_change = move |ev: web_sys::Event| {
@@ -90,10 +106,10 @@ pub fn GraphPage(
         // Фильтруем узлы по режиму отображения
         current_graph.nodes = current_graph.nodes.into_iter().filter(|node| {
             match mode.as_str() {
-                "known" => matches!(node.type_info.get_certainty(), Certainty::Known),
-                "union" => matches!(node.type_info.get_category(), TypeCategory::Union),
-                "flow" => node.type_info.is_flow_sensitive(),
-                "config" => matches!(node.type_info.get_category(), TypeCategory::Configuration),
+                "known" => node.type_info.certainty >= 90,
+                "union" => node.type_info.category == "Union",
+                "flow" => node.type_info.flow_sensitive,
+                "config" => node.type_info.category == "Configuration",
                 _ => true, // "all"
             }
         }).collect();
@@ -107,9 +123,9 @@ pub fn GraphPage(
         }
         
         // Фильтруем связи - оставляем только те, у которых есть оба узла
-        let node_ids: std::collections::HashSet<String> = current_graph.nodes.iter().map(|n| n.id.clone()).collect();
+        let node_ids: HashSet<String> = current_graph.nodes.iter().map(|n| n.id.clone()).collect();
         current_graph.connections = current_graph.connections.into_iter().filter(|conn| {
-            node_ids.contains(&conn.from) && node_ids.contains(&conn.to)
+            node_ids.contains(&conn.source) && node_ids.contains(&conn.target)
         }).collect();
         
         current_graph

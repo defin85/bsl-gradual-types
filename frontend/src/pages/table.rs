@@ -1,6 +1,6 @@
 //! Table page for tabular type analysis
 
-use crate::api::{fetch_types, types::*};
+use crate::api::*;
 use crate::components::{SearchBar, TableView};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -14,7 +14,7 @@ pub fn TablePage(
 ) -> impl IntoView {
     let filters = RwSignal::new(TypeFilters::new());
     let types = RwSignal::new(Vec::<TypeInfo>::new());
-    let search_result = RwSignal::new(None::<TypeSearchResult>);
+    let search_result = RwSignal::new(None::<AnalysisResultDto>);
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
     let selected_type = RwSignal::new(None::<TypeInfo>);
@@ -83,11 +83,11 @@ pub fn TablePage(
     let stats = Signal::derive(move || {
         let types_list = types.get();
         let total = types_list.len() as u32;
-        let known = types_list.iter().filter(|t| matches!(t.get_certainty(), Certainty::Known)).count() as u32;
-        let inferred = types_list.iter().filter(|t| matches!(t.get_certainty(), Certainty::Inferred(_))).count() as u32;
-        let unknown = types_list.iter().filter(|t| matches!(t.get_certainty(), Certainty::Unknown)).count() as u32;
-        let flow_sensitive = types_list.iter().filter(|t| t.is_flow_sensitive()).count() as u32;
-        
+        let known = types_list.iter().filter(|t| t.certainty >= 90).count() as u32;
+        let inferred = types_list.iter().filter(|t| t.certainty >= 50 && t.certainty < 90).count() as u32;
+        let unknown = types_list.iter().filter(|t| t.certainty < 50).count() as u32;
+        let flow_sensitive = types_list.iter().filter(|t| t.flow_sensitive).count() as u32;
+
         (total, known, inferred, unknown, flow_sensitive)
     });
 
@@ -158,7 +158,7 @@ pub fn TablePage(
                                         <div class="selected-type-info">
                                             <h3>"Выбранный тип: " {selected.name.clone()}</h3>
                                             <p>"Категория: " {selected.category.clone()}</p>
-                                            <p>"Уверенность: " {selected.get_certainty().as_percentage()}</p>
+                                            <p>"Уверенность: " {selected.certainty_percentage()}</p>
                                             <p>"Описание: " {selected.description.clone()}</p>
                                         </div>
                                     }.into_any()

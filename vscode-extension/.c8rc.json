@@ -1,0 +1,23 @@
+{
+  "all": true,
+  "include": [
+    "out/**/*.js"
+  ],
+  "exclude": [
+    "out/test/**",
+    "out/esbuild.js",
+    "node_modules/**",
+    "**/*.d.ts"
+  ],
+  "reporter": [
+    "text",
+    "html",
+    "lcov"
+  ],
+  "report-dir": "./coverage",
+  "check-coverage": true,
+  "lines": 80,
+  "functions": 80,
+  "branches": 70,
+  "statements": 80
+}

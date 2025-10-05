@@ -1,6 +1,6 @@
 //! Компонент пагинации
 
-use crate::api::types::PaginationInfo;
+use crate::api::PaginationInfo;
 use leptos::prelude::*;
 
 /// Компонент пагинации

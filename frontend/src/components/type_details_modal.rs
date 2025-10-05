@@ -1,6 +1,6 @@
 //! Type details modal component
 
-use crate::api::types::TypeInfo;
+use crate::api::TypeInfo;
 use leptos::prelude::*;
 
 #[component]
@@ -34,10 +34,10 @@ pub fn TypeDetailsModal(
                 let facets_empty = facets.is_empty();
                 let methods_empty = methods.is_empty();
                 let properties_empty = properties.is_empty();
-                let enum_values_empty = enum_values.is_empty();
+                let enum_values_empty = enum_values.as_ref().map(|v| v.is_empty()).unwrap_or(true);
                 let methods_len = methods.len();
                 let properties_len = properties.len();
-                let enum_values_len = enum_values.len();
+                let enum_values_len = enum_values.as_ref().map(|v| v.len()).unwrap_or(0);
                 let has_metadata = !methods_empty || !properties_empty || attributes_count.unwrap_or(0) > 0;
 
                 view! {

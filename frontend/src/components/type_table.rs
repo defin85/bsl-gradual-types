@@ -1,6 +1,6 @@
 //! Type table component for tabular display of types
 
-use crate::api::types::*;
+use crate::api::*;
 use leptos::prelude::*;
 
 /// Колонка для сортировки
@@ -195,7 +195,7 @@ fn TypeTableRow(
             <td>
                 <span
                     class="category-badge"
-                    style=move || format!("background: {}; color: white;", type_info.get().get_category().color())
+                    style=move || format!("background: {}; color: white;", CategoryDto::get_color(&CategoryDto{ color: String::new(), icon: String::new(), count: 0 }, &type_info.get().category))
                 >
                     {move || type_info.get().category.clone()}
                 </span>
@@ -207,10 +207,10 @@ fn TypeTableRow(
                         style=move || {
                             let info = type_info.get();
                             let width = info.certainty as f32;
-                            format!("width: {}%; background: {};", width, info.get_certainty().color())
+                            format!("width: {}%; background: {};", width, info.certainty_color())
                         }
                     ></div>
-                    <div class="certainty-text">{move || type_info.get().get_certainty().as_percentage()}</div>
+                    <div class="certainty-text">{move || type_info.get().certainty_percentage()}</div>
                 </div>
             </td>
             <td class="facets-cell">

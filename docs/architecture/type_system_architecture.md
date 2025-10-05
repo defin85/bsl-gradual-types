@@ -796,71 +796,142 @@ impl TypeResolver {
 
 ## План реализации
 
-### Phase 1: Создание TypeMetadataLookup
+### Phase 1: Создание TypeMetadataLookup — ✅ **ЗАВЕРШЕНА**
 
-**Задачи:**
-1. ✅ Создать `shared/src/domain/metadata_lookup.rs`
-2. ✅ Реализовать TypeMetadataLookup с методами:
-   - `get_raw_type()`
-   - `get_methods()`
-   - `get_properties()`
-   - `has_member()`
-3. ✅ Добавить unit-тесты для TypeMetadataLookup
-4. ✅ Экспортировать в `shared/src/domain/mod.rs`
+**Статус:** ✅ Полностью реализовано (2025-10-03)
+
+**Реализованные задачи:**
+1. ✅ Создан [shared/src/domain/metadata_lookup.rs](../../shared/src/domain/metadata_lookup.rs) (417 строк)
+2. ✅ Реализован TypeMetadataLookup с методами:
+   - `get_raw_type()` — получение полной RawTypeData
+   - `get_methods()` — получение методов типа
+   - `get_properties()` — получение свойств типа
+   - `has_member()` — проверка существования метода/свойства
+   - `get_description()`, `get_category()` — дополнительные метаданные
+3. ✅ Добавлено 6 unit-тестов (строки 292-416)
+4. ✅ Экспортирован в [shared/src/domain/mod.rs](../../shared/src/domain/mod.rs#L11)
 
 **Критерии завершения:**
-- Все тесты проходят
-- `cargo clippy` без warnings
-- Документация с примерами использования
+- ✅ Все тесты проходят (`cargo test`)
+- ✅ `cargo clippy` без warnings
+- ✅ Полная rustdoc документация с примерами использования (строки 1-48)
 
 ---
 
-### Phase 2: Интеграция в TypeValidator
+### Phase 2: Интеграция в TypeValidator — ⚠️ **ЧАСТИЧНО ЗАВЕРШЕНА**
 
-**Задачи:**
-1. ✅ Добавить метод `validate_property_access_with_lookup()` в validators.rs
-2. ✅ Обновить существующие методы валидации для использования lookup
-3. ✅ Добавить интеграционные тесты
+**Статус:** ⚠️ TypeValidator существует, но **НЕ** использует TypeMetadataLookup
 
-**Пример:**
+**Текущее состояние:**
+- ✅ TypeValidator реализован в [shared/src/domain/validators.rs](../../shared/src/domain/validators.rs)
+- ✅ Определены три категории ошибок (IncorrectParameterType, NonExistentProperty, SimpleTypeAsCollection)
+- ❌ Метод `validate_property_access_with_lookup()` **НЕ РЕАЛИЗОВАН**
+- ❌ Текущий `validate_method_call()` не проверяет существование методов
+
+**Требуется реализовать:**
+
+```rust
+// shared/src/domain/validators.rs
+
+use crate::domain::metadata_lookup::TypeMetadataLookup;
+
+impl TypeValidator {
+    /// Проверка доступа к свойству/методу с использованием TypeMetadataLookup
+    pub fn validate_property_access_with_lookup(
+        resolution: &TypeResolution,
+        property_name: &str,
+        metadata_lookup: &TypeMetadataLookup,
+    ) -> Option<TypeErrorKind> {
+        if !metadata_lookup.has_member(resolution, property_name) {
+            Some(TypeErrorKind::NonExistentProperty {
+                object_type: format!("{:?}", resolution.result),
+                property_name: property_name.to_string(),
+            })
+        } else {
+            None
+        }
+    }
+}
+```
+
+**Пример использования (после реализации):**
 ```rust
 let resolution = resolver.resolve_expression_sync("ТаблДанных");
+let metadata_lookup = TypeMetadataLookup::new(repository);
 let error = TypeValidator::validate_property_access_with_lookup(
     &resolution,
     "НеСуществующийМетод",
     &metadata_lookup
 );
-assert!(error.is_some());
+assert!(error.is_some()); // Должна быть ошибка NonExistentProperty
 ```
 
 ---
 
-### Phase 3: Обновление TypeSystemService
+### Phase 3: Обновление TypeSystemService — ✅ **ЗАВЕРШЕНА**
 
-**Задачи:**
-1. ✅ Добавить поле `metadata_lookup: TypeMetadataLookup` в TypeSystemService
-2. ✅ Обновить `get_all_types()` для использования реальных данных из RawTypeData
-3. ✅ Исправить TypeDto:
-   - `methods_count` из `raw_type.methods.len()`
-   - `methods` из `raw_type.methods`
-   - `description` из `raw_type.description`
-4. ✅ Тестирование Web API
+**Статус:** ✅ Полностью реализовано (2025-10-03)
 
-**Файл:** [type_system_service.rs](../../backend/src/application/type_system_service.rs)
+**Реализованные задачи:**
+1. ✅ Добавлено поле `metadata_lookup: TypeMetadataLookup` ([строка 26](../../backend/src/application/type_system_service.rs#L26))
+2. ✅ Обновлен `get_all_types_as_dto()` для использования реальных данных из RawTypeData ([строки 118-121](../../backend/src/application/type_system_service.rs#L118))
+3. ✅ Исправлен TypeDto:
+   - ✅ `methods_count: Some(methods.len())` — реальное количество методов
+   - ✅ `methods: methods.iter().map(|m| m.name.clone()).collect()` — реальные имена методов
+   - ✅ `description: raw_type.map(|r| r.description).unwrap_or_else(...)` — реальное описание из RawTypeData
+   - ✅ `properties: properties.iter().map(|p| p.name.clone()).collect()` — реальные свойства
+   - ✅ `enum_values: raw_type.and_then(|rt| ...)` — значения перечислений для платформенных типов
+4. ❓ Тестирование Web API — **требует проверки**
+
+**Файл:** [backend/src/application/type_system_service.rs](../../backend/src/application/type_system_service.rs)
+
+**Ключевые изменения:**
+```rust
+// Строки 118-126
+let methods = self.metadata_lookup.get_methods(res);
+let properties = self.metadata_lookup.get_properties(res);
+let raw_type = self.metadata_lookup.get_raw_type(res);
+
+let description = raw_type.as_ref()
+    .map(|rt| rt.description.clone())
+    .unwrap_or_else(|| self.generate_type_description(res));
+```
+
+**Результат:** TypeDto теперь содержит **реальные данные** вместо hardcoded значений!
 
 ---
 
-### Phase 4: Обновление Web UI
+### Phase 4: Обновление Web UI — ❓ **ТРЕБУЕТ ТЕСТИРОВАНИЯ**
 
-**Задачи:**
-1. ✅ Проверить что API возвращает методы
-2. ✅ Обновить frontend для отображения методов
-3. ✅ Добавить раскрываемый список методов в карточке типа
-4. ✅ E2E тестирование через Chrome DevTools MCP
+**Статус:** ❓ Backend готов, frontend требует проверки
 
-**Критерии:**
-- Типы "Массив", "ТаблицаЗначений" показывают полный список методов
-- Методы корректно отображаются в UI
+**План тестирования:**
+
+1. ❓ **Проверить что API возвращает методы:**
+   ```bash
+   # Запустить веб-сервер
+   cargo run -p bsl-backend --bin bsl-web-server -- --port 3002 --enable-cors true
+
+   # Проверить API ответ (с URL-кодированием для кириллицы)
+   curl "http://localhost:3002/api/types" | jq '.types[0].methods'
+   curl "http://localhost:3002/api/search?q=%D0%9C%D0%B0%D1%81%D1%81%D0%B8%D0%B2" | jq '.'
+   ```
+
+2. ❓ **Проверить frontend отображение:**
+   - Открыть http://localhost:3002
+   - Найти тип "Массив" или "ТаблицаЗначений"
+   - Убедиться что методы отображаются в карточке типа
+
+3. ❓ **E2E тестирование через Chrome DevTools MCP:**
+   - Автоматизированное тестирование поиска типов
+   - Проверка отображения методов и фильтров
+   - Измерение Core Web Vitals
+
+**Критерии завершения:**
+- ✅ Backend API возвращает реальные методы (уже реализовано)
+- ❓ Типы "Массив", "ТаблицаЗначений" показывают полный список методов в UI
+- ❓ Методы корректно отображаются и раскрываются
+- ❓ E2E тесты проходят успешно
 
 ---
 
@@ -877,31 +948,57 @@ assert!(error.is_some());
 
 ## Статус реализации
 
-| Компонент | Статус | Приоритет |
-|-----------|--------|-----------|
-| TypeMetadataLookup | ⏳ Не начато | 🔥 Критичный |
-| TypeValidator integration | ⏳ Не начато | 🔥 Критичный |
-| TypeSystemService update | ⏳ Не начато | 🔥 Критичный |
-| Web UI update | ⏳ Не начато | ⚠️ Высокий |
-| LSP integration | ⏳ Не начато | 📅 Будущее |
+**Дата обновления:** 2025-10-03
+
+| Компонент | Статус | Приоритет | Комментарий |
+|-----------|--------|-----------|-------------|
+| TypeMetadataLookup | ✅ **Реализован** | 🔥 Критичный | [shared/src/domain/metadata_lookup.rs](../../shared/src/domain/metadata_lookup.rs) - полностью реализован с тестами |
+| TypeValidator integration | ⚠️ **Частично** | 🔥 Критичный | TypeValidator существует, но не использует TypeMetadataLookup для валидации |
+| TypeSystemService update | ✅ **Реализован** | 🔥 Критичный | [backend/src/application/type_system_service.rs](../../backend/src/application/type_system_service.rs) - использует реальные данные через TypeMetadataLookup |
+| Web UI update | ❓ **Не проверено** | ⚠️ Высокий | Требует тестирования отображения методов в веб-интерфейсе |
+| LSP integration | ⏳ Не начато | 📅 Будущее | Планируется после завершения Web UI |
 
 ---
 
 ## Заключение
+
+**Дата обновления:** 2025-10-03
 
 Архитектура системы типов BSL Gradual Types основана на правильных принципах:
 - ✅ Separation of Concerns (TypeResolution vs RawTypeData)
 - ✅ Single Source of Truth (RawTypeData в Repository)
 - ✅ Градуальная типизация с честностью о неопределенности
 
-**Однако выявлены критичные проблемы:**
-- ❌ Потеря данных при RawTypeData → TypeResolution
-- ❌ Нет моста между TypeResolution и RawTypeData для валидации
-- ❌ Hardcoded данные в TypeDto вместо реальных
+### 🎉 Достигнутые результаты
 
-**Решение: TypeMetadataLookup Service**
-- Легковесный мост между анализом и документацией
-- Явный, тестируемый, переиспользуемый
-- Не нарушает существующую архитектуру
+**✅ Критичные проблемы РЕШЕНЫ:**
+- ✅ **TypeMetadataLookup реализован** — мост между TypeResolution и RawTypeData работает
+- ✅ **TypeSystemService обновлён** — реальные данные вместо hardcoded значений
+- ✅ **Simplified Architecture реализована** — SystemCoordinator, AnalysisEngine, все System Layer компоненты
 
-**Приоритет:** Критичный для функционирования валидации и полноценного UI.
+**⚠️ Требует доработки:**
+- ⚠️ **TypeValidator не использует TypeMetadataLookup** — нужно добавить `validate_property_access_with_lookup()`
+- ❓ **Web UI не протестирован** — требуется проверка отображения методов в браузере
+
+**📊 Общий прогресс:**
+- **Phase 1 (TypeMetadataLookup):** ✅ 100% завершено
+- **Phase 2 (TypeValidator integration):** ⚠️ 30% завершено (структура есть, интеграция нет)
+- **Phase 3 (TypeSystemService):** ✅ 100% завершено
+- **Phase 4 (Web UI):** ❓ 50% завершено (backend готов, frontend не проверен)
+- **Phase 5 (LSP integration):** ⏳ 0% (планируется в будущем)
+
+### 🎯 Следующие шаги
+
+1. **Высокий приоритет:**
+   - Реализовать `validate_property_access_with_lookup()` в TypeValidator
+   - Протестировать Web UI с реальными методами
+
+2. **Средний приоритет:**
+   - E2E тестирование через Chrome DevTools MCP
+   - Добавить интеграционные тесты для валидации
+
+3. **Будущее:**
+   - LSP интеграция для автодополнения методов
+   - Hover документация в редакторе
+
+**Приоритет оставшихся задач:** Высокий для валидации, средний для Web UI тестирования.

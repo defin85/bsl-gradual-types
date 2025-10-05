@@ -12,9 +12,10 @@ categories = ["development-tools", "parser-implementations"]
 [workspace]
 members = [
     "shared",
-    "backend", 
+    "backend",
     "frontend",
-    "cli"
+    "cli",
+    "type-visualization"  # Milestone 2.5: Унификация визуализации
 ]
 resolver = "2"
 
@@ -71,6 +72,7 @@ web-sys = "0.3"
 # Backend-specific dependencies
 colored = "2.0"
 tree-sitter = "0.25"
+tree-sitter-bsl = { git = "https://github.com/alkoleft/tree-sitter-bsl", tag = "v0.1.5" }
 tempfile = "3.8"
 
 # Дополнительные зависимости
@@ -88,6 +90,7 @@ bsl-shared = { path = "shared", default-features = true }
 bsl-backend = { path = "backend" }
 bsl-frontend = { path = "frontend" }
 bsl-cli = { path = "cli" }
+bsl-type-visualization = { path = "type-visualization" }
 
 # Force single getrandom version with proper WASM features
 getrandom = { version = "0.3", features = ["wasm_js"] }

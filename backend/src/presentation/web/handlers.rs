@@ -81,3 +81,34 @@ pub async fn health_check() -> impl IntoResponse {
         "service": "bsl-gradual-types"
     }))
 }
+
+/// Validate code fragment
+/// Phase 4: TypeValidator integration - проверяет методы и свойства
+pub async fn validate_code(
+    State(state): State<AppState>,
+    Json(payload): Json<bsl_shared::api::ValidateCodeRequest>,
+) -> impl IntoResponse {
+    use std::time::Instant;
+
+    let start = Instant::now();
+
+    match state.type_service.validate_code_fragment(&payload.code).await {
+        Ok(errors) => {
+            let is_valid = errors.is_empty();
+            let duration_ms = start.elapsed().as_millis() as u64;
+
+            let response = bsl_shared::api::ValidateCodeResponse {
+                is_valid,
+                errors,
+                metadata: Some(bsl_shared::api::ValidationMetadataDto {
+                    expressions_analyzed: 1,
+                    types_resolved: if is_valid { 1 } else { 0 },
+                    duration_ms,
+                }),
+            };
+
+            Json(response).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}

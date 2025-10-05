@@ -1,6 +1,6 @@
 //! Cards page for card-based type visualization
 
-use crate::api::{fetch_types, types::*};
+use crate::api::*;
 use crate::components::{SearchBar, TypeCardsGrid};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -14,7 +14,7 @@ pub fn CardsPage(
 ) -> impl IntoView {
     let filters = RwSignal::new(TypeFilters::default());
     let types = RwSignal::new(Vec::<TypeInfo>::new());
-    let search_result = RwSignal::new(None::<TypeSearchResult>);
+    let search_result = RwSignal::new(None::<AnalysisResultDto>);
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
 
@@ -87,7 +87,8 @@ pub fn CardsPage(
                             <div class="results-summary">
                                 <p>{move || {
                                     if let Some(result) = search_result.get() {
-                                        format!("Найдено типов: {} (показано: {})", result.metrics.total_types, types.get().len())
+                                        let total = result.metrics.certainty_high + result.metrics.certainty_medium + result.metrics.certainty_low;
+                                        format!("Найдено типов: {} (показано: {})", total, types.get().len())
                                     } else {
                                         format!("Найдено типов: {}", types.get().len())
                                     }

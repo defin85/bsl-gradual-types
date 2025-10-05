@@ -1,9 +1,13 @@
 //! API integration utilities
 
 pub mod client;
-pub mod types;
+pub mod extensions;
 
-#[allow(unused_imports)]
-pub use client::*;
-#[allow(unused_imports)]
-pub use types::*;
+// Re-export shared DTOs as the source of truth
+pub use bsl_shared::api::dtos::*;
+
+// Re-export frontend-specific extensions
+pub use extensions::*;
+
+// Re-export client functions
+pub use client::{fetch_metrics, fetch_types, fetch_type_graph};

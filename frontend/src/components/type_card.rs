@@ -1,6 +1,6 @@
 //! Type card component for displaying type information
 
-use crate::api::types::*;
+use crate::api::*;
 use leptos::prelude::*;
 
 /// Компонент карточки типа
@@ -14,20 +14,21 @@ pub fn TypeCard(
 ) -> impl IntoView {
     let card_class = move || {
         let info = type_info.get();
-        match info.get_category() {
-            TypeCategory::Platform => "type-card card-known",
-            TypeCategory::Configuration => "type-card card-known",
-            TypeCategory::Union => "type-card card-inferred",
-            TypeCategory::Dynamic => "type-card card-unknown",
+        match info.category.as_str() {
+            "Platform" => "type-card card-known",
+            "Configuration" => "type-card card-known",
+            "Union" => "type-card card-inferred",
+            "Dynamic" => "type-card card-unknown",
+            _ => "type-card card-unknown",
         }
     };
 
     let certainty_badge_class = move || {
         let info = type_info.get();
-        match info.get_certainty() {
-            Certainty::Known => "certainty-badge badge-known",
-            Certainty::Inferred(_) => "certainty-badge badge-inferred",
-            Certainty::Unknown => "certainty-badge badge-unknown",
+        match info.certainty {
+            90..=100 => "certainty-badge badge-known",
+            50..=89 => "certainty-badge badge-inferred",
+            _ => "certainty-badge badge-unknown",
         }
     };
 
@@ -42,7 +43,7 @@ pub fn TypeCard(
             <div class="type-header">
                 <div class="type-name">{move || type_info.get().name.clone()}</div>
                 <div class=certainty_badge_class>
-                    {move || type_info.get().get_certainty().as_percentage()}
+                    {move || type_info.get().certainty_percentage()}
                 </div>
             </div>
 

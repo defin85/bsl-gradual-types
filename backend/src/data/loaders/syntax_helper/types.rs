@@ -65,12 +65,17 @@ pub struct TypeDocumentation {
     pub since_version: String,
 }
 
+/// Двуязычное имя (русское, английское)
+pub type BilingualName = (String, String);
+
 /// Структура типа
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeStructure {
     pub collection_element: Option<String>,
-    pub methods: Vec<String>,
-    pub properties: Vec<String>,
+    /// Методы с двуязычными именами: (русское, английское)
+    pub methods: Vec<BilingualName>,
+    /// Свойства с двуязычными именами: (русское, английское)
+    pub properties: Vec<BilingualName>,
     pub constructors: Vec<String>,
     pub iterable: bool,
     pub indexable: bool,

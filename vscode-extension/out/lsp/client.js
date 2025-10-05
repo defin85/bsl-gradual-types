@@ -90,12 +90,12 @@ async function startLanguageClient(context) {
         serverOptions = {
             run: {
                 command: serverPath,
-                args: ['lsp'],
+                args: [],
                 options: execOptions
             },
             debug: {
                 command: serverPath,
-                args: ['lsp', '--debug'],
+                args: [],
                 options: execOptions
             }
         };

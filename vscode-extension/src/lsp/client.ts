@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { 
-    TypeInfoParams, 
-    ValidateMethodParams, 
+import {
+    TypeInfoParams,
+    ValidateMethodParams,
     IndexingProgressParams
 } from '../types';
 import {
@@ -11,12 +11,25 @@ import {
     TransportKind,
     RevealOutputChannelOn,
     Trace,
-    ExecutableOptions
+    Executable,
+    State
 } from 'vscode-languageclient/node';
 import { getBinaryPath } from '../utils/binaryPath';
 import { BslAnalyzerConfig } from '../config/configHelper';
 import { updateStatusBar } from './progress';
 import * as fs from 'fs';
+
+/**
+ * Преобразует состояние LSP клиента в читаемую строку
+ */
+function StateToString(state: State): string {
+    switch (state) {
+        case State.Stopped: return 'Stopped';
+        case State.Starting: return 'Starting';
+        case State.Running: return 'Running';
+        default: return `Unknown(${state})`;
+    }
+}
 
 let client: LanguageClient | null = null;
 let outputChannel: vscode.OutputChannel;
@@ -78,27 +91,22 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
     let serverOptions: ServerOptions;
     
     if (serverMode === 'stdio') {
-        // STDIO mode - запускаем сервер как процесс
-        const execOptions: ExecutableOptions = {
-            env: { 
-                ...process.env,
-                RUST_LOG: 'info', // Use 'info' as default log level
-                RUST_BACKTRACE: '1'
-            }
+        // STDIO mode - прямой запуск (как в rust-analyzer)
+        const newEnv = { ...process.env };
+        newEnv.RUST_LOG = 'debug';
+        newEnv.RUST_BACKTRACE = 'full';
+
+        const run: Executable = {
+            command: serverPath,
+            options: { env: newEnv }
         };
-        
+
         serverOptions = {
-            run: {
-                command: serverPath,
-                args: ['lsp'],
-                options: execOptions
-            },
-            debug: {
-                command: serverPath,
-                args: ['lsp', '--debug'],
-                options: execOptions
-            }
+            run,
+            debug: run
         };
+
+        outputChannel.appendLine(`📝 Rust server logs: ${context.extensionPath}\\rust_lsp_server.log`);
     } else {
         // TCP mode - подключаемся к серверу
         outputChannel.appendLine(`📡 Connecting to LSP server on port ${tcpPort}...`);
@@ -160,9 +168,25 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
         clientOptions
     );
     
+    // Добавляем детальные обработчики ошибок ПЕРЕД запуском
+    client.onDidChangeState((event) => {
+        outputChannel.appendLine(`🔄 LSP Client state: ${StateToString(event.oldState)} → ${StateToString(event.newState)}`);
+    });
+
+    // Обработчик ошибок подключения
+    (client as any).onConnectionError = (error: Error, message: any, count: number) => {
+        outputChannel.appendLine(`❌ Connection error (attempt ${count}): ${error.message}`);
+        outputChannel.appendLine(`   Error stack: ${error.stack}`);
+        if (message) {
+            outputChannel.appendLine(`   Last message: ${JSON.stringify(message)}`);
+        }
+    };
+
     // Start the client
     try {
         outputChannel.appendLine('🚀 Starting LSP client...');
+        outputChannel.appendLine(`   Server command: ${JSON.stringify(serverOptions)}`);
+
         await client.start();
         outputChannel.appendLine('✅ LSP client started successfully');
         

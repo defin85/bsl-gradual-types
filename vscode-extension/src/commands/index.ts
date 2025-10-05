@@ -12,12 +12,12 @@ import {
     updateStatusBar
 } from '../lsp/progress';
 import {
-    executeBslCommand,
     parseMethodCall,
     getConfigurationPath,
     getPlatformVersion,
     getPlatformDocsArchive
 } from '../utils';
+import { queryType, buildIndex, validateMethod, checkTypeCompatibility, incrementalUpdate } from '../lsp/customRequests';
 import {
     showTypeInfoWebview,
     showMethodInfoWebview,
@@ -85,17 +85,9 @@ export async function registerCommands(context: vscode.ExtensionContext) {
                 });
                 vscode.window.showInformationMessage('✅ File analysis completed');
             } else {
-                // Если LSP не работает, используем отдельный бинарник как fallback
-                outputChannel.appendLine('⚠️ LSP server not running, using standalone analyzer...');
-                const result = await executeBslCommand('bsl-analyzer', [
-                    'analyze',
-                    '--path', editor.document.uri.fsPath,
-                    '--enable-enhanced-semantics',
-                    '--enable-method-validation',
-                    '--platform-version', getPlatformVersion()
-                ]);
-                outputChannel.appendLine(result);
-                vscode.window.showInformationMessage('✅ File analysis completed (standalone mode)');
+                // ✅ ЗАМЕНА CLI → LSP: bsl-analyzer заменён на LSP анализ
+                outputChannel.appendLine('⚠️ LSP server not running - please start it first');
+                vscode.window.showWarningMessage('LSP server is not running. Please wait for it to start.');
             }
         } catch (error) {
             vscode.window.showErrorMessage(`Analysis failed: ${error}`);
@@ -263,14 +255,11 @@ export async function registerCommands(context: vscode.ExtensionContext) {
         updateStatusBar('BSL Analyzer: Searching type...');
 
         try {
-            const result = await executeBslCommand('query_type', [
-                '--name', typeName,
-                '--config', getConfigurationPath(),
-                '--platform-version', getPlatformVersion(),
-                '--show-all-methods'
-            ]);
+            // ✅ ЗАМЕНА CLI → LSP: используем LSP custom request вместо fork процесса
+            const result = await queryType(typeName);
 
-            showTypeInfoWebview(context, typeName, result);
+            const resultText = JSON.stringify(result, null, 2);
+            showTypeInfoWebview(context, typeName, resultText);
             updateStatusBar('BSL Analyzer: Ready');
         } catch (error) {
             vscode.window.showErrorMessage(`Type search failed: ${error}`);
@@ -301,14 +290,11 @@ export async function registerCommands(context: vscode.ExtensionContext) {
         updateStatusBar('BSL Analyzer: Searching method...');
 
         try {
-            const result = await executeBslCommand('query_type', [
-                '--name', typeName,
-                '--config', getConfigurationPath(),
-                '--platform-version', getPlatformVersion(),
-                '--show-all-methods'
-            ]);
+            // ✅ ЗАМЕНА CLI → LSP: query_type #2
+            const result = await queryType(typeName);
 
-            showMethodInfoWebview(context, typeName, methodName, result);
+            const resultText = JSON.stringify(result, null, 2);
+            showMethodInfoWebview(context, typeName, methodName, resultText);
             updateStatusBar('BSL Analyzer: Ready');
         } catch (error) {
             vscode.window.showErrorMessage(`Method search failed: ${error}`);
@@ -363,7 +349,8 @@ export async function registerCommands(context: vscode.ExtensionContext) {
                     args.push('--platform-docs-archive', platformDocsArchive);
                 }
                 
-                const result = await executeBslCommand('build_unified_index', args);
+                // ✅ ЗАМЕНА CLI → LSP: build_unified_index #1
+                const result = await buildIndex(configPath);
 
                 updateIndexingProgress(4, 'Finalizing index...', 90);
                 progress.report({ increment: 15, message: 'Finalizing...' });
@@ -399,13 +386,11 @@ export async function registerCommands(context: vscode.ExtensionContext) {
         updateStatusBar('BSL Analyzer: Loading stats...');
 
         try {
-            const result = await executeBslCommand('query_type', [
-                '--name', 'stats',
-                '--config', configPath,
-                '--platform-version', getPlatformVersion()
-            ]);
+            // ✅ ЗАМЕНА CLI → LSP: query_type #3
+            const result = await queryType('stats');
 
-            showIndexStatsWebview(context, result);
+            const resultText = JSON.stringify(result, null, 2);
+            showIndexStatsWebview(context, resultText);
             updateStatusBar('BSL Analyzer: Ready');
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to load index stats: ${error}`);
@@ -436,21 +421,18 @@ export async function registerCommands(context: vscode.ExtensionContext) {
                 updateIndexingProgress(2, 'Updating index...', 60);
                 progress.report({ increment: 50, message: 'Updating index...' });
                 await new Promise(resolve => setTimeout(resolve, 600));
-                
-                const result = await executeBslCommand('incremental_update', [
-                    '--config', configPath,
-                    '--platform-version', getPlatformVersion(),
-                    '--verbose'
-                ]);
+
+                // ✅ ЗАМЕНА CLI → LSP: incremental_update #11
+                const result = await incrementalUpdate(configPath, getPlatformVersion());
 
                 updateIndexingProgress(3, 'Finalizing...', 95);
                 progress.report({ increment: 20, message: 'Finalizing...' });
-                
+
                 finishIndexing(true);
-                
-                vscode.window.showInformationMessage(`✅ Index updated successfully: ${result}`);
-                
-                return result;
+
+                vscode.window.showInformationMessage(`✅ Index updated successfully: ${result.message}`);
+
+                return result.message;
             });
         } catch (error) {
             finishIndexing(false);
@@ -482,14 +464,11 @@ export async function registerCommands(context: vscode.ExtensionContext) {
         updateStatusBar('BSL Analyzer: Loading type info...');
 
         try {
-            const result = await executeBslCommand('query_type', [
-                '--name', typeName,
-                '--config', getConfigurationPath(),
-                '--platform-version', getPlatformVersion(),
-                '--show-all-methods'
-            ]);
+            // ✅ ЗАМЕНА CLI → LSP: query_type #4
+            const result = await queryType(typeName);
 
-            showTypeExplorerWebview(context, typeName, result);
+            const resultText = JSON.stringify(result, null, 2);
+            showTypeExplorerWebview(context, typeName, resultText);
             updateStatusBar('BSL Analyzer: Ready');
         } catch (error) {
             vscode.window.showErrorMessage(`Type exploration failed: ${error}`);
@@ -524,14 +503,11 @@ export async function registerCommands(context: vscode.ExtensionContext) {
                 return;
             }
 
-            const result = await executeBslCommand('query_type', [
-                '--name', methodCallInfo.objectName,
-                '--config', getConfigurationPath(),
-                '--platform-version', getPlatformVersion(),
-                '--show-all-methods'
-            ]);
+            // ✅ ЗАМЕНА CLI → LSP: query_type #5
+            const result = await queryType(methodCallInfo.objectName);
 
-            showMethodValidationWebview(context, methodCallInfo, result);
+            const resultText = JSON.stringify(result, null, 2);
+            showMethodValidationWebview(context, methodCallInfo, resultText);
             updateStatusBar('BSL Analyzer: Ready');
         } catch (error) {
             vscode.window.showErrorMessage(`Method validation failed: ${error}`);
@@ -562,14 +538,11 @@ export async function registerCommands(context: vscode.ExtensionContext) {
         updateStatusBar('BSL Analyzer: Checking compatibility...');
 
         try {
-            const result = await executeBslCommand('check_type_compatibility', [
-                '--from', fromType,
-                '--to', toType,
-                '--config', getConfigurationPath(),
-                '--platform-version', getPlatformVersion()
-            ]);
+            // ✅ ЗАМЕНА CLI → LSP: check_type_compatibility
+            const result = await checkTypeCompatibility(fromType, toType);
 
-            showTypeCompatibilityWebview(context, fromType, toType, result);
+            const resultText = JSON.stringify(result, null, 2);
+            showTypeCompatibilityWebview(context, fromType, toType, resultText);
             updateStatusBar('BSL Analyzer: Ready');
         } catch (error) {
             vscode.window.showErrorMessage(`Type compatibility check failed: ${error}`);

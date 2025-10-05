@@ -4,13 +4,79 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 📋 Содержание
 
-1. [Архитектура проекта](#архитектура-проекта)
-2. [Команды разработки](#команды-разработки)
-3. [Архитектурная диаграмма](#архитектурная-диаграмма)
-4. [Компоненты архитектуры](#компоненты-архитектуры)
-5. [Анализ кода](#анализ-кода)
-6. [MCP Инструментарий](#mcp-инструментарий)
-7. [Научные основы](#научные-основы)
+1. [Правила работы с Roadmap](#правила-работы-с-roadmap)
+2. [Архитектура проекта](#архитектура-проекта)
+3. [Команды разработки](#команды-разработки)
+4. [Архитектурная диаграмма](#архитектурная-диаграмма)
+5. [Компоненты архитектуры](#компоненты-архитектуры)
+6. [Анализ кода](#анализ-кода)
+7. [MCP Инструментарий](#mcp-инструментарий)
+8. [Научные основы](#научные-основы)
+
+---
+
+## Правила работы с Roadmap
+
+### 🚨 КРИТИЧЕСКОЕ ТРЕБОВАНИЕ: Контрольная проверка выполнения
+
+**ПРИ ВЫПОЛНЕНИИ ЛЮБЫХ ЭТАПОВ ИЗ ROADMAP:**
+
+1. **ПЕРЕД отчётом о выполнении** — ОБЯЗАТЕЛЬНО провести **контрольную проверку фактического выполнения**
+
+2. **Проверка должна включать:**
+   - ✅ Чтение реального кода в файлах (Read tool)
+   - ✅ Поиск реализованных функций/структур (Grep/Glob tools)
+   - ✅ Запуск тестов для проверки работоспособности (Bash: cargo test)
+   - ✅ Проверка компиляции (Bash: cargo check/build)
+
+3. **ЗАПРЕЩЕНО:**
+   - ❌ Утверждать о выполнении без проверки кода
+   - ❌ Отчитываться о готовности всего этапа, если выполнена только часть задачи
+   - ❌ Предполагать наличие кода без чтения файлов
+   - ❌ Заявлять о прохождении тестов без их реального запуска
+
+4. **Формат отчёта о выполнении:**
+   ```markdown
+   ## Статус выполнения [Milestone X.Y]
+
+   ### ✅ Task N: [Название] — ВЫПОЛНЕНО
+   **Проверка:**
+   - ✅ [Файл:строка] — реализация найдена
+   - ✅ cargo test [test_name] — тесты проходят
+   - ✅ cargo check — компиляция успешна
+
+   ### ❌ Task M: [Название] — НЕ НАЧАТО
+   **Проверка:**
+   - ❌ grep показывает отсутствие кода
+   - ❌ файл не существует
+
+   ### ⚠️ Task K: [Название] — ЧАСТИЧНО (X%)
+   **Что есть:**
+   - ✅ [конкретные файлы и строки]
+   **Что отсутствует:**
+   - ❌ [конкретные недостающие компоненты]
+   ```
+
+5. **Примеры ПРАВИЛЬНОЙ проверки:**
+   ```bash
+   # Проверка Task 1: Подключить tree-sitter-bsl
+   grep -n "tree-sitter-bsl" Cargo.toml backend/Cargo.toml
+   cargo test -p bsl-backend tree_sitter
+
+   # Проверка Task 2: TreeSitterAdapter
+   find backend/src -name "*adapter*" | grep tree
+   grep -n "TreeSitterAdapter" backend/src -r
+
+   # Проверка Task 4: Flow-sensitive analysis
+   grep -n "FlowSensitive\|CFG\|ControlFlowGraph" backend/src -r
+   ```
+
+6. **Честность в отчётности:**
+   - Если задача выполнена на 10% — так и указывай: **⚠️ ЧАСТИЧНО (10%)**
+   - Если код не найден — четко заявляй: **❌ НЕ НАЧАТО**
+   - Если тесты не проходят — не считай задачу выполненной
+
+**Цель:** Реальный прогресс вместо иллюзии выполнения. Пользователь должен видеть объективную картину, а не оптимистичные предположения.
 
 ---
 
@@ -348,9 +414,9 @@ graph TB
 
     subgraph "🌐 Presentation Layer (Адаптеры)"
         LSPServer["🔌 LSP Server (`backend`)<br/>- Language Server Protocol<br/>- VS Code integration"]
-        
+
         WebInterface["🌐 Web Interface (`backend`)<br/>- Simple HTML dashboard<br/>- Type visualization"]
-        
+
         CLITool["⚙️ CLI Tool (`cli`)<br/>- Command line interface<br/>- Batch analysis"]
     end
 
@@ -373,19 +439,19 @@ graph TB
 
     subgraph "💾 Data Layer (`shared`)"
         PlatformTypes["📄 Platform Types<br/>- 1C platform metadata<br/>- HTML parsing<br/>- Type definitions"]
-        
+
         ConfigData["⚙️ Configuration<br/>- XML metadata<br/>- Settings<br/>- User preferences"]
     end
 
     %% Flow
     SystemCoordinator --> AnalysisCache
-    SystemCoordinator --> ParserCoordinator  
+    SystemCoordinator --> ParserCoordinator
     SystemCoordinator --> BasicObservability
     SystemCoordinator --> TypeSystemService
-    
+
     LSPServer --> TypeSystemService
     WebInterface --> TypeSystemService
-    
+
     TypeSystemService --> AnalysisEngine
     TypeSystemService --> AnalysisCache
 
@@ -409,7 +475,7 @@ graph TB
     classDef applicationStyle fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
     classDef domainStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px
     classDef dataStyle fill:#fce4ec,stroke:#c2185b,stroke-width:2px
-    
+
     class SystemCoordinator,AnalysisCache,ParserCoordinator,BasicObservability systemStyle
     class LSPServer,WebInterface,CLITool presentationStyle
     class TypeSystemService,AnalysisEngine applicationStyle

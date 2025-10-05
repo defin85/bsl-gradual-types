@@ -271,6 +271,19 @@ impl TypeSystemService {
             ResolutionResult::Union(types) => {
                 format!("Union тип из {} вариантов", types.len())
             }
+            ResolutionResult::Intersection(types) => {
+                format!("Intersection тип из {} типов", types.len())
+            }
+            ResolutionResult::Generic(gen) => {
+                format!("Generic тип: {}<{}>", gen.base_type,
+                    gen.type_params.iter()
+                        .map(|t| format!("{:?}", t))
+                        .collect::<Vec<_>>()
+                        .join(", "))
+            }
+            ResolutionResult::Nullable(inner) => {
+                format!("Nullable тип: {:?} | Null", inner)
+            }
             ResolutionResult::Dynamic => "Динамический тип".to_string(),
         }
     }
@@ -296,6 +309,24 @@ impl TypeSystemService {
 
         info!("✅ Анализ файла {} завершён", path);
         Ok(analysis_result)
+    }
+
+    /// LSP операции - инкрементальный парсинг для textDocument/didChange
+    pub async fn parse_incremental(
+        &self,
+        file_path: std::path::PathBuf,
+        new_content: String,
+        edits: Vec<crate::system::parser_coordinator::TextEdit>,
+    ) -> Result<()> {
+        info!("🔄 Инкрементальный парсинг файла: {:?}", file_path);
+
+        let _result = self
+            .parser
+            .parse_incremental(file_path, new_content, edits)
+            .map_err(|e| anyhow::anyhow!("Ошибка инкрементального парсинга: {}", e))?;
+
+        info!("✅ Инкрементальный парсинг завершён успешно");
+        Ok(())
     }
 
     /// Анализ содержимого файла без чтения с диска (Phase 4: улучшенная реализация)
@@ -943,6 +974,94 @@ impl TypeSystemService {
     ) -> Option<String> {
         // Простая заглушка для hover информации
         Some(format!("BSL символ на позиции {}:{} (Phase 4)", line, column))
+    }
+
+    // ============================================================================
+    // Validation API (Phase 4 - TypeValidator Integration)
+    // ============================================================================
+
+    /// Валидирует код 1С с использованием TypeValidator
+    ///
+    /// # Параметры
+    /// * `code` - фрагмент кода для валидации (например "массив.Добавить()" или "таблица.НесуществующийМетод()")
+    ///
+    /// # Возвращает
+    /// Список ошибок валидации или пустой вектор если код валиден
+    ///
+    /// # Примеры
+    /// ```
+    /// let errors = service.validate_code_fragment("массив.НесуществующийМетод()").await?;
+    /// if errors.is_empty() {
+    ///     println!("Код валиден!");
+    /// }
+    /// ```
+    pub async fn validate_code_fragment(&self, code: &str) -> Result<Vec<bsl_shared::api::ValidationErrorDto>> {
+        use bsl_shared::domain::validators::TypeValidator;
+        use bsl_shared::domain::types::DiagnosticSeverity;
+        use std::time::Instant;
+
+        let start = Instant::now();
+        let mut errors = Vec::new();
+
+        // Упрощённая валидация для демонстрации
+        // В реальной реализации нужен парсинг кода и анализ AST
+
+        // Примитивный парсинг выражений вида "объект.метод()" или "объект.свойство"
+        if let Some((object_expr, member)) = Self::parse_simple_member_access(code) {
+            // Резолвим тип объекта
+            let resolution = self.inference_service.resolve_expression_async(&object_expr).await;
+            let validator = TypeValidator::new(&self.metadata_lookup);
+
+                // Проверяем методы (если есть скобки)
+                if member.ends_with("()") || code.contains('(') {
+                    let method_name = member.trim_end_matches("()").trim();
+                    if let Some(error) = validator.validate_method_exists(&resolution, method_name) {
+                        let diagnostic = error.to_diagnostic(1, 1);
+                        errors.push(bsl_shared::api::ValidationErrorDto {
+                            message: diagnostic.message,
+                            severity: match diagnostic.severity {
+                                DiagnosticSeverity::Error => "error".to_string(),
+                                DiagnosticSeverity::Warning => "warning".to_string(),
+                                DiagnosticSeverity::Info | DiagnosticSeverity::Hint => "info".to_string(),
+                            },
+                            line: diagnostic.line,
+                            column: diagnostic.column,
+                            error_type: "NonExistentMethod".to_string(),
+                        });
+                    }
+                } else {
+                    // Проверяем свойства
+                    if let Some(error) = validator.validate_property_exists(&resolution, &member) {
+                        let diagnostic = error.to_diagnostic(1, 1);
+                        errors.push(bsl_shared::api::ValidationErrorDto {
+                            message: diagnostic.message,
+                            severity: match diagnostic.severity {
+                                DiagnosticSeverity::Error => "error".to_string(),
+                                DiagnosticSeverity::Warning => "warning".to_string(),
+                                DiagnosticSeverity::Info | DiagnosticSeverity::Hint => "info".to_string(),
+                            },
+                            line: diagnostic.line,
+                            column: diagnostic.column,
+                            error_type: "NonExistentProperty".to_string(),
+                        });
+                    }
+                }
+        }
+
+        info!("Валидация завершена за {:?}", start.elapsed());
+        Ok(errors)
+    }
+
+    /// Примитивный парсер для выражений вида "объект.метод()" или "объект.свойство"
+    fn parse_simple_member_access(code: &str) -> Option<(String, String)> {
+        let trimmed = code.trim();
+        if let Some(dot_pos) = trimmed.find('.') {
+            let object = trimmed[..dot_pos].trim().to_string();
+            let member = trimmed[dot_pos + 1..].trim().to_string();
+            Some((object, member))
+        } else {
+            None
+        }
     }
 }
 

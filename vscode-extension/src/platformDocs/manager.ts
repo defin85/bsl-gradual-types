@@ -3,14 +3,14 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import {
-    executeBslCommand,
     getPlatformDocsArchive
 } from '../utils';
-import { 
-    startIndexing, 
-    updateIndexingProgress, 
-    finishIndexing 
+import {
+    startIndexing,
+    updateIndexingProgress,
+    finishIndexing
 } from '../lsp/progress';
+import { extractPlatformDocs } from '../lsp/customRequests';
 import { BslPlatformDocsProvider } from '../providers';
 
 let outputChannel: vscode.OutputChannel;
@@ -120,33 +120,22 @@ export async function addPlatformDocumentation(provider: BslPlatformDocsProvider
                 if (primaryArchive) {
                     updateIndexingProgress(currentStep++, 'Processing platform documentation archives...', 25);
                     progress.report({ increment: 25, message: 'Extracting platform types from archives...' });
-                    
-                    const extractResult = await executeBslCommand('extract_platform_docs', [
-                        '--archive', primaryArchive,
-                        '--platform-version', version,
-                        '--force' // Всегда форсируем при ручном добавлении документации
-                    ]);
-                    
-                    // Ищем количество типов в выводе
-                    // extract_platform_docs обрабатывает оба архива и выводит общее количество
-                    const typesMatch = extractResult.match(/(\d+)\s+types/i) || 
-                                      extractResult.match(/(\d+)\s+entities/i) ||
-                                      extractResult.match(/Objects\s+│\s+(\d+)/i);
-                    const savedMatch = extractResult.match(/Saved\s+(\d+)\s+platform\s+types/i);
-                    
-                    if (savedMatch && savedMatch[1]) {
-                        totalTypesCount = parseInt(savedMatch[1]);
-                    } else if (typesMatch && typesMatch[1]) {
-                        totalTypesCount = parseInt(typesMatch[1]);
+
+                    // ✅ ЗАМЕНА CLI → LSP: extract_platform_docs #12
+                    const extractResult = await extractPlatformDocs(
+                        primaryArchive,
+                        version,
+                        true // force
+                    );
+
+                    totalTypesCount = extractResult.types_count;
+
+                    if (extractResult.success) {
+                        outputChannel.appendLine(`✅ Platform documentation extracted: ${totalTypesCount} types`);
+                        outputChannel.appendLine(`   Message: ${extractResult.message}`);
+                    } else {
+                        outputChannel.appendLine(`⚠️ Platform documentation extraction completed with warnings`);
                     }
-                    
-                    // Проверяем, были ли обработаны оба архива
-                    const hasAutoDetected = extractResult.includes('Auto-detected');
-                    if (hasAutoDetected) {
-                        outputChannel.appendLine(`✅ Both archives processed automatically`);
-                    }
-                    
-                    outputChannel.appendLine(`✅ Platform documentation extracted: ${totalTypesCount} types`);
                 }
                 
                 // Финализация
@@ -280,7 +269,8 @@ export async function parsePlatformDocumentation(version: string): Promise<void>
                 args.push('--platform-docs-archive', platformDocsArchive);
             }
             
-            const result = await executeBslCommand('build_unified_index', args);
+            // ✅ ЗАМЕНА CLI → LSP: build_unified_index #3
+            const result = await buildIndex(configPath);
 
             // Этап 3: Завершение
             updateIndexingProgress(3, 'Finalizing...', 95);

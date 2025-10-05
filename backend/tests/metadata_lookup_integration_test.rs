@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
 use bsl_shared::domain::repository::{TypeRepository, InMemoryTypeRepository};
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::types::{TypeResolution, ConcreteType, PlatformType, Certainty, ResolutionResult, ResolutionSource, ResolutionMetadata};
@@ -9,9 +10,12 @@ use bsl_shared::domain::types::{TypeResolution, ConcreteType, PlatformType, Cert
 #[test]
 fn test_metadata_lookup_with_real_syntax_helper() {
     // 1. Парсим синтаксис-помощник
-    let parser = SyntaxHelperParser::new();
-    let parsed_types = parser.parse_from_directory("examples/syntax_helper")
+    let mut parser = SyntaxHelperParser::new();
+    parser.parse_directory("examples/syntax_helper")
         .expect("Failed to parse syntax helper");
+
+    let db = parser.export_database();
+    let parsed_types = convert_syntax_helper_to_raw(&db);
 
     println!("✅ Parsed {} types from syntax helper", parsed_types.len());
 
@@ -72,9 +76,12 @@ fn test_metadata_lookup_with_real_syntax_helper() {
 #[test]
 fn test_repository_content_sample() {
     // Быстрый тест - просто посмотрим что есть в repository
-    let parser = SyntaxHelperParser::new();
-    let parsed_types = parser.parse_from_directory("examples/syntax_helper")
+    let mut parser = SyntaxHelperParser::new();
+    parser.parse_directory("examples/syntax_helper")
         .expect("Failed to parse");
+
+    let db = parser.export_database();
+    let parsed_types = convert_syntax_helper_to_raw(&db);
 
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository.load_types(parsed_types).expect("Failed to load");

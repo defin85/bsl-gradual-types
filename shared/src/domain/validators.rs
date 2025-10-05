@@ -13,6 +13,7 @@ use crate::domain::types::{
     ConcreteType, TypeResolution, TypeDiagnostic, DiagnosticSeverity,
     SpecialType,
 };
+use crate::domain::metadata_lookup::TypeMetadataLookup;
 
 /// Категории ошибок типизации из статьи Balyuk & Popova
 #[derive(Debug, Clone, PartialEq)]
@@ -28,6 +29,11 @@ pub enum TypeErrorKind {
     NonExistentProperty {
         object_type: String,
         property_name: String,
+    },
+    /// Обращение к несуществующему методу объекта
+    NonExistentMethod {
+        object_type: String,
+        method_name: String,
     },
     /// Обработка простого типа как коллекции
     SimpleTypeAsCollection {
@@ -55,6 +61,13 @@ impl TypeErrorKind {
                 "Свойство '{}' не существует для типа '{}'",
                 property_name, object_type
             ),
+            TypeErrorKind::NonExistentMethod {
+                object_type,
+                method_name,
+            } => format!(
+                "Метод '{}' не существует для типа '{}'",
+                method_name, object_type
+            ),
             TypeErrorKind::SimpleTypeAsCollection {
                 type_name,
                 operation,
@@ -74,10 +87,77 @@ impl TypeErrorKind {
 }
 
 /// Валидатор типов на основе правил из статьи
-pub struct TypeValidator;
+pub struct TypeValidator<'a> {
+    metadata_lookup: &'a TypeMetadataLookup,
+}
 
-impl TypeValidator {
-    /// Проверка корректности передачи параметров
+impl<'a> TypeValidator<'a> {
+    /// Создаёт новый валидатор с доступом к метаданным
+    pub fn new(metadata_lookup: &'a TypeMetadataLookup) -> Self {
+        Self { metadata_lookup }
+    }
+
+    /// Проверка существования метода у объекта (новый метод!)
+    pub fn validate_method_exists(
+        &self,
+        object_resolution: &TypeResolution,
+        method_name: &str,
+    ) -> Option<TypeErrorKind> {
+        let methods = self.metadata_lookup.get_methods(object_resolution);
+
+        // Проверяем есть ли метод с таким именем (case-insensitive для кириллицы и латиницы)
+        let method_exists = methods.iter().any(|m| {
+            Self::names_equal_ignore_case(&m.name, method_name) ||
+            Self::names_equal_ignore_case(&m.english_name, method_name)
+        });
+
+        if !method_exists {
+            // Получаем читаемое имя типа для сообщения об ошибке
+            let type_name = Self::resolution_to_string(object_resolution);
+            Some(TypeErrorKind::NonExistentMethod {
+                object_type: type_name,
+                method_name: method_name.to_string(),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Проверка существования свойства у объекта (обновлённый метод)
+    pub fn validate_property_exists(
+        &self,
+        object_resolution: &TypeResolution,
+        property_name: &str,
+    ) -> Option<TypeErrorKind> {
+        let properties = self.metadata_lookup.get_properties(object_resolution);
+
+        // Проверяем есть ли свойство с таким именем (case-insensitive)
+        let property_exists = properties.iter().any(|p| {
+            Self::names_equal_ignore_case(&p.name, property_name)
+        });
+
+        if !property_exists {
+            let type_name = Self::resolution_to_string(object_resolution);
+            Some(TypeErrorKind::NonExistentProperty {
+                object_type: type_name,
+                property_name: property_name.to_string(),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Case-insensitive сравнение строк (работает с кириллицей и латиницей)
+    fn names_equal_ignore_case(a: &str, b: &str) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        a.chars().zip(b.chars()).all(|(ca, cb)| {
+            ca.to_lowercase().eq(cb.to_lowercase())
+        })
+    }
+
+    /// Проверка корректности передачи параметров (старый API для совместимости)
     pub fn validate_method_call(
         method_name: &str,
         expected_params: &[String],
@@ -99,7 +179,7 @@ impl TypeValidator {
         errors
     }
 
-    /// Проверка существования свойства у объекта
+    /// Проверка существования свойства у объекта (старый API для совместимости)
     pub fn validate_property_access(
         object_type: &ConcreteType,
         property_name: &str,
@@ -164,6 +244,25 @@ impl TypeValidator {
                     expected == type_str || Self::is_subtype(&type_str, expected)
                 })
             }
+            ResolutionResult::Intersection(types) => {
+                // Все типы должны совпадать для intersection
+                types.iter().all(|t| {
+                    let type_str = t.to_string();
+                    expected == type_str || Self::is_subtype(&type_str, expected)
+                })
+            }
+            ResolutionResult::Generic(gen) => {
+                // Проверяем базовый тип
+                expected == gen.base_type || Self::is_subtype(&gen.base_type, expected)
+            }
+            ResolutionResult::Nullable(inner) => {
+                // Nullable тип совместим если внутренний тип совместим, или если ожидается Null
+                if expected == "Null" {
+                    return true;
+                }
+                let inner_str = inner.to_string();
+                expected == inner_str || Self::is_subtype(&inner_str, expected)
+            }
         }
     }
 
@@ -183,6 +282,25 @@ impl TypeValidator {
                     .map(|wt| wt.type_.to_string())
                     .collect();
                 format!("({}) | вероятность неопределённости", type_names.join(" | "))
+            }
+            ResolutionResult::Intersection(types) => {
+                let type_names: Vec<_> = types.iter()
+                    .map(|t| t.to_string())
+                    .collect();
+                format!("({})", type_names.join(" & "))
+            }
+            ResolutionResult::Generic(gen) => {
+                if gen.type_params.is_empty() {
+                    gen.base_type.clone()
+                } else {
+                    let params: Vec<_> = gen.type_params.iter()
+                        .map(|t| t.to_string())
+                        .collect();
+                    format!("{}<{}>", gen.base_type, params.join(", "))
+                }
+            }
+            ResolutionResult::Nullable(inner) => {
+                format!("{} | Null", inner.to_string())
             }
             ResolutionResult::Dynamic => "Произвольный".to_string(),
         }

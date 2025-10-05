@@ -21,13 +21,16 @@ pub fn convert_syntax_helper_to_raw(db: &SyntaxHelperDatabase) -> Vec<RawTypeDat
 }
 
 fn convert_type_info_to_raw(type_info: &TypeInfo) -> RawTypeData {
-    let methods = type_info.structure.methods.iter().map(|name| RawMethodData {
-        name: name.clone(),
+    // Конвертируем методы с сохранением двуязычных имён
+    let methods = type_info.structure.methods.iter().map(|(russian, english)| RawMethodData {
+        name: russian.clone(),
+        english_name: english.clone(),
         ..Default::default()
     }).collect();
 
-    let properties = type_info.structure.properties.iter().map(|name| RawPropertyData {
-        name: name.clone(),
+    // Конвертируем свойства с сохранением двуязычных имён (если будут)
+    let properties = type_info.structure.properties.iter().map(|(russian, _english)| RawPropertyData {
+        name: russian.clone(),
         ..Default::default()
     }).collect();
 

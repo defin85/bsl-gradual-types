@@ -1,0 +1,22 @@
+[package]
+name = "bsl-type-visualization"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Shared DTOs
+bsl-shared = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+
+[lib]
+name = "bsl_type_visualization"
+path = "src/lib.rs"

@@ -123,7 +123,50 @@ grep -n "pub methods" frontend/src/api/types.rs
 >
 > Если структура WASM ожидает обязательные поля, которых нет в API - ошибка!
 
+## 💡 Реальный пример из практики
+
+**Дата:** 2025-10-05
+**Проблема:** `Error: missing field 'methods'` при загрузке типов во Frontend
+
+### Симптомы:
+```
+❌ API error: JsValue(Error: missing field `methods`)
+```
+
+### Причина:
+Backend использовал `skip_serializing_if` для пропуска пустых полей:
+```rust
+#[serde(skip_serializing_if = "Vec::is_empty")]
+pub methods: Vec<String>,
+```
+
+Когда метод возвращал тип БЕЗ методов, JSON не включал поле `methods`.
+Frontend WASM ожидал это поле всегда → ошибка десериализации.
+
+### Решение:
+```rust
+// shared/src/api/dtos.rs - добавлен #[serde(default)]
+#[serde(default, skip_serializing_if = "Vec::is_empty")]
+pub methods: Vec<String>,
+
+#[serde(default, skip_serializing_if = "Vec::is_empty")]
+pub properties: Vec<String>,
+```
+
+### Пересборка:
+```bash
+cd frontend && trunk build --release
+# Время: 26 секунд
+```
+
+### Результат:
+✅ Ошибки десериализации устранены
+✅ Frontend успешно загружает 3,362 типа
+✅ Поиск и фильтрация работают корректно
+
+**Урок:** Всегда комбинируйте `default` с `skip_serializing_if` для опциональных полей!
+
 ---
 
 **Дата создания:** 2025-10-02
-**Последнее обновление:** 2025-10-02
+**Последнее обновление:** 2025-10-05

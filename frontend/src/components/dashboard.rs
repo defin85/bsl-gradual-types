@@ -1,6 +1,6 @@
 //! Dashboard component with metrics and overview
 
-use crate::api::types::*;
+use crate::api::*;
 use leptos::prelude::*;
 
 /// Dashboard with overview metrics
@@ -10,7 +10,7 @@ pub fn Dashboard(
     /// Type metrics signal
     metrics: Signal<Option<TypeMetrics>>,
     /// Search result signal
-    search_result: Signal<Option<TypeSearchResult>>,
+    search_result: Signal<Option<AnalysisResultDto>>,
 ) -> impl IntoView {
     view! {
         <div class="dashboard-grid">
@@ -44,7 +44,7 @@ pub fn Dashboard(
                             if let Some(result) = search_result.get() {
                                 result.metrics.certainty_high.to_string()
                             } else if let Some(metrics_data) = metrics.get() {
-                                metrics_data.known_types.to_string()
+                                metrics_data.known_types().to_string()
                             } else {
                                 "0".to_string()
                             }
@@ -64,7 +64,7 @@ pub fn Dashboard(
                             if let Some(result) = search_result.get() {
                                 result.metrics.certainty_medium.to_string()
                             } else if let Some(metrics_data) = metrics.get() {
-                                metrics_data.inferred_types.to_string()
+                                metrics_data.inferred_types().to_string()
                             } else {
                                 "0".to_string()
                             }
@@ -84,7 +84,7 @@ pub fn Dashboard(
                             if let Some(result) = search_result.get() {
                                 result.metrics.certainty_low.to_string()
                             } else if let Some(metrics_data) = metrics.get() {
-                                metrics_data.unknown_types.to_string()
+                                metrics_data.unknown_types().to_string()
                             } else {
                                 "0".to_string()
                             }
@@ -104,7 +104,7 @@ pub fn Dashboard(
                             if let Some(result) = search_result.get() {
                                 result.metrics.flow_sensitive.to_string()
                             } else if let Some(metrics_data) = metrics.get() {
-                                metrics_data.flow_sensitive_types.to_string()
+                                metrics_data.flow_sensitive_types().to_string()
                             } else {
                                 "0".to_string()
                             }
@@ -124,7 +124,7 @@ pub fn Dashboard(
                             if let Some(result) = search_result.get() {
                                 result.metrics.cache_hit_rate.clone()
                             } else if let Some(metrics_data) = metrics.get() {
-                                format!("{:.0}%", metrics_data.cache_hit_rate * 100.0)
+                                metrics_data.cache_hit_rate.clone()
                             } else {
                                 "N/A".to_string()
                             }
@@ -134,7 +134,7 @@ pub fn Dashboard(
                     <div class="metric-card__extra">
                         {move || {
                             if let Some(metrics_data) = metrics.get() {
-                                format!("Скорость: {:.0}ms", metrics_data.analysis_speed_ms)
+                                format!("Скорость: {:.0}ms", metrics_data.analysis_speed_ms())
                             } else {
                                 "".to_string()
                             }
@@ -184,7 +184,7 @@ pub fn Dashboard(
                             if let Some(result) = search_result.get() {
                                 result.metrics.analysis_speed.clone()
                             } else if let Some(metrics_data) = metrics.get() {
-                                format!("{:.0}ms", metrics_data.analysis_speed_ms)
+                                format!("{:.0}ms", metrics_data.analysis_speed_ms())
                             } else {
                                 "125ms".to_string()
                             }

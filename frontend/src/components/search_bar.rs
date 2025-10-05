@@ -1,6 +1,6 @@
 //! Enhanced search bar component for filtering types
 
-use crate::api::types::*;
+use crate::api::*;
 use leptos::prelude::*;
 use leptos::html;
 use web_sys::Event;
@@ -42,15 +42,11 @@ pub fn SearchBar(
         let target = ev.target().unwrap();
         let select = target.dyn_into::<web_sys::HtmlSelectElement>().unwrap();
         let value = select.value();
-        
+
         filters.update(|f| {
             f.facet = match value.as_str() {
-                "Manager" => Some(FacetKind::Manager),
-                "Object" => Some(FacetKind::Object),
-                "Reference" => Some(FacetKind::Reference),
-                "Collection" => Some(FacetKind::Collection),
-                "Metadata" => Some(FacetKind::Metadata),
-                _ => None,
+                "" => None,
+                facet_str => Some(facet_str.to_string()),
             };
         });
         

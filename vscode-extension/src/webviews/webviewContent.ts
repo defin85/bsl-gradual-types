@@ -1,45 +1,66 @@
+/**
+ * Webview Content Generation - MIGRATED TO Rust TypeVisualization
+ *
+ * Milestone 2.5: Унификация визуализации типов
+ * Использует Rust HtmlRenderer через LSP вместо TypeScript legacy
+ */
+
 import * as vscode from 'vscode';
+import { LanguageClient } from 'vscode-languageclient/node';
 import { MethodCallInfo } from '../utils';
 import { CodeMetrics } from '../types';
+import { renderTypeHtml, showTypeInfoWebview as showTypeInfoWebviewLsp, showMethodInfoWebview as showMethodInfoWebviewLsp } from '../lsp/typeVisualization';
 
 /**
  * Показать webview с информацией о типе
+ * ✅ MIGRATED: Использует Rust TypeVisualization через LSP
  */
-export function showTypeInfoWebview(_context: vscode.ExtensionContext, typeName: string, result: string) {
-    const panel = vscode.window.createWebviewPanel(
-        'bslTypeInfo',
-        `BSL Type: ${typeName}`,
-        vscode.ViewColumn.Two,
-        {
-            enableScripts: true,
-            retainContextWhenHidden: true
-        }
-    );
-    
-    panel.webview.html = getTypeInfoWebviewContent(typeName, result);
+export async function showTypeInfoWebview(
+    clientOrContext: LanguageClient | vscode.ExtensionContext,
+    typeName: string,
+    _result?: string
+): Promise<void> {
+    // Check if it's a LanguageClient (has sendRequest method)
+    if ('sendRequest' in clientOrContext) {
+        await showTypeInfoWebviewLsp(clientOrContext as LanguageClient, typeName);
+    } else {
+        console.warn('showTypeInfoWebview called with ExtensionContext - LSP client required');
+    }
 }
 
 /**
  * Показать webview с информацией о методе
+ * ✅ MIGRATED: Использует Rust TypeVisualization через LSP
  */
-export function showMethodInfoWebview(_context: vscode.ExtensionContext, typeName: string, methodName: string, result: string) {
-    const panel = vscode.window.createWebviewPanel(
-        'bslMethodInfo',
-        `BSL Method: ${typeName}.${methodName}`,
-        vscode.ViewColumn.Two,
-        {
-            enableScripts: true,
-            retainContextWhenHidden: true
-        }
-    );
-    
-    panel.webview.html = getMethodInfoWebviewContent(typeName, methodName, result);
+export async function showMethodInfoWebview(
+    clientOrContext: LanguageClient | vscode.ExtensionContext,
+    typeName: string,
+    methodName: string,
+    _result?: string
+): Promise<void> {
+    if ('sendRequest' in clientOrContext) {
+        await showMethodInfoWebviewLsp(clientOrContext as LanguageClient, typeName, methodName);
+    } else {
+        console.warn('showMethodInfoWebview called with ExtensionContext - LSP client required');
+    }
 }
 
 /**
  * Показать webview с обозревателем типов
+ * ✅ MIGRATED: Использует Rust TypeVisualization
  */
-export function showTypeExplorerWebview(_context: vscode.ExtensionContext, typeName: string, result: string) {
+export async function showTypeExplorerWebview(
+    clientOrContext: LanguageClient | vscode.ExtensionContext,
+    typeName: string,
+    _result?: string
+): Promise<void> {
+    if (!('sendRequest' in clientOrContext)) {
+        console.warn('showTypeExplorerWebview called with ExtensionContext - LSP client required');
+        return;
+    }
+
+    const client = clientOrContext as LanguageClient;
+
     const panel = vscode.window.createWebviewPanel(
         'bslTypeExplorer',
         `BSL Type Explorer: ${typeName}`,
@@ -49,12 +70,15 @@ export function showTypeExplorerWebview(_context: vscode.ExtensionContext, typeN
             retainContextWhenHidden: true
         }
     );
-    
-    panel.webview.html = getTypeExplorerWebviewContent(typeName, result);
+
+    panel.webview.html = '<html><body><h2>🔄 Загрузка...</h2></body></html>';
+    const html = await renderTypeHtml(client, typeName);
+    panel.webview.html = html;
 }
 
 /**
  * Показать webview со статистикой индекса
+ * ⚠️ TODO: Создать отдельный LSP request для метрик или использовать JsonRenderer
  */
 export function showIndexStatsWebview(_context: vscode.ExtensionContext, result: string) {
     const panel = vscode.window.createWebviewPanel(
@@ -66,8 +90,8 @@ export function showIndexStatsWebview(_context: vscode.ExtensionContext, result:
             retainContextWhenHidden: true
         }
     );
-    
-    panel.webview.html = getIndexStatsWebviewContent(result);
+
+    panel.webview.html = getIndexStatsWebviewContentSimple(result);
 }
 
 /**
@@ -83,7 +107,7 @@ export function showMethodValidationWebview(_context: vscode.ExtensionContext, m
             retainContextWhenHidden: true
         }
     );
-    
+
     panel.webview.html = getMethodValidationWebviewContent(methodCall, result);
 }
 
@@ -100,7 +124,7 @@ export function showTypeCompatibilityWebview(_context: vscode.ExtensionContext, 
             retainContextWhenHidden: true
         }
     );
-    
+
     panel.webview.html = getTypeCompatibilityWebviewContent(fromType, toType, result);
 }
 
@@ -118,150 +142,14 @@ export function showMetricsWebview(_context: vscode.ExtensionContext, metrics: C
         }
     );
 
-    panel.webview.html = getMetricsWebviewContent(metrics);
+    panel.webview.html = getMetricsWebviewContentSimple(metrics);
 }
 
-// HTML генераторы для webview
-function getTypeInfoWebviewContent(typeName: string, result: string): string {
-    return `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BSL Type Information</title>
-        <style>
-            body {
-                font-family: var(--vscode-font-family);
-                color: var(--vscode-foreground);
-                background-color: var(--vscode-editor-background);
-                padding: 20px;
-            }
-            h1 {
-                color: var(--vscode-titleBar-activeForeground);
-                border-bottom: 2px solid var(--vscode-panel-border);
-                padding-bottom: 10px;
-            }
-            .type-info {
-                background-color: var(--vscode-editor-inactiveSelectionBackground);
-                border: 1px solid var(--vscode-panel-border);
-                border-radius: 4px;
-                padding: 15px;
-                margin-top: 15px;
-            }
-            pre {
-                background-color: var(--vscode-textBlockQuote-background);
-                border: 1px solid var(--vscode-panel-border);
-                border-radius: 4px;
-                padding: 10px;
-                overflow-x: auto;
-            }
-        </style>
-    </head>
-    <body>
-        <h1>Type: ${typeName}</h1>
-        <div class="type-info">
-            <pre>${result}</pre>
-        </div>
-    </body>
-    </html>
-    `;
-}
+// =============================================================================
+// Simple HTML generators (используют VSCode CSS variables)
+// =============================================================================
 
-function getMethodInfoWebviewContent(typeName: string, methodName: string, result: string): string {
-    return `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BSL Method Information</title>
-        <style>
-            body {
-                font-family: var(--vscode-font-family);
-                color: var(--vscode-foreground);
-                background-color: var(--vscode-editor-background);
-                padding: 20px;
-            }
-            h1 {
-                color: var(--vscode-titleBar-activeForeground);
-                border-bottom: 2px solid var(--vscode-panel-border);
-                padding-bottom: 10px;
-            }
-            .method-info {
-                background-color: var(--vscode-editor-inactiveSelectionBackground);
-                border: 1px solid var(--vscode-panel-border);
-                border-radius: 4px;
-                padding: 15px;
-                margin-top: 15px;
-            }
-            pre {
-                background-color: var(--vscode-textBlockQuote-background);
-                border: 1px solid var(--vscode-panel-border);
-                border-radius: 4px;
-                padding: 10px;
-                overflow-x: auto;
-            }
-        </style>
-    </head>
-    <body>
-        <h1>Method: ${typeName}.${methodName}</h1>
-        <div class="method-info">
-            <pre>${result}</pre>
-        </div>
-    </body>
-    </html>
-    `;
-}
-
-function getTypeExplorerWebviewContent(typeName: string, result: string): string {
-    return `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BSL Type Explorer</title>
-        <style>
-            body {
-                font-family: var(--vscode-font-family);
-                color: var(--vscode-foreground);
-                background-color: var(--vscode-editor-background);
-                padding: 20px;
-            }
-            .explorer-header {
-                border-bottom: 2px solid var(--vscode-panel-border);
-                padding-bottom: 16px;
-                margin-bottom: 20px;
-            }
-            .explorer-title {
-                font-size: 24px;
-                font-weight: bold;
-                color: var(--vscode-charts-blue);
-            }
-            .result-content {
-                background: var(--vscode-editor-inactiveSelectionBackground);
-                border: 1px solid var(--vscode-panel-border);
-                border-radius: 6px;
-                padding: 16px;
-                white-space: pre-wrap;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 14px;
-                overflow-x: auto;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="explorer-header">
-            <div class="explorer-title">🧭 Type Explorer: ${typeName}</div>
-        </div>
-        <div class="result-content">${result}</div>
-    </body>
-    </html>
-    `;
-}
-
-function getIndexStatsWebviewContent(result: string): string {
+function getIndexStatsWebviewContentSimple(result: string): string {
     return `
     <!DOCTYPE html>
     <html lang="en">
@@ -271,38 +159,30 @@ function getIndexStatsWebviewContent(result: string): string {
         <title>BSL Index Statistics</title>
         <style>
             body {
-                font-family: var(--vscode-font-family);
-                color: var(--vscode-foreground);
-                background-color: var(--vscode-editor-background);
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                 padding: 20px;
+                background: var(--vscode-editor-background);
+                color: var(--vscode-editor-foreground);
             }
-            .stats-header {
-                border-bottom: 2px solid var(--vscode-panel-border);
-                padding-bottom: 16px;
-                margin-bottom: 20px;
-            }
-            .stats-title {
-                font-size: 24px;
-                font-weight: bold;
-                color: var(--vscode-charts-orange);
-            }
-            .result-content {
-                background: var(--vscode-editor-inactiveSelectionBackground);
+            .stats-container {
+                background: var(--vscode-sideBar-background);
                 border: 1px solid var(--vscode-panel-border);
                 border-radius: 6px;
-                padding: 16px;
-                white-space: pre-wrap;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 14px;
+                padding: 20px;
+            }
+            pre {
+                background: var(--vscode-textCodeBlock-background);
+                padding: 12px;
+                border-radius: 4px;
                 overflow-x: auto;
             }
         </style>
     </head>
     <body>
-        <div class="stats-header">
-            <div class="stats-title">📊 Index Statistics</div>
+        <h1>📊 Index Statistics</h1>
+        <div class="stats-container">
+            <pre>${result}</pre>
         </div>
-        <div class="result-content">${result}</div>
     </body>
     </html>
     `;
@@ -314,14 +194,13 @@ function getMethodValidationWebviewContent(methodCall: MethodCallInfo, result: s
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>BSL Method Validation</title>
         <style>
             body {
-                font-family: var(--vscode-font-family);
-                color: var(--vscode-foreground);
-                background-color: var(--vscode-editor-background);
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                 padding: 20px;
+                background: var(--vscode-editor-background);
+                color: var(--vscode-editor-foreground);
             }
             .validation-header {
                 border-bottom: 2px solid var(--vscode-panel-border);
@@ -331,24 +210,22 @@ function getMethodValidationWebviewContent(methodCall: MethodCallInfo, result: s
             .validation-title {
                 font-size: 24px;
                 font-weight: bold;
-                color: var(--vscode-charts-red);
+                color: var(--vscode-errorForeground);
             }
             .method-call-info {
-                background: var(--vscode-badge-background);
-                color: var(--vscode-badge-foreground);
+                background: var(--vscode-textCodeBlock-background);
                 padding: 8px 12px;
                 border-radius: 4px;
                 margin: 8px 0;
                 font-family: 'Consolas', 'Monaco', monospace;
             }
             .result-content {
-                background: var(--vscode-editor-inactiveSelectionBackground);
+                background: var(--vscode-textCodeBlock-background);
                 border: 1px solid var(--vscode-panel-border);
                 border-radius: 6px;
                 padding: 16px;
                 white-space: pre-wrap;
                 font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 14px;
                 overflow-x: auto;
             }
         </style>
@@ -372,14 +249,13 @@ function getTypeCompatibilityWebviewContent(fromType: string, toType: string, re
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>BSL Type Compatibility</title>
         <style>
             body {
-                font-family: var(--vscode-font-family);
-                color: var(--vscode-foreground);
-                background-color: var(--vscode-editor-background);
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                 padding: 20px;
+                background: var(--vscode-editor-background);
+                color: var(--vscode-editor-foreground);
             }
             .compatibility-header {
                 border-bottom: 2px solid var(--vscode-panel-border);
@@ -389,11 +265,10 @@ function getTypeCompatibilityWebviewContent(fromType: string, toType: string, re
             .compatibility-title {
                 font-size: 24px;
                 font-weight: bold;
-                color: var(--vscode-charts-yellow);
+                color: var(--vscode-editorWarning-foreground);
             }
             .type-comparison {
-                background: var(--vscode-badge-background);
-                color: var(--vscode-badge-foreground);
+                background: var(--vscode-textCodeBlock-background);
                 padding: 8px 12px;
                 border-radius: 4px;
                 margin: 8px 0;
@@ -401,13 +276,12 @@ function getTypeCompatibilityWebviewContent(fromType: string, toType: string, re
                 text-align: center;
             }
             .result-content {
-                background: var(--vscode-editor-inactiveSelectionBackground);
+                background: var(--vscode-textCodeBlock-background);
                 border: 1px solid var(--vscode-panel-border);
                 border-radius: 6px;
                 padding: 16px;
                 white-space: pre-wrap;
                 font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 14px;
                 overflow-x: auto;
             }
         </style>
@@ -425,64 +299,55 @@ function getTypeCompatibilityWebviewContent(fromType: string, toType: string, re
     `;
 }
 
-function getMetricsWebviewContent(metrics: CodeMetrics): string {
+function getMetricsWebviewContentSimple(metrics: CodeMetrics): string {
+    const metricsHtml = Object.entries(metrics)
+        .map(([key, value]) => `<tr><td>${key}</td><td>${value}</td></tr>`)
+        .join('');
+
     return `
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>BSL Code Quality Metrics</title>
         <style>
             body {
-                font-family: var(--vscode-font-family);
-                color: var(--vscode-foreground);
-                background-color: var(--vscode-editor-background);
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                 padding: 20px;
+                background: var(--vscode-editor-background);
+                color: var(--vscode-editor-foreground);
             }
-            h1 {
-                color: var(--vscode-titleBar-activeForeground);
-                border-bottom: 2px solid var(--vscode-panel-border);
-                padding-bottom: 10px;
-            }
-            .metrics-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-                gap: 20px;
-                margin-top: 20px;
-            }
-            .metric-card {
-                background-color: var(--vscode-editor-inactiveSelectionBackground);
-                border: 1px solid var(--vscode-panel-border);
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                background: var(--vscode-sideBar-background);
                 border-radius: 6px;
-                padding: 15px;
+                overflow: hidden;
             }
-            .metric-title {
+            th, td {
+                padding: 12px;
+                text-align: left;
+                border-bottom: 1px solid var(--vscode-panel-border);
+            }
+            th {
+                background: var(--vscode-textCodeBlock-background);
                 font-weight: bold;
-                color: var(--vscode-charts-blue);
-                margin-bottom: 10px;
-            }
-            .metric-value {
-                font-size: 24px;
-                font-weight: bold;
-            }
-            .metric-description {
-                color: var(--vscode-descriptionForeground);
-                font-size: 12px;
-                margin-top: 5px;
             }
         </style>
     </head>
     <body>
-        <h1>Code Quality Metrics</h1>
-        <div class="metrics-grid">
-            ${Object.entries(metrics).map(([key, value]) => `
-                <div class="metric-card">
-                    <div class="metric-title">${key}</div>
-                    <div class="metric-value">${value}</div>
-                </div>
-            `).join('')}
-        </div>
+        <h1>📈 Code Quality Metrics</h1>
+        <table>
+            <thead>
+                <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${metricsHtml}
+            </tbody>
+        </table>
     </body>
     </html>
     `;

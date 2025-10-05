@@ -177,6 +177,15 @@ impl CliFormatter {
             ResolutionResult::Union(types) => {
                 format!("Union[{}]", types.len()).yellow().to_string()
             }
+            ResolutionResult::Intersection(types) => {
+                format!("Intersection[{}]", types.len()).cyan().to_string()
+            }
+            ResolutionResult::Generic(gen) => {
+                format!("{}<{}>", gen.base_type, gen.type_params.len()).blue().to_string()
+            }
+            ResolutionResult::Nullable(inner) => {
+                format!("{} | Null", inner).yellow().to_string()
+            }
             ResolutionResult::Dynamic => "Dynamic".magenta().to_string(),
         }
     }

@@ -106,15 +106,9 @@ impl TypeMetadataLookup {
     /// ```
     pub fn get_methods(&self, resolution: &TypeResolution) -> Vec<RawMethodData> {
         let type_name = self.extract_type_name(resolution);
-        eprintln!("🔍 [TypeMetadataLookup] extracted type_name: {:?}", type_name);
 
         let raw_type = type_name.and_then(|name| {
-            let result = self.repository.find_type(&name);
-            eprintln!("🔍 [TypeMetadataLookup] find_type('{}') -> found: {}", name, result.is_some());
-            if let Some(ref raw) = result {
-                eprintln!("🔍 [TypeMetadataLookup] Type '{}' has {} methods", name, raw.methods.len());
-            }
-            result
+            self.repository.find_type(&name)
         });
 
         raw_type.map(|raw| raw.methods).unwrap_or_default()
@@ -265,6 +259,22 @@ impl TypeMetadataLookup {
             },
             // Union и Dynamic типы не имеют прямого соответствия в RawTypeData
             ResolutionResult::Union(_) | ResolutionResult::Dynamic => None,
+            // Intersection - берём первый тип
+            ResolutionResult::Intersection(types) => {
+                types.first().and_then(|t| self.extract_type_name(&TypeResolution {
+                    result: ResolutionResult::Concrete(t.clone()),
+                    ..resolution.clone()
+                }))
+            },
+            // Generic - используем базовый тип
+            ResolutionResult::Generic(gen) => Some(gen.base_type.clone()),
+            // Nullable - распаковываем внутренний тип
+            ResolutionResult::Nullable(inner) => {
+                self.extract_type_name(&TypeResolution {
+                    result: ResolutionResult::Concrete(inner.as_ref().clone()),
+                    ..resolution.clone()
+                })
+            },
         }
     }
 
@@ -326,6 +336,7 @@ mod tests {
             kind: None,
             attributes: vec![],
             tabular_sections: vec![],
+            enum_values: vec![],
         };
 
         repo.load_types(vec![array_type]).unwrap();

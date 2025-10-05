@@ -1,6 +1,6 @@
 //! Enhanced Table view component with sorting and pagination
 
-use crate::api::types::*;
+use crate::api::*;
 use crate::components::{Pagination, TypeDetailsModal};
 use leptos::prelude::*;
 
@@ -18,7 +18,7 @@ pub fn TableView(
     /// Types signal
     types: Signal<Vec<TypeInfo>>,
     /// Search result signal
-    search_result: Signal<Option<TypeSearchResult>>,
+    search_result: Signal<Option<AnalysisResultDto>>,
     /// Page change callback
     on_page_change: Callback<usize>,
 ) -> impl IntoView {

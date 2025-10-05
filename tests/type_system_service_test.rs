@@ -18,7 +18,7 @@ async fn test_get_all_types_as_dto_basic() {
     // Act: получаем все типы с пагинацией
     let limit = 10;
     let offset = 0;
-    let result = type_service.get_all_types_as_dto(limit, offset);
+    let result = type_service.get_all_types_as_dto(limit, offset, None, None, false);
 
     // Assert: проверяем структуру результата
     assert!(!result.types.is_empty(), "Should return some types");
@@ -42,10 +42,10 @@ async fn test_get_all_types_as_dto_pagination() {
     let type_service = coordinator.type_service().expect("Should have service");
 
     // Act: получаем первую страницу
-    let page1 = type_service.get_all_types_as_dto(5, 0);
+    let page1 = type_service.get_all_types_as_dto(5, 0, None, None, false);
 
     // Act: получаем вторую страницу
-    let page2 = type_service.get_all_types_as_dto(5, 5);
+    let page2 = type_service.get_all_types_as_dto(5, 5, None, None, false);
 
     // Assert: страницы должны быть разными
     if page1.types.len() == 5 && page2.types.len() > 0 {
@@ -72,7 +72,7 @@ async fn test_get_all_types_as_dto_certainty_levels() {
     let type_service = coordinator.type_service().expect("Should have service");
 
     // Act: получаем типы
-    let result = type_service.get_all_types_as_dto(50, 0);
+    let result = type_service.get_all_types_as_dto(50, 0, None, None, false);
 
     // Assert: проверяем что у типов есть certainty levels
     for type_dto in &result.types {
@@ -94,7 +94,7 @@ async fn test_get_all_types_as_dto_categories() {
     let type_service = coordinator.type_service().expect("Should have service");
 
     // Act
-    let result = type_service.get_all_types_as_dto(50, 0);
+    let result = type_service.get_all_types_as_dto(50, 0, None, None, false);
 
     // Assert: проверяем категории
     assert!(!result.categories.is_empty(), "Should have categories");
@@ -164,7 +164,7 @@ async fn test_dto_type_fields_completeness() {
     let type_service = coordinator.type_service().expect("Should have service");
 
     // Act
-    let result = type_service.get_all_types_as_dto(10, 0);
+    let result = type_service.get_all_types_as_dto(10, 0, None, None, false);
 
     // Assert: проверяем что все поля TypeDto заполнены
     for type_dto in &result.types {
@@ -186,7 +186,7 @@ async fn test_large_pagination_request() {
     let type_service = coordinator.type_service().expect("Should have service");
 
     // Act: запрашиваем большое количество типов
-    let result = type_service.get_all_types_as_dto(1000, 0);
+    let result = type_service.get_all_types_as_dto(1000, 0, None, None, false);
 
     // Assert: должно вернуть не больше чем есть типов
     assert!(result.types.len() <= 1000, "Should not exceed limit");

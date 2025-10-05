@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
 use bsl_shared::domain::repository::{TypeRepository, InMemoryTypeRepository};
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::types::{TypeResolution, ConcreteType, PlatformType, Certainty, ResolutionResult, ResolutionSource, ResolutionMetadata};
@@ -11,9 +12,13 @@ fn main() {
 
     // 1. Парсим
     println!("📚 Parsing syntax helper...");
-    let parser = SyntaxHelperParser::new();
-    let parsed_types = parser.parse_directory("examples/syntax_helper")
+    let mut parser = SyntaxHelperParser::new();
+    parser.parse_directory("examples/syntax_helper")
         .expect("Failed to parse");
+
+    let db = parser.export_database();
+    let parsed_types = convert_syntax_helper_to_raw(&db);
+
     println!("✅ Parsed {} types\n", parsed_types.len());
 
     // 2. Repository

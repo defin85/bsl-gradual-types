@@ -1,113 +1,131 @@
-# 🚀 BSL Analyzer - Инструкция по установке
+# Установка и тестирование BSL Gradual Types расширения для VS Code
 
-## 📦 Готовый пакет
-**Файл:** `bsl-analyzer-1.0.0.vsix` (21 KB)  
-**Версия:** 1.0.0  
-**Дата:** 2025-08-04
+## 📦 Готовое расширение
 
-## ⚡ Быстрая установка
+Расширение упаковано в файл: `bsl-gradual-types-1.0.0.vsix` (29.15 MB)
 
-### Шаг 1: Установка расширения
-1. Скопируйте файл `bsl-analyzer-1.0.0.vsix` в удобное место
-2. Откройте VSCode
-3. Нажмите `Ctrl+Shift+P`
-4. Введите: "Extensions: Install from VSIX..."
-5. Выберите файл `bsl-analyzer-1.0.0.vsix`
-6. Нажмите "Install"
-7. Перезапустите VSCode
+## 🚀 Установка
 
-### Шаг 2: Настройка путей (ОБЯЗАТЕЛЬНО!)
-Откройте настройки VSCode (`Ctrl+,`) и настройте:
+### Способ 1: Установка через VS Code UI
 
-```json
-{
-  "bslAnalyzer.indexServerPath": "C:\\1CProject\\bsl_type_safety_analyzer\\target\\debug",
-  "bslAnalyzer.configurationPath": "C:\\path\\to\\your\\1c\\configuration",
-  "bslAnalyzer.platformVersion": "8.3.25"
-}
-```
+1. Открой VS Code
+2. Открой панель Extensions (Ctrl+Shift+X)
+3. Кликни на иконку ... (меню) в правом верхнем углу панели
+4. Выбери "Install from VSIX..."
+5. Найди файл bsl-gradual-types-1.0.0.vsix
+6. Подтверди установку
 
-### Шаг 3: Первый запуск
-1. Откройте любой .bsl файл (или создайте test.bsl)
-2. Нажмите `Ctrl+Shift+P`
-3. Введите: "BSL Index: Build Unified BSL Index"
-4. Дождитесь завершения индексации
+### Способ 2: Установка через командную строку
 
-## ✅ Проверка установки
-
-### Проверьте статус расширения:
-- В статус баре должно появиться: "BSL Analyzer: Ready"
-- В Command Palette (`Ctrl+Shift+P`) найдите команды "BSL Index", "BSL Verification"
-
-### Тест функциональности:
-```
-Ctrl+Shift+P → "BSL Index: Search BSL Type"
-Введите: "Массив"
-→ Должен открыться Webview с информацией о типе
-```
-
-## 🔧 Требования
-
-### Обязательные файлы в target/debug/:
-- ✅ `lsp_server.exe`
-- ✅ `build_unified_index.exe` 
-- ✅ `query_type.exe`
-- ✅ `check_type_compatibility.exe`
-- ✅ `incremental_update.exe`
-
-### Если файлы отсутствуют:
 ```bash
-cd "C:\1CProject\bsl_type_safety_analyzer"
-cargo build --release
-# Затем укажите path: target/release вместо target/debug
+cd vscode-extension
+code --install-extension bsl-gradual-types-1.0.0.vsix
 ```
 
-## 🎯 Доступные команды
+## 🧪 Тестирование
 
-После установки доступно **14 команд**:
+Открой файл [examples/test_lsp.bsl](../examples/test_lsp.bsl) в VS Code и проверь:
 
-### BSL Index (6 команд)
-- Search BSL Type
-- Search Method in Type  
-- Build Unified BSL Index
-- Show Index Statistics
-- Incremental Index Update
-- Explore Type Methods & Properties
+1. **Hover подсказки** ✅ — наведи на переменную (работает!)
+2. **LSP сервер запущен** ✅ — View → Output → BSL Type Safety Analyzer
+3. **Парсинг работает** ✅ — логи показывают `Tree-sitter parsed: X nodes`
 
-### BSL Verification (2 команды)
-- Validate Method Call
-- Check Type Compatibility
+### Проверка работоспособности
 
-### BSL Analyzer (6 команд)
-- Analyze Current File
-- Analyze Workspace
-- Generate Reports
-- Show Code Quality Metrics
-- Configure Rules
-- Restart LSP Server
+**Output панель (Ctrl+Shift+U):**
+```
+🔄 LSP Client state: Starting → Running  ← ✅ Должно быть Running!
+✅ LSP client started successfully
+[Info] BSL Language Server initialized!
+```
 
-## 🐛 Решение проблем
+**Логи Rust сервера:**
+```bash
+# Просмотр логов в реальном времени
+tail -f vscode-extension/rust_lsp_server.log
+```
 
-### "Command not found"
-→ Проверьте настройку `bslAnalyzer.indexServerPath`
+### Что работает
 
-### "Configuration not found"  
-→ Проверьте настройку `bslAnalyzer.configurationPath`
+✅ **Hover tooltips** — показывает информацию о типах при наведении
+✅ **File parsing** — Tree-sitter парсит BSL синтаксис
+✅ **TypeSystemService** — система типов инициализирована
 
-### "LSP Server not starting"
-→ Проверьте наличие `lsp_server.exe` в указанной директории
+### Известные ограничения
 
-### Расширение не активируется
-→ Проверьте Output → BSL Analyzer на ошибки
+⚠️ `textDocument/diagnostic` не реализован (не критично)
+⚠️ `workspace/didChangeConfiguration` игнорируется (не критично)
+
+Детали решения проблем: [LSP_SUCCESS.md](LSP_SUCCESS.md)
 
 ## 🎉 Готово!
 
-После успешной установки вы получите:
-- 🔍 Поиск по 24,055+ BSL типам
-- ⚡ Real-time диагностику кода
-- 📊 Проверку совместимости типов
-- 🎯 Валидацию вызовов методов
-- 📈 Метрики качества кода
+LSP сервер запустится автоматически при открытии .bsl файлов.
 
 ---
-**BSL Analyzer v1.0** - Professional BSL development tools for VSCode
+
+## 🔧 Разработка расширения
+
+### Автоматическое обновление бинарников
+
+Расширение включает механизм автоматической синхронизации Rust бинарников:
+
+```bash
+# Компиляция с автоматическим копированием бинарников
+npm run compile
+
+# Принудительное обновление всех бинарников
+npm run copy-binaries:force
+
+# Создание production сборки (автоматически обновляет бинарники)
+npm run package
+```
+
+**Что происходит автоматически:**
+1. ✅ Проверка наличия `target/release/bsl-lsp-server.exe`
+2. ✅ Автоматическая сборка Rust если бинарник отсутствует
+3. ✅ Копирование в `vscode-extension/bin/lsp_server.exe`
+4. ✅ Пропуск копирования если бинарник уже актуален
+
+**Детали:** См. [scripts/README.md](scripts/README.md)
+
+### Пересборка расширения после изменений
+
+После изменений в Rust коде (backend):
+
+```bash
+cd vscode-extension
+
+# Вариант 1: Быстрая пересборка (только если бинарник устарел)
+npm run compile
+
+# Вариант 2: Полная пересборка (принудительно)
+npm run copy-binaries:force && npm run compile
+
+# Вариант 3: Production сборка для публикации
+npm run package
+```
+
+После изменений в TypeScript коде (расширение):
+
+```bash
+cd vscode-extension
+npm run compile
+```
+
+### Переупаковка и переустановка
+
+```bash
+cd vscode-extension
+
+# 1. Пересобрать бинарники и расширение
+npm run package
+
+# 2. Упаковать в .vsix
+vsce package
+
+# 3. Переустановить в VS Code
+code --install-extension bsl-gradual-types-1.0.0.vsix --force
+```
+
+**Примечание:** `--force` флаг переустанавливает расширение даже если оно уже установлено.

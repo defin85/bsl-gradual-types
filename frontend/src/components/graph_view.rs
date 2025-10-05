@@ -1,6 +1,6 @@
 //! Graph view component for type relationships visualization
 
-use crate::api::types::*;
+use crate::api::*;
 use leptos::prelude::*;
 
 /// Graph view for visualizing type relationships

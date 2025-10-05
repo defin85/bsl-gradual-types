@@ -29,11 +29,11 @@ pub struct TypeDto {
     pub facets: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub methods_count: Option<usize>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub methods: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes_count: Option<usize>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<String>,
     /// Enum values for platform enumeration types (e.g., "Авто (Auto)", "НеИспользовать (DontUse)")
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -117,4 +117,60 @@ pub struct PaginationDto {
     pub total_pages: usize,
     pub has_prev: bool,
     pub has_next: bool,
+}
+
+// ============================================================================
+// Validation DTOs
+// ============================================================================
+
+/// Request for code validation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateCodeRequest {
+    /// Code fragment to validate (e.g., "массив.Добавить()", "таблица.НесуществующийМетод()")
+    pub code: String,
+    /// Optional file path for context
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+}
+
+/// Response with validation results
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateCodeResponse {
+    /// Whether the code is valid (no errors)
+    pub is_valid: bool,
+    /// List of validation errors found
+    pub errors: Vec<ValidationErrorDto>,
+    /// Metadata about validation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ValidationMetadataDto>,
+}
+
+/// A single validation error
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationErrorDto {
+    /// Error message in Russian
+    pub message: String,
+    /// Error severity: "error", "warning", "info"
+    pub severity: String,
+    /// Line number (1-indexed)
+    pub line: u32,
+    /// Column number (1-indexed)
+    pub column: u32,
+    /// Type of error: "NonExistentMethod", "NonExistentProperty", etc.
+    pub error_type: String,
+}
+
+/// Metadata about the validation process
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationMetadataDto {
+    /// Number of expressions analyzed
+    pub expressions_analyzed: usize,
+    /// Number of types resolved
+    pub types_resolved: usize,
+    /// Time taken for validation (milliseconds)
+    pub duration_ms: u64,
 }

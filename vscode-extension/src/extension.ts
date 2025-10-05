@@ -18,7 +18,6 @@ import {
     updateStatusBar
 } from './lsp/progress';
 import {
-    executeBslCommand,
     getPlatformDocsArchive,
     initializeUtils,
     autoDetectConfiguration
@@ -241,7 +240,8 @@ async function initializeIndexIfNeeded() {
                 '--platform-docs-archive', platformDocsArchive
             ];
 
-            await executeBslCommand('build_unified_index', args);
+            // ✅ ЗАМЕНА CLI → LSP: build_unified_index #2
+            await buildIndex(configPath);
 
             updateIndexingProgress(4, 'Finalizing index...', 90);
             progress.report({ increment: 15, message: 'Finalizing...' });

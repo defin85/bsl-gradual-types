@@ -52,8 +52,10 @@ impl DocumentParser {
             },
             structure: TypeStructure {
                 collection_element: self.html_extractor.extract_collection_element(document),
-                methods: Vec::new(),      // Будут заполнены позже
-                properties: Vec::new(),   // Будут заполнены позже
+                // Извлекаем методы из HTML с двуязычными именами
+                methods: self.html_extractor.extract_methods_from_html(document),
+                // Извлекаем свойства из HTML с двуязычными именами
+                properties: self.html_extractor.extract_properties_from_html(document),
                 constructors: Vec::new(), // Будут заполнены позже
                 iterable: self.html_extractor.is_iterable(&description),
                 indexable: self.html_extractor.is_indexable(&description),
@@ -88,7 +90,11 @@ impl DocumentParser {
     }
 
     /// Парсит глобальную функцию из документа
-    pub fn parse_global_function(&self, path: &Path, document: &Html) -> Result<GlobalFunctionInfo> {
+    pub fn parse_global_function(
+        &self,
+        path: &Path,
+        document: &Html,
+    ) -> Result<GlobalFunctionInfo> {
         // Извлекаем категорию из пути
         let category = Self::extract_function_category(path);
 

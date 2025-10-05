@@ -25,6 +25,7 @@ path = "src/bin/lsp_server.rs"
 
 [dependencies]
 bsl-shared = { workspace = true }
+bsl-type-visualization = { path = "../type-visualization" }
 
 # Core dependencies
 anyhow = { workspace = true }
@@ -88,6 +89,7 @@ colored = { workspace = true }
 
 # Tree-sitter
 tree-sitter = { workspace = true }
+tree-sitter-bsl = { workspace = true }
 
 # HTML parsing
 scraper = { workspace = true }

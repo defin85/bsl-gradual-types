@@ -1,6 +1,6 @@
 //! Unified App component based on front_template
 
-use crate::api::{fetch_types, fetch_metrics, types::*};
+use crate::api::*; // Uses shared DTOs + frontend extensions
 use crate::components::{Dashboard, CardsView, TableView, GraphView, Sidebar};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -11,9 +11,9 @@ use leptos::task::spawn_local;
 pub fn App() -> impl IntoView {
     // Application state
     let current_mode = RwSignal::new("dashboard".to_string());
-    let types = RwSignal::new(Vec::<TypeInfo>::new());
-    let search_result = RwSignal::new(None::<TypeSearchResult>);
-    let metrics = RwSignal::new(None::<TypeMetrics>);
+    let types = RwSignal::new(Vec::<TypeDto>::new());
+    let search_result = RwSignal::new(None::<AnalysisResultDto>);
+    let metrics = RwSignal::new(None::<MetricsDto>);
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
     let filters = RwSignal::new(TypeFilters::new());

@@ -14,6 +14,7 @@ use clap::Parser;
 // ✅ ИСПРАВЛЕНО: Clean Architecture - используем Application Layer
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::system::SystemCoordinator;
+use bsl_type_visualization::{HtmlRenderer, RenderOptions, ThemeMode};
 
 // ✅ ИСПРАВЛЕНО: временные структуры удалены, используем TypeSystemService API
 
@@ -41,7 +42,43 @@ impl BslLanguageServer {
         }
     }
 
-    // ✅ ИСПРАВЛЕНО: удален неиспользуемый get_completion_prefix метод
+    /// Применяет текстовое изменение к строке
+    fn apply_text_edit(&self, source: &str, range: Range, new_text: &str) -> String {
+        let lines: Vec<&str> = source.lines().collect();
+        let start_line = range.start.line as usize;
+        let start_char = range.start.character as usize;
+        let end_line = range.end.line as usize;
+        let end_char = range.end.character as usize;
+
+        let mut result = String::new();
+
+        // Строки до изменения
+        for line in lines.iter().take(start_line) {
+            result.push_str(line);
+            result.push('\n');
+        }
+
+        // Начало изменяемой строки
+        if let Some(start_line_text) = lines.get(start_line) {
+            result.push_str(&start_line_text[..start_char.min(start_line_text.len())]);
+        }
+
+        // Новый текст
+        result.push_str(new_text);
+
+        // Конец изменяемой строки
+        if let Some(end_line_text) = lines.get(end_line) {
+            result.push_str(&end_line_text[end_char.min(end_line_text.len())..]);
+        }
+
+        // Строки после изменения
+        for line in lines.iter().skip(end_line + 1) {
+            result.push('\n');
+            result.push_str(line);
+        }
+
+        result
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -185,12 +222,14 @@ impl LanguageServer for BslLanguageServer {
                 .cloned()
                 .unwrap_or_default();
 
-            // TODO: Более сложная логика применения инкрементальных изменений
-            // Пока используем последнее изменение как полное
-            changes
-                .last()
-                .map(|c| c.text.clone())
-                .unwrap_or(existing_text)
+            // Применяем все инкрементальные изменения последовательно
+            let mut current_text = existing_text;
+            for change in &changes {
+                if let Some(range) = change.range {
+                    current_text = self.apply_text_edit(&current_text, range, &change.text);
+                }
+            }
+            current_text
         };
 
         // Кешируем текст
@@ -198,7 +237,44 @@ impl LanguageServer for BslLanguageServer {
             .write()
             .await
             .insert(uri.clone(), updated_text.clone());
-        let _ = (version, changes); // не используем, пока нет инкрементального анализатора в target
+
+        // ✅ ИНКРЕМЕНТАЛЬНЫЙ ПАРСИНГ: конвертируем LSP edits → ParserCoordinator TextEdit
+        use bsl_backend::system::parser_coordinator::TextEdit;
+        use std::path::PathBuf;
+
+        let text_edits: Vec<TextEdit> = changes
+            .iter()
+            .filter_map(|change| {
+                change.range.map(|range| TextEdit {
+                    start_line: range.start.line,
+                    start_column: range.start.character,
+                    old_end_line: range.end.line,
+                    old_end_column: range.end.character,
+                    new_end_line: range.start.line
+                        + change.text.matches('\n').count() as u32,
+                    new_end_column: if change.text.contains('\n') {
+                        change.text.lines().last().unwrap_or("").len() as u32
+                    } else {
+                        range.start.character + change.text.len() as u32
+                    },
+                    new_text: change.text.clone(),
+                })
+            })
+            .collect();
+
+        // Извлекаем путь к файлу из URI
+        let file_path = PathBuf::from(uri.path());
+
+        // Используем инкрементальный парсинг через TypeSystemService
+        if let Err(e) = self
+            .type_service
+            .parse_incremental(file_path, updated_text.clone(), text_edits)
+            .await
+        {
+            error!("Incremental parsing failed: {}", e);
+        } else {
+            info!("✅ Incremental parsing succeeded for: {}", uri.path());
+        }
 
         // Базовые диагностики (пусто)
         // TODO: интегрировать с analyze_file для получения реальных диагностик
@@ -338,15 +414,254 @@ impl LanguageServer for BslLanguageServer {
     }
 }
 
+// ============================================================================
+// Custom LSP Request Handlers - заменяют CLI бинарники
+// ============================================================================
+
+/// Custom request: bsl/queryType - запрос типа по имени
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+struct QueryTypeParams {
+    type_name: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[allow(dead_code)]
+struct QueryTypeResponse {
+    type_name: String,
+    found: bool,
+    details: Option<String>,
+}
+
+/// Custom request: bsl/buildIndex - построение индекса типов
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+struct BuildIndexParams {
+    workspace_path: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[allow(dead_code)]
+struct BuildIndexResponse {
+    success: bool,
+    types_count: usize,
+    message: String,
+}
+
+/// Custom request: bsl/validateMethod - валидация вызова метода
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+struct ValidateMethodParams {
+    object_type: String,
+    method_name: String,
+    arguments: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[allow(dead_code)]
+struct ValidateMethodResponse {
+    valid: bool,
+    message: String,
+}
+
+/// Custom request: bsl/checkTypeCompatibility - проверка совместимости типов
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+struct CheckCompatibilityParams {
+    source_type: String,
+    target_type: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[allow(dead_code)]
+struct CheckCompatibilityResponse {
+    compatible: bool,
+    message: String,
+}
+
+/// Custom request: bsl/incrementalUpdate - инкрементальное обновление индекса
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+struct IncrementalUpdateParams {
+    config_path: String,
+    platform_version: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[allow(dead_code)]
+struct IncrementalUpdateResponse {
+    success: bool,
+    message: String,
+}
+
+/// Custom request: bsl/extractPlatformDocs - извлечение платформенной документации
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+struct ExtractPlatformDocsParams {
+    archive_path: String,
+    platform_version: String,
+    force: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[allow(dead_code)]
+struct ExtractPlatformDocsResponse {
+    success: bool,
+    types_count: usize,
+    message: String,
+}
+
+/// Custom request: bsl/renderTypeHtml - рендеринг HTML для типа (использует TypeVisualization)
+#[derive(Debug, serde::Deserialize)]
+struct RenderTypeHtmlParams {
+    type_name: String,
+    theme: Option<String>, // "light", "dark", "high-contrast"
+}
+
+#[derive(Debug, serde::Serialize)]
+struct RenderTypeHtmlResponse {
+    html: String,
+    success: bool,
+    message: Option<String>,
+}
+
+#[allow(dead_code)]
+impl BslLanguageServer {
+    /// Обработчик custom request: bsl/queryType
+    async fn handle_query_type(&self, params: QueryTypeParams) -> JsonRpcResult<QueryTypeResponse> {
+        info!("Custom request: bsl/queryType - {}", params.type_name);
+
+        // Простая реализация — возвращаем информацию о типе
+        // TODO: Интегрировать с TypeSystemService.analyze_file() для полного анализа
+        Ok(QueryTypeResponse {
+            type_name: params.type_name.clone(),
+            found: true,
+            details: Some(format!("Type '{}' query handled by LSP server", params.type_name)),
+        })
+    }
+
+    /// Обработчик custom request: bsl/buildIndex
+    async fn handle_build_index(&self, params: BuildIndexParams) -> JsonRpcResult<BuildIndexResponse> {
+        info!("Custom request: bsl/buildIndex - {}", params.workspace_path);
+
+        // TODO: Реализовать через TypeSystemService
+        Ok(BuildIndexResponse {
+            success: true,
+            types_count: 0,
+            message: "Index building not yet implemented via LSP".to_string(),
+        })
+    }
+
+    /// Обработчик custom request: bsl/validateMethod
+    async fn handle_validate_method(&self, params: ValidateMethodParams) -> JsonRpcResult<ValidateMethodResponse> {
+        info!("Custom request: bsl/validateMethod - {}.{}", params.object_type, params.method_name);
+
+        // TODO: Реализовать через TypeSystemService
+        Ok(ValidateMethodResponse {
+            valid: true,
+            message: format!("Method {}.{} validation not yet fully implemented",
+                params.object_type, params.method_name),
+        })
+    }
+
+    /// Обработчик custom request: bsl/checkTypeCompatibility
+    async fn handle_check_compatibility(&self, params: CheckCompatibilityParams) -> JsonRpcResult<CheckCompatibilityResponse> {
+        info!("Custom request: bsl/checkTypeCompatibility - {} → {}",
+            params.source_type, params.target_type);
+
+        // TODO: Реализовать через TypeSystemService
+        Ok(CheckCompatibilityResponse {
+            compatible: true,
+            message: format!("Type compatibility check for {} → {} not yet fully implemented",
+                params.source_type, params.target_type),
+        })
+    }
+
+    /// Обработчик custom request: bsl/incrementalUpdate
+    async fn handle_incremental_update(&self, params: IncrementalUpdateParams) -> JsonRpcResult<IncrementalUpdateResponse> {
+        info!("Custom request: bsl/incrementalUpdate - config: {}, version: {}",
+            params.config_path, params.platform_version);
+
+        // TODO: Реализовать инкрементальное обновление индекса через SystemCoordinator
+        Ok(IncrementalUpdateResponse {
+            success: true,
+            message: format!("Incremental update for version {} completed (stub)", params.platform_version),
+        })
+    }
+
+    /// Обработчик custom request: bsl/extractPlatformDocs
+    async fn handle_extract_platform_docs(&self, params: ExtractPlatformDocsParams) -> JsonRpcResult<ExtractPlatformDocsResponse> {
+        info!("Custom request: bsl/extractPlatformDocs - archive: {}, version: {}, force: {}",
+            params.archive_path, params.platform_version, params.force);
+
+        // TODO: Реализовать извлечение платформенной документации
+        // Сейчас возвращаем заглушку
+        Ok(ExtractPlatformDocsResponse {
+            success: true,
+            types_count: 0,
+            message: format!("Platform docs extraction for version {} completed (stub)", params.platform_version),
+        })
+    }
+
+    /// Обработчик custom request: bsl/renderTypeHtml - рендеринг HTML с использованием TypeVisualization
+    async fn handle_render_type_html(&self, params: RenderTypeHtmlParams) -> JsonRpcResult<RenderTypeHtmlResponse> {
+        info!("Custom request: bsl/renderTypeHtml - {} (theme: {:?})",
+            params.type_name, params.theme);
+
+        // Определяем тему
+        let theme_mode = match params.theme.as_deref() {
+            Some("dark") => ThemeMode::Dark,
+            Some("light") => ThemeMode::Light,
+            Some("high-contrast") => ThemeMode::HighContrast,
+            _ => ThemeMode::Auto,
+        };
+
+        // Создаём рендерер
+        let _renderer = HtmlRenderer::new(RenderOptions {
+            theme: theme_mode.clone(),
+            syntax_highlight: true,
+            enable_links: true,
+            compact: false,
+        });
+
+        // TODO: Получить TypeDto через TypeSystemService
+        // Пока возвращаем заглушку с информацией об успешной интеграции
+        let html = format!(
+            r#"<div class="type-info-integrated">
+                <h2>TypeVisualization Integrated!</h2>
+                <p>Тип: <strong>{}</strong></p>
+                <p>Тема: <code>{:?}</code></p>
+                <p>HtmlRenderer готов к использованию</p>
+                <p><em>TODO: Интеграция с TypeSystemService для получения реальных TypeDto</em></p>
+            </div>"#,
+            params.type_name, theme_mode
+        );
+
+        Ok(RenderTypeHtmlResponse {
+            html,
+            success: true,
+            message: Some("TypeVisualization успешно интегрирована".to_string()),
+        })
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Настраиваем логирование
+    // ОТЛАДКА: логируем в файл, чтобы увидеть что происходит при запуске из VSCode
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("C:\\1CProject\\bsl-gradual-types\\vscode-extension\\rust_lsp_server.log")
+        .expect("Failed to create log file");
+
+    // Настраиваем логирование В ФАЙЛ вместо stderr
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("bsl_gradual_types=debug".parse()?)
                 .add_directive("tower_lsp=info".parse()?),
         )
+        .with_writer(std::sync::Mutex::new(log_file))
         .init();
 
     info!("Starting BSL Language Server - Clean Architecture");
@@ -365,18 +680,29 @@ async fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Failed to create TypeSystemService: AnalysisEngine not initialized"))?;
 
     // Initialize the type service
+    info!("Initializing TypeSystemService...");
     type_service.initialize()?;
+    info!("✅ TypeSystemService initialized successfully");
 
     // Создаём stdin/stdout для коммуникации с клиентом
+    info!("Setting up STDIO communication channels...");
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
+    info!("✅ STDIO channels created");
 
     // ✅ ИСПРАВЛЕНО: передаем TypeSystemService в LSP Server
+    info!("Creating LSP service...");
     let (service, socket) =
-        LspService::new(move |client| BslLanguageServer::new(client, type_service.clone()));
+        LspService::new(move |client| {
+            info!("Initializing BSL Language Server");
+            BslLanguageServer::new(client, type_service.clone())
+        });
+    info!("✅ LSP service created");
 
     // Запускаем сервер
+    info!("Starting LSP server loop (listening on STDIO)...");
     Server::new(stdin, stdout, socket).serve(service).await;
+    info!("LSP server shut down");
 
     Ok(())
 }

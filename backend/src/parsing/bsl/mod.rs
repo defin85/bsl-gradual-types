@@ -21,19 +21,75 @@ pub mod ast {
             params: Vec<String>,
             body: Vec<Statement>,
         },
+        ProcedureDecl {
+            name: String,
+            params: Vec<String>,
+            body: Vec<Statement>,
+        },
         If {
             condition: Expression,
             then_body: Vec<Statement>,
             else_body: Option<Vec<Statement>>,
         },
+        For {
+            variable: String,
+            start: Expression,
+            end: Expression,
+            body: Vec<Statement>,
+        },
+        ForEach {
+            variable: String,
+            collection: Expression,
+            body: Vec<Statement>,
+        },
+        While {
+            condition: Expression,
+            body: Vec<Statement>,
+        },
+        Return {
+            value: Option<Expression>,
+        },
+        Try {
+            try_body: Vec<Statement>,
+            except_body: Vec<Statement>,
+        },
+        Call {
+            expression: Expression,
+        },
+        Break,
+        Continue,
+        Goto {
+            label: String,
+        },
+        Label {
+            name: String,
+        },
+        Execute {
+            code: Expression,
+        },
+        RaiseError {
+            message: Option<Expression>,
+        },
+        AddHandler {
+            event: Expression,
+            handler: Expression,
+        },
+        RemoveHandler {
+            event: Expression,
+            handler: Expression,
+        },
+        Await {
+            expression: Expression,
+        },
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq)]
     pub enum Expression {
         Identifier(String),
         String(String),
         Number(f64),
         Boolean(bool),
+        Date(String),
         Call {
             function: Box<Expression>,
             args: Vec<Expression>,
@@ -46,6 +102,26 @@ pub mod ast {
         Unary {
             operator: String,
             operand: Box<Expression>,
+        },
+        Ternary {
+            condition: Box<Expression>,
+            then_expr: Box<Expression>,
+            else_expr: Box<Expression>,
+        },
+        New {
+            type_name: String,
+            args: Vec<Expression>,
+        },
+        PropertyAccess {
+            object: Box<Expression>,
+            property: String,
+        },
+        IndexAccess {
+            object: Box<Expression>,
+            index: Box<Expression>,
+        },
+        Await {
+            expression: Box<Expression>,
         },
     }
 }

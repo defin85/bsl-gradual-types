@@ -795,34 +795,172 @@ const certaintyColor = certainty >= 90
 
 ---
 
+### 🔧 Milestone 2.7: TreeSitterAdapter — Завершение реализации (2 недели) 🚨 **КРИТИЧЕСКИЙ**
+
+**Приоритет:** 🔴 КРИТИЧЕСКИЙ — блокирует все LSP features (hover, completion, diagnostics)
+
+**Текущее состояние (2025-10-06):**
+- ✅ Tree-sitter-bsl v0.1.5 интегрирован и работает
+- ✅ ParserCoordinator использует tree-sitter как primary парсер
+- ✅ TreeSitterAdapter существует и конвертирует базовые конструкции
+- ❌ **ПРОБЛЕМА:** Пропускает 70% конструкций BSL → возвращает пустой AST
+- ❌ **ПОСЛЕДСТВИЕ:** Hover/Completion работают только через примитивный regex fallback
+
+**Что пропускается сейчас (из логов):**
+```
+DEBUG Skipping unknown statement type: PROCEDURE_KEYWORD at 2
+DEBUG Skipping unknown statement type: FUNCTION_KEYWORD at 3
+DEBUG Skipping unknown expression: expression
+DEBUG Skipping unknown expression: arguments
+DEBUG Skipping unknown statement type: ENDPROCEDURE_KEYWORD at 7
+```
+
+**Root cause:** TreeSitterAdapter не маппит node.kind() tree-sitter-bsl → наши AST структуры.
+
+#### Задачи:
+
+**1. Полный маппинг tree-sitter node kinds (5 дней)**
+
+**Цель:** Поддержка всех основных конструкций BSL из grammar.js tree-sitter-bsl
+
+**Подзадачи:**
+- ✅ Изучить `grammar.js` tree-sitter-bsl для полного списка node kinds
+- ✅ Реализовать конвертацию для процедур/функций:
+  ```rust
+  "procedure_declaration" | "PROCEDURE_KEYWORD" => Statement::ProcedureDecl
+  "function_declaration" | "FUNCTION_KEYWORD" => Statement::FunctionDecl
+  ```
+- ✅ Реализовать конвертацию для выражений:
+  - `"expression"` → Expression::*
+  - `"call_expression"` → Expression::Call
+  - `"member_expression"` → Expression::Access
+  - `"binary_expression"` → Expression::BinaryOp
+  - `"unary_expression"` → Expression::UnaryOp
+  - `"new_expression"` → Expression::New
+- ✅ Реализовать конвертацию для statements:
+  - `"assignment_statement"` → Statement::Assignment
+  - `"if_statement"` → Statement::If
+  - `"for_statement"` → Statement::For
+  - `"while_statement"` → Statement::While
+  - `"return_statement"` → Statement::Return
+  - `"try_statement"` → Statement::TryExcept
+
+**Метрика успеха:** 90% BSL конструкций парсятся без "Skipping unknown"
+
+**2. Тестирование на реальных BSL файлах (3 дня)**
+
+**Цель:** Убедиться что adapter работает на production коде 1С
+
+**Подзадачи:**
+- ✅ Создать тестовый набор из 20+ реальных BSL файлов:
+  - Формы документов
+  - Модули объектов
+  - Общие модули
+  - Модули команд
+- ✅ Unit-тесты для каждого node kind:
+  ```rust
+  #[test]
+  fn test_parse_procedure_declaration() {
+      let code = "Процедура Тест() КонецПроцедуры";
+      let program = parse_bsl(code);
+      assert_eq!(program.statements.len(), 1);
+      assert!(matches!(program.statements[0], Statement::ProcedureDecl { .. }));
+  }
+  ```
+- ✅ Интеграционные тесты с TypeSystemService
+- ✅ Проверка hover на реальных файлах (должны показывать типы, а не "Dynamic type")
+
+**Метрика успеха:** Hover показывает корректные типы в 80%+ случаев
+
+**3. Оптимизация производительности (2 дня)**
+
+**Цель:** Парсинг 10000 строк < 200ms (из Milestone 2.1)
+
+**Подзадачи:**
+- ✅ Профилирование TreeSitterAdapter (найти узкие места)
+- ✅ Оптимизация аллокаций (использовать `Box::new` только где нужно)
+- ✅ Оптимизация String cloning (использовать `&str` где возможно)
+- ✅ Бенчмарки для разных размеров файлов:
+  ```rust
+  #[bench]
+  fn bench_parse_10k_lines(b: &mut Bencher) {
+      let code = include_str!("../fixtures/large_module.bsl");
+      b.iter(|| parse_bsl(code));
+  }
+  ```
+
+**Метрика успеха:** Парсинг 10000 строк < 200ms
+
+**4. Документация и примеры (2 дня)**
+
+**Цель:** Понятная документация для будущих contributors
+
+**Подзадачи:**
+- ✅ Документировать маппинг tree-sitter node kinds → AST в README
+- ✅ Создать примеры использования TreeSitterAdapter
+- ✅ Добавить диагностику для неподдерживаемых конструкций:
+  ```rust
+  warn!("Unsupported node kind '{}' at {}:{} - please file an issue",
+        node.kind(), node.start_position().row, node.start_position().column);
+  ```
+- ✅ Создать checklist для добавления новых node kinds
+
+**Метрика успеха:** Contributor может добавить новый node kind за 30 минут
+
+**5. Исправление сломанных тестов (2 дня)**
+
+**Цель:** Восстановить workspace test suite после рефакторинга
+
+**Подзадачи:**
+- ✅ Исправить импорты `TypeResolution`, `ResolutionResult` в тестах
+- ✅ Обновить моки для нового AST
+- ✅ Убедиться что `cargo test --workspace` проходит без ошибок
+
+**Метрика успеха:** `cargo test --workspace` — 100% success
+
+---
+
+**Результат Milestone 2.7:**
+- ✅ TreeSitterAdapter поддерживает 90% конструкций BSL
+- ✅ Hover показывает реальные типы (не "Dynamic type")
+- ✅ Парсинг 10000 строк < 200ms
+- ✅ 80%+ test coverage для adapter
+- ✅ Все workspace тесты проходят
+- ✅ Готовность к Milestone 2.2 (VSCode Extension)
+
+**Статус:** ⏳ **ПЛАНИРУЕТСЯ** (приоритет #1 после удаления легаси кода)
+
+---
+
 ### 🎯 Результаты Версии 2.0 (через 8-10 недель)
 
 **Timeline обновлён:**
 ```
-Неделя 1-3:   🧠 Milestone 2.1 - Tree-sitter Integration (КРИТИЧЕСКИЙ)
-Неделя 4-5:   📦 Milestone 2.2 - VSCode Extension (КРИТИЧЕСКИЙ)
-Неделя 6-8:   🔧 Milestone 2.3 - Advanced Type System (ВЫСОКИЙ)
-Неделя 8-9:   📈 Milestone 2.4 - Performance Optimization (СРЕДНИЙ)
-Неделя 9-10:  🎨 Milestone 2.5 - Унификация визуализации (ЗАВЕРШЁН ✅)
-Неделя 11:    🎨 Milestone 2.6 - Design System (ПЛАНИРУЕТСЯ ⏳)
+Неделя 1-3:   🧠 Milestone 2.1 - Tree-sitter Integration (ЧАСТИЧНО ⚠️ 30%)
+Неделя 4-5:   🔧 Milestone 2.7 - TreeSitterAdapter завершение (КРИТИЧЕСКИЙ 🚨)
+Неделя 6-7:   📦 Milestone 2.2 - VSCode Extension (КРИТИЧЕСКИЙ)
+Неделя 8-10:  🔧 Milestone 2.3 - Advanced Type System (ВЫСОКИЙ)
+Неделя 11-12: 📈 Milestone 2.4 - Performance Optimization (СРЕДНИЙ)
+ЗАВЕРШЕНО:    🎨 Milestone 2.5 - Унификация визуализации (ЗАВЕРШЁН ✅)
+ПЛАНИРУЕТСЯ:  🎨 Milestone 2.6 - Design System (ПЛАНИРУЕТСЯ ⏳)
 ```
 
 **Технические метрики:**
-- ✅ **Tree-sitter-bsl v0.1.5 интегрирован** — полноценный AST парсинг
-- ✅ **Flow-sensitive analysis > 70%** — отслеживание типов в коде
-- ✅ **Инкрементальный парсинг < 10ms** — LSP performance
-- ✅ VSCode Extension: 4-5 MB (вместо 30 MB)
-- ✅ 1 бинарник (вместо 10)
-- ✅ 80% test coverage
-- ✅ Union/Intersection/Generic Types с type inference
-- ✅ Null safety анализ через CFG
-- ✅ Кеширование < 50ms
+- ⚠️ **Tree-sitter-bsl v0.1.5 интегрирован** — парсинг работает, но adapter неполный (30%)
+- ❌ **Flow-sensitive analysis > 70%** — БЛОКИРОВАН (требует полный AST)
+- ✅ **Инкрементальный парсинг < 10ms** — LSP performance (реализовано)
+- ⏳ VSCode Extension: 4-5 MB (вместо 30 MB) — ПЛАНИРУЕТСЯ Milestone 2.2
+- ⏳ 1 бинарник (вместо 10) — ПЛАНИРУЕТСЯ Milestone 2.2
+- ⏳ 80% test coverage — В ПРОЦЕССЕ (некоторые тесты сломаны)
+- ⏳ Union/Intersection/Generic Types с type inference — ПЛАНИРУЕТСЯ Milestone 2.3
+- ❌ Null safety анализ через CFG — БЛОКИРОВАН (требует flow-sensitive)
+- ⏳ Кеширование < 50ms — ПЛАНИРУЕТСЯ Milestone 2.4
 
 **Пользовательские метрики:**
-- ✅ Автодополнение работает мгновенно
-- ✅ Hover показывает точные типы
-- ✅ Diagnostics предотвращают 80% типовых ошибок
-- ✅ Semantic highlighting помогает читать код
+- ⏳ Автодополнение работает мгновенно — ЧАСТИЧНО (только regex fallback)
+- ❌ Hover показывает точные типы — НЕТ (показывает "Dynamic type")
+- ❌ Diagnostics предотвращают 80% типовых ошибок — БЛОКИРОВАН (требует AST)
+- ❌ Semantic highlighting помогает читать код — НЕ РЕАЛИЗОВАНО
 
 ---
 

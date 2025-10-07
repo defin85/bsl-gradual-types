@@ -16,7 +16,7 @@ fn test_validate_array_methods_with_real_data() {
     // Парсим синтаксис-помощник
     let mut parser = SyntaxHelperParser::new();
     parser
-        .parse_directory("examples/syntax_helper")
+        .parse_directory("../examples/syntax_helper")
         .expect("Failed to parse syntax helper");
 
     let db = parser.export_database();
@@ -84,7 +84,7 @@ fn test_validate_value_table_properties_with_real_data() {
     // Парсим синтаксис-помощник
     let mut parser = SyntaxHelperParser::new();
     parser
-        .parse_directory("examples/syntax_helper")
+        .parse_directory("../examples/syntax_helper")
         .expect("Failed to parse syntax helper");
 
     let db = parser.export_database();
@@ -144,7 +144,7 @@ fn test_validate_http_connection_complex_type() {
     // Тестируем более сложный тип с множеством методов и свойств
     let mut parser = SyntaxHelperParser::new();
     parser
-        .parse_directory("examples/syntax_helper")
+        .parse_directory("../examples/syntax_helper")
         .expect("Failed to parse syntax helper");
 
     let db = parser.export_database();

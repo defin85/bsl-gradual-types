@@ -799,6 +799,102 @@ const certaintyColor = certainty >= 90
 
 **Приоритет:** 🔴 КРИТИЧЕСКИЙ — блокирует все LSP features (hover, completion, diagnostics)
 
+#### Архитектурная диаграмма (текущее состояние после рефакторинга 2025-10-06):
+
+```mermaid
+graph TB
+    subgraph "🎯 System Layer (backend)"
+        SystemCoordinator["🎯 SystemCoordinator<br/>- DI management<br/>- Lifecycle"]
+        AnalysisCache["💾 AnalysisCache<br/>- LRU cache<br/>- TTL"]
+        ParserCoordinator["🎨 ParserCoordinator<br/>- TreeSitter (primary)<br/>- Regex fallback<br/>✅ returns AST"]
+        BasicObservability["📊 BasicObservability<br/>- Logging<br/>- Metrics"]
+    end
+
+    subgraph "🌐 Presentation Layer"
+        LSPServer["🔌 LSP Server<br/>✅ hover работает"]
+        WebServer["🌐 Web Server<br/>REST API"]
+        VSCode["📦 VSCode Extension"]
+        CLI["⚙️ CLI Tool<br/>❌ MOCK analyze"]
+    end
+
+    subgraph "🎨 Helper Layer"
+        TypeViz["🎨 type-visualization<br/>✅ HtmlRenderer<br/>JsonRenderer"]
+    end
+
+    subgraph "🔧 Application Layer"
+        subgraph "backend"
+            TypeSystemService["🎭 TypeSystemService<br/>✅ expression_to_type_name()<br/>✅ использует AnalysisEngine"]
+        end
+        subgraph "shared"
+            AnalysisEngine["🚀 AnalysisEngine<br/>✅ resolve_type()<br/>❌ analyze_file() = MOCK"]
+        end
+    end
+
+    subgraph "🧠 Domain Layer (shared)"
+        TypeResolver["🧠 TypeResolver<br/>✅ резолвит типы"]
+        TypeMetadataLookup["🔍 TypeMetadataLookup"]
+        TypeRepository["📚 TypeRepository<br/>✅ 3927 типов"]
+    end
+
+    subgraph "💾 Data Layer (shared)"
+        PlatformTypes["📄 Platform Types<br/>✅ включая примитивы"]
+        ConfigData["⚙️ Configuration"]
+    end
+
+    subgraph "📄 DTOs"
+        DTOs["shared/api/dtos.rs"]
+    end
+
+    SystemCoordinator --> AnalysisCache
+    SystemCoordinator --> ParserCoordinator
+    SystemCoordinator --> BasicObservability
+    SystemCoordinator --> TypeSystemService
+
+    LSPServer --> TypeSystemService
+    LSPServer --> TypeViz
+    WebServer --> TypeSystemService
+    VSCode --> LSPServer
+    CLI --> AnalysisEngine
+
+    TypeSystemService --> AnalysisEngine
+    TypeSystemService --> AnalysisCache
+    TypeSystemService --> ParserCoordinator
+    TypeSystemService -.-> TypeMetadataLookup
+
+    AnalysisEngine --> TypeResolver
+    AnalysisEngine -.-> TypeMetadataLookup
+
+    TypeResolver --> TypeRepository
+    TypeMetadataLookup --> TypeRepository
+    TypeRepository --> PlatformTypes
+    TypeRepository --> ConfigData
+
+    TypeViz -.-> DTOs
+    TypeSystemService --> DTOs
+
+    classDef systemStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef presentationStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef helperStyle fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef applicationStyle fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef domainStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef dataStyle fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef dtoStyle fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+
+    class SystemCoordinator,AnalysisCache,ParserCoordinator,BasicObservability systemStyle
+    class LSPServer,WebServer,VSCode,CLI presentationStyle
+    class TypeViz helperStyle
+    class TypeSystemService,AnalysisEngine applicationStyle
+    class TypeResolver,TypeMetadataLookup,TypeRepository domainStyle
+    class PlatformTypes,ConfigData dataStyle
+    class DTOs dtoStyle
+```
+
+**Ключевые улучшения (2025-10-06):**
+- ✅ **Hover работает через AnalysisEngine** — TypeSystemService.get_hover_info() → expression_to_type_name() → AnalysisEngine.resolve_type()
+- ✅ **Примитивные типы интегрированы** — Число/Строка/Булево резолвятся через TypeRepository (3927 типов из синтаксис-помощника)
+- ✅ **Разделение ответственности** — Application Layer (маппинг AST→строка) + Domain Layer (резолв типа)
+- ❌ **Проблема:** AnalysisEngine.analyze_file() ещё MOCK — требует AST в shared (см. Milestone 2.8)
+
 **Текущее состояние (2025-10-06):**
 - ✅ Tree-sitter-bsl v0.1.5 интегрирован и работает
 - ✅ ParserCoordinator использует tree-sitter как primary парсер
@@ -929,7 +1025,532 @@ DEBUG Skipping unknown statement type: ENDPROCEDURE_KEYWORD at 7
 - ✅ Все workspace тесты проходят
 - ✅ Готовность к Milestone 2.2 (VSCode Extension)
 
-**Статус:** ⏳ **ПЛАНИРУЕТСЯ** (приоритет #1 после удаления легаси кода)
+**Статус:** 🚧 **В ПРОЦЕССЕ** (80% выполнено, hover работает через AnalysisEngine)
+
+---
+
+### 🏗️ Milestone 2.8: Semantic IR Layer — Разделение Syntax и Semantics (1 неделя) 🎯 **АРХИТЕКТУРНЫЙ**
+
+**Приоритет:** 🔴 КРИТИЧЕСКИЙ — устраняет циклическую зависимость и создаёт правильную архитектуру
+
+**Текущая проблема:**
+- ✅ LSP hover работает — реальный парсинг через TreeSitterAdapter
+- ❌ CLI analyze_file() — MOCK, возвращает хардкод
+- ❌ AnalysisEngine не может работать с AST (AST в backend, AnalysisEngine в shared)
+- 🔴 **CRITICAL:** Прямой перенос AST в shared создаст циклическую зависимость `tree-sitter` ↔ `shared`
+- 🔴 **CRITICAL:** CLI придётся зависеть от тяжёлого ParserCoordinator (~7-8 MB бинарник)
+
+**Root cause:** Смешивание Syntax (AST) и Semantics (Domain) в одном слое
+
+#### Архитектурное решение:
+
+**Intermediate Representation (IR) — Semantic Layer между Syntax и Domain**
+
+Правильная архитектура должна разделять:
+1. **Syntax Layer (AST)** — структура программы, привязана к парсеру (backend)
+2. **Semantic Layer (IR)** — семантическая модель, независимая от парсера (shared)
+3. **Domain Layer (Types)** — типовая система и анализ (shared)
+
+**Аналогия с другими проектами:**
+- **rust-analyzer:** `syntax` (AST) → `hir` (HIR) → `ty` (Type System)
+- **TypeScript:** `AST` → `Symbol` → `Type`
+- **LLVM:** Source → AST → IR → Machine Code
+
+#### Задачи:
+
+**1. Создать Semantic IR в shared/src/ir/ (2 дня)**
+
+**Цель:** Создать семантическое представление, независимое от парсера
+
+**Подзадачи:**
+- [ ] Создать `shared/src/ir/mod.rs` с SemanticProgram, SemanticNode, SymbolTable:
+  ```rust
+  /// Семантическое представление программы (не зависит от конкретного парсера)
+  pub struct SemanticProgram {
+      pub symbols: SymbolTable,
+      pub nodes: Vec<SemanticNode>,
+      pub source_info: SourceInfo, // Метаданные для debugging
+  }
+
+  /// Упрощённое семантическое представление элементов программы
+  pub enum SemanticNode {
+      VariableDeclaration {
+          name: String,
+          type_hint: Option<String>,
+          is_export: bool,
+      },
+      Assignment {
+          variable: String,
+          value_type: String,
+      },
+      FunctionDeclaration {
+          name: String,
+          params: Vec<Parameter>,
+          return_type: Option<String>,
+      },
+      FunctionCall {
+          function: String,
+          args: Vec<String>, // Типы аргументов
+      },
+      // ... минималистичный набор для анализа типов
+  }
+
+  pub struct SymbolTable {
+      pub variables: HashMap<String, TypeHint>,
+      pub functions: HashMap<String, FunctionSignature>,
+  }
+  ```
+- [ ] Добавить `shared/src/ir/visitor.rs` с FlowSensitiveVisitor:
+  ```rust
+  pub trait SemanticVisitor {
+      fn visit_node(&mut self, node: &SemanticNode, context: &mut FlowContext);
+      fn enter_scope(&mut self);
+      fn exit_scope(&mut self);
+  }
+  ```
+- [ ] Экспортировать из `shared/src/lib.rs`: `pub mod ir;`
+
+**Метрика успеха:** `shared/src/ir/` компилируется без зависимостей от backend/tree-sitter
+
+**2. Создать AST → IR конвертер в backend (2 дня)**
+
+**Цель:** Bridge между синтаксисом (AST) и семантикой (IR)
+
+**Подзадачи:**
+- [ ] Создать `backend/src/application/ast_to_ir.rs`:
+  ```rust
+  pub struct AstToIrConverter {
+      symbol_table: SymbolTable,
+  }
+
+  impl AstToIrConverter {
+      pub fn convert(ast: Program) -> Result<SemanticProgram> {
+          let mut converter = Self {
+              symbol_table: SymbolTable::new(),
+          };
+
+          let nodes = ast.statements
+              .into_iter()
+              .filter_map(|stmt| converter.convert_statement(stmt))
+              .collect();
+
+          Ok(SemanticProgram {
+              symbols: converter.symbol_table,
+              nodes,
+              source_info: SourceInfo::from_ast(&ast),
+          })
+      }
+
+      fn convert_statement(&mut self, stmt: Statement) -> Option<SemanticNode> {
+          match stmt {
+              Statement::VarDeclaration { name, type_hint } => {
+                  self.symbol_table.register_variable(&name, type_hint.clone());
+                  Some(SemanticNode::VariableDeclaration {
+                      name,
+                      type_hint,
+                      is_export: false,
+                  })
+              }
+              Statement::Assignment { target, value } => {
+                  if let Expression::Identifier(var_name) = target {
+                      let value_type = self.infer_expression_type(&value);
+                      Some(SemanticNode::Assignment {
+                          variable: var_name,
+                          value_type,
+                      })
+                  } else {
+                      None
+                  }
+              }
+              // ... конвертация других statement типов
+              _ => None,
+          }
+      }
+
+      fn infer_expression_type(&self, expr: &Expression) -> String {
+          match expr {
+              Expression::Number(_) => "Число".to_string(),
+              Expression::String(_) => "Строка".to_string(),
+              Expression::Boolean(_) => "Булево".to_string(),
+              Expression::New { type_name, .. } => type_name.clone(),
+              Expression::Identifier(name) => {
+                  self.symbol_table.get_variable_type(name)
+                      .unwrap_or_else(|| "Unknown".to_string())
+              }
+              _ => "Dynamic".to_string(),
+          }
+      }
+  }
+  ```
+- [ ] Обновить ParserCoordinator для возврата IR:
+  ```rust
+  pub fn parse_to_ir(&self, content: &str) -> Result<SemanticProgram> {
+      let ast = self.parse(content)?; // Старый метод остаётся для обратной совместимости
+      AstToIrConverter::convert(ast)
+  }
+  ```
+- [ ] Добавить unit-тесты для конвертера
+
+**Метрика успеха:** AST успешно конвертируется в IR, тесты проходят
+
+**3. Создать Parser trait в shared (1 день)**
+
+**Цель:** Dependency Inversion — любой парсер может производить IR
+
+**Подзадачи:**
+- [ ] Создать `shared/src/parsing/parser_trait.rs`:
+  ```rust
+  /// Абстракция парсера — возвращает семантическое представление
+  pub trait Parser: Send + Sync {
+      fn parse(&self, content: &str) -> Result<SemanticProgram, String>;
+
+      fn supports_incremental(&self) -> bool {
+          false // По умолчанию не поддерживает
+      }
+  }
+
+  /// Lightweight wrapper для CLI (не тянет весь backend)
+  pub struct LightweightParser {
+      // Минимальная реализация на regex для быстрых задач
+  }
+
+  impl Parser for LightweightParser {
+      fn parse(&self, content: &str) -> Result<SemanticProgram, String> {
+          // Простой regex-based парсинг → IR
+          todo!("Implement lightweight parsing")
+      }
+  }
+  ```
+- [ ] Реализовать `Parser` trait для ParserCoordinator:
+  ```rust
+  // backend/src/system/parser_coordinator.rs
+  impl bsl_shared::parsing::Parser for ParserCoordinator {
+      fn parse(&self, content: &str) -> Result<SemanticProgram, String> {
+          self.parse_to_ir(content)
+      }
+
+      fn supports_incremental(&self) -> bool {
+          true // TreeSitter поддерживает инкрементальный парсинг
+      }
+  }
+  ```
+
+**Метрика успеха:** CLI может использовать `Box<dyn Parser>` без зависимости от backend
+
+**4. Обновить AnalysisEngine для работы с IR (2 дня)**
+
+**Цель:** AnalysisEngine анализирует IR вместо AST
+
+**Подзадачи:**
+- [ ] Обновить `shared/src/engine.rs`:
+  ```rust
+  pub fn analyze_program(&self, program: SemanticProgram) -> CliAnalysisResult {
+      let mut resolutions = HashMap::new();
+
+      for node in program.nodes {
+          match node {
+              SemanticNode::VariableDeclaration { name, type_hint, .. } => {
+                  if let Some(type_name) = type_hint {
+                      let resolution = self.resolve_type(&type_name);
+                      resolutions.insert(name, resolution);
+                  }
+              }
+              SemanticNode::Assignment { variable, value_type } => {
+                  let resolution = self.resolve_type(&value_type);
+                  resolutions.insert(variable, resolution);
+              }
+              SemanticNode::FunctionCall { function, args } => {
+                  // Анализ вызова функции с аргументами
+                  let fn_resolution = self.resolve_type(&function);
+                  // Проверка типов аргументов
+              }
+              _ => {}
+          }
+      }
+
+      CliAnalysisResult {
+          file_path: program.source_info.path,
+          type_resolutions: resolutions.into_iter().collect(),
+          analysis_duration_ms: 0, // TODO: timing
+      }
+  }
+
+  pub async fn analyze_file<P, F>(
+      &self,
+      path: P,
+      parser: &dyn Parser, // ✅ Dependency Injection через trait
+  ) -> Result<CliAnalysisResult>
+  where
+      P: AsRef<Path>
+  {
+      let content = std::fs::read_to_string(path.as_ref())?;
+      let program = parser.parse(&content)?;
+      Ok(self.analyze_program(program))
+  }
+  ```
+- [ ] Убрать MOCK implementation
+- [ ] Добавить IR-кеш (опционально):
+  ```rust
+  pub struct AnalysisEngine {
+      resolver: Arc<TypeResolver>,
+      repository: Arc<dyn TypeRepository>,
+      ir_cache: DashMap<PathBuf, (u64, SemanticProgram)>, // Кеш IR
+  }
+  ```
+
+**Метрика успеха:** `analyze_file()` возвращает реальные типы из IR
+
+**5. Обновить TypeSystemService для конвертации AST → IR (1 день)**
+
+**Цель:** LSP hover продолжает работать через IR
+
+**Подзадачи:**
+- [ ] Обновить `backend/src/application/type_system_service.rs`:
+  ```rust
+  pub fn get_hover_info(&self, file_path: &str, line: usize, column: usize)
+      -> Option<String>
+  {
+      // 1. Парсинг AST (как раньше)
+      let ast = self.parser.parse(content)?;
+
+      // 2. Конвертация AST → IR
+      let ir = AstToIrConverter::convert(ast)?;
+
+      // 3. Поиск нужного семантического узла по позиции курсора
+      let node = ir.find_node_at_position(line, column)?;
+
+      // 4. Резолв типа через AnalysisEngine
+      match node {
+          SemanticNode::VariableDeclaration { name, type_hint, .. } => {
+              if let Some(type_name) = type_hint {
+                  let resolution = self.analysis_engine.resolve_type(&type_name);
+                  Some(self.format_type_for_hover(&type_name, &resolution))
+              } else {
+                  Some(format!("**Переменная:** `{}`\n\n*Тип не указан*", name))
+              }
+          }
+          SemanticNode::Assignment { variable, value_type } => {
+              let resolution = self.analysis_engine.resolve_type(&value_type);
+              Some(format!("**Присваивание:** `{} = ...`\n\n{}",
+                  variable,
+                  self.format_type_for_hover(&value_type, &resolution)
+              ))
+          }
+          _ => None
+      }
+  }
+  ```
+- [ ] Сохранить backward compatibility (старый `expression_to_type_name()` можно оставить)
+
+**Метрика успеха:** LSP hover работает без регрессий
+
+**6. Обновить CLI для использования Parser trait (1 день)**
+
+**Цель:** Лёгкий CLI (~2-3 MB) вместо тяжёлого (~7-8 MB)
+
+**Подзадачи:**
+- [ ] Обновить `cli/src/main.rs`:
+  ```rust
+  use bsl_shared::parsing::{Parser, LightweightParser};
+  use bsl_shared::engine::AnalysisEngine;
+
+  #[tokio::main]
+  async fn main() -> Result<()> {
+      let args = Args::parse();
+
+      // ✅ CLI использует лёгкий парсер без backend зависимости
+      let parser: Box<dyn Parser> = if args.use_full_parser {
+          // Опционально: можно подключить ParserCoordinator из backend
+          Box::new(create_full_parser()?)
+      } else {
+          Box::new(LightweightParser::new())
+      };
+
+      let engine = AnalysisEngine::new(resolver, repository);
+
+      for file in &args.files {
+          let result = engine.analyze_file(file, parser.as_ref()).await?;
+          println!("{:?}", result);
+      }
+
+      Ok(())
+  }
+  ```
+- [ ] Обновить `cli/Cargo.toml` (убрать backend зависимость по умолчанию):
+  ```toml
+  [dependencies]
+  bsl-shared = { path = "../shared" }
+
+  [features]
+  full-parser = ["bsl-backend"]  # Опциональная фича для полного парсера
+  ```
+
+**Метрика успеха:**
+- `cargo build --bin bsl-type-check` → ~2-3 MB бинарник
+- `cargo build --bin bsl-type-check --features full-parser` → ~7-8 MB бинарник
+
+---
+
+**Результат Milestone 2.8:**
+- ✅ IR (Intermediate Representation) живёт в shared — разделение Syntax и Semantics
+- ✅ AnalysisEngine.analyze_file() работает с реальным IR (не MOCK)
+- ✅ CLI показывает реальные типы через лёгкий парсер (~2-3 MB бинарник)
+- ✅ Parser trait — DI для разных парсеров (TreeSitter, Regex, Lightweight)
+- ✅ Архитектура без циклических зависимостей
+- ✅ LSP hover продолжает работать через AST → IR → TypeResolver
+- ✅ Готовность к flow-sensitive анализу (Milestone 2.3)
+
+**Диаграмма AFTER (Полная архитектура после Milestone 2.8 с IR Layer):**
+
+```mermaid
+graph TB
+    subgraph "🎯 System Layer (в `backend/src/system`)"
+        SystemCoordinator["🎯 SystemCoordinator"]
+        AnalysisCache["💾 AnalysisCache"]
+        ParserCoordinator["🎨 ParserCoordinator<br/>- TreeSitter + Regex<br/>✅ ПОСЛЕ 2.8: → IR через AstToIrConverter"]
+        BasicObservability["📊 BasicObservability"]
+    end
+
+    subgraph "🌐 Presentation Layer (Адаптеры - разные процессы)"
+        subgraph "LSP Process"
+            LSPServer["🔌 LSP Server (backend)"]
+            VSCode["📦 VSCode Extension (TypeScript)"]
+        end
+
+        subgraph "Web Process"
+            WebServer["🌐 Web Server (backend)"]
+            Frontend["🖥️ Frontend UI (Leptos WASM)"]
+        end
+
+        CLITool["⚙️ CLI Tool (cli)<br/>✅ ПОСЛЕ 2.8: LightweightParser (~2-3 MB)"]
+    end
+
+    subgraph "🎨 Helper Layer"
+        TypeViz["🎨 type-visualization"]
+    end
+
+    subgraph "🔧 Application Layer"
+        subgraph "`backend/src/application`"
+            TypeSystemService["🎭 TypeSystemService<br/>✅ LSP hover через AST → IR"]
+            AstToIr["🔄 AstToIrConverter<br/>✅ ПОСЛЕ 2.8: AST → IR bridge<br/>- Конвертирует синтаксис в семантику<br/>- Строит SymbolTable"]
+        end
+        subgraph "`shared/src/engine`"
+            AnalysisEngine["🚀 AnalysisEngine<br/>✅ ПОСЛЕ 2.8: analyze_program(IR)<br/>- Работает с SemanticProgram<br/>- Не зависит от парсеров"]
+        end
+    end
+
+    subgraph "🌟 Semantic Layer (✅ НОВЫЙ! shared/src/ir/)"
+        IR["📄 Intermediate Representation<br/>✅ ПОСЛЕ 2.8: shared/src/ir/<br/>- SemanticProgram<br/>- SemanticNode (упрощённый набор)<br/>- SymbolTable<br/>- FlowSensitiveVisitor<br/>✨ Независим от парсера!"]
+
+        ParserTrait["🔌 Parser trait<br/>✅ ПОСЛЕ 2.8: shared/src/parsing/<br/>- parse() → SemanticProgram<br/>- DI для разных парсеров<br/>- LightweightParser для CLI"]
+    end
+
+    subgraph "🧠 Domain Layer (в `shared/src/domain`)"
+        TypeResolver["🧠 TypeResolver"]
+        TypeMetadataLookup["🔍 TypeMetadataLookup"]
+        TypeRepository["📚 TypeRepository (3927 типов)"]
+    end
+
+    subgraph "💾 Data Layer"
+        PlatformTypes["📄 Platform Types<br/>(Syntax Helper: Строка, Число, etc.)"]
+        ConfigData["⚙️ Configuration"]
+    end
+
+    subgraph "📄 DTOs"
+        DTOs["shared/api/dtos.rs"]
+    end
+
+    %% System coordination
+    SystemCoordinator --> AnalysisCache
+    SystemCoordinator --> ParserCoordinator
+    SystemCoordinator --> BasicObservability
+    SystemCoordinator --> TypeSystemService
+
+    %% Presentation → Application
+    LSPServer --> TypeSystemService
+    WebServer --> TypeSystemService
+    VSCode --> LSPServer
+    Frontend --> WebServer
+    CLITool --> AnalysisEngine
+
+    %% Helper layer
+    LSPServer --> TypeViz
+    TypeViz -.-> DTOs
+
+    %% Application → Semantic Layer (КЛЮЧЕВОЕ ИЗМЕНЕНИЕ 2.8)
+    TypeSystemService --> AnalysisEngine
+    TypeSystemService --> AstToIr
+    TypeSystemService --> ParserCoordinator
+
+    ParserCoordinator -.->|"✅ ПОСЛЕ 2.8: converts AST"| AstToIr
+    AstToIr -.->|"produces"| IR
+
+    %% CLI использует Parser trait (Dependency Injection)
+    CLITool -.->|"✅ uses ParserTrait"| ParserTrait
+    ParserTrait -.->|"returns"| IR
+
+    %% ParserCoordinator implements Parser trait
+    ParserCoordinator -.->|"✅ implements"| ParserTrait
+
+    %% AnalysisEngine работает с IR
+    AnalysisEngine -.->|"✅ analyzes"| IR
+    AnalysisEngine --> TypeResolver
+
+    %% Domain layer
+    TypeResolver --> TypeRepository
+    TypeMetadataLookup --> TypeRepository
+    TypeSystemService -.-> TypeMetadataLookup
+    AnalysisEngine -.-> TypeMetadataLookup
+
+    TypeRepository --> PlatformTypes
+    TypeRepository --> ConfigData
+
+    TypeSystemService --> DTOs
+    TypeSystemService --> AnalysisCache
+
+    %% Styling
+    classDef systemStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef presentationStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef helperStyle fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef applicationStyle fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef semanticStyle fill:#ffe0b2,stroke:#e65100,stroke-width:4px,stroke-dasharray: 5 5
+    classDef domainStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef dataStyle fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef dtoStyle fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+
+    class SystemCoordinator,AnalysisCache,ParserCoordinator,BasicObservability systemStyle
+    class LSPServer,WebServer,Frontend,VSCode,CLITool presentationStyle
+    class TypeViz helperStyle
+    class TypeSystemService,AstToIr,AnalysisEngine applicationStyle
+    class IR,ParserTrait semanticStyle
+    class TypeResolver,TypeMetadataLookup,TypeRepository domainStyle
+    class PlatformTypes,ConfigData dataStyle
+    class DTOs dtoStyle
+```
+
+**Ключевые изменения в архитектуре:**
+
+1. **✅ Semantic Layer (IR)** — новый слой между Syntax (AST) и Domain (Types):
+   - `SemanticProgram` — упрощённое представление программы
+   - `SemanticNode` — минималистичный набор узлов для анализа типов
+   - `SymbolTable` — таблица символов с типовыми аннотациями
+
+2. **✅ AST остаётся в backend** — избегаем циклической зависимости tree-sitter ↔ shared
+
+3. **✅ AstToIrConverter** — bridge в Application Layer, конвертирует AST → IR
+
+4. **✅ Parser trait** — Dependency Inversion для лёгкого CLI:
+   - `ParserCoordinator` (backend) implements `Parser`
+   - `LightweightParser` (shared) — простой парсер для CLI без backend зависимости
+
+5. **✅ AnalysisEngine работает с IR** — больше не MOCK, анализирует SemanticProgram
+
+6. **✅ Разделение Syntax и Semantics:**
+   ```
+   Source Code → AST (Syntax, backend) → IR (Semantics, shared) → Types (Domain, shared)
+   ```
+
+**Статус:** ⏳ **ПЛАНИРУЕТСЯ** (после завершения Milestone 2.7)
 
 ---
 
@@ -937,10 +1558,11 @@ DEBUG Skipping unknown statement type: ENDPROCEDURE_KEYWORD at 7
 
 **Timeline обновлён:**
 ```
-Неделя 1-3:   🧠 Milestone 2.1 - Tree-sitter Integration (ЧАСТИЧНО ⚠️ 30%)
-Неделя 4-5:   🔧 Milestone 2.7 - TreeSitterAdapter завершение (КРИТИЧЕСКИЙ 🚨)
+Неделя 1-3:   🧠 Milestone 2.1 - Tree-sitter Integration (80% ВЫПОЛНЕНО ✅)
+Неделя 4-5:   🔧 Milestone 2.7 - TreeSitterAdapter + hover (80% ВЫПОЛНЕНО 🚧)
+Неделя 5-6:   🏗️ Milestone 2.8 - Semantic IR Layer (КРИТИЧЕСКИЙ ⏳)
 Неделя 6-7:   📦 Milestone 2.2 - VSCode Extension (КРИТИЧЕСКИЙ)
-Неделя 8-10:  🔧 Milestone 2.3 - Advanced Type System (ВЫСОКИЙ)
+Неделя 8-10:  🔧 Milestone 2.3 - Advanced Type System + Flow-sensitive (ВЫСОКИЙ)
 Неделя 11-12: 📈 Milestone 2.4 - Performance Optimization (СРЕДНИЙ)
 ЗАВЕРШЕНО:    🎨 Milestone 2.5 - Унификация визуализации (ЗАВЕРШЁН ✅)
 ПЛАНИРУЕТСЯ:  🎨 Milestone 2.6 - Design System (ПЛАНИРУЕТСЯ ⏳)

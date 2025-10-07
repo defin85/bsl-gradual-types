@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn test_generic_nested() {
         // Массив<Массив<Строка>>
-        let inner_array = GenericType::array(ConcreteType::string());
+        let _inner_array = GenericType::array(ConcreteType::string());
         let outer_array = GenericType::array(ConcreteType::Platform(PlatformType {
             name: "Массив".to_string(), // Simplified - would use ResolutionResult::Generic
         }));

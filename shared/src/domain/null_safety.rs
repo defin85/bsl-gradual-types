@@ -241,6 +241,7 @@ impl NullSafetyAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{TypeResolution, ResolutionResult, ConcreteType, Certainty, ResolutionSource, ResolutionMetadata, PlatformType};
 
     #[test]
     fn test_null_check_detection() {

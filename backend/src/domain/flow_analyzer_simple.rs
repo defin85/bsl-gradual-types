@@ -137,7 +137,7 @@ pub struct FlowAnalysisResult {
 mod tests {
     use super::*;
     use bsl_shared::domain::repository::InMemoryTypeRepository;
-    use bsl_shared::domain::types::{ResolutionResult, ConcreteType, PlatformType};
+    use bsl_shared::domain::types::{ResolutionResult, ConcreteType};
 
     #[test]
     fn test_simple_variable_assignment() {

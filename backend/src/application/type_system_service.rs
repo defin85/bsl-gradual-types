@@ -19,6 +19,9 @@ use crate::application::TypeInferenceService;
 /// Phase 4: Заменяет LspTypeService + WebTypeService + AnalysisService
 /// единым unified API для всех презентационных слоев
 pub struct TypeSystemService {
+    // Application Layer: AnalysisEngine - чистая оркестрация анализа
+    analysis_engine: Arc<AnalysisEngine>,
+
     // Application Layer: Type Inference Service для high-level операций
     inference_service: Arc<TypeInferenceService>,
 
@@ -46,6 +49,7 @@ impl TypeSystemService {
         let metadata_lookup = TypeMetadataLookup::new(repository);
 
         Self {
+            analysis_engine,
             inference_service,
             metadata_lookup,
             cache,
@@ -713,7 +717,7 @@ impl TypeSystemService {
         let line_index = line as usize;
 
         // Получаем текущую строку и префикс
-        let (current_line, line_prefix) = if line_index < lines.len() {
+        let (_current_line, line_prefix) = if line_index < lines.len() {
             let line_content = lines[line_index];
             let column_index = (column as usize).min(line_content.len());
             (line_content, &line_content[..column_index])
@@ -722,7 +726,8 @@ impl TypeSystemService {
         };
 
         // Извлекаем текущее слово
-        let current_word = self.extract_word_at_position(current_line, column as usize);
+        let current_word = self.extract_word_at_position(content, line, column)
+            .unwrap_or_default();
 
         // Анализируем контекст
         let line_trimmed = line_prefix.trim();
@@ -735,38 +740,6 @@ impl TypeSystemService {
         }
     }
 
-    /// Извлекает слово в указанной позиции
-    fn extract_word_at_position(&self, line: &str, column: usize) -> String {
-        if column == 0 || column > line.len() {
-            return String::new();
-        }
-
-        let chars: Vec<char> = line.chars().collect();
-        let mut start = column;
-        let mut end = column;
-
-        // Идём назад от позиции до начала слова
-        while start > 0 {
-            let ch = chars[start - 1];
-            if ch.is_alphabetic() || ch == '_' || (start < column && ch.is_numeric()) {
-                start -= 1;
-            } else {
-                break;
-            }
-        }
-
-        // Идём вперёд до конца слова
-        while end < chars.len() {
-            let ch = chars[end];
-            if ch.is_alphanumeric() || ch == '_' {
-                end += 1;
-            } else {
-                break;
-            }
-        }
-
-        chars[start..end].iter().collect()
-    }
 
     /// Проверяет, можно ли добавлять операторы в данной позиции
     fn can_add_statements(&self, line_prefix: &str) -> bool {
@@ -964,18 +937,6 @@ impl TypeSystemService {
         ]
     }
 
-    /// Извлекает расширенную информацию о символе
-    fn extract_enhanced_symbol_info(
-        &self,
-        _content: &str,
-        line: u32,
-        column: u32,
-        _ast: Option<&crate::parsing::Program>,
-    ) -> Option<String> {
-        // Простая заглушка для hover информации
-        Some(format!("BSL символ на позиции {}:{} (Phase 4)", line, column))
-    }
-
     // ============================================================================
     // Validation API (Phase 4 - TypeValidator Integration)
     // ============================================================================
@@ -989,11 +950,15 @@ impl TypeSystemService {
     /// Список ошибок валидации или пустой вектор если код валиден
     ///
     /// # Примеры
-    /// ```
+    /// ```no_run
+    /// # use bsl_backend::application::type_system_service::TypeSystemService;
+    /// # async fn example(service: &TypeSystemService) -> anyhow::Result<()> {
     /// let errors = service.validate_code_fragment("массив.НесуществующийМетод()").await?;
     /// if errors.is_empty() {
     ///     println!("Код валиден!");
     /// }
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn validate_code_fragment(&self, code: &str) -> Result<Vec<bsl_shared::api::ValidationErrorDto>> {
         use bsl_shared::domain::validators::TypeValidator;
@@ -1062,6 +1027,153 @@ impl TypeSystemService {
         } else {
             None
         }
+    }
+
+    /// Извлечь информацию о символе на указанной позиции из AST
+    fn extract_enhanced_symbol_info(
+        &self,
+        file_content: &str,
+        line: u32,
+        column: u32,
+        parse_result: Option<&crate::parsing::Program>,
+    ) -> Option<String> {
+        use crate::parsing::bsl::ast::{Statement, Expression};
+
+        // Шаг 1: Извлечь слово под курсором
+        let word_under_cursor = self.extract_word_at_position(file_content, line, column)?;
+
+        // Шаг 2: Если есть AST, ищем информацию о слове в нём
+        if let Some(parse_result) = parse_result {
+            for statement in &parse_result.statements {
+                match statement {
+                    Statement::VarDeclaration { name, .. } if name == &word_under_cursor => {
+                        return Some(format!("**Переменная:** `{}`\n\n*Тип:* Неопределено (требуется flow-sensitive анализ)", name));
+                    }
+                    Statement::Assignment { target, value } => {
+                        if let Expression::Identifier(var_name) = target {
+                            if var_name == &word_under_cursor {
+                                // Application Layer: Маппинг AST → имя типа
+                                if let Some(type_name) = self.expression_to_type_name(value) {
+                                    // Domain Layer: Резолв через AnalysisEngine
+                                    let resolution = self.analysis_engine.resolve_type(&type_name);
+                                    let type_info = self.format_type_for_hover(&type_name, &resolution);
+                                    return Some(format!("**Присваивание:** `{} = ...`\n\n{}", var_name, type_info));
+                                } else {
+                                    return Some(format!("**Присваивание:** `{} = ...`\n\n*Тип:* Требуется расширенный анализ", var_name));
+                                }
+                            }
+                        }
+                    }
+                    Statement::FunctionDecl { name, params, .. } if name == &word_under_cursor => {
+                        return Some(format!("**Функция:** `{}({})`\n\n*Параметры:* {}", name, params.join(", "), params.len()));
+                    }
+                    Statement::ProcedureDecl { name, params, .. } if name == &word_under_cursor => {
+                        return Some(format!("**Процедура:** `{}({})`\n\n*Параметры:* {}", name, params.join(", "), params.len()));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Шаг 3: Fallback - попытка резолва через TypeResolver
+        self.resolve_type_for_identifier(&word_under_cursor)
+    }
+
+    /// Извлечь слово на указанной позиции (line, column)
+    fn extract_word_at_position(&self, file_content: &str, line: u32, column: u32) -> Option<String> {
+        let lines: Vec<&str> = file_content.lines().collect();
+        let current_line = lines.get(line as usize)?;
+
+        let chars: Vec<char> = current_line.chars().collect();
+        if chars.is_empty() || column as usize >= chars.len() {
+            return None;
+        }
+
+        // Ищем начало слова
+        let mut start = column as usize;
+        while start > 0 && Self::is_identifier_char(chars[start - 1]) {
+            start -= 1;
+        }
+
+        // Ищем конец слова
+        let mut end = column as usize;
+        while end < chars.len() && Self::is_identifier_char(chars[end]) {
+            end += 1;
+        }
+
+        if start < end {
+            Some(chars[start..end].iter().collect())
+        } else {
+            None
+        }
+    }
+
+    /// Проверка, является ли символ частью идентификатора BSL
+    fn is_identifier_char(c: char) -> bool {
+        c.is_alphanumeric() || c == '_' || ('\u{0400}'..='\u{04FF}').contains(&c)
+    }
+
+    /// Попытка резолва типа для идентификатора через AnalysisEngine
+    fn resolve_type_for_identifier(&self, identifier: &str) -> Option<String> {
+        // Domain Layer: Резолв через AnalysisEngine
+        let resolution = self.analysis_engine.resolve_type(identifier);
+
+        // Проверяем, нашёлся ли тип
+        use bsl_shared::domain::types::Certainty;
+        if !matches!(resolution.certainty, Certainty::Unknown) {
+            let type_info = self.format_type_for_hover(identifier, &resolution);
+            return Some(format!("**Тип платформы:** `{}`\n\n{}", identifier, type_info));
+        }
+
+        // Если не нашлось — локальная переменная или неизвестный тип
+        Some(format!(
+            "**Идентификатор:** `{}`\n\n*Информация:* Локальная переменная или неизвестный тип\n\n💡 *Подсказка:* Для точного определения типа требуется flow-sensitive анализ",
+            identifier
+        ))
+    }
+
+    /// Форматировать ResolutionResult для отображения
+    fn format_resolution_result(result: &ResolutionResult) -> String {
+        match result {
+            ResolutionResult::Concrete(concrete_type) => format!("{:?}", concrete_type),
+            ResolutionResult::Union(types) => {
+                let names: Vec<String> = types.iter().map(|t| format!("{:?}", t)).collect();
+                format!("Union<{}>", names.join(" | "))
+            }
+            ResolutionResult::Dynamic => "Dynamic".to_string(),
+            ResolutionResult::Intersection(types) => {
+                let names: Vec<String> = types.iter().map(|t| format!("{:?}", t)).collect();
+                format!("Intersection<{}>", names.join(" & "))
+            }
+            ResolutionResult::Generic(generic) => format!("Generic<{}>", generic.base_type),
+            ResolutionResult::Nullable(inner) => format!("Nullable<{:?}>", inner),
+        }
+    }
+
+    /// Маппинг AST Expression → имя типа (Application Layer ответственность)
+    ///
+    /// Преобразует синтаксическую конструкцию (Expression) в доменное понятие (имя типа)
+    /// для дальнейшего резолва через AnalysisEngine/TypeResolver.
+    fn expression_to_type_name(&self, expr: &crate::parsing::bsl::ast::Expression) -> Option<String> {
+        use crate::parsing::bsl::ast::Expression as Expr;
+
+        match expr {
+            Expr::Number(_) => Some("Число".to_string()),
+            Expr::String(_) => Some("Строка".to_string()),
+            Expr::Boolean(_) => Some("Булево".to_string()),
+            Expr::Identifier(name) => Some(name.clone()),
+            Expr::New { type_name, .. } => Some(type_name.clone()),
+            _ => None, // Сложные выражения требуют расширенного анализа
+        }
+    }
+
+    /// Форматирует TypeResolution для hover подсказки с полным описанием типа
+    fn format_type_for_hover(&self, type_name: &str, resolution: &TypeResolution) -> String {
+        let type_str = Self::format_resolution_result(&resolution.result);
+        format!(
+            "**Тип:** `{}`\n\n*Категория:* {:?}\n*Certainty:* {:?}\n*Структура:* {}",
+            type_name, resolution.source, resolution.certainty, type_str
+        )
     }
 }
 

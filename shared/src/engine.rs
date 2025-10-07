@@ -80,6 +80,17 @@ impl AnalysisEngine {
         self.repository.clone()
     }
 
+    /// Резолвит тип по имени (Domain Use Case для hover/completion)
+    ///
+    /// Принимает имя типа (например: "Число", "Массив", "Справочники.Контрагенты")
+    /// и возвращает полный TypeResolution с метаданными.
+    ///
+    /// Это основной entry point для Application Layer (TypeSystemService)
+    /// после маппинга AST Expression → имя типа.
+    pub fn resolve_type(&self, type_name: &str) -> TypeResolution {
+        self.resolver.resolve_expression_sync(type_name)
+    }
+
     /// Analyzes a single BSL file.
     pub async fn analyze_file<P: AsRef<Path>>(&self, path: P) -> Result<CliAnalysisResult> {
         let start_time = std::time::Instant::now();

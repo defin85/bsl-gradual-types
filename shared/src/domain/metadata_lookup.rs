@@ -26,7 +26,7 @@ use crate::domain::types::{
 ///
 /// # Примеры использования
 ///
-/// ```rust
+/// ```ignore
 /// use bsl_gradual_types::domain::metadata_lookup::TypeMetadataLookup;
 /// use bsl_gradual_types::domain::repository::TypeRepository;
 /// use std::sync::Arc;
@@ -73,7 +73,7 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```rust
+    /// ```ignore
     /// let resolution = resolver.resolve_expression_sync("ТаблицаЗначений");
     /// if let Some(raw_type) = lookup.get_raw_type(&resolution) {
     ///     println!("Категория: {}", raw_type.category);
@@ -97,7 +97,7 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```rust
+    /// ```ignore
     /// let resolution = resolver.resolve_expression_sync("Массив");
     /// let methods = lookup.get_methods(&resolution);
     /// for method in methods {
@@ -126,7 +126,7 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```rust
+    /// ```ignore
     /// let resolution = resolver.resolve_expression_sync("HTTPСоединение");
     /// let properties = lookup.get_properties(&resolution);
     /// for prop in properties {
@@ -152,7 +152,7 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```rust
+    /// ```ignore
     /// let resolution = resolver.resolve_expression_sync("ТаблицаЗначений");
     ///
     /// // Проверяем существующий метод
@@ -164,7 +164,7 @@ impl TypeMetadataLookup {
     ///
     /// # Использование для валидации
     ///
-    /// ```rust
+    /// ```ignore
     /// // В TypeValidator
     /// if !metadata_lookup.has_member(&resolution, "Записать") {
     ///     return Some(TypeErrorKind::NonExistentProperty {

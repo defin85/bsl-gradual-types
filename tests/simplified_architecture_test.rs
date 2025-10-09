@@ -72,9 +72,9 @@ fn test_parser_coordinator() {
 
     // Должно либо успешно спарсить, либо упасть с ошибкой (но не панику)
     match result {
-        Ok(program) => {
+        Ok(parse_result) => {
             // TreeSitter сработал
-            assert!(!program.statements.is_empty() || program.statements.is_empty());
+            assert!(!parse_result.program.statements.is_empty() || parse_result.program.statements.is_empty());
         }
         Err(_) => {
             // Regex fallback сработал - это тоже OK для теста

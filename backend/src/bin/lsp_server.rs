@@ -10,6 +10,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{error, info};
 
 use clap::Parser;
+use serde::Deserialize;
 
 // ✅ ИСПРАВЛЕНО: Clean Architecture - используем Application Layer
 use bsl_backend::application::TypeSystemService;
@@ -24,19 +25,45 @@ use bsl_type_visualization::{HtmlRenderer, RenderOptions, ThemeMode};
 #[allow(dead_code)]
 struct Args {}
 
+/// LSP Configuration - передаётся из VSCode Extension через initializationOptions
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspConfig {
+    /// Путь к родительской папке с документацией платформы 1С (syntax_helper)
+    /// Должна содержать подпапки: rebuilt.shcntx_ru и rebuilt.shlang_ru
+    platform_docs_archive: Option<String>,
+
+    /// Путь к Configuration.xml конфигурации 1С
+    configuration_path: Option<String>,
+
+    /// Версия платформы 1С (например, "8.3.25")
+    platform_version: Option<String>,
+}
+
 /// BSL Language Server backend - CLEAN ARCHITECTURE
 struct BslLanguageServer {
     client: Client,
     documents: Arc<RwLock<HashMap<Url, String>>>,
+    // ✅ MILESTONE 2.10: храним LSP конфигурацию из initializationOptions
+    config: Arc<RwLock<Option<LspConfig>>>,
+    // ✅ MILESTONE 2.10: храним SystemCoordinator для перезагрузки типов
+    coordinator: Arc<SystemCoordinator>,
     // ✅ ИСПРАВЛЕНО: используем Application Layer вместо System Layer
     type_service: Arc<TypeSystemService>,
 }
 
 impl BslLanguageServer {
-    fn new(client: Client, type_service: Arc<TypeSystemService>) -> Self {
+    fn new(
+        client: Client,
+        coordinator: Arc<SystemCoordinator>,
+        type_service: Arc<TypeSystemService>,
+    ) -> Self {
         Self {
             client,
             documents: Arc::new(RwLock::new(HashMap::new())),
+            // ✅ MILESTONE 2.10: инициализируем пустой конфигурацией
+            config: Arc::new(RwLock::new(None)),
+            coordinator,
             // ✅ ИСПРАВЛЕНО: используем TypeSystemService напрямую
             type_service,
         }
@@ -83,8 +110,29 @@ impl BslLanguageServer {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for BslLanguageServer {
-    async fn initialize(&self, _params: InitializeParams) -> JsonRpcResult<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> JsonRpcResult<InitializeResult> {
         info!("Initializing BSL Language Server");
+
+        // ✅ MILESTONE 2.10: Читаем initializationOptions из Extension
+        if let Some(options) = params.initialization_options {
+            match serde_json::from_value::<LspConfig>(options.clone()) {
+                Ok(config) => {
+                    info!("📂 LSP Config received: {:?}", config);
+
+                    // Сохраняем конфигурацию
+                    *self.config.write().await = Some(config.clone());
+
+                    info!("✅ Configuration saved, will reload types in initialized()");
+                }
+                Err(e) => {
+                    error!("❌ Failed to parse LSP config: {}", e);
+                    error!("   Raw options: {:?}", options);
+                }
+            }
+        } else {
+            info!("⚠️ No initializationOptions provided - using defaults (4 basic types only)");
+        }
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -121,6 +169,42 @@ impl LanguageServer for BslLanguageServer {
         self.client
             .log_message(MessageType::INFO, "BSL Language Server initialized!")
             .await;
+
+        // ✅ MILESTONE 2.10: Перезагружаем типы с конфигурацией из initializationOptions
+        let config = self.config.read().await;
+        if let Some(ref cfg) = *config {
+            if let Some(ref platform_docs) = cfg.platform_docs_archive {
+                info!("🔄 Reloading types with platformDocsArchive: {}", platform_docs);
+
+                let syntax_path = std::path::Path::new(platform_docs);
+
+                // Перезапускаем SystemCoordinator с новым путём
+                match self.coordinator.start_with_paths(Some(syntax_path), None).await {
+                    Ok(()) => {
+                        info!("✅ Types reloaded successfully with platform documentation");
+
+                        self.client
+                            .log_message(
+                                MessageType::INFO,
+                                format!("Platform documentation loaded from: {}", platform_docs),
+                            )
+                            .await;
+                    }
+                    Err(e) => {
+                        error!("❌ Failed to reload types: {}", e);
+
+                        self.client
+                            .log_message(
+                                MessageType::ERROR,
+                                format!("Failed to load platform documentation: {}", e),
+                            )
+                            .await;
+                    }
+                }
+            } else {
+                info!("⚠️ platformDocsArchive not provided - using basic types only");
+            }
+        }
     }
 
     async fn shutdown(&self) -> JsonRpcResult<()> {
@@ -390,7 +474,14 @@ impl LanguageServer for BslLanguageServer {
             }
         };
 
-        // Получаем информацию о символе через TypeSystemService
+        // ✅ MILESTONE 2.10: Используем IR-based hover с Inline Scope Analysis
+        // Получаем путь к файлу
+        let file_path = match uri.to_file_path() {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(_) => "untitled".to_string(),
+        };
+
+        // Используем get_hover_info() с IR-based анализом
         match self
             .type_service
             .get_hover_info(&file_content, position.line, position.character)
@@ -648,18 +739,24 @@ impl BslLanguageServer {
 #[tokio::main]
 async fn main() -> Result<()> {
     // ОТЛАДКА: логируем в файл, чтобы увидеть что происходит при запуске из VSCode
+    // ✅ MILESTONE 2.10: Перезаписываем файл при каждом запуске (.write(true).truncate(true))
     let log_file = std::fs::OpenOptions::new()
         .create(true)
-        .append(true)
+        .write(true)
+        .truncate(true)  // Очищаем файл при каждом запуске
         .open("C:\\1CProject\\bsl-gradual-types\\vscode-extension\\rust_lsp_server.log")
         .expect("Failed to create log file");
 
     // Настраиваем логирование В ФАЙЛ вместо stderr
+    // ✅ MILESTONE 2.10: Подавляем DEBUG логи от html5ever и selectors для предотвращения гигантских log файлов
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("bsl_gradual_types=debug".parse()?)
-                .add_directive("tower_lsp=info".parse()?),
+                .add_directive("tower_lsp=info".parse()?)
+                .add_directive("html5ever=warn".parse()?)        // Подавляем DEBUG от html5ever (используется в scraper)
+                .add_directive("selectors=warn".parse()?)        // Подавляем DEBUG от selectors (используется в scraper)
+                .add_directive("scraper=info".parse()?),         // Подавляем DEBUG от scraper
         )
         .with_writer(std::sync::Mutex::new(log_file))
         .init();
@@ -690,12 +787,13 @@ async fn main() -> Result<()> {
     let stdout = tokio::io::stdout();
     info!("✅ STDIO channels created");
 
-    // ✅ ИСПРАВЛЕНО: передаем TypeSystemService в LSP Server
+    // ✅ MILESTONE 2.10: передаем SystemCoordinator и TypeSystemService в LSP Server
     info!("Creating LSP service...");
+    let coordinator_clone = coordinator.clone();
     let (service, socket) =
         LspService::new(move |client| {
             info!("Initializing BSL Language Server");
-            BslLanguageServer::new(client, type_service.clone())
+            BslLanguageServer::new(client, coordinator_clone.clone(), type_service.clone())
         });
     info!("✅ LSP service created");
 

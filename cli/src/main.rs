@@ -39,6 +39,9 @@ async fn main() {
         Commands::Info { expression } => {
             info_command(&expression, &args.format).await
         }
+        Commands::AnalyzeIr { path, show_ir, show_symbols } => {
+            analyze_ir_command(&path, &args.format, args.verbose, show_ir, show_symbols).await
+        }
     };
 
     if let Err(e) = result {
@@ -155,6 +158,100 @@ async fn info_command(expression: &str, format: &OutputFormat) -> anyhow::Result
 
     let output = CliFormatter::format_type_info(expression, &resolution, format);
     println!("{}", output);
+
+    Ok(())
+}
+
+/// Milestone 2.8: Команда IR-based анализа (Task 6.2)
+async fn analyze_ir_command(
+    path: &str,
+    format: &OutputFormat,
+    verbose: bool,
+    show_ir: bool,
+    show_symbols: bool,
+) -> anyhow::Result<()> {
+    println!("{} {}", "🎯 IR-based анализ:".green().bold(), path.cyan());
+
+    // 1. Создаем координатор
+    let coordinator = bsl_backend::system::SystemCoordinator::new();
+    coordinator.start().await?;
+
+    let engine = coordinator.analysis_engine()
+        .ok_or_else(|| anyhow::anyhow!("AnalysisEngine не доступен"))?;
+
+    // 2. Получаем Parser через backend (полный ParserCoordinator)
+    // Согласно CLAUDE.md: CLI всегда использует полный backend (~7-8 MB)
+    let parser = std::sync::Arc::new(bsl_backend::system::ParserCoordinator::with_fallback());
+
+    // 3. Читаем файл
+    let content = std::fs::read_to_string(path)?;
+
+    // 4. Парсинг → IR → Type Analysis через AnalysisEngine
+    println!("📝 Парсинг → IR...");
+    let ir_result = engine.parse_and_analyze(parser.as_ref(), &content, path)?;
+
+    // 4. Вывод результатов
+    println!("\n{}", "✅ Результаты анализа:".green().bold());
+    println!("   • Узлов IR: {}", ir_result.ir.nodes.len().to_string().cyan());
+    println!("   • Типов разрешено: {}", ir_result.type_resolutions.len().to_string().cyan());
+    println!("   • Время парсинга: {}ms", ir_result.parse_duration_ms.to_string().yellow());
+    println!("   • Время анализа: {}ms", ir_result.analysis_duration_ms.to_string().yellow());
+
+    // 5. SymbolTable
+    if show_symbols || verbose {
+        println!("\n{}", "📋 Symbol Table:".blue().bold());
+        println!("   • Scopes: {}", ir_result.ir.symbols.scopes.len());
+        println!("   • Функции: {}", ir_result.ir.symbols.global_functions.len());
+        println!("   • Процедуры: {}", ir_result.ir.symbols.global_procedures.len());
+
+        if verbose {
+            for (name, sig) in &ir_result.ir.symbols.global_functions {
+                let params = sig.params.iter()
+                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_deref().unwrap_or("?")))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!("     - Функция {}({})", name.cyan(), params);
+            }
+
+            for (name, sig) in &ir_result.ir.symbols.global_procedures {
+                let params = sig.params.iter()
+                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_deref().unwrap_or("?")))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!("     - Процедура {}({})", name.cyan(), params);
+            }
+        }
+    }
+
+    // 6. IR структура
+    if show_ir {
+        println!("\n{}", "🔍 IR Nodes:".magenta().bold());
+        for (idx, node) in ir_result.ir.nodes.iter().enumerate().take(10) {
+            let node_type = format!("{:?}", node.kind);
+            let first_line = node_type.lines().next().unwrap_or("?");
+
+            if let Some(resolution) = ir_result.type_resolutions.get(&idx) {
+                println!("   [{:2}] {} → {:?}", idx, first_line.yellow(), resolution.certainty);
+            } else {
+                println!("   [{:2}] {}", idx, first_line.dimmed());
+            }
+        }
+        if ir_result.ir.nodes.len() > 10 {
+            println!("   ... и ещё {} узлов", ir_result.ir.nodes.len() - 10);
+        }
+    }
+
+    // 7. Типовая информация (как в старом analyze)
+    if matches!(format, OutputFormat::Json) {
+        let json = serde_json::json!({
+            "file": path,
+            "nodes": ir_result.ir.nodes.len(),
+            "types_resolved": ir_result.type_resolutions.len(),
+            "parse_time_ms": ir_result.parse_duration_ms,
+            "analysis_time_ms": ir_result.analysis_duration_ms,
+        });
+        println!("\n{}", serde_json::to_string_pretty(&json)?);
+    }
 
     Ok(())
 }

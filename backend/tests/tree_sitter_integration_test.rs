@@ -17,7 +17,8 @@ fn test_tree_sitter_simple_function() {
 
     assert!(result.is_ok(), "Парсинг должен пройти успешно: {:?}", result);
 
-    let program = result.unwrap();
+    let parse_result = result.unwrap();
+    let program = parse_result.program;
 
     // Проверяем, что функция распознана
     assert!(
@@ -27,7 +28,7 @@ fn test_tree_sitter_simple_function() {
 
     // Проверяем что первый statement — это функция
     match &program.statements[0] {
-        Statement::FunctionDecl { name, params, body } => {
+        Statement::FunctionDecl { name, params, body, .. } => {
             assert_eq!(name, "ПолучитьСумму", "Имя функции должно совпадать");
             assert_eq!(params.len(), 2, "Должно быть 2 параметра");
             assert!(params.contains(&"А".to_string()), "Должен быть параметр А");
@@ -55,7 +56,8 @@ fn test_tree_sitter_variable_declaration() {
 
     assert!(result.is_ok(), "Парсинг переменных должен работать: {:?}", result);
 
-    let program = result.unwrap();
+    let parse_result = result.unwrap();
+    let program = parse_result.program;
 
     // Должны быть распознаны 2 объявления переменных + 2 присваивания
     assert!(
@@ -87,7 +89,8 @@ fn test_tree_sitter_if_statement() {
 
     assert!(result.is_ok(), "Парсинг условий должен работать: {:?}", result);
 
-    let program = result.unwrap();
+    let parse_result = result.unwrap();
+    let program = parse_result.program;
 
     // Должен быть распознан if statement
     assert!(!program.statements.is_empty(), "Должен быть if statement");
@@ -97,10 +100,11 @@ fn test_tree_sitter_if_statement() {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             // Условие должно быть identifier "Условие"
             match condition {
-                Expression::Identifier(name) => {
+                Expression::Identifier { name, .. } => {
                     assert_eq!(name, "Условие", "Условие должно быть identifier");
                 }
                 _ => {}
@@ -142,7 +146,8 @@ fn test_tree_sitter_method_call() {
 
     assert!(result.is_ok(), "Парсинг вызовов методов должен работать: {:?}", result);
 
-    let program = result.unwrap();
+    let parse_result = result.unwrap();
+    let program = parse_result.program;
 
     // Вызов метода должен быть распознан
     // Пока это может быть просто statement на верхнем уровне
@@ -181,7 +186,8 @@ fn test_tree_sitter_binary_expression() {
 
     assert!(result.is_ok(), "Парсинг бинарных выражений должен работать");
 
-    let program = result.unwrap();
+    let parse_result = result.unwrap();
+    let program = parse_result.program;
 
     // Должна быть функция с assignment внутри
     assert!(!program.statements.is_empty(), "Должна быть функция");

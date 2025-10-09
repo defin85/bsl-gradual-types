@@ -7,6 +7,8 @@ pub mod api;
 pub mod domain;
 pub mod types;
 pub mod engine;
+pub mod ir; // Milestone 2.8: Intermediate Representation (IR)
+pub mod parsing; // Milestone 2.8: Parser trait для инверсии зависимостей
 // УДАЛЕНО Phase 1: loaders переехали в backend/src/data/
 // pub mod loaders;
 

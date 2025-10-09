@@ -122,6 +122,18 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
         };
     }
     
+    // ✅ MILESTONE 2.10: Подготавливаем initializationOptions для передачи в LSP
+    const initializationOptions = {
+        platformDocsArchive: BslAnalyzerConfig.platformDocsArchive,
+        configurationPath: BslAnalyzerConfig.configurationPath,
+        platformVersion: BslAnalyzerConfig.platformVersion
+    };
+
+    outputChannel.appendLine(`📤 Sending initializationOptions to LSP:`);
+    outputChannel.appendLine(`   platformDocsArchive: ${initializationOptions.platformDocsArchive || 'NOT SET'}`);
+    outputChannel.appendLine(`   configurationPath: ${initializationOptions.configurationPath || 'NOT SET'}`);
+    outputChannel.appendLine(`   platformVersion: ${initializationOptions.platformVersion || 'NOT SET'}`);
+
     // Client options configuration
     const clientOptions: LanguageClientOptions = {
         documentSelector: [
@@ -136,6 +148,8 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
             ],
             configurationSection: 'bslAnalyzer'
         },
+        // ✅ MILESTONE 2.10: Передаём initializationOptions в LSP
+        initializationOptions: initializationOptions,
         outputChannel: outputChannel,
         revealOutputChannelOn: RevealOutputChannelOn.Never,
         traceOutputChannel: outputChannel,
@@ -182,12 +196,30 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
         }
     };
 
-    // Start the client
+    // Start the client with progress notification
     try {
         outputChannel.appendLine('🚀 Starting LSP client...');
         outputChannel.appendLine(`   Server command: ${JSON.stringify(serverOptions)}`);
 
-        await client.start();
+        // MILESTONE 2.9: Показываем прогресс парсинга документации
+        // Используем Window (status bar) вместо Notification для меньшей навязчивости
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Window,
+            title: "BSL Analyzer: Запуск LSP сервера",
+            cancellable: false
+        }, async (progress) => {
+            progress.report({ increment: 0, message: "Инициализация..." });
+
+            await client!.start();
+
+            progress.report({ increment: 50, message: "Парсинг документации платформы 1С..." });
+
+            // Даём серверу время на парсинг (он делает это при старте)
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            progress.report({ increment: 100, message: "Готов к работе" });
+        });
+
         outputChannel.appendLine('✅ LSP client started successfully');
         
         // Регистрируем обработчики custom requests

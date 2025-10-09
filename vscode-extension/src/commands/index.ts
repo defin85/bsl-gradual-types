@@ -304,6 +304,12 @@ export async function registerCommands(context: vscode.ExtensionContext) {
 
     // Build Unified BSL Index
     await safeRegisterCommand('bslAnalyzer.buildIndex', async () => {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            vscode.window.showWarningMessage('No workspace folder found');
+            return;
+        }
+
         const configPath = getConfigurationPath();
         if (!configPath) {
             vscode.window.showWarningMessage('Please configure the 1C configuration path in settings');
@@ -321,6 +327,8 @@ export async function registerCommands(context: vscode.ExtensionContext) {
         }
 
         startIndexing(4);
+
+        const workspacePath = workspaceFolders[0].uri.fsPath;
 
         try {
             await vscode.window.withProgress({
@@ -350,19 +358,15 @@ export async function registerCommands(context: vscode.ExtensionContext) {
                 }
                 
                 // ✅ ЗАМЕНА CLI → LSP: build_unified_index #1
-                const result = await buildIndex(configPath);
+                const result = await buildIndex({ workspace_path: workspacePath });
 
                 updateIndexingProgress(4, 'Finalizing index...', 90);
                 progress.report({ increment: 15, message: 'Finalizing...' });
                 
                 finishIndexing(true);
-                
-                let typesCount = 'unknown';
-                const typesMatch = result.match(/(\d+)\s+entities/i);
-                if (typesMatch && typesMatch[1]) {
-                    typesCount = typesMatch[1];
-                }
-                
+
+                const typesCount = result.types_count || 'unknown';
+
                 vscode.window.showInformationMessage(`✅ BSL Index built successfully with ${typesCount} types`);
                 
                 return result;

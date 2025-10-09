@@ -91,14 +91,19 @@ export class HierarchicalTypeIndexProvider implements vscode.TreeDataProvider<Hi
         this.configTypes.clear();
         this.typeCategories.clear();
 
+        // TODO Milestone 2.10: Запрашивать типы через LSP Custom Request (bsl/getAllTypes)
+        // ВРЕМЕННО ОТКЛЮЧЕНО (Milestone 2.9): Убираем дублирование кеша типов
+        // Теперь единственный источник истины - TypeRepository в LSP Server
+        // Extension будет запрашивать типы через LSP вместо прямого чтения JSONL
+
         // Загружаем типы платформы
-        await this.loadPlatformTypes();
+        // await this.loadPlatformTypes(); // ВРЕМЕННО ОТКЛЮЧЕНО
 
         // Загружаем типы конфигурации
-        await this.loadConfigurationTypes();
+        // await this.loadConfigurationTypes(); // ВРЕМЕННО ОТКЛЮЧЕНО
 
         // Группируем типы по категориям
-        this.categorizeTypes();
+        // this.categorizeTypes(); // ВРЕМЕННО ОТКЛЮЧЕНО
     }
 
     private async loadPlatformTypes(): Promise<void> {
@@ -378,82 +383,100 @@ export class HierarchicalTypeIndexProvider implements vscode.TreeDataProvider<Hi
     private async getRootCategories(): Promise<HierarchicalTypeItem[]> {
         this.outputChannel?.appendLine(`HierarchicalTypeIndexProvider: Building categories, found ${this.typeCategories.size} categories`);
         const items: HierarchicalTypeItem[] = [];
-        const configPath = BslAnalyzerConfig.configurationPath;
-        const platformDocs = BslAnalyzerConfig.platformDocsArchive;
 
-        // Platform types group
-        if (this.platformTypes.size > 0) {
-            const platformGroup = new HierarchicalTypeItem(
-                `🏢 Платформа 1С (${this.platformTypes.size} типов)`,
-                vscode.TreeItemCollapsibleState.Collapsed,
-                'Платформа',
-                'platform-group'
-            );
-            items.push(platformGroup);
-        } else if (platformDocs) {
-            // Platform docs configured but no cache
-            const noPlatformItem = new HierarchicalTypeItem(
-                '⚠️ Кеш платформы не найден',
-                vscode.TreeItemCollapsibleState.None,
-                'no-platform',
-                'empty'
-            );
-            noPlatformItem.tooltip = 'Постройте индекс для создания кеша платформы';
-            items.push(noPlatformItem);
-        } else {
-            // No platform docs configured
-            const noPlatformDocsItem = new HierarchicalTypeItem(
-                '❌ Документация платформы не настроена',
-                vscode.TreeItemCollapsibleState.None,
-                'no-platform-docs',
-                'empty'
-            );
-            noPlatformDocsItem.tooltip = 'Укажите путь к архиву документации платформы в настройках';
-            items.push(noPlatformDocsItem);
-        }
+        // TODO Milestone 2.10: Показывать типы из LSP через Custom Request
+        // ВРЕМЕННО: показываем заглушку вместо Type Index
+        const stubItem = new HierarchicalTypeItem(
+            'ℹ️ Type Index временно отключён',
+            vscode.TreeItemCollapsibleState.None,
+            'type-index-disabled',
+            'empty'
+        );
+        stubItem.tooltip =
+            'Type Index временно отключён (Milestone 2.9).\n\n' +
+            'Используйте LSP hover для получения информации о типах.\n\n' +
+            'В Milestone 2.10 Type Index будет получать данные напрямую из LSP Server\n' +
+            'через Custom Request (bsl/getAllTypes) вместо чтения JSONL кеша.\n\n' +
+            'Это устранит дублирование данных и упростит архитектуру.';
+        items.push(stubItem);
 
-        // Configuration types group
-        if (this.configTypes.size > 0) {
-            const configGroup = new HierarchicalTypeItem(
-                `🏗️ Конфигурация (${this.configTypes.size} типов)`,
-                vscode.TreeItemCollapsibleState.Collapsed,
-                'Конфигурация',
-                'config-group'
-            );
-            items.push(configGroup);
-        } else if (configPath) {
-            // Config path set but no cache
-            const projectId = this.extractUuidProjectId(configPath);
-            if (!projectId) {
-                const invalidConfigItem = new HierarchicalTypeItem(
-                    '❌ Неверная конфигурация (нет UUID)',
-                    vscode.TreeItemCollapsibleState.None,
-                    'invalid-config',
-                    'empty'
-                );
-                invalidConfigItem.tooltip = 'Configuration.xml должен содержать валидный UUID';
-                items.push(invalidConfigItem);
-            } else {
-                const noConfigItem = new HierarchicalTypeItem(
-                    '⚠️ Кеш конфигурации не найден',
-                    vscode.TreeItemCollapsibleState.None,
-                    'no-config',
-                    'empty'
-                );
-                noConfigItem.tooltip = 'Постройте индекс для создания кеша конфигурации';
-                items.push(noConfigItem);
-            }
-        } else {
-            // No config path set
-            const noConfigPathItem = new HierarchicalTypeItem(
-                'ℹ️ Путь к конфигурации не указан',
-                vscode.TreeItemCollapsibleState.None,
-                'no-config-path',
-                'empty'
-            );
-            noConfigPathItem.tooltip = 'Укажите путь к конфигурации 1С в настройках';
-            items.push(noConfigPathItem);
-        }
+        // СТАРЫЙ КОД (закомментирован):
+        // const configPath = BslAnalyzerConfig.configurationPath;
+        // const platformDocs = BslAnalyzerConfig.platformDocsArchive;
+        //
+        // // Platform types group
+        // if (this.platformTypes.size > 0) {
+        //     const platformGroup = new HierarchicalTypeItem(
+        //         `🏢 Платформа 1С (${this.platformTypes.size} типов)`,
+        //         vscode.TreeItemCollapsibleState.Collapsed,
+        //         'Платформа',
+        //         'platform-group'
+        //     );
+        //     items.push(platformGroup);
+        // } else if (platformDocs) {
+        //     // Platform docs configured but no cache
+        //     const noPlatformItem = new HierarchicalTypeItem(
+        //         '⚠️ Кеш платформы не найден',
+        //         vscode.TreeItemCollapsibleState.None,
+        //         'no-platform',
+        //         'empty'
+        //     );
+        //     noPlatformItem.tooltip = 'Постройте индекс для создания кеша платформы';
+        //     items.push(noPlatformItem);
+        // } else {
+        //     // No platform docs configured
+        //     const noPlatformDocsItem = new HierarchicalTypeItem(
+        //         '❌ Документация платформы не настроена',
+        //         vscode.TreeItemCollapsibleState.None,
+        //         'no-platform-docs',
+        //         'empty'
+        //     );
+        //     noPlatformDocsItem.tooltip = 'Укажите путь к архиву документации платформы в настройках';
+        //     items.push(noPlatformDocsItem);
+        // }
+        //
+        // // Configuration types group
+        // if (this.configTypes.size > 0) {
+        //     const configGroup = new HierarchicalTypeItem(
+        //         `🏗️ Конфигурация (${this.configTypes.size} типов)`,
+        //         vscode.TreeItemCollapsibleState.Collapsed,
+        //         'Конфигурация',
+        //         'config-group'
+        //     );
+        //     items.push(configGroup);
+        // } else if (configPath) {
+        //     // Config path set but no cache
+        //     const projectId = this.extractUuidProjectId(configPath);
+        //     if (!projectId) {
+        //         const invalidConfigItem = new HierarchicalTypeItem(
+        //             '❌ Неверная конфигурация (нет UUID)',
+        //             vscode.TreeItemCollapsibleState.None,
+        //             'invalid-config',
+        //             'empty'
+        //         );
+        //         invalidConfigItem.tooltip = 'Configuration.xml должен содержать валидный UUID';
+        //         items.push(invalidConfigItem);
+        //     } else {
+        //         const noConfigItem = new HierarchicalTypeItem(
+        //             '⚠️ Кеш конфигурации не найден',
+        //             vscode.TreeItemCollapsibleState.None,
+        //             'no-config',
+        //             'empty'
+        //         );
+        //         noConfigItem.tooltip = 'Постройте индекс для создания кеша конфигурации';
+        //         items.push(noConfigItem);
+        //     }
+        // } else {
+        //     // No config path set
+        //     const noConfigPathItem = new HierarchicalTypeItem(
+        //         'ℹ️ Путь к конфигурации не указан',
+        //         vscode.TreeItemCollapsibleState.None,
+        //         'no-config-path',
+        //         'empty'
+        //     );
+        //     noConfigPathItem.tooltip = 'Укажите путь к конфигурации 1С в настройках';
+        //     items.push(noConfigPathItem);
+        // }
 
         return items;
     }

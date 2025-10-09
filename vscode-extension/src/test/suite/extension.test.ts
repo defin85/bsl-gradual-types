@@ -6,11 +6,11 @@ suite('Extension Test Suite', () => {
     vscode.window.showInformationMessage('Start all tests.');
 
     test('Extension should be present', () => {
-        assert.ok(vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer'));
+        assert.ok(vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types'));
     });
 
     test('Should activate extension', async () => {
-        const ext = vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer');
+        const ext = vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types');
         if (ext) {
             await ext.activate();
             assert.ok(ext.isActive);

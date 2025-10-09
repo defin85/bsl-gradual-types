@@ -3,6 +3,7 @@
 
 pub mod type_system_service;
 pub mod type_inference_service;
+pub mod ast_to_ir; // Milestone 2.8: AST → IR конвертер
 
 // === Phase 4: Unified API ===
 // Main unified service - single entry point for all clients

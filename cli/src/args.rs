@@ -65,6 +65,20 @@ pub enum Commands {
         /// Expression to get info for
         expression: String,
     },
+
+    /// Milestone 2.8: Analyze file using IR-based flow (Parser → IR → Type Analysis)
+    AnalyzeIr {
+        /// File to analyze
+        path: String,
+
+        /// Show IR structure
+        #[arg(long)]
+        show_ir: bool,
+
+        /// Show symbol table
+        #[arg(long)]
+        show_symbols: bool,
+    },
 }
 
 /// Output format options

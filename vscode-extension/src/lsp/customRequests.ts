@@ -91,10 +91,8 @@ export async function queryType(typeName: string): Promise<QueryTypeResponse> {
  * Построение индекса типов через LSP
  * Заменяет: executeBslCommand('build_unified_index', ...)
  */
-export async function buildIndex(workspacePath: string): Promise<BuildIndexResponse> {
-    return await sendCustomRequest<BuildIndexResponse>('bsl/buildIndex', {
-        workspace_path: workspacePath
-    });
+export async function buildIndex(params: BuildIndexParams): Promise<BuildIndexResponse> {
+    return await sendCustomRequest<BuildIndexResponse>('bsl/buildIndex', params);
 }
 
 /**

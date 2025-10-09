@@ -22,22 +22,17 @@ import {
     initializeUtils,
     autoDetectConfiguration
 } from './utils';
+import { buildIndex } from './lsp/customRequests';
 import {
     BslOverviewProvider,
     BslDiagnosticsProvider,
-    BslPlatformDocsProvider,
     HierarchicalTypeIndexProvider,
     BslActionsWebviewProvider
 } from './providers';
 // Webview функции не используются напрямую в extension.ts
 // Они используются в модуле commands
 import { registerCommands as registerAllCommands, initializeCommands } from './commands';
-import {
-    initializePlatformDocs,
-    addPlatformDocumentation,
-    removePlatformDocumentation,
-    parsePlatformDocumentation
-} from './platformDocs';
+// MILESTONE 2.9: Platform Documentation функции удалены - больше не используются
 
 // Глобальные переменные
 let indexServerPath: string;
@@ -80,10 +75,31 @@ export async function activate(context: vscode.ExtensionContext) {
         initializeProgress(outputChannel, statusBarItem);
         initializeLspClient(outputChannel);
         initializeCommands(outputChannel);
-        initializePlatformDocs(outputChannel);
+        // MILESTONE 2.9: initializePlatformDocs удалён - управление типами через LSP
 
         // Migrate legacy settings if needed
         await migrateLegacySettings();
+
+        // MILESTONE 2.9: Валидация ОБЯЗАТЕЛЬНОГО параметра platformDocsArchive
+        const platformDocsArchive = BslAnalyzerConfig.platformDocsArchive;
+        if (!platformDocsArchive || platformDocsArchive.trim() === '') {
+            const selection = await vscode.window.showErrorMessage(
+                '⚠️ BSL Analyzer: platformDocsArchive не настроен!\n\n' +
+                'Это ОБЯЗАТЕЛЬНЫЙ параметр для работы TypeRepository.\n' +
+                'Без него типы платформы 1С не будут доступны в LSP hover.',
+                'Открыть настройки',
+                'Закрыть'
+            );
+
+            if (selection === 'Открыть настройки') {
+                vscode.commands.executeCommand('workbench.action.openSettings', 'bslAnalyzer.platformDocsArchive');
+            }
+
+            // НЕ останавливаем активацию полностью, но показываем предупреждение
+            outputChannel.appendLine('⚠️ Extension будет работать в ограниченном режиме без платформенных типов');
+        } else {
+            outputChannel.appendLine(`✅ Platform docs archive configured: ${platformDocsArchive}`);
+        }
 
         // Initialize configuration
         initializeConfiguration();
@@ -154,7 +170,7 @@ async function autoDetectConfigurationIfNeeded() {
         if (detectedPath) {
             outputChannel.appendLine(`✅ Configuration auto-detected: ${detectedPath}`);
             // Refresh providers to use new configuration
-            vscode.commands.executeCommand('bslAnalyzer.refreshTypeIndex');
+            vscode.commands.executeCommand('bslAnalyzer.refreshTypeRepository');
         }
     } else {
         outputChannel.appendLine(`📍 Using configured path: ${configPath}`);
@@ -241,7 +257,8 @@ async function initializeIndexIfNeeded() {
             ];
 
             // ✅ ЗАМЕНА CLI → LSP: build_unified_index #2
-            await buildIndex(configPath);
+            const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+            await buildIndex({ workspace_path: workspacePath });
 
             updateIndexingProgress(4, 'Finalizing index...', 90);
             progress.report({ increment: 15, message: 'Finalizing...' });
@@ -356,25 +373,19 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
         context.subscriptions.push(diagnosticsTreeView);
         outputChannel.appendLine('✅ Diagnostics provider registered');
 
-        // Type Index provider - используем новый иерархический провайдер
-        outputChannel.appendLine('📋 Creating Hierarchical Type Index provider...');
+        // Type Repository provider - показывает типы из LSP Server TypeRepository
+        outputChannel.appendLine('📋 Creating Type Repository provider...');
         const typeIndexProvider = new HierarchicalTypeIndexProvider(outputChannel);
-        const typeIndexTreeView = vscode.window.createTreeView('bslAnalyzer.typeIndex', {
+        const typeIndexTreeView = vscode.window.createTreeView('bslAnalyzer.typeRepository', {
             treeDataProvider: typeIndexProvider,
             showCollapseAll: true
         });
         context.subscriptions.push(typeIndexTreeView);
-        outputChannel.appendLine('✅ Hierarchical Type Index provider registered');
+        outputChannel.appendLine('✅ Type Repository provider registered');
 
-        // Platform Documentation provider
-        outputChannel.appendLine('📋 Creating Platform Documentation provider...');
-        const platformDocsProvider = new BslPlatformDocsProvider(outputChannel);
-        const platformDocsTreeView = vscode.window.createTreeView('bslAnalyzer.platformDocs', {
-            treeDataProvider: platformDocsProvider,
-            showCollapseAll: true
-        });
-        context.subscriptions.push(platformDocsTreeView);
-        outputChannel.appendLine('✅ Platform Documentation provider registered');
+        // MILESTONE 2.9: Platform Documentation provider УДАЛЁН
+        // Теперь единственный источник данных - TypeRepository в LSP Server
+        // UI показывает типы через Custom LSP Requests (будет в Milestone 2.10)
 
         // Quick Actions webview provider
         outputChannel.appendLine('📋 Creating Quick Actions webview provider...');
@@ -399,49 +410,18 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
         );
 
         context.subscriptions.push(
-            vscode.commands.registerCommand('bslAnalyzer.refreshTypeIndex', () => {
-                outputChannel.appendLine('🔄 Refreshing Type Index panel');
+            vscode.commands.registerCommand('bslAnalyzer.refreshTypeRepository', () => {
+                outputChannel.appendLine('🔄 Refreshing Type Repository panel');
                 typeIndexProvider.refresh();
             })
         );
 
-        context.subscriptions.push(
-            vscode.commands.registerCommand('bslAnalyzer.refreshPlatformDocs', () => {
-                outputChannel.appendLine('🔄 Refreshing Platform Docs panel');
-                platformDocsProvider.refresh();
-            })
-        );
-
-        // Регистрируем команду добавления документации
-        outputChannel.appendLine('Registering bslAnalyzer.addPlatformDocs command...');
-        try {
-            const addDocsDisposable = vscode.commands.registerCommand('bslAnalyzer.addPlatformDocs', async () => {
-                outputChannel.appendLine('📁 Command executed: Adding platform documentation...');
-                await addPlatformDocumentation(platformDocsProvider);
-            });
-            context.subscriptions.push(addDocsDisposable);
-            outputChannel.appendLine('✅ Successfully registered bslAnalyzer.addPlatformDocs');
-        } catch (error) {
-            outputChannel.appendLine(`❌ Failed to register bslAnalyzer.addPlatformDocs: ${error}`);
-        }
-
-        context.subscriptions.push(
-            vscode.commands.registerCommand('bslAnalyzer.removePlatformDocs', async (item) => {
-                if (item && item.version) {
-                    outputChannel.appendLine(`🗑️ Removing platform docs for version: ${item.version}`);
-                    await removePlatformDocumentation(item.version, platformDocsProvider);
-                }
-            })
-        );
-
-        context.subscriptions.push(
-            vscode.commands.registerCommand('bslAnalyzer.parsePlatformDocs', async (item) => {
-                if (item && item.version) {
-                    outputChannel.appendLine(`⚙️ Parsing platform docs for version: ${item.version}`);
-                    await parsePlatformDocumentation(item.version);
-                }
-            })
-        );
+        // MILESTONE 2.9: Platform Documentation команды УДАЛЕНЫ
+        // - bslAnalyzer.refreshPlatformDocs
+        // - bslAnalyzer.addPlatformDocs
+        // - bslAnalyzer.removePlatformDocs
+        // - bslAnalyzer.parsePlatformDocs
+        // Все управление типами теперь через LSP Server TypeRepository
 
         outputChannel.appendLine('✅ All BSL Analyzer sidebar providers registered successfully');
 

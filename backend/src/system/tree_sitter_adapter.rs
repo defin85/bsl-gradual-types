@@ -2,7 +2,7 @@
 //!
 //! Преобразует узлы tree-sitter в структуры из backend/src/parsing/bsl/mod.rs
 
-use crate::parsing::bsl::ast::{Expression, Program, Statement};
+use crate::parsing::bsl::ast::{ErrorType, Expression, ParseError, ParseResult, Program, Span, Statement};
 use tree_sitter::{Node, Tree};
 use tracing::debug;
 
@@ -10,12 +10,70 @@ use tracing::debug;
 pub struct TreeSitterAdapter;
 
 impl TreeSitterAdapter {
-    /// Конвертировать дерево tree-sitter в Program
-    pub fn convert_tree(tree: &Tree, source: &str) -> Result<Program, String> {
-        let root = tree.root_node();
-        let statements = Self::convert_source_file(&root, source)?;
+    /// Извлечь Span из tree-sitter Node (Milestone 2.7 Task 2)
+    fn node_to_span(node: &Node) -> Span {
+        let start_pos = node.start_position();
+        let end_pos = node.end_position();
+        Span::from_positions(
+            (start_pos.row as u32, start_pos.column as u32),
+            (end_pos.row as u32, end_pos.column as u32),
+        )
+    }
 
-        Ok(Program { statements })
+    /// Конвертировать дерево tree-sitter в ParseResult с обработкой ошибок (Milestone 2.7 Task 3)
+    pub fn convert_tree(tree: &Tree, source: &str) -> Result<ParseResult, String> {
+        let root = tree.root_node();
+
+        // Собираем синтаксические ошибки из дерева
+        let syntax_errors = Self::collect_syntax_errors(&root, source);
+
+        // Пытаемся извлечь statements даже при наличии ошибок (partial recovery)
+        let statements = Self::convert_source_file(&root, source)?;
+        let program = Program { statements };
+
+        // Возвращаем ParseResult с программой и ошибками
+        if syntax_errors.is_empty() {
+            Ok(ParseResult::success(program))
+        } else {
+            Ok(ParseResult::with_errors(program, syntax_errors))
+        }
+    }
+
+    /// Собрать все ERROR узлы из дерева (рекурсивный обход)
+    fn collect_syntax_errors(node: &Node, source: &str) -> Vec<ParseError> {
+        let mut errors = Vec::new();
+
+        // Если текущий узел — ERROR, добавляем его
+        if node.kind() == "ERROR" {
+            let span = Self::node_to_span(node);
+            let text = node.utf8_text(source.as_bytes())
+                .unwrap_or("<неизвестно>")
+                .to_string();
+
+            errors.push(ParseError {
+                message: format!("Синтаксическая ошибка: неожиданный текст '{}'", text),
+                span,
+                error_type: ErrorType::ParseError,
+            });
+        }
+
+        // Проверяем node.is_missing() для пропущенных токенов
+        if node.is_missing() {
+            let span = Self::node_to_span(node);
+            errors.push(ParseError {
+                message: format!("Отсутствует обязательный элемент: {}", node.kind()),
+                span,
+                error_type: ErrorType::MissingToken,
+            });
+        }
+
+        // Рекурсивно обходим дочерние узлы
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            errors.extend(Self::collect_syntax_errors(&child, source));
+        }
+
+        errors
     }
 
     /// Конвертировать source_file (корневой узел)
@@ -49,8 +107,12 @@ impl TreeSitterAdapter {
             "assignment_statement" => Ok(Some(Self::convert_assignment(node, source)?)),
             "return_statement" => Ok(Some(Self::convert_return(node, source)?)),
             "call_statement" => Ok(Some(Self::convert_call_statement(node, source)?)),
-            "break_statement" => Ok(Some(Statement::Break)),
-            "continue_statement" => Ok(Some(Statement::Continue)),
+            "break_statement" => Ok(Some(Statement::Break {
+                span: Self::node_to_span(node),
+            })),
+            "continue_statement" => Ok(Some(Statement::Continue {
+                span: Self::node_to_span(node),
+            })),
             "goto_statement" => Ok(Some(Self::convert_goto_statement(node, source)?)),
             "label_statement" => Ok(Some(Self::convert_label_statement(node, source)?)),
             "execute_statement" => Ok(Some(Self::convert_execute_statement(node, source)?)),
@@ -76,6 +138,7 @@ impl TreeSitterAdapter {
 
     /// Конвертировать function_definition или procedure_definition
     fn convert_function_definition(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut name = String::new();
         let mut params = Vec::new();
@@ -102,9 +165,19 @@ impl TreeSitterAdapter {
         }
 
         if is_procedure {
-            Ok(Statement::ProcedureDecl { name, params, body })
+            Ok(Statement::ProcedureDecl {
+                name,
+                params,
+                body,
+                span,
+            })
         } else {
-            Ok(Statement::FunctionDecl { name, params, body })
+            Ok(Statement::FunctionDecl {
+                name,
+                params,
+                body,
+                span,
+            })
         }
     }
 
@@ -144,13 +217,18 @@ impl TreeSitterAdapter {
         Ok(Statement::VarDeclaration {
             name,
             type_hint: None, // tree-sitter-bsl не поддерживает type hints
+            span: Self::node_to_span(node),
         })
     }
 
     /// Конвертировать if_statement
     fn convert_if_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
-        let mut condition = Expression::Boolean(true); // default
+        let mut condition = Expression::Boolean {
+            value: true,
+            span: Span::stub(),
+        }; // default
         let mut then_body = Vec::new();
         let mut else_body = None;
 
@@ -196,6 +274,7 @@ impl TreeSitterAdapter {
             condition,
             then_body,
             else_body,
+            span,
         })
     }
 
@@ -220,10 +299,17 @@ impl TreeSitterAdapter {
 
     /// Конвертировать for_statement
     fn convert_for_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut variable = String::new();
-        let mut start = Expression::Number(0.0);
-        let mut end = Expression::Number(0.0);
+        let mut start = Expression::Number {
+            value: 0.0,
+            span: Span::stub(),
+        };
+        let mut end = Expression::Number {
+            value: 0.0,
+            span: Span::stub(),
+        };
         let mut body = Vec::new();
         let mut in_body = false;
         let mut expr_count = 0;
@@ -269,11 +355,13 @@ impl TreeSitterAdapter {
             start,
             end,
             body,
+            span,
         })
     }
 
     /// Конвертировать assignment_statement
     fn convert_assignment(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut target = None;
         let mut value = None;
@@ -289,13 +377,21 @@ impl TreeSitterAdapter {
         }
 
         Ok(Statement::Assignment {
-            target: target.unwrap_or(Expression::Identifier("unknown".to_string())),
-            value: value.unwrap_or(Expression::Identifier("unknown".to_string())),
+            target: target.unwrap_or(Expression::Identifier {
+                name: "unknown".to_string(),
+                span: Span::stub(),
+            }),
+            value: value.unwrap_or(Expression::Identifier {
+                name: "unknown".to_string(),
+                span: Span::stub(),
+            }),
+            span,
         })
     }
 
     /// Конвертировать return_statement
     fn convert_return(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut value = None;
 
@@ -311,16 +407,20 @@ impl TreeSitterAdapter {
             }
         }
 
-        Ok(Statement::Return { value })
+        Ok(Statement::Return { value, span })
     }
 
     /// Конвертировать call_statement (вызов процедуры/функции)
     fn convert_call_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
 
         for child in node.children(&mut cursor) {
             if let Some(expr) = Self::convert_expression(&child, source)? {
-                return Ok(Statement::Call { expression: expr });
+                return Ok(Statement::Call {
+                    expression: expr,
+                    span,
+                });
             }
         }
 
@@ -329,8 +429,12 @@ impl TreeSitterAdapter {
 
     /// Конвертировать while_statement
     fn convert_while_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
-        let mut condition = Expression::Boolean(true);
+        let mut condition = Expression::Boolean {
+            value: true,
+            span: Span::stub(),
+        };
         let mut body = Vec::new();
         let mut in_body = false;
 
@@ -356,11 +460,16 @@ impl TreeSitterAdapter {
             }
         }
 
-        Ok(Statement::While { condition, body })
+        Ok(Statement::While {
+            condition,
+            body,
+            span,
+        })
     }
 
     /// Конвертировать try_statement
     fn convert_try_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut try_body = Vec::new();
         let mut except_body = Vec::new();
@@ -387,14 +496,19 @@ impl TreeSitterAdapter {
         Ok(Statement::Try {
             try_body,
             except_body,
+            span,
         })
     }
 
     /// Конвертировать for_each_statement
     fn convert_for_each_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut variable = String::new();
-        let mut collection = Expression::Identifier("unknown".to_string());
+        let mut collection = Expression::Identifier {
+            name: "unknown".to_string(),
+            span: Span::stub(),
+        };
         let mut body = Vec::new();
         let mut in_body = false;
 
@@ -430,16 +544,18 @@ impl TreeSitterAdapter {
             variable,
             collection,
             body,
+            span,
         })
     }
 
     /// Конвертировать goto_statement
     fn convert_goto_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "identifier" {
                 let label = Self::node_text(&child, source);
-                return Ok(Statement::Goto { label });
+                return Ok(Statement::Goto { label, span });
             }
         }
         Err("goto_statement without label".to_string())
@@ -447,11 +563,12 @@ impl TreeSitterAdapter {
 
     /// Конвертировать label_statement
     fn convert_label_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "identifier" {
                 let name = Self::node_text(&child, source);
-                return Ok(Statement::Label { name });
+                return Ok(Statement::Label { name, span });
             }
         }
         Err("label_statement without name".to_string())
@@ -459,10 +576,11 @@ impl TreeSitterAdapter {
 
     /// Конвертировать execute_statement
     fn convert_execute_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if let Some(expr) = Self::convert_expression(&child, source)? {
-                return Ok(Statement::Execute { code: expr });
+                return Ok(Statement::Execute { code: expr, span });
             }
         }
         Err("execute_statement without code".to_string())
@@ -470,6 +588,7 @@ impl TreeSitterAdapter {
 
     /// Конвертировать rise_error_statement
     fn convert_raise_error_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut message = None;
 
@@ -485,19 +604,29 @@ impl TreeSitterAdapter {
             }
         }
 
-        Ok(Statement::RaiseError { message })
+        Ok(Statement::RaiseError { message, span })
     }
 
     /// Конвертировать add_handler_statement
     fn convert_add_handler_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let (event, handler) = Self::extract_event_handler_pair(node, source)?;
-        Ok(Statement::AddHandler { event, handler })
+        Ok(Statement::AddHandler {
+            event,
+            handler,
+            span,
+        })
     }
 
     /// Конвертировать remove_handler_statement
     fn convert_remove_handler_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let (event, handler) = Self::extract_event_handler_pair(node, source)?;
-        Ok(Statement::RemoveHandler { event, handler })
+        Ok(Statement::RemoveHandler {
+            event,
+            handler,
+            span,
+        })
     }
 
     /// Извлечь пару event-handler из узла
@@ -533,6 +662,7 @@ impl TreeSitterAdapter {
 
     /// Конвертировать await_statement
     fn convert_await_statement(node: &Node, source: &str) -> Result<Statement, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             // Пропускаем ключевые слова
@@ -541,7 +671,10 @@ impl TreeSitterAdapter {
             }
 
             if let Some(expr) = Self::convert_expression(&child, source)? {
-                return Ok(Statement::Await { expression: expr });
+                return Ok(Statement::Await {
+                    expression: expr,
+                    span,
+                });
             }
         }
         Err("await_statement without expression".to_string())
@@ -572,70 +705,86 @@ impl TreeSitterAdapter {
 
                 // Fallback: парсим текст напрямую
                 let text = Self::node_text(node, source);
+                let span = Self::node_to_span(node);
                 if let Ok(num) = text.parse::<f64>() {
-                    Ok(Some(Expression::Number(num)))
+                    Ok(Some(Expression::Number { value: num, span }))
                 } else if text.eq_ignore_ascii_case("истина")
                     || text.eq_ignore_ascii_case("true")
                 {
-                    Ok(Some(Expression::Boolean(true)))
+                    Ok(Some(Expression::Boolean { value: true, span }))
                 } else if text.eq_ignore_ascii_case("ложь")
                     || text.eq_ignore_ascii_case("false")
                 {
-                    Ok(Some(Expression::Boolean(false)))
+                    Ok(Some(Expression::Boolean { value: false, span }))
                 } else {
-                    Ok(Some(Expression::String(text)))
+                    Ok(Some(Expression::String { value: text, span }))
                 }
             }
 
-            "identifier" => Ok(Some(Expression::Identifier(Self::node_text(node, source)))),
+            "identifier" => Ok(Some(Expression::Identifier {
+                name: Self::node_text(node, source),
+                span: Self::node_to_span(node),
+            })),
 
             "number" => {
                 let text = Self::node_text(node, source);
+                let span = Self::node_to_span(node);
                 if let Ok(num) = text.parse::<f64>() {
-                    Ok(Some(Expression::Number(num)))
+                    Ok(Some(Expression::Number { value: num, span }))
                 } else {
-                    Ok(Some(Expression::String(text)))
+                    Ok(Some(Expression::String { value: text, span }))
                 }
             }
 
             "string" => {
+                let span = Self::node_to_span(node);
                 // string может содержать дочерние узлы (string_content)
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
                     if child.kind() == "string_content" {
-                        return Ok(Some(Expression::String(Self::node_text(&child, source))));
+                        return Ok(Some(Expression::String {
+                            value: Self::node_text(&child, source),
+                            span,
+                        }));
                     }
                 }
 
                 // Fallback: берём весь текст и убираем кавычки
                 let text = Self::node_text(node, source);
                 let trimmed = text.trim_matches('"');
-                Ok(Some(Expression::String(trimmed.to_string())))
+                Ok(Some(Expression::String {
+                    value: trimmed.to_string(),
+                    span,
+                }))
             }
 
             "boolean" => {
+                let span = Self::node_to_span(node);
                 // boolean узел содержит дочерний TRUE_KEYWORD или FALSE_KEYWORD
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
                     let child_kind = child.kind();
                     if child_kind == "TRUE_KEYWORD" {
-                        return Ok(Some(Expression::Boolean(true)));
+                        return Ok(Some(Expression::Boolean { value: true, span }));
                     } else if child_kind == "FALSE_KEYWORD" {
-                        return Ok(Some(Expression::Boolean(false)));
+                        return Ok(Some(Expression::Boolean { value: false, span }));
                     }
                 }
 
                 // Fallback: парсим текст
                 let text = Self::node_text(node, source);
                 if text.eq_ignore_ascii_case("истина") || text.eq_ignore_ascii_case("true") {
-                    Ok(Some(Expression::Boolean(true)))
+                    Ok(Some(Expression::Boolean { value: true, span }))
                 } else {
-                    Ok(Some(Expression::Boolean(false)))
+                    Ok(Some(Expression::Boolean { value: false, span }))
                 }
             }
 
             "date" => {
-                Ok(Some(Expression::Date(Self::node_text(node, source))))
+                Ok(Some(Expression::Date {
+                    value: Self::node_text(node, source),
+                    span: Self::node_to_span(node),
+                }))
             }
 
             "binary_expression" => Self::convert_binary_expression(node, source),
@@ -688,6 +837,7 @@ impl TreeSitterAdapter {
 
     /// Конвертировать binary_expression
     fn convert_binary_expression(node: &Node, source: &str) -> Result<Option<Expression>, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut left = None;
         let mut operator = String::new();
@@ -710,6 +860,7 @@ impl TreeSitterAdapter {
                 left: Box::new(l),
                 operator: operator.clone(),
                 right: Box::new(r),
+                span,
             }))
         } else {
             Ok(None)
@@ -718,6 +869,7 @@ impl TreeSitterAdapter {
 
     /// Конвертировать call_expression
     fn convert_call_expression(node: &Node, source: &str) -> Result<Option<Expression>, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut function = None;
         let mut args = Vec::new();
@@ -748,6 +900,7 @@ impl TreeSitterAdapter {
             Ok(Some(Expression::Call {
                 function: Box::new(func),
                 args,
+                span,
             }))
         } else {
             Ok(None)
@@ -756,6 +909,7 @@ impl TreeSitterAdapter {
 
     /// Конвертировать unary_expression
     fn convert_unary_expression(node: &Node, source: &str) -> Result<Option<Expression>, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut operator = String::new();
         let mut operand = None;
@@ -772,6 +926,7 @@ impl TreeSitterAdapter {
             Ok(Some(Expression::Unary {
                 operator,
                 operand: Box::new(op),
+                span,
             }))
         } else {
             Ok(None)
@@ -780,6 +935,7 @@ impl TreeSitterAdapter {
 
     /// Конвертировать property_access
     fn convert_property_access(node: &Node, source: &str) -> Result<Option<Expression>, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut object = None;
         let mut property = String::new();
@@ -788,7 +944,11 @@ impl TreeSitterAdapter {
             match child.kind() {
                 "identifier" => {
                     if object.is_none() {
-                        object = Some(Expression::Identifier(Self::node_text(&child, source)));
+                        let child_span = Self::node_to_span(&child);
+                        object = Some(Expression::Identifier {
+                            name: Self::node_text(&child, source),
+                            span: child_span,
+                        });
                     } else {
                         property = Self::node_text(&child, source);
                     }
@@ -810,16 +970,21 @@ impl TreeSitterAdapter {
             Some(obj) if !property.is_empty() => Ok(Some(Expression::PropertyAccess {
                 object: Box::new(obj),
                 property,
+                span,
             })),
             _ => {
                 // Fallback: возвращаем как Identifier
-                Ok(Some(Expression::Identifier(Self::node_text(node, source))))
+                Ok(Some(Expression::Identifier {
+                    name: Self::node_text(node, source),
+                    span,
+                }))
             }
         }
     }
 
     /// Конвертировать index_access (доступ по индексу: arr[0])
     fn convert_index_access(node: &Node, source: &str) -> Result<Option<Expression>, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut object = None;
         let mut index = None;
@@ -838,6 +1003,7 @@ impl TreeSitterAdapter {
             (Some(obj), Some(idx)) => Ok(Some(Expression::IndexAccess {
                 object: Box::new(obj),
                 index: Box::new(idx),
+                span,
             })),
             _ => Ok(None),
         }
@@ -845,6 +1011,7 @@ impl TreeSitterAdapter {
 
     /// Конвертировать ternary_expression
     fn convert_ternary_expression(node: &Node, source: &str) -> Result<Option<Expression>, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         let mut condition = None;
         let mut then_expr = None;
@@ -867,6 +1034,7 @@ impl TreeSitterAdapter {
                 condition: Box::new(c),
                 then_expr: Box::new(t),
                 else_expr: Box::new(e),
+                span,
             })),
             _ => Ok(None),
         }
@@ -874,28 +1042,49 @@ impl TreeSitterAdapter {
 
     /// Конвертировать new_expression
     fn convert_new_expression(node: &Node, source: &str) -> Result<Option<Expression>, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
-        let mut type_name = String::new();
+        let mut type_expr = None;
         let mut args = Vec::new();
 
         for child in node.children(&mut cursor) {
             match child.kind() {
                 "NEW_KEYWORD" | "НОВЫЙ_KEYWORD" => {}
                 "identifier" | "property_access" => {
-                    if type_name.is_empty() {
-                        type_name = Self::node_text(&child, source);
+                    // Новый Тип или Новый Модуль.Тип - прямой identifier
+                    if type_expr.is_none() {
+                        type_expr = Some(Self::node_text(&child, source));
                     }
                 }
-                _ => {
-                    if let Some(expr) = Self::convert_expression(&child, source)? {
-                        args.push(expr);
+                "arguments" => {
+                    // Новый(Выражение) - expression внутри arguments
+                    // Парсим аргументы и берём первый как type_expr
+                    let mut arg_cursor = child.walk();
+                    for arg_child in child.children(&mut arg_cursor) {
+                        if arg_child.kind() == "expression" {
+                            if let Some(expr) = Self::convert_expression(&arg_child, source)? {
+                                if type_expr.is_none() {
+                                    // Первое выражение - это тип для конструктора
+                                    // Сохраняем как строку из исходного кода
+                                    type_expr = Some(Self::node_text(&arg_child, source));
+                                } else {
+                                    // Остальные выражения - аргументы конструктора
+                                    args.push(expr);
+                                }
+                            }
+                        }
                     }
                 }
+                _ => {}
             }
         }
 
-        if !type_name.is_empty() {
-            Ok(Some(Expression::New { type_name, args }))
+        if let Some(type_name) = type_expr {
+            Ok(Some(Expression::New {
+                type_name,
+                args,
+                span,
+            }))
         } else {
             Ok(None)
         }
@@ -903,6 +1092,7 @@ impl TreeSitterAdapter {
 
     /// Конвертировать await_expression
     fn convert_await_expression(node: &Node, source: &str) -> Result<Option<Expression>, String> {
+        let span = Self::node_to_span(node);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             // Пропускаем ключевые слова
@@ -913,6 +1103,7 @@ impl TreeSitterAdapter {
             if let Some(expr) = Self::convert_expression(&child, source)? {
                 return Ok(Some(Expression::Await {
                     expression: Box::new(expr),
+                    span,
                 }));
             }
         }

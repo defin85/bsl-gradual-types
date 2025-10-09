@@ -162,7 +162,8 @@
                     "bslAnalyzer.platformDocsArchive": {
                         "type": "string",
                         "default": "",
-                        "description": "Путь к архиву документации платформы 1С (rebuilt.shcntx_ru.zip или rebuilt.shlang_ru.zip)",
+                        "description": "⚠️ ОБЯЗАТЕЛЬНЫЙ: Путь к РОДИТЕЛЬСКОЙ ПАПКЕ с документацией платформы 1С (должна содержать rebuilt.shcntx_ru и rebuilt.shlang_ru)",
+                        "markdownDescription": "⚠️ **ОБЯЗАТЕЛЬНЫЙ ПАРАМЕТР**: Путь к родительской папке с документацией платформы 1С\n\n**Структура папки:**\n```\nexamples/syntax_helper/\n├── rebuilt.shcntx_ru/  (контекстная справка)\n└── rebuilt.shlang_ru/  (справка по языку)\n```\n\n**Без этого параметра TypeRepository будет пустым!**",
                         "order": 2
                     },
                     "bslAnalyzer.autoIndexBuild": {
@@ -415,19 +416,15 @@
                     "type": "tree"
                 },
                 {
-                    "id": "bslAnalyzer.typeIndex",
-                    "name": "Type Index",
-                    "type": "tree"
+                    "id": "bslAnalyzer.typeRepository",
+                    "name": "Type Repository",
+                    "type": "tree",
+                    "contextualTitle": "BSL Type Repository (TypeRepository из LSP Server)"
                 },
                 {
                     "id": "bslAnalyzer.actions",
                     "name": "Quick Actions",
                     "type": "webview"
-                },
-                {
-                    "id": "bslAnalyzer.platformDocs",
-                    "name": "Platform Documentation",
-                    "type": "tree"
                 }
             ]
         },

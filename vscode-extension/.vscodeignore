@@ -29,16 +29,10 @@ tsconfig.*.json
 node_modules/**
 
 # Binaries - ONLY include LSP server
-bin/bsl-analyzer.exe
-bin/query_type.exe
-bin/build_unified_index.exe
-bin/incremental_update.exe
-bin/check_type_compatibility.exe
-bin/extract_platform_docs.exe
-bin/extract_hybrid_docs.exe
-bin/bsl-mcp-server.exe
-bin/syntaxcheck.exe
-# Keep only: bin/lsp_server.exe
+# All other binaries are removed, keep only:
+# - bin/lsp_server.exe (7.7 MB)
+# - bin/lsp_server_wrapper.bat
+# - bin/README.md
 
 # Misc
 .eslintrc.json

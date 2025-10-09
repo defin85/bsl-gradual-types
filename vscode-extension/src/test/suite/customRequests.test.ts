@@ -69,7 +69,7 @@ suite('LSP Custom Requests Test Suite', () => {
         }
 
         try {
-            const result = await buildIndex(workspaceFolder.uri.fsPath);
+            const result = await buildIndex({ workspace_path: workspaceFolder.uri.fsPath });
 
             assert.ok(result, 'Build index result should not be null');
             assert.strictEqual(typeof result.success, 'boolean', 'Success should be boolean');

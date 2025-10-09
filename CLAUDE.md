@@ -100,6 +100,48 @@ BSL Gradual Type System - система градуальной типизаци
 
 Валидация этих ошибок реализована в модуле [shared/src/domain/validators.rs](shared/src/domain/validators.rs).
 
+### ✨ Inline Scope Analysis (Milestone 2.9)
+
+**Концепция:** Анализ типов локальных переменных "на лету" при hover, без загрузки runtime типов в TypeRepository.
+
+**Ключевая идея:**
+```text
+LSP hover(file, line, column):
+  1. Парсим файл → SemanticProgram (IR)
+  2. Вызываем find_variable_at_position(line, column)
+  3. Получаем (var_name, TypeHint) из scope
+  4. Резолвим тип через TypeRepository (Platform/Config)
+  5. Получаем методы/свойства через TypeMetadataLookup
+  6. Возвращаем hover text
+```
+
+**Реализация:**
+- [shared/src/ir/mod.rs:find_variable_at_position()](shared/src/ir/mod.rs) — поиск переменной в scope hierarchy
+- [backend/src/application/type_system_service.rs:get_hover_info_ir()](backend/src/application/type_system_service.rs) — Inline Scope Analysis flow
+
+**Пример использования:**
+```bsl
+Процедура Тест()
+    МассивДанных = Новый Массив();
+    МассивДанных.Добавить(42);  // ← hover на "МассивДанных" показывает тип Массив + методы
+КонецПроцедуры
+```
+
+**Преимущества:**
+- ✅ НЕ нужно управлять жизненным циклом runtime типов
+- ✅ НЕ нужно load_runtime_types() / invalidate_runtime_types()
+- ✅ SemanticProgram всегда актуальная (парсится на каждый hover)
+- ✅ Работает в пределах одной процедуры/функции (достаточно для базовой проверки!)
+
+**Ограничения (приемлемы для MVP):**
+- ❌ НЕ работает межмодульный анализ (рлф_ОбогащениеДанных.ОбогатитьСтруктуру)
+- ❌ НЕ отслеживается мутабельность (Структура.Вставить)
+- ❌ НЕ работает flow-sensitive анализ (Если x <> Неопределено)
+
+**Тестирование:**
+- [backend/tests/inline_scope_analysis_test.rs](backend/tests/inline_scope_analysis_test.rs) — 5 интеграционных тестов
+- [cli/test_inline_scope.bsl](cli/test_inline_scope.bsl) — тестовый файл для ручной проверки
+
 ### 🎯 Философия: Right-Sized Architecture
 
 **Start simple, scale up по необходимости** — 6-8 компонентов вместо 25-30.
@@ -111,16 +153,19 @@ bsl-gradual-types/
 ├── shared/          # Чистая доменная логика + AnalysisEngine
 │   ├── domain/      # TypeResolver, TypeRepository, types
 │   ├── engine/      # AnalysisEngine - переиспользуемое ядро
+│   ├── ir/          # ✅ Semantic IR Layer (Milestone 2.8)
+│   │                # SemanticProgram, SemanticNode, SymbolTable
+│   ├── parsing/     # ✅ Parser trait для DI (Milestone 2.8)
 │   └── api/         # DTO и контракты для API
 │
 ├── backend/         # Все серверные слои в одном крейте
 │   ├── system/      # SystemCoordinator, AnalysisCache, Observability
-│   ├── application/ # TypeSystemService (использует shared::engine)
+│   ├── application/ # TypeSystemService, AstToIrConverter
 │   ├── presentation/# LSP Server, Web routes
 │   └── data/        # Platform types, Config loaders
 │
 ├── frontend/        # Веб-интерфейс на Leptos WASM
-├── cli/             # CLI инструменты
+├── cli/             # CLI инструменты (LightweightParser)
 └── vscode-extension/# VSCode расширение (TypeScript)
 ```
 
@@ -129,16 +174,23 @@ bsl-gradual-types/
 #### System Layer (в backend)
 - **SystemCoordinator** — единая точка координации и DI management
 - **AnalysisCache** — простое LRU кеширование в памяти с TTL
-- **ParserCoordinator** — TreeSitter (основной) + Regex (fallback)
+- **ParserCoordinator** — TreeSitter (основной) + Regex (fallback), преобразует AST → IR
 - **BasicObservability** — структурированное логирование и базовые метрики
 
 #### Application Layer
-- **AnalysisEngine** (в shared) — чистый оркестратор анализа без зависимостей от backend
+- **AnalysisEngine** (в shared) — чистый оркестратор анализа, работает с IR вместо AST
 - **TypeSystemService** (в backend) — высокоуровневый API для Web/LSP, использует AnalysisEngine
+- **AstToIrConverter** (в backend) — ✅ мост между синтаксисом (AST) и семантикой (IR)
+
+#### Semantic IR Layer (в shared) — ✅ Новый слой после Milestone 2.8
+- **SemanticProgram** — промежуточное представление, независимое от конкретного парсера
+- **SemanticNode** — упрощённый набор узлов (Variable, Function, IfStatement, etc.)
+- **SymbolTable** — иерархия областей видимости с символами
+- **Parser trait** — интерфейс для dependency inversion (разные парсеры → одна IR)
 
 #### Domain Layer (в shared)
 - **TypeResolver** — центральная логика анализа типов с flow-sensitive анализом
-- **TypeRepository** — абстракция для работы с данными
+- **TypeRepository** — абстракция для работы с данными (3927 типов платформы)
 
 ### 🎯 Центральная абстракция: TypeResolution
 
@@ -242,6 +294,19 @@ code --install-extension bsl-gradual-types-1.0.0.vsix
 npm test
 npm run lint  # TypeScript проверка
 ```
+
+**⚠️ Type Index временно отключён (Milestone 2.9):**
+
+В рамках упрощения архитектуры и устранения дублирования кеша типов, Hierarchical Type Index Provider в Extension временно отключён:
+- ❌ Extension НЕ читает JSONL кеш (~4.5 MB)
+- ❌ `loadPlatformTypes()` / `loadConfigurationTypes()` закомментированы
+- ✅ Показывается заглушка: "ℹ️ Type Index временно отключён"
+- ✅ Tooltip объясняет: используйте LSP hover вместо Type Index
+
+**Планы на Milestone 2.10:**
+- ✅ Extension будет запрашивать типы через LSP Custom Request (`bsl/getAllTypes`)
+- ✅ TypeRepository в LSP Server — единственный источник истины
+- ✅ Устранение дублирования данных между TypeScript и Rust
 
 ### Frontend (интегрированный в backend)
 ```bash
@@ -398,106 +463,159 @@ curl -X POST "http://localhost:3002/api/analyze" \
 
 ## Архитектурная диаграмма
 
-### 🏗️ Simplified Architecture Diagram
+### 🏗️ Architecture Diagram (после Milestone 2.8)
 
 ```mermaid
 graph TB
-    subgraph "🎯 System Layer (в `backend`)"
-        SystemCoordinator["🎯 SystemCoordinator<br/>- Single coordination point<br/>- DI management<br/>- Lifecycle control"]
-        
-        AnalysisCache["💾 AnalysisCache<br/>- Simple LRU in-memory<br/>- File hash keys<br/>- TTL eviction"]
-        
-        ParserCoordinator["🎨 ParserCoordinator<br/>- TreeSitter (primary)<br/>- Regex fallback<br/>- Simple selection logic"]
-        
-        BasicObservability["📊 BasicObservability<br/>- Structured logging<br/>- Basic metrics<br/>- Health endpoint"]
+    subgraph "🎯 System Layer (в `backend/src/system`)"
+        SystemCoordinator["🎯 SystemCoordinator"]
+        AnalysisCache["💾 AnalysisCache"]
+        ParserCoordinator["🎨 ParserCoordinator<br/>- TreeSitter + Regex<br/>✅ ПОСЛЕ 2.8: → IR через AstToIrConverter"]
+        BasicObservability["📊 BasicObservability"]
     end
 
-    subgraph "🌐 Presentation Layer (Адаптеры)"
-        LSPServer["🔌 LSP Server (`backend`)<br/>- Language Server Protocol<br/>- VS Code integration"]
-
-        WebInterface["🌐 Web Interface (`backend`)<br/>- Simple HTML dashboard<br/>- Type visualization"]
-
-        CLITool["⚙️ CLI Tool (`cli`)<br/>- Command line interface<br/>- Batch analysis"]
-    end
-
-    subgraph "🔧 Application Layer" 
-        subgraph "`backend`"
-            TypeSystemService["🎭 TypeSystemService<br/>- High-level API (Web, LSP)<br/>- Управляет кэшем<br/>- **Использует AnalysisEngine**"]
+    subgraph "🌐 Presentation Layer (Адаптеры - разные процессы)"
+        subgraph "LSP Process"
+            LSPServer["🔌 LSP Server (backend)"]
+            VSCode["📦 VSCode Extension (TypeScript)"]
         end
-        subgraph "`shared`"
-            AnalysisEngine["🚀 AnalysisEngine<br/>- **Чистая оркестрация анализа**<br/>- Use Case: 'Analyze File'<br/>- Не зависит от Web/CLI"]
+
+        subgraph "Web Process"
+            WebServer["🌐 Web Server (backend)"]
+            Frontend["🖥️ Frontend UI (Leptos WASM)"]
+        end
+
+        CLITool["⚙️ CLI Tool (cli)<br/>✅ ПОСЛЕ 2.8: LightweightParser (~2-3 MB)"]
+    end
+
+    subgraph "🎨 Helper Layer"
+        TypeViz["🎨 type-visualization"]
+    end
+
+    subgraph "🔧 Application Layer"
+        subgraph "`backend/src/application`"
+            TypeSystemService["🎭 TypeSystemService<br/>✅ LSP hover через AST → IR"]
+            AstToIr["🔄 AstToIrConverter<br/>✅ ПОСЛЕ 2.8: AST → IR bridge<br/>- Конвертирует синтаксис в семантику<br/>- Строит SymbolTable"]
+        end
+        subgraph "`shared/src/engine`"
+            AnalysisEngine["🚀 AnalysisEngine<br/>✅ ПОСЛЕ 2.8: analyze_program(IR)<br/>- Работает с SemanticProgram<br/>- Не зависит от парсеров"]
         end
     end
 
-    subgraph "🧠 Domain Layer (`shared`)"
-        TypeResolver["🧠 TypeResolver<br/>- Core type analysis<br/>- Resolution algorithms<br/>- Business logic"]
+    subgraph "🌟 Semantic Layer (✅ НОВЫЙ! shared/src/ir/)"
+        IR["📄 Intermediate Representation<br/>✅ ПОСЛЕ 2.8: shared/src/ir/<br/>- SemanticProgram<br/>- SemanticNode (упрощённый набор)<br/>- SymbolTable<br/>- FlowSensitiveVisitor<br/>✨ Независим от парсера!"]
 
-        TypeMetadataLookup["🔍 TypeMetadataLookup<br/>- Bridge: TypeResolution → RawTypeData<br/>- Get methods/properties<br/>- Validation support"]
-
-        TypeRepository["📚 TypeRepository<br/>- Type storage<br/>- Query interface<br/>- Data abstraction"]
+        ParserTrait["🔌 Parser trait<br/>✅ ПОСЛЕ 2.8: shared/src/parsing/<br/>- parse() → SemanticProgram<br/>- DI для разных парсеров<br/>- LightweightParser для CLI"]
     end
 
-    subgraph "💾 Data Layer (`shared`)"
-        PlatformTypes["📄 Platform Types<br/>- 1C platform metadata<br/>- HTML parsing<br/>- Type definitions"]
-
-        ConfigData["⚙️ Configuration<br/>- XML metadata<br/>- Settings<br/>- User preferences"]
+    subgraph "🧠 Domain Layer (в `shared/src/domain`)"
+        TypeResolver["🧠 TypeResolver"]
+        TypeMetadataLookup["🔍 TypeMetadataLookup"]
+        TypeRepository["📚 TypeRepository (3927 типов)"]
     end
 
-    %% Flow
+    subgraph "💾 Data Layer"
+        PlatformTypes["📄 Platform Types<br/>(Syntax Helper: Строка, Число, etc.)"]
+        ConfigData["⚙️ Configuration"]
+    end
+
+    subgraph "📄 DTOs"
+        DTOs["shared/api/dtos.rs"]
+    end
+
+    %% System coordination
     SystemCoordinator --> AnalysisCache
     SystemCoordinator --> ParserCoordinator
     SystemCoordinator --> BasicObservability
     SystemCoordinator --> TypeSystemService
 
+    %% Presentation → Application
     LSPServer --> TypeSystemService
-    WebInterface --> TypeSystemService
-
-    TypeSystemService --> AnalysisEngine
-    TypeSystemService --> AnalysisCache
-
+    WebServer --> TypeSystemService
+    VSCode --> LSPServer
+    Frontend --> WebServer
     CLITool --> AnalysisEngine
-    
-    AnalysisEngine --> TypeResolver
-    AnalysisEngine --> ParserCoordinator
 
+    %% Helper layer
+    LSPServer --> TypeViz
+    TypeViz -.-> DTOs
+
+    %% Application → Semantic Layer (КЛЮЧЕВОЕ ИЗМЕНЕНИЕ 2.8)
+    TypeSystemService --> AnalysisEngine
+    TypeSystemService --> AstToIr
+    TypeSystemService --> ParserCoordinator
+
+    ParserCoordinator -.->|"✅ ПОСЛЕ 2.8: converts AST"| AstToIr
+    AstToIr -.->|"produces"| IR
+
+    %% CLI использует Parser trait (Dependency Injection)
+    CLITool -.->|"✅ uses ParserTrait"| ParserTrait
+    ParserTrait -.->|"returns"| IR
+
+    %% ParserCoordinator implements Parser trait
+    ParserCoordinator -.->|"✅ implements"| ParserTrait
+
+    %% AnalysisEngine работает с IR
+    AnalysisEngine -.->|"✅ analyzes"| IR
+    AnalysisEngine --> TypeResolver
+
+    %% Domain layer
     TypeResolver --> TypeRepository
     TypeMetadataLookup --> TypeRepository
+    TypeSystemService -.-> TypeMetadataLookup
+    AnalysisEngine -.-> TypeMetadataLookup
+
     TypeRepository --> PlatformTypes
     TypeRepository --> ConfigData
 
-    %% TypeMetadataLookup используется для получения методов/свойств
-    TypeSystemService -.-> TypeMetadataLookup
-    AnalysisEngine -.-> TypeMetadataLookup
-    
+    TypeSystemService --> DTOs
+    TypeSystemService --> AnalysisCache
+
     %% Styling
     classDef systemStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
     classDef presentationStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef helperStyle fill:#fff9c4,stroke:#f57f17,stroke-width:2px
     classDef applicationStyle fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef semanticStyle fill:#ffe0b2,stroke:#e65100,stroke-width:4px,stroke-dasharray: 5 5
     classDef domainStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px
     classDef dataStyle fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef dtoStyle fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
 
     class SystemCoordinator,AnalysisCache,ParserCoordinator,BasicObservability systemStyle
-    class LSPServer,WebInterface,CLITool presentationStyle
-    class TypeSystemService,AnalysisEngine applicationStyle
+    class LSPServer,WebServer,Frontend,VSCode,CLITool presentationStyle
+    class TypeViz helperStyle
+    class TypeSystemService,AstToIr,AnalysisEngine applicationStyle
+    class IR,ParserTrait semanticStyle
     class TypeResolver,TypeMetadataLookup,TypeRepository domainStyle
     class PlatformTypes,ConfigData dataStyle
+    class DTOs dtoStyle
 ```
 
 ### 📊 Описание потоков данных
 
 **Presentation → Application:**
-- LSP Server, Web Interface → TypeSystemService
-- CLI Tool → AnalysisEngine (напрямую)
+- LSP Server, Web Server → TypeSystemService
+- CLI Tool → AnalysisEngine (напрямую, через LightweightParser)
 
-**Application → Domain:**
-- TypeSystemService → AnalysisEngine → TypeResolver
-- AnalysisEngine → ParserCoordinator
+**Application → Semantic IR (✅ НОВОЕ после Milestone 2.8):**
+- TypeSystemService → ParserCoordinator → AstToIrConverter → SemanticProgram
+- CLI Tool → LightweightParser (реализует Parser trait) → SemanticProgram
+- AnalysisEngine работает с SemanticProgram вместо AST
+
+**Semantic → Domain:**
+- AnalysisEngine анализирует SemanticProgram → TypeResolver
+- TypeResolver использует SymbolTable из IR для контекста
 
 **Domain → Data:**
 - TypeResolver → TypeRepository → PlatformTypes/ConfigData
 
 **System Management:**
 - SystemCoordinator координирует все backend компоненты
+
+**Ключевое отличие после Milestone 2.8:**
+- Раньше: `AST → AnalysisEngine → TypeResolver`
+- Теперь: `AST → IR (SemanticProgram) → AnalysisEngine → TypeResolver`
+- Независимость от парсера: разные парсеры (TreeSitter, LightweightParser) → единая IR
 
 ---
 
@@ -511,14 +629,37 @@ graph TB
 - **Зависимости:** AnalysisCache, ParserCoordinator, BasicObservability, TypeSystemService
 
 #### 🚀 AnalysisEngine (в `shared`)
-- **Структура:** Содержит TypeResolver и ParserCoordinator
-- **Назначение:** Чистый сценарий "проанализировать файл"
-- **Особенность:** Не зависит от backend, переиспользуется всеми адаптерами
+- **Структура:** ✅ ПОСЛЕ 2.8: Работает с SemanticProgram вместо AST
+- **Назначение:** Чистый сценарий "проанализировать программу"
+- **Особенность:** Не зависит от backend и конкретного парсера, переиспользуется всеми адаптерами
+- **Метод:** `analyze_program(program: &SemanticProgram) -> TypedProgram`
 
 #### 🎭 TypeSystemService (в `backend`)
 - **Структура:** Содержит AnalysisEngine и backend-специфичные компоненты
 - **Назначение:** Высокоуровневый API для LSP/Web с кэшированием
-- **Использует:** AnalysisEngine, AnalysisCache
+- **Использует:** AnalysisEngine, AnalysisCache, AstToIrConverter
+- **Функции:** get_hover_info_ir() (IR-based), get_hover_info() (AST-based fallback)
+
+#### 🔄 AstToIrConverter (в `backend`) — ✅ НОВЫЙ компонент Milestone 2.8
+- **Структура:** Конвертер из tree-sitter AST в SemanticProgram
+- **Назначение:** Мост между синтаксическим уровнем и семантическим
+- **Процесс:** Двухпроходная конвертация (сбор символов + конвертация узлов)
+- **Выход:** SemanticProgram с SymbolTable и SemanticNode деревом
+
+#### 📄 SemanticProgram (в `shared/src/ir`) — ✅ НОВЫЙ Milestone 2.8
+- **Структура:** Промежуточное представление программы
+- **Компоненты:**
+  - `nodes: Vec<SemanticNode>` — упрощённое дерево (Variable, Function, IfStatement, etc.)
+  - `symbol_table: SymbolTable` — иерархия областей видимости
+  - `source_map: SourceMap` — связь с исходным кодом
+- **Преимущество:** Независимость от конкретного парсера (TreeSitter, Regex, LightweightParser)
+
+#### 🔌 Parser trait (в `shared/src/parsing`) — ✅ НОВЫЙ Milestone 2.8
+- **Назначение:** Dependency Inversion для парсеров
+- **Метод:** `fn parse(&self, source: &str) -> Result<SemanticProgram>`
+- **Реализации:**
+  - ParserCoordinator (backend) — TreeSitter + Regex
+  - LightweightParser (cli) — упрощённый парсер для CLI (~2-3 MB)
 
 #### 💾 AnalysisCache
 - **Структура:** LRU-кэш с TTL отслеживанием
@@ -527,8 +668,8 @@ graph TB
 
 #### 🎨 ParserCoordinator
 - **Структура:** TreeSitter (primary) + Regex (fallback)
-- **Назначение:** Парсинг исходного кода с простой стратегией fallback
-- **Логика:** Попытка основного парсера → при ошибке → запасной
+- **Назначение:** ✅ ПОСЛЕ 2.8: Парсинг → AST → SemanticProgram (через AstToIrConverter)
+- **Логика:** Попытка основного парсера → при ошибке → запасной → конвертация в IR
 
 #### 📊 BasicObservability
 - **Структура:** Структурированный логгер + простые метрики
@@ -537,12 +678,14 @@ graph TB
 
 ### 🎯 Ключевые принципы архитектуры
 
-1. **AnalysisEngine** (shared) — чистый оркестратор без I/O зависимостей
-2. **TypeSystemService** (backend) — высокоуровневый API с кэшированием
-3. **SystemCoordinator** — единая точка координации всех компонентов
-4. **Фасетная система** — автоматическое переключение контекста 1С объектов
-5. **Градуальная типизация** — честность о неопределенности типов
-6. **Слои внутри крейтов** — логическое разделение без физической фрагментации
+1. **Semantic IR Layer** (shared) — ✅ НОВОЕ после Milestone 2.8: промежуточное представление, независимое от парсера
+2. **AnalysisEngine** (shared) — чистый оркестратор, работает с IR вместо AST
+3. **TypeSystemService** (backend) — высокоуровневый API с кэшированием, два режима hover (IR + AST fallback)
+4. **SystemCoordinator** — единая точка координации всех компонентов
+5. **Фасетная система** — автоматическое переключение контекста 1С объектов
+6. **Градуальная типизация** — честность о неопределенности типов
+7. **Слои внутри крейтов** — логическое разделение без физической фрагментации
+8. **Parser trait** — ✅ Dependency Inversion: разные парсеры → единая IR (TreeSitter, LightweightParser)
 
 ## MCP Инструментарий
 

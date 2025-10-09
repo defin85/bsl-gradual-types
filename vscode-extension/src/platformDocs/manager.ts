@@ -10,7 +10,7 @@ import {
     updateIndexingProgress,
     finishIndexing
 } from '../lsp/progress';
-import { extractPlatformDocs } from '../lsp/customRequests';
+import { extractPlatformDocs, buildIndex } from '../lsp/customRequests';
 import { BslPlatformDocsProvider } from '../providers';
 
 let outputChannel: vscode.OutputChannel;
@@ -270,7 +270,8 @@ export async function parsePlatformDocumentation(version: string): Promise<void>
             }
             
             // ✅ ЗАМЕНА CLI → LSP: build_unified_index #3
-            const result = await buildIndex(configPath);
+            const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+            const result = await buildIndex({ workspace_path: workspacePath });
 
             // Этап 3: Завершение
             updateIndexingProgress(3, 'Finalizing...', 95);

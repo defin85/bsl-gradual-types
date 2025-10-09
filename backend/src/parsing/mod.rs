@@ -2,4 +2,4 @@
 
 pub mod bsl;
 
-pub use bsl::Program;
+pub use bsl::ast::{ErrorType, ParseError, ParseResult, Program};

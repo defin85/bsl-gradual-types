@@ -355,7 +355,7 @@ impl TypeSystemService {
             .parse(content)
             .map_err(|e| anyhow::anyhow!("Ошибка парсинга содержимого {}: {}", file_path, e))?;
 
-        info!("📝 Парсинг успешен, найдено операторов: {}", parse_result.statements.len());
+        info!("📝 Парсинг успешен, найдено операторов: {}", parse_result.program.statements.len());
 
         // 3. Извлечение переменных и типов из AST
         let mut type_resolutions = HashMap::new();
@@ -466,13 +466,38 @@ impl TypeSystemService {
     ) -> Result<Option<String>> {
         info!("🎯 Hover запрос: строка {}, колонка {}", line, column);
 
+        // Парсинг BSL кода
         let parse_result = self
             .parser
             .parse(file_content)
             .map_err(|e| anyhow::anyhow!("Ошибка парсинга для hover: {}", e))?;
 
+        // Конвертация AST → IR для Inline Scope Analysis
+        let ir_program = crate::application::ast_to_ir::AstToIrConverter::convert(
+            parse_result.program.clone(),
+            file_content.to_string(),
+            "hover_request.bsl".to_string()
+        )?;
+
+        // НОВОЕ: Используем find_variable_at_position() для извлечения типа из scope
+        if let Some((var_name, type_hint)) = ir_program.find_variable_at_position(line, column) {
+            info!("✅ find_variable_at_position({}, {}) нашла переменную: '{}' с типом {:?}",
+                line, column, var_name, type_hint);
+
+            // Форматируем hover с методами/свойствами из TypeRepository
+            return Ok(Some(self.format_variable_hover(&var_name, &type_hint)));
+        }
+
+        // Fallback 1: Пробуем find_node_at_position для других узлов (функции, циклы, etc.)
+        if let Some(node) = ir_program.find_node_at_position(line, column) {
+            info!("✅ find_node_at_position({}, {}) нашёл узел (не переменная): span={:?}",
+                line, column, node.span);
+            return Ok(Some(self.format_semantic_node_info(node, file_content)));
+        }
+
+        // Fallback: старая логика по имени переменной
         if let Some(symbol_info) =
-            self.extract_enhanced_symbol_info(file_content, line, column, Some(&parse_result))
+            self.extract_enhanced_symbol_info(file_content, line, column, Some(&parse_result.program))
         {
             Ok(Some(symbol_info))
         } else {
@@ -1049,8 +1074,8 @@ impl TypeSystemService {
                     Statement::VarDeclaration { name, .. } if name == &word_under_cursor => {
                         return Some(format!("**Переменная:** `{}`\n\n*Тип:* Неопределено (требуется flow-sensitive анализ)", name));
                     }
-                    Statement::Assignment { target, value } => {
-                        if let Expression::Identifier(var_name) = target {
+                    Statement::Assignment { target, value, .. } => {
+                        if let Expression::Identifier { name: var_name, .. } = target {
                             if var_name == &word_under_cursor {
                                 // Application Layer: Маппинг AST → имя типа
                                 if let Some(type_name) = self.expression_to_type_name(value) {
@@ -1150,6 +1175,156 @@ impl TypeSystemService {
         }
     }
 
+    /// Форматирует информацию о SemanticNode для hover (Milestone 2.11)
+    fn format_semantic_node_info(&self, node: &bsl_shared::ir::SemanticNode, _file_content: &str) -> String {
+        use bsl_shared::ir::SemanticNodeKind;
+
+        match &node.kind {
+            SemanticNodeKind::VariableDeclaration { name, type_hint, initial_value_type, .. } => {
+                let type_info = type_hint.as_ref()
+                    .or(initial_value_type.as_ref())
+                    .map(|t| format!("*Тип:* {}", t))
+                    .unwrap_or_else(|| "*Тип:* Неопределено".to_string());
+
+                format!("**Переменная:** `{}`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
+                    name, type_info,
+                    node.span.start_line, node.span.start_column,
+                    node.span.end_line, node.span.end_column)
+            }
+            SemanticNodeKind::Assignment { variable, value_type } => {
+                let resolution = self.analysis_engine.resolve_type(value_type);
+                let type_info = self.format_type_for_hover(value_type, &resolution);
+
+                format!("**Присваивание:** `{} = ...`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
+                    variable, type_info,
+                    node.span.start_line, node.span.start_column,
+                    node.span.end_line, node.span.end_column)
+            }
+            SemanticNodeKind::FunctionDeclaration { name, params, return_type, .. } => {
+                let params_str = params.iter()
+                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_ref().unwrap_or(&"Неопределено".to_string())))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let return_str = return_type.as_ref()
+                    .map(|t| format!("*Возвращает:* {}", t))
+                    .unwrap_or_else(|| "*Возвращает:* Неопределено".to_string());
+
+                format!("**Функция:** `{}({})`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
+                    name, params_str, return_str,
+                    node.span.start_line, node.span.start_column,
+                    node.span.end_line, node.span.end_column)
+            }
+            SemanticNodeKind::ProcedureDeclaration { name, params, .. } => {
+                let params_str = params.iter()
+                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_ref().unwrap_or(&"Неопределено".to_string())))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                format!("**Процедура:** `{}({})`\n\n📍 Позиция: {}:{}-{}:{}",
+                    name, params_str,
+                    node.span.start_line, node.span.start_column,
+                    node.span.end_line, node.span.end_column)
+            }
+            SemanticNodeKind::IfStatement { condition_type, .. } => {
+                format!("**Условие:** `Если ... Тогда`\n\n*Условие:* {}\n\n📍 Позиция: {}:{}-{}:{}",
+                    condition_type,
+                    node.span.start_line, node.span.start_column,
+                    node.span.end_line, node.span.end_column)
+            }
+            SemanticNodeKind::WhileLoop { condition_type, .. } => {
+                format!("**Цикл:** `Пока ... Цикл`\n\n*Условие:* {}\n\n📍 Позиция: {}:{}-{}:{}",
+                    condition_type,
+                    node.span.start_line, node.span.start_column,
+                    node.span.end_line, node.span.end_column)
+            }
+            _ => {
+                format!("**Узел IR:** {:?}\n\n📍 Позиция: {}:{}-{}:{}",
+                    node.kind,
+                    node.span.start_line, node.span.start_column,
+                    node.span.end_line, node.span.end_column)
+            }
+        }
+    }
+
+    /// Форматирует информацию о переменной для hover (используя Inline Scope Analysis)
+    ///
+    /// # Аргументы
+    /// - `var_name` - имя переменной из IR
+    /// - `type_hint` - тип переменной из SymbolTable (Explicit/Inferred/Unknown)
+    ///
+    /// # Возвращает
+    /// Форматированный markdown с информацией о типе, методах и свойствах
+    fn format_variable_hover(&self, var_name: &str, type_hint: &bsl_shared::ir::TypeHint) -> String {
+        use bsl_shared::ir::TypeHint;
+
+        // Извлекаем имя типа из TypeHint
+        let type_name = match type_hint {
+            TypeHint::Explicit(t) | TypeHint::Inferred(t) => t.clone(),
+            TypeHint::Unknown => {
+                return format!(
+                    "**Переменная:** `{}`\n\n*Тип:* Неопределено\n\n💡 *Подсказка:* Переменная объявлена, но тип не выведен из присваивания",
+                    var_name
+                );
+            }
+        };
+
+        // Резолвим тип через AnalysisEngine → TypeRepository
+        let resolution = self.analysis_engine.resolve_type(&type_name);
+
+        // Получаем методы и свойства через TypeMetadataLookup
+        let methods = self.metadata_lookup.get_methods(&resolution);
+        let properties = self.metadata_lookup.get_properties(&resolution);
+
+        // Получаем RawTypeData для описания
+        let raw_type = self.metadata_lookup.get_raw_type(&resolution);
+        let description = raw_type
+            .as_ref()
+            .map(|rt| rt.description.clone())
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| format!("Тип {}", type_name));
+
+        // Форматируем hover
+        let mut output = format!("**Переменная:** `{}`\n", var_name);
+        output.push_str(&format!("*Тип:* `{}`\n\n", type_name));
+        output.push_str(&format!("📝 {}\n\n", description));
+
+        // Добавляем методы (первые 10 для краткости)
+        if !methods.is_empty() {
+            output.push_str("📚 **Методы:**\n");
+            for method in methods.iter().take(10) {
+                // Форматируем сигнатуру метода: name(params) -> return_type
+                let params_str = method.params.iter()
+                    .map(|p| format!("{}: {}", p.name, p.param_type))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                if !method.return_type.is_empty() {
+                    output.push_str(&format!("- `{}({})` → `{}`\n", method.name, params_str, method.return_type));
+                } else {
+                    output.push_str(&format!("- `{}({})`\n", method.name, params_str));
+                }
+            }
+            if methods.len() > 10 {
+                output.push_str(&format!("- ... и ещё {} методов\n", methods.len() - 10));
+            }
+            output.push('\n');
+        }
+
+        // Добавляем свойства (первые 10)
+        if !properties.is_empty() {
+            output.push_str("📦 **Свойства:**\n");
+            for prop in properties.iter().take(10) {
+                // Форматируем свойство: name: type
+                output.push_str(&format!("- `{}`: `{}`\n", prop.name, prop.prop_type));
+            }
+            if properties.len() > 10 {
+                output.push_str(&format!("- ... и ещё {} свойств\n", properties.len() - 10));
+            }
+        }
+
+        output
+    }
+
     /// Маппинг AST Expression → имя типа (Application Layer ответственность)
     ///
     /// Преобразует синтаксическую конструкцию (Expression) в доменное понятие (имя типа)
@@ -1158,10 +1333,10 @@ impl TypeSystemService {
         use crate::parsing::bsl::ast::Expression as Expr;
 
         match expr {
-            Expr::Number(_) => Some("Число".to_string()),
-            Expr::String(_) => Some("Строка".to_string()),
-            Expr::Boolean(_) => Some("Булево".to_string()),
-            Expr::Identifier(name) => Some(name.clone()),
+            Expr::Number { .. } => Some("Число".to_string()),
+            Expr::String { .. } => Some("Строка".to_string()),
+            Expr::Boolean { .. } => Some("Булево".to_string()),
+            Expr::Identifier { name, .. } => Some(name.clone()),
             Expr::New { type_name, .. } => Some(type_name.clone()),
             _ => None, // Сложные выражения требуют расширенного анализа
         }

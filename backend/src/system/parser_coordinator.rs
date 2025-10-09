@@ -1,17 +1,18 @@
-//! Parser Coordinator - простая координация парсеров
+//! Parser Coordinator - координация Tree-sitter парсера
 //!
-//! TreeSitter (primary) + Regex (fallback) вместо сложной strategy pattern
+//! Milestone 2.8 Task 7: Regex fallback удалён, используется только Tree-sitter
 
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 use tree_sitter::{InputEdit, Parser, Point};
 
-use crate::parsing::bsl::Program;
+use crate::parsing::ParseResult;
 use crate::system::tree_cache::{hash_content, TreeCache};
 use crate::system::tree_sitter_adapter::TreeSitterAdapter;
 use bsl_shared::domain::repository::TypeRepository;
+use bsl_shared::parsing::Parser as ParserTrait; // Milestone 2.8: Parser trait
 
 /// Текстовое изменение для инкрементального парсинга (из LSP)
 #[derive(Debug, Clone)]
@@ -29,58 +30,51 @@ pub struct TextEdit {
     pub new_text: String,
 }
 
-/// Простой координатор парсеров
+/// Координатор Tree-sitter парсера (Milestone 2.8: без regex fallback)
 pub struct ParserCoordinator {
     tree_sitter: TreeSitterParser,
-    regex_fallback: RegexParser,
     tree_cache: TreeCache,
 }
 
-/// TreeSitter парсер (primary) с tree-sitter-bsl
+/// TreeSitter парсер с tree-sitter-bsl
 pub struct TreeSitterParser {
     parser: Mutex<Parser>,
 }
 
-/// Regex парсер (fallback)
-pub struct RegexParser {
-    // Простые regex паттерны для BSL
-}
-
 impl ParserCoordinator {
-    /// Создать координатор с fallback стратегией
+    /// Создать координатор с Tree-sitter (Milestone 2.8: удалён regex fallback)
     pub fn with_fallback() -> Self {
         Self {
             tree_sitter: TreeSitterParser::new(),
-            regex_fallback: RegexParser::new(),
             tree_cache: TreeCache::new(),
         }
     }
 
-    /// Парсинг с простым fallback
-    pub fn parse(&self, content: &str) -> Result<Program, String> {
-        // Simple strategy: try TreeSitter, fallback to Regex
+    /// Парсинг через Tree-sitter с поддержкой ParseResult (Milestone 2.7 Task 3)
+    pub fn parse(&self, content: &str) -> Result<ParseResult, String> {
         match self.tree_sitter.parse(content) {
             Ok(result) => {
-                debug!("TreeSitter parsing successful");
+                if result.has_errors() {
+                    warn!("TreeSitter parsing completed with {} syntax errors", result.syntax_errors.len());
+                } else {
+                    debug!("TreeSitter parsing successful");
+                }
                 Ok(result)
             }
             Err(tree_sitter_error) => {
-                warn!(
-                    "TreeSitter failed: {}, falling back to regex",
-                    tree_sitter_error
-                );
-                self.regex_fallback.parse(content)
+                error!("TreeSitter parsing failed: {}", tree_sitter_error);
+                Err(format!("Tree-sitter parsing failed: {}", tree_sitter_error))
             }
         }
     }
 
-    /// Инкрементальный парсинг для LSP textDocument/didChange
+    /// Инкрементальный парсинг для LSP textDocument/didChange с ParseResult (Milestone 2.7 Task 3)
     pub fn parse_incremental(
         &self,
         file_path: PathBuf,
         new_content: String,
         edits: Vec<TextEdit>,
-    ) -> Result<Program, String> {
+    ) -> Result<ParseResult, String> {
         let new_hash = hash_content(&new_content);
 
         // Попытка получить старое дерево из кеша
@@ -111,7 +105,7 @@ impl ParserCoordinator {
             }
         }
 
-        // Fallback: полный парсинг
+        // Fallback: полный парсинг (Milestone 2.8: только Tree-sitter)
         debug!("Full parse for file: {:?}", file_path);
         match self.tree_sitter.parse(&new_content) {
             Ok(program) => {
@@ -120,10 +114,46 @@ impl ParserCoordinator {
                 Ok(program)
             }
             Err(e) => {
-                warn!("TreeSitter failed: {}, falling back to regex", e);
-                self.regex_fallback.parse(&new_content)
+                error!("TreeSitter parsing failed: {}", e);
+                Err(format!("Tree-sitter parsing failed: {}", e))
             }
         }
+    }
+
+    /// Парсинг с конвертацией в IR (Milestone 2.8)
+    ///
+    /// # Примеры
+    ///
+    /// ```no_run
+    /// use bsl_backend::system::ParserCoordinator;
+    ///
+    /// let parser = ParserCoordinator::with_fallback();
+    /// let ir = parser.parse_to_ir("Перем x: Число;", "test.bsl");
+    /// match ir {
+    ///     Ok(program) => println!("IR получен с {} узлами", program.nodes.len()),
+    ///     Err(e) => eprintln!("Ошибка парсинга: {}", e),
+    /// }
+    /// ```
+    pub fn parse_to_ir(&self, content: &str, file_path: &str) -> Result<bsl_shared::ir::SemanticProgram, String> {
+        use crate::application::ast_to_ir::AstToIrConverter;
+
+        // 1. Парсинг в AST (tree-sitter) с поддержкой ParseResult
+        let parse_result = self.parse(content)?;
+
+        // Логируем синтаксические ошибки, если они есть
+        if parse_result.has_errors() {
+            warn!("⚠️ Обнаружены синтаксические ошибки при парсинге:");
+            for error in &parse_result.syntax_errors {
+                warn!("  - [{}:{}-{}:{}] {}",
+                    error.span.start_line, error.span.start_column,
+                    error.span.end_line, error.span.end_column,
+                    error.message);
+            }
+        }
+
+        // 2. Конвертация AST → IR (извлекаем program из ParseResult)
+        AstToIrConverter::convert(parse_result.program, content.to_string(), file_path.to_string())
+            .map_err(|e| format!("AST to IR conversion failed: {}", e))
     }
 
     /// Загрузка платформенных типов (упрощенная)
@@ -154,7 +184,7 @@ impl TreeSitterParser {
         }
     }
 
-    fn parse(&self, content: &str) -> Result<Program, String> {
+    fn parse(&self, content: &str) -> Result<ParseResult, String> {
         // Парсинг с использованием tree-sitter-bsl
         let mut parser = self
             .parser
@@ -173,18 +203,18 @@ impl TreeSitterParser {
             content.len()
         );
 
-        // Конвертация tree-sitter AST → Program AST через TreeSitterAdapter
+        // Конвертация tree-sitter AST → ParseResult через TreeSitterAdapter
         TreeSitterAdapter::convert_tree(&tree, content)
     }
 
-    /// Инкрементальный парсинг с использованием старого дерева
+    /// Инкрементальный парсинг с использованием старого дерева (Milestone 2.7 Task 3)
     fn parse_incremental(
         &self,
         new_content: &str,
         old_tree: Option<&tree_sitter::Tree>,
         edits: Vec<TextEdit>,
         old_source: &str,
-    ) -> Result<(tree_sitter::Tree, Program), String> {
+    ) -> Result<(tree_sitter::Tree, ParseResult), String> {
         let mut parser = self
             .parser
             .lock()
@@ -285,55 +315,95 @@ impl TreeSitterParser {
     }
 }
 
-impl RegexParser {
-    fn new() -> Self {
-        Self {}
-    }
-
-    fn parse(&self, content: &str) -> Result<Program, String> {
-        // Простой regex fallback для базовых конструкций BSL
-        debug!(
-            "Using regex fallback parser for content length: {}",
-            content.len()
-        );
-
-        // TODO: Implement basic regex parsing
-        Ok(Program { statements: vec![] })
-    }
-}
+// === Milestone 2.8 Task 7: RegexParser удалён ===
+// Regex fallback legacy был удалён, используется только Tree-sitter
 
 // === COMPARISON WITH COMPLEX PARSING ===
 
-/// Сравнение: Simple vs Complex parsing
+/// Milestone 2.8: Упрощённая архитектура парсера
 ///
-/// Complex (UnifiedParserCoordinator):
+/// Previous Complex (UnifiedParserCoordinator):
 /// - Strategy pattern с 3+ парсерами
-/// - TreeSitterStrategy + SyntaxHelperStrategy + RegexFallback  
+/// - TreeSitterStrategy + SyntaxHelperStrategy + RegexFallback
 /// - Parser selection logic
 /// - Configuration-guided discovery
 /// - ~300+ LOC
 ///
-/// Simple (ParserCoordinator):
-/// - TreeSitter + Regex fallback
-/// - Simple selection logic  
-/// - ~100 LOC
+/// Current Simple (ParserCoordinator):
+/// - Tree-sitter только (regex legacy удалён)
+/// - Инкрементальный парсинг с кешированием
+/// - Parser trait для инверсии зависимостей
+/// - ~200 LOC
 ///
-/// Экономия: ~60% сложности, покрывает 90% use cases
+/// Milestone 2.8: Полный переход на Tree-sitter, regex удалён
 #[cfg(test)]
 mod comparison_notes {
-    //! Сравнение: Simple vs Complex parsing
+    //! Сравнение архитектур парсинга
     //!
-    //! Complex (UnifiedParserCoordinator):
+    //! Old Complex (UnifiedParserCoordinator):
     //! - Strategy pattern с 3+ парсерами
-    //! - TreeSitterStrategy + SyntaxHelperStrategy + RegexFallback  
+    //! - TreeSitterStrategy + SyntaxHelperStrategy + RegexFallback
     //! - Parser selection logic
-    //! - Configuration-guided discovery
     //! - ~300+ LOC
     //!
-    //! Simple (ParserCoordinator):
-    //! - TreeSitter + Regex fallback
-    //! - Simple selection logic  
-    //! - ~100 LOC
+    //! Current (ParserCoordinator после Milestone 2.8):
+    //! - Только Tree-sitter (regex legacy удалён)
+    //! - Parser trait для инверсии зависимостей
+    //! - Инкрементальный парсинг
+    //! - ~200 LOC
     //!
-    //! Экономия: ~60% сложности, покрывает 90% use cases
+    //! Результат: Упрощение архитектуры + качество анализа
+}
+
+// === MILESTONE 2.8: Parser trait implementation ===
+
+/// Реализация Parser trait для ParserCoordinator (Milestone 2.8: Task 3.2)
+///
+/// Это позволяет:
+/// - CLI использовать ParserCoordinator через trait без зависимости от backend
+/// - Легко тестировать с mock parser
+/// - Инверсия зависимостей: shared не зависит от backend
+impl ParserTrait for ParserCoordinator {
+    fn parse_to_ir(&self, content: &str, file_path: &str) -> Result<bsl_shared::ir::SemanticProgram> {
+        // Используем существующий метод parse_to_ir
+        self.parse_to_ir(content, file_path)
+            .map_err(|e| anyhow::anyhow!("ParserCoordinator::parse_to_ir failed: {}", e))
+    }
+
+    fn parser_name(&self) -> &'static str {
+        "TreeSitter" // Milestone 2.8: Regex fallback удалён
+    }
+
+    fn supports_incremental(&self) -> bool {
+        true // ParserCoordinator поддерживает инкрементальный парсинг
+    }
+}
+
+#[cfg(test)]
+mod parser_trait_tests {
+    use super::*;
+
+    #[test]
+    fn test_parser_trait_parse_to_ir() {
+        let parser = ParserCoordinator::with_fallback();
+        let code = "Перем x: Число;";
+
+        let result = ParserTrait::parse_to_ir(&parser, code, "test.bsl");
+
+        assert!(result.is_ok());
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 1); // One variable declaration
+    }
+
+    #[test]
+    fn test_parser_trait_parser_name() {
+        let parser = ParserCoordinator::with_fallback();
+        assert_eq!(ParserTrait::parser_name(&parser), "TreeSitter"); // Milestone 2.8: regex удалён
+    }
+
+    #[test]
+    fn test_parser_trait_supports_incremental() {
+        let parser = ParserCoordinator::with_fallback();
+        assert!(ParserTrait::supports_incremental(&parser));
+    }
 }

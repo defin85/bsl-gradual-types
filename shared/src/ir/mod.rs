@@ -534,6 +534,336 @@ impl Default for SemanticProgram {
 // Используем Inline Scope Analysis вместо загрузки runtime типов в TypeRepository
 // См. SemanticProgram::find_variable_at_position() для нового подхода
 
+// === Конверторы IR → DTO (Milestone 2.12) ===
+
+use crate::api::semantic_dtos::*;
+
+impl SemanticProgram {
+    /// Конвертировать SemanticProgram в SemanticTreeDto для передачи клиентам
+    ///
+    /// # Milestone 2.12: Real-time Semantic Tree Visualization
+    ///
+    /// Этот метод преобразует внутреннее представление IR в DTO,
+    /// пригодное для передачи через LSP и Web API.
+    pub fn to_dto(&self, include_call_graph: bool, include_flow_sensitive: bool) -> SemanticTreeDto {
+        let start_time = std::time::Instant::now();
+
+        // Конвертируем root-level узлы
+        let root_nodes = self.nodes.iter()
+            .filter(|node| {
+                // Показываем только top-level узлы (functions, procedures, global variables)
+                matches!(node.kind,
+                    SemanticNodeKind::FunctionDeclaration { .. } |
+                    SemanticNodeKind::ProcedureDeclaration { .. } |
+                    SemanticNodeKind::VariableDeclaration { .. }
+                )
+            })
+            .map(|node| self.node_to_dto(node, 0))
+            .collect();
+
+        // Конвертируем таблицу символов
+        let symbol_table = self.symbols_to_dto(include_flow_sensitive);
+
+        // Собираем граф вызовов (если requested)
+        let call_graph = if include_call_graph {
+            self.extract_call_graph()
+        } else {
+            Vec::new()
+        };
+
+        // Вычисляем метрики
+        let metrics = self.calculate_metrics();
+
+        let analysis_time_ms = start_time.elapsed().as_millis() as u64;
+
+        SemanticTreeDto {
+            file_path: self.source_info.path.clone(),
+            root_nodes,
+            symbol_table,
+            call_graph,
+            metrics: SemanticMetricsDto {
+                analysis_time_ms,
+                ..metrics
+            },
+            timestamp: Some(chrono::Utc::now().to_rfc3339()),
+        }
+    }
+
+    /// Конвертировать узел в DTO
+    fn node_to_dto(&self, node: &SemanticNode, depth: usize) -> SemanticNodeDto {
+        let (kind, name, attributes) = self.extract_node_info(&node.kind);
+
+        // Рекурсивно конвертируем children (с ограничением глубины)
+        let children = if depth < 10 {
+            self.get_node_children(node, depth + 1)
+        } else {
+            Vec::new()
+        };
+
+        SemanticNodeDto {
+            kind,
+            name,
+            location: SourceLocationDto {
+                line: node.span.start_line,
+                column: node.span.start_column,
+            },
+            range: Some(SourceRangeDto {
+                start: SourceLocationDto {
+                    line: node.span.start_line,
+                    column: node.span.start_column,
+                },
+                end: SourceLocationDto {
+                    line: node.span.end_line,
+                    column: node.span.end_column,
+                },
+            }),
+            children,
+            attributes,
+        }
+    }
+
+    /// Извлечь информацию из SemanticNodeKind
+    fn extract_node_info(&self, kind: &SemanticNodeKind) -> (String, Option<String>, HashMap<String, String>) {
+        let mut attributes = HashMap::new();
+
+        match kind {
+            SemanticNodeKind::VariableDeclaration { name, type_hint, is_export, .. } => {
+                if let Some(hint) = type_hint {
+                    attributes.insert("type".to_string(), hint.clone());
+                }
+                attributes.insert("is_export".to_string(), is_export.to_string());
+                ("Variable".to_string(), Some(name.clone()), attributes)
+            }
+            SemanticNodeKind::FunctionDeclaration { name, params, return_type, .. } => {
+                attributes.insert("parameter_count".to_string(), params.len().to_string());
+                if let Some(ret) = return_type {
+                    attributes.insert("return_type".to_string(), ret.clone());
+                }
+                ("Function".to_string(), Some(name.clone()), attributes)
+            }
+            SemanticNodeKind::ProcedureDeclaration { name, params, .. } => {
+                attributes.insert("parameter_count".to_string(), params.len().to_string());
+                ("Procedure".to_string(), Some(name.clone()), attributes)
+            }
+            SemanticNodeKind::Assignment { variable, value_type } => {
+                attributes.insert("variable".to_string(), variable.clone());
+                attributes.insert("value_type".to_string(), value_type.clone());
+                ("Assignment".to_string(), None, attributes)
+            }
+            SemanticNodeKind::IfStatement { .. } => {
+                ("IfStatement".to_string(), None, attributes)
+            }
+            SemanticNodeKind::ForLoop { .. } => {
+                ("ForLoop".to_string(), None, attributes)
+            }
+            SemanticNodeKind::WhileLoop { .. } => {
+                ("WhileLoop".to_string(), None, attributes)
+            }
+            SemanticNodeKind::FunctionCall { function_name, arg_types, .. } => {
+                attributes.insert("function_name".to_string(), function_name.clone());
+                attributes.insert("arg_count".to_string(), arg_types.len().to_string());
+                ("FunctionCall".to_string(), Some(function_name.clone()), attributes)
+            }
+            SemanticNodeKind::Return { .. } => {
+                ("Return".to_string(), None, attributes)
+            }
+            SemanticNodeKind::TryExcept { .. } => {
+                ("TryExcept".to_string(), None, attributes)
+            }
+            SemanticNodeKind::Break => {
+                ("Break".to_string(), None, attributes)
+            }
+            SemanticNodeKind::Continue => {
+                ("Continue".to_string(), None, attributes)
+            }
+            SemanticNodeKind::ForEachLoop { variable, collection_type, .. } => {
+                attributes.insert("variable".to_string(), variable.clone());
+                attributes.insert("collection_type".to_string(), collection_type.clone());
+                ("ForEachLoop".to_string(), None, attributes)
+            }
+            SemanticNodeKind::MemberAccess { object_type, member_name, is_method } => {
+                attributes.insert("object_type".to_string(), object_type.clone());
+                attributes.insert("member_name".to_string(), member_name.clone());
+                attributes.insert("is_method".to_string(), is_method.to_string());
+                ("MemberAccess".to_string(), Some(member_name.clone()), attributes)
+            }
+            SemanticNodeKind::BlockScope { .. } => {
+                ("BlockScope".to_string(), None, attributes)
+            }
+        }
+    }
+
+    /// Получить дочерние узлы (для построения иерархии)
+    fn get_node_children(&self, _parent: &SemanticNode, _depth: usize) -> Vec<SemanticNodeDto> {
+        // TODO: Реализовать извлечение дочерних узлов из body_scope
+        // Для MVP возвращаем пустой список
+        Vec::new()
+    }
+
+    /// Конвертировать таблицу символов в DTO
+    fn symbols_to_dto(&self, include_flow_sensitive: bool) -> HashMap<String, SymbolInfoDto> {
+        let mut result = HashMap::new();
+
+        // Обходим все scopes
+        for (_scope_id, scope) in &self.symbols.scopes {
+            for (var_name, (type_hint, span)) in &scope.variables {
+                let symbol = SymbolInfoDto {
+                    name: var_name.clone(),
+                    kind: "Variable".to_string(),
+                    resolved_type: self.type_hint_to_dto(type_hint),
+                    scope: "Local".to_string(), // TODO: различать Global/Local
+                    declaration_location: SourceLocationDto {
+                        line: span.start_line,
+                        column: span.start_column,
+                    },
+                    flow_variants: if include_flow_sensitive {
+                        Vec::new() // TODO: flow-sensitive analysis
+                    } else {
+                        Vec::new()
+                    },
+                    metadata: HashMap::new(),
+                };
+
+                result.insert(var_name.clone(), symbol);
+            }
+        }
+
+        // Добавляем функции
+        for (fn_name, sig) in &self.symbols.global_functions {
+            let symbol = SymbolInfoDto {
+                name: fn_name.clone(),
+                kind: if sig.return_type.is_some() {
+                    "Function".to_string()
+                } else {
+                    "Procedure".to_string()
+                },
+                resolved_type: sig.return_type.as_ref().map(|rt| TypeResolutionDto {
+                    name: rt.clone(),
+                    category: "Unknown".to_string(),
+                    certainty: "Inferred".to_string(),
+                    certainty_percent: 50,
+                    active_facet: None,
+                    methods: Vec::new(),
+                    properties: Vec::new(),
+                    is_union: None,
+                    union_components: Vec::new(),
+                }),
+                scope: "Global".to_string(),
+                declaration_location: SourceLocationDto { line: 0, column: 0 }, // TODO: store location
+                flow_variants: Vec::new(),
+                metadata: {
+                    let mut meta = HashMap::new();
+                    meta.insert("is_export".to_string(), sig.is_export.to_string());
+                    meta.insert("parameter_count".to_string(), sig.params.len().to_string());
+                    meta
+                },
+            };
+
+            result.insert(fn_name.clone(), symbol);
+        }
+
+        result
+    }
+
+    /// Конвертировать TypeHint в TypeResolutionDto
+    fn type_hint_to_dto(&self, hint: &TypeHint) -> Option<TypeResolutionDto> {
+        match hint {
+            TypeHint::Explicit(type_name) => Some(TypeResolutionDto {
+                name: type_name.clone(),
+                category: "Platform".to_string(),
+                certainty: "Known".to_string(),
+                certainty_percent: 100,
+                active_facet: None,
+                methods: Vec::new(),
+                properties: Vec::new(),
+                is_union: None,
+                union_components: Vec::new(),
+            }),
+            TypeHint::Inferred(type_name) => Some(TypeResolutionDto {
+                name: type_name.clone(),
+                category: "Inferred".to_string(),
+                certainty: "Inferred".to_string(),
+                certainty_percent: 75,
+                active_facet: None,
+                methods: Vec::new(),
+                properties: Vec::new(),
+                is_union: None,
+                union_components: Vec::new(),
+            }),
+            TypeHint::Unknown => None,
+        }
+    }
+
+    /// Извлечь граф вызовов функций
+    fn extract_call_graph(&self) -> Vec<CallEdgeDto> {
+        let edges = Vec::new();
+
+        // TODO: Реализовать извлечение call graph из узлов
+        // Для MVP возвращаем пустой граф
+
+        edges
+    }
+
+    /// Вычислить метрики семантического анализа
+    fn calculate_metrics(&self) -> SemanticMetricsDto {
+        let mut procedure_count = 0;
+        let mut function_count = 0;
+        let mut variable_count = 0;
+        let mut known_types = 0;
+        let mut inferred_types = 0;
+        let mut unknown_types = 0;
+
+        // Подсчёт procedures и functions
+        for node in &self.nodes {
+            match &node.kind {
+                SemanticNodeKind::ProcedureDeclaration { .. } => procedure_count += 1,
+                SemanticNodeKind::FunctionDeclaration { .. } => function_count += 1,
+                SemanticNodeKind::VariableDeclaration { .. } => variable_count += 1,
+                _ => {}
+            }
+        }
+
+        // Подсчёт типов
+        for (_scope_id, scope) in &self.symbols.scopes {
+            for (_var_name, (type_hint, _span)) in &scope.variables {
+                match type_hint {
+                    TypeHint::Explicit(_) => known_types += 1,
+                    TypeHint::Inferred(_) => inferred_types += 1,
+                    TypeHint::Unknown => unknown_types += 1,
+                }
+            }
+        }
+
+        let total_types = known_types + inferred_types + unknown_types;
+        let average_certainty = if total_types > 0 {
+            (known_types as f32 + inferred_types as f32 * 0.75) / total_types as f32
+        } else {
+            0.0
+        };
+
+        SemanticMetricsDto {
+            procedure_count,
+            function_count,
+            variable_count,
+            parameter_count: 0, // TODO: calculate
+            known_types,
+            inferred_types,
+            unknown_types,
+            average_certainty,
+            analysis_time_ms: 0, // Will be set by caller
+            node_count: self.nodes.len(),
+            tree_depth: self.calculate_tree_depth(),
+            call_count: 0, // TODO: calculate
+        }
+    }
+
+    /// Вычислить максимальную глубину дерева
+    fn calculate_tree_depth(&self) -> usize {
+        // TODO: Реализовать подсчёт глубины
+        1
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

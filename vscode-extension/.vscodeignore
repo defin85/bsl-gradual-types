@@ -1,4 +1,4 @@
-# Source files
+# Source files (не включаем в VSIX)
 src/**
 **/*.ts
 !out/**/*.js
@@ -14,33 +14,44 @@ src/**
 test/**
 **/*.test.ts
 **/*.spec.ts
+coverage/
+.nyc_output/
 
 # Build artifacts
 *.map
 tsconfig.json
 tsconfig.*.json
+esbuild.js
+scripts/
 
-# Documentation
+# Documentation (оставляем только README и CHANGELOG)
 *.md
 !README.md
 !CHANGELOG.md
 
-# Dependencies - exclude node_modules from VSIX
+# Dependencies - полностью исключаем node_modules
+# esbuild bundler встраивает только необходимые зависимости в out/extension.js
 node_modules/**
 
-# Binaries - ONLY include LSP server
-# All other binaries are removed, keep only:
-# - bin/lsp_server.exe (7.7 MB)
-# - bin/lsp_server_wrapper.bat
-# - bin/README.md
+# Binaries - ТОЛЬКО LSP server (Milestone 2.2 Task 2: ✅ 1 бинарник вместо 10)
+# Включаем только:
+# - bin/lsp_server.exe (~7.7 MB с tree-sitter-bsl встроенным)
+# Все CLI бинарники удалены, вся логика в LSP сервере
+
+# Старые VSIX и dist файлы
+dist/**
+*.vsix
 
 # Misc
 .eslintrc.json
 .prettierrc
 *.log
-*.vsix
 package-lock.json
+.DS_Store
+*.swp
+*~
 
-# Images - keep only necessary ones
+# Images - минимизация (Milestone 2.2 Task 1: размер < 5 MB)
 images/**
 !images/bsl-analyzer-logo.png
+# Все остальные изображения исключены для экономии места

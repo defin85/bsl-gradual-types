@@ -616,6 +616,14 @@ struct RenderTypeHtmlResponse {
     message: Option<String>,
 }
 
+// === MILESTONE 2.12: Semantic Visualization Custom Requests ===
+
+/// Custom request: bsl/getSemanticTree - получить семантическое дерево файла
+use bsl_shared::api::semantic_dtos::{GetSemanticTreeRequest, SemanticTreeDto};
+
+/// Custom request: bsl/getSemanticHtml - получить HTML визуализацию семантики
+use bsl_shared::api::semantic_dtos::{GetSemanticHtmlRequest, RenderedHtmlDto};
+
 #[allow(dead_code)]
 impl BslLanguageServer {
     /// Обработчик custom request: bsl/queryType
@@ -733,6 +741,179 @@ impl BslLanguageServer {
             success: true,
             message: Some("TypeVisualization успешно интегрирована".to_string()),
         })
+    }
+
+    /// Обработчик custom request: bsl/getSemanticTree - MILESTONE 2.12
+    async fn handle_get_semantic_tree(&self, params: GetSemanticTreeRequest) -> JsonRpcResult<SemanticTreeDto> {
+        info!("Custom request: bsl/getSemanticTree - {}", params.uri);
+
+        // Парсим URI и получаем путь к файлу
+        let uri = tower_lsp::lsp_types::Url::parse(&params.uri)
+            .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e)))?;
+
+        let file_path = uri.to_file_path()
+            .map_err(|_| tower_lsp::jsonrpc::Error::invalid_params("Could not convert URI to file path"))?;
+
+        let file_path_str = file_path.to_string_lossy().to_string();
+
+        // Читаем содержимое файла (из кеша или с диска)
+        let file_content = match self.documents.read().await.get(&uri) {
+            Some(content) => content.clone(),
+            None => {
+                std::fs::read_to_string(&file_path)
+                    .map_err(|e| tower_lsp::jsonrpc::Error::internal_error())?
+            }
+        };
+
+        // Используем TypeSystemService для получения SemanticProgram
+        // TypeSystemService уже содержит всю логику парсинга и конвертации AST → IR
+        match self.type_service.get_semantic_tree(&file_content, &file_path_str).await {
+            Ok(dto) => {
+                info!("✅ Semantic tree generated: {} nodes, {} symbols",
+                    dto.root_nodes.len(), dto.symbol_table.len());
+                Ok(dto)
+            }
+            Err(e) => {
+                error!("Failed to generate semantic tree: {}", e);
+                Err(tower_lsp::jsonrpc::Error::internal_error())
+            }
+        }
+    }
+
+    /// Обработчик custom request: bsl/getSemanticHtml - MILESTONE 2.12
+    async fn handle_get_semantic_html(&self, params: GetSemanticHtmlRequest) -> JsonRpcResult<RenderedHtmlDto> {
+        info!("Custom request: bsl/getSemanticHtml - {} (theme: {:?})", params.uri, params.theme);
+
+        // Сначала получаем semantic tree
+        let tree_request = GetSemanticTreeRequest {
+            uri: params.uri.clone(),
+            include_call_graph: true,
+            include_flow_sensitive: true,
+            max_depth: None,
+        };
+
+        let semantic_tree = self.handle_get_semantic_tree(tree_request).await?;
+
+        // Определяем тему
+        let theme_mode = match params.theme.as_deref() {
+            Some("dark") => ThemeMode::Dark,
+            Some("light") => ThemeMode::Light,
+            Some("high-contrast") => ThemeMode::HighContrast,
+            _ => ThemeMode::Auto,
+        };
+
+        // Создаём HTML рендерер
+        let renderer = HtmlRenderer::new(RenderOptions {
+            theme: theme_mode.clone(),
+            syntax_highlight: true,
+            enable_links: true,
+            compact: params.compact,
+        });
+
+        // Генерируем HTML body
+        let body = self.format_semantic_tree_html(&semantic_tree);
+
+        // Генерируем полный HTML документ
+        let html = renderer.render_document("BSL Semantic Analysis", &body);
+
+        Ok(RenderedHtmlDto {
+            file_path: semantic_tree.file_path.clone(),
+            html,
+            metrics: semantic_tree.metrics.clone(),
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            theme: Some(format!("{:?}", theme_mode)),
+        })
+    }
+
+    /// Форматировать SemanticTreeDto в HTML
+    fn format_semantic_tree_html(&self, tree: &SemanticTreeDto) -> String {
+        let mut html = String::new();
+
+        // Header с метриками
+        html.push_str(&format!(r#"
+            <div class="semantic-header">
+                <h1>Семантический анализ: {}</h1>
+                <div class="metrics">
+                    <span class="metric">📊 Процедуры: {}</span>
+                    <span class="metric">🔧 Функции: {}</span>
+                    <span class="metric">📝 Переменные: {}</span>
+                    <span class="metric">✅ Известные типы: {}</span>
+                    <span class="metric">🔍 Выведенные типы: {}</span>
+                    <span class="metric">❓ Неизвестные типы: {}</span>
+                    <span class="metric">⏱️ Анализ: {}ms</span>
+                </div>
+            </div>
+        "#,
+            tree.file_path,
+            tree.metrics.procedure_count,
+            tree.metrics.function_count,
+            tree.metrics.variable_count,
+            tree.metrics.known_types,
+            tree.metrics.inferred_types,
+            tree.metrics.unknown_types,
+            tree.metrics.analysis_time_ms
+        ));
+
+        // Дерево узлов
+        html.push_str("<div class='semantic-tree'><h2>Семантическое дерево</h2>");
+        for node in &tree.root_nodes {
+            html.push_str(&self.format_node_html(node, 0));
+        }
+        html.push_str("</div>");
+
+        // Таблица символов
+        html.push_str("<div class='symbol-table'><h2>Таблица символов</h2><table>");
+        html.push_str("<tr><th>Символ</th><th>Тип</th><th>Категория</th><th>Область</th></tr>");
+        for (name, symbol) in &tree.symbol_table {
+            let type_name = symbol.resolved_type.as_ref()
+                .map(|t| t.name.as_str())
+                .unwrap_or("?");
+            html.push_str(&format!(
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                name, type_name, symbol.kind, symbol.scope
+            ));
+        }
+        html.push_str("</table></div>");
+
+        // CSS стили
+        html.push_str(r#"
+            <style>
+                .semantic-header { background: #f0f0f0; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+                .semantic-header h1 { margin: 0 0 10px 0; }
+                .metrics { display: flex; gap: 15px; flex-wrap: wrap; }
+                .metric { background: white; padding: 8px 12px; border-radius: 4px; font-size: 14px; }
+                .semantic-tree, .symbol-table { margin: 20px 0; }
+                .tree-node { margin-left: 20px; padding: 5px; border-left: 2px solid #ccc; }
+                .node-header { font-weight: bold; color: #0066cc; }
+                .node-name { color: #009900; }
+                table { width: 100%; border-collapse: collapse; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+            </style>
+        "#);
+
+        html
+    }
+
+    /// Форматировать узел дерева в HTML
+    fn format_node_html(&self, node: &bsl_shared::api::semantic_dtos::SemanticNodeDto, depth: usize) -> String {
+        let indent = "  ".repeat(depth);
+        let mut html = format!(
+            r#"{}<div class="tree-node">
+                <span class="node-header">{}</span>
+                {}"#,
+            indent,
+            node.kind,
+            node.name.as_ref().map(|n| format!(r#"<span class="node-name">{}</span>"#, n)).unwrap_or_default()
+        );
+
+        // Рекурсивно добавляем детей
+        for child in &node.children {
+            html.push_str(&self.format_node_html(child, depth + 1));
+        }
+
+        html.push_str("</div>");
+        html
     }
 }
 

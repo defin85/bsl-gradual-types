@@ -142,6 +142,51 @@ LSP hover(file, line, column):
 - [backend/tests/inline_scope_analysis_test.rs](backend/tests/inline_scope_analysis_test.rs) — 5 интеграционных тестов
 - [cli/test_inline_scope.bsl](cli/test_inline_scope.bsl) — тестовый файл для ручной проверки
 
+### 🎯 Tree-Sitter Span Extraction (Milestone 2.11)
+
+**Цель:** Извлечение реальных координат из tree-sitter узлов для корректной работы LSP hover.
+
+**Проблема (до 2.11):**
+- Все `Span` в `SemanticNode` были фейковые (0, 0, 0, 0)
+- `find_node_at_position(line, column)` всегда возвращал `None`
+- Hover проваливался в fallback → одинаковая информация для всех переменных
+
+**Решение (после 2.11):**
+```rust
+// Tree-sitter предоставляет точные координаты
+let span = Span::new(
+    node.start_position().row as u32,        // start_line
+    node.start_position().column as u32,     // start_column
+    node.end_position().row as u32,          // end_line
+    node.end_position().column as u32        // end_column
+);
+```
+
+**Ключевые компоненты:**
+- ✅ [backend/src/system/tree_sitter_adapter.rs:node_to_span()](backend/src/system/tree_sitter_adapter.rs#L14-L31) — извлекает реальные координаты из tree-sitter
+- ✅ [backend/src/application/ast_to_ir.rs:ast_span_to_ir_span()](backend/src/application/ast_to_ir.rs#L616-L638) — передаёт координаты в IR
+- ✅ [backend/src/application/type_system_service.rs:get_hover_info()](backend/src/application/type_system_service.rs#L460-L520) — использует реальные Span для поиска узлов
+
+**Результат:**
+- ✅ 0 использований `Span::stub()` в production коде (только в тестовых данных)
+- ✅ `find_node_at_position()` корректно находит узлы по позиции курсора
+- ✅ Hover показывает разную информацию для разных переменных
+- ✅ DEBUG логи отслеживают Span extraction в реальном времени
+
+**Тестирование:**
+- [backend/tests/hover_with_spans_test.rs](backend/tests/hover_with_spans_test.rs) — 6 интеграционных тестов, проверяющих:
+  - Hover на переменной в объявлении
+  - Hover на переменной при использовании
+  - Hover показывает разную информацию для разных переменных
+  - Hover на параметре функции
+  - Hover на имени метода
+  - Корректность `Span.contains(line, column)`
+
+**Отладка:**
+- DEBUG логи в `tree_sitter_adapter.rs` показывают извлечённые Span из tree-sitter
+- DEBUG логи в `ast_to_ir.rs` показывают конвертацию AST Span → IR Span
+- DEBUG/WARN логи в `type_system_service.rs` показывают результат поиска узлов
+
 ### 🎯 Философия: Right-Sized Architecture
 
 **Start simple, scale up по необходимости** — 6-8 компонентов вместо 25-30.

@@ -10,14 +10,24 @@ use tracing::debug;
 pub struct TreeSitterAdapter;
 
 impl TreeSitterAdapter {
-    /// Извлечь Span из tree-sitter Node (Milestone 2.7 Task 2)
+    /// Извлечь Span из tree-sitter Node (Milestone 2.7 Task 2 + 2.11 Task B1: DEBUG логи)
     fn node_to_span(node: &Node) -> Span {
         let start_pos = node.start_position();
         let end_pos = node.end_position();
-        Span::from_positions(
+        let span = Span::from_positions(
             (start_pos.row as u32, start_pos.column as u32),
             (end_pos.row as u32, end_pos.column as u32),
-        )
+        );
+
+        // Milestone 2.11 Task B1: DEBUG логи для Span extraction
+        debug!(
+            "Extracted Span: {}:{} - {}:{} (node kind: {})",
+            span.start_line, span.start_column,
+            span.end_line, span.end_column,
+            node.kind()
+        );
+
+        span
     }
 
     /// Конвертировать дерево tree-sitter в ParseResult с обработкой ошибок (Milestone 2.7 Task 3)

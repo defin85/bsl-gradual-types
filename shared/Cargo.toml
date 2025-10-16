@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 indexmap = { workspace = true }
+chrono = { workspace = true }
 
 # Dependencies for loaders (optional for WASM)
 dashmap = { workspace = true }

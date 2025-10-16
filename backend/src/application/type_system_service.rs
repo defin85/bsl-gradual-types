@@ -464,6 +464,8 @@ impl TypeSystemService {
         line: u32,
         column: u32,
     ) -> Result<Option<String>> {
+        use tracing::{info, debug, warn};
+
         info!("🎯 Hover запрос: строка {}, колонка {}", line, column);
 
         // Парсинг BSL кода
@@ -479,6 +481,9 @@ impl TypeSystemService {
             "hover_request.bsl".to_string()
         )?;
 
+        // Milestone 2.11 Task B1: DEBUG логи для поиска узла
+        debug!("Looking for node at position {}:{}", line, column);
+
         // НОВОЕ: Используем find_variable_at_position() для извлечения типа из scope
         if let Some((var_name, type_hint)) = ir_program.find_variable_at_position(line, column) {
             info!("✅ find_variable_at_position({}, {}) нашла переменную: '{}' с типом {:?}",
@@ -486,21 +491,30 @@ impl TypeSystemService {
 
             // Форматируем hover с методами/свойствами из TypeRepository
             return Ok(Some(self.format_variable_hover(&var_name, &type_hint)));
+        } else {
+            // Milestone 2.11 Task B1: Логи когда переменная не найдена
+            debug!("find_variable_at_position({}, {}) не нашла переменную", line, column);
         }
 
         // Fallback 1: Пробуем find_node_at_position для других узлов (функции, циклы, etc.)
         if let Some(node) = ir_program.find_node_at_position(line, column) {
             info!("✅ find_node_at_position({}, {}) нашёл узел (не переменная): span={:?}",
                 line, column, node.span);
+            debug!("Found node: {:?} at span {:?}", node.kind, node.span);
             return Ok(Some(self.format_semantic_node_info(node, file_content)));
+        } else {
+            // Milestone 2.11 Task B1: Предупреждение когда узел не найден
+            warn!("❌ No node found at position {}:{} in IR", line, column);
         }
 
         // Fallback: старая логика по имени переменной
         if let Some(symbol_info) =
             self.extract_enhanced_symbol_info(file_content, line, column, Some(&parse_result.program))
         {
+            debug!("Fallback: using extract_enhanced_symbol_info");
             Ok(Some(symbol_info))
         } else {
+            warn!("❌ Fallback also failed, returning generic BSL symbol message");
             Ok(Some(format!("BSL символ на позиции {}:{}", line, column)))
         }
     }
@@ -1349,6 +1363,36 @@ impl TypeSystemService {
             "**Тип:** `{}`\n\n*Категория:* {:?}\n*Certainty:* {:?}\n*Структура:* {}",
             type_name, resolution.source, resolution.certainty, type_str
         )
+    }
+
+    /// MILESTONE 2.12: Получить семантическое дерево файла
+    ///
+    /// Парсит файл, конвертирует AST в IR, и возвращает SemanticTreeDto
+    pub async fn get_semantic_tree(
+        &self,
+        file_content: &str,
+        file_path: &str,
+    ) -> Result<bsl_shared::api::semantic_dtos::SemanticTreeDto> {
+        info!("🌳 Generating semantic tree for: {}", file_path);
+
+        // 1. Парсим файл → AST → IR (используем готовый метод из ParserCoordinator)
+        let semantic_program = self.parser.parse_to_ir(file_content, file_path)
+            .map_err(|e| anyhow::anyhow!("Failed to parse file: {}", e))?;
+
+        // 2. Конвертируем SemanticProgram → SemanticTreeDto
+        let dto = semantic_program.to_dto(
+            true,  // include_call_graph
+            true,  // include_flow_sensitive
+        );
+
+        info!("✅ Semantic tree generated: {} root nodes, {} symbols, {} metrics: {:?}",
+            dto.root_nodes.len(),
+            dto.symbol_table.len(),
+            dto.metrics.node_count,
+            dto.metrics
+        );
+
+        Ok(dto)
     }
 }
 

@@ -48,15 +48,14 @@ struct BslLanguageServer {
     config: Arc<RwLock<Option<LspConfig>>>,
     // ✅ MILESTONE 2.10: храним SystemCoordinator для перезагрузки типов
     coordinator: Arc<SystemCoordinator>,
-    // ✅ ИСПРАВЛЕНО: используем Application Layer вместо System Layer
-    type_service: Arc<TypeSystemService>,
+    // ❌ УДАЛЕНО: НЕ храним Arc<TypeSystemService>, потому что он может устареть после reload!
+    // Вместо этого всегда получаем актуальный экземпляр через coordinator.type_service()
 }
 
 impl BslLanguageServer {
     fn new(
         client: Client,
         coordinator: Arc<SystemCoordinator>,
-        type_service: Arc<TypeSystemService>,
     ) -> Self {
         Self {
             client,
@@ -64,18 +63,50 @@ impl BslLanguageServer {
             // ✅ MILESTONE 2.10: инициализируем пустой конфигурацией
             config: Arc::new(RwLock::new(None)),
             coordinator,
-            // ✅ ИСПРАВЛЕНО: используем TypeSystemService напрямую
-            type_service,
         }
+    }
+
+    /// Получить актуальный TypeSystemService (всегда fresh после reload)
+    fn get_type_service(&self) -> Arc<TypeSystemService> {
+        self.coordinator
+            .type_service()
+            .expect("TypeSystemService not available - coordinator not initialized")
+    }
+
+    /// Конвертирует UTF-16 offset (LSP character) в UTF-8 byte offset
+    ///
+    /// LSP протокол использует UTF-16 code units для позиций, но Rust строки в UTF-8.
+    /// Эта функция корректно преобразует UTF-16 offset в byte offset для работы с &str[..].
+    fn utf16_to_byte_offset(line: &str, utf16_offset: u32) -> usize {
+        let mut utf16_count = 0;
+        for (byte_offset, ch) in line.char_indices() {
+            if utf16_count >= utf16_offset {
+                return byte_offset;
+            }
+            // Кириллица и другие non-ASCII символы занимают 2 UTF-16 code units
+            utf16_count += ch.len_utf16() as u32;
+        }
+        line.len() // Если offset за пределами строки, возвращаем конец
     }
 
     /// Применяет текстовое изменение к строке
     fn apply_text_edit(&self, source: &str, range: Range, new_text: &str) -> String {
         let lines: Vec<&str> = source.lines().collect();
         let start_line = range.start.line as usize;
-        let start_char = range.start.character as usize;
         let end_line = range.end.line as usize;
-        let end_char = range.end.character as usize;
+
+        // ✅ ИСПРАВЛЕНИЕ: Конвертируем UTF-16 offsets → UTF-8 byte offsets
+        let start_char = if let Some(start_line_text) = lines.get(start_line) {
+            Self::utf16_to_byte_offset(start_line_text, range.start.character)
+        } else {
+            0
+        };
+
+        let end_char = if let Some(end_line_text) = lines.get(end_line) {
+            Self::utf16_to_byte_offset(end_line_text, range.end.character)
+        } else {
+            0
+        };
 
         let mut result = String::new();
 
@@ -159,6 +190,13 @@ impl LanguageServer for BslLanguageServer {
                         work_done_progress_options: WorkDoneProgressOptions::default(),
                     },
                 )),
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec![
+                        "bsl.getSemanticHtml".to_string(),
+                        "bsl.getSemanticTree".to_string(),
+                    ],
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                }),
                 ..Default::default()
             },
             ..Default::default()
@@ -176,12 +214,80 @@ impl LanguageServer for BslLanguageServer {
             if let Some(ref platform_docs) = cfg.platform_docs_archive {
                 info!("🔄 Reloading types with platformDocsArchive: {}", platform_docs);
 
+                // ✅ НОВОЕ: Отправляем LSP Progress notification (стандартный протокол LSP)
+                use tower_lsp::lsp_types::{
+                    NumberOrString, ProgressParams, ProgressParamsValue,
+                    WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd,
+                    WorkDoneProgressReport,
+                };
+
+                // Генерируем уникальный токен для прогресса (timestamp-based)
+                let token = NumberOrString::String(format!("bsl-load-types-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis()
+                ));
+
+                // 1. Начинаем прогресс (VSCode автоматически покажет progress bar в UI)
+                self.client
+                    .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                        ProgressParams {
+                            token: token.clone(),
+                            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
+                                WorkDoneProgressBegin {
+                                    title: "Загрузка типов платформы 1С".to_string(),
+                                    message: Some("Парсинг Syntax Helper...".to_string()),
+                                    percentage: Some(0),
+                                    cancellable: Some(false),
+                                },
+                            )),
+                        },
+                    )
+                    .await;
+
+                // ✅ FIX: Даём VSCode время обработать Begin notification
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                // 2. Обновляем прогресс на 50%
+                self.client
+                    .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                        ProgressParams {
+                            token: token.clone(),
+                            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
+                                WorkDoneProgressReport {
+                                    message: Some(format!("Обработка документации из {}...", platform_docs)),
+                                    percentage: Some(50),
+                                    cancellable: Some(false),
+                                },
+                            )),
+                        },
+                    )
+                    .await;
+
+                // ✅ FIX: Даём VSCode время обработать Report notification
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
                 let syntax_path = std::path::Path::new(platform_docs);
 
-                // Перезапускаем SystemCoordinator с новым путём
+                // 3. Перезапускаем SystemCoordinator с новым путём
                 match self.coordinator.start_with_paths(Some(syntax_path), None).await {
                     Ok(()) => {
                         info!("✅ Types reloaded successfully with platform documentation");
+
+                        // 4. Завершаем прогресс с успехом
+                        self.client
+                            .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                                ProgressParams {
+                                    token: token.clone(),
+                                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
+                                        WorkDoneProgressEnd {
+                                            message: Some("✅ Типы платформы загружены успешно".to_string()),
+                                        },
+                                    )),
+                                },
+                            )
+                            .await;
 
                         self.client
                             .log_message(
@@ -192,6 +298,20 @@ impl LanguageServer for BslLanguageServer {
                     }
                     Err(e) => {
                         error!("❌ Failed to reload types: {}", e);
+
+                        // 5. Завершаем прогресс с ошибкой
+                        self.client
+                            .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                                ProgressParams {
+                                    token: token.clone(),
+                                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
+                                        WorkDoneProgressEnd {
+                                            message: Some(format!("❌ Ошибка загрузки: {}", e)),
+                                        },
+                                    )),
+                                },
+                            )
+                            .await;
 
                         self.client
                             .log_message(
@@ -223,6 +343,14 @@ impl LanguageServer for BslLanguageServer {
             .await
             .insert(uri.clone(), text.clone());
 
+        // ✅ MILESTONE 2.13: Прогрев IR кеша при didOpen (Eagerly Parse)
+        // Вызываем get_hover_info с dummy position (0, 0) для кеширования IR
+        // Это делает последующие hover мгновенными (<5ms вместо 50-100ms)
+        match self.get_type_service().get_hover_info(&text, 0, 0).await {
+            Ok(_) => info!("✅ IR cache preheated for {}", uri),
+            Err(e) => error!("❌ Failed to preheat IR cache for {}: {}", uri, e),
+        }
+
         // ✅ ИСПРАВЛЕНО: диагностики через TypeSystemService
         let file_path = uri.to_file_path().map_err(|e| {
             error!("Failed to convert URI to file path: {:?}", e);
@@ -234,7 +362,7 @@ impl LanguageServer for BslLanguageServer {
                 info!("🔍 Анализируем файл: {}", path_str);
 
                 // Анализируем файл через Application Layer
-                match self.type_service.analyze_file(&path_str).await {
+                match self.get_type_service().analyze_file(&path_str).await {
                     Ok(analysis) => {
                         info!("✅ Анализ файла {} успешно завершён", path_str);
                         // Создаём информационную диагностику об успешном анализе
@@ -351,7 +479,7 @@ impl LanguageServer for BslLanguageServer {
 
         // Используем инкрементальный парсинг через TypeSystemService
         if let Err(e) = self
-            .type_service
+            .get_type_service()
             .parse_incremental(file_path, updated_text.clone(), text_edits)
             .await
         {
@@ -419,7 +547,7 @@ impl LanguageServer for BslLanguageServer {
 
         // Получаем автодополнение через TypeSystemService
         match self
-            .type_service
+            .get_type_service()
             .get_completion(&file_content, position.line, position.character)
             .await
         {
@@ -483,7 +611,7 @@ impl LanguageServer for BslLanguageServer {
 
         // Используем get_hover_info() с IR-based анализом
         match self
-            .type_service
+            .get_type_service()
             .get_hover_info(&file_content, position.line, position.character)
             .await
         {
@@ -500,6 +628,39 @@ impl LanguageServer for BslLanguageServer {
             Err(e) => {
                 error!("Failed to get hover info: {}", e);
                 Ok(None)
+            }
+        }
+    }
+
+    async fn execute_command(&self, params: ExecuteCommandParams) -> JsonRpcResult<Option<serde_json::Value>> {
+        info!("Execute command: {} with {} arguments", params.command, params.arguments.len());
+
+        match params.command.as_str() {
+            "bsl.getSemanticHtml" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params("Missing request parameters"));
+                }
+
+                let request: GetSemanticHtmlRequest = serde_json::from_value(params.arguments[0].clone())
+                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid parameters: {}", e)))?;
+
+                let result = self.handle_get_semantic_html(request).await?;
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
+            "bsl.getSemanticTree" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params("Missing request parameters"));
+                }
+
+                let request: GetSemanticTreeRequest = serde_json::from_value(params.arguments[0].clone())
+                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid parameters: {}", e)))?;
+
+                let result = self.handle_get_semantic_tree(request).await?;
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
+            _ => {
+                tracing::warn!("Unknown command: {}", params.command);
+                Err(tower_lsp::jsonrpc::Error::method_not_found())
             }
         }
     }
@@ -767,7 +928,7 @@ impl BslLanguageServer {
 
         // Используем TypeSystemService для получения SemanticProgram
         // TypeSystemService уже содержит всю логику парсинга и конвертации AST → IR
-        match self.type_service.get_semantic_tree(&file_content, &file_path_str).await {
+        match self.get_type_service().get_semantic_tree(&file_content, &file_path_str).await {
             Ok(dto) => {
                 info!("✅ Semantic tree generated: {} nodes, {} symbols",
                     dto.root_nodes.len(), dto.symbol_table.len());
@@ -950,17 +1111,17 @@ async fn main() -> Result<()> {
     // ✅ ИСПРАВЛЕНО: SystemCoordinator как IoC Container
     let coordinator = Arc::new(SystemCoordinator::new());
 
-    // ✅ Инициализируем SystemCoordinator с Domain Layer
+    // ❌ УДАЛЕНО: НЕ вызываем start() здесь! TypeRepository будет создан в initialized() с правильными путями
+    // coordinator.start().await - это создаёт ПУСТОЙ repository, который потом не обновляется!
+
+    // ⚠️ ВАЖНО: Вызываем start() только с базовыми типами, чтобы TypeSystemService был доступен
+    // Настоящая загрузка типов произойдёт в initialized() через start_with_paths()
+    info!("⚠️ Initializing coordinator with fallback types (real types will be loaded in initialized())");
     coordinator.start().await.map_err(|e| anyhow::anyhow!("Failed to start coordinator: {}", e))?;
 
-    // ✅ ИСПРАВЛЕНО: создаем TypeSystemService через SystemCoordinator согласно новой архитектуре
-    let type_service = coordinator.type_service()
-        .ok_or_else(|| anyhow::anyhow!("Failed to create TypeSystemService: AnalysisEngine not initialized"))?;
-
-    // Initialize the type service
-    info!("Initializing TypeSystemService...");
-    type_service.initialize()?;
-    info!("✅ TypeSystemService initialized successfully");
+    // ✅ ИСПРАВЛЕНО: НЕ передаём TypeSystemService в BslLanguageServer!
+    // BslLanguageServer будет получать актуальный TypeSystemService через coordinator.type_service()
+    // Это гарантирует, что после reload типов в initialized() мы используем НОВЫЙ TypeSystemService
 
     // Создаём stdin/stdout для коммуникации с клиентом
     info!("Setting up STDIO communication channels...");
@@ -968,13 +1129,14 @@ async fn main() -> Result<()> {
     let stdout = tokio::io::stdout();
     info!("✅ STDIO channels created");
 
-    // ✅ MILESTONE 2.10: передаем SystemCoordinator и TypeSystemService в LSP Server
+    // ✅ MILESTONE 2.10: передаем только SystemCoordinator в LSP Server
+    // TypeSystemService будет получен lazy через coordinator.type_service()
     info!("Creating LSP service...");
     let coordinator_clone = coordinator.clone();
     let (service, socket) =
         LspService::new(move |client| {
             info!("Initializing BSL Language Server");
-            BslLanguageServer::new(client, coordinator_clone.clone(), type_service.clone())
+            BslLanguageServer::new(client, coordinator_clone.clone())
         });
     info!("✅ LSP service created");
 

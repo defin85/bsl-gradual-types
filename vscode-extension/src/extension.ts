@@ -112,8 +112,12 @@ export async function activate(context: vscode.ExtensionContext) {
         setTimeout(async () => {
             outputChannel.appendLine('🚀 Starting LSP server with delay...');
             await startLanguageClient(context);
-            // Обновляем статус бар после успешного запуска
-            updateStatusBar('$(database) BSL Analyzer: Ready');
+            // ✅ ИСПРАВЛЕНО: НЕ перезаписываем статус, если идёт индексация
+            // updateStatusBar обновит статус сам, когда индексация завершится
+            const currentProgress = require('./lsp/progress').getCurrentProgress();
+            if (!currentProgress || !currentProgress.isIndexing) {
+                updateStatusBar('$(database) BSL Analyzer: Ready');
+            }
         }, 1000);
 
         // Register sidebar providers

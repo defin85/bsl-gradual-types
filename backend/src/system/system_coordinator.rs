@@ -16,6 +16,7 @@ use crate::data::loaders::SyntaxHelperParser;
 use crate::data::adapters::convert_syntax_helper_to_raw;
 
 use super::basic_observability::BasicObservability;
+use super::ir_cache::IrCache;
 use super::parser_coordinator::ParserCoordinator;
 use super::simple_cache::AnalysisCache;
 
@@ -25,6 +26,7 @@ use super::simple_cache::AnalysisCache;
 pub struct SystemCoordinator {
     // === SYSTEM LAYER COMPONENTS ONLY ===
     cache: Arc<AnalysisCache>,
+    ir_cache: Arc<IrCache>, // Milestone 2.13: IR кеширование для LSP hover
     parser: Arc<ParserCoordinator>,
     observability: Arc<BasicObservability>,
 
@@ -49,14 +51,18 @@ impl SystemCoordinator {
         // 1. Simple caching
         let cache = Arc::new(AnalysisCache::new(1000)); // Simple LRU
 
-        // 2. Simple parsing
+        // 2. IR caching (Milestone 2.13)
+        let ir_cache = Arc::new(IrCache::new(100)); // 100 файлов (~10 MB RAM)
+
+        // 3. Simple parsing
         let parser = Arc::new(ParserCoordinator::with_fallback());
 
-        // 3. Basic observability
+        // 4. Basic observability
         let observability = Arc::new(BasicObservability::default());
 
         Self {
             cache,
+            ir_cache,
             parser,
             observability,
             analysis_engine_cache: Mutex::new(None),
@@ -78,6 +84,19 @@ impl SystemCoordinator {
         self.observability.log_startup();
 
         info!("🎯 SystemCoordinator: инициализация System Layer...");
+
+        // ✅ КРИТИЧЕСКИ ВАЖНО: Очищаем кеши при повторной инициализации
+        // Это гарантирует, что TypeSystemService получит НОВЫЙ AnalysisEngine с НОВЫМ TypeRepository
+        {
+            let mut engine_cache = self.analysis_engine_cache.lock().unwrap();
+            let mut service_cache = self.type_service_cache.lock().unwrap();
+
+            if engine_cache.is_some() || service_cache.is_some() {
+                info!("🔄 Очищаем кеши AnalysisEngine и TypeSystemService для повторной инициализации");
+                *engine_cache = None;
+                *service_cache = None;
+            }
+        }
 
         // === PHASE 3: Infrastructure инициализация в SystemCoordinator ===
 
@@ -190,6 +209,11 @@ impl SystemCoordinator {
         (self.cache.clone(), self.parser.clone())
     }
 
+    /// Получить IR Cache
+    pub fn ir_cache(&self) -> Arc<IrCache> {
+        self.ir_cache.clone()
+    }
+
     /// Получить AnalysisEngine (делегирует Domain Layer логику)
     pub fn get_analysis_engine(&self) -> Option<Arc<AnalysisEngine>> {
         let cache = self.analysis_engine_cache.lock().unwrap();
@@ -217,6 +241,7 @@ impl SystemCoordinator {
                 engine,
                 self.cache.clone(),
                 self.parser.clone(),
+                self.ir_cache.clone(), // Milestone 2.13: передаём IR Cache
             ));
 
             *cache = Some(service.clone());

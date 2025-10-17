@@ -86,6 +86,7 @@ pub enum SemanticNodeKind {
         params: Vec<Parameter>,
         return_type: Option<String>,
         body_scope: ScopeId,
+        body: Vec<usize>,  // ✅ НОВОЕ: индексы узлов тела функции
     },
 
     /// Объявление процедуры
@@ -93,6 +94,7 @@ pub enum SemanticNodeKind {
         name: String,
         params: Vec<Parameter>,
         body_scope: ScopeId,
+        body: Vec<usize>,  // ✅ НОВОЕ: индексы узлов тела процедуры
     },
 
     // === Control Flow (КРИТИЧНО для Milestone 2.3 flow-sensitive) ===
@@ -548,15 +550,12 @@ impl SemanticProgram {
     pub fn to_dto(&self, include_call_graph: bool, include_flow_sensitive: bool) -> SemanticTreeDto {
         let start_time = std::time::Instant::now();
 
-        // Конвертируем root-level узлы
+        // Конвертируем root-level узлы (только узлы в root scope!)
         let root_nodes = self.nodes.iter()
             .filter(|node| {
-                // Показываем только top-level узлы (functions, procedures, global variables)
-                matches!(node.kind,
-                    SemanticNodeKind::FunctionDeclaration { .. } |
-                    SemanticNodeKind::ProcedureDeclaration { .. } |
-                    SemanticNodeKind::VariableDeclaration { .. }
-                )
+                // ✅ ИСПРАВЛЕНИЕ: Фильтруем по scope_id, а не по типу узла
+                // Показываем только узлы, которые находятся в root scope
+                node.scope_id == self.symbols.root_scope
             })
             .map(|node| self.node_to_dto(node, 0))
             .collect();
@@ -648,7 +647,8 @@ impl SemanticProgram {
             SemanticNodeKind::Assignment { variable, value_type } => {
                 attributes.insert("variable".to_string(), variable.clone());
                 attributes.insert("value_type".to_string(), value_type.clone());
-                ("Assignment".to_string(), None, attributes)
+                // ✅ Показываем имя переменной в UI
+                ("Assignment".to_string(), Some(format!("{} = {}", variable, value_type)), attributes)
             }
             SemanticNodeKind::IfStatement { .. } => {
                 ("IfStatement".to_string(), None, attributes)
@@ -694,10 +694,45 @@ impl SemanticProgram {
     }
 
     /// Получить дочерние узлы (для построения иерархии)
-    fn get_node_children(&self, _parent: &SemanticNode, _depth: usize) -> Vec<SemanticNodeDto> {
-        // TODO: Реализовать извлечение дочерних узлов из body_scope
-        // Для MVP возвращаем пустой список
-        Vec::new()
+    fn get_node_children(&self, parent: &SemanticNode, depth: usize) -> Vec<SemanticNodeDto> {
+        use SemanticNodeKind::*;
+
+        // Извлекаем индексы дочерних узлов в зависимости от типа родителя
+        let child_indices: Vec<usize> = match &parent.kind {
+            // ✅ НОВОЕ: Извлекаем body из FunctionDeclaration
+            FunctionDeclaration { body, .. } => body.clone(),
+
+            // ✅ НОВОЕ: Извлекаем body из ProcedureDeclaration
+            ProcedureDeclaration { body, .. } => body.clone(),
+
+            // Существующие узлы с индексами
+            IfStatement { then_branch, else_branch, .. } => {
+                let mut indices = then_branch.clone();
+                if let Some(else_idx) = else_branch {
+                    indices.extend(else_idx);
+                }
+                indices
+            }
+            WhileLoop { body, .. } => body.clone(),
+            ForLoop { body, .. } => body.clone(),
+            ForEachLoop { body, .. } => body.clone(),
+            TryExcept { try_body, except_body } => {
+                let mut indices = try_body.clone();
+                indices.extend(except_body);
+                indices
+            }
+            BlockScope { statements, .. } => statements.clone(),
+
+            // Листовые узлы (нет детей)
+            _ => Vec::new(),
+        };
+
+        // Конвертируем дочерние узлы в DTO (рекурсивно)
+        child_indices
+            .iter()
+            .filter_map(|&idx| self.nodes.get(idx))
+            .map(|node| self.node_to_dto(node, depth))
+            .collect()
     }
 
     /// Конвертировать таблицу символов в DTO

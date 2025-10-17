@@ -4,11 +4,14 @@
 // LSP interface components
 pub mod lsp;
 
-// Web interface components  
+// Web interface components
 pub mod web;
 
 // CLI interface components
 pub mod cli;
+
+// Semantic visualization API (MILESTONE 2.16)
+pub mod semantic_routes;
 
 // Re-exports for backward compatibility
 pub use lsp::{/* enhanced, */ code_actions, type_hints, position};

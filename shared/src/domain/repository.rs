@@ -108,9 +108,30 @@ impl TypeRepository for InMemoryTypeRepository {
 
     fn find_type(&self, name: &str) -> Option<RawTypeData> {
         let types = self.types.read().unwrap();
-        types.iter()
+        let result = types.iter()
             .find(|t| t.name == name || t.english_name == name)
-            .cloned()
+            .cloned();
+
+        // DEBUG: Логируем поиск типа
+        if result.is_none() {
+            tracing::debug!(
+                "TypeRepository.find_type('{}') → NOT FOUND (total types: {})",
+                name,
+                types.len()
+            );
+            // Показываем первые 5 типов для отладки
+            if !types.is_empty() {
+                let sample: Vec<String> = types.iter()
+                    .take(5)
+                    .map(|t| format!("'{}' (en: '{}')", t.name, t.english_name))
+                    .collect();
+                tracing::debug!("Sample types in repository: {}", sample.join(", "));
+            }
+        } else {
+            tracing::debug!("TypeRepository.find_type('{}') → FOUND", name);
+        }
+
+        result
     }
 
     fn get_stats(&self) -> RepositoryStats {

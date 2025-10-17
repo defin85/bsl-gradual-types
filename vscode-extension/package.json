@@ -392,6 +392,12 @@
                 "title": "Test Progress System",
                 "category": "BSL Debug",
                 "icon": "$(beaker)"
+            },
+            {
+                "command": "bsl-gradual-types.showSemanticVisualization",
+                "title": "Показать семантическое дерево",
+                "category": "BSL",
+                "icon": "$(type-hierarchy-sub)"
             }
         ],
         "viewsContainers": {
@@ -515,6 +521,10 @@
                 },
                 {
                     "command": "bslAnalyzer.testProgress"
+                },
+                {
+                    "command": "bsl-gradual-types.showSemanticVisualization",
+                    "when": "resourceExtname == .bsl"
                 }
             ],
             "view/title": [

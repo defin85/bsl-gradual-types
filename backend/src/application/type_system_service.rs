@@ -11,7 +11,7 @@ use tracing::info;
 use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::domain::types::{TypeResolution, ResolutionResult};
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup};
-use crate::system::{AnalysisCache, AnalysisResult, ParserCoordinator};
+use crate::system::{AnalysisCache, AnalysisResult, IrCache, ParserCoordinator};
 use crate::application::TypeInferenceService;
 
 /// Унифицированный сервис системы типов для Application Layer
@@ -30,6 +30,7 @@ pub struct TypeSystemService {
 
     // System Layer компоненты
     cache: Arc<AnalysisCache>,
+    ir_cache: Arc<IrCache>, // Milestone 2.13: IR кеширование для LSP hover
     parser: Arc<ParserCoordinator>,
 }
 
@@ -39,6 +40,7 @@ impl TypeSystemService {
         analysis_engine: Arc<AnalysisEngine>,
         cache: Arc<AnalysisCache>,
         parser: Arc<ParserCoordinator>,
+        ir_cache: Arc<IrCache>, // Milestone 2.13: IR кеширование
     ) -> Self {
         // Создаем TypeInferenceService на основе AnalysisEngine
         let resolver = analysis_engine.get_resolver();
@@ -53,6 +55,7 @@ impl TypeSystemService {
             inference_service,
             metadata_lookup,
             cache,
+            ir_cache,
             parser,
         }
     }
@@ -468,18 +471,37 @@ impl TypeSystemService {
 
         info!("🎯 Hover запрос: строка {}, колонка {}", line, column);
 
-        // Парсинг BSL кода
-        let parse_result = self
-            .parser
-            .parse(file_content)
-            .map_err(|e| anyhow::anyhow!("Ошибка парсинга для hover: {}", e))?;
+        // MILESTONE 2.13: IR Caching - проверяем кеш перед парсингом
+        let content_hash = self.hash_content(file_content);
 
-        // Конвертация AST → IR для Inline Scope Analysis
-        let ir_program = crate::application::ast_to_ir::AstToIrConverter::convert(
-            parse_result.program.clone(),
-            file_content.to_string(),
-            "hover_request.bsl".to_string()
-        )?;
+        // Проверяем IR кеш
+        let ir_program = if let Some(cached_ir) = self.ir_cache.get(content_hash).await {
+            info!("✅ IR cache HIT for hash {}", content_hash);
+            cached_ir
+        } else {
+            info!("❌ IR cache MISS for hash {}, parsing...", content_hash);
+
+            // Парсинг BSL кода (только при cache MISS)
+            let parse_result = self
+                .parser
+                .parse(file_content)
+                .map_err(|e| anyhow::anyhow!("Ошибка парсинга для hover: {}", e))?;
+
+            // Конвертация AST → IR для Inline Scope Analysis
+            let ir = crate::application::ast_to_ir::AstToIrConverter::convert(
+                parse_result.program.clone(),
+                file_content.to_string(),
+                "hover_request.bsl".to_string()
+            )?;
+
+            let ir_arc = std::sync::Arc::new(ir);
+
+            // Сохраняем в кеш
+            self.ir_cache.put(content_hash, ir_arc.clone()).await;
+            debug!("Cached IR for hash {}", content_hash);
+
+            ir_arc
+        };
 
         // Milestone 2.11 Task B1: DEBUG логи для поиска узла
         debug!("Looking for node at position {}:{}", line, column);
@@ -507,9 +529,9 @@ impl TypeSystemService {
             warn!("❌ No node found at position {}:{} in IR", line, column);
         }
 
-        // Fallback: старая логика по имени переменной
+        // Fallback: старая логика по имени переменной (без AST, т.к. теперь используется IR кеш)
         if let Some(symbol_info) =
-            self.extract_enhanced_symbol_info(file_content, line, column, Some(&parse_result.program))
+            self.extract_enhanced_symbol_info(file_content, line, column, None)
         {
             debug!("Fallback: using extract_enhanced_symbol_info");
             Ok(Some(symbol_info))
@@ -745,6 +767,22 @@ impl TypeSystemService {
 
     // === МЕТОДЫ АНАЛИЗА КОНТЕКСТА ===
 
+    /// Конвертирует UTF-16 offset (LSP character) в UTF-8 byte offset
+    ///
+    /// LSP протокол использует UTF-16 code units для позиций, но Rust строки в UTF-8.
+    /// Эта функция корректно преобразует UTF-16 offset в byte offset для работы с &str[..].
+    fn utf16_to_byte_offset(line: &str, utf16_offset: u32) -> usize {
+        let mut utf16_count = 0;
+        for (byte_offset, ch) in line.char_indices() {
+            if utf16_count >= utf16_offset {
+                return byte_offset;
+            }
+            // Кириллица и другие non-ASCII символы занимают 2 UTF-16 code units
+            utf16_count += ch.len_utf16() as u32;
+        }
+        line.len() // Если offset за пределами строки, возвращаем конец
+    }
+
     /// Анализирует контекст для умного автодополнения
     pub fn analyze_completion_context(
         &self,
@@ -758,7 +796,8 @@ impl TypeSystemService {
         // Получаем текущую строку и префикс
         let (_current_line, line_prefix) = if line_index < lines.len() {
             let line_content = lines[line_index];
-            let column_index = (column as usize).min(line_content.len());
+            // ✅ ИСПРАВЛЕНИЕ: Конвертируем UTF-16 offset → UTF-8 byte offset
+            let column_index = Self::utf16_to_byte_offset(line_content, column);
             (line_content, &line_content[..column_index])
         } else {
             ("", "")
@@ -1123,19 +1162,32 @@ impl TypeSystemService {
         let lines: Vec<&str> = file_content.lines().collect();
         let current_line = lines.get(line as usize)?;
 
+        // ✅ ИСПРАВЛЕНИЕ: Конвертируем UTF-16 offset → UTF-8 byte offset
+        let byte_offset = Self::utf16_to_byte_offset(current_line, column);
+
+        // Ищем символ на позиции byte_offset (в терминах char indices, не bytes!)
+        let mut char_index = 0;
+
         let chars: Vec<char> = current_line.chars().collect();
-        if chars.is_empty() || column as usize >= chars.len() {
+        for (idx, _ch) in current_line.char_indices() {
+            if idx >= byte_offset {
+                break;
+            }
+            char_index += 1;
+        }
+
+        if chars.is_empty() || char_index >= chars.len() {
             return None;
         }
 
         // Ищем начало слова
-        let mut start = column as usize;
+        let mut start = char_index;
         while start > 0 && Self::is_identifier_char(chars[start - 1]) {
             start -= 1;
         }
 
         // Ищем конец слова
-        let mut end = column as usize;
+        let mut end = char_index;
         while end < chars.len() && Self::is_identifier_char(chars[end]) {
             end += 1;
         }
@@ -1214,7 +1266,7 @@ impl TypeSystemService {
                     node.span.start_line, node.span.start_column,
                     node.span.end_line, node.span.end_column)
             }
-            SemanticNodeKind::FunctionDeclaration { name, params, return_type, .. } => {
+            SemanticNodeKind::FunctionDeclaration { name, params, return_type, body, .. } => {
                 let params_str = params.iter()
                     .map(|p| format!("{}: {}", p.name, p.type_hint.as_ref().unwrap_or(&"Неопределено".to_string())))
                     .collect::<Vec<_>>()
@@ -1223,19 +1275,33 @@ impl TypeSystemService {
                     .map(|t| format!("*Возвращает:* {}", t))
                     .unwrap_or_else(|| "*Возвращает:* Неопределено".to_string());
 
-                format!("**Функция:** `{}({})`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
-                    name, params_str, return_str,
+                // ✅ НОВОЕ: Добавляем количество statements в теле
+                let body_info = if body.is_empty() {
+                    "Тело пустое".to_string()
+                } else {
+                    format!("Содержит {} узлов", body.len())
+                };
+
+                format!("**Функция:** `{}({})`\n\n{}\n\n📦 {}\n\n📍 Позиция: {}:{}-{}:{}",
+                    name, params_str, return_str, body_info,
                     node.span.start_line, node.span.start_column,
                     node.span.end_line, node.span.end_column)
             }
-            SemanticNodeKind::ProcedureDeclaration { name, params, .. } => {
+            SemanticNodeKind::ProcedureDeclaration { name, params, body, .. } => {
                 let params_str = params.iter()
                     .map(|p| format!("{}: {}", p.name, p.type_hint.as_ref().unwrap_or(&"Неопределено".to_string())))
                     .collect::<Vec<_>>()
                     .join(", ");
 
-                format!("**Процедура:** `{}({})`\n\n📍 Позиция: {}:{}-{}:{}",
-                    name, params_str,
+                // ✅ НОВОЕ: Добавляем количество statements в теле
+                let body_info = if body.is_empty() {
+                    "Тело пустое".to_string()
+                } else {
+                    format!("Содержит {} узлов", body.len())
+                };
+
+                format!("**Процедура:** `{}({})`\n\n📦 {}\n\n📍 Позиция: {}:{}-{}:{}",
+                    name, params_str, body_info,
                     node.span.start_line, node.span.start_column,
                     node.span.end_line, node.span.end_column)
             }
@@ -1270,6 +1336,7 @@ impl TypeSystemService {
     /// Форматированный markdown с информацией о типе, методах и свойствах
     fn format_variable_hover(&self, var_name: &str, type_hint: &bsl_shared::ir::TypeHint) -> String {
         use bsl_shared::ir::TypeHint;
+        use bsl_shared::domain::types::Certainty;
 
         // Извлекаем имя типа из TypeHint
         let type_name = match type_hint {
@@ -1285,12 +1352,30 @@ impl TypeSystemService {
         // Резолвим тип через AnalysisEngine → TypeRepository
         let resolution = self.analysis_engine.resolve_type(&type_name);
 
+        // Получаем RawTypeData для проверки существования типа
+        let raw_type = self.metadata_lookup.get_raw_type(&resolution);
+
+        // DEBUG: Выводим детальную информацию о resolution
+        tracing::debug!("Resolution для '{}': certainty={:?}, result={:?}",
+            type_name, resolution.certainty, resolution.result);
+        tracing::debug!("RawTypeData для '{}': {}",
+            type_name, if raw_type.is_some() { "НАЙДЕН" } else { "НЕ НАЙДЕН" });
+
+        // ✅ НОВОЕ: Проверяем, найден ли тип в TypeRepository
+        // Проверяем не только Certainty::Unknown, но и отсутствие RawTypeData
+        if matches!(resolution.certainty, Certainty::Unknown) || raw_type.is_none() {
+            return format!(
+                "**Переменная:** `{}`\n\n*Тип:* `{}`\n\n⚠️ **Тип не найден в TypeRepository**\n\n💡 *Возможные причины:*\n- Тип не загружен в систему (проверьте логи загрузки типов)\n- Тип из конфигурации 1С (требуется Configuration Loader)\n- Опечатка в имени типа",
+                var_name,
+                type_name
+            );
+        }
+
         // Получаем методы и свойства через TypeMetadataLookup
         let methods = self.metadata_lookup.get_methods(&resolution);
         let properties = self.metadata_lookup.get_properties(&resolution);
 
-        // Получаем RawTypeData для описания
-        let raw_type = self.metadata_lookup.get_raw_type(&resolution);
+        // Форматируем описание из RawTypeData
         let description = raw_type
             .as_ref()
             .map(|rt| rt.description.clone())
@@ -1393,6 +1478,14 @@ impl TypeSystemService {
         );
 
         Ok(dto)
+    }
+
+    /// MILESTONE 2.13: Получить статистику IR Cache
+    ///
+    /// # Возвращает
+    /// Статистику IR кеша (hits, misses, evictions, hit rate)
+    pub async fn get_ir_cache_stats(&self) -> crate::system::IrCacheStats {
+        self.ir_cache.get_stats().await
     }
 }
 

@@ -164,6 +164,112 @@ var init_config = __esm({
   }
 });
 
+// src/lsp/progress.ts
+var progress_exports = {};
+__export(progress_exports, {
+  finishIndexing: () => finishIndexing,
+  getCurrentProgress: () => getCurrentProgress,
+  initializeProgress: () => initializeProgress,
+  progressEmitter: () => progressEmitter,
+  startIndexing: () => startIndexing,
+  updateIndexingProgress: () => updateIndexingProgress,
+  updateStatusBar: () => updateStatusBar
+});
+function initializeProgress(channel, statusBar) {
+  outputChannel = channel;
+  statusBarItem = statusBar;
+}
+function startIndexing(totalSteps = 4) {
+  globalIndexingProgress = {
+    isIndexing: true,
+    currentStep: "Initializing...",
+    progress: 0,
+    totalSteps,
+    currentStepNumber: 0,
+    startTime: /* @__PURE__ */ new Date()
+  };
+  updateStatusBar(void 0, globalIndexingProgress);
+  progressEmitter.fire(globalIndexingProgress);
+  outputChannel?.appendLine(`\u{1F680} Index building started with ${totalSteps} steps`);
+}
+function updateIndexingProgress(stepNumber, stepName, progress) {
+  if (!globalIndexingProgress.isIndexing) {
+    outputChannel?.appendLine(`\u26A0\uFE0F updateIndexingProgress called but indexing is not active`);
+    return;
+  }
+  const elapsed = globalIndexingProgress.startTime ? ((/* @__PURE__ */ new Date()).getTime() - globalIndexingProgress.startTime.getTime()) / 1e3 : 0;
+  const eta = progress > 5 ? Math.round(elapsed * (100 / progress) - elapsed) : void 0;
+  globalIndexingProgress = {
+    ...globalIndexingProgress,
+    currentStep: stepName,
+    progress: Math.min(progress, 100),
+    currentStepNumber: stepNumber,
+    estimatedTimeRemaining: eta ? `${eta}s` : "calculating..."
+  };
+  updateStatusBar(void 0, globalIndexingProgress);
+  progressEmitter.fire(globalIndexingProgress);
+  outputChannel?.appendLine(`\u{1F4CA} Step ${stepNumber}/${globalIndexingProgress.totalSteps}: ${stepName} (${progress}%)`);
+}
+function finishIndexing(success = true) {
+  const elapsed = globalIndexingProgress.startTime ? ((/* @__PURE__ */ new Date()).getTime() - globalIndexingProgress.startTime.getTime()) / 1e3 : 0;
+  globalIndexingProgress = {
+    isIndexing: false,
+    currentStep: success ? "Completed" : "Failed",
+    progress: 100,
+    totalSteps: globalIndexingProgress.totalSteps,
+    currentStepNumber: globalIndexingProgress.totalSteps
+  };
+  updateStatusBar(success ? "BSL Analyzer: Index Ready" : "BSL Analyzer: Index Failed", void 0);
+  progressEmitter.fire(globalIndexingProgress);
+  const statusIcon = success ? "\u2705" : "\u274C";
+  outputChannel?.appendLine(`${statusIcon} Index building ${success ? "completed" : "failed"} in ${elapsed.toFixed(1)}s`);
+  if (success) {
+    vscode2.window.showInformationMessage(`BSL Index built successfully in ${elapsed.toFixed(1)}s`);
+  }
+}
+function updateStatusBar(text, progress) {
+  if (!statusBarItem) {
+    return;
+  }
+  if (text) {
+    statusBarItem.text = text;
+    statusBarItem.show();
+    return;
+  }
+  if (progress && progress.isIndexing) {
+    const icon = "$(sync~spin)";
+    const percent = Math.round(progress.progress);
+    const eta = progress.estimatedTimeRemaining ? ` - ETA: ${progress.estimatedTimeRemaining}` : "";
+    statusBarItem.text = `${icon} BSL Index: ${progress.currentStep} (${percent}%${eta})`;
+    statusBarItem.tooltip = `Step ${progress.currentStepNumber}/${progress.totalSteps}
+Progress: ${percent}%
+${progress.currentStep}`;
+    statusBarItem.show();
+  } else {
+    statusBarItem.text = "$(database) BSL Analyzer";
+    statusBarItem.tooltip = "BSL Type Safety Analyzer\nClick to build index";
+    statusBarItem.show();
+  }
+}
+function getCurrentProgress() {
+  return globalIndexingProgress;
+}
+var vscode2, globalIndexingProgress, progressEmitter, outputChannel, statusBarItem;
+var init_progress = __esm({
+  "src/lsp/progress.ts"() {
+    "use strict";
+    vscode2 = __toESM(require("vscode"));
+    globalIndexingProgress = {
+      isIndexing: false,
+      currentStep: "Idle",
+      progress: 0,
+      totalSteps: 4,
+      currentStepNumber: 0
+    };
+    progressEmitter = new vscode2.EventEmitter();
+  }
+});
+
 // node_modules/vscode-languageclient/lib/common/utils/is.js
 var require_is = __commonJS({
   "node_modules/vscode-languageclient/lib/common/utils/is.js"(exports2) {
@@ -17898,103 +18004,15 @@ var path4 = __toESM(require("path"));
 var fs6 = __toESM(require("fs"));
 init_config();
 
-// src/lsp/progress.ts
-var vscode2 = __toESM(require("vscode"));
-var globalIndexingProgress = {
-  isIndexing: false,
-  currentStep: "Idle",
-  progress: 0,
-  totalSteps: 4,
-  currentStepNumber: 0
-};
-var progressEmitter = new vscode2.EventEmitter();
-var outputChannel;
-var statusBarItem;
-function initializeProgress(channel, statusBar) {
-  outputChannel = channel;
-  statusBarItem = statusBar;
-}
-function startIndexing(totalSteps = 4) {
-  globalIndexingProgress = {
-    isIndexing: true,
-    currentStep: "Initializing...",
-    progress: 0,
-    totalSteps,
-    currentStepNumber: 0,
-    startTime: /* @__PURE__ */ new Date()
-  };
-  updateStatusBar(void 0, globalIndexingProgress);
-  progressEmitter.fire(globalIndexingProgress);
-  outputChannel?.appendLine(`\u{1F680} Index building started with ${totalSteps} steps`);
-}
-function updateIndexingProgress(stepNumber, stepName, progress) {
-  if (!globalIndexingProgress.isIndexing) {
-    outputChannel?.appendLine(`\u26A0\uFE0F updateIndexingProgress called but indexing is not active`);
-    return;
-  }
-  const elapsed = globalIndexingProgress.startTime ? ((/* @__PURE__ */ new Date()).getTime() - globalIndexingProgress.startTime.getTime()) / 1e3 : 0;
-  const eta = progress > 5 ? Math.round(elapsed * (100 / progress) - elapsed) : void 0;
-  globalIndexingProgress = {
-    ...globalIndexingProgress,
-    currentStep: stepName,
-    progress: Math.min(progress, 100),
-    currentStepNumber: stepNumber,
-    estimatedTimeRemaining: eta ? `${eta}s` : "calculating..."
-  };
-  updateStatusBar(void 0, globalIndexingProgress);
-  progressEmitter.fire(globalIndexingProgress);
-  outputChannel?.appendLine(`\u{1F4CA} Step ${stepNumber}/${globalIndexingProgress.totalSteps}: ${stepName} (${progress}%)`);
-}
-function finishIndexing(success = true) {
-  const elapsed = globalIndexingProgress.startTime ? ((/* @__PURE__ */ new Date()).getTime() - globalIndexingProgress.startTime.getTime()) / 1e3 : 0;
-  globalIndexingProgress = {
-    isIndexing: false,
-    currentStep: success ? "Completed" : "Failed",
-    progress: 100,
-    totalSteps: globalIndexingProgress.totalSteps,
-    currentStepNumber: globalIndexingProgress.totalSteps
-  };
-  updateStatusBar(success ? "BSL Analyzer: Index Ready" : "BSL Analyzer: Index Failed", void 0);
-  progressEmitter.fire(globalIndexingProgress);
-  const statusIcon = success ? "\u2705" : "\u274C";
-  outputChannel?.appendLine(`${statusIcon} Index building ${success ? "completed" : "failed"} in ${elapsed.toFixed(1)}s`);
-  if (success) {
-    vscode2.window.showInformationMessage(`BSL Index built successfully in ${elapsed.toFixed(1)}s`);
-  }
-}
-function updateStatusBar(text, progress) {
-  if (!statusBarItem) {
-    return;
-  }
-  if (text) {
-    statusBarItem.text = text;
-    statusBarItem.show();
-    return;
-  }
-  if (progress && progress.isIndexing) {
-    const icon = "$(sync~spin)";
-    const percent = Math.round(progress.progress);
-    const eta = progress.estimatedTimeRemaining ? ` - ETA: ${progress.estimatedTimeRemaining}` : "";
-    statusBarItem.text = `${icon} BSL Index: ${progress.currentStep} (${percent}%${eta})`;
-    statusBarItem.tooltip = `Step ${progress.currentStepNumber}/${progress.totalSteps}
-Progress: ${percent}%
-${progress.currentStep}`;
-    statusBarItem.show();
-  } else {
-    statusBarItem.text = "$(database) BSL Analyzer";
-    statusBarItem.tooltip = "BSL Type Safety Analyzer\nClick to build index";
-    statusBarItem.show();
-  }
-}
-function getCurrentProgress() {
-  return globalIndexingProgress;
-}
+// src/lsp/index.ts
+init_progress();
 
 // src/lsp/client.ts
 var vscode4 = __toESM(require("vscode"));
 var import_node = __toESM(require_node3());
 init_binaryPath();
 init_configHelper();
+init_progress();
 var fs2 = __toESM(require("fs"));
 function StateToString(state) {
   switch (state) {
@@ -18256,6 +18274,9 @@ function stopHealthCheck() {
   }
 }
 
+// src/extension.ts
+init_progress();
+
 // src/utils/index.ts
 init_binaryPath();
 
@@ -18436,6 +18457,7 @@ var BslDiagnosticItem = class extends vscode6.TreeItem {
 
 // src/providers/overviewProvider.ts
 var vscode7 = __toESM(require("vscode"));
+init_progress();
 init_configHelper();
 var BslOverviewProvider = class {
   constructor(outputChannel7) {
@@ -19158,6 +19180,7 @@ var BslActionsWebviewProvider = class {
 
 // src/commands/index.ts
 var vscode15 = __toESM(require("vscode"));
+init_progress();
 
 // src/webviews/webviewContent.ts
 var vscode14 = __toESM(require("vscode"));
@@ -19543,7 +19566,7 @@ async function registerCommands(context) {
     }
   };
   await safeRegisterCommand("bslAnalyzer.analyzeFile", async () => {
-    const editor = vscode15.window.activeTextEditor;
+    const editor = vscode15.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode15.window.activeTextEditor;
     if (!editor || editor.document.languageId !== "bsl") {
       vscode15.window.showWarningMessage("Please open a BSL file to analyze");
       return;
@@ -19632,7 +19655,7 @@ async function registerCommands(context) {
     }
   });
   await safeRegisterCommand("bslAnalyzer.showMetrics", async () => {
-    const editor = vscode15.window.activeTextEditor;
+    const editor = vscode15.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode15.window.activeTextEditor;
     if (!editor || editor.document.languageId !== "bsl") {
       vscode15.window.showWarningMessage("Please open a BSL file to show metrics");
       return;
@@ -19844,7 +19867,7 @@ async function registerCommands(context) {
     }
   });
   await safeRegisterCommand("bslAnalyzer.exploreType", async () => {
-    const editor = vscode15.window.activeTextEditor;
+    const editor = vscode15.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode15.window.activeTextEditor;
     let typeName = "";
     if (editor && editor.selection && !editor.selection.isEmpty) {
       typeName = editor.document.getText(editor.selection);
@@ -19870,7 +19893,7 @@ async function registerCommands(context) {
     }
   });
   await safeRegisterCommand("bslAnalyzer.validateMethodCall", async () => {
-    const editor = vscode15.window.activeTextEditor;
+    const editor = vscode15.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode15.window.activeTextEditor;
     if (!editor || editor.document.languageId !== "bsl") {
       vscode15.window.showWarningMessage("Please open a BSL file and select a method call");
       return;
@@ -19963,8 +19986,109 @@ async function registerCommands(context) {
     });
     outputChannel5.appendLine("\u2705 Progress system test completed");
   });
+  await safeRegisterCommand("bsl-gradual-types.showSemanticVisualization", async () => {
+    const editor = vscode15.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode15.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== "bsl") {
+      vscode15.window.showWarningMessage("\u041D\u0435\u0442 \u043E\u0442\u043A\u0440\u044B\u0442\u043E\u0433\u043E BSL \u0444\u0430\u0439\u043B\u0430");
+      return;
+    }
+    const client2 = getLanguageClient();
+    if (!client2 || !client2.isRunning()) {
+      vscode15.window.showErrorMessage("LSP server \u043D\u0435 \u0437\u0430\u043F\u0443\u0449\u0435\u043D. \u041F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430, \u043F\u043E\u0434\u043E\u0436\u0434\u0438\u0442\u0435 \u0438\u043B\u0438 \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u0441\u0435\u0440\u0432\u0435\u0440.");
+      return;
+    }
+    const uri = editor.document.uri.toString();
+    const fileName = editor.document.fileName.split(/[/\\]/).pop() || "unknown.bsl";
+    const panel = vscode15.window.createWebviewPanel(
+      "bslSemanticVisualization",
+      `\u0421\u0435\u043C\u0430\u043D\u0442\u0438\u0447\u0435\u0441\u043A\u043E\u0435 \u0434\u0435\u0440\u0435\u0432\u043E: ${fileName}`,
+      vscode15.ViewColumn.Two,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true
+      }
+    );
+    panel.webview.html = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: var(--vscode-progressBar-background);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <div class="spinner"></div>
+        <p>\u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u0441\u0435\u043C\u0430\u043D\u0442\u0438\u0447\u0435\u0441\u043A\u043E\u0433\u043E \u0434\u0435\u0440\u0435\u0432\u0430...</p>
+    </div>
+</body>
+</html>`;
+    try {
+      const isDark = vscode15.window.activeColorTheme.kind === vscode15.ColorThemeKind.Dark;
+      const theme = isDark ? "dark" : "light";
+      const response = await client2.sendRequest("workspace/executeCommand", {
+        command: "bsl.getSemanticHtml",
+        arguments: [{
+          uri,
+          theme,
+          compact: false
+        }]
+      });
+      panel.webview.html = response.html;
+    } catch (error) {
+      const errorMessage = error?.toString() || "Unknown error";
+      panel.webview.html = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+            padding: 20px;
+        }
+        h1 {
+            color: var(--vscode-errorForeground);
+        }
+        pre {
+            background: var(--vscode-textCodeBlock-background);
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>\u274C \u041E\u0448\u0438\u0431\u043A\u0430</h1>
+    <pre>${errorMessage}</pre>
+</body>
+</html>`;
+      vscode15.window.showErrorMessage(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u044F \u0441\u0435\u043C\u0430\u043D\u0442\u0438\u0447\u0435\u0441\u043A\u043E\u0433\u043E \u0434\u0435\u0440\u0435\u0432\u0430: ${errorMessage}`);
+    }
+  });
   commandsRegistered = true;
-  outputChannel5.appendLine("\u2705 Successfully registered 15 extension commands");
+  outputChannel5.appendLine("\u2705 Successfully registered 16 extension commands");
 }
 
 // src/extension.ts
@@ -20012,7 +20136,10 @@ async function activate(context) {
     setTimeout(async () => {
       outputChannel6.appendLine("\u{1F680} Starting LSP server with delay...");
       await startLanguageClient(context);
-      updateStatusBar("$(database) BSL Analyzer: Ready");
+      const currentProgress = (init_progress(), __toCommonJS(progress_exports)).getCurrentProgress();
+      if (!currentProgress || !currentProgress.isIndexing) {
+        updateStatusBar("$(database) BSL Analyzer: Ready");
+      }
     }, 1e3);
     registerSidebarProviders(context);
     await registerCommands(context);

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { CommandHandler, CodeMetrics } from '../types';
-import { 
+import {
     getLanguageClient,
     startLanguageClient,
     stopLanguageClient
@@ -27,6 +27,7 @@ import {
     showTypeCompatibilityWebview,
     showMetricsWebview
 } from '../webviews';
+import { registerSemanticVisualization } from './semanticVisualization';
 
 let outputChannel: vscode.OutputChannel;
 let commandsRegistered = false;
@@ -67,7 +68,10 @@ export async function registerCommands(context: vscode.ExtensionContext) {
     // LSP сервер автоматически анализирует файлы при открытии/изменении
     // Но оставляем для явного вызова анализа
     await safeRegisterCommand('bslAnalyzer.analyzeFile', async () => {
-        const editor = vscode.window.activeTextEditor;
+        // ✅ ИСПРАВЛЕНИЕ: Приоритет BSL файлу из visibleTextEditors (activeTextEditor может быть Output)
+        const editor = vscode.window.visibleTextEditors.find(e => e.document.languageId === 'bsl') ||
+                       vscode.window.activeTextEditor;
+
         if (!editor || editor.document.languageId !== 'bsl') {
             vscode.window.showWarningMessage('Please open a BSL file to analyze');
             return;
@@ -174,7 +178,10 @@ export async function registerCommands(context: vscode.ExtensionContext) {
 
     // Show metrics
     await safeRegisterCommand('bslAnalyzer.showMetrics', async () => {
-        const editor = vscode.window.activeTextEditor;
+        // ✅ ИСПРАВЛЕНИЕ: Приоритет BSL файлу из visibleTextEditors (activeTextEditor может быть Output)
+        const editor = vscode.window.visibleTextEditors.find(e => e.document.languageId === 'bsl') ||
+                       vscode.window.activeTextEditor;
+
         if (!editor || editor.document.languageId !== 'bsl') {
             vscode.window.showWarningMessage('Please open a BSL file to show metrics');
             return;
@@ -447,7 +454,9 @@ export async function registerCommands(context: vscode.ExtensionContext) {
 
     // Explore Type Methods & Properties
     await safeRegisterCommand('bslAnalyzer.exploreType', async () => {
-        const editor = vscode.window.activeTextEditor;
+        // ✅ ИСПРАВЛЕНИЕ: Приоритет BSL файлу из visibleTextEditors (activeTextEditor может быть Output)
+        const editor = vscode.window.visibleTextEditors.find(e => e.document.languageId === 'bsl') ||
+                       vscode.window.activeTextEditor;
         let typeName = '';
 
         if (editor && editor.selection && !editor.selection.isEmpty) {
@@ -482,7 +491,10 @@ export async function registerCommands(context: vscode.ExtensionContext) {
 
     // Validate Method Call
     await safeRegisterCommand('bslAnalyzer.validateMethodCall', async () => {
-        const editor = vscode.window.activeTextEditor;
+        // ✅ ИСПРАВЛЕНИЕ: Приоритет BSL файлу из visibleTextEditors (activeTextEditor может быть Output)
+        const editor = vscode.window.visibleTextEditors.find(e => e.document.languageId === 'bsl') ||
+                       vscode.window.activeTextEditor;
+
         if (!editor || editor.document.languageId !== 'bsl') {
             vscode.window.showWarningMessage('Please open a BSL file and select a method call');
             return;
@@ -605,8 +617,125 @@ export async function registerCommands(context: vscode.ExtensionContext) {
         outputChannel.appendLine('✅ Progress system test completed');
     });
 
+    // Show Semantic Visualization (MILESTONE 2.16)
+    // Регистрируем команду всегда, проверку client делаем внутри
+    await safeRegisterCommand('bsl-gradual-types.showSemanticVisualization', async () => {
+        // ✅ ИСПРАВЛЕНИЕ: Приоритет отдаём BSL файлу из visibleTextEditors, а не activeTextEditor
+        // Проблема: activeTextEditor может быть Output панелью с languageId "Log"
+        const editor = vscode.window.visibleTextEditors.find(e => e.document.languageId === 'bsl') ||
+                       vscode.window.activeTextEditor;
+
+        if (!editor || editor.document.languageId !== 'bsl') {
+            vscode.window.showWarningMessage('Нет открытого BSL файла');
+            return;
+        }
+
+        // Проверяем наличие LSP client
+        const client = getLanguageClient();
+        if (!client || !client.isRunning()) {
+            vscode.window.showErrorMessage('LSP server не запущен. Пожалуйста, подождите или перезапустите сервер.');
+            return;
+        }
+
+        const uri = editor.document.uri.toString();
+        const fileName = editor.document.fileName.split(/[/\\]/).pop() || 'unknown.bsl';
+
+        const panel = vscode.window.createWebviewPanel(
+            'bslSemanticVisualization',
+            `Семантическое дерево: ${fileName}`,
+            vscode.ViewColumn.Two,
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true
+            }
+        );
+
+        // Loading индикатор
+        panel.webview.html = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: var(--vscode-progressBar-background);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <div class="spinner"></div>
+        <p>Загрузка семантического дерева...</p>
+    </div>
+</body>
+</html>`;
+
+        try {
+            const isDark = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark;
+            const theme = isDark ? 'dark' : 'light';
+
+            const response = await client.sendRequest<{ html: string }>('workspace/executeCommand', {
+                command: 'bsl.getSemanticHtml',
+                arguments: [{
+                    uri: uri,
+                    theme: theme,
+                    compact: false
+                }]
+            });
+
+            panel.webview.html = response.html;
+        } catch (error) {
+            const errorMessage = error?.toString() || 'Unknown error';
+            panel.webview.html = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+            padding: 20px;
+        }
+        h1 {
+            color: var(--vscode-errorForeground);
+        }
+        pre {
+            background: var(--vscode-textCodeBlock-background);
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>❌ Ошибка</h1>
+    <pre>${errorMessage}</pre>
+</body>
+</html>`;
+            vscode.window.showErrorMessage(`Ошибка получения семантического дерева: ${errorMessage}`);
+        }
+    });
+
     // Устанавливаем флаг, что команды зарегистрированы
     commandsRegistered = true;
-    outputChannel.appendLine('✅ Successfully registered 15 extension commands');
+    outputChannel.appendLine('✅ Successfully registered 16 extension commands');
 }
 

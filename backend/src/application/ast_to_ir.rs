@@ -68,8 +68,9 @@ impl AstToIrConverter {
         }
 
         // Проход 2: Конвертация statements → SemanticNode
+        // Игнорируем индексы для root level - они нам не нужны
         for statement in ast.statements {
-            converter.convert_statement(statement)?;
+            let _ = converter.convert_statement(statement)?;
         }
 
         // Построение CFG (опционально, для flow-sensitive)
@@ -129,7 +130,10 @@ impl AstToIrConverter {
     }
 
     /// Конвертация Statement → SemanticNode
-    fn convert_statement(&mut self, statement: Statement) -> Result<()> {
+    ///
+    /// Возвращает Option<usize> - индекс добавленного главного узла (или None если узел не добавлен).
+    /// Это позволяет собирать только прямые дочерние узлы, исключая вложенные.
+    fn convert_statement(&mut self, statement: Statement) -> Result<Option<usize>> {
         match statement {
             Statement::VarDeclaration { name, type_hint, span: ast_span } => {
                 let span = self.ast_span_to_ir_span(ast_span);
@@ -153,6 +157,7 @@ impl AstToIrConverter {
                 self.symbol_table.register_variable(self.current_scope, name, hint, span);
 
                 self.nodes.push(node);
+                return Ok(Some(self.nodes.len() - 1));
             }
 
             Statement::Assignment { target, value, span: ast_span } => {
@@ -177,7 +182,9 @@ impl AstToIrConverter {
                     }
 
                     self.nodes.push(node);
+                    return Ok(Some(self.nodes.len() - 1));
                 }
+                return Ok(None);  // Если target не Identifier
             }
 
             Statement::If { condition, then_body, else_body, span: ast_span } => {
@@ -189,12 +196,13 @@ impl AstToIrConverter {
                 let old_scope = self.current_scope;
                 self.current_scope = then_scope;
 
-                let then_start = self.nodes.len();
+                // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                let mut then_indices = Vec::new();
                 for stmt in then_body {
-                    self.convert_statement(stmt)?;
+                    if let Some(idx) = self.convert_statement(stmt)? {
+                        then_indices.push(idx);
+                    }
                 }
-                let then_end = self.nodes.len();
-                let then_indices: Vec<usize> = (then_start..then_end).collect();
 
                 self.current_scope = old_scope;
 
@@ -203,12 +211,13 @@ impl AstToIrConverter {
                     let else_scope = self.symbol_table.create_scope(self.current_scope);
                     self.current_scope = else_scope;
 
-                    let else_start = self.nodes.len();
+                    // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                    let mut indices = Vec::new();
                     for stmt in else_stmts {
-                        self.convert_statement(stmt)?;
+                        if let Some(idx) = self.convert_statement(stmt)? {
+                            indices.push(idx);
+                        }
                     }
-                    let else_end = self.nodes.len();
-                    let indices: Vec<usize> = (else_start..else_end).collect();
 
                     self.current_scope = old_scope;
                     Some(indices)
@@ -227,6 +236,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
+                return Ok(Some(self.nodes.len() - 1));
             }
 
             Statement::While { condition, body, span: ast_span } => {
@@ -237,12 +247,13 @@ impl AstToIrConverter {
                 let old_scope = self.current_scope;
                 self.current_scope = body_scope;
 
-                let body_start = self.nodes.len();
+                // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                let mut body_indices = Vec::new();
                 for stmt in body {
-                    self.convert_statement(stmt)?;
+                    if let Some(idx) = self.convert_statement(stmt)? {
+                        body_indices.push(idx);
+                    }
                 }
-                let body_end = self.nodes.len();
-                let body_indices: Vec<usize> = (body_start..body_end).collect();
 
                 self.current_scope = old_scope;
 
@@ -256,6 +267,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
+                return Ok(Some(self.nodes.len() - 1));
             }
 
             Statement::For { variable, start, end, body, span: ast_span } => {
@@ -277,12 +289,13 @@ impl AstToIrConverter {
                     span
                 );
 
-                let body_start = self.nodes.len();
+                // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                let mut body_indices = Vec::new();
                 for stmt in body {
-                    self.convert_statement(stmt)?;
+                    if let Some(idx) = self.convert_statement(stmt)? {
+                        body_indices.push(idx);
+                    }
                 }
-                let body_end = self.nodes.len();
-                let body_indices: Vec<usize> = (body_start..body_end).collect();
 
                 self.current_scope = old_scope;
 
@@ -297,6 +310,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
+                return Ok(Some(self.nodes.len() - 1));
             }
 
             Statement::ForEach { variable, collection, body, span: ast_span } => {
@@ -307,12 +321,13 @@ impl AstToIrConverter {
                 let old_scope = self.current_scope;
                 self.current_scope = body_scope;
 
-                let body_start = self.nodes.len();
+                // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                let mut body_indices = Vec::new();
                 for stmt in body {
-                    self.convert_statement(stmt)?;
+                    if let Some(idx) = self.convert_statement(stmt)? {
+                        body_indices.push(idx);
+                    }
                 }
-                let body_end = self.nodes.len();
-                let body_indices: Vec<usize> = (body_start..body_end).collect();
 
                 self.current_scope = old_scope;
 
@@ -327,6 +342,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
+                return Ok(Some(self.nodes.len() - 1));
             }
 
             Statement::Return { value, span: ast_span } => {
@@ -340,6 +356,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
+                return Ok(Some(self.nodes.len() - 1));
             }
 
             Statement::Try { try_body, except_body, span: ast_span } => {
@@ -350,12 +367,13 @@ impl AstToIrConverter {
                 let old_scope = self.current_scope;
                 self.current_scope = try_scope;
 
-                let try_start = self.nodes.len();
+                // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                let mut try_indices = Vec::new();
                 for stmt in try_body {
-                    self.convert_statement(stmt)?;
+                    if let Some(idx) = self.convert_statement(stmt)? {
+                        try_indices.push(idx);
+                    }
                 }
-                let try_end = self.nodes.len();
-                let try_indices: Vec<usize> = (try_start..try_end).collect();
 
                 self.current_scope = old_scope;
 
@@ -363,12 +381,13 @@ impl AstToIrConverter {
                 let except_scope = self.symbol_table.create_scope(self.current_scope);
                 self.current_scope = except_scope;
 
-                let except_start = self.nodes.len();
+                // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                let mut except_indices = Vec::new();
                 for stmt in except_body {
-                    self.convert_statement(stmt)?;
+                    if let Some(idx) = self.convert_statement(stmt)? {
+                        except_indices.push(idx);
+                    }
                 }
-                let except_end = self.nodes.len();
-                let except_indices: Vec<usize> = (except_start..except_end).collect();
 
                 self.current_scope = old_scope;
 
@@ -382,6 +401,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
+                return Ok(Some(self.nodes.len() - 1));
             }
 
             Statement::Call { expression, span: ast_span } => {
@@ -390,6 +410,7 @@ impl AstToIrConverter {
                 // Обрабатываем как FunctionCall
                 if let Expression::Call { function, args, .. } = expression {
                     self.convert_call_expression(*function, args, span)?;
+                    return Ok(Some(self.nodes.len() - 1));
                 } else if let Expression::PropertyAccess { object, property, .. } = expression {
                     // Метод объекта
                     let object_type = self.infer_expression_type(&object);
@@ -405,7 +426,9 @@ impl AstToIrConverter {
                     };
 
                     self.nodes.push(node);
+                    return Ok(Some(self.nodes.len() - 1));
                 }
+                return Ok(None);  // Если expression не Call и не PropertyAccess
             }
 
             Statement::Break { span: ast_span } => {
@@ -416,6 +439,7 @@ impl AstToIrConverter {
                     scope_id: self.current_scope,
                 };
                 self.nodes.push(node);
+                return Ok(Some(self.nodes.len() - 1));
             }
 
             Statement::Continue { span: ast_span } => {
@@ -426,6 +450,7 @@ impl AstToIrConverter {
                     scope_id: self.current_scope,
                 };
                 self.nodes.push(node);
+                return Ok(Some(self.nodes.len() - 1));
             }
 
             Statement::FunctionDecl { name, params, body, span: ast_span } => {
@@ -441,12 +466,16 @@ impl AstToIrConverter {
                     })
                     .collect();
 
-                // Конвертируем тело функции
+                // ✅ ИСПРАВЛЕНИЕ: Применяем паттерн из IfStatement
                 let old_scope = self.current_scope;
                 self.current_scope = body_scope;
 
+                // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                let mut body_indices = Vec::new();
                 for stmt in body {
-                    self.convert_statement(stmt)?;
+                    if let Some(idx) = self.convert_statement(stmt)? {
+                        body_indices.push(idx);
+                    }
                 }
 
                 self.current_scope = old_scope;
@@ -457,12 +486,14 @@ impl AstToIrConverter {
                         params: params_vec,
                         return_type: None,
                         body_scope,
+                        body: body_indices,
                     },
                     span,
                     scope_id: self.current_scope,
                 };
 
                 self.nodes.push(node);
+                return Ok(Some(self.nodes.len() - 1));
             }
 
             Statement::ProcedureDecl { name, params, body, span: ast_span } => {
@@ -478,12 +509,16 @@ impl AstToIrConverter {
                     })
                     .collect();
 
-                // Конвертируем тело процедуры
+                // ✅ ИСПРАВЛЕНИЕ: Применяем паттерн из IfStatement
                 let old_scope = self.current_scope;
                 self.current_scope = body_scope;
 
+                // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                let mut body_indices = Vec::new();
                 for stmt in body {
-                    self.convert_statement(stmt)?;
+                    if let Some(idx) = self.convert_statement(stmt)? {
+                        body_indices.push(idx);
+                    }
                 }
 
                 self.current_scope = old_scope;
@@ -493,21 +528,22 @@ impl AstToIrConverter {
                         name,
                         params: params_vec,
                         body_scope,
+                        body: body_indices,
                     },
                     span,
                     scope_id: self.current_scope,
                 };
 
                 self.nodes.push(node);
+                return Ok(Some(self.nodes.len() - 1));
             }
 
             _ => {
                 // Другие statement типы пока пропускаем
                 // TODO: Добавить Goto, Label, Execute, RaiseError, AddHandler, RemoveHandler, Await
+                return Ok(None);
             }
         }
-
-        Ok(())
     }
 
     /// Конвертация вызова функции
@@ -788,5 +824,54 @@ mod tests {
         // Глобальная переменная должна быть в root scope
         let root_scope = ir.symbols.scopes.get(&ir.symbols.root_scope).unwrap();
         assert!(root_scope.variables.contains_key("global"));
+    }
+
+    #[test]
+    fn test_function_body_indices() {
+        let ast = Program {
+            statements: vec![
+                Statement::FunctionDecl {
+                    name: "TestFunc".to_string(),
+                    params: vec![],
+                    body: vec![
+                        Statement::VarDeclaration {
+                            name: "local".to_string(),
+                            type_hint: Some("Число".to_string()),
+                            span: AstSpan::stub(),
+                        },
+                        Statement::Assignment {
+                            target: Expression::Identifier {
+                                name: "local".to_string(),
+                                span: AstSpan::stub(),
+                            },
+                            value: Expression::Number {
+                                value: 42.0,
+                                span: AstSpan::stub(),
+                            },
+                            span: AstSpan::stub(),
+                        },
+                    ],
+                    span: AstSpan::stub(),
+                },
+            ],
+        };
+
+        let ir = AstToIrConverter::convert(
+            ast,
+            "Функция TestFunc()\n  Перем local: Число;\n  local = 42;\nКонецФункции".to_string(),
+            "test.bsl".to_string()
+        ).unwrap();
+
+        // Проверяем, что есть 3 узла: 2 внутренних + FunctionDeclaration
+        assert_eq!(ir.nodes.len(), 3);
+
+        // Проверяем, что FunctionDeclaration содержит индексы тела
+        if let SemanticNodeKind::FunctionDeclaration { body, .. } = &ir.nodes[2].kind {
+            assert_eq!(body.len(), 2);  // VariableDeclaration + Assignment
+            assert_eq!(body[0], 0);  // Индекс первого узла тела
+            assert_eq!(body[1], 1);  // Индекс второго узла тела
+        } else {
+            panic!("Expected FunctionDeclaration at nodes[2]");
+        }
     }
 }

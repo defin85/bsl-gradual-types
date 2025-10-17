@@ -14,6 +14,8 @@ use bsl_shared::domain::resolver::TypeResolver;
 
 /// Инициализация TypeSystemService для тестов
 fn setup_service() -> TypeSystemService {
+    use bsl_backend::system::IrCache;
+
     // 1. Создаем InMemoryTypeRepository (конкретная реализация TypeRepository)
     let repository = Arc::new(InMemoryTypeRepository::new());
 
@@ -26,9 +28,10 @@ fn setup_service() -> TypeSystemService {
     // 4. Создаем SystemLayer компоненты
     let cache = Arc::new(AnalysisCache::new(1000)); // capacity = 1000
     let parser = Arc::new(ParserCoordinator::with_fallback());
+    let ir_cache = Arc::new(IrCache::new(100)); // MILESTONE 2.13: IR Cache
 
     // 5. Создаем TypeSystemService
-    TypeSystemService::new(analysis_engine, cache, parser)
+    TypeSystemService::new(analysis_engine, cache, parser, ir_cache)
 }
 
 #[tokio::test]

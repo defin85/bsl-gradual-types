@@ -13,13 +13,16 @@ use std::sync::Arc;
 
 /// Создание тестового TypeSystemService
 fn create_test_service() -> TypeSystemService {
+    use bsl_backend::system::IrCache;
+
     let repo = Arc::new(InMemoryTypeRepository::new());
     let resolver = Arc::new(TypeResolver::new(repo.clone()));
     let engine = Arc::new(AnalysisEngine::new(resolver, repo));
     let cache = Arc::new(AnalysisCache::new(100));
     let parser = Arc::new(ParserCoordinator::with_fallback());
+    let ir_cache = Arc::new(IrCache::new(100)); // MILESTONE 2.13: IR Cache
 
-    TypeSystemService::new(engine, cache, parser)
+    TypeSystemService::new(engine, cache, parser, ir_cache)
 }
 
 #[tokio::test]

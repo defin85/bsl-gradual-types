@@ -90,6 +90,9 @@ LSP принимает конфигурацию через initialization option
 ### 🔍 Milestone 2.11: Tree-Sitter Span Extraction ✅ (2025-10-13)
 Реальные координаты из tree-sitter, `find_node_at_position()` работает, hover показывает разную информацию для переменных, 10 тестов проходят.
 
+### 🎨 Milestone 2.16: Semantic Tree Visualization ✅ (2025-10-17)
+VSCode webview с интерактивной визуализацией семантического дерева, LSP custom request `bsl.getSemanticHtml`, исправлена иерархия узлов (FunctionCall дублирование), исправлена проблема с `activeTextEditor` (Output панель становилась активным редактором), HTML/CSS визуализация с expand/collapse.
+
 ---
 
 ### ⚡ Milestone 2.13: IR Caching & Performance Optimization (3-5 дней)
@@ -247,6 +250,253 @@ info!("⏱️ Hover performance: parse={}ms, ir_convert={}ms, lookup={}ms, total
 
 ---
 
+### 📦 Milestone 2.17: Configuration Metadata Parser (3-4 дня)
+
+**Приоритет:** 🔴 КРИТИЧНЫЙ — без типов конфигурации система типов неполная
+
+**Проблема:**
+Сейчас в `TypeRepository` только **платформенные типы** (Массив, Строка, Справочники, Документы и т.д. — всего 3927 типов). Но отсутствуют **конкретные типы из конфигурации пользователя**:
+- `Справочники.Номенклатура` — нет метаданных!
+- `Документы.РеализацияТоваровУслуг` — нет метаданных!
+- `РегистрыСведений.ЦеныНоменклатуры` — нет метаданных!
+
+**Последствия:**
+- ⚠️ Hover на переменной типа `Справочники.Номенклатура` показывает только базовые методы `СправочникМенеджер`, но не знает реквизитов конкретного справочника
+- ⚠️ Autocomplete не предлагает специфичные для конфигурации поля (например, `Номенклатура.Артикул`)
+- ⚠️ Type checking не валидирует обращение к несуществующим реквизитам
+
+**Цель:**
+Парсить метаданные из `Configuration.xml` и автоматически добавлять типы конфигурации в `TypeRepository`.
+
+#### Задачи:
+
+**Task 1: Configuration.xml Parser** (1 день)
+
+**Добавить модуль `backend/src/data/loaders/config_metadata_parser.rs`:**
+```rust
+use quick_xml::Reader;
+use quick_xml::events::Event;
+
+pub struct ConfigurationMetadataParser;
+
+impl ConfigurationMetadataParser {
+    /// Парсинг Configuration.xml из указанного пути
+    pub fn parse_configuration(config_path: &str) -> Result<ConfigurationMetadata> {
+        let config_xml_path = PathBuf::from(config_path).join("Configuration.xml");
+        let xml_content = fs::read_to_string(config_xml_path)?;
+
+        let mut reader = Reader::from_str(&xml_content);
+        let mut metadata = ConfigurationMetadata::default();
+
+        // Парсим Catalogs (Справочники)
+        metadata.catalogs = Self::parse_catalogs(&xml_content, config_path)?;
+
+        // Парсим Documents (Документы)
+        metadata.documents = Self::parse_documents(&xml_content, config_path)?;
+
+        // Парсим InformationRegisters (РегистрыСведений)
+        metadata.info_registers = Self::parse_info_registers(&xml_content, config_path)?;
+
+        // Парсим Enums (Перечисления)
+        metadata.enums = Self::parse_enums(&xml_content, config_path)?;
+
+        Ok(metadata)
+    }
+
+    fn parse_catalogs(xml: &str, config_path: &str) -> Result<Vec<CatalogMetadata>> {
+        let mut catalogs = Vec::new();
+
+        // Ищем <Catalog uuid="..."> в Configuration.xml
+        // Для каждого справочника читаем Catalogs/<Имя>/Catalog.xml
+        // Извлекаем:
+        // - Имя справочника
+        // - Реквизиты (StandardAttributes + Attributes)
+        // - Табличные части
+
+        catalogs
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ConfigurationMetadata {
+    pub catalogs: Vec<CatalogMetadata>,
+    pub documents: Vec<DocumentMetadata>,
+    pub info_registers: Vec<InfoRegisterMetadata>,
+    pub enums: Vec<EnumMetadata>,
+}
+
+#[derive(Debug)]
+pub struct CatalogMetadata {
+    pub name: String,           // "Номенклатура"
+    pub uuid: String,
+    pub attributes: Vec<AttributeMetadata>,
+    pub tabular_sections: Vec<TabularSectionMetadata>,
+}
+
+#[derive(Debug)]
+pub struct AttributeMetadata {
+    pub name: String,           // "Артикул"
+    pub type_description: String, // "String(50)"
+}
+```
+
+**Task 2: Интеграция с TypeRepository** (1 день)
+
+**Добавить в `TypeRepository`:**
+```rust
+// shared/src/domain/repository.rs
+
+impl TypeRepository {
+    /// Загрузить типы из метаданных конфигурации
+    pub fn load_configuration_types(&mut self, config_path: &str) -> Result<usize> {
+        use crate::data::loaders::config_metadata_parser::ConfigurationMetadataParser;
+
+        let metadata = ConfigurationMetadataParser::parse_configuration(config_path)?;
+        let mut count = 0;
+
+        // Создаём типы для каждого справочника
+        for catalog in metadata.catalogs {
+            // 1. Справочники.Номенклатура (Manager)
+            let manager_type = PlatformType {
+                name: format!("Справочники.{}", catalog.name),
+                facets: vec![
+                    self.create_catalog_manager_facet(&catalog),
+                ],
+                ..Default::default()
+            };
+            self.register_type(manager_type);
+            count += 1;
+
+            // 2. СправочникОбъект.Номенклатура (Object)
+            let object_type = PlatformType {
+                name: format!("СправочникОбъект.{}", catalog.name),
+                facets: vec![
+                    self.create_catalog_object_facet(&catalog),
+                ],
+                ..Default::default()
+            };
+            self.register_type(object_type);
+            count += 1;
+
+            // 3. СправочникСсылка.Номенклатура (Reference)
+            let ref_type = PlatformType {
+                name: format!("СправочникСсылка.{}", catalog.name),
+                facets: vec![
+                    self.create_catalog_ref_facet(&catalog),
+                ],
+                ..Default::default()
+            };
+            self.register_type(ref_type);
+            count += 1;
+        }
+
+        // Аналогично для Documents, InfoRegisters, Enums
+
+        Ok(count)
+    }
+
+    fn create_catalog_object_facet(&self, catalog: &CatalogMetadata) -> TypeFacet {
+        let mut methods = Vec::new();
+
+        // Добавляем методы из реквизитов как get/set
+        for attr in &catalog.attributes {
+            methods.push(MethodSignature {
+                name: attr.name.clone(),  // Геттер: Артикул
+                params: vec![],
+                return_type: Some(attr.type_description.clone()),
+            });
+        }
+
+        TypeFacet {
+            kind: FacetKind::Object,
+            methods,
+            properties: catalog.attributes.iter().map(|a| a.name.clone()).collect(),
+        }
+    }
+}
+```
+
+**Task 3: LSP Custom Request `bsl/parseConfiguration`** (1 день)
+
+**Добавить в LSP Server:**
+```rust
+// backend/src/bin/lsp_server.rs
+
+async fn handle_execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
+    match params.command.as_str() {
+        "bsl.parseConfiguration" => {
+            let config_path = params.arguments[0].as_str().unwrap();
+
+            let type_service = self.type_service.clone();
+            let count = type_service
+                .repository()
+                .write()
+                .await
+                .load_configuration_types(config_path)?;
+
+            info!("✅ Loaded {} configuration types", count);
+
+            Ok(Some(json!({
+                "types_loaded": count,
+                "message": format!("Successfully loaded {} types from configuration", count)
+            })))
+        }
+        _ => // ...
+    }
+}
+```
+
+**Task 4: VSCode команда для парсинга конфигурации** (1 день)
+
+**Добавить в Extension:**
+```typescript
+// vscode-extension/src/commands/index.ts
+
+await safeRegisterCommand('bslAnalyzer.parseConfiguration', async () => {
+    const configPath = BslAnalyzerConfig.configurationPath;
+    if (!configPath) {
+        vscode.window.showWarningMessage('Please configure 1C configuration path');
+        return;
+    }
+
+    try {
+        const client = getLanguageClient();
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.parseConfiguration',
+            arguments: [configPath]
+        });
+
+        vscode.window.showInformationMessage(
+            `✅ Configuration parsed: ${result.types_loaded} types loaded`
+        );
+    } catch (error) {
+        vscode.window.showErrorMessage(`Configuration parsing failed: ${error}`);
+    }
+});
+```
+
+**Результат Milestone 2.17:**
+- ✅ Парсинг метаданных из Configuration.xml
+- ✅ Автоматическое добавление типов конфигурации в TypeRepository
+- ✅ Hover показывает реквизиты конкретных справочников/документов
+- ✅ Autocomplete предлагает поля из конфигурации
+- ✅ Type checking валидирует обращение к реквизитам
+- ✅ Поддержка Справочников, Документов, Регистров, Перечислений
+
+**Тестирование:**
+1. Настроить путь к конфигурации в Extension settings
+2. Выполнить команду "Parse Configuration"
+3. Открыть `.bsl` файл с кодом:
+   ```bsl
+   Перем Номенклатура;
+   Номенклатура = Справочники.Номенклатура.НайтиПоНаименованию("Товар");
+   МойАртикул = Номенклатура.Артикул;  // ✅ Hover показывает тип "Строка(50)"
+   ```
+4. Проверить, что hover на `Номенклатура.Артикул` показывает правильный тип из метаданных
+5. Проверить autocomplete после `Номенклатура.` — должны быть все реквизиты из Configuration
+
+---
+
 ### 📈 Milestone 2.4: Performance & Caching (1.5 недели)
 
 **Приоритет:** 🟠 ВЫСОКИЙ — критично для работы с реальными проектами
@@ -277,7 +527,7 @@ info!("⏱️ Hover performance: parse={}ms, ir_convert={}ms, lookup={}ms, total
 
 ### 🎯 Результаты Версии 2.0 (через 8-10 недель)
 
-**Timeline обновлён (2025-10-13):**
+**Timeline обновлён (2025-10-17):**
 ```
 ЗАВЕРШЕНО:    🧠 Milestone 2.1 - Tree-sitter Integration (✅ ЗАВЕРШЁН)
 ЗАВЕРШЕНО:    📦 Milestone 2.2 - VSCode Extension Optimization (✅ ЗАВЕРШЁН 2025-10-13)
@@ -288,10 +538,12 @@ info!("⏱️ Hover performance: parse={}ms, ir_convert={}ms, lookup={}ms, total
 ЗАВЕРШЕНО:    ✨ Milestone 2.9 - Inline Scope Analysis (✅ ЗАВЕРШЁН 2025-10-08)
 ЗАВЕРШЕНО:    📦 Milestone 2.10 - LSP Configuration + Type Index (✅ ЗАВЕРШЁН 2025-10-08)
 ЗАВЕРШЕНО:    🔍 Milestone 2.11 - Tree-Sitter Span Extraction (✅ ЗАВЕРШЁН 2025-10-13)
+ЗАВЕРШЕНО:    🎨 Milestone 2.16 - Semantic Tree Visualization (✅ ЗАВЕРШЁН 2025-10-17)
 ПЛАНИРУЕТСЯ:  📊 Milestone 2.12 - Custom LSP Requests (bsl/getAllTypes, bsl/searchTypes) (⏳ СРЕДНИЙ)
-ПЛАНИРУЕТСЯ:  ⚡ Milestone 2.13 - IR Caching & Performance Optimization (⏳ ВЫСОКИЙ)
+ПЛАНИРУЕТСЯ:  ⚡ Milestone 2.13 - IR Caching & Performance Optimization (🔴 КРИТИЧНЫЙ)
 ПЛАНИРУЕТСЯ:  🔧 Milestone 2.14 - Inter-procedural Analysis (⏳ НИЗКИЙ)
 ПЛАНИРУЕТСЯ:  🔧 Milestone 2.15 - Flow-sensitive Analysis (CFG) (⏳ НИЗКИЙ)
+ПЛАНИРУЕТСЯ:  📦 Milestone 2.17 - Configuration Metadata Parser (🔴 КРИТИЧНЫЙ)
 ПЛАНИРУЕТСЯ:  📈 Milestone 2.4 - Performance Optimization (⏳ СРЕДНИЙ)
 ```
 

@@ -206,7 +206,7 @@ bsl-gradual-types/
 ├── backend/         # Все серверные слои в одном крейте
 │   ├── system/      # SystemCoordinator, AnalysisCache, Observability
 │   ├── application/ # TypeSystemService, AstToIrConverter
-│   ├── presentation/# LSP Server, Web routes
+│   ├── presentation/# LSP Server, Web routes, SemanticRoutes
 │   └── data/        # Platform types, Config loaders
 │
 ├── frontend/        # Веб-интерфейс на Leptos WASM
@@ -221,6 +221,11 @@ bsl-gradual-types/
 - **AnalysisCache** — простое LRU кеширование в памяти с TTL
 - **ParserCoordinator** — TreeSitter (основной) + Regex (fallback), преобразует AST → IR
 - **BasicObservability** — структурированное логирование и базовые метрики
+
+#### Presentation Layer (в backend)
+- **LSP Server** — Language Server Protocol для VSCode Extension
+- **Web Server** — Axum web server для API endpoints
+- **SemanticRoutes** — ✅ MILESTONE 2.16: API для semantic visualization (`/api/semantic/:file_path`)
 
 #### Application Layer
 - **AnalysisEngine** (в shared) — чистый оркестратор анализа, работает с IR вместо AST
@@ -279,6 +284,9 @@ cargo test
 # Конкретные тесты
 cargo test --test config_parser_guided_test
 cargo run --example test_simple
+
+# Semantic visualization тесты (Milestone 2.16)
+cargo test --test semantic_visualization_test
 
 # Performance тесты
 cargo run --bin bsl-profiler benchmark --iterations 10
@@ -502,6 +510,13 @@ curl "http://localhost:3002/api/search?q=%D0%9C%D0%B0%D1%81%D1%81%D0%B8%D0%B2" |
 curl -X POST "http://localhost:3002/api/analyze" \
   -H "Content-Type: application/json" \
   -d '{"code": "Функция Тест() Возврат 42; КонецФункции"}'
+
+# Semantic visualization (Milestone 2.16)
+# JSON формат
+curl "http://localhost:3002/api/semantic/test.bsl?format=json"
+
+# HTML формат с темной темой
+curl "http://localhost:3002/api/semantic/test.bsl?format=html&theme=dark"
 ```
 
 ---
@@ -528,6 +543,7 @@ graph TB
         subgraph "Web Process"
             WebServer["🌐 Web Server (backend)"]
             Frontend["🖥️ Frontend UI (Leptos WASM)"]
+            SemanticRoutes["📊 Semantic Routes<br/>✅ MILESTONE 2.16<br/>- /api/semantic/:file_path<br/>- JSON/HTML visualization"]
         end
 
         CLITool["⚙️ CLI Tool (cli)<br/>✅ ПОСЛЕ 2.8: LightweightParser (~2-3 MB)"]
@@ -577,6 +593,9 @@ graph TB
     %% Presentation → Application
     LSPServer --> TypeSystemService
     WebServer --> TypeSystemService
+    WebServer --> SemanticRoutes
+    LSPServer -.->|"custom request<br/>bsl/getSemanticHtml"| SemanticRoutes
+    SemanticRoutes --> TypeSystemService
     VSCode --> LSPServer
     Frontend --> WebServer
     CLITool --> AnalysisEngine
@@ -627,7 +646,7 @@ graph TB
     classDef dtoStyle fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
 
     class SystemCoordinator,AnalysisCache,ParserCoordinator,BasicObservability systemStyle
-    class LSPServer,WebServer,Frontend,VSCode,CLITool presentationStyle
+    class LSPServer,WebServer,Frontend,VSCode,CLITool,SemanticRoutes presentationStyle
     class TypeViz helperStyle
     class TypeSystemService,AstToIr,AnalysisEngine applicationStyle
     class IR,ParserTrait semanticStyle
@@ -640,6 +659,9 @@ graph TB
 
 **Presentation → Application:**
 - LSP Server, Web Server → TypeSystemService
+- **Semantic Routes** → TypeSystemService (для получения семантического дерева)
+- Web Server → Semantic Routes (маршрутизация `/api/semantic/:file_path`)
+- LSP Server → Semantic Routes (custom request `bsl/getSemanticHtml` для VSCode)
 - CLI Tool → AnalysisEngine (напрямую, через LightweightParser)
 
 **Application → Semantic IR (✅ НОВОЕ после Milestone 2.8):**
@@ -720,6 +742,17 @@ graph TB
 - **Структура:** Структурированный логгер + простые метрики
 - **Назначение:** Мониторинг работы приложения
 - **Функции:** Логирование, метрики производительности, health endpoint
+
+#### 📊 SemanticRoutes (в `backend/src/presentation`) — ✅ НОВЫЙ компонент Milestone 2.16
+- **Структура:** Axum router для semantic visualization API
+- **Назначение:** HTTP endpoint для получения семантического дерева BSL модулей
+- **Endpoints:**
+  - `GET /api/semantic/:file_path?format=json|html&theme=dark|light&compact=false`
+- **Интеграция:**
+  - Web Server: прямой вызов через маршрутизацию
+  - LSP Server: custom request `bsl/getSemanticHtml` для VSCode Extension
+- **Использует:** TypeSystemService для получения семантического дерева
+- **Статус:** MVP stub (заглушка для тестирования API контракта)
 
 ### 🎯 Ключевые принципы архитектуры
 

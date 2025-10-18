@@ -1384,7 +1384,16 @@ impl TypeSystemService {
 
         // Форматируем hover
         let mut output = format!("**Переменная:** `{}`\n", var_name);
-        output.push_str(&format!("*Тип:* `{}`\n\n", type_name));
+        output.push_str(&format!("*Тип:* `{}`\n", type_name));
+
+        // ✅ НОВОЕ: Добавляем certainty (градуальная типизация)
+        let certainty_text = match resolution.certainty {
+            Certainty::Known => "🟢 Known (100%)".to_string(),
+            Certainty::Inferred(val) => format!("🟡 Inferred ({:.0}%)", val * 100.0),
+            Certainty::Unknown => "⚪ Unknown (0%)".to_string(),
+        };
+        output.push_str(&format!("*Уверенность:* {}\n\n", certainty_text));
+
         output.push_str(&format!("📝 {}\n\n", description));
 
         // Добавляем методы (первые 10 для краткости)

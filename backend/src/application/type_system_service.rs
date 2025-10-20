@@ -1258,13 +1258,92 @@ impl TypeSystemService {
                     node.span.end_line, node.span.end_column)
             }
             SemanticNodeKind::Assignment { variable, value_type } => {
-                let resolution = self.analysis_engine.resolve_type(value_type);
-                let type_info = self.format_type_for_hover(value_type, &resolution);
+                use bsl_shared::domain::types::Certainty;
 
-                format!("**Присваивание:** `{} = ...`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
-                    variable, type_info,
+                let resolution = self.analysis_engine.resolve_type(value_type);
+                let raw_type = self.metadata_lookup.get_raw_type(&resolution);
+
+                // ✅ ИСПРАВЛЕНИЕ: Показываем certainty в пользовательском формате (как в format_variable_hover)
+                let mut output = format!("**Присваивание:** `{} = ...`\n", variable);
+                output.push_str(&format!("*Тип:* `{}`\n", value_type));
+
+                // ✅ ВСЕГДА показываем certainty
+                let certainty_text = match resolution.certainty {
+                    Certainty::Known => "🟢 Known (100%)".to_string(),
+                    Certainty::Inferred(val) => format!("🟡 Inferred ({:.0}%)", val * 100.0),
+                    Certainty::Unknown => "⚪ Unknown (0%)".to_string(),
+                };
+                output.push_str(&format!("*Уверенность:* {}\n\n", certainty_text));
+
+                // Проверяем наличие RawTypeData для отображения методов/свойств
+                if raw_type.is_none() {
+                    output.push_str("⚠️ **Детали типа недоступны**\n\n");
+                    output.push_str(&format!("📍 Позиция: {}:{}-{}:{}\n",
+                        node.span.start_line, node.span.start_column,
+                        node.span.end_line, node.span.end_column));
+                    return output;
+                }
+
+                // Если Unknown — показываем дополнительную подсказку
+                if matches!(resolution.certainty, Certainty::Unknown) {
+                    output.push_str("⚠️ **Тип не распознан системой**\n\n");
+                    output.push_str(&format!("📍 Позиция: {}:{}-{}:{}\n",
+                        node.span.start_line, node.span.start_column,
+                        node.span.end_line, node.span.end_column));
+                    return output;
+                }
+
+                // RawTypeData найден — показываем полную информацию
+                let methods = self.metadata_lookup.get_methods(&resolution);
+                let properties = self.metadata_lookup.get_properties(&resolution);
+
+                // Форматируем описание из RawTypeData
+                let description = raw_type
+                    .as_ref()
+                    .map(|rt| rt.description.clone())
+                    .filter(|d| !d.is_empty())
+                    .unwrap_or_else(|| format!("Тип {}", value_type));
+
+                output.push_str(&format!("📝 {}\n\n", description));
+
+                // Добавляем методы (первые 10)
+                if !methods.is_empty() {
+                    output.push_str("📚 **Методы:**\n");
+                    for method in methods.iter().take(10) {
+                        let params_str = method.params.iter()
+                            .map(|p| format!("{}: {}", p.name, p.param_type))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+
+                        if !method.return_type.is_empty() {
+                            output.push_str(&format!("- `{}({})` → `{}`\n", method.name, params_str, method.return_type));
+                        } else {
+                            output.push_str(&format!("- `{}({})`\n", method.name, params_str));
+                        }
+                    }
+                    if methods.len() > 10 {
+                        output.push_str(&format!("- ... и ещё {} методов\n", methods.len() - 10));
+                    }
+                    output.push('\n');
+                }
+
+                // Добавляем свойства (первые 10)
+                if !properties.is_empty() {
+                    output.push_str("📦 **Свойства:**\n");
+                    for prop in properties.iter().take(10) {
+                        output.push_str(&format!("- `{}`: `{}`\n", prop.name, prop.prop_type));
+                    }
+                    if properties.len() > 10 {
+                        output.push_str(&format!("- ... и ещё {} свойств\n", properties.len() - 10));
+                    }
+                    output.push('\n');
+                }
+
+                output.push_str(&format!("📍 Позиция: {}:{}-{}:{}\n",
                     node.span.start_line, node.span.start_column,
-                    node.span.end_line, node.span.end_column)
+                    node.span.end_line, node.span.end_column));
+
+                output
             }
             SemanticNodeKind::FunctionDeclaration { name, params, return_type, body, .. } => {
                 let params_str = params.iter()
@@ -1361,17 +1440,37 @@ impl TypeSystemService {
         tracing::debug!("RawTypeData для '{}': {}",
             type_name, if raw_type.is_some() { "НАЙДЕН" } else { "НЕ НАЙДЕН" });
 
-        // ✅ НОВОЕ: Проверяем, найден ли тип в TypeRepository
-        // Проверяем не только Certainty::Unknown, но и отсутствие RawTypeData
-        if matches!(resolution.certainty, Certainty::Unknown) || raw_type.is_none() {
-            return format!(
-                "**Переменная:** `{}`\n\n*Тип:* `{}`\n\n⚠️ **Тип не найден в TypeRepository**\n\n💡 *Возможные причины:*\n- Тип не загружен в систему (проверьте логи загрузки типов)\n- Тип из конфигурации 1С (требуется Configuration Loader)\n- Опечатка в имени типа",
-                var_name,
-                type_name
-            );
+        // ✅ ИСПРАВЛЕНИЕ: Формируем базовую информацию ВСЕГДА (независимо от raw_type)
+        let mut output = format!("**Переменная:** `{}`\n", var_name);
+        output.push_str(&format!("*Тип:* `{}`\n", type_name));
+
+        // ✅ ВСЕГДА показываем certainty (КЛЮЧЕВОЕ: ПЕРЕД проверкой raw_type)
+        let certainty_text = match resolution.certainty {
+            Certainty::Known => "🟢 Known (100%)".to_string(),
+            Certainty::Inferred(val) => format!("🟡 Inferred ({:.0}%)", val * 100.0),
+            Certainty::Unknown => "⚪ Unknown (0%)".to_string(),
+        };
+        output.push_str(&format!("*Уверенность:* {}\n\n", certainty_text));
+
+        // ✅ ТЕПЕРЬ проверяем наличие RawTypeData для отображения методов/свойств
+        if raw_type.is_none() {
+            output.push_str("⚠️ **Детали типа недоступны**\n\n");
+            output.push_str("💡 *Возможные причины:*\n");
+            output.push_str("- Тип не загружен из Syntax Helper\n");
+            output.push_str("- Требуется парсинг документации платформы\n");
+            return output;
         }
 
-        // Получаем методы и свойства через TypeMetadataLookup
+        // ✅ Если Unknown — показываем дополнительную подсказку
+        if matches!(resolution.certainty, Certainty::Unknown) {
+            output.push_str("⚠️ **Тип не распознан системой**\n\n");
+            output.push_str("💡 *Возможные причины:*\n");
+            output.push_str("- Опечатка в имени типа\n");
+            output.push_str("- Тип из конфигурации 1С (требуется Configuration Loader)\n");
+            return output;
+        }
+
+        // ✅ RawTypeData найден — показываем полную информацию
         let methods = self.metadata_lookup.get_methods(&resolution);
         let properties = self.metadata_lookup.get_properties(&resolution);
 
@@ -1381,18 +1480,6 @@ impl TypeSystemService {
             .map(|rt| rt.description.clone())
             .filter(|d| !d.is_empty())
             .unwrap_or_else(|| format!("Тип {}", type_name));
-
-        // Форматируем hover
-        let mut output = format!("**Переменная:** `{}`\n", var_name);
-        output.push_str(&format!("*Тип:* `{}`\n", type_name));
-
-        // ✅ НОВОЕ: Добавляем certainty (градуальная типизация)
-        let certainty_text = match resolution.certainty {
-            Certainty::Known => "🟢 Known (100%)".to_string(),
-            Certainty::Inferred(val) => format!("🟡 Inferred ({:.0}%)", val * 100.0),
-            Certainty::Unknown => "⚪ Unknown (0%)".to_string(),
-        };
-        output.push_str(&format!("*Уверенность:* {}\n\n", certainty_text));
 
         output.push_str(&format!("📝 {}\n\n", description));
 

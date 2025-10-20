@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" format="Hierarchical" version="2.18">
+	<ConfigVersions>
+		<Metadata name="Catalog.Контрагенты" id="e3cbde3c-52ed-494d-bd38-ed777a837517" configVersion="23cd437e77df0649878b15a6b0edd6de00000000"/>
+		<Metadata name="Catalog.Организации" id="ba1ac18d-9ca3-4a51-8497-a8d5b7673169" configVersion="d7161ff8e7bc2143864f19b52e89648000000000">
+			<Metadata name="Catalog.Организации.Attribute.КраткоеНаименование" id="62cf7c3a-27ab-4c21-9230-e404f990f370"/>
+		</Metadata>
+		<Metadata name="Catalog.Организации.ManagerModule" id="ba1ac18d-9ca3-4a51-8497-a8d5b7673169.3" configVersion="b5e03637f378544e9b53d2e8fd78ff8300000000"/>
+		<Metadata name="Catalog.Организации.ObjectModule" id="ba1ac18d-9ca3-4a51-8497-a8d5b7673169.0" configVersion="c8e505575f067748a8e7f999943da4d800000000"/>
+		<Metadata name="Configuration.Конфигурация" id="787997b1-dd2a-4b98-a8cc-c38eb2830949" configVersion="8028c784c6f97e49bb36c071f3296db900000000"/>
+		<Metadata name="Configuration.Конфигурация.CommandInterface" id="cf9d8c30-31e8-4051-81be-dbd41a83d6d9.a" configVersion="b2178b76e4b601409a047a1dd6d7209700000000"/>
+		<Metadata name="Configuration.Конфигурация.ExternalConnectionModule" id="cf9d8c30-31e8-4051-81be-dbd41a83d6d9.5" configVersion="fb7d3d677c6b924c91c1bf6bae60c4ec00000000"/>
+		<Metadata name="Configuration.Конфигурация.MainSectionCommandInterface" id="cf9d8c30-31e8-4051-81be-dbd41a83d6d9.9" configVersion="2eddbb984d059547917ee4eebd309d8700000000"/>
+		<Metadata name="Configuration.Конфигурация.ManagedApplicationModule" id="cf9d8c30-31e8-4051-81be-dbd41a83d6d9.6" configVersion="ae8ae7b4ee47cc4a818a0a75753e78b400000000"/>
+		<Metadata name="Configuration.Конфигурация.SessionModule" id="cf9d8c30-31e8-4051-81be-dbd41a83d6d9.7" configVersion="9367827bd0dc754298219048a899704200000000"/>
+		<Metadata name="Document.ЗаказНаряды" id="f1549edc-ee9a-4d8a-98ee-baf67632e38b" configVersion="8b0586cc2e4bf74eb9b58f6620b3343800000000">
+			<Metadata name="Document.ЗаказНаряды.Attribute.СтроковыйТип4" id="00d936f0-8a6f-45b0-9676-21a9a907da3f"/>
+			<Metadata name="Document.ЗаказНаряды.TabularSection.Стороны" id="124486f6-448c-4259-bda6-a2093155959d"/>
+			<Metadata name="Document.ЗаказНаряды.TabularSection.Работы" id="287bdcd6-dd8b-4b37-b602-8e032d0ac5f2"/>
+			<Metadata name="Document.ЗаказНаряды.Attribute.СтроковыйТип2" id="35a581e8-7bf3-41de-bf9b-e862939b4151"/>
+			<Metadata name="Document.ЗаказНаряды.Attribute.СтроковыйТип3" id="3801d470-1463-4771-9ad6-03b5ebee5f1b"/>
+			<Metadata name="Document.ЗаказНаряды.Attribute.НомерЗаказ" id="3d9c0797-df15-4324-adf4-783f446ca946"/>
+			<Metadata name="Document.ЗаказНаряды.Attribute.ЧисловойТип2" id="3e206a03-60c8-4e29-a41e-6a0f3779f813"/>
+			<Metadata name="Document.ЗаказНаряды.Attribute.ЧисловойТип1" id="48fae511-02ea-406c-8083-8a30d9db0466"/>
+			<Metadata name="Document.ЗаказНаряды.Attribute.РеквизитДата" id="585a02f9-b406-4f4f-b4c5-b70f23bc6b21"/>
+			<Metadata name="Document.ЗаказНаряды.Attribute.ЧисловойТип3" id="6075e9d0-2879-4c09-82bb-e771db412832"/>
+			<Metadata name="Document.ЗаказНаряды.Attribute.РеквизитВремя" id="64d4e173-d5dd-4008-946b-43acba3e805b"/>
+			<Metadata name="Document.ЗаказНаряды.TabularSection.Работы.Attribute.ВидРаботы" id="6c5824bc-d69e-4b07-bc0a-df4816dbd8af"/>
+			<Metadata name="Document.ЗаказНаряды.TabularSection.Стороны.Attribute.Сторона" id="6c7203b7-fdec-490a-a338-82c1cffc7316"/>
+			<Metadata name="Document.ЗаказНаряды.Attribute.РеквизитИндексируемыйДопУпорядочивание" id="7b90b189-f428-4cec-b611-999949f74638"/>
+			<Metadata name="Document.ЗаказНаряды.Attribute.СтроковыйТип1" id="7dd10c07-d88e-476c-9d36-8d8e831ef3b9"/>
+			<Metadata name="Document.ЗаказНаряды.Attribute.РеквизитДатаВремя" id="87e669a6-9da5-47c8-a54b-85b0d24e7182"/>
+			<Metadata name="Document.ЗаказНаряды.Attribute.РеквизитИндексируемый" id="cb981373-8384-4921-87e3-6412dcd9ed6e"/>
+		</Metadata>
+		<Metadata name="Document.ЗаказНаряды.Form.ФормаДокумента" id="0fce1071-bafe-43d6-acc7-eec478a28572" configVersion="e3304a1ac9d4044eac9cf7607cee820400000000"/>
+		<Metadata name="Document.ЗаказНаряды.Form.ФормаДокумента.Form" id="0fce1071-bafe-43d6-acc7-eec478a28572.0" configVersion="7cf0075b470b5d4582b6559617a65bac00000000"/>
+		<Metadata name="Document.ЗаказНаряды.Help" id="f1549edc-ee9a-4d8a-98ee-baf67632e38b.1" configVersion="4d332caf57aa5b4181e15b9ee33e67af00000000"/>
+		<Metadata name="InformationRegister.ТестовыйРегистрСведений" id="3729dfad-39a6-49cb-8609-a7924c74d80c" configVersion="5f8b3187fb9b5e418b19a92257180de000000000">
+			<Metadata name="InformationRegister.ТестовыйРегистрСведений.Attribute.ТестовыйРеквизит" id="314a2646-3f4a-4ea3-8ebd-afd4abfe6bb9"/>
+			<Metadata name="InformationRegister.ТестовыйРегистрСведений.Resource.ТестовыйРесурс" id="76aea2b4-db83-4ab1-9923-093f9bfe2b45"/>
+			<Metadata name="InformationRegister.ТестовыйРегистрСведений.Dimension.ТестовоеИзмерение" id="c314c5e8-d217-46e3-b4b5-af2e8f50c7d7"/>
+		</Metadata>
+		<Metadata name="Language.Русский" id="a29785c0-ce42-4f52-bf44-fc2fdf8b80ed" configVersion="e8d883afc4697044b1d002112452c23e00000000"/>
+	</ConfigVersions>
+</ConfigDumpInfo>

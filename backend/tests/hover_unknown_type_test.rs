@@ -1,7 +1,7 @@
-//! Интеграционный тест: Hover на переменных с несуществующими типами
+//! Интеграционный тест: Hover на переменных с конфигурационными типами
 //!
-//! Проверяет, что система честно сообщает об отсутствии типа в TypeRepository,
-//! вместо показа фантомной информации.
+//! Проверяет, что система честно сообщает об уровне уверенности (certainty) для типов,
+//! когда метаданные конфигурации не загружены (Inferred 50% вместо Unknown).
 
 use bsl_backend::system::SystemCoordinator;
 
@@ -38,15 +38,20 @@ async fn test_hover_shows_unknown_type_warning_for_configuration_types() {
     let hover_text = hover_result.unwrap();
     eprintln!("=== HOVER TEXT ===\n{}\n==================", hover_text);
 
-    // ✅ Проверяем, что hover содержит честное сообщение об отсутствии типа
+    // ✅ НОВОЕ ПОВЕДЕНИЕ: Система показывает Inferred (50%) для конфигурационных типов без метаданных
+    assert!(
+        hover_text.contains("🟡 Inferred (50%)"),
+        "Configuration type без метаданных должен показывать Inferred (50%). Actual hover:\n{}",
+        hover_text
+    );
     assert!(
         hover_text.contains("⚠️"),
         "Hover должен содержать предупреждение (⚠️). Actual hover:\n{}",
         hover_text
     );
     assert!(
-        hover_text.contains("Тип не найден в TypeRepository"),
-        "Hover должен сообщать, что тип не найден"
+        hover_text.contains("Детали типа недоступны"),
+        "Hover должен сообщать, что детали типа недоступны"
     );
     assert!(
         hover_text.contains("Справочники.Контрагенты"),
@@ -54,27 +59,18 @@ async fn test_hover_shows_unknown_type_warning_for_configuration_types() {
     );
     assert!(
         hover_text.contains("Возможные причины"),
-        "Hover должен перечислять возможные причины"
-    );
-    assert!(
-        hover_text.contains("Тип не загружен в систему")
-            || hover_text.contains("Configuration Loader")
-            || hover_text.contains("Опечатка"),
-        "Hover должен содержать хотя бы одну из возможных причин"
+        "Hover должен перечислять возможные причины отсутствия деталей"
     );
 
-    // ❌ Проверяем, что hover НЕ содержит фантомную информацию
-    assert!(
-        !hover_text.contains("📝 Тип Справочники.Контрагенты"),
-        "Hover НЕ должен показывать фейковое описание типа"
-    );
+    // ❌ Проверяем, что hover НЕ содержит фантомную информацию (методы/свойства)
+    // Но теперь допускается базовая информация о типе (имя, certainty)
     assert!(
         !hover_text.contains("📚 **Методы:**"),
-        "Hover НЕ должен показывать методы (их нет для Unknown типа)"
+        "Hover НЕ должен показывать список методов (метаданные не загружены)"
     );
     assert!(
         !hover_text.contains("📦 **Свойства:**"),
-        "Hover НЕ должен показывать свойства (их нет для Unknown типа)"
+        "Hover НЕ должен показывать список свойств (метаданные не загружены)"
     );
 }
 
@@ -189,15 +185,20 @@ async fn test_hover_differentiates_platform_and_configuration_types() {
         "Hover для Platform Type и Configuration Type должен быть разным"
     );
 
-    // ✅ Configuration Type должен показывать предупреждение
+    // ✅ Configuration Type должен показывать Inferred (50%) и предупреждение
+    assert!(
+        config_text.contains("🟡 Inferred (50%)"),
+        "Configuration Type должен показывать Inferred (50%). Actual:\n{}",
+        config_text
+    );
     assert!(
         config_text.contains("⚠️"),
         "Configuration Type должен показывать предупреждение. Actual:\n{}",
         config_text
     );
     assert!(
-        config_text.contains("Тип не найден в TypeRepository"),
-        "Configuration Type должен сообщать, что тип не найден. Actual:\n{}",
+        config_text.contains("Детали типа недоступны"),
+        "Configuration Type должен сообщать, что детали типа недоступны. Actual:\n{}",
         config_text
     );
 }

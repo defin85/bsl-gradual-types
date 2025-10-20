@@ -320,6 +320,70 @@ pub enum DiagnosticSeverity {
 #[derive(Debug, Clone)]
 pub struct FunctionSignature{}
 
+// === PARSE ERROR STRUCTURES (for Milestone 2.18) ===
+
+/// Тип синтаксической ошибки
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ErrorType {
+    /// Общая ошибка парсинга
+    ParseError,
+    /// Некорректный синтаксис
+    InvalidSyntax,
+    /// Отсутствует обязательный токен (например, КонецЕсли)
+    MissingToken,
+    /// Неожиданный токен
+    UnexpectedToken,
+}
+
+/// Синтаксическая ошибка из парсера
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParseError {
+    /// Тип ошибки
+    pub error_type: ErrorType,
+    /// Сообщение об ошибке
+    pub message: String,
+    /// Позиция ошибки в исходном коде
+    pub span: crate::ir::Span,
+}
+
+impl ParseError {
+    /// Создать ошибку отсутствующего токена
+    pub fn missing_token(message: String, span: crate::ir::Span) -> Self {
+        Self {
+            error_type: ErrorType::MissingToken,
+            message,
+            span,
+        }
+    }
+
+    /// Создать ошибку некорректного синтаксиса
+    pub fn invalid_syntax(message: String, span: crate::ir::Span) -> Self {
+        Self {
+            error_type: ErrorType::InvalidSyntax,
+            message,
+            span,
+        }
+    }
+
+    /// Создать ошибку неожиданного токена
+    pub fn unexpected_token(message: String, span: crate::ir::Span) -> Self {
+        Self {
+            error_type: ErrorType::UnexpectedToken,
+            message,
+            span,
+        }
+    }
+
+    /// Создать общую ошибку парсинга
+    pub fn parse_error(message: String, span: crate::ir::Span) -> Self {
+        Self {
+            error_type: ErrorType::ParseError,
+            message,
+            span,
+        }
+    }
+}
+
 // === DISPLAY IMPLEMENTATIONS ===
 
 use std::fmt;

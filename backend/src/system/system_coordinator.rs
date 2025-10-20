@@ -209,6 +209,11 @@ impl SystemCoordinator {
         (self.cache.clone(), self.parser.clone())
     }
 
+    /// Получить ParserCoordinator (Milestone 2.18: для синтаксических ошибок в LSP)
+    pub fn parser_coordinator(&self) -> Option<Arc<ParserCoordinator>> {
+        Some(self.parser.clone())
+    }
+
     /// Получить IR Cache
     pub fn ir_cache(&self) -> Arc<IrCache> {
         self.ir_cache.clone()

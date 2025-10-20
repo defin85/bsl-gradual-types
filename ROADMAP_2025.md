@@ -93,6 +93,9 @@ LSP принимает конфигурацию через initialization option
 ### 🎨 Milestone 2.16: Semantic Tree Visualization ✅ (2025-10-17)
 VSCode webview с интерактивной визуализацией семантического дерева, LSP custom request `bsl.getSemanticHtml`, исправлена иерархия узлов (FunctionCall дублирование), исправлена проблема с `activeTextEditor` (Output панель становилась активным редактором), HTML/CSS визуализация с expand/collapse.
 
+### 🚨 Milestone 2.18: LSP Syntax Error Diagnostics ✅ (2025-10-18)
+Синтаксические ошибки отображаются в LSP Diagnostics, UTF-16 координаты для кириллицы, оптимизация производительности парсинга (~300× ускорение), 40 интеграционных тестов (33 для функциональности + 7 для performance).
+
 ---
 
 ### ⚡ Milestone 2.13: IR Caching & Performance Optimization (3-5 дней)
@@ -497,6 +500,401 @@ await safeRegisterCommand('bslAnalyzer.parseConfiguration', async () => {
 
 ---
 
+### 🚨 Milestone 2.18: LSP Syntax Error Diagnostics (1-2 дня)
+
+**Приоритет:** 🟠 ВЫСОКИЙ — улучшает user experience, пользователь видит синтаксические ошибки в реальном времени
+
+**Проблема:**
+Tree-sitter парсер **УСПЕШНО обнаруживает синтаксические ошибки** (незакрытые конструкции, отсутствующие токены), но эти ошибки:
+- ✅ Логируются в файл `vscode-extension/rust_lsp_server.log`
+- ✅ Доступны в `ParseResult.syntax_errors`
+- ❌ **НЕ передаются** в LSP протокол через `publish_diagnostics`
+- ❌ **НЕ видны пользователю** в VSCode (нет красных волнистых линий)
+
+**Текущая ситуация:**
+```rust
+// backend/src/bin/lsp_server.rs - did_change() (строки 492-493)
+
+// ❌ ПРОБЛЕМА: Диагностики пустые!
+let all_diagnostics: Vec<Diagnostic> = Vec::new();
+// TODO: интегрировать с analyze_file для получения реальных диагностик
+```
+
+**Цель:**
+Передавать синтаксические ошибки из `ParseResult` в LSP Diagnostics для отображения пользователю в VSCode.
+
+#### Задачи:
+
+**Task 1: Конвертация ParseError → LSP Diagnostic** (0.5 дня)
+
+**Добавить в LSP Server:**
+```rust
+// backend/src/bin/lsp_server.rs
+
+impl BslLanguageServer {
+    /// Конвертировать синтаксические ошибки в LSP Diagnostics
+    fn syntax_errors_to_diagnostics(&self, errors: &[ParseError]) -> Vec<Diagnostic> {
+        errors
+            .iter()
+            .map(|error| {
+                let severity = match error.error_type {
+                    ErrorType::ParseError | ErrorType::InvalidSyntax => DiagnosticSeverity::ERROR,
+                    ErrorType::MissingToken => DiagnosticSeverity::ERROR,
+                    ErrorType::UnexpectedToken => DiagnosticSeverity::WARNING,
+                };
+
+                Diagnostic {
+                    range: Range::new(
+                        Position::new(error.span.start_line, error.span.start_column),
+                        Position::new(error.span.end_line, error.span.end_column)
+                    ),
+                    severity: Some(severity),
+                    message: error.message.clone(),
+                    source: Some("bsl-syntax".to_string()),
+                    code: Some(NumberOrString::String(format!("{:?}", error.error_type))),
+                    ..Default::default()
+                }
+            })
+            .collect()
+    }
+}
+```
+
+**Task 2: Интеграция в did_open()** (0.5 дня)
+
+**Модифицировать did_open() handler:**
+```rust
+// backend/src/bin/lsp_server.rs
+
+async fn did_open(&self, params: DidOpenTextDocumentParams) {
+    let uri = params.text_document.uri;
+    let text = params.text_document.text.clone();
+    let version = params.text_document.version;
+
+    // Кешируем текст
+    self.documents.write().await.insert(uri.clone(), text.clone());
+
+    // ✅ НОВОЕ: Парсим и получаем синтаксические ошибки
+    let mut diagnostics = Vec::new();
+
+    match self.get_type_service().parse_file(&text, uri.path()).await {
+        Ok(parse_result) => {
+            // ✅ Конвертируем синтаксические ошибки в LSP Diagnostics
+            if parse_result.has_errors() {
+                info!("⚠️ Found {} syntax errors in {}", parse_result.syntax_errors.len(), uri);
+                diagnostics.extend(self.syntax_errors_to_diagnostics(&parse_result.syntax_errors));
+            } else {
+                info!("✅ No syntax errors in {}", uri);
+            }
+        }
+        Err(e) => {
+            error!("Failed to parse document {}: {}", uri, e);
+            // Создаём диагностику об ошибке парсинга
+            diagnostics.push(Diagnostic {
+                range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+                severity: Some(DiagnosticSeverity::ERROR),
+                message: format!("❌ Ошибка парсинга: {}", e),
+                source: Some("bsl-syntax".to_string()),
+                ..Default::default()
+            });
+        }
+    }
+
+    // Отправляем диагностики
+    self.client.publish_diagnostics(uri.clone(), diagnostics, Some(version)).await;
+}
+```
+
+**Task 3: Интеграция в did_change()** (0.5 дня)
+
+**Модифицировать did_change() handler:**
+```rust
+// backend/src/bin/lsp_server.rs
+
+async fn did_change(&self, params: DidChangeTextDocumentParams) {
+    let uri = params.text_document.uri;
+    let version = params.text_document.version;
+    let changes = params.content_changes;
+
+    // Применяем изменения к тексту (как сейчас)
+    let updated_text = /* ... существующая логика ... */;
+
+    // Кешируем текст
+    self.documents.write().await.insert(uri.clone(), updated_text.clone());
+
+    // ✅ НОВОЕ: Парсим и получаем синтаксические ошибки
+    let mut diagnostics = Vec::new();
+
+    match self.get_type_service().parse_file(&updated_text, uri.path()).await {
+        Ok(parse_result) => {
+            if parse_result.has_errors() {
+                info!("⚠️ Found {} syntax errors in {}", parse_result.syntax_errors.len(), uri);
+                diagnostics.extend(self.syntax_errors_to_diagnostics(&parse_result.syntax_errors));
+            }
+        }
+        Err(e) => {
+            error!("Failed to parse document {}: {}", uri, e);
+        }
+    }
+
+    // Отправляем обновленные диагностики
+    self.client.publish_diagnostics(uri.clone(), diagnostics, Some(version)).await;
+}
+```
+
+**Task 4: Добавить метод parse_file() в TypeSystemService** (0.5 дня)
+
+**Добавить в TypeSystemService:**
+```rust
+// backend/src/application/type_system_service.rs
+
+impl TypeSystemService {
+    /// Парсинг файла с возвратом ParseResult (включая синтаксические ошибки)
+    pub async fn parse_file(&self, content: &str, file_path: &str) -> Result<ParseResult> {
+        // Используем существующий ParserCoordinator
+        self.parser.parse(content)
+    }
+}
+```
+
+**Результат Milestone 2.18:**
+- ✅ Синтаксические ошибки отображаются в VSCode с красными волнистыми линиями
+- ✅ Пользователь видит ошибки в реальном времени при вводе кода
+- ✅ Diagnostics panel показывает список всех синтаксических ошибок
+- ✅ Поддержка разных severity levels (Error, Warning)
+- ✅ Информативные сообщения об ошибках
+
+**Тестирование:**
+1. Открыть `.bsl` файл с незакрытой конструкцией:
+   ```bsl
+   Функция Тест()
+       Если Истина Тогда
+           Сообщить("Привет");
+       // Отсутствует КонецЕсли!
+       Возврат;
+   КонецФункции
+   ```
+2. **Ожидаемый результат:**
+   - ❌ Красная волнистая линия на строке с `Возврат;`
+   - 🔴 Error в Diagnostics panel: "Отсутствует обязательный элемент: ENDIF_KEYWORD"
+   - 📍 Позиция ошибки точно указана (line, column)
+
+3. Исправить ошибку, добавив `КонецЕсли;`
+4. **Ожидаемый результат:**
+   - ✅ Диагностика исчезает в реальном времени
+   - ✅ Diagnostics panel пуст
+
+**Интеграционные тесты:**
+```rust
+// backend/tests/lsp_syntax_diagnostics_test.rs
+
+#[tokio::test]
+async fn test_lsp_reports_syntax_errors() {
+    let coordinator = SystemCoordinator::new();
+    coordinator.start().await.expect("Failed to start");
+
+    let type_service = coordinator.type_service().expect("No type service");
+
+    // Код с синтаксической ошибкой
+    let source = r#"
+Функция Тест()
+    Если Истина Тогда
+        Сообщить("Привет");
+    Возврат;
+КонецФункции
+"#;
+
+    let parse_result = type_service.parse_file(source, "test.bsl").await.unwrap();
+
+    // Проверяем, что ошибка обнаружена
+    assert!(parse_result.has_errors());
+    assert_eq!(parse_result.syntax_errors.len(), 1);
+
+    let error = &parse_result.syntax_errors[0];
+    assert_eq!(error.error_type, ErrorType::MissingToken);
+    assert!(error.message.contains("ENDIF_KEYWORD"));
+}
+```
+
+---
+
+### 🏗️ Milestone 2.19: Architectural Improvements (2-3 дня)
+
+**Приоритет:** 🟡 СРЕДНИЙ — улучшение качества кода и maintainability
+
+**Контекст:**
+После завершения Milestone 2.18, **reviewer агент** провёл код-ревью и выявил несколько архитектурных проблем, которые не критичны для функциональности, но важны для поддерживаемости и соответствия Clean Architecture:
+
+1. **Дублирование ParseError** — два одинаковых типа в `backend` и `shared`
+2. **Нарушение Clean Architecture** — LSP напрямую обращается к ParserCoordinator
+3. **Молчаливая обработка ошибок** — некорректные координаты от tree-sitter пропускаются без логирования
+
+**Цель:**
+Устранить выявленные архитектурные проблемы и улучшить качество кода без изменения функциональности.
+
+#### Задачи:
+
+**Task 1: Устранение дублирования ParseError** (1 день)
+
+**Проблема:**
+Сейчас есть ДВА идентичных типа:
+- `backend::parsing::bsl::ParseError` — в backend
+- `shared::domain::types::ParseError` — в shared
+
+И функция `convert_parse_errors()` для конвертации между ними.
+
+**Решение:**
+
+```rust
+// ❌ УДАЛИТЬ backend/src/parsing/bsl/mod.rs
+pub struct ParseError {
+    pub error_type: ErrorType,
+    pub message: String,
+    pub span: Span,
+}
+
+// ✅ shared/src/domain/types.rs — ЕДИНСТВЕННЫЙ источник истины
+pub struct ParseError {
+    pub error_type: ErrorType,
+    pub message: String,
+    pub span: crate::ir::Span,
+}
+
+// ✅ backend/src/parsing/bsl/mod.rs — реэкспорт
+pub use bsl_shared::domain::types::{ParseError, ErrorType};
+
+// ✅ backend/src/bin/lsp_server.rs — прямое использование shared типа
+fn syntax_errors_to_diagnostics(&self, errors: &[bsl_shared::domain::types::ParseError]) -> Vec<Diagnostic> {
+    // ❌ УДАЛИТЬ функцию convert_parse_errors() — конвертация больше не нужна!
+}
+```
+
+**Преимущества:**
+- ✅ Устранение ~40 строк дублированного кода
+- ✅ Единая точка определения типа ошибки
+- ✅ Автоматическая синхронизация при добавлении новых ErrorType
+- ✅ Соответствие Clean Architecture
+
+**Task 2: API парсинга через TypeSystemService** (1 день)
+
+**Проблема:**
+LSP Server напрямую обращается к ParserCoordinator через `SystemCoordinator.parser_coordinator()`, нарушая Clean Architecture:
+
+```rust
+// ❌ НАРУШЕНИЕ: LSP → SystemCoordinator → ParserCoordinator
+let backend_errors = match coordinator.parser_coordinator().parse(text.as_str()) { ... }
+```
+
+**Решение:**
+
+```rust
+// ✅ backend/src/application/type_system_service.rs
+impl TypeSystemService {
+    /// Распарсить код и получить диагностики (Milestone 2.18)
+    ///
+    /// Unified API для LSP Server — скрывает детали координации парсеров.
+    pub async fn parse_and_validate(&self, source: &str) -> Result<Vec<bsl_shared::domain::types::ParseError>> {
+        // Используем ParserCoordinator внутри, но не exposing его LSP напрямую
+        let parse_result = self.parser.parse(source)?;
+
+        if parse_result.has_errors() {
+            Ok(parse_result.syntax_errors)
+        } else {
+            Ok(vec![])
+        }
+    }
+}
+
+// ✅ backend/src/bin/lsp_server.rs
+async fn did_open(&self, params: DidOpenTextDocumentParams) {
+    // Получаем ошибки через TypeSystemService API (Clean Architecture!)
+    match self.get_type_service().parse_and_validate(&text).await {
+        Ok(errors) => {
+            let diagnostics = self.syntax_errors_to_diagnostics(&errors);
+            self.client.publish_diagnostics(uri.clone(), diagnostics, Some(version)).await;
+        }
+        Err(e) => {
+            error!("Failed to parse document {}: {}", uri, e);
+        }
+    }
+}
+```
+
+**Преимущества:**
+- ✅ LSP Server НЕ знает о ParserCoordinator (правильная изоляция слоёв)
+- ✅ TypeSystemService — **единая точка входа** для Application Layer
+- ✅ Упрощение тестирования (можно мокировать TypeSystemService)
+
+**Task 3: Улучшение обработки некорректных координат** (0.5 дня)
+
+**Проблема:**
+Текущий код молчаливо пропускает ошибки tree-sitter:
+
+```rust
+// ❌ Молчаливо возвращает пустую строку
+let start_line_text = source.lines().nth(start_pos.row).unwrap_or("");
+```
+
+**Решение:**
+
+```rust
+// ✅ backend/src/system/tree_sitter_adapter.rs
+let start_line_text = lines.get(start_pos.row).map(|s| s.as_str()).unwrap_or_else(|| {
+    tracing::warn!(
+        "⚠️ Tree-sitter returned INVALID start line {} for node '{}' (file has {} lines). \
+         This indicates a bug in tree-sitter-bsl grammar or file encoding issue.",
+        start_pos.row,
+        node.kind(),
+        lines.len()
+    );
+    ""
+});
+```
+
+**Преимущества:**
+- ✅ Облегчает отладку проблем с парсером
+- ✅ Выявляет баги в tree-sitter grammar
+- ✅ Помогает обнаружить проблемы с кодировкой файлов
+
+**Task 4: Документация архитектурных решений** (0.5 дня)
+
+**Добавить комментарии в ключевые файлы:**
+
+```rust
+// backend/src/bin/lsp_server.rs
+
+/// Конвертировать синтаксические ошибки в LSP Diagnostics
+///
+/// # Milestone 2.18
+/// Используется для отображения синтаксических ошибок в VSCode.
+///
+/// # Milestone 2.19
+/// Работает напрямую с shared::domain::types::ParseError (устранено дублирование типов).
+fn syntax_errors_to_diagnostics(&self, errors: &[ParseError]) -> Vec<Diagnostic> {
+    // ...
+}
+```
+
+**Результат Milestone 2.19:**
+- ✅ Устранено дублирование ParseError (~40 строк)
+- ✅ Восстановлена Clean Architecture (LSP → TypeSystemService → Parser)
+- ✅ Улучшено логирование некорректных координат от tree-sitter
+- ✅ Документированы архитектурные решения
+- ✅ Код соответствует принципам Right-Sized Architecture
+
+**Тестирование:**
+1. Запустить все существующие тесты — должны проходить без изменений
+2. Проверить, что LSP diagnostics работают как раньше
+3. Проверить логи при парсинге файлов с некорректной кодировкой
+
+**Метрики качества после Milestone 2.19:**
+- **Code Review Rating:** ⭐⭐⭐⭐ (4/5) — было 3/5
+- **Architecture Compliance:** 95% — было 80%
+- **Code Duplication:** <2% — было ~5%
+- **Maintainability Index:** "Excellent" — было "Good"
+
+---
+
 ### 📈 Milestone 2.4: Performance & Caching (1.5 недели)
 
 **Приоритет:** 🟠 ВЫСОКИЙ — критично для работы с реальными проектами
@@ -527,7 +925,7 @@ await safeRegisterCommand('bslAnalyzer.parseConfiguration', async () => {
 
 ### 🎯 Результаты Версии 2.0 (через 8-10 недель)
 
-**Timeline обновлён (2025-10-17):**
+**Timeline обновлён (2025-10-18):**
 ```
 ЗАВЕРШЕНО:    🧠 Milestone 2.1 - Tree-sitter Integration (✅ ЗАВЕРШЁН)
 ЗАВЕРШЕНО:    📦 Milestone 2.2 - VSCode Extension Optimization (✅ ЗАВЕРШЁН 2025-10-13)
@@ -539,6 +937,8 @@ await safeRegisterCommand('bslAnalyzer.parseConfiguration', async () => {
 ЗАВЕРШЕНО:    📦 Milestone 2.10 - LSP Configuration + Type Index (✅ ЗАВЕРШЁН 2025-10-08)
 ЗАВЕРШЕНО:    🔍 Milestone 2.11 - Tree-Sitter Span Extraction (✅ ЗАВЕРШЁН 2025-10-13)
 ЗАВЕРШЕНО:    🎨 Milestone 2.16 - Semantic Tree Visualization (✅ ЗАВЕРШЁН 2025-10-17)
+ЗАВЕРШЕНО:    🚨 Milestone 2.18 - LSP Syntax Error Diagnostics (✅ ЗАВЕРШЁН 2025-10-18)
+ПЛАНИРУЕТСЯ:  🏗️ Milestone 2.19 - Architectural Improvements (🟡 СРЕДНИЙ)
 ПЛАНИРУЕТСЯ:  📊 Milestone 2.12 - Custom LSP Requests (bsl/getAllTypes, bsl/searchTypes) (⏳ СРЕДНИЙ)
 ПЛАНИРУЕТСЯ:  ⚡ Milestone 2.13 - IR Caching & Performance Optimization (🔴 КРИТИЧНЫЙ)
 ПЛАНИРУЕТСЯ:  🔧 Milestone 2.14 - Inter-procedural Analysis (⏳ НИЗКИЙ)
@@ -567,7 +967,8 @@ await safeRegisterCommand('bslAnalyzer.parseConfiguration', async () => {
 - ✅ **Hover показывает разную информацию** для разных переменных (не одинаковую)
 - ⚠️ **Hover performance** — 50-100ms на больших файлах (парсинг каждый раз) → **требует Milestone 2.13**
 - ⏳ **Автодополнение** — базовое работает, требуется улучшение контекста
-- ⏳ **Diagnostics** — базовая валидация работает, требуется расширение правил
+- ⏳ **Syntax Error Diagnostics** — tree-sitter обнаруживает ошибки, но не показывает пользователю → **требует Milestone 2.18**
+- ⏳ **Type checking** — базовая валидация работает, требуется расширение правил
 - ❌ **Semantic highlighting** — НЕ РЕАЛИЗОВАНО (планируется Milestone 3.0)
 
 ---

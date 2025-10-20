@@ -89,6 +89,67 @@ impl BslLanguageServer {
         line.len() // Если offset за пределами строки, возвращаем конец
     }
 
+    /// Конвертировать backend ParseError → shared ParseError (Milestone 2.18)
+    ///
+    /// Преобразует локальный ParseError из bsl::ast в shared::domain::types::ParseError
+    fn convert_parse_errors(&self, backend_errors: &[bsl_backend::parsing::bsl::ast::ParseError]) -> Vec<bsl_shared::domain::types::ParseError> {
+        use bsl_backend::parsing::bsl::ast::ErrorType as BackendErrorType;
+        use bsl_shared::domain::types::{ErrorType as SharedErrorType, ParseError as SharedParseError};
+
+        backend_errors.iter().map(|error| {
+            // Конвертируем ErrorType
+            let shared_error_type = match error.error_type {
+                BackendErrorType::ParseError => SharedErrorType::ParseError,
+                BackendErrorType::InvalidSyntax => SharedErrorType::InvalidSyntax,
+                BackendErrorType::MissingToken => SharedErrorType::MissingToken,
+                BackendErrorType::UnexpectedToken => SharedErrorType::UnexpectedToken,
+            };
+
+            // Конвертируем Span (backend::bsl::ast::Span → shared::ir::Span)
+            let shared_span = bsl_shared::ir::Span::new(
+                error.span.start_line,
+                error.span.start_column,
+                error.span.end_line,
+                error.span.end_column
+            );
+
+            // Создаём shared ParseError
+            SharedParseError {
+                error_type: shared_error_type,
+                message: error.message.clone(),
+                span: shared_span,
+            }
+        }).collect()
+    }
+
+    /// Конвертировать синтаксические ошибки в LSP Diagnostics (Milestone 2.18)
+    ///
+    /// Преобразует ParseError из парсера в LSP Diagnostic для отображения в VSCode.
+    /// Координаты ошибок уже в UTF-16 благодаря Task 1 (Milestone 2.18).
+    fn syntax_errors_to_diagnostics(&self, errors: &[bsl_shared::domain::types::ParseError]) -> Vec<Diagnostic> {
+        use bsl_shared::domain::types::ErrorType;
+
+        errors.iter().map(|error| {
+            let severity = match error.error_type {
+                ErrorType::ParseError | ErrorType::InvalidSyntax => DiagnosticSeverity::ERROR,
+                ErrorType::MissingToken => DiagnosticSeverity::ERROR,
+                ErrorType::UnexpectedToken => DiagnosticSeverity::WARNING,
+            };
+
+            Diagnostic {
+                range: Range::new(
+                    Position::new(error.span.start_line, error.span.start_column),
+                    Position::new(error.span.end_line, error.span.end_column)
+                ),
+                severity: Some(severity),
+                message: error.message.clone(),
+                source: Some("bsl-syntax".to_string()),
+                code: Some(NumberOrString::String(format!("{:?}", error.error_type))),
+                ..Default::default()
+            }
+        }).collect()
+    }
+
     /// Применяет текстовое изменение к строке
     fn apply_text_edit(&self, source: &str, range: Range, new_text: &str) -> String {
         let lines: Vec<&str> = source.lines().collect();
@@ -351,56 +412,43 @@ impl LanguageServer for BslLanguageServer {
             Err(e) => error!("❌ Failed to preheat IR cache for {}: {}", uri, e),
         }
 
-        // ✅ ИСПРАВЛЕНО: диагностики через TypeSystemService
-        let file_path = uri.to_file_path().map_err(|e| {
-            error!("Failed to convert URI to file path: {:?}", e);
-        });
+        // ✅ MILESTONE 2.18: Получаем синтаксические ошибки из парсера
+        let mut diagnostics = Vec::new();
 
-        let diagnostics = match file_path {
-            Ok(path) => {
-                let path_str = path.to_string_lossy();
-                info!("🔍 Анализируем файл: {}", path_str);
+        // Парсим файл через ParserCoordinator (доступен через SystemCoordinator)
+        match self.coordinator.parser_coordinator() {
+            Some(parser) => {
+                match parser.parse(&text) {
+                    Ok(parse_result) => {
+                        if parse_result.has_errors() {
+                            info!("⚠️ Found {} syntax errors in {}", parse_result.syntax_errors.len(), uri);
 
-                // Анализируем файл через Application Layer
-                match self.get_type_service().analyze_file(&path_str).await {
-                    Ok(analysis) => {
-                        info!("✅ Анализ файла {} успешно завершён", path_str);
-                        // Создаём информационную диагностику об успешном анализе
-                        vec![Diagnostic {
-                            range: Range::new(Position::new(0, 0), Position::new(0, 1)),
-                            severity: Some(DiagnosticSeverity::INFORMATION),
-                            message: format!(
-                                "✅ BSL файл проанализирован успешно ({})",
-                                analysis.file_path
-                            ),
-                            source: Some("bsl-gradual-types".to_string()),
-                            ..Default::default()
-                        }]
+                            // Конвертируем backend ParseError → shared ParseError
+                            let shared_errors = self.convert_parse_errors(&parse_result.syntax_errors);
+
+                            // Конвертируем shared ParseError → LSP Diagnostics
+                            diagnostics.extend(self.syntax_errors_to_diagnostics(&shared_errors));
+                        } else {
+                            info!("✅ No syntax errors in {}", uri);
+                        }
                     }
                     Err(e) => {
-                        error!("Failed to analyze document {}: {}", uri, e);
-                        // Создаём диагностику об ошибке анализа
-                        vec![Diagnostic {
+                        error!("Failed to parse document {}: {}", uri, e);
+                        // Создаём диагностику об ошибке парсинга
+                        diagnostics.push(Diagnostic {
                             range: Range::new(Position::new(0, 0), Position::new(0, 1)),
                             severity: Some(DiagnosticSeverity::ERROR),
-                            message: format!("❌ Ошибка анализа BSL файла: {}", e),
-                            source: Some("bsl-gradual-types".to_string()),
+                            message: format!("❌ Ошибка парсинга: {}", e),
+                            source: Some("bsl-syntax".to_string()),
                             ..Default::default()
-                        }]
+                        });
                     }
                 }
             }
-            Err(_) => {
-                // Создаём диагностику об ошибке пути
-                vec![Diagnostic {
-                    range: Range::new(Position::new(0, 0), Position::new(0, 1)),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    message: "❌ Невозможно получить путь к файлу".to_string(),
-                    source: Some("bsl-gradual-types".to_string()),
-                    ..Default::default()
-                }]
+            None => {
+                error!("ParserCoordinator not available");
             }
-        };
+        }
 
         // Отправляем диагностики
         self.client
@@ -488,21 +536,45 @@ impl LanguageServer for BslLanguageServer {
             info!("✅ Incremental parsing succeeded for: {}", uri.path());
         }
 
-        // Базовые диагностики (пусто)
-        // TODO: интегрировать с analyze_file для получения реальных диагностик
-        let all_diagnostics: Vec<Diagnostic> = Vec::new();
+        // ✅ MILESTONE 2.18: Получаем синтаксические ошибки из парсера
+        let mut diagnostics = Vec::new();
 
         // Берём актуальный текст документа
         let documents = self.documents.read().await;
-        if let Some(_text) = documents.get(&uri) {
-            // Пока что возвращаем пустые диагностики
-            // TODO: интегрировать с analyze_file для получения реальных диагностик
+        if let Some(text) = documents.get(&uri) {
             info!("🔍 Обновление диагностики файла: {}", uri.path());
+
+            // Парсим файл через ParserCoordinator
+            match self.coordinator.parser_coordinator() {
+                Some(parser) => {
+                    match parser.parse(text) {
+                        Ok(parse_result) => {
+                            if parse_result.has_errors() {
+                                info!("⚠️ Found {} syntax errors in {}", parse_result.syntax_errors.len(), uri);
+
+                                // Конвертируем backend ParseError → shared ParseError
+                                let shared_errors = self.convert_parse_errors(&parse_result.syntax_errors);
+
+                                // Конвертируем shared ParseError → LSP Diagnostics
+                                diagnostics.extend(self.syntax_errors_to_diagnostics(&shared_errors));
+                            } else {
+                                info!("✅ No syntax errors in {}", uri);
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to parse document {}: {}", uri, e);
+                        }
+                    }
+                }
+                None => {
+                    error!("ParserCoordinator not available");
+                }
+            }
         }
 
         // Отправляем обновленные диагностики
         self.client
-            .publish_diagnostics(uri.clone(), all_diagnostics, Some(version))
+            .publish_diagnostics(uri.clone(), diagnostics, Some(version))
             .await;
     }
 

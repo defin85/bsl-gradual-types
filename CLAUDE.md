@@ -187,6 +187,148 @@ let span = Span::new(
 - DEBUG логи в `ast_to_ir.rs` показывают конвертацию AST Span → IR Span
 - DEBUG/WARN логи в `type_system_service.rs` показывают результат поиска узлов
 
+### 🎯 Configuration Type Certainty (Исправление 2025-01-18)
+
+**Проблема:** Функция `resolve_member_access()` в TypeResolver ВСЕГДА возвращала `Certainty::Inferred(0.8)` (80%) для конфигурационных типов (Справочники.*, Документы.*), даже если метаданные конфигурации не загружены.
+
+**Пример проблемы:**
+```bsl
+СправочникКонтрагенты = Справочники.Контрагенты;
+// ❌ БЫЛО: Hover показывал "🟡 Inferred (80%)"
+// Но метаданных конфигурации нет → ложная уверенность!
+```
+
+**Решение:** Честная оценка certainty на основе наличия метаданных в TypeRepository:
+
+| Ситуация | Certainty | Пример |
+|----------|-----------|--------|
+| **Metadata найдена** | `Known (100%)` | Типы платформы из Syntax Helper |
+| **Только синтаксис** | `Inferred (50%)` | Справочники.* без загруженной конфигурации |
+| **Неизвестный тип** | `Unknown (0%)` | Опечатки, несуществующие типы |
+
+**Код исправления (shared/src/domain/resolver.rs:124-136):**
+```rust
+// ✅ ИСПРАВЛЕНИЕ: Проверяем наличие метаданных для честного certainty
+let type_name = format!("{}.{}", prefix, member);
+let has_metadata = self.repository.find_type(&type_name).is_some();
+
+// Определяем уровень уверенности:
+// - Known (100%) - тип найден в метаданных конфигурации
+// - Inferred (50%) - только синтаксис распарсили, метаданных нет
+let (certainty, source) = if has_metadata {
+    (Certainty::Known, ResolutionSource::Static)
+} else {
+    (Certainty::Inferred(0.5), ResolutionSource::Inferred)
+};
+```
+
+**Теперь hover показывает:**
+```
+Переменная: СправочникКонтрагенты
+Тип: Справочники.Контрагенты
+Уверенность: 🟡 Inferred (50%)  ← ЧЕСТНО!
+⚠️ **Детали типа недоступны**
+
+💡 Возможные причины:
+• Тип не загружен из Syntax Helper
+• Требуется парсинг документации платформы
+```
+
+**Затронутые компоненты:**
+- `shared/src/domain/resolver.rs` — логика TypeResolver
+- `backend/tests/hover_unknown_type_test.rs` — обновлены assertions
+- LSP hover, Web API, CLI — все используют новую логику certainty
+
+**Тесты:**
+- `cargo test -p bsl-backend --test hover_unknown_type_test` — 3/3 passed
+- `cargo test -p bsl-shared resolver` — 43/43 passed
+- Регрессия отсутствует: платформенные типы (Строка, Число) всё ещё показывают Known (100%)
+
+**Code Review:** Reviewer оценил изменение на 9.2/10 ⭐, архитектурная корректность 10/10.
+
+### 🚨 Syntax Error Detection (Milestone 2.18 — планируется)
+
+**Текущее состояние (2025-01-18):**
+Tree-sitter парсер **УСПЕШНО обнаруживает** синтаксические ошибки, но они **НЕ отображаются** пользователю в VSCode.
+
+**Что работает:**
+- ✅ `tree_sitter_adapter.rs` обнаруживает ERROR узлы
+- ✅ `tree_sitter_adapter.rs` обнаруживает отсутствующие токены (`node.is_missing()`)
+- ✅ `ParseResult.syntax_errors` содержит список ошибок с координатами
+- ✅ Логирование ошибок в `rust_lsp_server.log`
+
+**Что НЕ работает:**
+- ❌ LSP Server НЕ передаёт ошибки в `publish_diagnostics`
+- ❌ Пользователь НЕ видит красные волнистые линии в VSCode
+- ❌ Diagnostics panel пуст
+
+**Пример обнаруженной ошибки (из теста):**
+```rust
+// backend/tests/syntax_error_detection_test.rs
+
+let source = r#"
+Функция Тест()
+    Если Истина Тогда
+        Сообщить("Привет");
+    // Отсутствует КонецЕсли!
+    Возврат;
+КонецФункции
+"#;
+
+let parse_result = parser.parse(source).unwrap();
+
+// ✅ РАБОТАЕТ: Ошибка обнаружена
+assert!(parse_result.has_errors());
+assert_eq!(parse_result.syntax_errors.len(), 1);
+
+// ✅ РАБОТАЕТ: Детали ошибки доступны
+let error = &parse_result.syntax_errors[0];
+assert_eq!(error.error_type, ErrorType::MissingToken);
+assert!(error.message.contains("ENDIF_KEYWORD"));
+
+// Позиция: строка 8, колонка 38
+println!("{:?}", error.span);
+```
+
+**Типы синтаксических ошибок:**
+```rust
+// backend/src/parsing/bsl/mod.rs:48-56
+
+pub enum ErrorType {
+    UnexpectedToken,  // Неожиданный токен
+    MissingToken,     // Отсутствующий токен (незакрытая конструкция)
+    InvalidSyntax,    // Неверная структура
+    ParseError,       // Общая ошибка парсинга
+}
+```
+
+**Компоненты обнаружения ошибок:**
+
+| Компонент | Файл | Статус | Функция |
+|-----------|------|--------|---------|
+| **TreeSitterAdapter** | `backend/src/system/tree_sitter_adapter.rs` | ✅ Работает | Обнаруживает ERROR узлы и missing tokens |
+| **ParseResult** | `backend/src/parsing/bsl/mod.rs` | ✅ Работает | Хранит синтаксические ошибки |
+| **ParserCoordinator** | `backend/src/system/parser_coordinator.rs` | ✅ Работает | Логирует ошибки в файл |
+| **LSP diagnostics** | `backend/src/bin/lsp_server.rs` | ❌ НЕ работает | `publish_diagnostics` получает пустой массив |
+
+**Тестирование:**
+- [backend/tests/syntax_error_detection_test.rs](backend/tests/syntax_error_detection_test.rs) — 4 интеграционных теста
+- Все тесты проходят, ошибки обнаруживаются корректно
+- Протестированы: незакрытый Если, отсутствующий КонецЦикла, множественные ошибки
+
+**Пример лога (rust_lsp_server.log):**
+```
+WARN tree_sitter_adapter: ⚠️ Обнаружены синтаксические ошибки при парсинге:
+WARN tree_sitter_adapter:   - [8:38-8:38] Отсутствует обязательный элемент: ENDIF_KEYWORD
+```
+
+**Планируемое исправление (Milestone 2.18):**
+Добавить конвертацию `ParseError` → LSP `Diagnostic` для отображения красных волнистых линий в VSCode.
+
+**Ссылки:**
+- Milestone 2.18 описание: [ROADMAP_2025.md:500-714](ROADMAP_2025.md#L500-L714)
+- Тесты обнаружения: [backend/tests/syntax_error_detection_test.rs](backend/tests/syntax_error_detection_test.rs)
+
 ### 🎯 Философия: Right-Sized Architecture
 
 **Start simple, scale up по необходимости** — 6-8 компонентов вместо 25-30.

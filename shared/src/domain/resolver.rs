@@ -121,31 +121,60 @@ impl TypeResolver {
             }
         };
 
+        // ✅ ИСПРАВЛЕНИЕ: Проверяем наличие метаданных для честного certainty
+        // Формируем имя типа для поиска в repository
+        let type_name = format!("{}.{}", prefix, member);
+        let has_metadata = self.repository.find_type(&type_name).is_some();
+
+        // Определяем уровень уверенности:
+        // - Known (100%) - тип найден в метаданных конфигурации
+        // - Inferred (50%) - только синтаксис распарсили, метаданных нет
+        let (certainty, source) = if has_metadata {
+            (Certainty::Known, ResolutionSource::Static)
+        } else {
+            (Certainty::Inferred(0.5), ResolutionSource::Inferred)
+        };
+
         TypeResolution {
-            certainty: Certainty::Inferred(0.8),
+            certainty,
             result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
                 kind,
                 name: member.to_string(),
                 attributes: vec![],
                 tabular_sections: vec![],
             })),
-            source: ResolutionSource::Inferred,
+            source,
             metadata: ResolutionMetadata {
                 file: Some(format!("{}:{}", prefix, member)),
                 line: None,
                 column: None,
-                notes: vec![format!(
-                    "Inferred {} type: {}.{}",
-                    match kind {
-                        MetadataKind::Catalog => "catalog",
-                        MetadataKind::Document => "document",
-                        MetadataKind::Enum => "enum",
-                        MetadataKind::Register => "information register",
-                        _ => "configuration object",
-                    },
-                    base,
-                    member
-                )],
+                notes: vec![if has_metadata {
+                    format!(
+                        "Found {} type in metadata: {}.{}",
+                        match kind {
+                            MetadataKind::Catalog => "catalog",
+                            MetadataKind::Document => "document",
+                            MetadataKind::Enum => "enum",
+                            MetadataKind::Register => "information register",
+                            _ => "configuration object",
+                        },
+                        base,
+                        member
+                    )
+                } else {
+                    format!(
+                        "Inferred {} type from syntax: {}.{} (metadata not available)",
+                        match kind {
+                            MetadataKind::Catalog => "catalog",
+                            MetadataKind::Document => "document",
+                            MetadataKind::Enum => "enum",
+                            MetadataKind::Register => "information register",
+                            _ => "configuration object",
+                        },
+                        base,
+                        member
+                    )
+                }],
             },
             active_facet: Some(crate::domain::types::FacetKind::Manager),
             available_facets: vec![

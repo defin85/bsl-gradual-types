@@ -216,6 +216,25 @@ pub enum TypeHint {
     /// Выведенный из значения: `Перем x = 42`
     Inferred(String),
 
+    /// Generic тип с параметрами: `Массив<Строка>`, `Соответствие<Строка, Число>`
+    ///
+    /// Используется для flow-sensitive inference типов параметров коллекций.
+    /// Когда парсим `МассивСтрок = Новый Массив()` и затем `МассивСтрок.Добавить("текст")`,
+    /// выводим, что Generic параметр T = Строка.
+    Generic {
+        /// Базовый тип (например, "Массив", "Соответствие")
+        base_type: String,
+
+        /// Конкретные типы параметров (например, ["Строка"], ["Строка", "Число"])
+        /// Если параметр неизвестен, хранится "?" (для отображения в диагностиках)
+        type_params: Vec<String>,
+
+        /// Уверенность в выведённых типах (0.0-1.0)
+        /// 0.0 = все параметры неизвестны (только что создан)
+        /// 1.0 = все параметры выведены из кода
+        certainty: f32,
+    },
+
     /// Тип неизвестен
     Unknown,
 }
@@ -521,6 +540,151 @@ impl SymbolTable {
     pub fn register_procedure(&mut self, signature: FunctionSignature) {
         self.global_procedures
             .insert(signature.name.clone(), signature);
+    }
+
+    /// Получить тип переменной из текущего или родительского scope
+    pub fn get_variable_type(&self, scope_id: ScopeId, name: &str) -> Option<TypeHint> {
+        let mut current_scope_id = Some(scope_id);
+
+        while let Some(sid) = current_scope_id {
+            if let Some(scope) = self.scopes.get(&sid) {
+                if let Some((hint, _span)) = scope.variables.get(name) {
+                    return Some(hint.clone());
+                }
+                current_scope_id = scope.parent;
+            } else {
+                break;
+            }
+        }
+
+        None
+    }
+
+    /// Обновить тип переменной в указанном scope
+    pub fn update_variable_type(
+        &mut self,
+        scope_id: ScopeId,
+        name: String,
+        new_hint: TypeHint,
+    ) -> bool {
+        if let Some(scope) = self.scopes.get_mut(&scope_id) {
+            if let Some((hint, _span)) = scope.variables.get_mut(&name) {
+                *hint = new_hint;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Инициализировать переменную как Generic тип с неизвестными параметрами
+    ///
+    /// # Примеры
+    ///
+    /// ```
+    /// # use bsl_shared::ir::{SymbolTable, TypeHint};
+    /// let mut table = SymbolTable::new();
+    /// table.initialize_as_generic(table.root_scope, "МассивСтрок", "Массив", 1);
+    ///
+    /// let hint = table.get_variable_type(table.root_scope, "МассивСтрок");
+    /// match hint {
+    ///     Some(TypeHint::Generic { base_type, type_params, certainty }) => {
+    ///         assert_eq!(base_type, "Массив");
+    ///         assert_eq!(type_params, vec!["?".to_string()]);
+    ///         assert_eq!(certainty, 0.0);
+    ///     }
+    ///     _ => panic!("Expected Generic type"),
+    /// }
+    /// ```
+    pub fn initialize_as_generic(
+        &mut self,
+        scope_id: ScopeId,
+        var_name: String,
+        base_type: String,
+        type_param_count: usize,
+    ) {
+        // Создаём пустые параметры (неизвестные типы)
+        let type_params = vec!["?".to_string(); type_param_count];
+
+        let hint = TypeHint::Generic {
+            base_type,
+            type_params,
+            certainty: 0.0, // Пока параметры неизвестны
+        };
+
+        // Регистрируем или обновляем переменную
+        if let Some(scope) = self.scopes.get_mut(&scope_id) {
+            // Если переменная уже зарегистрирована, получаем её span
+            let span = scope
+                .variables
+                .get(&var_name)
+                .map(|(_, s)| *s)
+                .unwrap_or_else(Span::stub);
+
+            scope.variables.insert(var_name, (hint, span));
+        }
+    }
+
+    /// Обновить Generic параметр переменной
+    ///
+    /// # Примеры
+    ///
+    /// ```
+    /// # use bsl_shared::ir::{SymbolTable, TypeHint};
+    /// let mut table = SymbolTable::new();
+    /// table.initialize_as_generic(table.root_scope, "МассивСтрок", "Массив", 1);
+    /// table.update_generic_param(table.root_scope, "МассивСтрок", 0, "Строка");
+    ///
+    /// let hint = table.get_variable_type(table.root_scope, "МассивСтрок");
+    /// match hint {
+    ///     Some(TypeHint::Generic { type_params, certainty, .. }) => {
+    ///         assert_eq!(type_params[0], "Строка");
+    ///         assert_eq!(certainty, 1.0);
+    ///     }
+    ///     _ => panic!("Expected Generic type"),
+    /// }
+    /// ```
+    pub fn update_generic_param(
+        &mut self,
+        scope_id: ScopeId,
+        var_name: &str,
+        param_index: usize,
+        param_type: String,
+    ) -> bool {
+        if let Some(scope) = self.scopes.get_mut(&scope_id) {
+            if let Some((hint, _span)) = scope.variables.get_mut(var_name) {
+                match hint {
+                    TypeHint::Generic {
+                        type_params,
+                        certainty,
+                        ..
+                    } => {
+                        // Обновляем конкретный параметр (расширяем вектор, если нужно)
+                        if param_index < type_params.len() {
+                            type_params[param_index] = param_type;
+                        } else {
+                            type_params.push(param_type);
+                        }
+
+                        // Вычисляем новую уверенность
+                        // Если ВСЕ параметры известны (не "?"), то certainty = 1.0
+                        let all_known = type_params.iter().all(|p| p != "?");
+                        *certainty = if all_known { 1.0 } else { 0.5 };
+
+                        return true;
+                    }
+                    _ => {
+                        // Не Generic тип — попробуем конвертировать
+                        // (например, если раньше был Inferred, теперь становится Generic)
+                        tracing::warn!(
+                            "update_generic_param: {} не Generic тип, пропускаем",
+                            var_name
+                        );
+                    }
+                }
+            }
+        }
+
+        false
     }
 }
 
@@ -866,6 +1030,36 @@ impl SemanticProgram {
                 is_union: None,
                 union_components: Vec::new(),
             }),
+            TypeHint::Generic {
+                base_type,
+                type_params,
+                certainty,
+            } => {
+                // Форматируем Generic тип как "Массив<Строка>" или "Соответствие<Строка, Число>"
+                let generic_type_str = if type_params.is_empty() {
+                    base_type.clone()
+                } else {
+                    format!("{}<{}>", base_type, type_params.join(", "))
+                };
+
+                let certainty_percent = (*certainty * 100.0) as u8;
+
+                Some(TypeResolutionDto {
+                    name: generic_type_str,
+                    category: "Generic".to_string(),
+                    certainty: if *certainty > 0.8 {
+                        "Known".to_string()
+                    } else {
+                        "Inferred".to_string()
+                    },
+                    certainty_percent,
+                    active_facet: None,
+                    methods: Vec::new(),
+                    properties: Vec::new(),
+                    is_union: None,
+                    union_components: Vec::new(),
+                })
+            }
             TypeHint::Unknown => None,
         }
     }
@@ -905,6 +1099,14 @@ impl SemanticProgram {
                 match type_hint {
                     TypeHint::Explicit(_) => known_types += 1,
                     TypeHint::Inferred(_) => inferred_types += 1,
+                    TypeHint::Generic { certainty, .. } => {
+                        // Generic типы считаются как inferred, но с переменной уверенностью
+                        if *certainty > 0.8 {
+                            known_types += 1;
+                        } else {
+                            inferred_types += 1;
+                        }
+                    }
                     TypeHint::Unknown => unknown_types += 1,
                 }
             }
@@ -1063,5 +1265,197 @@ mod tests {
 
         // Поиск вне узлов
         assert!(program.find_node_at_position(10, 5).is_none());
+    }
+
+    // === Tests for Generic TypeHint functionality ===
+
+    #[test]
+    fn test_initialize_as_generic() {
+        let mut table = SymbolTable::new();
+
+        table.initialize_as_generic(
+            table.root_scope,
+            "МассивСтрок".to_string(),
+            "Массив".to_string(),
+            1,
+        );
+
+        let hint = table.get_variable_type(table.root_scope, "МассивСтрок");
+
+        match hint {
+            Some(TypeHint::Generic {
+                base_type,
+                type_params,
+                certainty,
+            }) => {
+                assert_eq!(base_type, "Массив");
+                assert_eq!(type_params.len(), 1);
+                assert_eq!(type_params[0], "?"); // Неизвестный параметр
+                assert_eq!(certainty, 0.0); // Уверенность минимальная
+            }
+            _ => panic!("Expected Generic hint, got {:?}", hint),
+        }
+    }
+
+    #[test]
+    fn test_update_generic_param() {
+        let mut table = SymbolTable::new();
+
+        // Инициализируем как Generic
+        table.initialize_as_generic(
+            table.root_scope,
+            "МассивСтрок".to_string(),
+            "Массив".to_string(),
+            1,
+        );
+
+        // Обновляем параметр
+        let success = table.update_generic_param(
+            table.root_scope,
+            "МассивСтрок",
+            0,
+            "Строка".to_string(),
+        );
+
+        assert!(success, "update_generic_param должна вернуть true");
+
+        let hint = table.get_variable_type(table.root_scope, "МассивСтрок");
+
+        match hint {
+            Some(TypeHint::Generic {
+                base_type,
+                type_params,
+                certainty,
+            }) => {
+                assert_eq!(base_type, "Массив");
+                assert_eq!(type_params[0], "Строка");
+                assert_eq!(certainty, 1.0); // Уверенность повысилась (все параметры известны)
+            }
+            _ => panic!("Expected Generic hint with Строка"),
+        }
+    }
+
+    #[test]
+    fn test_update_map_generic_params() {
+        let mut table = SymbolTable::new();
+
+        // Инициализируем Соответствие с 2 параметрами
+        table.initialize_as_generic(
+            table.root_scope,
+            "Словарь".to_string(),
+            "Соответствие".to_string(),
+            2,
+        );
+
+        // Обновляем первый параметр (ключ)
+        table.update_generic_param(table.root_scope, "Словарь", 0, "Строка".to_string());
+
+        // Обновляем второй параметр (значение)
+        table.update_generic_param(table.root_scope, "Словарь", 1, "Число".to_string());
+
+        let hint = table.get_variable_type(table.root_scope, "Словарь");
+
+        match hint {
+            Some(TypeHint::Generic {
+                base_type,
+                type_params,
+                certainty,
+            }) => {
+                assert_eq!(base_type, "Соответствие");
+                assert_eq!(type_params.len(), 2);
+                assert_eq!(type_params[0], "Строка");
+                assert_eq!(type_params[1], "Число");
+                assert_eq!(certainty, 1.0); // Все параметры известны
+            }
+            _ => panic!("Expected Generic hint with 2 params"),
+        }
+    }
+
+    #[test]
+    fn test_partial_generic_params() {
+        let mut table = SymbolTable::new();
+
+        // Инициализируем с 3 параметрами (не существует такого типа, но для теста)
+        table.initialize_as_generic(
+            table.root_scope,
+            "МойТип".to_string(),
+            "МойКонтейнер".to_string(),
+            3,
+        );
+
+        // Обновляем только первый параметр
+        table.update_generic_param(
+            table.root_scope,
+            "МойТип",
+            0,
+            "Строка".to_string(),
+        );
+
+        let hint = table.get_variable_type(table.root_scope, "МойТип");
+
+        match hint {
+            Some(TypeHint::Generic {
+                type_params,
+                certainty,
+                ..
+            }) => {
+                assert_eq!(type_params[0], "Строка");
+                assert_eq!(type_params[1], "?");
+                assert_eq!(type_params[2], "?");
+                assert_eq!(certainty, 0.5); // Промежуточная уверенность (не все параметры)
+            }
+            _ => panic!("Expected partial Generic hint"),
+        }
+    }
+
+    #[test]
+    fn test_generic_scope_hierarchy() {
+        let mut program = SemanticProgram::new();
+        let child_scope = program.symbols.create_scope(program.symbols.root_scope);
+
+        // Регистрируем Generic переменную в root scope
+        program.symbols.initialize_as_generic(
+            program.symbols.root_scope,
+            "МассивВРуте".to_string(),
+            "Массив".to_string(),
+            1,
+        );
+
+        // Регистрируем Generic переменную в child scope
+        program.symbols.initialize_as_generic(
+            child_scope,
+            "МассивВОтпроцедуре".to_string(),
+            "Массив".to_string(),
+            1,
+        );
+
+        // Обновляем параметр в child scope
+        program.symbols.update_generic_param(
+            child_scope,
+            "МассивВОтпроцедуре",
+            0,
+            "Число".to_string(),
+        );
+
+        // Проверяем видимость из child scope
+        let hint = program
+            .symbols
+            .get_variable_type(child_scope, "МассивВРуте");
+
+        match hint {
+            Some(TypeHint::Generic { .. }) => {
+                // OK, видна переменная из root scope
+            }
+            _ => panic!("Should see Generic variable from parent scope"),
+        }
+
+        // Проверяем, что child переменная не видна из root scope
+        let hint = program
+            .symbols
+            .get_variable_type(program.symbols.root_scope, "МассивВОтпроцедуре");
+        assert!(
+            hint.is_none(),
+            "Child scope variable should not be visible from parent"
+        );
     }
 }

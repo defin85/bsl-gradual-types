@@ -187,8 +187,55 @@ impl AstToIrConverter {
 
                     // Обновляем тип переменной в scope (flow-sensitive)
                     if let Some(scope) = self.symbol_table.scopes.get_mut(&self.current_scope) {
-                        if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
-                            *hint = TypeHint::Inferred(value_type);
+                        // Проверяем, является ли это присваиванием конструктора
+                        // Если это "Новый Тип", инициализируем как Generic (если нужно)
+                        if let Expression::New { type_name, .. } = value {
+                            // Для коллекций (Массив, Соответствие, Список) инициализируем как Generic
+                            // TODO: Здесь нужен TypeRepository для получения metadata о Generic типах
+                            // Пока используем简 эвристику: известные Generic типы
+                            match type_name.as_str() {
+                                "Массив" => {
+                                    if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
+                                        // Инициализируем как Generic Массив<?>
+                                        let mut params = vec!["?".to_string()];
+                                        *hint = TypeHint::Generic {
+                                            base_type: "Массив".to_string(),
+                                            type_params: params,
+                                            certainty: 0.0,
+                                        };
+                                    }
+                                }
+                                "Соответствие" => {
+                                    if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
+                                        // Инициализируем как Generic Соответствие<?, ?>
+                                        *hint = TypeHint::Generic {
+                                            base_type: "Соответствие".to_string(),
+                                            type_params: vec!["?".to_string(), "?".to_string()],
+                                            certainty: 0.0,
+                                        };
+                                    }
+                                }
+                                "Список" => {
+                                    if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
+                                        *hint = TypeHint::Generic {
+                                            base_type: "Список".to_string(),
+                                            type_params: vec!["?".to_string()],
+                                            certainty: 0.0,
+                                        };
+                                    }
+                                }
+                                _ => {
+                                    // Для остальных типов используем обычный Inferred
+                                    if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
+                                        *hint = TypeHint::Inferred(value_type);
+                                    }
+                                }
+                            }
+                        } else {
+                            // Для других выражений обновляем как обычно
+                            if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
+                                *hint = TypeHint::Inferred(value_type);
+                            }
                         }
                     }
 
@@ -704,6 +751,18 @@ impl AstToIrConverter {
                 if let Some((hint, _)) = scope.variables.get(name) {
                     return Some(match hint {
                         TypeHint::Explicit(t) | TypeHint::Inferred(t) => t.clone(),
+                        TypeHint::Generic {
+                            base_type,
+                            type_params,
+                            ..
+                        } => {
+                            // ✅ Generic тип: форматируем как "Массив<Строка>" или "Соответствие<Строка, Число>"
+                            if type_params.is_empty() {
+                                base_type.clone()
+                            } else {
+                                format!("{}<{}>", base_type, type_params.join(", "))
+                            }
+                        }
                         TypeHint::Unknown => "Dynamic".to_string(),
                     });
                 }

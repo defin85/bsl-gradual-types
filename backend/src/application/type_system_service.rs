@@ -1638,6 +1638,18 @@ impl TypeSystemService {
         // Извлекаем имя типа из TypeHint
         let type_name = match type_hint {
             TypeHint::Explicit(t) | TypeHint::Inferred(t) => t.clone(),
+            TypeHint::Generic {
+                base_type,
+                type_params,
+                ..
+            } => {
+                // Generic тип: форматируем как "Массив<Строка>" или "Соответствие<Строка, Число>"
+                if type_params.is_empty() {
+                    base_type.clone()
+                } else {
+                    format!("{}<{}>", base_type, type_params.join(", "))
+                }
+            }
             TypeHint::Unknown => {
                 return format!(
                     "**Переменная:** `{}`\n\n*Тип:* Неопределено\n\n💡 *Подсказка:* Переменная объявлена, но тип не выведен из присваивания",

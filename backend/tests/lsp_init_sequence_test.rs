@@ -63,9 +63,15 @@ async fn test_lsp_server_init_sequence_with_double_start() {
 
     // DEBUG: Проверяем, существует ли путь
     if syntax_path.exists() {
-        println!("✅ Путь к Syntax Helper существует: {}", syntax_path.display());
+        println!(
+            "✅ Путь к Syntax Helper существует: {}",
+            syntax_path.display()
+        );
     } else {
-        println!("❌ Путь к Syntax Helper НЕ существует: {}", syntax_path.display());
+        println!(
+            "❌ Путь к Syntax Helper НЕ существует: {}",
+            syntax_path.display()
+        );
         println!("   Current dir: {:?}", std::env::current_dir());
         panic!("Syntax Helper path not found!");
     }
@@ -78,7 +84,8 @@ async fn test_lsp_server_init_sequence_with_double_start() {
     println!("✅ ШАГ 2 завершён: Типы перезагружены");
 
     // DEBUG: Проверяем, сколько типов загружено после reload через TypeRepository
-    let analysis_engine = coordinator.get_analysis_engine()
+    let analysis_engine = coordinator
+        .get_analysis_engine()
         .expect("AnalysisEngine не доступен после reload");
     let repository = analysis_engine.get_repository();
     let stats = repository.get_stats();
@@ -86,8 +93,10 @@ async fn test_lsp_server_init_sequence_with_double_start() {
 
     // Проверим, резолвится ли тип "Массив"
     let массив_resolution = analysis_engine.resolve_type("Массив");
-    println!("🔍 Resolution для 'Массив': certainty={:?}, result={:?}",
-        массив_resolution.certainty, массив_resolution.result);
+    println!(
+        "🔍 Resolution для 'Массив': certainty={:?}, result={:?}",
+        массив_resolution.certainty, массив_resolution.result
+    );
 
     use bsl_shared::domain::types::Certainty;
     if !matches!(массив_resolution.certainty, Certainty::Unknown) {

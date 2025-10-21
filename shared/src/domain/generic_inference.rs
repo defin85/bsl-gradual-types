@@ -56,7 +56,9 @@ impl GenericInference {
             "Массив" => self.infer_array_element_type(method_name, arguments)?,
             "Список" => self.infer_list_element_type(method_name, arguments)?,
             "Соответствие" => self.infer_map_types(method_name, arguments)?,
-            "ФиксированныйМассив" => self.infer_array_element_type(method_name, arguments)?,
+            "ФиксированныйМассив" => {
+                self.infer_array_element_type(method_name, arguments)?
+            }
             _ => return None,
         };
 
@@ -130,10 +132,8 @@ impl GenericInference {
             }
 
             // Методы Массива
-            "Добавить" | "Add" | "Удалить" | "Delete" |
-            "Найти" | "Find" | "ВГраницах" | "InBounds" | "Очистить" | "Clear" => {
-                Some("Массив".to_string())
-            }
+            "Добавить" | "Add" | "Удалить" | "Delete" | "Найти" | "Find" | "ВГраницах"
+            | "InBounds" | "Очистить" | "Clear" => Some("Массив".to_string()),
 
             // Методы Списка (ValueList)
             "ЗагрузитьЗначения" | "LoadValues" | "НайтиПоЗначению" | "FindByValue" => {
@@ -151,11 +151,18 @@ impl GenericInference {
 
     /// Определить тип коллекции по имени метода и количеству аргументов (обратная совместимость)
     #[allow(dead_code)]
-    fn detect_collection_type_with_args(&self, method_name: &str, arg_count: usize) -> Option<String> {
+    fn detect_collection_type_with_args(
+        &self,
+        method_name: &str,
+        arg_count: usize,
+    ) -> Option<String> {
         // Создаём пустой массив аргументов для обратной совместимости
-        let dummy_args = vec![ConcreteType::Platform(PlatformType {
-            name: "Произвольный".to_string()
-        }); arg_count];
+        let dummy_args = vec![
+            ConcreteType::Platform(PlatformType {
+                name: "Произвольный".to_string()
+            });
+            arg_count
+        ];
         self.detect_collection_type_with_args_internal(method_name, &dummy_args)
     }
 
@@ -173,19 +180,13 @@ impl GenericInference {
     ) -> Option<Vec<ConcreteType>> {
         match method_name {
             // arr.Добавить(элемент) - первый аргумент это тип элемента
-            "Добавить" | "Add" => {
-                arguments.first().cloned().map(|t| vec![t])
-            }
+            "Добавить" | "Add" => arguments.first().cloned().map(|t| vec![t]),
 
             // arr.Вставить(индекс, элемент) - второй аргумент это тип элемента
-            "Вставить" | "Insert" => {
-                arguments.get(1).cloned().map(|t| vec![t])
-            }
+            "Вставить" | "Insert" => arguments.get(1).cloned().map(|t| vec![t]),
 
             // arr.Найти(значение) - первый аргумент это тип элемента
-            "Найти" | "Find" => {
-                arguments.first().cloned().map(|t| vec![t])
-            }
+            "Найти" | "Find" => arguments.first().cloned().map(|t| vec![t]),
 
             _ => None,
         }
@@ -255,11 +256,7 @@ mod tests {
         let mut inference = GenericInference::new();
 
         // arr.Добавить("текст")
-        let result = inference.infer_from_method_call(
-            "arr",
-            "Добавить",
-            &[ConcreteType::string()],
-        );
+        let result = inference.infer_from_method_call("arr", "Добавить", &[ConcreteType::string()]);
 
         assert!(result.is_some());
         let generic = result.unwrap();
@@ -320,11 +317,7 @@ mod tests {
     fn test_variable_type_tracking() {
         let mut inference = GenericInference::new();
 
-        inference.infer_from_method_call(
-            "arr",
-            "Добавить",
-            &[ConcreteType::string()],
-        );
+        inference.infer_from_method_call("arr", "Добавить", &[ConcreteType::string()]);
 
         let var_type = inference.get_variable_type("arr");
         assert!(var_type.is_some());
@@ -339,11 +332,7 @@ mod tests {
         let mut inference = GenericInference::new();
 
         // Первый вывод: Массив<Строка>
-        inference.infer_from_method_call(
-            "arr",
-            "Добавить",
-            &[ConcreteType::string()],
-        );
+        inference.infer_from_method_call("arr", "Добавить", &[ConcreteType::string()]);
 
         // Уточнение: добавляем число
         inference.refine_inference("arr", ConcreteType::number(), 0);
@@ -357,11 +346,7 @@ mod tests {
     fn test_unknown_method_returns_none() {
         let mut inference = GenericInference::new();
 
-        let result = inference.infer_from_method_call(
-            "obj",
-            "НеизвестныйМетод",
-            &[],
-        );
+        let result = inference.infer_from_method_call("obj", "НеизвестныйМетод", &[]);
 
         assert!(result.is_none());
     }

@@ -50,33 +50,33 @@ impl WebServerConfig {
     /// Load configuration from environment variables
     pub fn from_env() -> Self {
         let mut config = Self::default();
-        
+
         if let Ok(host) = std::env::var("BSL_WEB_HOST") {
             config.host = host;
         }
-        
+
         if let Ok(port_str) = std::env::var("BSL_WEB_PORT") {
             if let Ok(port) = port_str.parse::<u16>() {
                 config.port = port;
             }
         }
-        
+
         if let Ok(static_path) = std::env::var("BSL_STATIC_PATH") {
             config.static_files_path = Some(PathBuf::from(static_path));
         }
-        
+
         if let Ok(project_path) = std::env::var("BSL_PROJECT_PATH") {
             config.project_path = Some(PathBuf::from(project_path));
         }
-        
+
         if let Ok(cors_str) = std::env::var("BSL_ENABLE_CORS") {
             config.enable_cors = cors_str.to_lowercase() == "true";
         }
-        
+
         if let Ok(log_level) = std::env::var("BSL_LOG_LEVEL") {
             config.log_level = log_level;
         }
-        
+
         config
     }
 
@@ -129,16 +129,16 @@ pub struct CliConfig {
 /// Load configuration with priority: CLI args > config file > env vars > defaults
 pub fn load_config(cli_config: CliConfig) -> Result<WebServerConfig, Box<dyn std::error::Error>> {
     let mut config = WebServerConfig::from_env();
-    
+
     // Load from config file if specified
     if let Some(config_file) = &cli_config.config_file {
         if config_file.exists() {
             config = WebServerConfig::from_file(config_file)?;
         }
     }
-    
+
     // Override with CLI arguments
     config.merge_with_cli(cli_config);
-    
+
     Ok(config)
 }

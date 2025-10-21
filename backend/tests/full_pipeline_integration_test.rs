@@ -26,7 +26,10 @@ fn test_full_pipeline_simple_function() {
     println!("✅ Step 1: Парсинг в AST");
     println!("   Statements: {}", parse_result.program.statements.len());
     if parse_result.has_errors() {
-        println!("   ⚠️  Синтаксические ошибки: {}", parse_result.syntax_errors.len());
+        println!(
+            "   ⚠️  Синтаксические ошибки: {}",
+            parse_result.syntax_errors.len()
+        );
     }
 
     // 4. Конвертация AST → IR
@@ -67,9 +70,7 @@ fn test_full_pipeline_with_type_inference() {
     let coordinator = ParserCoordinator::with_fallback();
 
     // Парсинг в AST
-    let parse_result = coordinator
-        .parse(bsl_code)
-        .expect("Парсинг должен пройти");
+    let parse_result = coordinator.parse(bsl_code).expect("Парсинг должен пройти");
 
     assert!(
         !parse_result.program.statements.is_empty(),
@@ -84,7 +85,8 @@ fn test_full_pipeline_with_type_inference() {
     // Проверяем что переменные есть в таблице символов (ищем в scopes)
     let mut has_vars = false;
     for (_scope_id, scope) in &ir_result.symbols.scopes {
-        if scope.variables.contains_key("Число") || scope.variables.contains_key("Строка") {
+        if scope.variables.contains_key("Число") || scope.variables.contains_key("Строка")
+        {
             has_vars = true;
             break;
         }
@@ -159,7 +161,9 @@ fn test_pipeline_with_syntax_errors() {
     let coordinator = ParserCoordinator::with_fallback();
 
     // Парсинг может вернуть результат с ошибками
-    let parse_result = coordinator.parse(bsl_code).expect("ParseResult должен вернуться");
+    let parse_result = coordinator
+        .parse(bsl_code)
+        .expect("ParseResult должен вернуться");
 
     // Проверяем partial recovery
     if parse_result.has_errors() {
@@ -168,7 +172,10 @@ fn test_pipeline_with_syntax_errors() {
             parse_result.syntax_errors.len()
         );
         for error in &parse_result.syntax_errors {
-            println!("   - [{}:{}] {}", error.span.start_line, error.span.start_column, error.message);
+            println!(
+                "   - [{}:{}] {}",
+                error.span.start_line, error.span.start_column, error.message
+            );
         }
     }
 
@@ -177,7 +184,10 @@ fn test_pipeline_with_syntax_errors() {
 
     match ir_result {
         Ok(ir) => {
-            println!("✅ Partial IR: {} узлов создано несмотря на ошибки", ir.nodes.len());
+            println!(
+                "✅ Partial IR: {} узлов создано несмотря на ошибки",
+                ir.nodes.len()
+            );
         }
         Err(e) => {
             println!("⚠️  IR конвертация не удалась: {}", e);
@@ -253,7 +263,11 @@ fn test_pipeline_span_propagation() {
         if !is_stub {
             println!(
                 "✅ IR узел {:?} имеет реальный span: [{}:{} - {}:{}]",
-                node.kind, node.span.start_line, node.span.start_column, node.span.end_line, node.span.end_column
+                node.kind,
+                node.span.start_line,
+                node.span.start_column,
+                node.span.end_line,
+                node.span.end_column
             );
         }
     }
@@ -276,5 +290,9 @@ fn test_pipeline_span_propagation() {
         real_spans_count
     );
 
-    println!("✅ Span propagation: {}/{} узлов имеют реальные span", real_spans_count, ir_result.nodes.len());
+    println!(
+        "✅ Span propagation: {}/{} узлов имеют реальные span",
+        real_spans_count,
+        ir_result.nodes.len()
+    );
 }

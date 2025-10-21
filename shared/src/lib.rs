@@ -5,16 +5,16 @@
 
 pub mod api;
 pub mod domain;
-pub mod types;
 pub mod engine;
 pub mod ir; // Milestone 2.8: Intermediate Representation (IR)
-pub mod parsing; // Milestone 2.8: Parser trait для инверсии зависимостей
-// УДАЛЕНО Phase 1: loaders переехали в backend/src/data/
-// pub mod loaders;
+pub mod parsing;
+pub mod types; // Milestone 2.8: Parser trait для инверсии зависимостей
+               // УДАЛЕНО Phase 1: loaders переехали в backend/src/data/
+               // pub mod loaders;
 
 // Re-export main types (simplified according to architecture specification)
 pub use api::*;
-pub use domain::{TypeResolver, TypeRepository}; // Only essential domain components
+pub use domain::{TypeRepository, TypeResolver}; // Only essential domain components
 pub use types::*;
 
 /// Version of the shared components

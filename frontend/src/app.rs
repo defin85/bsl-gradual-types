@@ -1,7 +1,7 @@
 //! Unified App component based on front_template
 
 use crate::api::*; // Uses shared DTOs + frontend extensions
-use crate::components::{Dashboard, CardsView, TableView, GraphView, Sidebar};
+use crate::components::{CardsView, Dashboard, GraphView, Sidebar, TableView};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -37,7 +37,7 @@ pub fn App() -> impl IntoView {
                     types.set(result.types.clone());
                     search_result.set(Some(result));
                     loading.set(false);
-                },
+                }
                 Err(err) => {
                     error.set(Some(format!("Ошибка загрузки типов: {}", err)));
                     loading.set(false);

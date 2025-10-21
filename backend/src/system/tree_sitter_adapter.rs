@@ -2,9 +2,11 @@
 //!
 //! Преобразует узлы tree-sitter в структуры из backend/src/parsing/bsl/mod.rs
 
-use crate::parsing::bsl::ast::{ErrorType, Expression, ParseError, ParseResult, Program, Span, Statement};
-use tree_sitter::{Node, Tree};
+use crate::parsing::bsl::ast::{
+    ErrorType, Expression, ParseError, ParseResult, Program, Span, Statement,
+};
 use tracing::debug;
+use tree_sitter::{Node, Tree};
 
 /// Адаптер tree-sitter AST → Program AST
 pub struct TreeSitterAdapter;
@@ -57,23 +59,29 @@ impl TreeSitterAdapter {
         let end_pos = node.end_position();
 
         // ✅ O(1) доступ вместо O(n) итерации через source.lines().nth()!
-        let start_line_text = lines.get(start_pos.row).map(|s| s.as_str()).unwrap_or_else(|| {
-            tracing::warn!(
-                "Tree-sitter returned invalid start line: {} (file has {} lines)",
-                start_pos.row,
-                lines.len()
-            );
-            ""
-        });
+        let start_line_text = lines
+            .get(start_pos.row)
+            .map(|s| s.as_str())
+            .unwrap_or_else(|| {
+                tracing::warn!(
+                    "Tree-sitter returned invalid start line: {} (file has {} lines)",
+                    start_pos.row,
+                    lines.len()
+                );
+                ""
+            });
 
-        let end_line_text = lines.get(end_pos.row).map(|s| s.as_str()).unwrap_or_else(|| {
-            tracing::warn!(
-                "Tree-sitter returned invalid end line: {} (file has {} lines)",
-                end_pos.row,
-                lines.len()
-            );
-            ""
-        });
+        let end_line_text = lines
+            .get(end_pos.row)
+            .map(|s| s.as_str())
+            .unwrap_or_else(|| {
+                tracing::warn!(
+                    "Tree-sitter returned invalid end line: {} (file has {} lines)",
+                    end_pos.row,
+                    lines.len()
+                );
+                ""
+            });
 
         // ✅ MILESTONE 2.18: Конвертируем byte offsets → UTF-16 code units
         let start_column_utf16 = Self::byte_offset_to_utf16(start_line_text, start_pos.column);
@@ -87,11 +95,15 @@ impl TreeSitterAdapter {
         // Milestone 2.11 Task B1: DEBUG логи для Span extraction
         debug!(
             "Extracted Span (UTF-16): {}:{} - {}:{} (node kind: {}) [UTF-8 was: {}:{} - {}:{}]",
-            span.start_line, span.start_column,
-            span.end_line, span.end_column,
+            span.start_line,
+            span.start_column,
+            span.end_line,
+            span.end_column,
             node.kind(),
-            start_pos.row, start_pos.column,
-            end_pos.row, end_pos.column
+            start_pos.row,
+            start_pos.column,
+            end_pos.row,
+            end_pos.column
         );
 
         span
@@ -135,13 +147,18 @@ impl TreeSitterAdapter {
     }
 
     /// Собрать все ERROR узлы из дерева с использованием кеша строк (Milestone 2.19)
-    fn collect_syntax_errors_cached(node: &Node, source: &str, lines: &[String]) -> Vec<ParseError> {
+    fn collect_syntax_errors_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Vec<ParseError> {
         let mut errors = Vec::new();
 
         // Если текущий узел — ERROR, добавляем его
         if node.kind() == "ERROR" {
             let span = Self::node_to_span_cached(node, source, lines);
-            let text = node.utf8_text(source.as_bytes())
+            let text = node
+                .utf8_text(source.as_bytes())
                 .unwrap_or("<неизвестно>")
                 .to_string();
 
@@ -182,7 +199,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать source_file с использованием кеша строк (Milestone 2.19)
-    fn convert_source_file_cached(node: &Node, source: &str, lines: &[String]) -> Result<Vec<Statement>, String> {
+    fn convert_source_file_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Vec<Statement>, String> {
         let mut statements = Vec::new();
         let mut cursor = node.walk();
 
@@ -206,35 +227,67 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать statement узел с использованием кеша строк (Milestone 2.19)
-    fn convert_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Option<Statement>, String> {
+    fn convert_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Option<Statement>, String> {
         match node.kind() {
-            "function_definition" | "procedure_definition" => {
-                Ok(Some(Self::convert_function_definition_cached(node, source, lines)?))
+            "function_definition" | "procedure_definition" => Ok(Some(
+                Self::convert_function_definition_cached(node, source, lines)?,
+            )),
+            "var_definition" | "var_statement" => Ok(Some(Self::convert_var_definition_cached(
+                node, source, lines,
+            )?)),
+            "if_statement" => Ok(Some(Self::convert_if_statement_cached(
+                node, source, lines,
+            )?)),
+            "for_statement" => Ok(Some(Self::convert_for_statement_cached(
+                node, source, lines,
+            )?)),
+            "for_each_statement" => Ok(Some(Self::convert_for_each_statement_cached(
+                node, source, lines,
+            )?)),
+            "while_statement" => Ok(Some(Self::convert_while_statement_cached(
+                node, source, lines,
+            )?)),
+            "try_statement" => Ok(Some(Self::convert_try_statement_cached(
+                node, source, lines,
+            )?)),
+            "assignment_statement" => {
+                Ok(Some(Self::convert_assignment_cached(node, source, lines)?))
             }
-            "var_definition" | "var_statement" => {
-                Ok(Some(Self::convert_var_definition_cached(node, source, lines)?))
-            }
-            "if_statement" => Ok(Some(Self::convert_if_statement_cached(node, source, lines)?)),
-            "for_statement" => Ok(Some(Self::convert_for_statement_cached(node, source, lines)?)),
-            "for_each_statement" => Ok(Some(Self::convert_for_each_statement_cached(node, source, lines)?)),
-            "while_statement" => Ok(Some(Self::convert_while_statement_cached(node, source, lines)?)),
-            "try_statement" => Ok(Some(Self::convert_try_statement_cached(node, source, lines)?)),
-            "assignment_statement" => Ok(Some(Self::convert_assignment_cached(node, source, lines)?)),
             "return_statement" => Ok(Some(Self::convert_return_cached(node, source, lines)?)),
-            "call_statement" => Ok(Some(Self::convert_call_statement_cached(node, source, lines)?)),
+            "call_statement" => Ok(Some(Self::convert_call_statement_cached(
+                node, source, lines,
+            )?)),
             "break_statement" => Ok(Some(Statement::Break {
                 span: Self::node_to_span_cached(node, source, lines),
             })),
             "continue_statement" => Ok(Some(Statement::Continue {
                 span: Self::node_to_span_cached(node, source, lines),
             })),
-            "goto_statement" => Ok(Some(Self::convert_goto_statement_cached(node, source, lines)?)),
-            "label_statement" => Ok(Some(Self::convert_label_statement_cached(node, source, lines)?)),
-            "execute_statement" => Ok(Some(Self::convert_execute_statement_cached(node, source, lines)?)),
-            "rise_error_statement" => Ok(Some(Self::convert_raise_error_statement_cached(node, source, lines)?)),
-            "add_handler_statement" => Ok(Some(Self::convert_add_handler_statement_cached(node, source, lines)?)),
-            "remove_handler_statement" => Ok(Some(Self::convert_remove_handler_statement_cached(node, source, lines)?)),
-            "await_statement" => Ok(Some(Self::convert_await_statement_cached(node, source, lines)?)),
+            "goto_statement" => Ok(Some(Self::convert_goto_statement_cached(
+                node, source, lines,
+            )?)),
+            "label_statement" => Ok(Some(Self::convert_label_statement_cached(
+                node, source, lines,
+            )?)),
+            "execute_statement" => Ok(Some(Self::convert_execute_statement_cached(
+                node, source, lines,
+            )?)),
+            "rise_error_statement" => Ok(Some(Self::convert_raise_error_statement_cached(
+                node, source, lines,
+            )?)),
+            "add_handler_statement" => Ok(Some(Self::convert_add_handler_statement_cached(
+                node, source, lines,
+            )?)),
+            "remove_handler_statement" => Ok(Some(Self::convert_remove_handler_statement_cached(
+                node, source, lines,
+            )?)),
+            "await_statement" => Ok(Some(Self::convert_await_statement_cached(
+                node, source, lines,
+            )?)),
 
             // Пропускаем препроцессор и комментарии
             "preprocessor" | "comment" | "line_comment" => Ok(None),
@@ -442,7 +495,10 @@ impl TreeSitterAdapter {
                 "ENDDO_KEYWORD" | "КОНЕЦЦИКЛА_KEYWORD" => {
                     break;
                 }
-                _ if child.kind().contains("expression") || child.kind() == "const_expression" || child.kind() == "number" => {
+                _ if child.kind().contains("expression")
+                    || child.kind() == "const_expression"
+                    || child.kind() == "number" =>
+                {
                     if !in_body {
                         if let Some(expr) = Self::convert_expression(&child, source)? {
                             if expr_count == 0 {
@@ -592,7 +648,8 @@ impl TreeSitterAdapter {
 
         for child in node.children(&mut cursor) {
             match child.kind() {
-                "TRY_KEYWORD" | "ПОПЫТКА_KEYWORD" | "ENDTRY_KEYWORD" | "КОНЕЦПОПЫТКИ_KEYWORD" => {}
+                "TRY_KEYWORD" | "ПОПЫТКА_KEYWORD" | "ENDTRY_KEYWORD" | "КОНЕЦПОПЫТКИ_KEYWORD" =>
+                    {}
                 "EXCEPT_KEYWORD" | "ИСКЛЮЧЕНИЕ_KEYWORD" => {
                     in_except = true;
                 }
@@ -1239,7 +1296,11 @@ impl TreeSitterAdapter {
     // для O(1) доступа вместо O(n) итерации через source.lines().nth()
 
     /// Конвертировать function_definition с использованием кеша строк (Milestone 2.19)
-    fn convert_function_definition_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_function_definition_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         let mut name = String::new();
@@ -1284,7 +1345,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать var_definition с использованием кеша строк (Milestone 2.19)
-    fn convert_var_definition_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_var_definition_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let mut cursor = node.walk();
         let mut name = String::new();
 
@@ -1303,7 +1368,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать if_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_if_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_if_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         let mut condition = Expression::Boolean {
@@ -1331,10 +1400,13 @@ impl TreeSitterAdapter {
                     else_body = Some(else_statements);
                 }
                 "elseif_clause" => {
-                    let elseif_statements = Self::convert_clause_body_cached(&child, source, lines)?;
+                    let elseif_statements =
+                        Self::convert_clause_body_cached(&child, source, lines)?;
                     else_body = Some(elseif_statements);
                 }
-                kind if in_then && (kind.ends_with("_statement") || kind.ends_with("_definition")) => {
+                kind if in_then
+                    && (kind.ends_with("_statement") || kind.ends_with("_definition")) =>
+                {
                     if let Some(stmt) = Self::convert_statement_cached(&child, source, lines)? {
                         then_body.push(stmt);
                     }
@@ -1352,7 +1424,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать clause_body с использованием кеша строк (Milestone 2.19)
-    fn convert_clause_body_cached(node: &Node, source: &str, lines: &[String]) -> Result<Vec<Statement>, String> {
+    fn convert_clause_body_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Vec<Statement>, String> {
         let mut statements = Vec::new();
         let mut cursor = node.walk();
 
@@ -1370,12 +1446,22 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать for_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_for_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_for_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         let mut variable = String::new();
-        let mut start = Expression::Number { value: 0.0, span: Span::stub() };
-        let mut end = Expression::Number { value: 0.0, span: Span::stub() };
+        let mut start = Expression::Number {
+            value: 0.0,
+            span: Span::stub(),
+        };
+        let mut end = Expression::Number {
+            value: 0.0,
+            span: Span::stub(),
+        };
         let mut body = Vec::new();
         let mut in_body = false;
         let mut expr_count = 0;
@@ -1393,7 +1479,10 @@ impl TreeSitterAdapter {
                 "ENDDO_KEYWORD" | "КОНЕЦЦИКЛА_KEYWORD" => {
                     break;
                 }
-                _ if child.kind().contains("expression") || child.kind() == "const_expression" || child.kind() == "number" => {
+                _ if child.kind().contains("expression")
+                    || child.kind() == "const_expression"
+                    || child.kind() == "number" =>
+                {
                     if !in_body {
                         if let Some(expr) = Self::convert_expression(&child, source)? {
                             if expr_count == 0 {
@@ -1426,7 +1515,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать for_each_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_for_each_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_for_each_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         let mut variable = String::new();
@@ -1474,7 +1567,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать while_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_while_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_while_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         let mut condition = Expression::Boolean {
@@ -1514,7 +1611,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать try_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_try_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_try_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         let mut try_body = Vec::new();
@@ -1523,7 +1624,8 @@ impl TreeSitterAdapter {
 
         for child in node.children(&mut cursor) {
             match child.kind() {
-                "TRY_KEYWORD" | "ПОПЫТКА_KEYWORD" | "ENDTRY_KEYWORD" | "КОНЕЦПОПЫТКИ_KEYWORD" => {}
+                "TRY_KEYWORD" | "ПОПЫТКА_KEYWORD" | "ENDTRY_KEYWORD" | "КОНЕЦПОПЫТКИ_KEYWORD" =>
+                    {}
                 "EXCEPT_KEYWORD" | "ИСКЛЮЧЕНИЕ_KEYWORD" => {
                     in_except = true;
                 }
@@ -1547,7 +1649,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать assignment_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_assignment_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_assignment_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         let mut target = None;
@@ -1577,7 +1683,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать return_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_return_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_return_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         let mut value = None;
@@ -1597,7 +1707,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать call_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_call_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_call_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
 
@@ -1614,7 +1728,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать goto_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_goto_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_goto_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1627,7 +1745,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать label_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_label_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_label_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1640,7 +1762,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать execute_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_execute_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_execute_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1652,7 +1778,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать raise_error_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_raise_error_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_raise_error_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         let mut message = None;
@@ -1672,7 +1802,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать add_handler_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_add_handler_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_add_handler_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let (event, handler) = Self::extract_event_handler_pair(node, source)?;
         Ok(Statement::AddHandler {
@@ -1683,7 +1817,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать remove_handler_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_remove_handler_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_remove_handler_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let (event, handler) = Self::extract_event_handler_pair(node, source)?;
         Ok(Statement::RemoveHandler {
@@ -1694,7 +1832,11 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать await_statement с использованием кеша строк (Milestone 2.19)
-    fn convert_await_statement_cached(node: &Node, source: &str, lines: &[String]) -> Result<Statement, String> {
+    fn convert_await_statement_cached(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Result<Statement, String> {
         let span = Self::node_to_span_cached(node, source, lines);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {

@@ -2,10 +2,10 @@
 //!
 //! Согласно архитектурной диаграмме: CLI Tool (Presentation Layer)
 
-use colored::*;
-use bsl_shared::engine::CliAnalysisResult;
-use bsl_shared::domain::types::{TypeResolution, Certainty, ResolutionResult};
 use crate::args::OutputFormat;
+use bsl_shared::domain::types::{Certainty, ResolutionResult, TypeResolution};
+use bsl_shared::engine::CliAnalysisResult;
+use colored::*;
 
 /// Форматтер для CLI вывода
 pub struct CliFormatter;
@@ -35,7 +35,9 @@ impl CliFormatter {
 
         match format {
             OutputFormat::Table => Self::format_completions_table(&limited_completions),
-            OutputFormat::Json => serde_json::to_string_pretty(&limited_completions).unwrap_or_default(),
+            OutputFormat::Json => {
+                serde_json::to_string_pretty(&limited_completions).unwrap_or_default()
+            }
             OutputFormat::Plain => Self::format_completions_plain(&limited_completions),
         }
     }
@@ -46,8 +48,14 @@ impl CliFormatter {
 
         // Заголовок
         output.push_str(&format!("📁 {}\n", result.file_path.bold()));
-        output.push_str(&format!("⏱️  Время анализа: {} мс\n", result.analysis_duration_ms));
-        output.push_str(&format!("🔍 Найдено типов: {}\n\n", result.type_resolutions.len()));
+        output.push_str(&format!(
+            "⏱️  Время анализа: {} мс\n",
+            result.analysis_duration_ms
+        ));
+        output.push_str(&format!(
+            "🔍 Найдено типов: {}\n\n",
+            result.type_resolutions.len()
+        ));
 
         if result.type_resolutions.is_empty() {
             output.push_str("ℹ️  Типы не найдены\n");
@@ -55,7 +63,10 @@ impl CliFormatter {
         }
 
         // Таблица типов
-        output.push_str(&format!("{:<30} {:<20} {:<15}\n", "Выражение", "Тип", "Уверенность"));
+        output.push_str(&format!(
+            "{:<30} {:<20} {:<15}\n",
+            "Выражение", "Тип", "Уверенность"
+        ));
         output.push_str(&"-".repeat(70));
         output.push('\n');
 
@@ -70,7 +81,8 @@ impl CliFormatter {
                 let type_str = Self::format_type_result(&resolution.result);
                 let certainty_str = Self::format_certainty(&resolution.certainty);
 
-                output.push_str(&format!("{:<30} {:<20} {:<15}\n",
+                output.push_str(&format!(
+                    "{:<30} {:<20} {:<15}\n",
                     expr.cyan(),
                     type_str,
                     certainty_str
@@ -89,9 +101,8 @@ impl CliFormatter {
 
     /// JSON формат
     fn format_json(result: &CliAnalysisResult) -> String {
-        serde_json::to_string_pretty(result).unwrap_or_else(|e| {
-            format!("{{\"error\": \"Failed to serialize result: {}\"}}", e)
-        })
+        serde_json::to_string_pretty(result)
+            .unwrap_or_else(|e| format!("{{\"error\": \"Failed to serialize result: {}\"}}", e))
     }
 
     /// Простой текстовый формат
@@ -99,7 +110,10 @@ impl CliFormatter {
         let mut output = String::new();
 
         output.push_str(&format!("File: {}\n", result.file_path));
-        output.push_str(&format!("Analysis time: {} ms\n", result.analysis_duration_ms));
+        output.push_str(&format!(
+            "Analysis time: {} ms\n",
+            result.analysis_duration_ms
+        ));
         output.push_str(&format!("Types found: {}\n", result.type_resolutions.len()));
 
         for (expr, resolution) in &result.type_resolutions {
@@ -110,7 +124,8 @@ impl CliFormatter {
             };
 
             if should_show {
-                output.push_str(&format!("{}: {} ({})\n",
+                output.push_str(&format!(
+                    "{}: {} ({})\n",
                     expr,
                     Self::format_type_result(&resolution.result),
                     Self::format_certainty(&resolution.certainty)
@@ -128,7 +143,9 @@ impl CliFormatter {
     }
 
     /// Табличный формат для автодополнений
-    fn format_completions_table(completions: &[&bsl_shared::domain::repository::CompletionItem]) -> String {
+    fn format_completions_table(
+        completions: &[&bsl_shared::domain::repository::CompletionItem],
+    ) -> String {
         let mut output = String::new();
 
         if completions.is_empty() {
@@ -136,14 +153,21 @@ impl CliFormatter {
             return output;
         }
 
-        output.push_str(&format!("🔍 Найдено автодополнений: {}\n\n", completions.len()));
-        output.push_str(&format!("{:<25} {:<15} {:<30}\n", "Название", "Тип", "Описание"));
+        output.push_str(&format!(
+            "🔍 Найдено автодополнений: {}\n\n",
+            completions.len()
+        ));
+        output.push_str(&format!(
+            "{:<25} {:<15} {:<30}\n",
+            "Название", "Тип", "Описание"
+        ));
         output.push_str(&"-".repeat(70));
         output.push('\n');
 
         for completion in completions {
             let description = completion.detail.as_deref().unwrap_or("");
-            output.push_str(&format!("{:<25} {:<15} {:<30}\n",
+            output.push_str(&format!(
+                "{:<25} {:<15} {:<30}\n",
                 completion.label.cyan(),
                 format!("{:?}", completion.kind).yellow(),
                 description.dimmed()
@@ -154,7 +178,9 @@ impl CliFormatter {
     }
 
     /// Простой формат для автодополнений
-    fn format_completions_plain(completions: &[&bsl_shared::domain::repository::CompletionItem]) -> String {
+    fn format_completions_plain(
+        completions: &[&bsl_shared::domain::repository::CompletionItem],
+    ) -> String {
         let mut output = String::new();
 
         for completion in completions {
@@ -181,11 +207,11 @@ impl CliFormatter {
                 format!("Intersection[{}]", types.len()).cyan().to_string()
             }
             ResolutionResult::Generic(gen) => {
-                format!("{}<{}>", gen.base_type, gen.type_params.len()).blue().to_string()
+                format!("{}<{}>", gen.base_type, gen.type_params.len())
+                    .blue()
+                    .to_string()
             }
-            ResolutionResult::Nullable(inner) => {
-                format!("{} | Null", inner).yellow().to_string()
-            }
+            ResolutionResult::Nullable(inner) => format!("{} | Null", inner).yellow().to_string(),
             ResolutionResult::Dynamic => "Dynamic".magenta().to_string(),
         }
     }
@@ -211,8 +237,14 @@ impl CliFormatter {
             OutputFormat::Table | OutputFormat::Plain => {
                 let mut output = String::new();
                 output.push_str(&format!("🔍 {}\n", expression.bold()));
-                output.push_str(&format!("Тип: {}\n", Self::format_type_result(&resolution.result)));
-                output.push_str(&format!("Уверенность: {}\n", Self::format_certainty(&resolution.certainty)));
+                output.push_str(&format!(
+                    "Тип: {}\n",
+                    Self::format_type_result(&resolution.result)
+                ));
+                output.push_str(&format!(
+                    "Уверенность: {}\n",
+                    Self::format_certainty(&resolution.certainty)
+                ));
 
                 if !resolution.metadata.notes.is_empty() {
                     output.push_str("\n💡 Заметки:\n");

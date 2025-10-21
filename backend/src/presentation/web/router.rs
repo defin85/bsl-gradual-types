@@ -3,14 +3,16 @@
 //! Настройка маршрутов для веб-сервера
 
 use axum::{
+    http::StatusCode,
     routing::{get, post},
     Router,
-    http::StatusCode,
 };
-use tower_http::services::{ServeDir, ServeFile};
 use std::collections::HashMap;
+use tower_http::services::{ServeDir, ServeFile};
 
-use super::handlers::{AppState, get_metrics, get_types, search_types, health_check, validate_code};
+use super::handlers::{
+    get_metrics, get_types, health_check, search_types, validate_code, AppState,
+};
 
 /// Handler for favicon.ico - returns 204 No Content to avoid 404 errors
 async fn favicon() -> StatusCode {
@@ -35,11 +37,11 @@ pub fn create_router(app_state: AppState, static_path: &str, enable_cors: bool) 
         .route("/api/metrics", get(get_metrics))
         .route("/api/types", get(get_types))
         .route("/api/search", get(search_types))
-        .route("/api/validate", post(validate_code))  // New validation endpoint
+        .route("/api/validate", post(validate_code)) // New validation endpoint
         .route("/favicon.ico", get(favicon))
         .fallback_service(static_dir)
         .with_state(app_state);
-    
+
     // Add CORS if enabled
     if enable_cors {
         use tower_http::cors::CorsLayer;

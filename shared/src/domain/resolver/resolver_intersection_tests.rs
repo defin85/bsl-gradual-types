@@ -2,7 +2,7 @@
 
 use crate::domain::repository::InMemoryTypeRepository;
 use crate::domain::resolver::TypeResolver;
-use crate::domain::types::{ResolutionResult, Certainty, ConcreteType, TypeResolution};
+use crate::domain::types::{Certainty, ConcreteType, ResolutionResult, TypeResolution};
 use std::sync::Arc;
 
 fn create_test_resolver() -> TypeResolver {
@@ -26,7 +26,10 @@ mod tests {
             ResolutionResult::Intersection(types) => {
                 assert_eq!(types.len(), 2, "Intersection должен содержать 2 типа");
             }
-            _ => panic!("Ожидался Intersection тип, получен {:?}", intersection.result),
+            _ => panic!(
+                "Ожидался Intersection тип, получен {:?}",
+                intersection.result
+            ),
         }
     }
 
@@ -119,7 +122,10 @@ mod tests {
         let formatted = TypeResolver::format_intersection_type(&types);
 
         // Проверяем, что типы соединены через " & "
-        assert!(formatted.contains("&"), "Format should contain '&' separator");
+        assert!(
+            formatted.contains("&"),
+            "Format should contain '&' separator"
+        );
         assert!(
             formatted.contains("String") || formatted.contains("Строка"),
             "Format should contain String type"

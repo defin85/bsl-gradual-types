@@ -50,7 +50,8 @@ mod tests {
                 assert!(normalized[0].weight >= normalized[1].weight);
 
                 // Weights should be merged
-                let number_weight = normalized.iter()
+                let number_weight = normalized
+                    .iter()
                     .find(|wt| matches!(wt.type_, ConcreteType::Primitive(PrimitiveType::Number)))
                     .map(|wt| wt.weight);
                 assert_eq!(number_weight, Some(0.5)); // 0.3 + 0.2
@@ -220,7 +221,10 @@ mod tests {
 
         match nullable {
             ResolutionResult::Nullable(inner) => {
-                assert!(matches!(*inner, ConcreteType::Primitive(PrimitiveType::String)));
+                assert!(matches!(
+                    *inner,
+                    ConcreteType::Primitive(PrimitiveType::String)
+                ));
             }
             other => panic!("Expected Nullable, got {:?}", other),
         }
@@ -322,6 +326,9 @@ mod tests {
         assert!(matches!(n, ConcreteType::Primitive(PrimitiveType::Number)));
         assert!(matches!(b, ConcreteType::Primitive(PrimitiveType::Boolean)));
         assert!(matches!(null, ConcreteType::Special(SpecialType::Null)));
-        assert!(matches!(undef, ConcreteType::Special(SpecialType::Undefined)));
+        assert!(matches!(
+            undef,
+            ConcreteType::Special(SpecialType::Undefined)
+        ));
     }
 }

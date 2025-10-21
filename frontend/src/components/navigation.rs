@@ -8,7 +8,8 @@ use leptos::prelude::*;
 #[allow(non_snake_case)]
 pub fn Navigation(
     /// Текущее активное представление
-    #[prop(into)] current_view: RwSignal<ViewType>,
+    #[prop(into)]
+    current_view: RwSignal<ViewType>,
 ) -> impl IntoView {
     view! {
         <nav class="main-nav">

@@ -8,9 +8,11 @@ use leptos::prelude::*;
 #[allow(non_snake_case)]
 pub fn TypeCard(
     /// Информация о типе
-    #[prop(into)] type_info: Signal<TypeInfo>,
+    #[prop(into)]
+    type_info: Signal<TypeInfo>,
     /// Обработчик клика по карточке
-    #[prop(optional)] on_click: Option<Callback<TypeInfo>>,
+    #[prop(optional)]
+    on_click: Option<Callback<TypeInfo>>,
 ) -> impl IntoView {
     let card_class = move || {
         let info = type_info.get();
@@ -139,9 +141,11 @@ pub fn TypeCard(
 #[allow(non_snake_case)]
 pub fn TypeCardsGrid(
     /// Список типов для отображения
-    #[prop(into)] types: Signal<Vec<TypeInfo>>,
+    #[prop(into)]
+    types: Signal<Vec<TypeInfo>>,
     /// Обработчик клика по карточке
-    #[prop(optional)] on_card_click: Option<Callback<TypeInfo>>,
+    #[prop(optional)]
+    on_card_click: Option<Callback<TypeInfo>>,
 ) -> impl IntoView {
     view! {
         <div class="cards-grid">
@@ -149,16 +153,16 @@ pub fn TypeCardsGrid(
                 types.get().into_iter().map(|type_info| {
                     let type_signal = Signal::derive(move || type_info.clone());
                     let click_handler = on_card_click;
-                    
+
                     match click_handler {
                         Some(handler) => view! {
-                            <TypeCard 
+                            <TypeCard
                                 type_info=type_signal
                                 on_click=handler
                             />
                         }.into_view(),
                         None => view! {
-                            <TypeCard 
+                            <TypeCard
                                 type_info=type_signal
                             />
                         }.into_view(),

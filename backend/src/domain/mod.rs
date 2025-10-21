@@ -7,4 +7,6 @@
 pub mod flow_analyzer_simple;
 
 // pub use flow_analyzer::{FlowAnalyzer, AnalysisResult as FlowAnalysisResult};
-pub use flow_analyzer_simple::{SimpleFlowAnalyzer, FlowAnalysisResult as SimpleFlowAnalysisResult};
+pub use flow_analyzer_simple::{
+    FlowAnalysisResult as SimpleFlowAnalysisResult, SimpleFlowAnalyzer,
+};

@@ -257,10 +257,7 @@ impl TypeRenderer for HtmlRenderer {
             methods_html.join("\n        ")
         );
 
-        Ok(self.render_document(
-            &format!("Методы: {}", type_name),
-            &body,
-        ))
+        Ok(self.render_document(&format!("Методы: {}", type_name), &body))
     }
 
     fn render_properties(&self, type_name: &str, properties: &[String]) -> Result<String> {
@@ -282,10 +279,7 @@ impl TypeRenderer for HtmlRenderer {
             props_html.join("\n        ")
         );
 
-        Ok(self.render_document(
-            &format!("Свойства: {}", type_name),
-            &body,
-        ))
+        Ok(self.render_document(&format!("Свойства: {}", type_name), &body))
     }
 
     fn render_metrics(&self, total_types: usize, total_methods: usize) -> Result<String> {

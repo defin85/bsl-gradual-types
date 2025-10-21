@@ -65,7 +65,9 @@ impl AnalysisCache {
             storage: lru::LruCache::new(std::num::NonZeroUsize::new(capacity).unwrap()),
             ttl_tracker: HashMap::new(),
             default_ttl: Duration::from_secs(300), // 5 минут TTL
-            string_cache: std::sync::Mutex::new(lru::LruCache::new(std::num::NonZeroUsize::new(capacity).unwrap())),
+            string_cache: std::sync::Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(capacity).unwrap(),
+            )),
             string_stats: std::sync::Mutex::new((0, 0)),
         }
     }

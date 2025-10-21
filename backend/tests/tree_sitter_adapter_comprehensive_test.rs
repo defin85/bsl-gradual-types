@@ -41,7 +41,9 @@ fn test_procedure_declaration() {
 
     assert_eq!(program.statements.len(), 1);
     match &program.statements[0] {
-        Statement::ProcedureDecl { name, params, body, .. } => {
+        Statement::ProcedureDecl {
+            name, params, body, ..
+        } => {
             assert_eq!(name, "Тест");
             assert_eq!(params.len(), 2);
             assert_eq!(params[0], "Параметр1");
@@ -59,7 +61,9 @@ fn test_function_declaration() {
 
     assert_eq!(program.statements.len(), 1);
     match &program.statements[0] {
-        Statement::FunctionDecl { name, params, body, .. } => {
+        Statement::FunctionDecl {
+            name, params, body, ..
+        } => {
             assert_eq!(name, "Сумма");
             assert_eq!(params.len(), 2);
             assert!(!body.is_empty());
@@ -75,7 +79,9 @@ fn test_var_declaration() {
 
     assert!(program.statements.len() >= 2);
     match &program.statements[0] {
-        Statement::VarDeclaration { name, type_hint, .. } => {
+        Statement::VarDeclaration {
+            name, type_hint, ..
+        } => {
             assert_eq!(name, "Счетчик");
             assert!(type_hint.is_none());
         }
@@ -155,7 +161,9 @@ fn test_while_statement() {
 
     assert_eq!(program.statements.len(), 1);
     match &program.statements[0] {
-        Statement::While { condition, body, .. } => {
+        Statement::While {
+            condition, body, ..
+        } => {
             assert!(matches!(condition, Expression::Identifier { .. }));
             assert!(!body.is_empty());
         }
@@ -165,7 +173,8 @@ fn test_while_statement() {
 
 #[test]
 fn test_try_statement() {
-    let code = "Попытка\n    ВызватьМетод();\nИсключение\n    Сообщить(ОписаниеОшибки());\nКонецПопытки";
+    let code =
+        "Попытка\n    ВызватьМетод();\nИсключение\n    Сообщить(ОписаниеОшибки());\nКонецПопытки";
     let program = parse_bsl(code).expect("Парсинг должен пройти успешно");
 
     assert_eq!(program.statements.len(), 1);
@@ -286,7 +295,10 @@ fn test_raise_error_statement() {
     match &program.statements[0] {
         Statement::RaiseError { message, .. } => {
             assert!(message.is_some());
-            assert!(matches!(message.as_ref().unwrap(), Expression::String { .. }));
+            assert!(matches!(
+                message.as_ref().unwrap(),
+                Expression::String { .. }
+            ));
         }
         _ => panic!("Expected RaiseError statement"),
     }
@@ -407,7 +419,8 @@ fn test_unary_expression() {
         Statement::Assignment { value, .. } => {
             // Может быть Unary или просто Number с минусом
             assert!(
-                matches!(value, Expression::Unary { .. }) || matches!(value, Expression::Number { .. })
+                matches!(value, Expression::Unary { .. })
+                    || matches!(value, Expression::Number { .. })
             );
         }
         _ => panic!("Expected Assignment"),
@@ -456,7 +469,10 @@ fn test_new_expression() {
 
     match &program.statements[0] {
         Statement::Assignment { value, .. } => {
-            if let Expression::New { type_name, args, .. } = value {
+            if let Expression::New {
+                type_name, args, ..
+            } = value
+            {
                 assert!(type_name.contains("Массив"));
                 assert_eq!(args.len(), 0);
             } else {
@@ -508,7 +524,9 @@ fn test_new_expression_method_debug() {
     let code = "Объект = Новый(ТипЗнч(Образец));";
 
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).unwrap();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .unwrap();
     let tree = parser.parse(code, None).unwrap();
 
     // Выведем структуру AST
@@ -520,7 +538,13 @@ fn test_new_expression_method_debug() {
         } else {
             text.to_string()
         };
-        eprintln!("{}{} [{}] '{}'", indent, node.kind(), node.kind_id(), display_text);
+        eprintln!(
+            "{}{} [{}] '{}'",
+            indent,
+            node.kind(),
+            node.kind_id(),
+            display_text
+        );
 
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -545,8 +569,7 @@ fn test_new_expression_method() {
             // Выводим для отладки, что получилось
             eprintln!("Parsed expression: {:?}", value);
             assert!(
-                matches!(value, Expression::New { .. })
-                    || matches!(value, Expression::Call { .. })
+                matches!(value, Expression::New { .. }) || matches!(value, Expression::Call { .. })
             );
         }
         _ => panic!("Expected Assignment, got {:?}", program.statements[0]),
@@ -585,7 +608,9 @@ fn test_real_world_function_with_logic() {
 
     assert_eq!(program.statements.len(), 1);
     match &program.statements[0] {
-        Statement::FunctionDecl { name, params, body, .. } => {
+        Statement::FunctionDecl {
+            name, params, body, ..
+        } => {
             assert_eq!(name, "ПолучитьСписокКонтрагентов");
             assert_eq!(params.len(), 1);
             assert!(!body.is_empty(), "Тело функции должно содержать statements");

@@ -36,9 +36,9 @@ pub struct NullSafetyWarning {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NullWarningKind {
-    PossibleNullDereference,  // Возможное обращение к Null
-    UncheckedNull,            // Не проверено на Null перед использованием
-    AlwaysNull,               // Переменная всегда Null
+    PossibleNullDereference, // Возможное обращение к Null
+    UncheckedNull,           // Не проверено на Null перед использованием
+    AlwaysNull,              // Переменная всегда Null
 }
 
 /// Безопасная операция после проверки
@@ -241,7 +241,10 @@ impl NullSafetyAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TypeResolution, ResolutionResult, ConcreteType, Certainty, ResolutionSource, ResolutionMetadata, PlatformType};
+    use crate::{
+        Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult,
+        ResolutionSource, TypeResolution,
+    };
 
     #[test]
     fn test_null_check_detection() {
@@ -363,7 +366,10 @@ mod tests {
 
         // Должно быть предупреждение о возможном NPE
         assert!(result.warnings.len() > 0);
-        assert_eq!(result.warnings[0].kind, NullWarningKind::PossibleNullDereference);
+        assert_eq!(
+            result.warnings[0].kind,
+            NullWarningKind::PossibleNullDereference
+        );
     }
 
     #[test]
@@ -450,8 +456,6 @@ mod tests {
 
         // Должно быть предупреждение о доступе к свойству nullable объекта
         assert!(result.warnings.len() > 0);
-        assert!(result.warnings[0]
-            .message
-            .contains("доступе к свойству"));
+        assert!(result.warnings[0].message.contains("доступе к свойству"));
     }
 }

@@ -24,10 +24,10 @@
 
 mod visitor;
 
-pub use visitor::{FlowContext, SemanticVisitor, walk_program};
+pub use visitor::{walk_program, FlowContext, SemanticVisitor};
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
 
 /// Семантическое представление программы
 ///
@@ -65,7 +65,6 @@ pub struct SemanticNode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SemanticNodeKind {
     // === Базовые объявления ===
-
     /// Объявление переменной: `Перем x: Число;`
     VariableDeclaration {
         name: String,
@@ -86,7 +85,7 @@ pub enum SemanticNodeKind {
         params: Vec<Parameter>,
         return_type: Option<String>,
         body_scope: ScopeId,
-        body: Vec<usize>,  // ✅ НОВОЕ: индексы узлов тела функции
+        body: Vec<usize>, // ✅ НОВОЕ: индексы узлов тела функции
     },
 
     /// Объявление процедуры
@@ -94,11 +93,10 @@ pub enum SemanticNodeKind {
         name: String,
         params: Vec<Parameter>,
         body_scope: ScopeId,
-        body: Vec<usize>,  // ✅ НОВОЕ: индексы узлов тела процедуры
+        body: Vec<usize>, // ✅ НОВОЕ: индексы узлов тела процедуры
     },
 
     // === Control Flow (КРИТИЧНО для Milestone 2.3 flow-sensitive) ===
-
     /// Условный оператор: `Если условие Тогда ... Иначе ... КонецЕсли`
     IfStatement {
         condition_type: String,
@@ -127,9 +125,7 @@ pub enum SemanticNodeKind {
     },
 
     /// Возврат из функции: `Возврат значение;`
-    Return {
-        value_type: Option<String>,
-    },
+    Return { value_type: Option<String> },
 
     /// Прерывание цикла: `Прервать;`
     Break,
@@ -144,7 +140,6 @@ pub enum SemanticNodeKind {
     },
 
     // === Member Access (КРИТИЧНО для LSP hover) ===
-
     /// Доступ к члену объекта: `объект.свойство` или `объект.Метод()`
     MemberAccess {
         object_type: String,
@@ -160,7 +155,6 @@ pub enum SemanticNodeKind {
     },
 
     // === Scope tracking ===
-
     /// Блок scope
     BlockScope {
         statements: Vec<usize>, // Индексы SemanticNode
@@ -306,9 +300,7 @@ pub struct CfgNodeId(pub usize);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CfgNode {
     /// Обычный statement
-    Statement {
-        semantic_node_id: usize,
-    },
+    Statement { semantic_node_id: usize },
 
     /// Точка ветвления (if, while condition)
     Branch {
@@ -339,7 +331,8 @@ impl SemanticProgram {
     /// }
     /// ```
     pub fn find_node_at_position(&self, line: u32, column: u32) -> Option<&SemanticNode> {
-        self.nodes.iter()
+        self.nodes
+            .iter()
             .find(|node| node.span.contains(line, column))
     }
 
@@ -460,12 +453,15 @@ impl SymbolTable {
     pub fn new() -> Self {
         let root_scope = ScopeId(0);
         let mut scopes = HashMap::new();
-        scopes.insert(root_scope, Scope {
-            id: root_scope,
-            parent: None,
-            variables: HashMap::new(),
-            children: Vec::new(),
-        });
+        scopes.insert(
+            root_scope,
+            Scope {
+                id: root_scope,
+                parent: None,
+                variables: HashMap::new(),
+                children: Vec::new(),
+            },
+        );
 
         Self {
             scopes,
@@ -503,7 +499,13 @@ impl SymbolTable {
     }
 
     /// Зарегистрировать переменную в scope
-    pub fn register_variable(&mut self, scope_id: ScopeId, name: String, hint: TypeHint, span: Span) {
+    pub fn register_variable(
+        &mut self,
+        scope_id: ScopeId,
+        name: String,
+        hint: TypeHint,
+        span: Span,
+    ) {
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
             scope.variables.insert(name, (hint, span));
         }
@@ -511,12 +513,14 @@ impl SymbolTable {
 
     /// Зарегистрировать глобальную функцию
     pub fn register_function(&mut self, signature: FunctionSignature) {
-        self.global_functions.insert(signature.name.clone(), signature);
+        self.global_functions
+            .insert(signature.name.clone(), signature);
     }
 
     /// Зарегистрировать глобальную процедуру
     pub fn register_procedure(&mut self, signature: FunctionSignature) {
-        self.global_procedures.insert(signature.name.clone(), signature);
+        self.global_procedures
+            .insert(signature.name.clone(), signature);
     }
 }
 
@@ -547,11 +551,17 @@ impl SemanticProgram {
     ///
     /// Этот метод преобразует внутреннее представление IR в DTO,
     /// пригодное для передачи через LSP и Web API.
-    pub fn to_dto(&self, include_call_graph: bool, include_flow_sensitive: bool) -> SemanticTreeDto {
+    pub fn to_dto(
+        &self,
+        include_call_graph: bool,
+        include_flow_sensitive: bool,
+    ) -> SemanticTreeDto {
         let start_time = std::time::Instant::now();
 
         // Конвертируем root-level узлы (только узлы в root scope!)
-        let root_nodes = self.nodes.iter()
+        let root_nodes = self
+            .nodes
+            .iter()
             .filter(|node| {
                 // ✅ ИСПРАВЛЕНИЕ: Фильтруем по scope_id, а не по типу узла
                 // Показываем только узлы, которые находятся в root scope
@@ -622,18 +632,31 @@ impl SemanticProgram {
     }
 
     /// Извлечь информацию из SemanticNodeKind
-    fn extract_node_info(&self, kind: &SemanticNodeKind) -> (String, Option<String>, HashMap<String, String>) {
+    fn extract_node_info(
+        &self,
+        kind: &SemanticNodeKind,
+    ) -> (String, Option<String>, HashMap<String, String>) {
         let mut attributes = HashMap::new();
 
         match kind {
-            SemanticNodeKind::VariableDeclaration { name, type_hint, is_export, .. } => {
+            SemanticNodeKind::VariableDeclaration {
+                name,
+                type_hint,
+                is_export,
+                ..
+            } => {
                 if let Some(hint) = type_hint {
                     attributes.insert("type".to_string(), hint.clone());
                 }
                 attributes.insert("is_export".to_string(), is_export.to_string());
                 ("Variable".to_string(), Some(name.clone()), attributes)
             }
-            SemanticNodeKind::FunctionDeclaration { name, params, return_type, .. } => {
+            SemanticNodeKind::FunctionDeclaration {
+                name,
+                params,
+                return_type,
+                ..
+            } => {
                 attributes.insert("parameter_count".to_string(), params.len().to_string());
                 if let Some(ret) = return_type {
                     attributes.insert("return_type".to_string(), ret.clone());
@@ -644,52 +667,63 @@ impl SemanticProgram {
                 attributes.insert("parameter_count".to_string(), params.len().to_string());
                 ("Procedure".to_string(), Some(name.clone()), attributes)
             }
-            SemanticNodeKind::Assignment { variable, value_type } => {
+            SemanticNodeKind::Assignment {
+                variable,
+                value_type,
+            } => {
                 attributes.insert("variable".to_string(), variable.clone());
                 attributes.insert("value_type".to_string(), value_type.clone());
                 // ✅ Показываем имя переменной в UI
-                ("Assignment".to_string(), Some(format!("{} = {}", variable, value_type)), attributes)
+                (
+                    "Assignment".to_string(),
+                    Some(format!("{} = {}", variable, value_type)),
+                    attributes,
+                )
             }
-            SemanticNodeKind::IfStatement { .. } => {
-                ("IfStatement".to_string(), None, attributes)
-            }
-            SemanticNodeKind::ForLoop { .. } => {
-                ("ForLoop".to_string(), None, attributes)
-            }
-            SemanticNodeKind::WhileLoop { .. } => {
-                ("WhileLoop".to_string(), None, attributes)
-            }
-            SemanticNodeKind::FunctionCall { function_name, arg_types, .. } => {
+            SemanticNodeKind::IfStatement { .. } => ("IfStatement".to_string(), None, attributes),
+            SemanticNodeKind::ForLoop { .. } => ("ForLoop".to_string(), None, attributes),
+            SemanticNodeKind::WhileLoop { .. } => ("WhileLoop".to_string(), None, attributes),
+            SemanticNodeKind::FunctionCall {
+                function_name,
+                arg_types,
+                ..
+            } => {
                 attributes.insert("function_name".to_string(), function_name.clone());
                 attributes.insert("arg_count".to_string(), arg_types.len().to_string());
-                ("FunctionCall".to_string(), Some(function_name.clone()), attributes)
+                (
+                    "FunctionCall".to_string(),
+                    Some(function_name.clone()),
+                    attributes,
+                )
             }
-            SemanticNodeKind::Return { .. } => {
-                ("Return".to_string(), None, attributes)
-            }
-            SemanticNodeKind::TryExcept { .. } => {
-                ("TryExcept".to_string(), None, attributes)
-            }
-            SemanticNodeKind::Break => {
-                ("Break".to_string(), None, attributes)
-            }
-            SemanticNodeKind::Continue => {
-                ("Continue".to_string(), None, attributes)
-            }
-            SemanticNodeKind::ForEachLoop { variable, collection_type, .. } => {
+            SemanticNodeKind::Return { .. } => ("Return".to_string(), None, attributes),
+            SemanticNodeKind::TryExcept { .. } => ("TryExcept".to_string(), None, attributes),
+            SemanticNodeKind::Break => ("Break".to_string(), None, attributes),
+            SemanticNodeKind::Continue => ("Continue".to_string(), None, attributes),
+            SemanticNodeKind::ForEachLoop {
+                variable,
+                collection_type,
+                ..
+            } => {
                 attributes.insert("variable".to_string(), variable.clone());
                 attributes.insert("collection_type".to_string(), collection_type.clone());
                 ("ForEachLoop".to_string(), None, attributes)
             }
-            SemanticNodeKind::MemberAccess { object_type, member_name, is_method } => {
+            SemanticNodeKind::MemberAccess {
+                object_type,
+                member_name,
+                is_method,
+            } => {
                 attributes.insert("object_type".to_string(), object_type.clone());
                 attributes.insert("member_name".to_string(), member_name.clone());
                 attributes.insert("is_method".to_string(), is_method.to_string());
-                ("MemberAccess".to_string(), Some(member_name.clone()), attributes)
+                (
+                    "MemberAccess".to_string(),
+                    Some(member_name.clone()),
+                    attributes,
+                )
             }
-            SemanticNodeKind::BlockScope { .. } => {
-                ("BlockScope".to_string(), None, attributes)
-            }
+            SemanticNodeKind::BlockScope { .. } => ("BlockScope".to_string(), None, attributes),
         }
     }
 
@@ -706,7 +740,11 @@ impl SemanticProgram {
             ProcedureDeclaration { body, .. } => body.clone(),
 
             // Существующие узлы с индексами
-            IfStatement { then_branch, else_branch, .. } => {
+            IfStatement {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 let mut indices = then_branch.clone();
                 if let Some(else_idx) = else_branch {
                     indices.extend(else_idx);
@@ -716,7 +754,10 @@ impl SemanticProgram {
             WhileLoop { body, .. } => body.clone(),
             ForLoop { body, .. } => body.clone(),
             ForEachLoop { body, .. } => body.clone(),
-            TryExcept { try_body, except_body } => {
+            TryExcept {
+                try_body,
+                except_body,
+            } => {
                 let mut indices = try_body.clone();
                 indices.extend(except_body);
                 indices
@@ -956,7 +997,7 @@ mod tests {
             program.symbols.root_scope,
             "globalVar".to_string(),
             TypeHint::Explicit("Число".to_string()),
-            Span::stub()
+            Span::stub(),
         );
 
         // Регистрируем переменную в child scope
@@ -964,7 +1005,7 @@ mod tests {
             child_scope,
             "localVar".to_string(),
             TypeHint::Explicit("Строка".to_string()),
-            Span::stub()
+            Span::stub(),
         );
 
         // Поиск в child scope должен найти обе переменные
@@ -972,8 +1013,12 @@ mod tests {
         assert!(program.resolve_variable("globalVar", child_scope).is_some());
 
         // Поиск в root scope должен найти только globalVar
-        assert!(program.resolve_variable("globalVar", program.symbols.root_scope).is_some());
-        assert!(program.resolve_variable("localVar", program.symbols.root_scope).is_none());
+        assert!(program
+            .resolve_variable("globalVar", program.symbols.root_scope)
+            .is_some());
+        assert!(program
+            .resolve_variable("localVar", program.symbols.root_scope)
+            .is_none());
     }
 
     #[test]
@@ -1003,12 +1048,18 @@ mod tests {
         // Поиск первого узла
         let node = program.find_node_at_position(1, 5);
         assert!(node.is_some());
-        assert!(matches!(node.unwrap().kind, SemanticNodeKind::VariableDeclaration { .. }));
+        assert!(matches!(
+            node.unwrap().kind,
+            SemanticNodeKind::VariableDeclaration { .. }
+        ));
 
         // Поиск второго узла
         let node = program.find_node_at_position(2, 5);
         assert!(node.is_some());
-        assert!(matches!(node.unwrap().kind, SemanticNodeKind::Assignment { .. }));
+        assert!(matches!(
+            node.unwrap().kind,
+            SemanticNodeKind::Assignment { .. }
+        ));
 
         // Поиск вне узлов
         assert!(program.find_node_at_position(10, 5).is_none());

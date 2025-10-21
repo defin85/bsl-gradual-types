@@ -4,16 +4,17 @@
 //! Координирует только System Layer компоненты
 
 use anyhow::Result;
-use std::sync::{Arc, Mutex};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
 
-use bsl_shared::engine::AnalysisEngine;
+use crate::application::type_system_service::TypeSystemService;
+use crate::data::adapters::convert_syntax_helper_to_raw;
+use crate::data::loaders::SyntaxHelperParser;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
-use crate::application::type_system_service::TypeSystemService;
-use crate::data::loaders::SyntaxHelperParser;
-use crate::data::adapters::convert_syntax_helper_to_raw;
+use bsl_shared::domain::types::RawTypeData;
+use bsl_shared::engine::AnalysisEngine;
 
 use super::basic_observability::BasicObservability;
 use super::ir_cache::IrCache;
@@ -79,7 +80,7 @@ impl SystemCoordinator {
     pub async fn start_with_paths(
         &self,
         syntax_helper_path: Option<&Path>,
-        _config_path: Option<&Path>,
+        config_path: Option<&Path>,
     ) -> Result<(), StartupError> {
         self.observability.log_startup();
 
@@ -127,11 +128,15 @@ impl SystemCoordinator {
         let database = syntax_parser.export_database();
         if !database.nodes.is_empty() {
             let platform_raw_data = convert_syntax_helper_to_raw(&database);
-            repository.load_types(platform_raw_data)
+            repository
+                .load_types(platform_raw_data)
                 .map_err(StartupError::PlatformTypesError)?;
 
             let stats = repository.get_stats();
-            info!("📊 Загружено {} типов из синтаксис-помощника", stats.total_types);
+            info!(
+                "📊 Загружено {} типов из синтаксис-помощника",
+                stats.total_types
+            );
         } else {
             // Загружаем базовые типы как fallback
             Self::load_fallback_types(&repository)?;
@@ -149,6 +154,24 @@ impl SystemCoordinator {
             *cache = Some(Arc::new(analysis_engine));
         }
 
+        // 7. Загружаем метаданные конфигурации если путь указан
+        if let Some(config_path) = config_path {
+            info!(
+                "📂 Загружаем метаданные конфигурации: {}",
+                config_path.display()
+            );
+
+            match self.load_configuration_metadata(config_path) {
+                Ok(count) => {
+                    info!("✅ Загружено {} объектов метаданных конфигурации", count);
+                }
+                Err(e) => {
+                    warn!("⚠️ Ошибка загрузки метаданных конфигурации: {}", e);
+                    info!("📦 Продолжаем работу с типами платформы...");
+                }
+            }
+        }
+
         info!("💾 SystemCoordinator: прогрев кеша...");
         self.cache.warm_cache()?;
 
@@ -158,7 +181,7 @@ impl SystemCoordinator {
 
     /// Загрузка базовых типов как fallback
     fn load_fallback_types(repository: &Arc<InMemoryTypeRepository>) -> Result<(), StartupError> {
-        use bsl_shared::domain::types::{RawTypeData, RawDataSource};
+        use bsl_shared::domain::types::{RawDataSource, RawTypeData};
 
         info!("📦 Загружаем базовые типы платформы 1С...");
 
@@ -197,7 +220,8 @@ impl SystemCoordinator {
             },
         ];
 
-        repository.load_types(basic_types)
+        repository
+            .load_types(basic_types)
             .map_err(StartupError::PlatformTypesError)?;
 
         info!("✅ Базовые типы загружены: 4 типа");
@@ -265,6 +289,61 @@ impl SystemCoordinator {
     /// Health check
     pub fn health_status(&self) -> crate::system::basic_observability::HealthStatus {
         self.observability.health_check()
+    }
+
+    /// Загрузить метаданные конфигурации через универсальный парсер
+    ///
+    /// Использует ConfigurationDiscovery для автоматического обнаружения всех объектов метаданных
+    /// и загружает их в TypeRepository текущего AnalysisEngine.
+    ///
+    /// # Примеры
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    /// use bsl_backend::system::SystemCoordinator;
+    ///
+    /// let coordinator = SystemCoordinator::new();
+    /// let config_path = Path::new("examples/conf/conf_test");
+    /// let loaded = coordinator.load_configuration_metadata(config_path).unwrap();
+    /// println!("Загружено {} объектов метаданных", loaded);
+    /// ```
+    pub fn load_configuration_metadata(&self, config_path: &Path) -> Result<usize> {
+        use crate::data::loaders::ConfigurationDiscovery;
+
+        info!("🔍 Загрузка метаданных конфигурации из {:?}", config_path);
+
+        // Создаём discovery и обнаруживаем все объекты
+        let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+        let metadata_objects = discovery
+            .discover_all_metadata()
+            .map_err(|e| anyhow::anyhow!("Не удалось обнаружить метаданные: {}", e))?;
+
+        info!(
+            "📦 Обнаружено {} объектов метаданных",
+            metadata_objects.len()
+        );
+
+        // Получаем текущий AnalysisEngine или создаём новый
+        let engine = self.analysis_engine().ok_or_else(|| {
+            anyhow::anyhow!("AnalysisEngine не инициализирован. Вызовите start() сначала.")
+        })?;
+
+        // Получаем TypeRepository из AnalysisEngine
+        let repository = engine.get_repository();
+
+        // Конвертируем все объекты в RawTypeData
+        let raw_types: Vec<RawTypeData> = metadata_objects
+            .into_iter()
+            .map(|obj| obj.to_raw_type_data())
+            .collect();
+
+        let count = raw_types.len();
+
+        // Загружаем все типы в репозиторий за один вызов
+        repository.load_types(raw_types)?;
+
+        info!("✅ Загружено {} типов из конфигурации", count);
+        Ok(count)
     }
 }
 

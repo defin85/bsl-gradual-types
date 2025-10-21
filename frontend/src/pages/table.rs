@@ -10,7 +10,8 @@ use leptos::task::spawn_local;
 #[allow(non_snake_case)]
 pub fn TablePage(
     /// Поисковый запрос для фильтрации
-    #[prop(optional)] _search_query: Option<RwSignal<String>>,
+    #[prop(optional)]
+    _search_query: Option<RwSignal<String>>,
 ) -> impl IntoView {
     let filters = RwSignal::new(TypeFilters::new());
     let types = RwSignal::new(Vec::<TypeInfo>::new());
@@ -23,14 +24,14 @@ pub fn TablePage(
     let load_types = move || {
         loading.set(true);
         error.set(None);
-        
+
         spawn_local(async move {
             match fetch_types(filters.get()).await {
                 Ok(result) => {
                     types.set(result.types.clone());
                     search_result.set(Some(result));
                     loading.set(false);
-                },
+                }
                 Err(err) => {
                     error.set(Some(err));
                     loading.set(false);
@@ -66,15 +67,15 @@ pub fn TablePage(
             "view" => {
                 web_sys::console::log_1(&format!("View type: {}", type_info.name).into());
                 // Открыть детальный просмотр
-            },
+            }
             "copy" => {
                 web_sys::console::log_1(&format!("Copy type: {}", type_info.name).into());
                 // Скопировать в буфер обмена
-            },
+            }
             "link" => {
                 web_sys::console::log_1(&format!("Link to type: {}", type_info.name).into());
                 // Создать ссылку на тип
-            },
+            }
             _ => {}
         }
     };
@@ -84,7 +85,10 @@ pub fn TablePage(
         let types_list = types.get();
         let total = types_list.len() as u32;
         let known = types_list.iter().filter(|t| t.certainty >= 90).count() as u32;
-        let inferred = types_list.iter().filter(|t| t.certainty >= 50 && t.certainty < 90).count() as u32;
+        let inferred = types_list
+            .iter()
+            .filter(|t| t.certainty >= 50 && t.certainty < 90)
+            .count() as u32;
         let unknown = types_list.iter().filter(|t| t.certainty < 50).count() as u32;
         let flow_sensitive = types_list.iter().filter(|t| t.flow_sensitive).count() as u32;
 
@@ -121,7 +125,7 @@ pub fn TablePage(
                 </div>
             </div>
 
-            <SearchBar 
+            <SearchBar
                 filters=filters
                 on_filters_change=Callback::new(handle_filters_change)
                 placeholder="Поиск типов...".to_string()
@@ -151,7 +155,7 @@ pub fn TablePage(
                                 search_result=search_result_signal
                                 on_page_change=Callback::new(handle_page_change)
                             />
-                            
+
                             {move || {
                                 if let Some(selected) = selected_type.get() {
                                     view! {

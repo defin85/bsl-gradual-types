@@ -6,12 +6,16 @@ use std::sync::Arc;
 #[tokio::test]
 async fn debug_test_hover_file_structure() {
     // Читаем реальный файл
-    let code = std::fs::read_to_string("C:\\1CProject\\bsl-gradual-types\\test_hover_milestone_2_11.bsl")
-        .expect("Failed to read test file");
+    let code =
+        std::fs::read_to_string("C:\\1CProject\\bsl-gradual-types\\test_hover_milestone_2_11.bsl")
+            .expect("Failed to read test file");
 
     // Создаём coordinator
     let coordinator = Arc::new(SystemCoordinator::new());
-    coordinator.start().await.expect("Failed to start coordinator");
+    coordinator
+        .start()
+        .await
+        .expect("Failed to start coordinator");
 
     let type_service = coordinator.type_service().expect("No type service");
 
@@ -44,7 +48,9 @@ async fn debug_test_hover_file_structure() {
     println!("Total symbols: {}", dto.symbol_table.len());
 
     // Проверяем дублирование
-    let var_count = dto.root_nodes.iter()
+    let var_count = dto
+        .root_nodes
+        .iter()
         .filter(|n| n.kind == "Variable")
         .count();
 
@@ -56,7 +62,9 @@ async fn debug_test_hover_file_structure() {
     }
 
     // Проверяем функцию
-    let func_nodes: Vec<_> = dto.root_nodes.iter()
+    let func_nodes: Vec<_> = dto
+        .root_nodes
+        .iter()
         .filter(|n| n.kind == "Function")
         .collect();
 
@@ -66,7 +74,9 @@ async fn debug_test_hover_file_structure() {
         println!("\nFunction {:?}:", func.name);
         println!("  Children: {}", func.children.len());
 
-        let var_in_func = func.children.iter()
+        let var_in_func = func
+            .children
+            .iter()
             .filter(|n| n.kind == "Variable")
             .count();
         println!("  Variables inside: {}", var_in_func);

@@ -51,7 +51,7 @@ pub fn TableView(
 
         if let (Some(column), order) = (sort_column.get(), sort_order.get()) {
             match order {
-                SortOrder::None => {},
+                SortOrder::None => {}
                 SortOrder::Asc => {
                     types_list.sort_by(|a, b| match column.as_str() {
                         "name" => a.name.cmp(&b.name),
@@ -60,7 +60,7 @@ pub fn TableView(
                         "flow_sensitive" => a.flow_sensitive.cmp(&b.flow_sensitive),
                         _ => std::cmp::Ordering::Equal,
                     });
-                },
+                }
                 SortOrder::Desc => {
                     types_list.sort_by(|a, b| match column.as_str() {
                         "name" => b.name.cmp(&a.name),
@@ -69,7 +69,7 @@ pub fn TableView(
                         "flow_sensitive" => b.flow_sensitive.cmp(&a.flow_sensitive),
                         _ => std::cmp::Ordering::Equal,
                     });
-                },
+                }
             }
         }
 
@@ -94,7 +94,7 @@ pub fn TableView(
             "view" => {
                 is_closing.set(false); // Reset closing flag when opening
                 selected_type.set(Some(type_info));
-            },
+            }
             "copy" => web_sys::console::log_1(&format!("Copy type: {}", type_info.name).into()),
             "link" => web_sys::console::log_1(&format!("Link to type: {}", type_info.name).into()),
             _ => {}
@@ -313,8 +313,9 @@ fn get_category_class(category: &str) -> String {
         "Configuration" => "category-configuration",
         "Union" => "category-union",
         "Dynamic" => "category-dynamic",
-        _ => "category-unknown"
-    }.to_string()
+        _ => "category-unknown",
+    }
+    .to_string()
 }
 
 /// Get icon for category
@@ -324,6 +325,6 @@ fn get_category_icon(category: &str) -> &'static str {
         "Configuration" => "⚙️",
         "Union" => "🔗",
         "Dynamic" => "🌟",
-        _ => "❓"
+        _ => "❓",
     }
 }

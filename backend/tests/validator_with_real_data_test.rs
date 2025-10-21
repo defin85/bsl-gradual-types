@@ -1,6 +1,5 @@
 //! Интеграционный тест TypeValidator с реальными данными платформы 1С
 
-use std::sync::Arc;
 use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
 use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
@@ -10,6 +9,7 @@ use bsl_shared::domain::types::{
 };
 use bsl_shared::domain::validators::TypeValidator;
 use bsl_shared::domain::TypeMetadataLookup;
+use std::sync::Arc;
 
 #[test]
 fn test_validate_array_methods_with_real_data() {
@@ -64,10 +64,7 @@ fn test_validate_array_methods_with_real_data() {
 
     // Проверка case-insensitive
     let error = validator.validate_method_exists(&array_resolution, "добавить");
-    assert!(
-        error.is_none(),
-        "Case-insensitive поиск должен работать"
-    );
+    assert!(error.is_none(), "Case-insensitive поиск должен работать");
     println!("✅ Case-insensitive поиск работает");
 
     // Проверяем английское имя метода
@@ -173,7 +170,10 @@ fn test_validate_http_connection_complex_type() {
 
     // Проверяем методы
     let error = validator.validate_method_exists(&http_resolution, "ВызватьHTTPМетод");
-    assert!(error.is_none(), "Метод 'ВызватьHTTPМетод' должен существовать");
+    assert!(
+        error.is_none(),
+        "Метод 'ВызватьHTTPМетод' должен существовать"
+    );
     println!("✅ Метод 'ВызватьHTTPМетод' найден");
 
     // Проверяем свойства

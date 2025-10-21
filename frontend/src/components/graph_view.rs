@@ -137,8 +137,9 @@ fn get_category_class(category: &str) -> String {
         "Configuration" => "category-configuration",
         "Union" => "category-union",
         "Dynamic" => "category-dynamic",
-        _ => "category-unknown"
-    }.to_string()
+        _ => "category-unknown",
+    }
+    .to_string()
 }
 
 /// Get icon for category
@@ -148,6 +149,6 @@ fn get_category_icon(category: &str) -> &'static str {
         "Configuration" => "⚙️",
         "Union" => "🔗",
         "Dynamic" => "🌟",
-        _ => "❓"
+        _ => "❓",
     }
 }

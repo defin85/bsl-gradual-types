@@ -25,11 +25,14 @@ pub enum SortDirection {
 #[allow(non_snake_case)]
 pub fn TypeTable(
     /// Список типов для отображения
-    #[prop(into)] types: Signal<Vec<TypeInfo>>,
+    #[prop(into)]
+    types: Signal<Vec<TypeInfo>>,
     /// Обработчик клика по строке
-    #[prop(optional)] on_row_click: Option<Callback<TypeInfo>>,
+    #[prop(optional)]
+    on_row_click: Option<Callback<TypeInfo>>,
     /// Обработчик действий
-    #[prop(optional)] on_action: Option<Callback<(String, TypeInfo)>>,
+    #[prop(optional)]
+    on_action: Option<Callback<(String, TypeInfo)>>,
 ) -> impl IntoView {
     let sort_column = RwSignal::new(SortColumn::Name);
     let sort_direction = RwSignal::new(SortDirection::Asc);
@@ -43,14 +46,12 @@ pub fn TypeTable(
             let comparison = match col {
                 SortColumn::Name => a.name.cmp(&b.name),
                 SortColumn::Category => a.category.cmp(&b.category),
-                SortColumn::Certainty => {
-                    a.certainty.cmp(&b.certainty)
-                },
+                SortColumn::Certainty => a.certainty.cmp(&b.certainty),
                 SortColumn::Source => a.source.cmp(&b.source),
                 SortColumn::Methods => {
                     // Since we don't have methods_count in new structure, use 0
                     std::cmp::Ordering::Equal
-                },
+                }
             };
 
             match dir {
@@ -122,29 +123,29 @@ pub fn TypeTable(
                                 let type_info_clone = type_info.clone();
                                 let on_row_click_clone = on_row_click.clone();
                                 let on_action_clone = on_action.clone();
-                                
+
                                 match (on_row_click_clone, on_action_clone) {
                                     (Some(row_handler), Some(action_handler)) => view! {
-                                        <TypeTableRow 
+                                        <TypeTableRow
                                             type_info=Signal::derive(move || type_info_clone.clone())
                                             on_row_click=row_handler
                                             on_action=action_handler
                                         />
                                     }.into_view(),
                                     (Some(row_handler), None) => view! {
-                                        <TypeTableRow 
+                                        <TypeTableRow
                                             type_info=Signal::derive(move || type_info_clone.clone())
                                             on_row_click=row_handler
                                         />
                                     }.into_view(),
                                     (None, Some(action_handler)) => view! {
-                                        <TypeTableRow 
+                                        <TypeTableRow
                                             type_info=Signal::derive(move || type_info_clone.clone())
                                             on_action=action_handler
                                         />
                                     }.into_view(),
                                     (None, None) => view! {
-                                        <TypeTableRow 
+                                        <TypeTableRow
                                             type_info=Signal::derive(move || type_info_clone.clone())
                                         />
                                     }.into_view(),
@@ -163,11 +164,14 @@ pub fn TypeTable(
 #[allow(non_snake_case)]
 fn TypeTableRow(
     /// Информация о типе
-    #[prop(into)] type_info: Signal<TypeInfo>,
+    #[prop(into)]
+    type_info: Signal<TypeInfo>,
     /// Обработчик клика по строке
-    #[prop(optional)] on_row_click: Option<Callback<TypeInfo>>,
+    #[prop(optional)]
+    on_row_click: Option<Callback<TypeInfo>>,
     /// Обработчик действий
-    #[prop(optional)] on_action: Option<Callback<(String, TypeInfo)>>,
+    #[prop(optional)]
+    on_action: Option<Callback<(String, TypeInfo)>>,
 ) -> impl IntoView {
     let handle_row_click = move |_| {
         if let Some(ref handler) = on_row_click {

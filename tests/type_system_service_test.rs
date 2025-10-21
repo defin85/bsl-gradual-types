@@ -12,7 +12,8 @@ async fn test_get_all_types_as_dto_basic() {
     let coordinator = SystemCoordinator::new();
     coordinator.start().await.expect("Should start");
 
-    let type_service = coordinator.type_service()
+    let type_service = coordinator
+        .type_service()
         .expect("TypeSystemService should be available");
 
     // Act: получаем все типы с пагинацией
@@ -25,7 +26,10 @@ async fn test_get_all_types_as_dto_basic() {
     assert!(result.types.len() <= limit, "Should respect limit");
 
     // Проверяем наличие метрик
-    assert!(result.metrics.total_types > 0, "Should have total_types metric");
+    assert!(
+        result.metrics.total_types > 0,
+        "Should have total_types metric"
+    );
 
     // Проверяем пагинацию
     assert!(result.pagination.is_some(), "Should have pagination info");
@@ -53,7 +57,10 @@ async fn test_get_all_types_as_dto_pagination() {
         let second_page_names: Vec<_> = page2.types.iter().map(|t| &t.name).collect();
 
         // Первые элементы не должны совпадать
-        assert_ne!(first_page_names, second_page_names, "Pages should have different types");
+        assert_ne!(
+            first_page_names, second_page_names,
+            "Pages should have different types"
+        );
     }
 
     // Проверяем информацию о пагинации
@@ -77,13 +84,20 @@ async fn test_get_all_types_as_dto_certainty_levels() {
     // Assert: проверяем что у типов есть certainty levels
     for type_dto in &result.types {
         assert!(type_dto.certainty <= 100, "Certainty should be 0-100%");
-        assert!(!type_dto.certainty_text.is_empty(), "Should have certainty text");
+        assert!(
+            !type_dto.certainty_text.is_empty(),
+            "Should have certainty text"
+        );
     }
 
     // Проверяем метрики по certainty
     let metrics = &result.metrics;
-    let total_categorized = metrics.certainty_high + metrics.certainty_medium + metrics.certainty_low;
-    assert!(total_categorized > 0, "Should categorize types by certainty");
+    let total_categorized =
+        metrics.certainty_high + metrics.certainty_medium + metrics.certainty_low;
+    assert!(
+        total_categorized > 0,
+        "Should categorize types by certainty"
+    );
 }
 
 #[tokio::test]
@@ -100,7 +114,10 @@ async fn test_get_all_types_as_dto_categories() {
     assert!(!result.categories.is_empty(), "Should have categories");
 
     for (category_name, category_dto) in &result.categories {
-        assert!(!category_name.is_empty(), "Category name should not be empty");
+        assert!(
+            !category_name.is_empty(),
+            "Category name should not be empty"
+        );
         assert!(!category_dto.color.is_empty(), "Category should have color");
         assert!(!category_dto.icon.is_empty(), "Category should have icon");
         // count может быть любым неотрицательным числом (usize)
@@ -146,8 +163,14 @@ async fn test_get_metrics_summary_consistency() {
     // Assert: проверяем что сумма категорий = total
     let total = metrics.get("total_types").and_then(|v| v.as_u64()).unwrap();
     let known = metrics.get("known_types").and_then(|v| v.as_u64()).unwrap();
-    let inferred = metrics.get("inferred_types").and_then(|v| v.as_u64()).unwrap();
-    let unknown = metrics.get("unknown_types").and_then(|v| v.as_u64()).unwrap();
+    let inferred = metrics
+        .get("inferred_types")
+        .and_then(|v| v.as_u64())
+        .unwrap();
+    let unknown = metrics
+        .get("unknown_types")
+        .and_then(|v| v.as_u64())
+        .unwrap();
 
     assert_eq!(
         total,
@@ -170,9 +193,15 @@ async fn test_dto_type_fields_completeness() {
     for type_dto in &result.types {
         assert!(!type_dto.id.is_empty(), "ID should not be empty");
         assert!(!type_dto.name.is_empty(), "Name should not be empty");
-        assert!(!type_dto.category.is_empty(), "Category should not be empty");
+        assert!(
+            !type_dto.category.is_empty(),
+            "Category should not be empty"
+        );
         assert!(!type_dto.source.is_empty(), "Source should not be empty");
-        assert!(!type_dto.description.is_empty(), "Description should not be empty");
+        assert!(
+            !type_dto.description.is_empty(),
+            "Description should not be empty"
+        );
         // facets могут быть пустыми для некоторых типов
         // union_types опциональны
     }

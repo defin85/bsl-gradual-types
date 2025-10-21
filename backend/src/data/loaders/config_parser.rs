@@ -193,10 +193,9 @@ impl ConfigurationGuidedParser {
                             current_element = tag.to_string();
 
                             // Обрабатываем объекты метаданных в ChildObjects
-                            if in_child_objects
-                                && self.xml_tag_to_metadata_kind(tag).is_some() {
-                                    // Пока не знаем имя, создадим заготовку позже в Event::Text
-                                }
+                            if in_child_objects && self.xml_tag_to_metadata_kind(tag).is_some() {
+                                // Пока не знаем имя, создадим заготовку позже в Event::Text
+                            }
                         }
                     }
                 }
@@ -329,8 +328,7 @@ impl ConfigurationGuidedParser {
 
             if path.is_file() {
                 if let Some(file_name) = path.file_stem() {
-                    if file_name == target_name
-                        && path.extension().is_some_and(|ext| ext == "xml")
+                    if file_name == target_name && path.extension().is_some_and(|ext| ext == "xml")
                     {
                         return Ok(Some(path));
                     }
@@ -467,10 +465,9 @@ impl ConfigurationGuidedParser {
                                 _ => {}
                             }
                         } else if let Some(ref mut attr) = current_attribute {
-                            if in_attribute_properties
-                                && current_element.as_str() == "Name" {
-                                    attr.name = text;
-                                }
+                            if in_attribute_properties && current_element.as_str() == "Name" {
+                                attr.name = text;
+                            }
                         } else if let Some(ref mut ts) = current_tabular_section {
                             if current_element.as_str() == "Name" {
                                 ts.name = text;
@@ -771,12 +768,25 @@ impl ConfigurationGuidedParser {
         match kind {
             MetadataKind::Catalog => "Справочник",
             MetadataKind::Document => "Документ",
-            MetadataKind::Register => "Регистр сведений",
             MetadataKind::Enum => "Перечисление",
-            MetadataKind::Report => "Отчет",
-            MetadataKind::DataProcessor => "Обработка",
+            MetadataKind::InformationRegister => "Регистр сведений",
+            MetadataKind::AccumulationRegister => "Регистр накопления",
+            MetadataKind::AccountingRegister => "Регистр бухгалтерии",
+            MetadataKind::CalculationRegister => "Регистр расчета",
             MetadataKind::ChartOfAccounts => "План счетов",
             MetadataKind::ChartOfCharacteristicTypes => "План видов характеристик",
+            MetadataKind::ChartOfCalculationTypes => "План видов расчета",
+            MetadataKind::Report => "Отчет",
+            MetadataKind::DataProcessor => "Обработка",
+            MetadataKind::BusinessProcess => "Бизнес-процесс",
+            MetadataKind::Task => "Задача",
+            MetadataKind::ExchangePlan => "План обмена",
+            MetadataKind::Constant => "Константа",
+            MetadataKind::Role => "Роль",
+            MetadataKind::CommonModule => "Общий модуль",
+            MetadataKind::Subsystem => "Подсистема",
+            MetadataKind::Language => "Язык",
+            MetadataKind::Register => "Регистр",
         }
     }
 
@@ -785,12 +795,25 @@ impl ConfigurationGuidedParser {
         match kind {
             MetadataKind::Catalog => "Справочники",
             MetadataKind::Document => "Документы",
-            MetadataKind::Register => "РегистрыСведений",
             MetadataKind::Enum => "Перечисления",
-            MetadataKind::Report => "Отчеты",
-            MetadataKind::DataProcessor => "Обработки",
+            MetadataKind::InformationRegister => "РегистрыСведений",
+            MetadataKind::AccumulationRegister => "РегистрыНакопления",
+            MetadataKind::AccountingRegister => "РегистрыБухгалтерии",
+            MetadataKind::CalculationRegister => "РегистрыРасчета",
             MetadataKind::ChartOfAccounts => "ПланыСчетов",
             MetadataKind::ChartOfCharacteristicTypes => "ПланыВидовХарактеристик",
+            MetadataKind::ChartOfCalculationTypes => "ПланыВидовРасчета",
+            MetadataKind::Report => "Отчеты",
+            MetadataKind::DataProcessor => "Обработки",
+            MetadataKind::BusinessProcess => "БизнесПроцессы",
+            MetadataKind::Task => "Задачи",
+            MetadataKind::ExchangePlan => "ПланыОбмена",
+            MetadataKind::Constant => "Константы",
+            MetadataKind::Role => "Роли",
+            MetadataKind::CommonModule => "ОбщиеМодули",
+            MetadataKind::Subsystem => "Подсистемы",
+            MetadataKind::Language => "Языки",
+            MetadataKind::Register => "Регистры",
         }
     }
 
@@ -822,13 +845,26 @@ impl ConfigurationGuidedParser {
             match metadata.kind {
                 MetadataKind::Catalog => stats.catalogs += 1,
                 MetadataKind::Document => stats.documents += 1,
-                MetadataKind::Register => stats.registers += 1,
                 MetadataKind::Enum => stats.enums += 1,
+                MetadataKind::InformationRegister
+                | MetadataKind::AccumulationRegister
+                | MetadataKind::AccountingRegister
+                | MetadataKind::CalculationRegister
+                | MetadataKind::Register => stats.registers += 1,
                 MetadataKind::Report => stats.reports += 1,
                 MetadataKind::DataProcessor => stats.data_processors += 1,
                 MetadataKind::ChartOfAccounts => stats.chart_of_accounts += 1,
-                MetadataKind::ChartOfCharacteristicTypes => {
-                    stats.chart_of_characteristic_types += 1
+                MetadataKind::ChartOfCharacteristicTypes
+                | MetadataKind::ChartOfCalculationTypes => stats.chart_of_characteristic_types += 1,
+                MetadataKind::BusinessProcess
+                | MetadataKind::Task
+                | MetadataKind::ExchangePlan
+                | MetadataKind::Constant
+                | MetadataKind::Role
+                | MetadataKind::CommonModule
+                | MetadataKind::Subsystem
+                | MetadataKind::Language => {
+                    // Остальные типы не учитываются в статистике пока
                 }
             }
 

@@ -4,8 +4,8 @@ use crate::api::*;
 use crate::components::GraphView;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use wasm_bindgen::JsCast;
 use std::collections::HashSet;
+use wasm_bindgen::JsCast;
 
 #[derive(Clone, Debug)]
 struct SimpleGraph {
@@ -25,9 +25,13 @@ struct SimpleNode {
 #[allow(non_snake_case)]
 pub fn GraphPage(
     /// Поисковый запрос для фильтрации
-    #[prop(optional)] _search_query: Option<RwSignal<String>>,
+    #[prop(optional)]
+    _search_query: Option<RwSignal<String>>,
 ) -> impl IntoView {
-    let graph = RwSignal::new(SimpleGraph { nodes: vec![], connections: vec![] });
+    let graph = RwSignal::new(SimpleGraph {
+        nodes: vec![],
+        connections: vec![],
+    });
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
     let selected_node = RwSignal::new(None::<SimpleNode>);
@@ -48,7 +52,7 @@ pub fn GraphPage(
                     let nodes = vec![]; // TODO: построить узлы из connections
                     graph.set(SimpleGraph { nodes, connections });
                     loading.set(false);
-                },
+                }
                 Err(err) => {
                     error.set(Some(err));
                     loading.set(false);
@@ -64,13 +68,24 @@ pub fn GraphPage(
     let _handle_node_click = move |type_info: TypeDto| {
         web_sys::console::log_1(&format!("Clicked node: {}", type_info.name).into());
         // Найдем узел в графе
-        if let Some(node) = graph.get().nodes.iter().find(|n| n.type_info.name == type_info.name) {
+        if let Some(node) = graph
+            .get()
+            .nodes
+            .iter()
+            .find(|n| n.type_info.name == type_info.name)
+        {
             selected_node.set(Some(node.clone()));
         }
     };
 
     let _handle_connection_click = move |connection: ConnectionDto| {
-        web_sys::console::log_1(&format!("Clicked connection: {} -> {}", connection.source, connection.target).into());
+        web_sys::console::log_1(
+            &format!(
+                "Clicked connection: {} -> {}",
+                connection.source, connection.target
+            )
+            .into(),
+        );
     };
 
     let handle_display_mode_change = move |ev: web_sys::Event| {
@@ -102,32 +117,49 @@ pub fn GraphPage(
         let mut current_graph = graph.get();
         let mode = display_mode.get();
         let query = search_query.get();
-        
+
         // Фильтруем узлы по режиму отображения
-        current_graph.nodes = current_graph.nodes.into_iter().filter(|node| {
-            match mode.as_str() {
-                "known" => node.type_info.certainty >= 90,
-                "union" => node.type_info.category == "Union",
-                "flow" => node.type_info.flow_sensitive,
-                "config" => node.type_info.category == "Configuration",
-                _ => true, // "all"
-            }
-        }).collect();
-        
+        current_graph.nodes = current_graph
+            .nodes
+            .into_iter()
+            .filter(|node| {
+                match mode.as_str() {
+                    "known" => node.type_info.certainty >= 90,
+                    "union" => node.type_info.category == "Union",
+                    "flow" => node.type_info.flow_sensitive,
+                    "config" => node.type_info.category == "Configuration",
+                    _ => true, // "all"
+                }
+            })
+            .collect();
+
         // Фильтруем по поисковому запросу
         if !query.is_empty() {
-            current_graph.nodes = current_graph.nodes.into_iter().filter(|node| {
-                node.type_info.name.to_lowercase().contains(&query.to_lowercase()) ||
-                node.type_info.name.to_lowercase().contains(&query.to_lowercase())
-            }).collect();
+            current_graph.nodes = current_graph
+                .nodes
+                .into_iter()
+                .filter(|node| {
+                    node.type_info
+                        .name
+                        .to_lowercase()
+                        .contains(&query.to_lowercase())
+                        || node
+                            .type_info
+                            .name
+                            .to_lowercase()
+                            .contains(&query.to_lowercase())
+                })
+                .collect();
         }
-        
+
         // Фильтруем связи - оставляем только те, у которых есть оба узла
         let node_ids: HashSet<String> = current_graph.nodes.iter().map(|n| n.id.clone()).collect();
-        current_graph.connections = current_graph.connections.into_iter().filter(|conn| {
-            node_ids.contains(&conn.source) && node_ids.contains(&conn.target)
-        }).collect();
-        
+        current_graph.connections = current_graph
+            .connections
+            .into_iter()
+            .filter(|conn| node_ids.contains(&conn.source) && node_ids.contains(&conn.target))
+            .collect();
+
         current_graph
     });
 
@@ -140,7 +172,7 @@ pub fn GraphPage(
                 <div class="graph-controls" style="display: flex; gap: 20px; align-items: center; margin-top: 15px;">
                     <div class="control-group">
                         <label style="font-size: 0.9em; color: rgba(255, 255, 255, 0.9);">"Режим отображения:"</label>
-                        <select 
+                        <select
                             style="padding: 8px 12px; border: none; border-radius: 6px; background: rgba(255, 255, 255, 0.1); color: white; outline: none;"
                             on:change=handle_display_mode_change
                         >
@@ -154,7 +186,7 @@ pub fn GraphPage(
 
                     <div class="control-group">
                         <label style="font-size: 0.9em; color: rgba(255, 255, 255, 0.9);">"Связи:"</label>
-                        <select 
+                        <select
                             style="padding: 8px 12px; border: none; border-radius: 6px; background: rgba(255, 255, 255, 0.1); color: white; outline: none;"
                             on:change=handle_connection_type_change
                         >
@@ -168,7 +200,7 @@ pub fn GraphPage(
 
                     <div class="control-group">
                         <label style="font-size: 0.9em; color: rgba(255, 255, 255, 0.9);">"Поиск узла:"</label>
-                        <input 
+                        <input
                             type="text"
                             placeholder="Название типа..."
                             style="padding: 8px 12px; border: none; border-radius: 6px; background: rgba(255, 255, 255, 0.1); color: white; outline: none;"
@@ -178,7 +210,7 @@ pub fn GraphPage(
 
                     <div class="control-group">
                         <label style="font-size: 0.9em; color: rgba(255, 255, 255, 0.9);">"Глубина связей:"</label>
-                        <select 
+                        <select
                             style="padding: 8px 12px; border: none; border-radius: 6px; background: rgba(255, 255, 255, 0.1); color: white; outline: none;"
                             on:change=handle_depth_change
                         >
@@ -202,7 +234,7 @@ pub fn GraphPage(
                     view! {
                         <div class="error" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #1a1a2e; color: white;">
                             <p>"❌ Ошибка загрузки: " {err}</p>
-                            <button 
+                            <button
                                 style="margin-top: 1rem; padding: 0.5rem 1rem; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;"
                                 on:click=move |_| load_graph()
                             >
@@ -218,7 +250,7 @@ pub fn GraphPage(
                                     filtered_graph.get().nodes.into_iter().map(|node| node.type_info).collect()
                                 })
                             />
-                            
+
                             <div class="graph-stats" style="position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.8); padding: 15px; border-radius: 8px; color: white; border: 1px solid rgba(255, 255, 255, 0.2);">
                                 <h4>"📊 Статистика графа"</h4>
                                 <p>"Узлов: " {move || filtered_graph.get().nodes.len()}</p>

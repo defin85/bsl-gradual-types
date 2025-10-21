@@ -3,15 +3,13 @@
 #[cfg(feature = "web-ui")]
 use bsl_backend::{
     config::{load_config, CliConfig},
+    presentation::web::{create_router, AppState},
     system::SystemCoordinator,
-    presentation::web::{AppState, create_router},
 };
 #[cfg(feature = "web-ui")]
 use clap::Parser;
 #[cfg(feature = "web-ui")]
 use std::{path::PathBuf, sync::Arc};
-
-
 
 #[cfg(feature = "web-ui")]
 #[derive(Parser)]
@@ -51,13 +49,11 @@ struct Args {
     config: Option<PathBuf>,
 }
 
-
-
 #[cfg(feature = "web-ui")]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    
+
     // Load configuration
     let cli_config = CliConfig {
         host: args.host,
@@ -69,25 +65,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         log_level: args.log_level,
         config_file: args.config,
     };
-    
+
     let config = load_config(cli_config)?;
-    
+
     // Initialize logging with configured level
     let log_level = config.log_level.parse().unwrap_or(tracing::Level::INFO);
-    tracing_subscriber::fmt()
-        .with_max_level(log_level)
-        .init();
+    tracing_subscriber::fmt().with_max_level(log_level).init();
 
     let system_coord = Arc::new(SystemCoordinator::new());
 
     // 🚀 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: запускаем полную инициализацию с парсингом синтаксис-помощника
-    system_coord.start_with_paths(
-        config.syntax_helper_path.as_deref(),
-        config.project_path.as_deref()
-    ).await?;
+    system_coord
+        .start_with_paths(
+            config.syntax_helper_path.as_deref(),
+            config.project_path.as_deref(),
+        )
+        .await?;
 
     // Create TypeSystemService using SystemCoordinator's singleton method
-    let type_service = system_coord.type_service()
+    let type_service = system_coord
+        .type_service()
         .expect("AnalysisEngine should be initialized after start_with_paths");
 
     let app_state = AppState {
@@ -96,11 +93,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Static SPA from configured path or default
-    let static_path = config.static_files_path
+    let static_path = config
+        .static_files_path
         .as_ref()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| "target/site".to_string());
-    
+
     let app = create_router(app_state, &static_path, config.enable_cors);
 
     let addr = config.address();
@@ -109,8 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.server_url()
     );
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app.into_make_service())
-        .await?;
+    axum::serve(listener, app.into_make_service()).await?;
     Ok(())
 }
 

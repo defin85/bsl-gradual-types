@@ -38,6 +38,10 @@ pub struct TypeDto {
     /// Enum values for platform enumeration types (e.g., "Авто (Auto)", "НеИспользовать (DontUse)")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enum_values: Option<Vec<String>>,
+    /// Табличные части (для документов, справочников)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tabular_sections: Vec<TabularSectionDto>,
+    
     pub source: String,
     pub flow_sensitive: bool,
     pub description: String,
@@ -51,6 +55,27 @@ pub struct TypeDto {
     pub warning: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recommendation: Option<String>,
+}
+
+/// Табличная часть конфигурационного объекта
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TabularSectionDto {
+    /// Имя табличной части (например, "Работы", "Стороны")
+    pub name: String,
+    /// Атрибуты табличной части
+    pub attributes: Vec<TabularSectionAttributeDto>,
+}
+
+/// Атрибут табличной части
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TabularSectionAttributeDto {
+    /// Имя атрибута (например, "ВидРаботы", "Сторона")
+    pub name: String,
+    /// Тип атрибута (например, "xs:string", "ПланВидовХарактеристикСсылка.ВидыРабот")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attr_type: Option<String>,
 }
 
 /// A component of a union type with its probability.

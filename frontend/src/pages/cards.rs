@@ -10,7 +10,8 @@ use leptos::task::spawn_local;
 #[allow(non_snake_case)]
 pub fn CardsPage(
     /// Поисковый запрос для фильтрации
-    #[prop(optional)] _search_query: Option<RwSignal<String>>,
+    #[prop(optional)]
+    _search_query: Option<RwSignal<String>>,
 ) -> impl IntoView {
     let filters = RwSignal::new(TypeFilters::default());
     let types = RwSignal::new(Vec::<TypeInfo>::new());
@@ -22,14 +23,14 @@ pub fn CardsPage(
     let load_types = move || {
         loading.set(true);
         error.set(None);
-        
+
         spawn_local(async move {
             match fetch_types(filters.get()).await {
                 Ok(result) => {
                     types.set(result.types.clone());
                     search_result.set(Some(result));
                     loading.set(false);
-                },
+                }
                 Err(err) => {
                     error.set(Some(err));
                     loading.set(false);
@@ -60,7 +61,7 @@ pub fn CardsPage(
                 <p>"Card-Based Type Visualization with Facets & Gradual Typing"</p>
             </div>
 
-            <SearchBar 
+            <SearchBar
                 filters=filters
                 on_filters_change=Callback::new(handle_filters_change)
                 placeholder="Поиск типов... (например: Массив, Справочники, Строка)".to_string()
@@ -94,8 +95,8 @@ pub fn CardsPage(
                                     }
                                 }}</p>
                             </div>
-                            
-                            <TypeCardsGrid 
+
+                            <TypeCardsGrid
                                 types=types_signal
                                 on_card_click=Callback::new(handle_card_click)
                             />

@@ -481,10 +481,8 @@ mod tests {
 
     #[test]
     fn test_source_range() {
-        let range = SourceRangeDto::new(
-            SourceLocationDto::new(1, 1),
-            SourceLocationDto::new(10, 20),
-        );
+        let range =
+            SourceRangeDto::new(SourceLocationDto::new(1, 1), SourceLocationDto::new(10, 20));
 
         assert_eq!(range.start.line, 1);
         assert_eq!(range.end.column, 20);

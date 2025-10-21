@@ -37,9 +37,13 @@ fn test_parse_error_structure_complete() {
             println!("\nParseError:");
             println!("  error_type: {:?}", error.error_type);
             println!("  message: {}", error.message);
-            println!("  span: {}:{} - {}:{}",
-                error.span.start_line, error.span.start_column,
-                error.span.end_line, error.span.end_column);
+            println!(
+                "  span: {}:{} - {}:{}",
+                error.span.start_line,
+                error.span.start_column,
+                error.span.end_line,
+                error.span.end_column
+            );
 
             // ✅ ПРОВЕРКА 1: ErrorType должен быть установлен
             match error.error_type {
@@ -50,17 +54,27 @@ fn test_parse_error_structure_complete() {
             }
 
             // ✅ ПРОВЕРКА 2: Message не должно быть пустым
-            assert!(!error.message.is_empty(), "Сообщение ошибки не должно быть пустым");
+            assert!(
+                !error.message.is_empty(),
+                "Сообщение ошибки не должно быть пустым"
+            );
 
             // ✅ ПРОВЕРКА 3: Span должен быть валидным
             assert!(error.span.start_line >= 0, "start_line должен быть >= 0");
-            assert!(error.span.start_column >= 0, "start_column должен быть >= 0");
-            assert!(error.span.end_line >= error.span.start_line,
-                "end_line должен быть >= start_line");
+            assert!(
+                error.span.start_column >= 0,
+                "start_column должен быть >= 0"
+            );
+            assert!(
+                error.span.end_line >= error.span.start_line,
+                "end_line должен быть >= start_line"
+            );
 
             if error.span.start_line == error.span.end_line {
-                assert!(error.span.end_column >= error.span.start_column,
-                    "На одной строке: end_column >= start_column");
+                assert!(
+                    error.span.end_column >= error.span.start_column,
+                    "На одной строке: end_column >= start_column"
+                );
             }
 
             println!("  ✅ ParseError структура корректна для конвертации в Diagnostic");
@@ -90,23 +104,39 @@ fn test_error_type_severity_mapping() {
     let test_cases = vec![
         (ErrorType::ParseError, "ERROR", "Критичная ошибка парсинга"),
         (ErrorType::InvalidSyntax, "ERROR", "Некорректный синтаксис"),
-        (ErrorType::MissingToken, "ERROR", "Отсутствует обязательный токен"),
-        (ErrorType::UnexpectedToken, "WARNING", "Неожиданный токен (восстановимо)"),
+        (
+            ErrorType::MissingToken,
+            "ERROR",
+            "Отсутствует обязательный токен",
+        ),
+        (
+            ErrorType::UnexpectedToken,
+            "WARNING",
+            "Неожиданный токен (восстановимо)",
+        ),
     ];
 
     for (error_type, expected_severity, description) in test_cases {
-        println!("\n{:?} → {} ({}) ", error_type, expected_severity, description);
+        println!(
+            "\n{:?} → {} ({}) ",
+            error_type, expected_severity, description
+        );
 
         // Проверяем, что маппинг логичен
         match error_type {
             ErrorType::ParseError | ErrorType::InvalidSyntax | ErrorType::MissingToken => {
-                assert_eq!(expected_severity, "ERROR",
-                    "{:?} должен маппиться в ERROR", error_type);
+                assert_eq!(
+                    expected_severity, "ERROR",
+                    "{:?} должен маппиться в ERROR",
+                    error_type
+                );
                 println!("  ✅ Корректный severity");
             }
             ErrorType::UnexpectedToken => {
-                assert_eq!(expected_severity, "WARNING",
-                    "UnexpectedToken должен маппиться в WARNING (может быть восстановлен парсером)");
+                assert_eq!(
+                    expected_severity, "WARNING",
+                    "UnexpectedToken должен маппиться в WARNING (может быть восстановлен парсером)"
+                );
                 println!("  ✅ Корректный severity (WARNING)");
             }
         }
@@ -132,10 +162,10 @@ fn test_span_to_lsp_range_conversion() {
     ];
 
     for (span, description) in test_spans {
-        println!("\n{}: {}:{} - {}:{}",
-            description,
-            span.start_line, span.start_column,
-            span.end_line, span.end_column);
+        println!(
+            "\n{}: {}:{} - {}:{}",
+            description, span.start_line, span.start_column, span.end_line, span.end_column
+        );
 
         // LSP Range создаётся из Span следующим образом:
         // Range::new(
@@ -145,12 +175,17 @@ fn test_span_to_lsp_range_conversion() {
 
         // Проверяем, что координаты валидные для LSP
         assert!(span.start_line >= 0, "start_line должен быть >= 0 для LSP");
-        assert!(span.start_column >= 0, "start_column должен быть >= 0 для LSP");
+        assert!(
+            span.start_column >= 0,
+            "start_column должен быть >= 0 для LSP"
+        );
         assert!(span.end_line >= span.start_line, "end_line >= start_line");
 
         if span.start_line == span.end_line {
-            assert!(span.end_column >= span.start_column,
-                "На одной строке: end_column >= start_column");
+            assert!(
+                span.end_column >= span.start_column,
+                "На одной строке: end_column >= start_column"
+            );
         }
 
         println!("  ✅ Span валиден для конвертации в LSP Range");
@@ -188,13 +223,17 @@ fn test_parse_error_diagnostic_conversion_via_shared() {
             println!("\n=== Backend ParseError ===");
             println!("  Type: {:?}", backend_error.error_type);
             println!("  Message: {}", backend_error.message);
-            println!("  Span: {}:{} - {}:{}",
-                backend_error.span.start_line, backend_error.span.start_column,
-                backend_error.span.end_line, backend_error.span.end_column);
+            println!(
+                "  Span: {}:{} - {}:{}",
+                backend_error.span.start_line,
+                backend_error.span.start_column,
+                backend_error.span.end_line,
+                backend_error.span.end_column
+            );
 
             // Симулируем конвертацию backend ErrorType → shared ErrorType
-            use bsl_shared::domain::types::ErrorType as SharedErrorType;
             use bsl_backend::parsing::bsl::ast::ErrorType as BackendErrorType;
+            use bsl_shared::domain::types::ErrorType as SharedErrorType;
 
             let shared_error_type = match backend_error.error_type {
                 BackendErrorType::ParseError => SharedErrorType::ParseError,
@@ -211,13 +250,17 @@ fn test_parse_error_diagnostic_conversion_via_shared() {
                 backend_error.span.start_line,
                 backend_error.span.start_column,
                 backend_error.span.end_line,
-                backend_error.span.end_column
+                backend_error.span.end_column,
             );
 
             println!("\n=== Shared Span ===");
-            println!("  {}:{} - {}:{}",
-                shared_span.start_line, shared_span.start_column,
-                shared_span.end_line, shared_span.end_column);
+            println!(
+                "  {}:{} - {}:{}",
+                shared_span.start_line,
+                shared_span.start_column,
+                shared_span.end_line,
+                shared_span.end_column
+            );
 
             // Проверяем, что координаты совпадают
             assert_eq!(shared_span.start_line, backend_error.span.start_line);
@@ -248,7 +291,10 @@ fn test_diagnostic_metadata_fields() {
 
     println!("\nОжидаемые metadata:");
     println!("  source: \"{}\"", expected_source);
-    println!("  code: NumberOrString::String(format!(\"{}\", error_type))", expected_code_format);
+    println!(
+        "  code: NumberOrString::String(format!(\"{}\", error_type))",
+        expected_code_format
+    );
 
     // Проверяем форматирование ErrorType для code
     let test_error_types = vec![
@@ -292,21 +338,29 @@ fn test_diagnostic_utf16_coordinates() {
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
             println!("\nОшибка: {}", error.message);
-            println!("  Span: {}:{} - {}:{}",
-                error.span.start_line, error.span.start_column,
-                error.span.end_line, error.span.end_column);
+            println!(
+                "  Span: {}:{} - {}:{}",
+                error.span.start_line,
+                error.span.start_column,
+                error.span.end_line,
+                error.span.end_column
+            );
 
             // ✅ КЛЮЧЕВАЯ ПРОВЕРКА: координаты должны быть в UTF-16
             // Благодаря TreeSitterAdapter::byte_offset_to_utf16() (Milestone 2.18 Task 1)
 
             // Проверяем, что координаты не огромные (признак byte offsets)
-            assert!(error.span.start_column < 200,
+            assert!(
+                error.span.start_column < 200,
                 "start_column не должен быть огромным ({}). Это признак byte offset вместо UTF-16!",
-                error.span.start_column);
+                error.span.start_column
+            );
 
-            assert!(error.span.end_column < 200,
+            assert!(
+                error.span.end_column < 200,
                 "end_column не должен быть огромным ({}). Это признак byte offset вместо UTF-16!",
-                error.span.end_column);
+                error.span.end_column
+            );
 
             // LSP Position создаётся напрямую из Span:
             // Position::new(span.start_line, span.start_column)
@@ -322,7 +376,7 @@ fn test_diagnostic_utf16_coordinates() {
 // === РЕКОМЕНДАЦИЯ: Публичная функция для конвертации ===
 
 #[test]
-#[ignore]  // Игнорируем, пока не реализована публичная функция
+#[ignore] // Игнорируем, пока не реализована публичная функция
 fn test_public_conversion_function() {
     // РЕКОМЕНДАЦИЯ для будущего улучшения:
     // Вынести логику конвертации в публичную функцию в backend модуле

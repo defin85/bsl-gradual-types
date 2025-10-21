@@ -2,7 +2,7 @@
 
 use crate::domain::repository::InMemoryTypeRepository;
 use crate::domain::resolver::TypeResolver;
-use crate::domain::types::{ResolutionResult, Certainty, GenericType};
+use crate::domain::types::{Certainty, GenericType, ResolutionResult};
 use std::sync::Arc;
 
 fn create_test_resolver() -> TypeResolver {
@@ -128,16 +128,23 @@ mod tests {
     fn test_format_generic_type() {
         let generic = GenericType {
             base_type: "Массив".to_string(),
-            type_params: vec![
-                crate::domain::types::ConcreteType::string(),
-            ],
+            type_params: vec![crate::domain::types::ConcreteType::string()],
         };
 
         let formatted = TypeResolver::format_generic_type(&generic);
 
-        assert!(formatted.contains("Массив"), "Format should contain base type");
-        assert!(formatted.contains("<"), "Format should contain opening bracket");
-        assert!(formatted.contains(">"), "Format should contain closing bracket");
+        assert!(
+            formatted.contains("Массив"),
+            "Format should contain base type"
+        );
+        assert!(
+            formatted.contains("<"),
+            "Format should contain opening bracket"
+        );
+        assert!(
+            formatted.contains(">"),
+            "Format should contain closing bracket"
+        );
     }
 
     #[test]
@@ -152,7 +159,10 @@ mod tests {
 
         let formatted = TypeResolver::format_generic_type(&generic);
 
-        assert!(formatted.contains("Соответствие"), "Should contain base type");
+        assert!(
+            formatted.contains("Соответствие"),
+            "Should contain base type"
+        );
         assert!(formatted.contains(","), "Should contain comma separator");
     }
 }

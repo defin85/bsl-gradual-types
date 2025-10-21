@@ -88,4 +88,3 @@ pub enum OutputFormat {
     Json,
     Plain,
 }
-

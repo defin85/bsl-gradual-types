@@ -1,18 +1,18 @@
 //! Application Layer: Type System Service
-//! 
+//!
 //! Unified API для всех типов клиентов (LSP, Web, CLI)
 //! Phase 4: API Unification - объединяет LspTypeService + WebTypeService + AnalysisService
 
-use std::sync::Arc;
-use std::collections::HashMap;
 use anyhow::Result;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tracing::info;
 
-use bsl_shared::engine::AnalysisEngine;
-use bsl_shared::domain::types::{TypeResolution, ResolutionResult};
-use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup};
-use crate::system::{AnalysisCache, AnalysisResult, IrCache, ParserCoordinator};
 use crate::application::TypeInferenceService;
+use crate::system::{AnalysisCache, AnalysisResult, IrCache, ParserCoordinator};
+use bsl_shared::domain::types::{ResolutionResult, TypeResolution};
+use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup};
+use bsl_shared::engine::AnalysisEngine;
 
 /// Унифицированный сервис системы типов для Application Layer
 ///
@@ -45,7 +45,10 @@ impl TypeSystemService {
         // Создаем TypeInferenceService на основе AnalysisEngine
         let resolver = analysis_engine.get_resolver();
         let repository = analysis_engine.get_repository();
-        let inference_service = Arc::new(TypeInferenceService::new(resolver.clone(), repository.clone()));
+        let inference_service = Arc::new(TypeInferenceService::new(
+            resolver.clone(),
+            repository.clone(),
+        ));
 
         // Создаем TypeMetadataLookup для получения методов/свойств из RawTypeData
         let metadata_lookup = TypeMetadataLookup::new(repository);
@@ -82,7 +85,10 @@ impl TypeSystemService {
         certainty_filter: Option<String>,
         flow_sensitive_only: bool,
     ) -> bsl_shared::api::dtos::AnalysisResultDto {
-        use bsl_shared::api::dtos::{AnalysisResultDto, TypeDto, CategoryDto, MetricsDto, PaginationDto, UnionComponentDto};
+        use bsl_shared::api::dtos::{
+            AnalysisResultDto, CategoryDto, MetricsDto, PaginationDto, TabularSectionAttributeDto,
+            TabularSectionDto, TypeDto, UnionComponentDto,
+        };
         use bsl_shared::domain::types::{Certainty, ResolutionResult};
 
         // 1. Получаем все типы из Domain
@@ -128,19 +134,19 @@ impl TypeSystemService {
                 let raw_type = self.metadata_lookup.get_raw_type(res);
 
                 // Извлекаем реальное описание из RawTypeData
-                let description = raw_type.as_ref()
+                let description = raw_type
+                    .as_ref()
                     .map(|rt| rt.description.clone())
                     .unwrap_or_else(|| self.generate_type_description(res));
 
                 // Извлекаем enum values для платформенных перечислений
-                let enum_values = raw_type.as_ref()
-                    .and_then(|rt| {
-                        if rt.enum_values.is_empty() {
-                            None
-                        } else {
-                            Some(rt.enum_values.clone())
-                        }
-                    });
+                let enum_values = raw_type.as_ref().and_then(|rt| {
+                    if rt.enum_values.is_empty() {
+                        None
+                    } else {
+                        Some(rt.enum_values.clone())
+                    }
+                });
 
                 TypeDto {
                     id: name.clone(),
@@ -148,12 +154,36 @@ impl TypeSystemService {
                     category,
                     certainty: certainty_val,
                     certainty_text: format!("{:?} {}%", res.certainty, certainty_val),
-                    facets: res.available_facets.iter().map(|f| format!("{:?}", f)).collect(),
+                    facets: res
+                        .available_facets
+                        .iter()
+                        .map(|f| format!("{:?}", f))
+                        .collect(),
                     methods_count: Some(methods.len()),
                     methods: methods.iter().map(|m| m.name.clone()).collect(),
                     attributes_count: raw_type.as_ref().map(|rt| rt.attributes.len()),
                     properties: properties.iter().map(|p| p.name.clone()).collect(),
                     enum_values,
+// Конвертируем табличные части из RawTypeData в DTO
+                    tabular_sections: raw_type
+                        .as_ref()
+                        .map(|rt| {
+                            rt.tabular_sections
+                                .iter()
+                                .map(|ts| TabularSectionDto {
+                                    name: ts.name.clone(),
+                                    attributes: ts
+                                        .attributes
+                                        .iter()
+                                        .map(|attr| TabularSectionAttributeDto {
+                                            name: attr.name.clone(),
+                                            attr_type: Some(attr.attr_type.clone()),
+                                        })
+                                        .collect(),
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                     source,
                     flow_sensitive: false, // TODO: добавить flow-sensitive анализ
                     description,
@@ -228,7 +258,10 @@ impl TypeSystemService {
             CategoryDto {
                 color: "#3498db".to_string(),
                 icon: "🔧".to_string(),
-                count: type_dtos.iter().filter(|t| t.category == "Platform").count(),
+                count: type_dtos
+                    .iter()
+                    .filter(|t| t.category == "Platform")
+                    .count(),
             },
         );
         categories.insert(
@@ -282,11 +315,15 @@ impl TypeSystemService {
                 format!("Intersection тип из {} типов", types.len())
             }
             ResolutionResult::Generic(gen) => {
-                format!("Generic тип: {}<{}>", gen.base_type,
-                    gen.type_params.iter()
+                format!(
+                    "Generic тип: {}<{}>",
+                    gen.base_type,
+                    gen.type_params
+                        .iter()
                         .map(|t| format!("{:?}", t))
                         .collect::<Vec<_>>()
-                        .join(", "))
+                        .join(", ")
+                )
             }
             ResolutionResult::Nullable(inner) => {
                 format!("Nullable тип: {:?} | Null", inner)
@@ -358,7 +395,10 @@ impl TypeSystemService {
             .parse(content)
             .map_err(|e| anyhow::anyhow!("Ошибка парсинга содержимого {}: {}", file_path, e))?;
 
-        info!("📝 Парсинг успешен, найдено операторов: {}", parse_result.program.statements.len());
+        info!(
+            "📝 Парсинг успешен, найдено операторов: {}",
+            parse_result.program.statements.len()
+        );
 
         // 3. Извлечение переменных и типов из AST
         let mut type_resolutions = HashMap::new();
@@ -371,17 +411,26 @@ impl TypeSystemService {
                     let var_name = self.extract_var_name(line).unwrap_or("unknown".to_string());
 
                     // Используем TypeInferenceService для разрешения типа
-                    let resolution = self.inference_service.resolve_expression_async(&type_hint).await;
+                    let resolution = self
+                        .inference_service
+                        .resolve_expression_async(&type_hint)
+                        .await;
                     type_resolutions.insert(var_name, resolution);
                 }
             }
 
             // Паттерн: Функция ИмяФункции() Возврат Тип;
-            if line.trim().starts_with("Функция ") || line.trim().starts_with("Процедура ") {
+            if line.trim().starts_with("Функция ") || line.trim().starts_with("Процедура ")
+            {
                 if let Some(return_type) = self.extract_return_type(line) {
-                    let func_name = self.extract_function_name(line).unwrap_or("unknown".to_string());
+                    let func_name = self
+                        .extract_function_name(line)
+                        .unwrap_or("unknown".to_string());
 
-                    let resolution = self.inference_service.resolve_expression_async(&return_type).await;
+                    let resolution = self
+                        .inference_service
+                        .resolve_expression_async(&return_type)
+                        .await;
                     type_resolutions.insert(format!("return_{}", func_name), resolution);
                 }
             }
@@ -397,9 +446,13 @@ impl TypeSystemService {
         };
 
         // 4. Сохранение в кэш
-        self.cache.store_analysis(cache_key, analysis_result.clone());
+        self.cache
+            .store_analysis(cache_key, analysis_result.clone());
 
-        info!("✅ Анализ содержимого {} завершён за {}ms", file_path, analysis_duration_ms);
+        info!(
+            "✅ Анализ содержимого {} завершён за {}ms",
+            file_path, analysis_duration_ms
+        );
         Ok(analysis_result)
     }
 
@@ -467,7 +520,7 @@ impl TypeSystemService {
         line: u32,
         column: u32,
     ) -> Result<Option<String>> {
-        use tracing::{info, debug, warn};
+        use tracing::{debug, info, warn};
 
         info!("🎯 Hover запрос: строка {}, колонка {}", line, column);
 
@@ -491,7 +544,7 @@ impl TypeSystemService {
             let ir = crate::application::ast_to_ir::AstToIrConverter::convert(
                 parse_result.program.clone(),
                 file_content.to_string(),
-                "hover_request.bsl".to_string()
+                "hover_request.bsl".to_string(),
             )?;
 
             let ir_arc = std::sync::Arc::new(ir);
@@ -508,20 +561,27 @@ impl TypeSystemService {
 
         // НОВОЕ: Используем find_variable_at_position() для извлечения типа из scope
         if let Some((var_name, type_hint)) = ir_program.find_variable_at_position(line, column) {
-            info!("✅ find_variable_at_position({}, {}) нашла переменную: '{}' с типом {:?}",
-                line, column, var_name, type_hint);
+            info!(
+                "✅ find_variable_at_position({}, {}) нашла переменную: '{}' с типом {:?}",
+                line, column, var_name, type_hint
+            );
 
             // Форматируем hover с методами/свойствами из TypeRepository
             return Ok(Some(self.format_variable_hover(&var_name, &type_hint)));
         } else {
             // Milestone 2.11 Task B1: Логи когда переменная не найдена
-            debug!("find_variable_at_position({}, {}) не нашла переменную", line, column);
+            debug!(
+                "find_variable_at_position({}, {}) не нашла переменную",
+                line, column
+            );
         }
 
         // Fallback 1: Пробуем find_node_at_position для других узлов (функции, циклы, etc.)
         if let Some(node) = ir_program.find_node_at_position(line, column) {
-            info!("✅ find_node_at_position({}, {}) нашёл узел (не переменная): span={:?}",
-                line, column, node.span);
+            info!(
+                "✅ find_node_at_position({}, {}) нашёл узел (не переменная): span={:?}",
+                line, column, node.span
+            );
             debug!("Found node: {:?} at span {:?}", node.kind, node.span);
             return Ok(Some(self.format_semantic_node_info(node, file_content)));
         } else {
@@ -587,8 +647,14 @@ impl TypeSystemService {
     }
 
     /// Phase 5: Поиск типов с преобразованием в DTO (Web API)
-    pub async fn search_types_as_dto(&self, query: &str) -> Result<bsl_shared::api::dtos::AnalysisResultDto> {
-        use bsl_shared::api::dtos::{AnalysisResultDto, TypeDto, CategoryDto, MetricsDto, UnionComponentDto};
+    pub async fn search_types_as_dto(
+        &self,
+        query: &str,
+    ) -> Result<bsl_shared::api::dtos::AnalysisResultDto> {
+        use bsl_shared::api::dtos::{
+            AnalysisResultDto, CategoryDto, MetricsDto, TabularSectionAttributeDto,
+            TabularSectionDto, TypeDto, UnionComponentDto,
+        };
         use bsl_shared::domain::types::{Certainty, ResolutionResult};
 
         info!("🌐 Web поиск типов с DTO: {}", query);
@@ -639,19 +705,19 @@ impl TypeSystemService {
                 let raw_type = self.metadata_lookup.get_raw_type(res);
 
                 // Извлекаем реальное описание из RawTypeData
-                let description = raw_type.as_ref()
+                let description = raw_type
+                    .as_ref()
                     .map(|rt| rt.description.clone())
                     .unwrap_or_else(|| self.generate_type_description(res));
 
                 // Извлекаем enum values для платформенных перечислений
-                let enum_values = raw_type.as_ref()
-                    .and_then(|rt| {
-                        if rt.enum_values.is_empty() {
-                            None
-                        } else {
-                            Some(rt.enum_values.clone())
-                        }
-                    });
+                let enum_values = raw_type.as_ref().and_then(|rt| {
+                    if rt.enum_values.is_empty() {
+                        None
+                    } else {
+                        Some(rt.enum_values.clone())
+                    }
+                });
 
                 TypeDto {
                     id: (*name).clone(),
@@ -659,12 +725,36 @@ impl TypeSystemService {
                     category,
                     certainty: certainty_val,
                     certainty_text: format!("{:?} {}%", res.certainty, certainty_val),
-                    facets: res.available_facets.iter().map(|f| format!("{:?}", f)).collect(),
+                    facets: res
+                        .available_facets
+                        .iter()
+                        .map(|f| format!("{:?}", f))
+                        .collect(),
                     methods_count: Some(methods.len()),
                     methods: methods.iter().map(|m| m.name.clone()).collect(),
                     attributes_count: raw_type.as_ref().map(|rt| rt.attributes.len()),
                     properties: properties.iter().map(|p| p.name.clone()).collect(),
                     enum_values,
+// Конвертируем табличные части из RawTypeData в DTO
+                    tabular_sections: raw_type
+                        .as_ref()
+                        .map(|rt| {
+                            rt.tabular_sections
+                                .iter()
+                                .map(|ts| TabularSectionDto {
+                                    name: ts.name.clone(),
+                                    attributes: ts
+                                        .attributes
+                                        .iter()
+                                        .map(|attr| TabularSectionAttributeDto {
+                                            name: attr.name.clone(),
+                                            attr_type: Some(attr.attr_type.clone()),
+                                        })
+                                        .collect(),
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                     source,
                     flow_sensitive: false,
                     description,
@@ -698,7 +788,10 @@ impl TypeSystemService {
             CategoryDto {
                 color: "#3498db".to_string(),
                 icon: "🔧".to_string(),
-                count: type_dtos.iter().filter(|t| t.category == "Platform").count(),
+                count: type_dtos
+                    .iter()
+                    .filter(|t| t.category == "Platform")
+                    .count(),
             },
         );
         categories.insert(
@@ -730,10 +823,7 @@ impl TypeSystemService {
     }
 
     /// Web операции - получить автодополнения для выражения
-    pub async fn get_type_completions(
-        &self,
-        expression: &str,
-    ) -> Result<Vec<CompletionItem>> {
+    pub async fn get_type_completions(&self, expression: &str) -> Result<Vec<CompletionItem>> {
         info!("🌐 Web автодополнения для: {}", expression);
         let completions = self.inference_service.get_completions(expression);
         Ok(completions)
@@ -804,7 +894,8 @@ impl TypeSystemService {
         };
 
         // Извлекаем текущее слово
-        let current_word = self.extract_word_at_position(content, line, column)
+        let current_word = self
+            .extract_word_at_position(content, line, column)
             .unwrap_or_default();
 
         // Анализируем контекст
@@ -817,7 +908,6 @@ impl TypeSystemService {
             can_add_functions: self.can_add_functions(line_trimmed),
         }
     }
-
 
     /// Проверяет, можно ли добавлять операторы в данной позиции
     fn can_add_statements(&self, line_prefix: &str) -> bool {
@@ -875,7 +965,9 @@ impl TypeSystemService {
                     label: "Строка".to_string(),
                     kind: CompletionKind::Type,
                     detail: Some("📝 Тип данных: строка".to_string()),
-                    documentation: Some("Примитивный тип данных для текстовых значений".to_string()),
+                    documentation: Some(
+                        "Примитивный тип данных для текстовых значений".to_string(),
+                    ),
                     insert_text: Some("Строка".to_string()),
                     filter_text: Some("Строка".to_string()),
                     sort_text: Some("Строка".to_string()),
@@ -887,7 +979,9 @@ impl TypeSystemService {
                     label: "ТипЗнч".to_string(),
                     kind: CompletionKind::Function,
                     detail: Some("🔍 Получить тип значения".to_string()),
-                    documentation: Some("Функция для получения типа переданного значения".to_string()),
+                    documentation: Some(
+                        "Функция для получения типа переданного значения".to_string(),
+                    ),
                     insert_text: Some("ТипЗнч(${1:значение})".to_string()),
                     filter_text: Some("ТипЗнч".to_string()),
                     sort_text: Some("ТипЗнч".to_string()),
@@ -974,7 +1068,9 @@ impl TypeSystemService {
                 label: "Дата".to_string(),
                 kind: CompletionKind::Type,
                 detail: Some("📅 Тип данных дата/время".to_string()),
-                documentation: Some("Примитивный тип данных для значений даты и времени".to_string()),
+                documentation: Some(
+                    "Примитивный тип данных для значений даты и времени".to_string(),
+                ),
                 insert_text: Some("Дата".to_string()),
                 filter_text: Some("Дата".to_string()),
                 sort_text: Some("Дата".to_string()),
@@ -989,7 +1085,9 @@ impl TypeSystemService {
                 label: "Сообщить".to_string(),
                 kind: CompletionKind::Function,
                 detail: Some("📢 Вывести сообщение пользователю".to_string()),
-                documentation: Some("Встроенная функция для вывода сообщения пользователю".to_string()),
+                documentation: Some(
+                    "Встроенная функция для вывода сообщения пользователю".to_string(),
+                ),
                 insert_text: Some("Сообщить(${1:\"текст\"})".to_string()),
                 filter_text: Some("Сообщить".to_string()),
                 sort_text: Some("Сообщить".to_string()),
@@ -1038,9 +1136,12 @@ impl TypeSystemService {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn validate_code_fragment(&self, code: &str) -> Result<Vec<bsl_shared::api::ValidationErrorDto>> {
-        use bsl_shared::domain::validators::TypeValidator;
+    pub async fn validate_code_fragment(
+        &self,
+        code: &str,
+    ) -> Result<Vec<bsl_shared::api::ValidationErrorDto>> {
         use bsl_shared::domain::types::DiagnosticSeverity;
+        use bsl_shared::domain::validators::TypeValidator;
         use std::time::Instant;
 
         let start = Instant::now();
@@ -1052,43 +1153,50 @@ impl TypeSystemService {
         // Примитивный парсинг выражений вида "объект.метод()" или "объект.свойство"
         if let Some((object_expr, member)) = Self::parse_simple_member_access(code) {
             // Резолвим тип объекта
-            let resolution = self.inference_service.resolve_expression_async(&object_expr).await;
+            let resolution = self
+                .inference_service
+                .resolve_expression_async(&object_expr)
+                .await;
             let validator = TypeValidator::new(&self.metadata_lookup);
 
-                // Проверяем методы (если есть скобки)
-                if member.ends_with("()") || code.contains('(') {
-                    let method_name = member.trim_end_matches("()").trim();
-                    if let Some(error) = validator.validate_method_exists(&resolution, method_name) {
-                        let diagnostic = error.to_diagnostic(1, 1);
-                        errors.push(bsl_shared::api::ValidationErrorDto {
-                            message: diagnostic.message,
-                            severity: match diagnostic.severity {
-                                DiagnosticSeverity::Error => "error".to_string(),
-                                DiagnosticSeverity::Warning => "warning".to_string(),
-                                DiagnosticSeverity::Info | DiagnosticSeverity::Hint => "info".to_string(),
-                            },
-                            line: diagnostic.line,
-                            column: diagnostic.column,
-                            error_type: "NonExistentMethod".to_string(),
-                        });
-                    }
-                } else {
-                    // Проверяем свойства
-                    if let Some(error) = validator.validate_property_exists(&resolution, &member) {
-                        let diagnostic = error.to_diagnostic(1, 1);
-                        errors.push(bsl_shared::api::ValidationErrorDto {
-                            message: diagnostic.message,
-                            severity: match diagnostic.severity {
-                                DiagnosticSeverity::Error => "error".to_string(),
-                                DiagnosticSeverity::Warning => "warning".to_string(),
-                                DiagnosticSeverity::Info | DiagnosticSeverity::Hint => "info".to_string(),
-                            },
-                            line: diagnostic.line,
-                            column: diagnostic.column,
-                            error_type: "NonExistentProperty".to_string(),
-                        });
-                    }
+            // Проверяем методы (если есть скобки)
+            if member.ends_with("()") || code.contains('(') {
+                let method_name = member.trim_end_matches("()").trim();
+                if let Some(error) = validator.validate_method_exists(&resolution, method_name) {
+                    let diagnostic = error.to_diagnostic(1, 1);
+                    errors.push(bsl_shared::api::ValidationErrorDto {
+                        message: diagnostic.message,
+                        severity: match diagnostic.severity {
+                            DiagnosticSeverity::Error => "error".to_string(),
+                            DiagnosticSeverity::Warning => "warning".to_string(),
+                            DiagnosticSeverity::Info | DiagnosticSeverity::Hint => {
+                                "info".to_string()
+                            }
+                        },
+                        line: diagnostic.line,
+                        column: diagnostic.column,
+                        error_type: "NonExistentMethod".to_string(),
+                    });
                 }
+            } else {
+                // Проверяем свойства
+                if let Some(error) = validator.validate_property_exists(&resolution, &member) {
+                    let diagnostic = error.to_diagnostic(1, 1);
+                    errors.push(bsl_shared::api::ValidationErrorDto {
+                        message: diagnostic.message,
+                        severity: match diagnostic.severity {
+                            DiagnosticSeverity::Error => "error".to_string(),
+                            DiagnosticSeverity::Warning => "warning".to_string(),
+                            DiagnosticSeverity::Info | DiagnosticSeverity::Hint => {
+                                "info".to_string()
+                            }
+                        },
+                        line: diagnostic.line,
+                        column: diagnostic.column,
+                        error_type: "NonExistentProperty".to_string(),
+                    });
+                }
+            }
         }
 
         info!("Валидация завершена за {:?}", start.elapsed());
@@ -1115,7 +1223,7 @@ impl TypeSystemService {
         column: u32,
         parse_result: Option<&crate::parsing::Program>,
     ) -> Option<String> {
-        use crate::parsing::bsl::ast::{Statement, Expression};
+        use crate::parsing::bsl::ast::{Expression, Statement};
 
         // Шаг 1: Извлечь слово под курсором
         let word_under_cursor = self.extract_word_at_position(file_content, line, column)?;
@@ -1134,8 +1242,12 @@ impl TypeSystemService {
                                 if let Some(type_name) = self.expression_to_type_name(value) {
                                     // Domain Layer: Резолв через AnalysisEngine
                                     let resolution = self.analysis_engine.resolve_type(&type_name);
-                                    let type_info = self.format_type_for_hover(&type_name, &resolution);
-                                    return Some(format!("**Присваивание:** `{} = ...`\n\n{}", var_name, type_info));
+                                    let type_info =
+                                        self.format_type_for_hover(&type_name, &resolution);
+                                    return Some(format!(
+                                        "**Присваивание:** `{} = ...`\n\n{}",
+                                        var_name, type_info
+                                    ));
                                 } else {
                                     return Some(format!("**Присваивание:** `{} = ...`\n\n*Тип:* Требуется расширенный анализ", var_name));
                                 }
@@ -1143,10 +1255,20 @@ impl TypeSystemService {
                         }
                     }
                     Statement::FunctionDecl { name, params, .. } if name == &word_under_cursor => {
-                        return Some(format!("**Функция:** `{}({})`\n\n*Параметры:* {}", name, params.join(", "), params.len()));
+                        return Some(format!(
+                            "**Функция:** `{}({})`\n\n*Параметры:* {}",
+                            name,
+                            params.join(", "),
+                            params.len()
+                        ));
                     }
                     Statement::ProcedureDecl { name, params, .. } if name == &word_under_cursor => {
-                        return Some(format!("**Процедура:** `{}({})`\n\n*Параметры:* {}", name, params.join(", "), params.len()));
+                        return Some(format!(
+                            "**Процедура:** `{}({})`\n\n*Параметры:* {}",
+                            name,
+                            params.join(", "),
+                            params.len()
+                        ));
                     }
                     _ => {}
                 }
@@ -1158,7 +1280,12 @@ impl TypeSystemService {
     }
 
     /// Извлечь слово на указанной позиции (line, column)
-    fn extract_word_at_position(&self, file_content: &str, line: u32, column: u32) -> Option<String> {
+    fn extract_word_at_position(
+        &self,
+        file_content: &str,
+        line: u32,
+        column: u32,
+    ) -> Option<String> {
         let lines: Vec<&str> = file_content.lines().collect();
         let current_line = lines.get(line as usize)?;
 
@@ -1213,7 +1340,10 @@ impl TypeSystemService {
         use bsl_shared::domain::types::Certainty;
         if !matches!(resolution.certainty, Certainty::Unknown) {
             let type_info = self.format_type_for_hover(identifier, &resolution);
-            return Some(format!("**Тип платформы:** `{}`\n\n{}", identifier, type_info));
+            return Some(format!(
+                "**Тип платформы:** `{}`\n\n{}",
+                identifier, type_info
+            ));
         }
 
         // Если не нашлось — локальная переменная или неизвестный тип
@@ -1242,22 +1372,40 @@ impl TypeSystemService {
     }
 
     /// Форматирует информацию о SemanticNode для hover (Milestone 2.11)
-    fn format_semantic_node_info(&self, node: &bsl_shared::ir::SemanticNode, _file_content: &str) -> String {
+    fn format_semantic_node_info(
+        &self,
+        node: &bsl_shared::ir::SemanticNode,
+        _file_content: &str,
+    ) -> String {
         use bsl_shared::ir::SemanticNodeKind;
 
         match &node.kind {
-            SemanticNodeKind::VariableDeclaration { name, type_hint, initial_value_type, .. } => {
-                let type_info = type_hint.as_ref()
+            SemanticNodeKind::VariableDeclaration {
+                name,
+                type_hint,
+                initial_value_type,
+                ..
+            } => {
+                let type_info = type_hint
+                    .as_ref()
                     .or(initial_value_type.as_ref())
                     .map(|t| format!("*Тип:* {}", t))
                     .unwrap_or_else(|| "*Тип:* Неопределено".to_string());
 
-                format!("**Переменная:** `{}`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
-                    name, type_info,
-                    node.span.start_line, node.span.start_column,
-                    node.span.end_line, node.span.end_column)
+                format!(
+                    "**Переменная:** `{}`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
+                    name,
+                    type_info,
+                    node.span.start_line,
+                    node.span.start_column,
+                    node.span.end_line,
+                    node.span.end_column
+                )
             }
-            SemanticNodeKind::Assignment { variable, value_type } => {
+            SemanticNodeKind::Assignment {
+                variable,
+                value_type,
+            } => {
                 use bsl_shared::domain::types::Certainty;
 
                 let resolution = self.analysis_engine.resolve_type(value_type);
@@ -1278,18 +1426,26 @@ impl TypeSystemService {
                 // Проверяем наличие RawTypeData для отображения методов/свойств
                 if raw_type.is_none() {
                     output.push_str("⚠️ **Детали типа недоступны**\n\n");
-                    output.push_str(&format!("📍 Позиция: {}:{}-{}:{}\n",
-                        node.span.start_line, node.span.start_column,
-                        node.span.end_line, node.span.end_column));
+                    output.push_str(&format!(
+                        "📍 Позиция: {}:{}-{}:{}\n",
+                        node.span.start_line,
+                        node.span.start_column,
+                        node.span.end_line,
+                        node.span.end_column
+                    ));
                     return output;
                 }
 
                 // Если Unknown — показываем дополнительную подсказку
                 if matches!(resolution.certainty, Certainty::Unknown) {
                     output.push_str("⚠️ **Тип не распознан системой**\n\n");
-                    output.push_str(&format!("📍 Позиция: {}:{}-{}:{}\n",
-                        node.span.start_line, node.span.start_column,
-                        node.span.end_line, node.span.end_column));
+                    output.push_str(&format!(
+                        "📍 Позиция: {}:{}-{}:{}\n",
+                        node.span.start_line,
+                        node.span.start_column,
+                        node.span.end_line,
+                        node.span.end_column
+                    ));
                     return output;
                 }
 
@@ -1310,13 +1466,18 @@ impl TypeSystemService {
                 if !methods.is_empty() {
                     output.push_str("📚 **Методы:**\n");
                     for method in methods.iter().take(10) {
-                        let params_str = method.params.iter()
+                        let params_str = method
+                            .params
+                            .iter()
                             .map(|p| format!("{}: {}", p.name, p.param_type))
                             .collect::<Vec<_>>()
                             .join(", ");
 
                         if !method.return_type.is_empty() {
-                            output.push_str(&format!("- `{}({})` → `{}`\n", method.name, params_str, method.return_type));
+                            output.push_str(&format!(
+                                "- `{}({})` → `{}`\n",
+                                method.name, params_str, method.return_type
+                            ));
                         } else {
                             output.push_str(&format!("- `{}({})`\n", method.name, params_str));
                         }
@@ -1334,23 +1495,42 @@ impl TypeSystemService {
                         output.push_str(&format!("- `{}`: `{}`\n", prop.name, prop.prop_type));
                     }
                     if properties.len() > 10 {
-                        output.push_str(&format!("- ... и ещё {} свойств\n", properties.len() - 10));
+                        output
+                            .push_str(&format!("- ... и ещё {} свойств\n", properties.len() - 10));
                     }
                     output.push('\n');
                 }
 
-                output.push_str(&format!("📍 Позиция: {}:{}-{}:{}\n",
-                    node.span.start_line, node.span.start_column,
-                    node.span.end_line, node.span.end_column));
+                output.push_str(&format!(
+                    "📍 Позиция: {}:{}-{}:{}\n",
+                    node.span.start_line,
+                    node.span.start_column,
+                    node.span.end_line,
+                    node.span.end_column
+                ));
 
                 output
             }
-            SemanticNodeKind::FunctionDeclaration { name, params, return_type, body, .. } => {
-                let params_str = params.iter()
-                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_ref().unwrap_or(&"Неопределено".to_string())))
+            SemanticNodeKind::FunctionDeclaration {
+                name,
+                params,
+                return_type,
+                body,
+                ..
+            } => {
+                let params_str = params
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "{}: {}",
+                            p.name,
+                            p.type_hint.as_ref().unwrap_or(&"Неопределено".to_string())
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
-                let return_str = return_type.as_ref()
+                let return_str = return_type
+                    .as_ref()
                     .map(|t| format!("*Возвращает:* {}", t))
                     .unwrap_or_else(|| "*Возвращает:* Неопределено".to_string());
 
@@ -1361,14 +1541,30 @@ impl TypeSystemService {
                     format!("Содержит {} узлов", body.len())
                 };
 
-                format!("**Функция:** `{}({})`\n\n{}\n\n📦 {}\n\n📍 Позиция: {}:{}-{}:{}",
-                    name, params_str, return_str, body_info,
-                    node.span.start_line, node.span.start_column,
-                    node.span.end_line, node.span.end_column)
+                format!(
+                    "**Функция:** `{}({})`\n\n{}\n\n📦 {}\n\n📍 Позиция: {}:{}-{}:{}",
+                    name,
+                    params_str,
+                    return_str,
+                    body_info,
+                    node.span.start_line,
+                    node.span.start_column,
+                    node.span.end_line,
+                    node.span.end_column
+                )
             }
-            SemanticNodeKind::ProcedureDeclaration { name, params, body, .. } => {
-                let params_str = params.iter()
-                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_ref().unwrap_or(&"Неопределено".to_string())))
+            SemanticNodeKind::ProcedureDeclaration {
+                name, params, body, ..
+            } => {
+                let params_str = params
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "{}: {}",
+                            p.name,
+                            p.type_hint.as_ref().unwrap_or(&"Неопределено".to_string())
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
 
@@ -1379,28 +1575,46 @@ impl TypeSystemService {
                     format!("Содержит {} узлов", body.len())
                 };
 
-                format!("**Процедура:** `{}({})`\n\n📦 {}\n\n📍 Позиция: {}:{}-{}:{}",
-                    name, params_str, body_info,
-                    node.span.start_line, node.span.start_column,
-                    node.span.end_line, node.span.end_column)
+                format!(
+                    "**Процедура:** `{}({})`\n\n📦 {}\n\n📍 Позиция: {}:{}-{}:{}",
+                    name,
+                    params_str,
+                    body_info,
+                    node.span.start_line,
+                    node.span.start_column,
+                    node.span.end_line,
+                    node.span.end_column
+                )
             }
             SemanticNodeKind::IfStatement { condition_type, .. } => {
-                format!("**Условие:** `Если ... Тогда`\n\n*Условие:* {}\n\n📍 Позиция: {}:{}-{}:{}",
+                format!(
+                    "**Условие:** `Если ... Тогда`\n\n*Условие:* {}\n\n📍 Позиция: {}:{}-{}:{}",
                     condition_type,
-                    node.span.start_line, node.span.start_column,
-                    node.span.end_line, node.span.end_column)
+                    node.span.start_line,
+                    node.span.start_column,
+                    node.span.end_line,
+                    node.span.end_column
+                )
             }
             SemanticNodeKind::WhileLoop { condition_type, .. } => {
-                format!("**Цикл:** `Пока ... Цикл`\n\n*Условие:* {}\n\n📍 Позиция: {}:{}-{}:{}",
+                format!(
+                    "**Цикл:** `Пока ... Цикл`\n\n*Условие:* {}\n\n📍 Позиция: {}:{}-{}:{}",
                     condition_type,
-                    node.span.start_line, node.span.start_column,
-                    node.span.end_line, node.span.end_column)
+                    node.span.start_line,
+                    node.span.start_column,
+                    node.span.end_line,
+                    node.span.end_column
+                )
             }
             _ => {
-                format!("**Узел IR:** {:?}\n\n📍 Позиция: {}:{}-{}:{}",
+                format!(
+                    "**Узел IR:** {:?}\n\n📍 Позиция: {}:{}-{}:{}",
                     node.kind,
-                    node.span.start_line, node.span.start_column,
-                    node.span.end_line, node.span.end_column)
+                    node.span.start_line,
+                    node.span.start_column,
+                    node.span.end_line,
+                    node.span.end_column
+                )
             }
         }
     }
@@ -1413,9 +1627,13 @@ impl TypeSystemService {
     ///
     /// # Возвращает
     /// Форматированный markdown с информацией о типе, методах и свойствах
-    fn format_variable_hover(&self, var_name: &str, type_hint: &bsl_shared::ir::TypeHint) -> String {
-        use bsl_shared::ir::TypeHint;
+    fn format_variable_hover(
+        &self,
+        var_name: &str,
+        type_hint: &bsl_shared::ir::TypeHint,
+    ) -> String {
         use bsl_shared::domain::types::Certainty;
+        use bsl_shared::ir::TypeHint;
 
         // Извлекаем имя типа из TypeHint
         let type_name = match type_hint {
@@ -1431,14 +1649,30 @@ impl TypeSystemService {
         // Резолвим тип через AnalysisEngine → TypeRepository
         let resolution = self.analysis_engine.resolve_type(&type_name);
 
+        // ✅ НОВОЕ: Специальная обработка для Generic типов
+        if let ResolutionResult::Generic(ref generic_type) = resolution.result {
+            return self.format_generic_hover(var_name, generic_type, &resolution);
+        }
+
         // Получаем RawTypeData для проверки существования типа
         let raw_type = self.metadata_lookup.get_raw_type(&resolution);
 
         // DEBUG: Выводим детальную информацию о resolution
-        tracing::debug!("Resolution для '{}': certainty={:?}, result={:?}",
-            type_name, resolution.certainty, resolution.result);
-        tracing::debug!("RawTypeData для '{}': {}",
-            type_name, if raw_type.is_some() { "НАЙДЕН" } else { "НЕ НАЙДЕН" });
+        tracing::debug!(
+            "Resolution для '{}': certainty={:?}, result={:?}",
+            type_name,
+            resolution.certainty,
+            resolution.result
+        );
+        tracing::debug!(
+            "RawTypeData для '{}': {}",
+            type_name,
+            if raw_type.is_some() {
+                "НАЙДЕН"
+            } else {
+                "НЕ НАЙДЕН"
+            }
+        );
 
         // ✅ ИСПРАВЛЕНИЕ: Формируем базовую информацию ВСЕГДА (независимо от raw_type)
         let mut output = format!("**Переменная:** `{}`\n", var_name);
@@ -1488,13 +1722,18 @@ impl TypeSystemService {
             output.push_str("📚 **Методы:**\n");
             for method in methods.iter().take(10) {
                 // Форматируем сигнатуру метода: name(params) -> return_type
-                let params_str = method.params.iter()
+                let params_str = method
+                    .params
+                    .iter()
                     .map(|p| format!("{}: {}", p.name, p.param_type))
                     .collect::<Vec<_>>()
                     .join(", ");
 
                 if !method.return_type.is_empty() {
-                    output.push_str(&format!("- `{}({})` → `{}`\n", method.name, params_str, method.return_type));
+                    output.push_str(&format!(
+                        "- `{}({})` → `{}`\n",
+                        method.name, params_str, method.return_type
+                    ));
                 } else {
                     output.push_str(&format!("- `{}({})`\n", method.name, params_str));
                 }
@@ -1520,11 +1759,163 @@ impl TypeSystemService {
         output
     }
 
+    /// Форматирует hover для Generic типа (например, ТабличнаяЧасть<СтрокаРаботы>)
+    ///
+    /// Специальное форматирование для табличных частей с отображением:
+    /// - Базового типа и типового параметра
+    /// - Методов коллекции (с подставленными типами)
+    /// - Атрибутов строки табличной части
+    fn format_generic_hover(
+        &self,
+        var_name: &str,
+        generic_type: &bsl_shared::domain::types::GenericType,
+        resolution: &TypeResolution,
+    ) -> String {
+        use bsl_shared::domain::types::{Certainty, ConcreteType};
+
+        tracing::debug!(
+            "🎨 Форматирование Generic hover: {} = {}<{}>",
+            var_name,
+            generic_type.base_type,
+            generic_type.type_params.len()
+        );
+
+        let mut output = String::new();
+
+        // Заголовок переменной
+        output.push_str(&format!("**Переменная:** `{}`\n", var_name));
+
+        // Форматируем полное имя Generic типа
+        let full_type_name = if let Some(param_type) = generic_type.type_params.first() {
+            let param_name = self.format_concrete_type_name(param_type);
+            format!("{}<{}>", generic_type.base_type, param_name)
+        } else {
+            generic_type.base_type.clone()
+        };
+
+        output.push_str(&format!("*Тип:* `{}`\n", full_type_name));
+
+        // Уверенность
+        let certainty_text = match resolution.certainty {
+            Certainty::Known => "🟢 Known (100%)".to_string(),
+            Certainty::Inferred(val) => format!("🟡 Inferred ({:.0}%)", val * 100.0),
+            Certainty::Unknown => "⚪ Unknown (0%)".to_string(),
+        };
+        output.push_str(&format!("*Уверенность:* {}\n\n", certainty_text));
+
+        // ✅ НОВОЕ: Дополнительная информация для табличных частей
+        if generic_type.base_type == "ТабличнаяЧасть" {
+            if let Some(ConcreteType::TabularRow(row_type)) = generic_type.type_params.first() {
+                output.push_str(&format!(
+                    "📋 *Табличная часть:* `{}`\n",
+                    row_type.tabular_section_name
+                ));
+                output.push_str(&format!("📄 *Родительский объект:* `{}`\n\n", row_type.parent_type));
+
+                // Методы коллекции
+                let methods = self.metadata_lookup.get_methods(resolution);
+                if !methods.is_empty() {
+                    output.push_str("📚 **Методы коллекции:**\n");
+                    for method in methods.iter().take(10) {
+                        let params_str = method
+                            .params
+                            .iter()
+                            .map(|p| format!("{}: {}", p.name, p.param_type))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+
+                        if !method.return_type.is_empty() {
+                            output.push_str(&format!(
+                                "- `{}({})` → `{}`\n",
+                                method.name, params_str, method.return_type
+                            ));
+                        } else {
+                            output.push_str(&format!("- `{}({})`\n", method.name, params_str));
+                        }
+                    }
+                    if methods.len() > 10 {
+                        output.push_str(&format!("- ... и ещё {} методов\n", methods.len() - 10));
+                    }
+                    output.push('\n');
+                }
+
+                // ✅ НОВОЕ: Атрибуты строки табличной части
+                if !row_type.attributes.is_empty() {
+                    output.push_str("📦 **Атрибуты строки:**\n");
+                    for attr in row_type.attributes.iter().take(15) {
+                        if !attr.attr_type.is_empty() {
+                            output.push_str(&format!("- `{}`: `{}`\n", attr.name, attr.attr_type));
+                        } else {
+                            output.push_str(&format!("- `{}`\n", attr.name));
+                        }
+                    }
+                    if row_type.attributes.len() > 15 {
+                        output.push_str(&format!(
+                            "- ... и ещё {} атрибутов\n",
+                            row_type.attributes.len() - 15
+                        ));
+                    }
+                }
+            }
+        } else {
+            // Для других Generic типов (не табличных частей) - базовый формат
+            let methods = self.metadata_lookup.get_methods(resolution);
+            if !methods.is_empty() {
+                output.push_str("📚 **Методы:**\n");
+                for method in methods.iter().take(10) {
+                    let params_str = method
+                        .params
+                        .iter()
+                        .map(|p| format!("{}: {}", p.name, p.param_type))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    if !method.return_type.is_empty() {
+                        output.push_str(&format!(
+                            "- `{}({})` → `{}`\n",
+                            method.name, params_str, method.return_type
+                        ));
+                    } else {
+                        output.push_str(&format!("- `{}({})`\n", method.name, params_str));
+                    }
+                }
+                if methods.len() > 10 {
+                    output.push_str(&format!("- ... и ещё {} методов\n", methods.len() - 10));
+                }
+            }
+        }
+
+        output
+    }
+
+    /// Форматирует имя ConcreteType для отображения
+    fn format_concrete_type_name(&self, concrete: &bsl_shared::domain::types::ConcreteType) -> String {
+        use bsl_shared::domain::types::ConcreteType;
+
+        match concrete {
+            ConcreteType::Platform(pt) => pt.name.clone(),
+            ConcreteType::Configuration(ct) => {
+                // Используем to_prefix() для корректного форматирования
+                format!("{}.{}",
+                    ct.kind.to_prefix(),
+                    ct.name
+                )
+            }
+            ConcreteType::Primitive(prim) => format!("{:?}", prim),
+            ConcreteType::Special(spec) => format!("{:?}", spec),
+            ConcreteType::GlobalFunction(gf) => gf.name.clone(),
+            ConcreteType::TabularRow(tr) => tr.get_full_name(),
+        }
+    }
+
     /// Маппинг AST Expression → имя типа (Application Layer ответственность)
     ///
     /// Преобразует синтаксическую конструкцию (Expression) в доменное понятие (имя типа)
     /// для дальнейшего резолва через AnalysisEngine/TypeResolver.
-    fn expression_to_type_name(&self, expr: &crate::parsing::bsl::ast::Expression) -> Option<String> {
+    fn expression_to_type_name(
+        &self,
+        expr: &crate::parsing::bsl::ast::Expression,
+    ) -> Option<String> {
         use crate::parsing::bsl::ast::Expression as Expr;
 
         match expr {
@@ -1557,16 +1948,19 @@ impl TypeSystemService {
         info!("🌳 Generating semantic tree for: {}", file_path);
 
         // 1. Парсим файл → AST → IR (используем готовый метод из ParserCoordinator)
-        let semantic_program = self.parser.parse_to_ir(file_content, file_path)
+        let semantic_program = self
+            .parser
+            .parse_to_ir(file_content, file_path)
             .map_err(|e| anyhow::anyhow!("Failed to parse file: {}", e))?;
 
         // 2. Конвертируем SemanticProgram → SemanticTreeDto
         let dto = semantic_program.to_dto(
-            true,  // include_call_graph
-            true,  // include_flow_sensitive
+            true, // include_call_graph
+            true, // include_flow_sensitive
         );
 
-        info!("✅ Semantic tree generated: {} root nodes, {} symbols, {} metrics: {:?}",
+        info!(
+            "✅ Semantic tree generated: {} root nodes, {} symbols, {} metrics: {:?}",
             dto.root_nodes.len(),
             dto.symbol_table.len(),
             dto.metrics.node_count,

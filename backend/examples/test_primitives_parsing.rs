@@ -5,7 +5,9 @@ fn main() {
 
     // Парсим оба каталога
     println!("🚀 Парсинг Синтаксис-помощника...");
-    parser.parse_syntax_helper("../examples/syntax_helper").unwrap();
+    parser
+        .parse_syntax_helper("../examples/syntax_helper")
+        .unwrap();
 
     let db = parser.export_database();
 
@@ -14,20 +16,27 @@ fn main() {
 
     // Ищем примитивные типы
     let primitive_keywords = [
-        "String", "Строка",
-        "Number", "Число",
-        "Boolean", "Булево",
-        "Date", "Дата",
-        "Null", "Неопределено",
-        "def_String", "def_Number", "def_Boolean"
+        "String",
+        "Строка",
+        "Number",
+        "Число",
+        "Boolean",
+        "Булево",
+        "Date",
+        "Дата",
+        "Null",
+        "Неопределено",
+        "def_String",
+        "def_Number",
+        "def_Boolean",
     ];
 
     println!("\n🔍 Поиск примитивных типов:");
     for keyword in &primitive_keywords {
-        let found: Vec<_> = db.nodes.iter()
-            .filter(|(key, _)| {
-                key.to_lowercase().contains(&keyword.to_lowercase())
-            })
+        let found: Vec<_> = db
+            .nodes
+            .iter()
+            .filter(|(key, _)| key.to_lowercase().contains(&keyword.to_lowercase()))
             .collect();
 
         if !found.is_empty() {
@@ -40,7 +49,9 @@ fn main() {
 
     // Вывод всех ключей содержащих "def_"
     println!("\n📋 Все узлы с 'def_':");
-    let def_nodes: Vec<_> = db.nodes.iter()
+    let def_nodes: Vec<_> = db
+        .nodes
+        .iter()
         .filter(|(key, _)| key.starts_with("def_"))
         .collect();
 

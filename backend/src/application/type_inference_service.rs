@@ -3,10 +3,10 @@
 //! Высокоуровневая бизнес-логика для разрешения типов и автодополнения.
 //! Использует чистый Domain TypeResolver для основной логики типизации.
 
-use std::sync::Arc;
 use bsl_shared::domain::repository::{CompletionItem, CompletionKind, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
-use bsl_shared::domain::types::{TypeResolution, ConcreteType, ResolutionResult};
+use bsl_shared::domain::types::{ConcreteType, ResolutionResult, TypeResolution};
+use std::sync::Arc;
 
 /// Сервис вывода типов - Application Layer оркестрация
 pub struct TypeInferenceService {
@@ -16,7 +16,10 @@ pub struct TypeInferenceService {
 
 impl TypeInferenceService {
     pub fn new(resolver: Arc<TypeResolver>, repository: Arc<dyn TypeRepository>) -> Self {
-        Self { resolver, repository }
+        Self {
+            resolver,
+            repository,
+        }
     }
 
     /// Асинхронное разрешение выражений (Application оркестрация)
@@ -32,13 +35,11 @@ impl TypeInferenceService {
 
         for raw_type in all_types {
             if raw_type.name.to_lowercase().contains(&query.to_lowercase()) {
-                let resolution = TypeResolution::known(
-                    ConcreteType::Platform(
-                        bsl_shared::domain::types::PlatformType {
-                            name: raw_type.name.clone()
-                        }
-                    )
-                );
+                let resolution = TypeResolution::known(ConcreteType::Platform(
+                    bsl_shared::domain::types::PlatformType {
+                        name: raw_type.name.clone(),
+                    },
+                ));
 
                 let item = CompletionItem::with_details(
                     raw_type.name.clone(),
@@ -64,13 +65,11 @@ impl TypeInferenceService {
         let mut result = std::collections::HashMap::new();
 
         for raw_type in raw_types {
-            let mut resolution = TypeResolution::known(
-                ConcreteType::Platform(
-                    bsl_shared::domain::types::PlatformType {
-                        name: raw_type.name.clone()
-                    }
-                )
-            );
+            let mut resolution = TypeResolution::known(ConcreteType::Platform(
+                bsl_shared::domain::types::PlatformType {
+                    name: raw_type.name.clone(),
+                },
+            ));
             // Копируем фасеты из RawTypeData
             resolution.available_facets = raw_type.facets.clone();
 

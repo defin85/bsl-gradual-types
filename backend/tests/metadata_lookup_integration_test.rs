@@ -1,17 +1,21 @@
 //! Integration test для TypeMetadataLookup с реальными данными из SyntaxHelper
 
-use std::sync::Arc;
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
-use bsl_shared::domain::repository::{TypeRepository, InMemoryTypeRepository};
+use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+use bsl_shared::domain::types::{
+    Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult, ResolutionSource,
+    TypeResolution,
+};
 use bsl_shared::domain::TypeMetadataLookup;
-use bsl_shared::domain::types::{TypeResolution, ConcreteType, PlatformType, Certainty, ResolutionResult, ResolutionSource, ResolutionMetadata};
+use std::sync::Arc;
 
 #[test]
 fn test_metadata_lookup_with_real_syntax_helper() {
     // 1. Парсим синтаксис-помощник
     let mut parser = SyntaxHelperParser::new();
-    parser.parse_directory("examples/syntax_helper")
+    parser
+        .parse_directory("examples/syntax_helper")
         .expect("Failed to parse syntax helper");
 
     let db = parser.export_database();
@@ -21,7 +25,9 @@ fn test_metadata_lookup_with_real_syntax_helper() {
 
     // 2. Загружаем в repository
     let repository = Arc::new(InMemoryTypeRepository::new());
-    repository.load_types(parsed_types).expect("Failed to load types");
+    repository
+        .load_types(parsed_types)
+        .expect("Failed to load types");
 
     let stats = repository.get_stats();
     println!("📊 Repository stats: {} total types", stats.total_types);
@@ -39,8 +45,11 @@ fn test_metadata_lookup_with_real_syntax_helper() {
         let raw_type = repository.find_type(type_name);
         match &raw_type {
             Some(rt) => {
-                println!("  ✅ Found in repository: {} methods, {} properties",
-                    rt.methods.len(), rt.properties.len());
+                println!(
+                    "  ✅ Found in repository: {} methods, {} properties",
+                    rt.methods.len(),
+                    rt.properties.len()
+                );
                 if !rt.methods.is_empty() {
                     println!("     First method: {}", rt.methods[0].name);
                 }
@@ -66,8 +75,12 @@ fn test_metadata_lookup_with_real_syntax_helper() {
 
         // Сравниваем
         if let Some(rt) = raw_type {
-            assert_eq!(methods.len(), rt.methods.len(),
-                "Methods count mismatch for type {}", type_name);
+            assert_eq!(
+                methods.len(),
+                rt.methods.len(),
+                "Methods count mismatch for type {}",
+                type_name
+            );
             println!("  ✅ PASS: Methods count matches!");
         }
     }
@@ -77,7 +90,8 @@ fn test_metadata_lookup_with_real_syntax_helper() {
 fn test_repository_content_sample() {
     // Быстрый тест - просто посмотрим что есть в repository
     let mut parser = SyntaxHelperParser::new();
-    parser.parse_directory("examples/syntax_helper")
+    parser
+        .parse_directory("examples/syntax_helper")
         .expect("Failed to parse");
 
     let db = parser.export_database();
@@ -89,26 +103,30 @@ fn test_repository_content_sample() {
     let all_types = repository.get_all_types();
 
     println!("\n📋 First 10 types with methods:");
-    let types_with_methods: Vec<_> = all_types.iter()
+    let types_with_methods: Vec<_> = all_types
+        .iter()
         .filter(|t| !t.methods.is_empty())
         .take(10)
         .collect();
 
     for raw_type in types_with_methods {
-        println!("  - {} ({} methods)",
-            raw_type.name, raw_type.methods.len());
+        println!("  - {} ({} methods)", raw_type.name, raw_type.methods.len());
     }
 
     // Ищем конкретно "Массив"
     println!("\n🔍 Looking for 'Массив' type...");
     if let Some(array_type) = repository.find_type("Массив") {
-        println!("  ✅ Found! {} methods, {} properties",
-            array_type.methods.len(), array_type.properties.len());
+        println!(
+            "  ✅ Found! {} methods, {} properties",
+            array_type.methods.len(),
+            array_type.properties.len()
+        );
     } else {
         println!("  ❌ NOT FOUND");
 
         // Поищем похожие
-        let similar: Vec<_> = all_types.iter()
+        let similar: Vec<_> = all_types
+            .iter()
             .filter(|t| t.name.contains("Масс") || t.english_name.to_lowercase().contains("array"))
             .take(5)
             .collect();

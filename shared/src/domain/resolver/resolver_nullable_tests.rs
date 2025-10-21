@@ -2,7 +2,7 @@
 
 use crate::domain::repository::InMemoryTypeRepository;
 use crate::domain::resolver::TypeResolver;
-use crate::domain::types::{ResolutionResult, Certainty, ConcreteType};
+use crate::domain::types::{Certainty, ConcreteType, ResolutionResult};
 use std::sync::Arc;
 
 fn create_test_resolver() -> TypeResolver {
@@ -93,7 +93,10 @@ mod tests {
             ResolutionResult::Concrete(_) => {
                 // Success - получили базовый тип
             }
-            _ => panic!("Expected Concrete type after narrowing, got {:?}", narrowed.result),
+            _ => panic!(
+                "Expected Concrete type after narrowing, got {:?}",
+                narrowed.result
+            ),
         }
     }
 
@@ -134,7 +137,10 @@ mod tests {
     fn test_is_nullable_false() {
         let concrete_result = ResolutionResult::Concrete(ConcreteType::string());
 
-        assert!(!concrete_result.is_nullable(), "Concrete type is not nullable");
+        assert!(
+            !concrete_result.is_nullable(),
+            "Concrete type is not nullable"
+        );
     }
 
     #[test]

@@ -1,11 +1,13 @@
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 use bsl_backend::data::loaders::syntax_helper::SyntaxNode;
+use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 
 fn main() {
     let mut parser = SyntaxHelperParser::new();
 
     println!("🚀 Парсинг Синтаксис-помощника...");
-    parser.parse_syntax_helper("../examples/syntax_helper").unwrap();
+    parser
+        .parse_syntax_helper("../examples/syntax_helper")
+        .unwrap();
 
     let db = parser.export_database();
 
@@ -27,9 +29,14 @@ fn main() {
                 println!("   Русское имя: {}", type_info.identity.russian_name);
                 println!("   Английское имя: {}", type_info.identity.english_name);
                 println!("   Категория: {}", type_info.identity.category_path);
-                println!("   Описание: {}",
-                    type_info.documentation.type_description
-                        .chars().take(100).collect::<String>()
+                println!(
+                    "   Описание: {}",
+                    type_info
+                        .documentation
+                        .type_description
+                        .chars()
+                        .take(100)
+                        .collect::<String>()
                 );
                 println!("   Методы: {}", type_info.structure.methods.len());
                 println!("   Свойства: {}", type_info.structure.properties.len());

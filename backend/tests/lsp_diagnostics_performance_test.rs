@@ -39,20 +39,33 @@ fn test_large_file_parsing_performance() {
     let start = std::time::Instant::now();
 
     let mut parser = tree_sitter::Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).expect("Failed to set language");
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .expect("Failed to set language");
     let tree = parser.parse(&source, None).expect("Failed to parse source");
     let result = TreeSitterAdapter::convert_tree(&tree, &source).expect("Failed to convert tree");
 
     let duration = start.elapsed();
 
-    println!("⏱️  Parsing {:.1}KB file took: {:?}", source.len() as f64 / 1024.0, duration);
+    println!(
+        "⏱️  Parsing {:.1}KB file took: {:?}",
+        source.len() as f64 / 1024.0,
+        duration
+    );
 
     // Пороги скорректированы для реальной производительности (включая tree-sitter парсинг)
-    assert!(duration.as_millis() < 500, "Parsing should be reasonably fast (took {:?})", duration);
+    assert!(
+        duration.as_millis() < 500,
+        "Parsing should be reasonably fast (took {:?})",
+        duration
+    );
 
     // Разрешаем ошибки парсинга, так как генерируемый код может быть слишком большим
     if result.has_errors() {
-        println!("⚠️  Note: Parsing produced {} syntax errors (acceptable for large generated code)", result.syntax_errors.len());
+        println!(
+            "⚠️  Note: Parsing produced {} syntax errors (acceptable for large generated code)",
+            result.syntax_errors.len()
+        );
     }
 }
 
@@ -74,16 +87,26 @@ fn test_utf16_conversion_performance() {
     let start = std::time::Instant::now();
 
     let mut parser = tree_sitter::Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).expect("Failed to set language");
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .expect("Failed to set language");
     let tree = parser.parse(&source, None).expect("Failed to parse source");
     let _ = TreeSitterAdapter::convert_tree(&tree, &source).expect("Failed to convert tree");
 
     let duration = start.elapsed();
 
-    println!("⏱️  UTF-16 conversion for {:.1}KB Cyrillic file took: {:?}", source.len() as f64 / 1024.0, duration);
+    println!(
+        "⏱️  UTF-16 conversion for {:.1}KB Cyrillic file took: {:?}",
+        source.len() as f64 / 1024.0,
+        duration
+    );
 
     // Пороги скорректированы для реальной производительности
-    assert!(duration.as_millis() < 1000, "UTF-16 conversion should be reasonably fast (took {:?})", duration);
+    assert!(
+        duration.as_millis() < 1000,
+        "UTF-16 conversion should be reasonably fast (took {:?})",
+        duration
+    );
 }
 
 /// Тест 3: Производительность на ОЧЕНЬ большом файле (5000+ строк, ~500 процедур)
@@ -118,20 +141,24 @@ fn test_very_large_file_performance() {
     let start = std::time::Instant::now();
 
     let mut parser = tree_sitter::Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).expect("Failed to set language");
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .expect("Failed to set language");
     let tree = parser.parse(&source, None).expect("Failed to parse source");
     let result = TreeSitterAdapter::convert_tree(&tree, &source).expect("Failed to convert tree");
 
     let duration = start.elapsed();
 
-    println!("⏱️  Parsing VERY LARGE {:.1}KB file ({} lines) took: {:?}",
+    println!(
+        "⏱️  Parsing VERY LARGE {:.1}KB file ({} lines) took: {:?}",
         source.len() as f64 / 1024.0,
         source.lines().count(),
         duration
     );
 
     // Даже для очень большого файла должно быть <10 секунд
-    assert!(duration.as_millis() < 10_000,
+    assert!(
+        duration.as_millis() < 10_000,
         "Parsing very large file should complete in reasonable time (took {:?})",
         duration
     );
@@ -162,19 +189,23 @@ fn test_file_with_very_long_lines() {
     let start = std::time::Instant::now();
 
     let mut parser = tree_sitter::Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).expect("Failed to set language");
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .expect("Failed to set language");
     let tree = parser.parse(&source, None).expect("Failed to parse source");
     let _ = TreeSitterAdapter::convert_tree(&tree, &source);
 
     let duration = start.elapsed();
 
-    println!("⏱️  Parsing file with very long lines ({:.1}KB) took: {:?}",
+    println!(
+        "⏱️  Parsing file with very long lines ({:.1}KB) took: {:?}",
         source.len() as f64 / 1024.0,
         duration
     );
 
     // Даже для файла с очень длинными строками должно быть <2 секунд
-    assert!(duration.as_millis() < 2000,
+    assert!(
+        duration.as_millis() < 2000,
         "Parsing file with long lines should complete (took {:?})",
         duration
     );
@@ -207,20 +238,27 @@ fn test_memory_overhead_is_acceptable() {
     let source_size = source.len();
 
     let mut parser = tree_sitter::Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).expect("Failed to set language");
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .expect("Failed to set language");
     let tree = parser.parse(&source, None).expect("Failed to parse source");
     let _ = TreeSitterAdapter::convert_tree(&tree, &source).expect("Failed to convert tree");
 
     // Кеш строк добавляет ~source_size байт памяти
     // Это пренебрежимо мало для LSP сервера
-    println!("📊 Source size: {:.1}KB, cache overhead: ~{:.1}KB",
+    println!(
+        "📊 Source size: {:.1}KB, cache overhead: ~{:.1}KB",
         source_size as f64 / 1024.0,
-        source_size as f64 / 1024.0  // примерно столько же
+        source_size as f64 / 1024.0 // примерно столько же
     );
 
     // Проверяем, что source не слишком большой (overhead приемлемый)
     // Для 500 строк кода файл должен быть <15KB
-    assert!(source_size < 15_000, "Source size should be reasonable (got {} bytes, expected <15KB)", source_size);
+    assert!(
+        source_size < 15_000,
+        "Source size should be reasonable (got {} bytes, expected <15KB)",
+        source_size
+    );
 }
 
 /// Тест 6: Сравнение производительности на реальном BSL модуле
@@ -309,25 +347,32 @@ fn test_realistic_bsl_module_performance() {
     let start = std::time::Instant::now();
 
     let mut parser = tree_sitter::Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).expect("Failed to set language");
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .expect("Failed to set language");
     let tree = parser.parse(source, None).expect("Failed to parse source");
     let result = TreeSitterAdapter::convert_tree(&tree, source).expect("Failed to convert tree");
 
     let duration = start.elapsed();
 
-    println!("⏱️  Parsing realistic BSL module ({:.1}KB, {} lines) took: {:?}",
+    println!(
+        "⏱️  Parsing realistic BSL module ({:.1}KB, {} lines) took: {:?}",
         source.len() as f64 / 1024.0,
         source.lines().count(),
         duration
     );
 
-    assert!(duration.as_millis() < 100,
+    assert!(
+        duration.as_millis() < 100,
         "Parsing realistic module should be fast (took {:?})",
         duration
     );
     // Разрешаем ошибки парсинга, так как tree-sitter может не распознать все конструкции
     if result.has_errors() {
-        println!("⚠️  Note: Parsing produced {} syntax errors (acceptable for complex BSL)", result.syntax_errors.len());
+        println!(
+            "⚠️  Note: Parsing produced {} syntax errors (acceptable for complex BSL)",
+            result.syntax_errors.len()
+        );
     }
 }
 
@@ -363,21 +408,31 @@ fn test_parsing_with_syntax_errors_performance() {
     let start = std::time::Instant::now();
 
     let mut parser = tree_sitter::Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).expect("Failed to set language");
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .expect("Failed to set language");
     let tree = parser.parse(&source, None).expect("Failed to parse source");
     let result = TreeSitterAdapter::convert_tree(&tree, &source).expect("Failed to convert tree");
 
     let duration = start.elapsed();
 
-    println!("⏱️  Parsing file with syntax errors ({:.1}KB) took: {:?}",
+    println!(
+        "⏱️  Parsing file with syntax errors ({:.1}KB) took: {:?}",
         source.len() as f64 / 1024.0,
         duration
     );
 
-    assert!(duration.as_millis() < 500,
+    assert!(
+        duration.as_millis() < 500,
         "Parsing with errors should still be reasonably fast (took {:?})",
         duration
     );
-    assert!(result.has_errors(), "File with syntax errors should report errors");
-    assert!(!result.syntax_errors.is_empty(), "Syntax errors should be collected");
+    assert!(
+        result.has_errors(),
+        "File with syntax errors should report errors"
+    );
+    assert!(
+        !result.syntax_errors.is_empty(),
+        "Syntax errors should be collected"
+    );
 }

@@ -7,11 +7,11 @@
 pub const BUILD_VERSION: &str = "1.0.11-modal-closure-fix";
 
 pub mod api;
+pub mod app;
 pub mod components;
 pub mod config;
 pub mod pages;
 pub mod utils;
-pub mod app;
 
 // Re-export main app component
 pub use app::App;

@@ -9,11 +9,10 @@
 //! 2. Access to non-existent properties of objects
 //! 3. Treating simple types as collections
 
-use crate::domain::types::{
-    ConcreteType, TypeResolution, TypeDiagnostic, DiagnosticSeverity,
-    SpecialType,
-};
 use crate::domain::metadata_lookup::TypeMetadataLookup;
+use crate::domain::types::{
+    ConcreteType, DiagnosticSeverity, SpecialType, TypeDiagnostic, TypeResolution,
+};
 
 /// Категории ошибок типизации из статьи Balyuk & Popova
 #[derive(Debug, Clone, PartialEq)]
@@ -52,7 +51,10 @@ impl TypeErrorKind {
                 actual,
             } => format!(
                 "Некорректный параметр #{} для метода '{}': ожидается {}, получено {}",
-                param_index + 1, method_name, expected, actual
+                param_index + 1,
+                method_name,
+                expected,
+                actual
             ),
             TypeErrorKind::NonExistentProperty {
                 object_type,
@@ -107,8 +109,8 @@ impl<'a> TypeValidator<'a> {
 
         // Проверяем есть ли метод с таким именем (case-insensitive для кириллицы и латиницы)
         let method_exists = methods.iter().any(|m| {
-            Self::names_equal_ignore_case(&m.name, method_name) ||
-            Self::names_equal_ignore_case(&m.english_name, method_name)
+            Self::names_equal_ignore_case(&m.name, method_name)
+                || Self::names_equal_ignore_case(&m.english_name, method_name)
         });
 
         if !method_exists {
@@ -132,9 +134,9 @@ impl<'a> TypeValidator<'a> {
         let properties = self.metadata_lookup.get_properties(object_resolution);
 
         // Проверяем есть ли свойство с таким именем (case-insensitive)
-        let property_exists = properties.iter().any(|p| {
-            Self::names_equal_ignore_case(&p.name, property_name)
-        });
+        let property_exists = properties
+            .iter()
+            .any(|p| Self::names_equal_ignore_case(&p.name, property_name));
 
         if !property_exists {
             let type_name = Self::resolution_to_string(object_resolution);
@@ -152,9 +154,9 @@ impl<'a> TypeValidator<'a> {
         if a.len() != b.len() {
             return false;
         }
-        a.chars().zip(b.chars()).all(|(ca, cb)| {
-            ca.to_lowercase().eq(cb.to_lowercase())
-        })
+        a.chars()
+            .zip(b.chars())
+            .all(|(ca, cb)| ca.to_lowercase().eq(cb.to_lowercase()))
     }
 
     /// Проверка корректности передачи параметров (старый API для совместимости)
@@ -165,7 +167,9 @@ impl<'a> TypeValidator<'a> {
     ) -> Vec<TypeErrorKind> {
         let mut errors = Vec::new();
 
-        for (index, (expected, actual)) in expected_params.iter().zip(actual_params.iter()).enumerate() {
+        for (index, (expected, actual)) in
+            expected_params.iter().zip(actual_params.iter()).enumerate()
+        {
             if !Self::types_compatible(expected, actual) {
                 errors.push(TypeErrorKind::IncorrectParameterType {
                     method_name: method_name.to_string(),
@@ -210,8 +214,8 @@ impl<'a> TypeValidator<'a> {
                     operation: operation.to_string(),
                 })
             }
-            ResolutionResult::Concrete(ConcreteType::Special(SpecialType::Undefined)) |
-            ResolutionResult::Concrete(ConcreteType::Special(SpecialType::Null)) => {
+            ResolutionResult::Concrete(ConcreteType::Special(SpecialType::Undefined))
+            | ResolutionResult::Concrete(ConcreteType::Special(SpecialType::Null)) => {
                 Some(TypeErrorKind::SimpleTypeAsCollection {
                     type_name: "Неопределено".to_string(),
                     operation: operation.to_string(),
@@ -224,7 +228,7 @@ impl<'a> TypeValidator<'a> {
     // Вспомогательные методы
 
     fn types_compatible(expected: &str, actual: &TypeResolution) -> bool {
-        use crate::domain::types::{ResolutionResult, Certainty};
+        use crate::domain::types::{Certainty, ResolutionResult};
 
         // Если тип неизвестен, предполагаем совместимость (градуальная типизация)
         if matches!(actual.certainty, Certainty::Unknown) {
@@ -278,24 +282,21 @@ impl<'a> TypeValidator<'a> {
         match &resolution.result {
             ResolutionResult::Concrete(concrete) => concrete.to_string(),
             ResolutionResult::Union(types) => {
-                let type_names: Vec<_> = types.iter()
-                    .map(|wt| wt.type_.to_string())
-                    .collect();
-                format!("({}) | вероятность неопределённости", type_names.join(" | "))
+                let type_names: Vec<_> = types.iter().map(|wt| wt.type_.to_string()).collect();
+                format!(
+                    "({}) | вероятность неопределённости",
+                    type_names.join(" | ")
+                )
             }
             ResolutionResult::Intersection(types) => {
-                let type_names: Vec<_> = types.iter()
-                    .map(|t| t.to_string())
-                    .collect();
+                let type_names: Vec<_> = types.iter().map(|t| t.to_string()).collect();
                 format!("({})", type_names.join(" & "))
             }
             ResolutionResult::Generic(gen) => {
                 if gen.type_params.is_empty() {
                     gen.base_type.clone()
                 } else {
-                    let params: Vec<_> = gen.type_params.iter()
-                        .map(|t| t.to_string())
-                        .collect();
+                    let params: Vec<_> = gen.type_params.iter().map(|t| t.to_string()).collect();
                     format!("{}<{}>", gen.base_type, params.join(", "))
                 }
             }
@@ -311,8 +312,7 @@ impl<'a> TypeValidator<'a> {
 mod tests {
     use super::*;
     use crate::domain::types::{
-        Certainty, ResolutionResult, ResolutionSource, ResolutionMetadata,
-        PrimitiveType,
+        Certainty, PrimitiveType, ResolutionMetadata, ResolutionResult, ResolutionSource,
     };
 
     #[test]

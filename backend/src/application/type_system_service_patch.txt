@@ -1,0 +1,4 @@
+    /// Получить TypeRepository для прямого доступа к типам
+    pub fn get_repository(&self) -> std::sync::Arc<dyn bsl_shared::domain::repository::TypeRepository> {
+        self.analysis_engine.get_repository()
+    }

@@ -92,15 +92,11 @@ impl PersistentCache {
         let analysis_cache_dir = cache_root.join("analysis");
 
         // Создать директории если не существуют
-        fs::create_dir_all(&ast_cache_dir)
-            .context("Failed to create AST cache directory")?;
+        fs::create_dir_all(&ast_cache_dir).context("Failed to create AST cache directory")?;
         fs::create_dir_all(&analysis_cache_dir)
             .context("Failed to create analysis cache directory")?;
 
-        info!(
-            "Persistent cache initialized at {}",
-            cache_root.display()
-        );
+        info!("Persistent cache initialized at {}", cache_root.display());
 
         Ok(Self {
             cache_root,
@@ -197,7 +193,11 @@ impl PersistentCache {
     }
 
     /// Загрузить результаты анализа из persistent cache
-    pub fn load_analysis(&self, file_path: &str, content_hash: &str) -> Result<Option<CachedAnalysis>> {
+    pub fn load_analysis(
+        &self,
+        file_path: &str,
+        content_hash: &str,
+    ) -> Result<Option<CachedAnalysis>> {
         let cache_path = self.get_analysis_cache_path(file_path);
 
         if !cache_path.exists() {
@@ -206,8 +206,8 @@ impl PersistentCache {
         }
 
         let json = fs::read_to_string(&cache_path).context("Failed to read analysis cache")?;
-        let cached: CachedAnalysis = serde_json::from_str(&json)
-            .context("Failed to deserialize analysis cache")?;
+        let cached: CachedAnalysis =
+            serde_json::from_str(&json).context("Failed to deserialize analysis cache")?;
 
         // Проверка 1: Hash match (инвалидация при изменении файла)
         if cached.content_hash != content_hash {
@@ -262,7 +262,11 @@ impl PersistentCache {
     }
 
     /// Загрузить metadata AST дерева
-    pub fn load_ast_metadata(&self, file_path: &str, content_hash: &str) -> Result<Option<CachedAstMetadata>> {
+    pub fn load_ast_metadata(
+        &self,
+        file_path: &str,
+        content_hash: &str,
+    ) -> Result<Option<CachedAstMetadata>> {
         let cache_path = self.get_ast_cache_path(file_path);
 
         if !cache_path.exists() {

@@ -4,7 +4,6 @@
 /// - TreeSitter парсер извлекает span корректно
 /// - AST → IR конверсия передаёт span для всех Statement типов
 /// - find_node_at_position() находит узлы по координатам
-
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::system::parser_coordinator::ParserCoordinator;
 
@@ -37,8 +36,12 @@ fn test_span_extraction_from_tree_sitter() {
 
         // Проверяем, что span НЕ stub (0,0,0,0)
         assert!(
-            span.start_line != 0 || span.start_column != 0 || span.end_line != 0 || span.end_column != 0,
-            "Span не должен быть stub (0,0,0,0), получен: {:?}", span
+            span.start_line != 0
+                || span.start_column != 0
+                || span.end_line != 0
+                || span.end_column != 0,
+            "Span не должен быть stub (0,0,0,0), получен: {:?}",
+            span
         );
 
         println!("✅ Span извлечён из tree-sitter: {:?}", span);
@@ -63,18 +66,26 @@ fn test_span_propagation_ast_to_ir() {
     let ir_program = AstToIrConverter::convert(
         parse_result.program,
         code.to_string(),
-        "test_span_propagation.bsl".to_string()
-    ).expect("Конверсия AST → IR должна пройти успешно");
+        "test_span_propagation.bsl".to_string(),
+    )
+    .expect("Конверсия AST → IR должна пройти успешно");
 
     // Assert: Проверяем, что span передан в IR для разных типов Statement
-    let nodes_with_real_spans: Vec<_> = ir_program.nodes.iter()
+    let nodes_with_real_spans: Vec<_> = ir_program
+        .nodes
+        .iter()
         .filter(|node| {
-            node.span.start_line != 0 || node.span.start_column != 0
-                || node.span.end_line != 0 || node.span.end_column != 0
+            node.span.start_line != 0
+                || node.span.start_column != 0
+                || node.span.end_line != 0
+                || node.span.end_column != 0
         })
         .collect();
 
-    println!("✅ Узлов с реальными span в IR: {}", nodes_with_real_spans.len());
+    println!(
+        "✅ Узлов с реальными span в IR: {}",
+        nodes_with_real_spans.len()
+    );
     for (idx, node) in nodes_with_real_spans.iter().enumerate() {
         println!("   - Узел {}: span = {:?}", idx + 1, node.span);
     }
@@ -90,7 +101,8 @@ fn test_span_propagation_ast_to_ir() {
     assert!(
         nodes_with_spans * 2 >= total_nodes,
         "Большинство узлов должно иметь реальный span ({}/{})",
-        nodes_with_spans, total_nodes
+        nodes_with_spans,
+        total_nodes
     );
 }
 
@@ -109,8 +121,9 @@ fn test_find_node_at_position() {
     let ir_program = AstToIrConverter::convert(
         parse_result.program,
         code.to_string(),
-        "test_find_node.bsl".to_string()
-    ).expect("Конверсия AST → IR должна пройти успешно");
+        "test_find_node.bsl".to_string(),
+    )
+    .expect("Конверсия AST → IR должна пройти успешно");
 
     // Act: Поиск узла по позиции в строке 2 (Перем СправочникКонтрагенты)
     // Строки в LSP 0-based, tree-sitter тоже 0-based
@@ -184,14 +197,19 @@ fn test_span_for_all_statement_types() {
     let ir_program = AstToIrConverter::convert(
         parse_result.program,
         code.to_string(),
-        "test_all_statements.bsl".to_string()
-    ).expect("Конверсия AST → IR должна пройти успешно");
+        "test_all_statements.bsl".to_string(),
+    )
+    .expect("Конверсия AST → IR должна пройти успешно");
 
     // Assert: Проверяем наличие span для разных типов узлов
-    let nodes_with_real_spans: Vec<_> = ir_program.nodes.iter()
+    let nodes_with_real_spans: Vec<_> = ir_program
+        .nodes
+        .iter()
         .filter(|node| {
-            node.span.start_line != 0 || node.span.start_column != 0
-                || node.span.end_line != 0 || node.span.end_column != 0
+            node.span.start_line != 0
+                || node.span.start_column != 0
+                || node.span.end_line != 0
+                || node.span.end_column != 0
         })
         .collect();
 
@@ -210,6 +228,8 @@ fn test_span_for_all_statement_types() {
     assert!(
         nodes_with_spans * 100 / total_nodes >= 80,
         "Минимум 80% узлов должно иметь реальный span, получено {}/{} ({}%)",
-        nodes_with_spans, total_nodes, nodes_with_spans * 100 / total_nodes
+        nodes_with_spans,
+        total_nodes,
+        nodes_with_spans * 100 / total_nodes
     );
 }

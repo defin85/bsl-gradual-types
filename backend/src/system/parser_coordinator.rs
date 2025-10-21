@@ -55,7 +55,10 @@ impl ParserCoordinator {
         match self.tree_sitter.parse(content) {
             Ok(result) => {
                 if result.has_errors() {
-                    warn!("TreeSitter parsing completed with {} syntax errors", result.syntax_errors.len());
+                    warn!(
+                        "TreeSitter parsing completed with {} syntax errors",
+                        result.syntax_errors.len()
+                    );
                 } else {
                     debug!("TreeSitter parsing successful");
                 }
@@ -96,11 +99,15 @@ impl ParserCoordinator {
             ) {
                 Ok((new_tree, program)) => {
                     // Кешируем новое дерево
-                    self.tree_cache.update(&file_path, new_tree, new_content, new_hash);
+                    self.tree_cache
+                        .update(&file_path, new_tree, new_content, new_hash);
                     return Ok(program);
                 }
                 Err(e) => {
-                    warn!("Incremental parsing failed: {}, falling back to full parse", e);
+                    warn!(
+                        "Incremental parsing failed: {}, falling back to full parse",
+                        e
+                    );
                 }
             }
         }
@@ -134,7 +141,11 @@ impl ParserCoordinator {
     ///     Err(e) => eprintln!("Ошибка парсинга: {}", e),
     /// }
     /// ```
-    pub fn parse_to_ir(&self, content: &str, file_path: &str) -> Result<bsl_shared::ir::SemanticProgram, String> {
+    pub fn parse_to_ir(
+        &self,
+        content: &str,
+        file_path: &str,
+    ) -> Result<bsl_shared::ir::SemanticProgram, String> {
         use crate::application::ast_to_ir::AstToIrConverter;
 
         // 1. Парсинг в AST (tree-sitter) с поддержкой ParseResult
@@ -144,25 +155,45 @@ impl ParserCoordinator {
         if parse_result.has_errors() {
             warn!("⚠️ Обнаружены синтаксические ошибки при парсинге:");
             for error in &parse_result.syntax_errors {
-                warn!("  - [{}:{}-{}:{}] {}",
-                    error.span.start_line, error.span.start_column,
-                    error.span.end_line, error.span.end_column,
-                    error.message);
+                warn!(
+                    "  - [{}:{}-{}:{}] {}",
+                    error.span.start_line,
+                    error.span.start_column,
+                    error.span.end_line,
+                    error.span.end_column,
+                    error.message
+                );
             }
         }
 
         // 2. Конвертация AST → IR (извлекаем program из ParseResult)
-        AstToIrConverter::convert(parse_result.program, content.to_string(), file_path.to_string())
-            .map_err(|e| format!("AST to IR conversion failed: {}", e))
+        AstToIrConverter::convert(
+            parse_result.program,
+            content.to_string(),
+            file_path.to_string(),
+        )
+        .map_err(|e| format!("AST to IR conversion failed: {}", e))
     }
 
     /// Загрузка платформенных типов (упрощенная)
     pub async fn load_platform_types(&self, repository: &Arc<dyn TypeRepository>) -> Result<()> {
         debug!("Loading platform types via simple parser coordination");
 
-        // Простая логика загрузки без сложных координаторов
-        // В реальности здесь будет парсинг HTML справки 1С
-        let _stats = repository.get_stats();
+        // Загружаем базовые платформенные типы
+        let platform_types = crate::data::loaders::load_all_platform_types();
+
+        debug!("Loaded {} platform types", platform_types.len());
+
+        // Загружаем типы в репозиторий
+        repository
+            .load_types(platform_types)
+            .map_err(|e| anyhow::anyhow!("Failed to load platform types: {}", e))?;
+
+        let stats = repository.get_stats();
+        debug!(
+            "TypeRepository stats after platform types load: {} types total",
+            stats.total_types
+        );
 
         Ok(())
     }
@@ -270,14 +301,8 @@ impl TreeSitterParser {
             old_end_byte,
             new_end_byte,
             start_position: Point::new(edit.start_line as usize, edit.start_column as usize),
-            old_end_position: Point::new(
-                edit.old_end_line as usize,
-                edit.old_end_column as usize,
-            ),
-            new_end_position: Point::new(
-                edit.new_end_line as usize,
-                edit.new_end_column as usize,
-            ),
+            old_end_position: Point::new(edit.old_end_line as usize, edit.old_end_column as usize),
+            new_end_position: Point::new(edit.new_end_line as usize, edit.new_end_column as usize),
         })
     }
 
@@ -364,7 +389,11 @@ mod comparison_notes {
 /// - Легко тестировать с mock parser
 /// - Инверсия зависимостей: shared не зависит от backend
 impl ParserTrait for ParserCoordinator {
-    fn parse_to_ir(&self, content: &str, file_path: &str) -> Result<bsl_shared::ir::SemanticProgram> {
+    fn parse_to_ir(
+        &self,
+        content: &str,
+        file_path: &str,
+    ) -> Result<bsl_shared::ir::SemanticProgram> {
         // Используем существующий метод parse_to_ir
         self.parse_to_ir(content, file_path)
             .map_err(|e| anyhow::anyhow!("ParserCoordinator::parse_to_ir failed: {}", e))

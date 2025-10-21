@@ -22,7 +22,7 @@ pub struct RawTypeData {
     pub enum_values: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[derive(Default)]
 pub enum RawDataSource {
     #[default]
@@ -54,7 +54,7 @@ pub struct RawParamData {
     pub is_optional: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RawAttributeData {
     pub name: String,
     pub attr_type: String,
@@ -83,8 +83,94 @@ pub enum FacetKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MetadataKind {
-    Catalog, Document, Register, Report, DataProcessor, Enum,
-    ChartOfAccounts, ChartOfCharacteristicTypes,
+    Catalog,
+    Document,
+    Register,
+    Report,
+    DataProcessor,
+    Enum,
+    ChartOfAccounts,
+    ChartOfCharacteristicTypes,
+    ChartOfCalculationTypes,
+    // Регистры (добавлено для config_parser.rs)
+    InformationRegister,
+    AccumulationRegister,
+    AccountingRegister,
+    CalculationRegister,
+    // Бизнес-процессы и задачи
+    BusinessProcess,
+    Task,
+    // Остальные типы конфигурации
+    ExchangePlan,
+    Constant,
+    CommonModule,
+    Role,
+    Subsystem,
+    Language,
+}
+
+impl MetadataKind {
+    /// Конвертирует XML тег объекта метаданных в MetadataKind
+    pub fn from_xml_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "Catalog" => Some(MetadataKind::Catalog),
+            "Document" => Some(MetadataKind::Document),
+            "Enum" => Some(MetadataKind::Enum),
+            "Report" => Some(MetadataKind::Report),
+            "DataProcessor" => Some(MetadataKind::DataProcessor),
+            "ChartOfAccounts" => Some(MetadataKind::ChartOfAccounts),
+            "ChartOfCharacteristicTypes" => Some(MetadataKind::ChartOfCharacteristicTypes),
+            "ChartOfCalculationTypes" => Some(MetadataKind::ChartOfCalculationTypes),
+            "InformationRegister" => Some(MetadataKind::InformationRegister),
+            "AccumulationRegister" => Some(MetadataKind::AccumulationRegister),
+            "AccountingRegister" => Some(MetadataKind::AccountingRegister),
+            "CalculationRegister" => Some(MetadataKind::CalculationRegister),
+            "BusinessProcess" => Some(MetadataKind::BusinessProcess),
+            "Task" => Some(MetadataKind::Task),
+            "ExchangePlan" => Some(MetadataKind::ExchangePlan),
+            "Constant" => Some(MetadataKind::Constant),
+            "CommonModule" => Some(MetadataKind::CommonModule),
+            "Role" => Some(MetadataKind::Role),
+            "Subsystem" => Some(MetadataKind::Subsystem),
+            "Language" => Some(MetadataKind::Language),
+            _ => None,
+        }
+    }
+
+    /// Возвращает префикс для конфигурационного типа
+    ///
+    /// # Примеры
+    /// ```
+    /// use bsl_shared::domain::types::MetadataKind;
+    ///
+    /// assert_eq!(MetadataKind::Catalog.to_prefix(), "Справочники");
+    /// assert_eq!(MetadataKind::Document.to_prefix(), "Документы");
+    /// ```
+    pub fn to_prefix(&self) -> &'static str {
+        match self {
+            MetadataKind::Catalog => "Справочники",
+            MetadataKind::Document => "Документы",
+            MetadataKind::Register => "Регистры",
+            MetadataKind::Report => "Отчеты",
+            MetadataKind::DataProcessor => "Обработки",
+            MetadataKind::Enum => "Перечисления",
+            MetadataKind::ChartOfAccounts => "ПланыСчетов",
+            MetadataKind::ChartOfCharacteristicTypes => "ПланыВидовХарактеристик",
+            MetadataKind::ChartOfCalculationTypes => "ПланыВидовРасчета",
+            MetadataKind::InformationRegister => "РегистрыСведений",
+            MetadataKind::AccumulationRegister => "РегистрыНакопления",
+            MetadataKind::AccountingRegister => "РегистрыБухгалтерии",
+            MetadataKind::CalculationRegister => "РегистрыРасчета",
+            MetadataKind::BusinessProcess => "БизнесПроцессы",
+            MetadataKind::Task => "Задачи",
+            MetadataKind::ExchangePlan => "ПланыОбмена",
+            MetadataKind::Constant => "Константы",
+            MetadataKind::CommonModule => "ОбщиеМодули",
+            MetadataKind::Role => "Роли",
+            MetadataKind::Subsystem => "Подсистемы",
+            MetadataKind::Language => "Языки",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -228,6 +314,51 @@ pub struct ParameterInfo {
     pub description: Option<String>,
 }
 
+
+/// Тип строки табличной части конфигурационного объекта
+///
+/// # Примеры
+/// - `СтрокаРаботы` для `Документы.ЗаказНаряды.Работы`
+/// - `СтрокаСторон` для `Документы.ДоговорКонтрагента.Стороны`
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TabularRowType {
+    /// Полное имя родительского типа (например, "Документы.ЗаказНаряды")
+    pub parent_type: String,
+    /// Имя табличной части (например, "Работы")
+    pub tabular_section_name: String,
+    /// Атрибуты строки табличной части
+    pub attributes: Vec<RawAttributeData>,
+}
+
+impl TabularRowType {
+    /// Создаёт новый тип строки табличной части
+    pub fn new(parent_type: String, section_name: String, attributes: Vec<RawAttributeData>) -> Self {
+        Self {
+            parent_type,
+            tabular_section_name: section_name,
+            attributes,
+        }
+    }
+
+    /// Возвращает полное имя типа строки (например, "СтрокаРаботы")
+    pub fn get_full_name(&self) -> String {
+        format!("Строка{}", self.tabular_section_name)
+    }
+
+    /// Возвращает имя атрибута строки по индексу
+    pub fn get_attribute_name(&self, index: usize) -> Option<&str> {
+        self.attributes.get(index).map(|attr| attr.name.as_str())
+    }
+
+    /// Возвращает тип атрибута строки по имени
+    pub fn get_attribute_type(&self, name: &str) -> Option<&String> {
+        self.attributes
+            .iter()
+            .find(|attr| attr.name == name)
+            .map(|attr| &attr.attr_type)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ConcreteType {
     Platform(PlatformType),
@@ -235,6 +366,7 @@ pub enum ConcreteType {
     Primitive(PrimitiveType),
     Special(SpecialType),
     GlobalFunction(GlobalFunctionInfo),
+    TabularRow(TabularRowType),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -398,6 +530,7 @@ impl fmt::Display for ConcreteType {
             ConcreteType::Primitive(primitive) => write!(f, "{}", primitive.display_name()),
             ConcreteType::Special(special) => write!(f, "{}", special.display_name()),
             ConcreteType::GlobalFunction(func) => write!(f, "{}()", func.name),
+            ConcreteType::TabularRow(tr) => write!(f, "{}", tr.get_full_name()),
         }
     }
 }
@@ -434,6 +567,19 @@ impl MetadataKind {
             MetadataKind::Register => "Регистры",
             MetadataKind::ChartOfAccounts => "ПланыСчетов",
             MetadataKind::ChartOfCharacteristicTypes => "ПланыВидовХарактеристик",
+            MetadataKind::ChartOfCalculationTypes => "ПланыВидовРасчета",
+            MetadataKind::InformationRegister => "РегистрыСведений",
+            MetadataKind::AccumulationRegister => "РегистрыНакопления",
+            MetadataKind::AccountingRegister => "РегистрыБухгалтерии",
+            MetadataKind::CalculationRegister => "РегистрыРасчета",
+            MetadataKind::BusinessProcess => "БизнесПроцессы",
+            MetadataKind::Task => "Задачи",
+            MetadataKind::ExchangePlan => "ПланыОбмена",
+            MetadataKind::Constant => "Константы",
+            MetadataKind::CommonModule => "ОбщиеМодули",
+            MetadataKind::Role => "Роли",
+            MetadataKind::Subsystem => "Подсистемы",
+            MetadataKind::Language => "Языки",
         }
     }
 }

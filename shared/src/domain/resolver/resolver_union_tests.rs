@@ -4,7 +4,7 @@
 mod tests {
     use super::super::*;
     use crate::domain::repository::InMemoryTypeRepository;
-    use crate::domain::types::{ResolutionResult, ConcreteType, PrimitiveType};
+    use crate::domain::types::{ConcreteType, PrimitiveType, ResolutionResult};
     use std::sync::Arc;
 
     fn create_test_resolver() -> TypeResolver {
@@ -23,12 +23,12 @@ mod tests {
             assert_eq!(types.len(), 2);
 
             // Проверяем типы (они отсортированы по весу, но веса равны)
-            let has_string = types.iter().any(|wt| {
-                matches!(wt.type_, ConcreteType::Primitive(PrimitiveType::String))
-            });
-            let has_number = types.iter().any(|wt| {
-                matches!(wt.type_, ConcreteType::Primitive(PrimitiveType::Number))
-            });
+            let has_string = types
+                .iter()
+                .any(|wt| matches!(wt.type_, ConcreteType::Primitive(PrimitiveType::String)));
+            let has_number = types
+                .iter()
+                .any(|wt| matches!(wt.type_, ConcreteType::Primitive(PrimitiveType::Number)));
 
             assert!(has_string, "Union should contain String");
             assert!(has_number, "Union should contain Number");
@@ -75,12 +75,16 @@ mod tests {
             assert_eq!(types.len(), 2);
 
             // Вес для String должен быть объединён
-            let string_type = types.iter()
+            let string_type = types
+                .iter()
                 .find(|wt| matches!(wt.type_, ConcreteType::Primitive(PrimitiveType::String)))
                 .expect("String should be present");
 
             // Два String с весом 0.33 каждый → 0.66 после объединения
-            assert!((string_type.weight - 0.66).abs() < 0.01, "String weight should be ~0.66");
+            assert!(
+                (string_type.weight - 0.66).abs() < 0.01,
+                "String weight should be ~0.66"
+            );
         } else {
             panic!("Expected Union type");
         }

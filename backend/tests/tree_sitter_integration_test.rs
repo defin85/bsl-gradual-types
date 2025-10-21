@@ -15,7 +15,11 @@ fn test_tree_sitter_simple_function() {
     let coordinator = ParserCoordinator::with_fallback();
     let result = coordinator.parse(bsl_code);
 
-    assert!(result.is_ok(), "Парсинг должен пройти успешно: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Парсинг должен пройти успешно: {:?}",
+        result
+    );
 
     let parse_result = result.unwrap();
     let program = parse_result.program;
@@ -28,7 +32,9 @@ fn test_tree_sitter_simple_function() {
 
     // Проверяем что первый statement — это функция
     match &program.statements[0] {
-        Statement::FunctionDecl { name, params, body, .. } => {
+        Statement::FunctionDecl {
+            name, params, body, ..
+        } => {
             assert_eq!(name, "ПолучитьСумму", "Имя функции должно совпадать");
             assert_eq!(params.len(), 2, "Должно быть 2 параметра");
             assert!(params.contains(&"А".to_string()), "Должен быть параметр А");
@@ -54,7 +60,11 @@ fn test_tree_sitter_variable_declaration() {
     let coordinator = ParserCoordinator::with_fallback();
     let result = coordinator.parse(bsl_code);
 
-    assert!(result.is_ok(), "Парсинг переменных должен работать: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Парсинг переменных должен работать: {:?}",
+        result
+    );
 
     let parse_result = result.unwrap();
     let program = parse_result.program;
@@ -87,7 +97,11 @@ fn test_tree_sitter_if_statement() {
     let coordinator = ParserCoordinator::with_fallback();
     let result = coordinator.parse(bsl_code);
 
-    assert!(result.is_ok(), "Парсинг условий должен работать: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Парсинг условий должен работать: {:?}",
+        result
+    );
 
     let parse_result = result.unwrap();
     let program = parse_result.program;
@@ -129,7 +143,11 @@ fn test_tree_sitter_for_loop() {
     let coordinator = ParserCoordinator::with_fallback();
     let result = coordinator.parse(bsl_code);
 
-    assert!(result.is_ok(), "Парсинг циклов должен работать: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Парсинг циклов должен работать: {:?}",
+        result
+    );
 
     // For loop пока преобразуется в If (placeholder)
     // TODO: добавить Statement::For в ast.rs
@@ -144,7 +162,11 @@ fn test_tree_sitter_method_call() {
     let coordinator = ParserCoordinator::with_fallback();
     let result = coordinator.parse(bsl_code);
 
-    assert!(result.is_ok(), "Парсинг вызовов методов должен работать: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Парсинг вызовов методов должен работать: {:?}",
+        result
+    );
 
     let parse_result = result.unwrap();
     let program = parse_result.program;

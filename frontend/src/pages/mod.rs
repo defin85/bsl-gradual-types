@@ -1,13 +1,13 @@
 //! Application pages
 
 pub mod app;
-pub mod dashboard;
 pub mod cards;
-pub mod table;
+pub mod dashboard;
 pub mod graph;
+pub mod table;
 
 pub use app::App;
-pub use dashboard::Dashboard;
 pub use cards::CardsPage;
-pub use table::TablePage;
+pub use dashboard::Dashboard;
 pub use graph::GraphPage;
+pub use table::TablePage;

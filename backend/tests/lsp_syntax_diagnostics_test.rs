@@ -28,20 +28,33 @@ fn test_missing_endif_detected() {
     println!("Найдено ошибок: {}", parse_result.syntax_errors.len());
 
     assert!(parse_result.has_errors(), "Должна быть обнаружена ошибка");
-    assert!(!parse_result.syntax_errors.is_empty(), "Должны быть синтаксические ошибки");
+    assert!(
+        !parse_result.syntax_errors.is_empty(),
+        "Должны быть синтаксические ошибки"
+    );
 
     // Проверяем детали ошибок
     for (idx, error) in parse_result.syntax_errors.iter().enumerate() {
         println!("\nОшибка #{}: {:?}", idx + 1, error.error_type);
         println!("  Сообщение: {}", error.message);
-        println!("  Позиция: {}:{} - {}:{}",
-            error.span.start_line, error.span.start_column,
-            error.span.end_line, error.span.end_column);
+        println!(
+            "  Позиция: {}:{} - {}:{}",
+            error.span.start_line,
+            error.span.start_column,
+            error.span.end_line,
+            error.span.end_column
+        );
 
         // Проверяем, что координаты валидные
         assert!(error.span.start_line > 0, "start_line должен быть > 0");
-        assert!(error.span.start_column >= 0, "start_column должен быть >= 0");
-        assert!(error.span.end_line >= error.span.start_line, "end_line >= start_line");
+        assert!(
+            error.span.start_column >= 0,
+            "start_column должен быть >= 0"
+        );
+        assert!(
+            error.span.end_line >= error.span.start_line,
+            "end_line >= start_line"
+        );
     }
 
     println!("===================================\n");
@@ -67,7 +80,10 @@ fn test_missing_enddo_detected() {
     assert!(parse_result.has_errors(), "Должны быть обнаружены ошибки");
 
     for error in &parse_result.syntax_errors {
-        println!("- {} [{}:{}]", error.message, error.span.start_line, error.span.start_column);
+        println!(
+            "- {} [{}:{}]",
+            error.message, error.span.start_line, error.span.start_column
+        );
     }
 
     println!("=====================================\n");
@@ -126,7 +142,8 @@ fn test_multiple_syntax_errors() {
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     for (idx, error) in parse_result.syntax_errors.iter().enumerate() {
-        println!("{}. {} [{}:{}]",
+        println!(
+            "{}. {} [{}:{}]",
             idx + 1,
             error.message,
             error.span.start_line,
@@ -140,8 +157,10 @@ fn test_multiple_syntax_errors() {
     );
 
     // Должно быть хотя бы 2 ошибки (отсутствие КонецЕсли и КонецЦикла)
-    assert!(parse_result.syntax_errors.len() >= 1,
-        "Должно быть обнаружено хотя бы 1 синтаксическая ошибка");
+    assert!(
+        parse_result.syntax_errors.len() >= 1,
+        "Должно быть обнаружено хотя бы 1 синтаксическая ошибка"
+    );
 
     println!("==================================\n");
 }
@@ -204,25 +223,37 @@ fn test_error_utf16_coordinates_with_cyrillic() {
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
             println!("\nОшибка: {}", error.message);
-            println!("  Позиция: {}:{} - {}:{}",
-                error.span.start_line, error.span.start_column,
-                error.span.end_line, error.span.end_column);
+            println!(
+                "  Позиция: {}:{} - {}:{}",
+                error.span.start_line,
+                error.span.start_column,
+                error.span.end_line,
+                error.span.end_column
+            );
 
             // ✅ КЛЮЧЕВАЯ ПРОВЕРКА: координаты должны быть разумными для UTF-16
             // Если бы мы использовали byte offsets, координаты были бы больше
-            assert!(error.span.start_column < 100,
-                "start_column не должен быть огромным (это признак byte offset вместо UTF-16)");
+            assert!(
+                error.span.start_column < 100,
+                "start_column не должен быть огромным (это признак byte offset вместо UTF-16)"
+            );
 
-            assert!(error.span.end_column < 100,
-                "end_column не должен быть огромным");
+            assert!(
+                error.span.end_column < 100,
+                "end_column не должен быть огромным"
+            );
 
             // Координаты должны быть последовательными
-            assert!(error.span.end_line >= error.span.start_line,
-                "end_line должен быть >= start_line");
+            assert!(
+                error.span.end_line >= error.span.start_line,
+                "end_line должен быть >= start_line"
+            );
 
             if error.span.start_line == error.span.end_line {
-                assert!(error.span.end_column >= error.span.start_column,
-                    "На одной строке: end_column должен быть >= start_column");
+                assert!(
+                    error.span.end_column >= error.span.start_column,
+                    "На одной строке: end_column должен быть >= start_column"
+                );
             }
 
             println!("  ✅ Координаты выглядят корректными (UTF-16)");
@@ -238,13 +269,18 @@ fn test_empty_file_no_errors() {
     let source = "";
 
     let parser = ParserCoordinator::with_fallback();
-    let parse_result = parser.parse(source).expect("Парсинг пустого файла должен успеть");
+    let parse_result = parser
+        .parse(source)
+        .expect("Парсинг пустого файла должен успеть");
 
     println!("\n=== ТЕСТ: Пустой файл ===");
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     // Пустой файл НЕ должен иметь синтаксических ошибок
-    assert!(!parse_result.has_errors(), "Пустой файл не должен содержать ошибок");
+    assert!(
+        !parse_result.has_errors(),
+        "Пустой файл не должен содержать ошибок"
+    );
 
     println!("=========================\n");
 }
@@ -264,7 +300,10 @@ fn test_only_comments_no_errors() {
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     // Файл с комментариями не должен иметь ошибок
-    assert!(!parse_result.has_errors(), "Файл только с комментариями не должен содержать ошибок");
+    assert!(
+        !parse_result.has_errors(),
+        "Файл только с комментариями не должен содержать ошибок"
+    );
 
     println!("================================\n");
 }

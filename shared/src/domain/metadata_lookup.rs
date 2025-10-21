@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::domain::repository::TypeRepository;
 use crate::domain::types::{
     TypeResolution, RawTypeData, RawMethodData, RawPropertyData,
-    ResolutionResult, ConcreteType, MetadataKind,
+    ResolutionResult, ConcreteType, GenericType,
 };
 
 /// Сервис для получения метаданных типа по TypeResolution
@@ -105,6 +105,11 @@ impl TypeMetadataLookup {
     /// }
     /// ```
     pub fn get_methods(&self, resolution: &TypeResolution) -> Vec<RawMethodData> {
+        // Обработка Generic типов с подстановкой параметров
+        if let ResolutionResult::Generic(generic_type) = &resolution.result {
+            return self.get_methods_for_generic(generic_type);
+        }
+
         let type_name = self.extract_type_name(resolution);
 
         let raw_type = type_name.and_then(|name| {
@@ -248,7 +253,7 @@ impl TypeMetadataLookup {
                     // Для конфигурации формируем полное имя
                     // Например: "Справочники.Контрагенты"
                     Some(format!("{}.{}",
-                        self.metadata_kind_to_prefix(&config.kind),
+                        config.kind.to_prefix(),
                         config.name
                     ))
                 }
@@ -256,6 +261,7 @@ impl TypeMetadataLookup {
                 ConcreteType::Primitive(_) | ConcreteType::Special(_) => None,
                 // GlobalFunction может иметь документацию
                 ConcreteType::GlobalFunction(func) => Some(func.name.clone()),
+                ConcreteType::TabularRow(tr) => Some(tr.get_full_name()),
             },
             // Union и Dynamic типы не имеют прямого соответствия в RawTypeData
             ResolutionResult::Union(_) | ResolutionResult::Dynamic => None,
@@ -278,24 +284,100 @@ impl TypeMetadataLookup {
         }
     }
 
-    /// Преобразовать MetadataKind в префикс имени типа
+    /// Возвращает методы для Generic типа с подстановкой типовых параметров
     ///
     /// # Примеры
-    ///
-    /// - `Catalog` -> `"Справочники"`
-    /// - `Document` -> `"Документы"`
-    fn metadata_kind_to_prefix(&self, kind: &MetadataKind) -> &'static str {
-        match kind {
-            MetadataKind::Catalog => "Справочники",
-            MetadataKind::Document => "Документы",
-            MetadataKind::Enum => "Перечисления",
-            MetadataKind::Report => "Отчеты",
-            MetadataKind::DataProcessor => "Обработки",
-            MetadataKind::Register => "РегистрыСведений",
-            MetadataKind::ChartOfAccounts => "ПланыСчетов",
-            MetadataKind::ChartOfCharacteristicTypes => "ПланыВидовХарактеристик",
+    /// ```ignore
+    /// Generic: ТабличнаяЧасть<СтрокаРаботы>
+    /// Метод: Добавить() → T
+    /// Результат: Добавить() → СтрокаРаботы
+    /// ```
+    fn get_methods_for_generic(&self, generic_type: &GenericType) -> Vec<RawMethodData> {
+        tracing::debug!(
+            "🔍 Получение методов для Generic типа: {}",
+            generic_type.base_type
+        );
+
+        // 1. Получаем методы базового типа (например, "ТабличнаяЧасть")
+        let base_methods = self.repository
+            .find_type(&generic_type.base_type)
+            .map(|raw| raw.methods.clone())
+            .unwrap_or_default();
+
+        tracing::trace!(
+            "  📋 Найдено {} методов базового типа",
+            base_methods.len()
+        );
+
+        // 2. Если есть типовой параметр (например, СтрокаРаботы)
+        if let Some(param_type) = generic_type.type_params.first() {
+            // Форматируем имя типового параметра
+            let param_type_name = self.format_concrete_type(param_type);
+
+            tracing::trace!(
+                "  🔄 Подстановка типового параметра: T → {}",
+                param_type_name
+            );
+
+            // 3. Подставляем конкретный тип вместо "T" в методах
+            base_methods
+                .into_iter()
+                .map(|mut method| {
+                    // Подменяем "T" на конкретный тип в return_type
+                    if method.return_type == "T" {
+                        method.return_type = param_type_name.clone();
+                        tracing::trace!(
+                            "    ✅ Метод {}: return_type T → {}",
+                            method.name,
+                            param_type_name
+                        );
+                    }
+
+                    // Подменяем "T" в типах параметров
+                    for param in &mut method.params {
+                        if param.param_type == "T" {
+                            param.param_type = param_type_name.clone();
+                            tracing::trace!(
+                                "      ✅ Параметр {}: тип T → {}",
+                                param.name,
+                                param_type_name
+                            );
+                        }
+                    }
+
+                    method
+                })
+                .collect()
+        } else {
+            // Нет типовых параметров → возвращаем методы как есть
+            tracing::warn!(
+                "  ⚠️ Generic тип {} не имеет параметров",
+                generic_type.base_type
+            );
+            base_methods
         }
     }
+
+    /// Форматирует ConcreteType в строку для отображения
+    ///
+    /// # Примеры
+    /// - `Platform(Строка)` → `"Строка"`
+    /// - `Configuration(Справочники.Контрагенты)` → `"Справочники.Контрагенты"`
+    /// - `TabularRow(СтрокаРаботы)` → `"СтрокаРаботы"`
+    fn format_concrete_type(&self, concrete: &ConcreteType) -> String {
+        match concrete {
+            ConcreteType::Platform(pt) => pt.name.clone(),
+            ConcreteType::Configuration(ct) => {
+                // Формируем полное имя: "Справочники.Контрагенты"
+                format!("{}.{}", ct.kind.to_prefix(), ct.name)
+            },
+            ConcreteType::Primitive(prim) => format!("{:?}", prim),
+            ConcreteType::Special(spec) => format!("{:?}", spec),
+            ConcreteType::GlobalFunction(gf) => gf.name.clone(),
+            ConcreteType::TabularRow(tr) => tr.get_full_name(),
+        }
+    }
+
 }
 
 #[cfg(test)]
@@ -304,6 +386,7 @@ mod tests {
     use crate::domain::types::{
         PlatformType, RawDataSource, FacetKind,
         Certainty, ResolutionSource, ResolutionMetadata,
+        TabularRowType, GenericType, RawParamData,
     };
     use crate::domain::repository::InMemoryTypeRepository;
 
@@ -422,5 +505,210 @@ mod tests {
         assert!(lookup.get_methods(&resolution).is_empty());
         assert!(!lookup.has_member(&resolution, "Метод"));
         assert_eq!(lookup.get_description(&resolution), "");
+    }
+
+    // === Тесты для Generic типов ===
+
+    /// Вспомогательная функция для создания тестового репозитория с Generic типами
+    fn create_test_repository_with_generic_types() -> Arc<InMemoryTypeRepository> {
+        let repo = Arc::new(InMemoryTypeRepository::new());
+
+        // Создаём платформенный тип "ТабличнаяЧасть" с Generic методами
+        let tabular_type = RawTypeData {
+            name: "ТабличнаяЧасть".to_string(),
+            english_name: "TabularSection".to_string(),
+            category: "PlatformType".to_string(),
+            description: "Табличная часть с Generic методами".to_string(),
+            source: RawDataSource::Platform,
+            facets: vec![FacetKind::Collection],
+            methods: vec![
+                RawMethodData {
+                    name: "Добавить".to_string(),
+                    english_name: "Add".to_string(),
+                    return_type: "T".to_string(),  // ← Generic!
+                    params: vec![],
+                },
+                RawMethodData {
+                    name: "Получить".to_string(),
+                    english_name: "Get".to_string(),
+                    return_type: "T".to_string(),  // ← Generic!
+                    params: vec![
+                        RawParamData {
+                            name: "Индекс".to_string(),
+                            param_type: "Число".to_string(),
+                            is_optional: false,
+                        },
+                    ],
+                },
+                RawMethodData {
+                    name: "Количество".to_string(),
+                    english_name: "Count".to_string(),
+                    return_type: "Число".to_string(),  // НЕ Generic
+                    params: vec![],
+                },
+                RawMethodData {
+                    name: "Индекс".to_string(),
+                    english_name: "IndexOf".to_string(),
+                    return_type: "Число".to_string(),
+                    params: vec![
+                        RawParamData {
+                            name: "Строка".to_string(),
+                            param_type: "T".to_string(),  // ← Generic параметр!
+                            is_optional: false,
+                        },
+                    ],
+                },
+            ],
+            properties: vec![],
+            kind: None,
+            attributes: vec![],
+            tabular_sections: vec![],
+            enum_values: vec![],
+        };
+
+        repo.load_types(vec![tabular_type]).unwrap();
+        repo
+    }
+
+    #[test]
+    fn test_generic_method_return_type_substitution() {
+        let repo = create_test_repository_with_generic_types();
+        let lookup = TypeMetadataLookup::new(repo.clone());
+
+        // Создаём Generic тип: ТабличнаяЧасть<СтрокаРаботы>
+        let row_type = TabularRowType::new(
+            "Документы.ЗаказНаряды".to_string(),
+            "Работы".to_string(),
+            vec![],
+        );
+
+        let generic_type = GenericType {
+            base_type: "ТабличнаяЧасть".to_string(),
+            type_params: vec![ConcreteType::TabularRow(row_type)],
+        };
+
+        let resolution = TypeResolution {
+            result: ResolutionResult::Generic(generic_type),
+            certainty: Certainty::Known,
+            source: ResolutionSource::Static,
+            active_facet: Some(FacetKind::Collection),
+            metadata: ResolutionMetadata::default(),
+            available_facets: vec![],
+        };
+
+        // Получаем методы
+        let methods = lookup.get_methods(&resolution);
+
+        // Проверяем метод "Добавить": return_type должен быть "СтрокаРаботы"
+        let add_method = methods.iter().find(|m| m.name == "Добавить").unwrap();
+        assert_eq!(add_method.return_type, "СтрокаРаботы");
+
+        // Проверяем метод "Получить": return_type должен быть "СтрокаРаботы"
+        let get_method = methods.iter().find(|m| m.name == "Получить").unwrap();
+        assert_eq!(get_method.return_type, "СтрокаРаботы");
+    }
+
+    #[test]
+    fn test_generic_method_param_type_substitution() {
+        let repo = create_test_repository_with_generic_types();
+        let lookup = TypeMetadataLookup::new(repo.clone());
+
+        // Создаём Generic тип
+        let row_type = TabularRowType::new(
+            "Документы.ЗаказНаряды".to_string(),
+            "Работы".to_string(),
+            vec![],
+        );
+
+        let generic_type = GenericType {
+            base_type: "ТабличнаяЧасть".to_string(),
+            type_params: vec![ConcreteType::TabularRow(row_type)],
+        };
+
+        let resolution = TypeResolution {
+            result: ResolutionResult::Generic(generic_type),
+            certainty: Certainty::Known,
+            source: ResolutionSource::Static,
+            active_facet: Some(FacetKind::Collection),
+            metadata: ResolutionMetadata::default(),
+            available_facets: vec![],
+        };
+
+        let methods = lookup.get_methods(&resolution);
+
+        // Проверяем метод "Индекс": параметр "Строка" должен иметь тип "СтрокаРаботы"
+        let index_method = methods.iter().find(|m| m.name == "Индекс").unwrap();
+        assert_eq!(index_method.params.len(), 1);
+        assert_eq!(index_method.params[0].name, "Строка");
+        assert_eq!(index_method.params[0].param_type, "СтрокаРаботы");
+    }
+
+    #[test]
+    fn test_non_generic_methods_unchanged() {
+        let repo = create_test_repository_with_generic_types();
+        let lookup = TypeMetadataLookup::new(repo.clone());
+
+        let row_type = TabularRowType::new(
+            "Документы.ЗаказНаряды".to_string(),
+            "Работы".to_string(),
+            vec![],
+        );
+
+        let generic_type = GenericType {
+            base_type: "ТабличнаяЧасть".to_string(),
+            type_params: vec![ConcreteType::TabularRow(row_type)],
+        };
+
+        let resolution = TypeResolution {
+            result: ResolutionResult::Generic(generic_type),
+            certainty: Certainty::Known,
+            source: ResolutionSource::Static,
+            active_facet: Some(FacetKind::Collection),
+            metadata: ResolutionMetadata::default(),
+            available_facets: vec![],
+        };
+
+        let methods = lookup.get_methods(&resolution);
+
+        // Проверяем метод "Количество": return_type должен остаться "Число"
+        let count_method = methods.iter().find(|m| m.name == "Количество").unwrap();
+        assert_eq!(count_method.return_type, "Число");
+    }
+
+    #[test]
+    fn test_all_methods_returned() {
+        let repo = create_test_repository_with_generic_types();
+        let lookup = TypeMetadataLookup::new(repo.clone());
+
+        let row_type = TabularRowType::new(
+            "Документы.ЗаказНаряды".to_string(),
+            "Работы".to_string(),
+            vec![],
+        );
+
+        let generic_type = GenericType {
+            base_type: "ТабличнаяЧасть".to_string(),
+            type_params: vec![ConcreteType::TabularRow(row_type)],
+        };
+
+        let resolution = TypeResolution {
+            result: ResolutionResult::Generic(generic_type),
+            certainty: Certainty::Known,
+            source: ResolutionSource::Static,
+            active_facet: Some(FacetKind::Collection),
+            metadata: ResolutionMetadata::default(),
+            available_facets: vec![],
+        };
+
+        let methods = lookup.get_methods(&resolution);
+
+        // Должны вернуться все 4 метода
+        assert_eq!(methods.len(), 4);
+
+        let method_names: Vec<_> = methods.iter().map(|m| m.name.as_str()).collect();
+        assert!(method_names.contains(&"Добавить"));
+        assert!(method_names.contains(&"Получить"));
+        assert!(method_names.contains(&"Количество"));
+        assert!(method_names.contains(&"Индекс"));
     }
 }

@@ -35,9 +35,7 @@ async fn test_ir_hover_variable_declaration() -> Result<()> {
 "#;
 
     // Hover на "Число" (строка 1, после ":")
-    let hover_result = service
-        .get_hover_info(code, 1, 12)
-        .await?;
+    let hover_result = service.get_hover_info(code, 1, 12).await?;
 
     assert!(hover_result.is_some());
     let hover_text = hover_result.unwrap();
@@ -46,8 +44,11 @@ async fn test_ir_hover_variable_declaration() -> Result<()> {
 
     // Проверяем что в hover есть информация о переменной или типе
     assert!(
-        hover_text.contains("Переменная") || hover_text.contains("Объявление") || hover_text.contains("x"),
-        "Hover должен содержать информацию о переменной или объявлении. Got: {}", hover_text
+        hover_text.contains("Переменная")
+            || hover_text.contains("Объявление")
+            || hover_text.contains("x"),
+        "Hover должен содержать информацию о переменной или объявлении. Got: {}",
+        hover_text
     );
 
     Ok(())
@@ -64,9 +65,7 @@ async fn test_ir_hover_function_declaration() -> Result<()> {
 "#;
 
     // Hover на имени функции
-    let hover_result = service
-        .get_hover_info(code, 1, 12)
-        .await?;
+    let hover_result = service.get_hover_info(code, 1, 12).await?;
 
     assert!(hover_result.is_some());
     let hover_text = hover_result.unwrap();
@@ -92,9 +91,7 @@ async fn test_ir_hover_assignment() -> Result<()> {
 "#;
 
     // Hover на "результат" в присваивании
-    let hover_result = service
-        .get_hover_info(code, 2, 5)
-        .await?;
+    let hover_result = service.get_hover_info(code, 2, 5).await?;
 
     assert!(hover_result.is_some());
     let hover_text = hover_result.unwrap();
@@ -103,7 +100,9 @@ async fn test_ir_hover_assignment() -> Result<()> {
 
     // Проверяем что в hover есть информация о переменной
     assert!(
-        hover_text.contains("результат") || hover_text.contains("Переменная") || hover_text.contains("Присваивание"),
+        hover_text.contains("результат")
+            || hover_text.contains("Переменная")
+            || hover_text.contains("Присваивание"),
         "Hover должен содержать информацию о переменной или присваивании"
     );
 
@@ -119,9 +118,7 @@ async fn test_ir_hover_platform_type() -> Result<()> {
 "#;
 
     // Hover на "Массив"
-    let hover_result = service
-        .get_hover_info(code, 1, 16)
-        .await?;
+    let hover_result = service.get_hover_info(code, 1, 16).await?;
 
     assert!(hover_result.is_some());
     let hover_text = hover_result.unwrap();
@@ -130,8 +127,11 @@ async fn test_ir_hover_platform_type() -> Result<()> {
 
     // Проверяем что в hover есть какая-то информация
     assert!(
-        hover_text.contains("Переменная") || hover_text.contains("Объявление") || hover_text.contains("массив"),
-        "Hover должен содержать информацию о переменной. Got: {}", hover_text
+        hover_text.contains("Переменная")
+            || hover_text.contains("Объявление")
+            || hover_text.contains("массив"),
+        "Hover должен содержать информацию о переменной. Got: {}",
+        hover_text
     );
 
     Ok(())
@@ -146,9 +146,7 @@ async fn test_ir_hover_fallback_for_unknown() -> Result<()> {
 "#;
 
     // Hover на переменной без типа
-    let hover_result = service
-        .get_hover_info(code, 1, 8)
-        .await?;
+    let hover_result = service.get_hover_info(code, 1, 8).await?;
 
     assert!(hover_result.is_some());
     let hover_text = hover_result.unwrap();
@@ -156,7 +154,10 @@ async fn test_ir_hover_fallback_for_unknown() -> Result<()> {
     println!("Hover result:\n{}", hover_text);
 
     // Должно быть хоть что-то (даже если тип неизвестен)
-    assert!(!hover_text.is_empty(), "Hover должен возвращать хоть какую-то информацию");
+    assert!(
+        !hover_text.is_empty(),
+        "Hover должен возвращать хоть какую-то информацию"
+    );
 
     Ok(())
 }

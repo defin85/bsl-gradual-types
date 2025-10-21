@@ -1,25 +1,29 @@
 //! Enhanced search bar component for filtering types
 
 use crate::api::*;
-use leptos::prelude::*;
 use leptos::html;
-use web_sys::Event;
+use leptos::prelude::*;
 use wasm_bindgen::JsCast;
+use web_sys::Event;
 
 /// Компонент строки поиска с фильтрами
 #[component]
 #[allow(non_snake_case)]
 pub fn SearchBar(
     /// Текущие фильтры
-    #[prop(into)] filters: RwSignal<TypeFilters>,
+    #[prop(into)]
+    filters: RwSignal<TypeFilters>,
     /// Обработчик изменения фильтров
-    #[prop(optional)] on_filters_change: Option<Callback<TypeFilters>>,
+    #[prop(optional)]
+    on_filters_change: Option<Callback<TypeFilters>>,
     /// Плейсхолдер для поля поиска
-    #[prop(optional, into)] placeholder: Option<String>,
+    #[prop(optional, into)]
+    placeholder: Option<String>,
 ) -> impl IntoView {
     let search_input_ref = NodeRef::<html::Input>::new();
-    
-    let placeholder_text = placeholder.unwrap_or_else(|| "Поиск типов... (например: Массив, Справочники, Строка)".to_string());
+
+    let placeholder_text = placeholder
+        .unwrap_or_else(|| "Поиск типов... (например: Массив, Справочники, Строка)".to_string());
 
     let handle_search_input = move |_| {
         if let Some(input) = search_input_ref.get() {
@@ -27,7 +31,7 @@ pub fn SearchBar(
             filters.update(|f| {
                 f.search_query = if value.is_empty() { None } else { Some(value) };
             });
-            
+
             if let Some(callback) = on_filters_change {
                 callback.run(filters.get());
             }
@@ -49,7 +53,7 @@ pub fn SearchBar(
                 facet_str => Some(facet_str.to_string()),
             };
         });
-        
+
         if let Some(callback) = on_filters_change {
             callback.run(filters.get());
         }
@@ -59,11 +63,11 @@ pub fn SearchBar(
         let target = ev.target().unwrap();
         let checkbox = target.dyn_into::<web_sys::HtmlInputElement>().unwrap();
         let checked = checkbox.checked();
-        
+
         filters.update(|f| {
             f.flow_sensitive_only = checked;
         });
-        
+
         if let Some(callback) = on_filters_change {
             callback.run(filters.get());
         }
@@ -130,21 +134,24 @@ pub fn SearchBar(
 #[allow(non_snake_case)]
 pub fn SimpleSearchBar(
     /// Текущее значение поиска
-    #[prop(into)] search_value: RwSignal<String>,
+    #[prop(into)]
+    search_value: RwSignal<String>,
     /// Обработчик изменения значения поиска
-    #[prop(optional)] on_search_change: Option<Callback<String>>,
+    #[prop(optional)]
+    on_search_change: Option<Callback<String>>,
     /// Плейсхолдер для поля поиска
-    #[prop(optional, into)] placeholder: Option<String>,
+    #[prop(optional, into)]
+    placeholder: Option<String>,
 ) -> impl IntoView {
     let search_input_ref = NodeRef::<html::Input>::new();
-    
+
     let placeholder_text = placeholder.unwrap_or_else(|| "Поиск...".to_string());
 
     let handle_input = move |_| {
         if let Some(input) = search_input_ref.get() {
             let value = input.value();
             search_value.set(value.clone());
-            
+
             if let Some(callback) = on_search_change {
                 callback.run(value);
             }
@@ -153,7 +160,7 @@ pub fn SimpleSearchBar(
 
     view! {
         <div class="search-bar">
-            <input 
+            <input
                 type="text"
                 placeholder=placeholder_text
                 node_ref=search_input_ref
@@ -169,7 +176,8 @@ pub fn SimpleSearchBar(
 #[allow(non_snake_case)]
 pub fn HeaderSearchBar(
     /// RwSignal для текста поиска
-    #[prop(into)] search_query: RwSignal<String>,
+    #[prop(into)]
+    search_query: RwSignal<String>,
     /// Колбэк для обработки поиска
     on_search: Callback<String>,
 ) -> impl IntoView {

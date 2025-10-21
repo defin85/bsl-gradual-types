@@ -1,6 +1,6 @@
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
-use bsl_shared::domain::repository::{TypeRepository, InMemoryTypeRepository};
+use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use std::sync::Arc;
 
 fn main() {
@@ -8,7 +8,9 @@ fn main() {
 
     // 1. Парсим синтаксис-помощник
     let mut parser = SyntaxHelperParser::new();
-    parser.parse_syntax_helper("../examples/syntax_helper").unwrap();
+    parser
+        .parse_syntax_helper("../examples/syntax_helper")
+        .unwrap();
     let db = parser.export_database();
     println!("✅ Парсинг завершён: {} узлов", db.nodes.len());
 
@@ -25,14 +27,31 @@ fn main() {
     // 4. Проверяем наличие примитивных типов
     println!("🔍 Поиск примитивных типов в Repository:\n");
 
-    let primitive_names = ["Строка", "String", "Число", "Number", "Булево", "Boolean", "Дата", "Date", "Null"];
+    let primitive_names = [
+        "Строка",
+        "String",
+        "Число",
+        "Number",
+        "Булево",
+        "Boolean",
+        "Дата",
+        "Date",
+        "Null",
+    ];
 
     for name in &primitive_names {
         match repository.find_type(name) {
             Some(raw_type) => {
                 println!("✅ Найден: {}", name);
-                println!("   Полное имя: {} ({})", raw_type.name, raw_type.english_name);
-                println!("   Методы: {}, Свойства: {}", raw_type.methods.len(), raw_type.properties.len());
+                println!(
+                    "   Полное имя: {} ({})",
+                    raw_type.name, raw_type.english_name
+                );
+                println!(
+                    "   Методы: {}, Свойства: {}",
+                    raw_type.methods.len(),
+                    raw_type.properties.len()
+                );
                 println!();
             }
             None => {

@@ -1,7 +1,7 @@
 //! Main App component with enhanced UI from front_template
 
-use crate::components::{ViewType, HeaderSearchBar};
-use crate::pages::{Dashboard, CardsPage, TablePage, GraphPage};
+use crate::components::{HeaderSearchBar, ViewType};
+use crate::pages::{CardsPage, Dashboard, GraphPage, TablePage};
 use leptos::prelude::*;
 
 /// Главный компонент приложения с улучшенным дизайном

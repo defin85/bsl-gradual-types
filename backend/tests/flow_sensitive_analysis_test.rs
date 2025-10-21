@@ -1,7 +1,7 @@
 //! Integration tests for flow-sensitive analysis
 
-use bsl_shared::domain::{FlowAnalysisContext, ControlFlowGraph};
-use bsl_shared::domain::types::{TypeResolution, ConcreteType, PlatformType, ResolutionResult};
+use bsl_shared::domain::types::{ConcreteType, PlatformType, ResolutionResult, TypeResolution};
+use bsl_shared::domain::{ControlFlowGraph, FlowAnalysisContext};
 
 #[test]
 fn test_simple_variable_assignment() {

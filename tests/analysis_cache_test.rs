@@ -188,9 +188,18 @@ fn test_string_cache_lru_eviction() {
     cache.store_analysis("key4".to_string(), make_analysis(4));
 
     // Assert: key3 should be evicted
-    assert!(cache.get_analysis("key1").is_some(), "key1 should still exist");
-    assert!(cache.get_analysis("key2").is_some(), "key2 should still exist");
-    assert!(cache.get_analysis("key3").is_none(), "key3 should be evicted");
+    assert!(
+        cache.get_analysis("key1").is_some(),
+        "key1 should still exist"
+    );
+    assert!(
+        cache.get_analysis("key2").is_some(),
+        "key2 should still exist"
+    );
+    assert!(
+        cache.get_analysis("key3").is_none(),
+        "key3 should be evicted"
+    );
     assert!(cache.get_analysis("key4").is_some(), "key4 should exist");
 }
 
@@ -224,8 +233,5 @@ fn test_multiple_caches_independent_hit_rates() {
         (hit_rate1 - 100.0).abs() < 0.1,
         "Cache1 should have 100% hit rate"
     );
-    assert!(
-        hit_rate2.abs() < 0.1,
-        "Cache2 should have 0% hit rate"
-    );
+    assert!(hit_rate2.abs() < 0.1, "Cache2 should have 0% hit rate");
 }

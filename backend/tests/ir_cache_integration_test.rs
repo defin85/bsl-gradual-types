@@ -6,13 +6,13 @@
 //! 3. Измерение времени обоих hovers
 //! 4. Проверка статистики кеша
 
-use std::sync::Arc;
-use std::time::Instant;
 use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::{AnalysisCache, ParserCoordinator, IrCache};
-use bsl_shared::engine::AnalysisEngine;
+use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
 use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::engine::AnalysisEngine;
+use std::sync::Arc;
+use std::time::Instant;
 
 /// Инициализация TypeSystemService для тестов
 fn setup_service() -> TypeSystemService {
@@ -64,19 +64,32 @@ async fn test_ir_cache_hit_vs_miss() {
 
     // Проверяем, что второй hover быстрее первого
     // (хотя бы в 2 раза, учитывая что парсинг занимает время)
-    println!("Speedup: {:.2}x", duration1.as_secs_f64() / duration2.as_secs_f64());
+    println!(
+        "Speedup: {:.2}x",
+        duration1.as_secs_f64() / duration2.as_secs_f64()
+    );
 
     // Получаем статистику кеша
     let stats = service.get_ir_cache_stats().await;
-    println!("Cache stats: hits={}, misses={}, evictions={}",
-        stats.hits, stats.misses, stats.evictions);
+    println!(
+        "Cache stats: hits={}, misses={}, evictions={}",
+        stats.hits, stats.misses, stats.evictions
+    );
 
     // Проверяем статистику:
     // - Первый hover → MISS → парсинг → put → get при поиске узла → HIT
     // - Второй hover → HIT
     // Итого: минимум 1 hit, 1 miss
-    assert!(stats.hits >= 1, "Should have at least 1 hit (expected: {})", stats.hits);
-    assert!(stats.misses >= 1, "Should have at least 1 miss (expected: {})", stats.misses);
+    assert!(
+        stats.hits >= 1,
+        "Should have at least 1 hit (expected: {})",
+        stats.hits
+    );
+    assert!(
+        stats.misses >= 1,
+        "Should have at least 1 miss (expected: {})",
+        stats.misses
+    );
 }
 
 #[tokio::test]
@@ -109,10 +122,15 @@ async fn test_ir_cache_different_files() {
 
     // Статистика должна показать 2 miss (разные файлы → разные hash)
     let stats = service.get_ir_cache_stats().await;
-    println!("Cache stats for different files: hits={}, misses={}",
-        stats.hits, stats.misses);
+    println!(
+        "Cache stats for different files: hits={}, misses={}",
+        stats.hits, stats.misses
+    );
 
-    assert!(stats.misses >= 2, "Should have at least 2 misses for different files");
+    assert!(
+        stats.misses >= 2,
+        "Should have at least 2 misses for different files"
+    );
 }
 
 #[tokio::test]
@@ -144,7 +162,10 @@ async fn test_ir_cache_modified_file() {
         .expect("Hover on v2 failed");
 
     // Результаты должны отличаться (разные типы)
-    assert_ne!(hover1, hover2, "Hovers on different file versions should differ");
+    assert_ne!(
+        hover1, hover2,
+        "Hovers on different file versions should differ"
+    );
 
     // Статистика: минимум 2 miss (разные hash)
     let stats = service.get_ir_cache_stats().await;

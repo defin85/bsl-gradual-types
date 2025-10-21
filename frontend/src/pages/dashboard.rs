@@ -10,7 +10,8 @@ use leptos::task::spawn_local;
 #[allow(non_snake_case)]
 pub fn Dashboard(
     /// Поисковый запрос для фильтрации
-    #[prop(optional)] _search_query: Option<RwSignal<String>>,
+    #[prop(optional)]
+    _search_query: Option<RwSignal<String>>,
 ) -> impl IntoView {
     let metrics = RwSignal::new(None::<MetricsDto>);
     let loading = RwSignal::new(false);
@@ -20,13 +21,13 @@ pub fn Dashboard(
     let load_metrics = move || {
         loading.set(true);
         error.set(None);
-        
+
         spawn_local(async move {
             match fetch_metrics().await {
                 Ok(result) => {
                     metrics.set(Some(result));
                     loading.set(false);
-                },
+                }
                 Err(err) => {
                     error.set(Some(err));
                     loading.set(false);
@@ -72,7 +73,7 @@ pub fn Dashboard(
                     let unknown_percentage = if total > 0 {
                         (m.unknown_types() as f32 / total as f32 * 100.0) as u32
                     } else { 0 };
-                    
+
                     view! {
                         <div>
                             <div class="dashboard-grid">
@@ -83,7 +84,7 @@ pub fn Dashboard(
                                         <div class="certainty-fill" style=format!("width: {}%; background: linear-gradient(90deg, #28a745, #20c997);", known_percentage)></div>
                                     </div>
                                 </div>
-                                
+
                                 <div class="metric-card">
                                     <div class="metric-number" style="color: #ffc107;">{inferred_percentage}"%"</div>
                                     <div class="metric-label">"Inferred Types"</div>
@@ -91,7 +92,7 @@ pub fn Dashboard(
                                         <div class="certainty-fill" style=format!("width: {}%; background: linear-gradient(90deg, #ffc107, #fd7e14);", inferred_percentage)></div>
                                     </div>
                                 </div>
-                                
+
                                 <div class="metric-card">
                                     <div class="metric-number" style="color: #dc3545;">{unknown_percentage}"%"</div>
                                     <div class="metric-label">"Unknown Types"</div>

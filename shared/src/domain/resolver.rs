@@ -104,6 +104,39 @@ impl TypeResolver {
             ResolutionResult, ResolutionSource,
         };
 
+        // ✅ УЛУЧШЕНИЕ: Поддержка вложенных точек (Документы.ЗаказНаряды.Работы)
+        // Если member содержит точку, рекурсивно резолвим
+        if member.contains('.') {
+            // Пробуем склеить base.первая_часть_member и резолвить как тип
+            if let Some((first_part, rest)) = member.split_once('.') {
+                let potential_type = format!("{}.{}", base, first_part);
+
+                // Проверяем, существует ли такой тип в репозитории
+                if let Some(raw_type) = self.repository.find_type(&potential_type) {
+                    // Тип найден — проверяем, не табличная ли часть
+                    if let Some(tabular_section) = raw_type.tabular_sections.iter().find(|ts| ts.name == rest) {
+                        return self.resolve_tabular_section_access(
+                            potential_type,
+                            tabular_section.clone(),
+                        );
+                    }
+                    // Иначе пробуем рекурсивно
+                    return self.resolve_member_access(&potential_type, rest);
+                }
+            }
+        }
+
+        // Проверяем, не является ли base конфигурационным типом с табличными частями
+        if let Some(raw_type) = self.repository.find_type(base) {
+            // ✅ НОВОЕ: Проверка табличных частей
+            if let Some(tabular_section) = raw_type.tabular_sections.iter().find(|ts| ts.name == member) {
+                return self.resolve_tabular_section_access(
+                    base.to_string(),
+                    tabular_section.clone(),
+                );
+            }
+        }
+
         let (kind, prefix) = match base {
             "Справочники" | "Catalogs" => (MetadataKind::Catalog, "Справочники"),
             "Документы" | "Documents" => (MetadataKind::Document, "Документы"),
@@ -182,6 +215,78 @@ impl TypeResolver {
                 crate::domain::types::FacetKind::Object,
                 crate::domain::types::FacetKind::Reference,
             ],
+        }
+    }
+
+    /// Резолвит доступ к табличной части конфигурационного объекта
+    ///
+    /// # Пример
+    /// ```bsl
+    /// Документ = Документы.ЗаказНаряды.СоздатьДокумент();
+    /// Работы = Документ.Работы;  // ← вызывает resolve_tabular_section_access()
+    /// ```
+    ///
+    /// # Возвращает
+    /// `TypeResolution` с `ResolutionResult::Generic`:
+    /// - base_type: "ТабличнаяЧасть"
+    /// - type_params: [ConcreteType::TabularRow(СтрокаРаботы)]
+    fn resolve_tabular_section_access(
+        &self,
+        parent_type: String,
+        tabular_section: crate::domain::types::RawTabularSectionData,
+    ) -> TypeResolution {
+        use crate::domain::types::{
+            TabularRowType, GenericType, ConcreteType, Certainty,
+            ResolutionSource, FacetKind, ResolutionResult, ResolutionMetadata,
+        };
+
+        tracing::debug!(
+            "🔍 Резолюция табличной части: {}.{}",
+            parent_type,
+            tabular_section.name
+        );
+
+        // 1. Создаём TabularRowType для строки табличной части
+        let row_type = TabularRowType::new(
+            parent_type.clone(),
+            tabular_section.name.clone(),
+            tabular_section.attributes.clone(),
+        );
+
+        tracing::trace!(
+            "  ✅ Создан TabularRowType: {} с {} атрибутами",
+            row_type.get_full_name(),
+            row_type.attributes.len()
+        );
+
+        // 2. Оборачиваем в Generic тип: ТабличнаяЧасть<СтрокаРаботы>
+        let generic_type = GenericType {
+            base_type: "ТабличнаяЧасть".to_string(),
+            type_params: vec![ConcreteType::TabularRow(row_type)],
+        };
+
+        tracing::debug!(
+            "  🎯 Создан Generic тип: ТабличнаяЧасть<{}>",
+            tabular_section.name
+        );
+
+        // 3. Возвращаем резолюцию с высокой уверенностью
+        TypeResolution {
+            result: ResolutionResult::Generic(generic_type),
+            certainty: Certainty::Known,  // 100% - данные из метаданных
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata {
+                file: Some(format!("{}.{}", parent_type, tabular_section.name)),
+                line: None,
+                column: None,
+                notes: vec![format!(
+                    "Табличная часть '{}' с {} атрибутами",
+                    tabular_section.name,
+                    tabular_section.attributes.len()
+                )],
+            },
+            active_facet: Some(FacetKind::Collection),  // Табличная часть - это коллекция
+            available_facets: vec![FacetKind::Collection],
         }
     }
 
@@ -357,6 +462,7 @@ impl TypeResolver {
                     crate::domain::types::ConcreteType::Configuration(ct) => ct.name.clone(),
                     crate::domain::types::ConcreteType::Special(st) => format!("{:?}", st),
                     crate::domain::types::ConcreteType::GlobalFunction(gf) => gf.name.clone(),
+                    crate::domain::types::ConcreteType::TabularRow(tr) => tr.get_full_name(),
                 };
 
                 // Если вес не равен 1.0, показываем его
@@ -501,6 +607,7 @@ impl TypeResolver {
                 ConcreteType::Configuration(ct) => ct.name.clone(),
                 ConcreteType::Special(st) => format!("{:?}", st),
                 ConcreteType::GlobalFunction(gf) => gf.name.clone(),
+                ConcreteType::TabularRow(tr) => tr.get_full_name(),
             })
             .collect::<Vec<_>>()
             .join(" & ")
@@ -609,6 +716,7 @@ impl TypeResolver {
                 ConcreteType::Platform(pt) => pt.name.clone(),
                 ConcreteType::Configuration(ct) => ct.name.clone(),
                 ConcreteType::Special(st) => format!("{:?}", st),
+                ConcreteType::TabularRow(tr) => tr.get_full_name(),
                 ConcreteType::GlobalFunction(gf) => gf.name.clone(),
             })
             .collect::<Vec<_>>()
@@ -713,6 +821,7 @@ impl TypeResolver {
             ConcreteType::Platform(pt) => pt.name.clone(),
             ConcreteType::Configuration(ct) => ct.name.clone(),
             ConcreteType::Special(st) => format!("{:?}", st),
+            ConcreteType::TabularRow(tr) => tr.get_full_name(),
             ConcreteType::GlobalFunction(gf) => gf.name.clone(),
         };
 
@@ -734,3 +843,7 @@ mod resolver_generic_tests;
 // Milestone 2.3 Task 4: Nullable Types tests
 #[cfg(test)]
 mod resolver_nullable_tests;
+
+// Generic Tabular Sections: Resolver tests
+#[cfg(test)]
+mod resolver_tabular_tests;

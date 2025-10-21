@@ -10,4 +10,4 @@ pub use bsl_shared::api::dtos::*;
 pub use extensions::*;
 
 // Re-export client functions
-pub use client::{fetch_metrics, fetch_types, fetch_type_graph};
+pub use client::{fetch_metrics, fetch_type_graph, fetch_types};

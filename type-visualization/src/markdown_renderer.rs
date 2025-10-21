@@ -51,10 +51,7 @@ impl TypeRenderer for MarkdownRenderer {
 
         // Methods
         if !type_dto.methods.is_empty() {
-            md.push_str(&format!(
-                "## Методы ({})\n\n",
-                type_dto.methods.len()
-            ));
+            md.push_str(&format!("## Методы ({})\n\n", type_dto.methods.len()));
             for method in &type_dto.methods {
                 md.push_str(&format!("- `{}`\n", method));
             }
@@ -63,10 +60,7 @@ impl TypeRenderer for MarkdownRenderer {
 
         // Properties
         if !type_dto.properties.is_empty() {
-            md.push_str(&format!(
-                "## Свойства ({})\n\n",
-                type_dto.properties.len()
-            ));
+            md.push_str(&format!("## Свойства ({})\n\n", type_dto.properties.len()));
             for prop in &type_dto.properties {
                 md.push_str(&format!("- `{}`\n", prop));
             }
@@ -75,10 +69,7 @@ impl TypeRenderer for MarkdownRenderer {
 
         // Enum values
         if let Some(ref values) = type_dto.enum_values {
-            md.push_str(&format!(
-                "## Значения перечисления ({})\n\n",
-                values.len()
-            ));
+            md.push_str(&format!("## Значения перечисления ({})\n\n", values.len()));
             for value in values {
                 md.push_str(&format!("- `{}`\n", value));
             }

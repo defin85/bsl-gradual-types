@@ -35,7 +35,8 @@ async fn debug_array_type_resolution() {
         println!("\n✅ Hover text:\n{}", hover_text);
 
         // Проверяем, что hover НЕ содержит ошибку "Тип не найден"
-        if hover_text.contains("⚠️") && hover_text.contains("Тип не найден в TypeRepository") {
+        if hover_text.contains("⚠️") && hover_text.contains("Тип не найден в TypeRepository")
+        {
             println!("\n❌ ERROR: Hover shows 'Type not found' warning for Array type!");
             println!("This means either:");
             println!("  1. TypeResolver returns wrong ConcreteType");

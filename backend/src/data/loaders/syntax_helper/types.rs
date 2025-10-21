@@ -1,8 +1,8 @@
 //! Структуры данных для парсера синтакс-помощника 1С
 
+use bsl_shared::domain::types::FacetKind;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use bsl_shared::domain::types::FacetKind;
 
 // ============================================================================
 // Структуры данных

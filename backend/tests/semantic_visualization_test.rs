@@ -141,8 +141,8 @@ mod semantic_visualization_tests {
     #[test]
     fn test_dto_compatibility() {
         // Проверяем, что DTO из shared крейта доступны
-        use bsl_shared::api::SemanticTreeDto;
         use bsl_shared::api::RenderedHtmlDto;
+        use bsl_shared::api::SemanticTreeDto;
 
         // Если компилируется, значит DTO публичны и доступны
         // для использования в semantic_routes

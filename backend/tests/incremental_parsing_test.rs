@@ -26,11 +26,8 @@ fn test_incremental_simple_insertion() {
     let file_path = PathBuf::from("test.bsl");
 
     // Первый парсинг
-    let result1 = coordinator.parse_incremental(
-        file_path.clone(),
-        original_code.to_string(),
-        vec![],
-    );
+    let result1 =
+        coordinator.parse_incremental(file_path.clone(), original_code.to_string(), vec![]);
     assert!(result1.is_ok(), "Первый парсинг должен пройти успешно");
 
     // Инкрементальное обновление
@@ -44,13 +41,13 @@ fn test_incremental_simple_insertion() {
         new_text: "Перем А;\n    ".to_string(),
     }];
 
-    let result2 = coordinator.parse_incremental(
-        file_path,
-        modified_code.to_string(),
-        edits,
-    );
+    let result2 = coordinator.parse_incremental(file_path, modified_code.to_string(), edits);
 
-    assert!(result2.is_ok(), "Инкрементальный парсинг должен пройти успешно: {:?}", result2);
+    assert!(
+        result2.is_ok(),
+        "Инкрементальный парсинг должен пройти успешно: {:?}",
+        result2
+    );
 }
 
 #[test]
@@ -75,11 +72,8 @@ fn test_incremental_deletion() {
     let file_path = PathBuf::from("test2.bsl");
 
     // Первый парсинг
-    let result1 = coordinator.parse_incremental(
-        file_path.clone(),
-        original_code.to_string(),
-        vec![],
-    );
+    let result1 =
+        coordinator.parse_incremental(file_path.clone(), original_code.to_string(), vec![]);
     assert!(result1.is_ok());
 
     // Удаление строки "Перем А;"
@@ -93,11 +87,7 @@ fn test_incremental_deletion() {
         new_text: "".to_string(),
     }];
 
-    let result2 = coordinator.parse_incremental(
-        file_path,
-        modified_code.to_string(),
-        edits,
-    );
+    let result2 = coordinator.parse_incremental(file_path, modified_code.to_string(), edits);
 
     assert!(result2.is_ok(), "Инкрементальное удаление должно работать");
 }
@@ -112,11 +102,9 @@ fn test_incremental_replacement() {
     let file_path = PathBuf::from("test3.bsl");
 
     // Первый парсинг
-    coordinator.parse_incremental(
-        file_path.clone(),
-        original_code.to_string(),
-        vec![],
-    ).unwrap();
+    coordinator
+        .parse_incremental(file_path.clone(), original_code.to_string(), vec![])
+        .unwrap();
 
     // Замена имени функции
     let edits = vec![TextEdit {
@@ -129,11 +117,7 @@ fn test_incremental_replacement() {
         new_text: "Новое".to_string(),
     }];
 
-    let result = coordinator.parse_incremental(
-        file_path,
-        modified_code.to_string(),
-        edits,
-    );
+    let result = coordinator.parse_incremental(file_path, modified_code.to_string(), edits);
 
     assert!(result.is_ok());
 }
@@ -155,11 +139,9 @@ fn test_incremental_performance_comparison() {
 
     // Полный парсинг
     let start_full = Instant::now();
-    coordinator.parse_incremental(
-        file_path.clone(),
-        large_code.clone(),
-        vec![],
-    ).unwrap();
+    coordinator
+        .parse_incremental(file_path.clone(), large_code.clone(), vec![])
+        .unwrap();
     let duration_full = start_full.elapsed();
 
     println!("Полный парсинг: {:?}", duration_full);
@@ -179,18 +161,19 @@ fn test_incremental_performance_comparison() {
     }];
 
     let start_incr = Instant::now();
-    coordinator.parse_incremental(
-        file_path,
-        modified_code,
-        edits,
-    ).unwrap();
+    coordinator
+        .parse_incremental(file_path, modified_code, edits)
+        .unwrap();
     let duration_incr = start_incr.elapsed();
 
     println!("Инкрементальный парсинг: {:?}", duration_incr);
 
     // Инкрементальный парсинг должен быть быстрее
     // (на практике может быть не всегда, зависит от изменений)
-    println!("Ускорение: {:.2}x", duration_full.as_secs_f64() / duration_incr.as_secs_f64());
+    println!(
+        "Ускорение: {:.2}x",
+        duration_full.as_secs_f64() / duration_incr.as_secs_f64()
+    );
 }
 
 #[test]
@@ -202,25 +185,24 @@ fn test_cache_reuse() {
 
     // Первый парсинг
     let start1 = Instant::now();
-    coordinator.parse_incremental(
-        file_path.clone(),
-        code.to_string(),
-        vec![],
-    ).unwrap();
+    coordinator
+        .parse_incremental(file_path.clone(), code.to_string(), vec![])
+        .unwrap();
     let duration1 = start1.elapsed();
 
     // Второй парсинг того же кода (должен использовать кеш)
     let start2 = Instant::now();
-    coordinator.parse_incremental(
-        file_path,
-        code.to_string(),
-        vec![],
-    ).unwrap();
+    coordinator
+        .parse_incremental(file_path, code.to_string(), vec![])
+        .unwrap();
     let duration2 = start2.elapsed();
 
     println!("Первый парсинг: {:?}", duration1);
     println!("Кешированный парсинг: {:?}", duration2);
 
     // Второй парсинг должен быть значительно быстрее
-    assert!(duration2 < duration1, "Кешированный парсинг должен быть быстрее");
+    assert!(
+        duration2 < duration1,
+        "Кешированный парсинг должен быть быстрее"
+    );
 }

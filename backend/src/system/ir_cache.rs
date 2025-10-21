@@ -13,11 +13,11 @@
 //! - Последующие hover: <5ms (кеш попадание)
 //! - Hit rate: >90%
 
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use bsl_shared::ir::SemanticProgram;
 use lru::LruCache;
 use std::num::NonZeroUsize;
-use bsl_shared::ir::SemanticProgram;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::debug;
 
 /// IR Cache для кеширования промежуточного представления
@@ -88,9 +88,9 @@ impl IrCache {
         debug!("Creating IrCache with capacity: {}", capacity);
 
         Self {
-            storage: Arc::new(RwLock::new(
-                LruCache::new(NonZeroUsize::new(capacity).expect("Capacity must be > 0"))
-            )),
+            storage: Arc::new(RwLock::new(LruCache::new(
+                NonZeroUsize::new(capacity).expect("Capacity must be > 0"),
+            ))),
             stats: Arc::new(RwLock::new(IrCacheStats::default())),
         }
     }
@@ -227,7 +227,7 @@ impl IrCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bsl_shared::ir::{SemanticProgram, SemanticNode, SymbolTable, Span};
+    use bsl_shared::ir::{SemanticNode, SemanticProgram, Span, SymbolTable};
 
     fn create_test_ir(name: &str) -> Arc<SemanticProgram> {
         use bsl_shared::ir::{SemanticNodeKind, SourceInfo};

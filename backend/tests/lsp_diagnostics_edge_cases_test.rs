@@ -19,15 +19,23 @@ fn test_empty_file() {
 
     let source = "";
     let parser = ParserCoordinator::with_fallback();
-    let parse_result = parser.parse(source).expect("Парсинг пустого файла должен успеть");
+    let parse_result = parser
+        .parse(source)
+        .expect("Парсинг пустого файла должен успеть");
 
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     // Пустой файл НЕ должен иметь синтаксических ошибок
-    assert!(!parse_result.has_errors(), "Пустой файл не должен содержать ошибок");
+    assert!(
+        !parse_result.has_errors(),
+        "Пустой файл не должен содержать ошибок"
+    );
 
     // diagnostics должен быть пустым массивом
-    assert!(parse_result.syntax_errors.is_empty(), "Должен быть пустой массив ошибок");
+    assert!(
+        parse_result.syntax_errors.is_empty(),
+        "Должен быть пустой массив ошибок"
+    );
 
     println!("✅ Пустой файл: diagnostics = []");
     println!("=========================\n");
@@ -62,8 +70,14 @@ fn test_correct_file_no_errors() {
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     // Корректный файл НЕ должен иметь ошибок
-    assert!(!parse_result.has_errors(), "Корректный файл не должен содержать ошибок");
-    assert!(parse_result.syntax_errors.is_empty(), "diagnostics должен быть пустым");
+    assert!(
+        !parse_result.has_errors(),
+        "Корректный файл не должен содержать ошибок"
+    );
+    assert!(
+        parse_result.syntax_errors.is_empty(),
+        "diagnostics должен быть пустым"
+    );
 
     println!("✅ Корректный файл: diagnostics = []");
     println!("========================================\n");
@@ -101,19 +115,26 @@ fn test_multiple_errors_in_file() {
     assert!(parse_result.has_errors(), "Должны быть ошибки");
 
     // Должно быть хотя бы 1 ошибка (tree-sitter может обнаружить не все)
-    assert!(parse_result.syntax_errors.len() >= 1,
-        "Должно быть обнаружено хотя бы 1 ошибка");
+    assert!(
+        parse_result.syntax_errors.len() >= 1,
+        "Должно быть обнаружено хотя бы 1 ошибка"
+    );
 
     for (idx, error) in parse_result.syntax_errors.iter().enumerate() {
-        println!("{}. {} [{}:{}]",
+        println!(
+            "{}. {} [{}:{}]",
             idx + 1,
             error.message,
             error.span.start_line,
-            error.span.start_column);
+            error.span.start_column
+        );
 
         // Каждая ошибка должна иметь валидные координаты
         assert!(error.span.start_line > 0, "start_line должен быть > 0");
-        assert!(error.span.start_column >= 0, "start_column должен быть >= 0");
+        assert!(
+            error.span.start_column >= 0,
+            "start_column должен быть >= 0"
+        );
     }
 
     println!("✅ Все ошибки обнаружены и имеют корректные координаты");
@@ -139,28 +160,34 @@ fn test_emoji_and_special_chars() {
 "#;
 
     let parser = ParserCoordinator::with_fallback();
-    let parse_result = parser.parse(source).expect("Парсинг с эмодзи должен успеть");
+    let parse_result = parser
+        .parse(source)
+        .expect("Парсинг с эмодзи должен успеть");
 
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     // Парсинг должен работать с эмодзи
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
-            println!("Ошибка: {} [{}:{}]",
-                error.message,
-                error.span.start_line,
-                error.span.start_column);
+            println!(
+                "Ошибка: {} [{}:{}]",
+                error.message, error.span.start_line, error.span.start_column
+            );
 
             // ✅ КРИТИЧНАЯ ПРОВЕРКА: координаты должны быть в UTF-16
             // Даже при наличии эмодзи выше по тексту!
-            assert!(error.span.start_column < 300,
+            assert!(
+                error.span.start_column < 300,
                 "start_column не должен быть огромным ({}). \
                 Эмодзи могут сбить конвертацию UTF-8→UTF-16!",
-                error.span.start_column);
+                error.span.start_column
+            );
 
-            assert!(error.span.end_column < 300,
+            assert!(
+                error.span.end_column < 300,
                 "end_column не должен быть огромным ({})",
-                error.span.end_column);
+                error.span.end_column
+            );
         }
         println!("✅ Координаты с эмодзи корректны (UTF-16)");
     }
@@ -183,7 +210,9 @@ fn test_error_on_first_line() {
 
     if parse_result.has_errors() {
         // Проверяем, что ошибка может быть на строке 0 (первая строка)
-        let has_first_line_error = parse_result.syntax_errors.iter()
+        let has_first_line_error = parse_result
+            .syntax_errors
+            .iter()
             .any(|e| e.span.start_line == 0);
 
         if has_first_line_error {
@@ -195,7 +224,10 @@ fn test_error_on_first_line() {
         // Все координаты должны быть валидными
         for error in &parse_result.syntax_errors {
             assert!(error.span.start_line >= 0, "start_line должен быть >= 0");
-            assert!(error.span.start_column >= 0, "start_column должен быть >= 0");
+            assert!(
+                error.span.start_column >= 0,
+                "start_column должен быть >= 0"
+            );
         }
     }
 
@@ -219,7 +251,9 @@ fn test_error_on_last_line() {
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     if parse_result.has_errors() {
-        let max_line = parse_result.syntax_errors.iter()
+        let max_line = parse_result
+            .syntax_errors
+            .iter()
             .map(|e| e.span.end_line)
             .max()
             .unwrap_or(0);
@@ -229,10 +263,14 @@ fn test_error_on_last_line() {
         // Проверяем, что координаты не выходят за пределы файла
         let file_lines_count = source.lines().count() as u32;
         for error in &parse_result.syntax_errors {
-            assert!(error.span.start_line < file_lines_count + 10,
-                "start_line не должен быть сильно больше количества строк в файле");
-            assert!(error.span.end_line < file_lines_count + 10,
-                "end_line не должен быть сильно больше количества строк в файле");
+            assert!(
+                error.span.start_line < file_lines_count + 10,
+                "start_line не должен быть сильно больше количества строк в файле"
+            );
+            assert!(
+                error.span.end_line < file_lines_count + 10,
+                "end_line не должен быть сильно больше количества строк в файле"
+            );
         }
 
         println!("✅ Координаты последней строки валидны");
@@ -253,7 +291,10 @@ fn test_only_whitespace_file() {
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     // Файл только с whitespace не должен иметь ошибок
-    assert!(!parse_result.has_errors(), "Файл только с whitespace не должен иметь ошибок");
+    assert!(
+        !parse_result.has_errors(),
+        "Файл только с whitespace не должен иметь ошибок"
+    );
 
     println!("✅ Whitespace-only файл: diagnostics = []");
     println!("=============================================\n");
@@ -275,7 +316,10 @@ fn test_only_comments_file() {
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     // Файл только с комментариями не должен иметь ошибок
-    assert!(!parse_result.has_errors(), "Файл только с комментариями не должен иметь ошибок");
+    assert!(
+        !parse_result.has_errors(),
+        "Файл только с комментариями не должен иметь ошибок"
+    );
 
     println!("✅ Comments-only файл: diagnostics = []");
     println!("================================\n");
@@ -287,32 +331,41 @@ fn test_very_long_line_coordinates() {
 
     // Создаём строку с очень длинным именем переменной
     let long_var_name = "Перем ".to_string() + &"Х".repeat(500);
-    let source = format!(r#"
+    let source = format!(
+        r#"
 Функция Тест()
     {};
     Если Истина Тогда
         Сообщить("Тест");
     Возврат;
 КонецФункции
-"#, long_var_name);
+"#,
+        long_var_name
+    );
 
     let parser = ParserCoordinator::with_fallback();
-    let parse_result = parser.parse(source.as_str()).expect("Парсинг должен успеть");
+    let parse_result = parser
+        .parse(source.as_str())
+        .expect("Парсинг должен успеть");
 
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
-            println!("Ошибка: {} [{}:{}]",
-                error.message,
-                error.span.start_line,
-                error.span.start_column);
+            println!(
+                "Ошибка: {} [{}:{}]",
+                error.message, error.span.start_line, error.span.start_column
+            );
 
             // Координаты должны быть разумными даже для очень длинной строки
-            assert!(error.span.start_column < 10000,
-                "start_column не должен быть огромным");
-            assert!(error.span.end_column < 10000,
-                "end_column не должен быть огромным");
+            assert!(
+                error.span.start_column < 10000,
+                "start_column не должен быть огромным"
+            );
+            assert!(
+                error.span.end_column < 10000,
+                "end_column не должен быть огромным"
+            );
         }
         println!("✅ Координаты для длинной строки корректны");
     }
@@ -337,7 +390,10 @@ fn test_mixed_line_endings() {
         for error in &parse_result.syntax_errors {
             // Координаты должны быть валидными
             assert!(error.span.start_line >= 0, "start_line должен быть >= 0");
-            assert!(error.span.end_line >= error.span.start_line, "end_line >= start_line");
+            assert!(
+                error.span.end_line >= error.span.start_line,
+                "end_line >= start_line"
+            );
         }
         println!("✅ Смешанные line endings обработаны корректно");
     } else {
@@ -368,12 +424,18 @@ fn test_error_span_zero_width() {
             let span_width: Option<u32> = if error.span.start_line == error.span.end_line {
                 Some(error.span.end_column - error.span.start_column)
             } else {
-                None  // Многострочный span
+                None // Многострочный span
             };
 
-            println!("Ошибка: {} [ширина span: {}]",
+            println!(
+                "Ошибка: {} [ширина span: {}]",
                 error.message,
-                if let Some(width) = span_width { width.to_string() } else { "многострочный".to_string() });
+                if let Some(width) = span_width {
+                    width.to_string()
+                } else {
+                    "многострочный".to_string()
+                }
+            );
 
             // Zero-width span может быть валидным (например, для missing token)
             if span_width == Some(0) {
@@ -418,8 +480,10 @@ fn test_unicode_normalization_coordinates() {
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
             // Координаты должны быть валидными даже с Unicode нормализацией
-            assert!(error.span.start_column < 200,
-                "start_column не должен быть огромным");
+            assert!(
+                error.span.start_column < 200,
+                "start_column не должен быть огромным"
+            );
         }
         println!("✅ Unicode нормализация обработана корректно");
     } else {

@@ -2,15 +2,15 @@
 //!
 //! Разбиение большого файла syntax_helper_parser.rs на логические модули
 
-pub mod types;
+pub mod document_parsers;
 pub mod html_extractors;
 pub mod indexing;
+pub mod types;
 pub mod utils;
-pub mod document_parsers;
 
 // Публичные реэкспорты для удобства использования
-pub use types::*;
+pub use document_parsers::DocumentParser;
 pub use html_extractors::HtmlExtractor;
 pub use indexing::IndexBuilder;
+pub use types::*;
 pub use utils::*;
-pub use document_parsers::DocumentParser;

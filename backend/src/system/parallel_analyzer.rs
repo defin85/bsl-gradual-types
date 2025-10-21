@@ -299,7 +299,10 @@ impl ParallelAnalyzer {
     }
 
     /// Простой анализ для демонстрации (будет заменён на AnalysisEngine)
-    fn simple_analysis(&self, content: &str) -> Result<HashMap<String, SerializableTypeResolution>> {
+    fn simple_analysis(
+        &self,
+        content: &str,
+    ) -> Result<HashMap<String, SerializableTypeResolution>> {
         let mut resolutions = HashMap::new();
 
         // Простая эвристика: найти определения функций
@@ -344,8 +347,7 @@ impl ParallelAnalyzer {
     /// Получить статистику производительности
     pub fn get_performance_stats(&self, result: &ProjectAnalysisResult) -> PerformanceStats {
         let cache_hit_rate = if result.files_analyzed + result.files_failed > 0 {
-            (result.files_from_cache as f64
-                / (result.files_analyzed + result.files_failed) as f64)
+            (result.files_from_cache as f64 / (result.files_analyzed + result.files_failed) as f64)
                 * 100.0
         } else {
             0.0
@@ -390,8 +392,8 @@ impl PerformanceStats {
             self.total_duration_ms < 30_000
         } else {
             // Экстраполяция для меньшего количества файлов
-            let estimated_1000_files_ms = (1000.0 / self.total_files as f64)
-                * self.total_duration_ms as f64;
+            let estimated_1000_files_ms =
+                (1000.0 / self.total_files as f64) * self.total_duration_ms as f64;
             estimated_1000_files_ms < 30_000.0
         }
     }
@@ -419,8 +421,16 @@ mod tests {
         let analyzer = ParallelAnalyzer::new(cache);
 
         // Создать тестовые файлы
-        fs::write(temp_dir.path().join("test1.bsl"), "Функция Тест1() КонецФункции").unwrap();
-        fs::write(temp_dir.path().join("test2.bsl"), "Функция Тест2() КонецФункции").unwrap();
+        fs::write(
+            temp_dir.path().join("test1.bsl"),
+            "Функция Тест1() КонецФункции",
+        )
+        .unwrap();
+        fs::write(
+            temp_dir.path().join("test2.bsl"),
+            "Функция Тест2() КонецФункции",
+        )
+        .unwrap();
         fs::write(temp_dir.path().join("readme.txt"), "not a bsl file").unwrap();
 
         let files = analyzer.find_bsl_files(temp_dir.path()).unwrap();

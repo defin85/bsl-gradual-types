@@ -1,6 +1,6 @@
 //! HTML extraction методы для парсера синтакс-помощника 1С
 
-use scraper::{Html, Selector, ElementRef};
+use scraper::{ElementRef, Html, Selector};
 use std::path::Path;
 use tracing::debug;
 
@@ -199,7 +199,8 @@ impl HtmlExtractor {
             for chapter in document.select(&chapter_selector) {
                 let chapter_text = chapter.text().collect::<String>().trim().to_string();
 
-                if chapter_text == "Значения" || chapter_text.starts_with("Значения") {
+                if chapter_text == "Значения" || chapter_text.starts_with("Значения")
+                {
                     found_values_section = true;
                     current_chapter = Some(chapter);
                     debug!("🔍 Найден раздел 'Значения' в HTML");
@@ -241,7 +242,8 @@ impl HtmlExtractor {
 
                                     // Собираем текст из <a> элементов
                                     if elem.value().name() == "a" {
-                                        let link_text = elem.text().collect::<String>().trim().to_string();
+                                        let link_text =
+                                            elem.text().collect::<String>().trim().to_string();
                                         if !link_text.is_empty() {
                                             enum_values.push(link_text.clone());
                                             debug!("✓ Извлечено enum значение: {}", link_text);
@@ -340,12 +342,19 @@ impl HtmlExtractor {
 
                                 // Собираем текст из <a> элементов
                                 if elem.value().name() == "a" {
-                                    let link_text = elem.text().collect::<String>().trim().to_string();
+                                    let link_text =
+                                        elem.text().collect::<String>().trim().to_string();
                                     if !link_text.is_empty() {
                                         // Парсим формат "Добавить (Add)" -> ("Добавить", "Add")
-                                        let (russian, english) = self.parse_bilingual_name(&link_text);
+                                        let (russian, english) =
+                                            self.parse_bilingual_name(&link_text);
                                         items.push((russian, english));
-                                        debug!("✓ Извлечено из '{}': {} ({})", section_name, items.last().unwrap().0, items.last().unwrap().1);
+                                        debug!(
+                                            "✓ Извлечено из '{}': {} ({})",
+                                            section_name,
+                                            items.last().unwrap().0,
+                                            items.last().unwrap().1
+                                        );
                                     }
                                 }
                             }
@@ -356,9 +365,16 @@ impl HtmlExtractor {
         }
 
         if items.is_empty() {
-            debug!("⚠️  Не удалось извлечь элементы из раздела '{}'", section_name);
+            debug!(
+                "⚠️  Не удалось извлечь элементы из раздела '{}'",
+                section_name
+            );
         } else {
-            debug!("✓ Извлечено {} элементов из '{}'", items.len(), section_name);
+            debug!(
+                "✓ Извлечено {} элементов из '{}'",
+                items.len(),
+                section_name
+            );
         }
 
         items

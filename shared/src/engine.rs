@@ -86,7 +86,6 @@ impl AnalysisEngine {
         })
     }
 
-
     /// Получить resolver для TypeSystemService
     pub fn get_resolver(&self) -> Arc<TypeResolver> {
         self.resolver.clone()
@@ -196,7 +195,8 @@ impl AnalysisEngine {
         );
         resolutions_map.insert(
             "ПеременнаяБ".to_string(),
-            self.resolver.resolve_expression_sync("Справочники.Контрагенты"),
+            self.resolver
+                .resolve_expression_sync("Справочники.Контрагенты"),
         );
         let resolutions: Vec<(String, TypeResolution)> = resolutions_map.into_iter().collect();
 
@@ -232,7 +232,9 @@ impl<'a> IrTypeResolverVisitor<'a> {
         use crate::ir::SemanticNodeKind;
 
         let resolution = match &node.kind {
-            SemanticNodeKind::VariableDeclaration { name, type_hint, .. } => {
+            SemanticNodeKind::VariableDeclaration {
+                name, type_hint, ..
+            } => {
                 // Если есть type hint, резолвим его
                 if let Some(hint) = type_hint {
                     let res = self.resolver.resolve_expression_sync(hint);
@@ -244,13 +246,20 @@ impl<'a> IrTypeResolverVisitor<'a> {
                 }
             }
 
-            SemanticNodeKind::Assignment { variable, value_type } => {
+            SemanticNodeKind::Assignment {
+                variable,
+                value_type,
+            } => {
                 // Обновляем тип переменной в контексте
                 context.update_variable_type(variable.clone(), value_type.clone());
                 self.resolver.resolve_expression_sync(value_type)
             }
 
-            SemanticNodeKind::MemberAccess { object_type, member_name, .. } => {
+            SemanticNodeKind::MemberAccess {
+                object_type,
+                member_name,
+                ..
+            } => {
                 // Резолвим доступ к члену: object_type.member_name
                 let full_path = format!("{}.{}", object_type, member_name);
                 self.resolver.resolve_expression_sync(&full_path)
@@ -320,8 +329,8 @@ mod ir_analysis_tests {
     /// Milestone 2.3: Интеграционный тест для Union Types в IR анализе
     #[test]
     fn test_union_type_in_ir_analysis() {
-        use crate::domain::types::{ResolutionResult, Certainty};
-        use crate::ir::{SemanticProgram, SemanticNode, SemanticNodeKind, Span, SourceInfo};
+        use crate::domain::types::{Certainty, ResolutionResult};
+        use crate::ir::{SemanticNode, SemanticNodeKind, SemanticProgram, SourceInfo, Span};
 
         let repo = Arc::new(InMemoryTypeRepository::new());
         let resolver = Arc::new(TypeResolver::new(repo.clone()));
@@ -332,23 +341,21 @@ mod ir_analysis_tests {
         let root_scope = symbols.root_scope;
 
         let ir = SemanticProgram {
-            nodes: vec![
-                SemanticNode {
-                    kind: SemanticNodeKind::VariableDeclaration {
-                        name: "МояПеременная".to_string(),
-                        type_hint: Some("Строка | Число".to_string()),
-                        is_export: false,
-                        initial_value_type: None,
-                    },
-                    span: Span {
-                        start_line: 1,
-                        start_column: 1,
-                        end_line: 1,
-                        end_column: 30,
-                    },
-                    scope_id: root_scope,
+            nodes: vec![SemanticNode {
+                kind: SemanticNodeKind::VariableDeclaration {
+                    name: "МояПеременная".to_string(),
+                    type_hint: Some("Строка | Число".to_string()),
+                    is_export: false,
+                    initial_value_type: None,
                 },
-            ],
+                span: Span {
+                    start_line: 1,
+                    start_column: 1,
+                    end_line: 1,
+                    end_column: 30,
+                },
+                scope_id: root_scope,
+            }],
             symbols,
             cfg: None,
             source_info: SourceInfo {

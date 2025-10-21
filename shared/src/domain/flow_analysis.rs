@@ -3,8 +3,8 @@
 //! Отслеживание изменений типов переменных в процессе выполнения кода
 //! с учётом потока управления (control flow)
 
-use std::collections::HashMap;
 use crate::domain::types::TypeResolution;
+use std::collections::HashMap;
 
 /// Контекст для flow-sensitive анализа
 ///
@@ -76,64 +76,72 @@ impl FlowAnalysisContext {
     ///
     /// Создаёт union types для переменных, которые имеют разные типы в ветках
     pub fn merge(&mut self, other: &FlowAnalysisContext) {
-        use crate::domain::types::{ResolutionResult, WeightedType, Certainty, ConcreteType, PlatformType};
+        use crate::domain::types::{
+            Certainty, ConcreteType, PlatformType, ResolutionResult, WeightedType,
+        };
 
         for (var_name, other_resolution) in &other.variables {
             match self.variables.get(var_name) {
                 Some(self_resolution) => {
                     // Переменная изменялась в обеих ветках
-                    if format!("{:?}", self_resolution.result) != format!("{:?}", other_resolution.result) {
+                    if format!("{:?}", self_resolution.result)
+                        != format!("{:?}", other_resolution.result)
+                    {
                         // Извлекаем ConcreteType из ResolutionResult
                         let self_concrete = match &self_resolution.result {
                             ResolutionResult::Concrete(t) => t.clone(),
                             ResolutionResult::Union(types) => {
                                 // Берём первый тип из union
-                                types.first().map(|wt| wt.type_.clone())
-                                    .unwrap_or_else(|| ConcreteType::Platform(PlatformType {
-                                        name: "Произвольный".to_string()
-                                    }))
+                                types.first().map(|wt| wt.type_.clone()).unwrap_or_else(|| {
+                                    ConcreteType::Platform(PlatformType {
+                                        name: "Произвольный".to_string(),
+                                    })
+                                })
                             }
                             ResolutionResult::Intersection(types) => {
                                 // Берём первый тип из intersection
-                                types.first().cloned()
-                                    .unwrap_or_else(|| ConcreteType::Platform(PlatformType {
-                                        name: "Произвольный".to_string()
-                                    }))
+                                types.first().cloned().unwrap_or_else(|| {
+                                    ConcreteType::Platform(PlatformType {
+                                        name: "Произвольный".to_string(),
+                                    })
+                                })
                             }
                             ResolutionResult::Generic(gen) => {
                                 // Используем базовый тип без параметров
                                 ConcreteType::Platform(PlatformType {
-                                    name: gen.base_type.clone()
+                                    name: gen.base_type.clone(),
                                 })
                             }
                             ResolutionResult::Nullable(t) => t.as_ref().clone(),
                             ResolutionResult::Dynamic => ConcreteType::Platform(PlatformType {
-                                name: "Произвольный".to_string()
+                                name: "Произвольный".to_string(),
                             }),
                         };
 
                         let other_concrete = match &other_resolution.result {
                             ResolutionResult::Concrete(t) => t.clone(),
                             ResolutionResult::Union(types) => {
-                                types.first().map(|wt| wt.type_.clone())
-                                    .unwrap_or_else(|| ConcreteType::Platform(PlatformType {
-                                        name: "Произвольный".to_string()
-                                    }))
+                                types.first().map(|wt| wt.type_.clone()).unwrap_or_else(|| {
+                                    ConcreteType::Platform(PlatformType {
+                                        name: "Произвольный".to_string(),
+                                    })
+                                })
                             }
                             ResolutionResult::Intersection(types) => {
-                                types.first().cloned()
-                                    .unwrap_or_else(|| ConcreteType::Platform(PlatformType {
-                                        name: "Произвольный".to_string()
-                                    }))
+                                types.first().cloned().unwrap_or_else(|| {
+                                    ConcreteType::Platform(PlatformType {
+                                        name: "Произвольный".to_string(),
+                                    })
+                                })
                             }
                             ResolutionResult::Generic(gen) => {
                                 ConcreteType::Platform(PlatformType {
-                                    name: gen.base_type.clone()
+                                    name: gen.base_type.clone(),
                                 })
                             }
                             ResolutionResult::Nullable(t) => t.as_ref().clone(),
                             ResolutionResult::Dynamic => ConcreteType::Platform(PlatformType {
-                                name: "Произвольный".to_string()
+                                name: "Произвольный".to_string(),
                             }),
                         };
 
@@ -171,7 +179,8 @@ impl FlowAnalysisContext {
                 }
                 None => {
                     // Переменная появилась только в другой ветке
-                    self.variables.insert(var_name.clone(), other_resolution.clone());
+                    self.variables
+                        .insert(var_name.clone(), other_resolution.clone());
                 }
             }
         }
@@ -214,19 +223,13 @@ pub enum FlowEvent {
     },
 
     /// Вход в новый блок кода
-    EnterScope {
-        depth: usize,
-    },
+    EnterScope { depth: usize },
 
     /// Выход из блока кода
-    ExitScope {
-        depth: usize,
-    },
+    ExitScope { depth: usize },
 
     /// Объединение контекстов после ветвления
-    MergeContexts {
-        merged_variables: Vec<String>,
-    },
+    MergeContexts { merged_variables: Vec<String> },
 
     /// Вызов метода (может изменить тип через reassignment)
     MethodCall {
@@ -311,29 +314,20 @@ pub enum CfgNodeKind {
     Exit,
 
     /// Последовательность операторов
-    BasicBlock {
-        statements: Vec<String>,
-    },
+    BasicBlock { statements: Vec<String> },
 
     /// Условное ветвление (if-then-else)
-    Conditional {
-        condition: String,
-    },
+    Conditional { condition: String },
 
     /// Начало цикла
-    LoopHeader {
-        condition: String,
-    },
+    LoopHeader { condition: String },
 
     /// Тело цикла
     LoopBody,
 
     // === Новые варианты для null safety и type inference (Milestone 2.3) ===
     /// Присваивание переменной
-    Assignment {
-        variable: String,
-        value: String,
-    },
+    Assignment { variable: String, value: String },
 
     /// Вызов метода объекта
     MethodCall {
@@ -343,15 +337,10 @@ pub enum CfgNodeKind {
     },
 
     /// Доступ к свойству объекта
-    PropertyAccess {
-        object: String,
-        property: String,
-    },
+    PropertyAccess { object: String, property: String },
 
     /// Проверка условия (для null safety)
-    Condition {
-        variable: String,
-    },
+    Condition { variable: String },
 }
 
 /// Ребро графа потока управления
@@ -389,7 +378,7 @@ pub enum EdgeKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::types::{TypeResolution, ConcreteType, PlatformType};
+    use crate::domain::types::{ConcreteType, PlatformType, TypeResolution};
 
     #[test]
     fn test_flow_context_set_get() {

@@ -61,8 +61,7 @@ pub fn detect_file_type(path: &Path, document: &Html) -> FileType {
                 let title = title_elem.text().collect::<String>();
                 // Если заголовок начинается с "Глобальный контекст." или "Global context."
                 // это глобальная функция
-                if title.starts_with("Глобальный контекст.")
-                    || title.starts_with("Global context.")
+                if title.starts_with("Глобальный контекст.") || title.starts_with("Global context.")
                 {
                     return FileType::GlobalFunction;
                 }

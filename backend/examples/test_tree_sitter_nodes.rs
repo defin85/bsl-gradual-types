@@ -67,7 +67,16 @@ fn print_node_kinds(node: &tree_sitter::Node, source: &str, depth: usize) {
     let indent = "  ".repeat(depth);
     let text = if node.child_count() == 0 {
         let node_text = &source[node.byte_range()];
-        format!(" => \"{}\"", node_text.lines().next().unwrap_or("").chars().take(40).collect::<String>())
+        format!(
+            " => \"{}\"",
+            node_text
+                .lines()
+                .next()
+                .unwrap_or("")
+                .chars()
+                .take(40)
+                .collect::<String>()
+        )
     } else {
         String::new()
     };

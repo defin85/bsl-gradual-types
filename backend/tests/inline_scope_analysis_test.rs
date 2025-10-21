@@ -5,12 +5,12 @@
 //! 2. Резолвит типы переменных через TypeRepository (Platform/Config)
 //! 3. Возвращает методы и свойства через TypeMetadataLookup
 
-use std::sync::Arc;
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::system::{AnalysisCache, ParserCoordinator};
-use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::engine::AnalysisEngine;
+use std::sync::Arc;
 
 /// Инициализация TypeSystemService для тестов
 fn setup_service() -> TypeSystemService {
@@ -183,7 +183,9 @@ async fn test_inline_scope_unknown_type() {
     println!("Unknown type hover: {}", hover_text);
 
     assert!(
-        hover_text.contains("Неопределено") || hover_text.contains("Unknown") || hover_text.contains("НеизвестнаяПеременная"),
+        hover_text.contains("Неопределено")
+            || hover_text.contains("Unknown")
+            || hover_text.contains("НеизвестнаяПеременная"),
         "Hover должен показать, что тип неопределён. Получили: {}",
         hover_text
     );

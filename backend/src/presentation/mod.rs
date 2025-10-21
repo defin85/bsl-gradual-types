@@ -14,7 +14,7 @@ pub mod cli;
 pub mod semantic_routes;
 
 // Re-exports for backward compatibility
-pub use lsp::{/* enhanced, */ code_actions, type_hints, position};
+pub use lsp::{/* enhanced, */ code_actions, position, type_hints};
 
 /// Фильтры для поиска
 #[derive(Debug, Clone)]

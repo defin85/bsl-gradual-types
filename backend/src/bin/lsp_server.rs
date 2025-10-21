@@ -53,10 +53,7 @@ struct BslLanguageServer {
 }
 
 impl BslLanguageServer {
-    fn new(
-        client: Client,
-        coordinator: Arc<SystemCoordinator>,
-    ) -> Self {
+    fn new(client: Client, coordinator: Arc<SystemCoordinator>) -> Self {
         Self {
             client,
             documents: Arc::new(RwLock::new(HashMap::new())),
@@ -92,62 +89,76 @@ impl BslLanguageServer {
     /// Конвертировать backend ParseError → shared ParseError (Milestone 2.18)
     ///
     /// Преобразует локальный ParseError из bsl::ast в shared::domain::types::ParseError
-    fn convert_parse_errors(&self, backend_errors: &[bsl_backend::parsing::bsl::ast::ParseError]) -> Vec<bsl_shared::domain::types::ParseError> {
+    fn convert_parse_errors(
+        &self,
+        backend_errors: &[bsl_backend::parsing::bsl::ast::ParseError],
+    ) -> Vec<bsl_shared::domain::types::ParseError> {
         use bsl_backend::parsing::bsl::ast::ErrorType as BackendErrorType;
-        use bsl_shared::domain::types::{ErrorType as SharedErrorType, ParseError as SharedParseError};
+        use bsl_shared::domain::types::{
+            ErrorType as SharedErrorType, ParseError as SharedParseError,
+        };
 
-        backend_errors.iter().map(|error| {
-            // Конвертируем ErrorType
-            let shared_error_type = match error.error_type {
-                BackendErrorType::ParseError => SharedErrorType::ParseError,
-                BackendErrorType::InvalidSyntax => SharedErrorType::InvalidSyntax,
-                BackendErrorType::MissingToken => SharedErrorType::MissingToken,
-                BackendErrorType::UnexpectedToken => SharedErrorType::UnexpectedToken,
-            };
+        backend_errors
+            .iter()
+            .map(|error| {
+                // Конвертируем ErrorType
+                let shared_error_type = match error.error_type {
+                    BackendErrorType::ParseError => SharedErrorType::ParseError,
+                    BackendErrorType::InvalidSyntax => SharedErrorType::InvalidSyntax,
+                    BackendErrorType::MissingToken => SharedErrorType::MissingToken,
+                    BackendErrorType::UnexpectedToken => SharedErrorType::UnexpectedToken,
+                };
 
-            // Конвертируем Span (backend::bsl::ast::Span → shared::ir::Span)
-            let shared_span = bsl_shared::ir::Span::new(
-                error.span.start_line,
-                error.span.start_column,
-                error.span.end_line,
-                error.span.end_column
-            );
+                // Конвертируем Span (backend::bsl::ast::Span → shared::ir::Span)
+                let shared_span = bsl_shared::ir::Span::new(
+                    error.span.start_line,
+                    error.span.start_column,
+                    error.span.end_line,
+                    error.span.end_column,
+                );
 
-            // Создаём shared ParseError
-            SharedParseError {
-                error_type: shared_error_type,
-                message: error.message.clone(),
-                span: shared_span,
-            }
-        }).collect()
+                // Создаём shared ParseError
+                SharedParseError {
+                    error_type: shared_error_type,
+                    message: error.message.clone(),
+                    span: shared_span,
+                }
+            })
+            .collect()
     }
 
     /// Конвертировать синтаксические ошибки в LSP Diagnostics (Milestone 2.18)
     ///
     /// Преобразует ParseError из парсера в LSP Diagnostic для отображения в VSCode.
     /// Координаты ошибок уже в UTF-16 благодаря Task 1 (Milestone 2.18).
-    fn syntax_errors_to_diagnostics(&self, errors: &[bsl_shared::domain::types::ParseError]) -> Vec<Diagnostic> {
+    fn syntax_errors_to_diagnostics(
+        &self,
+        errors: &[bsl_shared::domain::types::ParseError],
+    ) -> Vec<Diagnostic> {
         use bsl_shared::domain::types::ErrorType;
 
-        errors.iter().map(|error| {
-            let severity = match error.error_type {
-                ErrorType::ParseError | ErrorType::InvalidSyntax => DiagnosticSeverity::ERROR,
-                ErrorType::MissingToken => DiagnosticSeverity::ERROR,
-                ErrorType::UnexpectedToken => DiagnosticSeverity::WARNING,
-            };
+        errors
+            .iter()
+            .map(|error| {
+                let severity = match error.error_type {
+                    ErrorType::ParseError | ErrorType::InvalidSyntax => DiagnosticSeverity::ERROR,
+                    ErrorType::MissingToken => DiagnosticSeverity::ERROR,
+                    ErrorType::UnexpectedToken => DiagnosticSeverity::WARNING,
+                };
 
-            Diagnostic {
-                range: Range::new(
-                    Position::new(error.span.start_line, error.span.start_column),
-                    Position::new(error.span.end_line, error.span.end_column)
-                ),
-                severity: Some(severity),
-                message: error.message.clone(),
-                source: Some("bsl-syntax".to_string()),
-                code: Some(NumberOrString::String(format!("{:?}", error.error_type))),
-                ..Default::default()
-            }
-        }).collect()
+                Diagnostic {
+                    range: Range::new(
+                        Position::new(error.span.start_line, error.span.start_column),
+                        Position::new(error.span.end_line, error.span.end_column),
+                    ),
+                    severity: Some(severity),
+                    message: error.message.clone(),
+                    source: Some("bsl-syntax".to_string()),
+                    code: Some(NumberOrString::String(format!("{:?}", error.error_type))),
+                    ..Default::default()
+                }
+            })
+            .collect()
     }
 
     /// Применяет текстовое изменение к строке
@@ -273,17 +284,20 @@ impl LanguageServer for BslLanguageServer {
         let config = self.config.read().await;
         if let Some(ref cfg) = *config {
             if let Some(ref platform_docs) = cfg.platform_docs_archive {
-                info!("🔄 Reloading types with platformDocsArchive: {}", platform_docs);
+                info!(
+                    "🔄 Reloading types with platformDocsArchive: {}",
+                    platform_docs
+                );
 
                 // ✅ НОВОЕ: Отправляем LSP Progress notification (стандартный протокол LSP)
                 use tower_lsp::lsp_types::{
-                    NumberOrString, ProgressParams, ProgressParamsValue,
-                    WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd,
-                    WorkDoneProgressReport,
+                    NumberOrString, ProgressParams, ProgressParamsValue, WorkDoneProgress,
+                    WorkDoneProgressBegin, WorkDoneProgressEnd, WorkDoneProgressReport,
                 };
 
                 // Генерируем уникальный токен для прогресса (timestamp-based)
-                let token = NumberOrString::String(format!("bsl-load-types-{}",
+                let token = NumberOrString::String(format!(
+                    "bsl-load-types-{}",
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap()
@@ -317,7 +331,10 @@ impl LanguageServer for BslLanguageServer {
                             token: token.clone(),
                             value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
                                 WorkDoneProgressReport {
-                                    message: Some(format!("Обработка документации из {}...", platform_docs)),
+                                    message: Some(format!(
+                                        "Обработка документации из {}...",
+                                        platform_docs
+                                    )),
                                     percentage: Some(50),
                                     cancellable: Some(false),
                                 },
@@ -332,7 +349,11 @@ impl LanguageServer for BslLanguageServer {
                 let syntax_path = std::path::Path::new(platform_docs);
 
                 // 3. Перезапускаем SystemCoordinator с новым путём
-                match self.coordinator.start_with_paths(Some(syntax_path), None).await {
+                match self
+                    .coordinator
+                    .start_with_paths(Some(syntax_path), None)
+                    .await
+                {
                     Ok(()) => {
                         info!("✅ Types reloaded successfully with platform documentation");
 
@@ -343,7 +364,9 @@ impl LanguageServer for BslLanguageServer {
                                     token: token.clone(),
                                     value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
                                         WorkDoneProgressEnd {
-                                            message: Some("✅ Типы платформы загружены успешно".to_string()),
+                                            message: Some(
+                                                "✅ Типы платформы загружены успешно".to_string(),
+                                            ),
                                         },
                                     )),
                                 },
@@ -421,10 +444,15 @@ impl LanguageServer for BslLanguageServer {
                 match parser.parse(&text) {
                     Ok(parse_result) => {
                         if parse_result.has_errors() {
-                            info!("⚠️ Found {} syntax errors in {}", parse_result.syntax_errors.len(), uri);
+                            info!(
+                                "⚠️ Found {} syntax errors in {}",
+                                parse_result.syntax_errors.len(),
+                                uri
+                            );
 
                             // Конвертируем backend ParseError → shared ParseError
-                            let shared_errors = self.convert_parse_errors(&parse_result.syntax_errors);
+                            let shared_errors =
+                                self.convert_parse_errors(&parse_result.syntax_errors);
 
                             // Конвертируем shared ParseError → LSP Diagnostics
                             diagnostics.extend(self.syntax_errors_to_diagnostics(&shared_errors));
@@ -510,8 +538,7 @@ impl LanguageServer for BslLanguageServer {
                     start_column: range.start.character,
                     old_end_line: range.end.line,
                     old_end_column: range.end.character,
-                    new_end_line: range.start.line
-                        + change.text.matches('\n').count() as u32,
+                    new_end_line: range.start.line + change.text.matches('\n').count() as u32,
                     new_end_column: if change.text.contains('\n') {
                         change.text.lines().last().unwrap_or("").len() as u32
                     } else {
@@ -550,13 +577,19 @@ impl LanguageServer for BslLanguageServer {
                     match parser.parse(text) {
                         Ok(parse_result) => {
                             if parse_result.has_errors() {
-                                info!("⚠️ Found {} syntax errors in {}", parse_result.syntax_errors.len(), uri);
+                                info!(
+                                    "⚠️ Found {} syntax errors in {}",
+                                    parse_result.syntax_errors.len(),
+                                    uri
+                                );
 
                                 // Конвертируем backend ParseError → shared ParseError
-                                let shared_errors = self.convert_parse_errors(&parse_result.syntax_errors);
+                                let shared_errors =
+                                    self.convert_parse_errors(&parse_result.syntax_errors);
 
                                 // Конвертируем shared ParseError → LSP Diagnostics
-                                diagnostics.extend(self.syntax_errors_to_diagnostics(&shared_errors));
+                                diagnostics
+                                    .extend(self.syntax_errors_to_diagnostics(&shared_errors));
                             } else {
                                 info!("✅ No syntax errors in {}", uri);
                             }
@@ -704,28 +737,49 @@ impl LanguageServer for BslLanguageServer {
         }
     }
 
-    async fn execute_command(&self, params: ExecuteCommandParams) -> JsonRpcResult<Option<serde_json::Value>> {
-        info!("Execute command: {} with {} arguments", params.command, params.arguments.len());
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> JsonRpcResult<Option<serde_json::Value>> {
+        info!(
+            "Execute command: {} with {} arguments",
+            params.command,
+            params.arguments.len()
+        );
 
         match params.command.as_str() {
             "bsl.getSemanticHtml" => {
                 if params.arguments.is_empty() {
-                    return Err(tower_lsp::jsonrpc::Error::invalid_params("Missing request parameters"));
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing request parameters",
+                    ));
                 }
 
-                let request: GetSemanticHtmlRequest = serde_json::from_value(params.arguments[0].clone())
-                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid parameters: {}", e)))?;
+                let request: GetSemanticHtmlRequest =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
 
                 let result = self.handle_get_semantic_html(request).await?;
                 Ok(Some(serde_json::to_value(result).unwrap()))
             }
             "bsl.getSemanticTree" => {
                 if params.arguments.is_empty() {
-                    return Err(tower_lsp::jsonrpc::Error::invalid_params("Missing request parameters"));
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing request parameters",
+                    ));
                 }
 
-                let request: GetSemanticTreeRequest = serde_json::from_value(params.arguments[0].clone())
-                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid parameters: {}", e)))?;
+                let request: GetSemanticTreeRequest =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
 
                 let result = self.handle_get_semantic_tree(request).await?;
                 Ok(Some(serde_json::to_value(result).unwrap()))
@@ -868,12 +922,18 @@ impl BslLanguageServer {
         Ok(QueryTypeResponse {
             type_name: params.type_name.clone(),
             found: true,
-            details: Some(format!("Type '{}' query handled by LSP server", params.type_name)),
+            details: Some(format!(
+                "Type '{}' query handled by LSP server",
+                params.type_name
+            )),
         })
     }
 
     /// Обработчик custom request: bsl/buildIndex
-    async fn handle_build_index(&self, params: BuildIndexParams) -> JsonRpcResult<BuildIndexResponse> {
+    async fn handle_build_index(
+        &self,
+        params: BuildIndexParams,
+    ) -> JsonRpcResult<BuildIndexResponse> {
         info!("Custom request: bsl/buildIndex - {}", params.workspace_path);
 
         // TODO: Реализовать через TypeSystemService
@@ -885,60 +945,96 @@ impl BslLanguageServer {
     }
 
     /// Обработчик custom request: bsl/validateMethod
-    async fn handle_validate_method(&self, params: ValidateMethodParams) -> JsonRpcResult<ValidateMethodResponse> {
-        info!("Custom request: bsl/validateMethod - {}.{}", params.object_type, params.method_name);
+    async fn handle_validate_method(
+        &self,
+        params: ValidateMethodParams,
+    ) -> JsonRpcResult<ValidateMethodResponse> {
+        info!(
+            "Custom request: bsl/validateMethod - {}.{}",
+            params.object_type, params.method_name
+        );
 
         // TODO: Реализовать через TypeSystemService
         Ok(ValidateMethodResponse {
             valid: true,
-            message: format!("Method {}.{} validation not yet fully implemented",
-                params.object_type, params.method_name),
+            message: format!(
+                "Method {}.{} validation not yet fully implemented",
+                params.object_type, params.method_name
+            ),
         })
     }
 
     /// Обработчик custom request: bsl/checkTypeCompatibility
-    async fn handle_check_compatibility(&self, params: CheckCompatibilityParams) -> JsonRpcResult<CheckCompatibilityResponse> {
-        info!("Custom request: bsl/checkTypeCompatibility - {} → {}",
-            params.source_type, params.target_type);
+    async fn handle_check_compatibility(
+        &self,
+        params: CheckCompatibilityParams,
+    ) -> JsonRpcResult<CheckCompatibilityResponse> {
+        info!(
+            "Custom request: bsl/checkTypeCompatibility - {} → {}",
+            params.source_type, params.target_type
+        );
 
         // TODO: Реализовать через TypeSystemService
         Ok(CheckCompatibilityResponse {
             compatible: true,
-            message: format!("Type compatibility check for {} → {} not yet fully implemented",
-                params.source_type, params.target_type),
+            message: format!(
+                "Type compatibility check for {} → {} not yet fully implemented",
+                params.source_type, params.target_type
+            ),
         })
     }
 
     /// Обработчик custom request: bsl/incrementalUpdate
-    async fn handle_incremental_update(&self, params: IncrementalUpdateParams) -> JsonRpcResult<IncrementalUpdateResponse> {
-        info!("Custom request: bsl/incrementalUpdate - config: {}, version: {}",
-            params.config_path, params.platform_version);
+    async fn handle_incremental_update(
+        &self,
+        params: IncrementalUpdateParams,
+    ) -> JsonRpcResult<IncrementalUpdateResponse> {
+        info!(
+            "Custom request: bsl/incrementalUpdate - config: {}, version: {}",
+            params.config_path, params.platform_version
+        );
 
         // TODO: Реализовать инкрементальное обновление индекса через SystemCoordinator
         Ok(IncrementalUpdateResponse {
             success: true,
-            message: format!("Incremental update for version {} completed (stub)", params.platform_version),
+            message: format!(
+                "Incremental update for version {} completed (stub)",
+                params.platform_version
+            ),
         })
     }
 
     /// Обработчик custom request: bsl/extractPlatformDocs
-    async fn handle_extract_platform_docs(&self, params: ExtractPlatformDocsParams) -> JsonRpcResult<ExtractPlatformDocsResponse> {
-        info!("Custom request: bsl/extractPlatformDocs - archive: {}, version: {}, force: {}",
-            params.archive_path, params.platform_version, params.force);
+    async fn handle_extract_platform_docs(
+        &self,
+        params: ExtractPlatformDocsParams,
+    ) -> JsonRpcResult<ExtractPlatformDocsResponse> {
+        info!(
+            "Custom request: bsl/extractPlatformDocs - archive: {}, version: {}, force: {}",
+            params.archive_path, params.platform_version, params.force
+        );
 
         // TODO: Реализовать извлечение платформенной документации
         // Сейчас возвращаем заглушку
         Ok(ExtractPlatformDocsResponse {
             success: true,
             types_count: 0,
-            message: format!("Platform docs extraction for version {} completed (stub)", params.platform_version),
+            message: format!(
+                "Platform docs extraction for version {} completed (stub)",
+                params.platform_version
+            ),
         })
     }
 
     /// Обработчик custom request: bsl/renderTypeHtml - рендеринг HTML с использованием TypeVisualization
-    async fn handle_render_type_html(&self, params: RenderTypeHtmlParams) -> JsonRpcResult<RenderTypeHtmlResponse> {
-        info!("Custom request: bsl/renderTypeHtml - {} (theme: {:?})",
-            params.type_name, params.theme);
+    async fn handle_render_type_html(
+        &self,
+        params: RenderTypeHtmlParams,
+    ) -> JsonRpcResult<RenderTypeHtmlResponse> {
+        info!(
+            "Custom request: bsl/renderTypeHtml - {} (theme: {:?})",
+            params.type_name, params.theme
+        );
 
         // Определяем тему
         let theme_mode = match params.theme.as_deref() {
@@ -977,33 +1073,43 @@ impl BslLanguageServer {
     }
 
     /// Обработчик custom request: bsl/getSemanticTree - MILESTONE 2.12
-    async fn handle_get_semantic_tree(&self, params: GetSemanticTreeRequest) -> JsonRpcResult<SemanticTreeDto> {
+    async fn handle_get_semantic_tree(
+        &self,
+        params: GetSemanticTreeRequest,
+    ) -> JsonRpcResult<SemanticTreeDto> {
         info!("Custom request: bsl/getSemanticTree - {}", params.uri);
 
         // Парсим URI и получаем путь к файлу
-        let uri = tower_lsp::lsp_types::Url::parse(&params.uri)
-            .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e)))?;
+        let uri = tower_lsp::lsp_types::Url::parse(&params.uri).map_err(|e| {
+            tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e))
+        })?;
 
-        let file_path = uri.to_file_path()
-            .map_err(|_| tower_lsp::jsonrpc::Error::invalid_params("Could not convert URI to file path"))?;
+        let file_path = uri.to_file_path().map_err(|_| {
+            tower_lsp::jsonrpc::Error::invalid_params("Could not convert URI to file path")
+        })?;
 
         let file_path_str = file_path.to_string_lossy().to_string();
 
         // Читаем содержимое файла (из кеша или с диска)
         let file_content = match self.documents.read().await.get(&uri) {
             Some(content) => content.clone(),
-            None => {
-                std::fs::read_to_string(&file_path)
-                    .map_err(|e| tower_lsp::jsonrpc::Error::internal_error())?
-            }
+            None => std::fs::read_to_string(&file_path)
+                .map_err(|e| tower_lsp::jsonrpc::Error::internal_error())?,
         };
 
         // Используем TypeSystemService для получения SemanticProgram
         // TypeSystemService уже содержит всю логику парсинга и конвертации AST → IR
-        match self.get_type_service().get_semantic_tree(&file_content, &file_path_str).await {
+        match self
+            .get_type_service()
+            .get_semantic_tree(&file_content, &file_path_str)
+            .await
+        {
             Ok(dto) => {
-                info!("✅ Semantic tree generated: {} nodes, {} symbols",
-                    dto.root_nodes.len(), dto.symbol_table.len());
+                info!(
+                    "✅ Semantic tree generated: {} nodes, {} symbols",
+                    dto.root_nodes.len(),
+                    dto.symbol_table.len()
+                );
                 Ok(dto)
             }
             Err(e) => {
@@ -1014,8 +1120,14 @@ impl BslLanguageServer {
     }
 
     /// Обработчик custom request: bsl/getSemanticHtml - MILESTONE 2.12
-    async fn handle_get_semantic_html(&self, params: GetSemanticHtmlRequest) -> JsonRpcResult<RenderedHtmlDto> {
-        info!("Custom request: bsl/getSemanticHtml - {} (theme: {:?})", params.uri, params.theme);
+    async fn handle_get_semantic_html(
+        &self,
+        params: GetSemanticHtmlRequest,
+    ) -> JsonRpcResult<RenderedHtmlDto> {
+        info!(
+            "Custom request: bsl/getSemanticHtml - {} (theme: {:?})",
+            params.uri, params.theme
+        );
 
         // Сначала получаем semantic tree
         let tree_request = GetSemanticTreeRequest {
@@ -1063,7 +1175,8 @@ impl BslLanguageServer {
         let mut html = String::new();
 
         // Header с метриками
-        html.push_str(&format!(r#"
+        html.push_str(&format!(
+            r#"
             <div class="semantic-header">
                 <h1>Семантический анализ: {}</h1>
                 <div class="metrics">
@@ -1098,7 +1211,9 @@ impl BslLanguageServer {
         html.push_str("<div class='symbol-table'><h2>Таблица символов</h2><table>");
         html.push_str("<tr><th>Символ</th><th>Тип</th><th>Категория</th><th>Область</th></tr>");
         for (name, symbol) in &tree.symbol_table {
-            let type_name = symbol.resolved_type.as_ref()
+            let type_name = symbol
+                .resolved_type
+                .as_ref()
                 .map(|t| t.name.as_str())
                 .unwrap_or("?");
             html.push_str(&format!(
@@ -1129,7 +1244,11 @@ impl BslLanguageServer {
     }
 
     /// Форматировать узел дерева в HTML
-    fn format_node_html(&self, node: &bsl_shared::api::semantic_dtos::SemanticNodeDto, depth: usize) -> String {
+    fn format_node_html(
+        &self,
+        node: &bsl_shared::api::semantic_dtos::SemanticNodeDto,
+        depth: usize,
+    ) -> String {
         let indent = "  ".repeat(depth);
         let mut html = format!(
             r#"{}<div class="tree-node">
@@ -1137,7 +1256,10 @@ impl BslLanguageServer {
                 {}"#,
             indent,
             node.kind,
-            node.name.as_ref().map(|n| format!(r#"<span class="node-name">{}</span>"#, n)).unwrap_or_default()
+            node.name
+                .as_ref()
+                .map(|n| format!(r#"<span class="node-name">{}</span>"#, n))
+                .unwrap_or_default()
         );
 
         // Рекурсивно добавляем детей
@@ -1157,7 +1279,7 @@ async fn main() -> Result<()> {
     let log_file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
-        .truncate(true)  // Очищаем файл при каждом запуске
+        .truncate(true) // Очищаем файл при каждом запуске
         .open("C:\\1CProject\\bsl-gradual-types\\vscode-extension\\rust_lsp_server.log")
         .expect("Failed to create log file");
 
@@ -1168,9 +1290,9 @@ async fn main() -> Result<()> {
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("bsl_gradual_types=debug".parse()?)
                 .add_directive("tower_lsp=info".parse()?)
-                .add_directive("html5ever=warn".parse()?)        // Подавляем DEBUG от html5ever (используется в scraper)
-                .add_directive("selectors=warn".parse()?)        // Подавляем DEBUG от selectors (используется в scraper)
-                .add_directive("scraper=info".parse()?),         // Подавляем DEBUG от scraper
+                .add_directive("html5ever=warn".parse()?) // Подавляем DEBUG от html5ever (используется в scraper)
+                .add_directive("selectors=warn".parse()?) // Подавляем DEBUG от selectors (используется в scraper)
+                .add_directive("scraper=info".parse()?), // Подавляем DEBUG от scraper
         )
         .with_writer(std::sync::Mutex::new(log_file))
         .init();
@@ -1189,7 +1311,10 @@ async fn main() -> Result<()> {
     // ⚠️ ВАЖНО: Вызываем start() только с базовыми типами, чтобы TypeSystemService был доступен
     // Настоящая загрузка типов произойдёт в initialized() через start_with_paths()
     info!("⚠️ Initializing coordinator with fallback types (real types will be loaded in initialized())");
-    coordinator.start().await.map_err(|e| anyhow::anyhow!("Failed to start coordinator: {}", e))?;
+    coordinator
+        .start()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to start coordinator: {}", e))?;
 
     // ✅ ИСПРАВЛЕНО: НЕ передаём TypeSystemService в BslLanguageServer!
     // BslLanguageServer будет получать актуальный TypeSystemService через coordinator.type_service()
@@ -1205,11 +1330,10 @@ async fn main() -> Result<()> {
     // TypeSystemService будет получен lazy через coordinator.type_service()
     info!("Creating LSP service...");
     let coordinator_clone = coordinator.clone();
-    let (service, socket) =
-        LspService::new(move |client| {
-            info!("Initializing BSL Language Server");
-            BslLanguageServer::new(client, coordinator_clone.clone())
-        });
+    let (service, socket) = LspService::new(move |client| {
+        info!("Initializing BSL Language Server");
+        BslLanguageServer::new(client, coordinator_clone.clone())
+    });
     info!("✅ LSP service created");
 
     // Запускаем сервер

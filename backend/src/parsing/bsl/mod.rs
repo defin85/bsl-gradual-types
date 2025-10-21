@@ -22,10 +22,7 @@ pub mod ast {
         }
 
         /// Создать span из tree-sitter позиций
-        pub fn from_positions(
-            start: (u32, u32),
-            end: (u32, u32),
-        ) -> Self {
+        pub fn from_positions(start: (u32, u32), end: (u32, u32)) -> Self {
             Self {
                 start_line: start.0,
                 start_column: start.1,

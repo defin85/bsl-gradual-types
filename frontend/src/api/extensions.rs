@@ -3,7 +3,7 @@
 //! This module provides UI-specific functionality (colors, formatting, filters)
 //! that extends the core DTOs from bsl-shared without duplicating them.
 
-use bsl_shared::api::dtos::{TypeDto, CategoryDto, MetricsDto, PaginationDto};
+use bsl_shared::api::dtos::{CategoryDto, MetricsDto, PaginationDto, TypeDto};
 
 // Type aliases for backward compatibility during transition
 pub type TypeInfo = TypeDto;
@@ -28,9 +28,9 @@ impl TypeDtoExt for TypeDto {
 
     fn certainty_color(&self) -> &'static str {
         match self.certainty {
-            90..=100 => "#28a745",  // Green - Known
-            50..=89 => "#ffc107",   // Yellow - Inferred
-            _ => "#dc3545",         // Red - Unknown
+            90..=100 => "#28a745", // Green - Known
+            50..=89 => "#ffc107",  // Yellow - Inferred
+            _ => "#dc3545",        // Red - Unknown
         }
     }
 
@@ -39,19 +39,22 @@ impl TypeDtoExt for TypeDto {
     }
 
     fn facet_colors(&self) -> Vec<(&str, &'static str)> {
-        self.facets.iter().map(|f| {
-            let color = match f.as_str() {
-                "Manager" => "#007bff",      // Blue
-                "Object" => "#28a745",       // Green
-                "Reference" => "#ffc107",    // Yellow
-                "Collection" => "#17a2b8",   // Cyan
-                "Selection" => "#e83e8c",    // Pink
-                "List" => "#6f42c1",         // Purple
-                "Metadata" => "#6c757d",     // Gray
-                _ => "#6c757d",              // Default gray
-            };
-            (f.as_str(), color)
-        }).collect()
+        self.facets
+            .iter()
+            .map(|f| {
+                let color = match f.as_str() {
+                    "Manager" => "#007bff",    // Blue
+                    "Object" => "#28a745",     // Green
+                    "Reference" => "#ffc107",  // Yellow
+                    "Collection" => "#17a2b8", // Cyan
+                    "Selection" => "#e83e8c",  // Pink
+                    "List" => "#6f42c1",       // Purple
+                    "Metadata" => "#6c757d",   // Gray
+                    _ => "#6c757d",            // Default gray
+                };
+                (f.as_str(), color)
+            })
+            .collect()
     }
 
     fn get_category(&self) -> &str {
@@ -75,16 +78,16 @@ pub trait CategoryDtoExt {
 impl CategoryDtoExt for CategoryDto {
     fn get_color(&self, category: &str) -> &'static str {
         match category {
-            "Platform" => "#007bff",        // Blue
-            "Configuration" => "#28a745",   // Green
-            "Union" => "#ffc107",           // Yellow
-            "Dynamic" => "#dc3545",         // Red
-            "Примитивный" => "#4CAF50",     // Green
-            "Платформа" => "#2196F3",       // Blue
-            "Справочник" => "#FF9800",      // Orange
-            "Документ" => "#9C27B0",        // Purple
-            "Перечисление" => "#00BCD4",    // Cyan
-            _ => "#6c757d",                 // Gray
+            "Platform" => "#007bff",      // Blue
+            "Configuration" => "#28a745", // Green
+            "Union" => "#ffc107",         // Yellow
+            "Dynamic" => "#dc3545",       // Red
+            "Примитивный" => "#4CAF50",   // Green
+            "Платформа" => "#2196F3",     // Blue
+            "Справочник" => "#FF9800",    // Orange
+            "Документ" => "#9C27B0",      // Purple
+            "Перечисление" => "#00BCD4",  // Cyan
+            _ => "#6c757d",               // Gray
         }
     }
 }
@@ -148,7 +151,8 @@ impl TypeFilters {
         }
 
         // Category filters (если все false - показать всё)
-        let has_category_filter = self.show_platform || self.show_configuration || self.show_union || self.show_dynamic;
+        let has_category_filter =
+            self.show_platform || self.show_configuration || self.show_union || self.show_dynamic;
         if has_category_filter {
             let matches_category = match type_dto.category.as_str() {
                 "Platform" => self.show_platform,
@@ -163,7 +167,8 @@ impl TypeFilters {
         }
 
         // Certainty filters (если все false - показать всё)
-        let has_certainty_filter = self.show_high_certainty || self.show_medium_certainty || self.show_low_certainty;
+        let has_certainty_filter =
+            self.show_high_certainty || self.show_medium_certainty || self.show_low_certainty;
         if has_certainty_filter {
             let matches_certainty = match type_dto.certainty {
                 90..=100 => self.show_high_certainty,

@@ -74,7 +74,10 @@ fn test_parser_coordinator() {
     match result {
         Ok(parse_result) => {
             // TreeSitter сработал
-            assert!(!parse_result.program.statements.is_empty() || parse_result.program.statements.is_empty());
+            assert!(
+                !parse_result.program.statements.is_empty()
+                    || parse_result.program.statements.is_empty()
+            );
         }
         Err(_) => {
             // Regex fallback сработал - это тоже OK для теста
@@ -161,10 +164,14 @@ async fn test_simplified_architecture_flow() {
     let coordinator = SystemCoordinator::new();
 
     // Инициализируем систему
-    coordinator.start().await.expect("SystemCoordinator should start");
+    coordinator
+        .start()
+        .await
+        .expect("SystemCoordinator should start");
 
     // 2. Получаем TypeSystemService через Application Layer
-    let type_service = coordinator.type_service()
+    let type_service = coordinator
+        .type_service()
         .expect("TypeSystemService should be available");
 
     // 3. Тестируем unified API для всех Presentation Layer компонентов
@@ -198,10 +205,14 @@ async fn test_architecture_data_flows() {
     let coordinator = SystemCoordinator::new();
 
     // Инициализируем систему
-    coordinator.start().await.expect("SystemCoordinator should start");
+    coordinator
+        .start()
+        .await
+        .expect("SystemCoordinator should start");
 
     // Проверяем поток: Presentation -> Application -> Domain -> Data
-    let type_service = coordinator.type_service()
+    let type_service = coordinator
+        .type_service()
         .expect("TypeSystemService should be available");
 
     // Simulated presentation layer request
@@ -219,7 +230,10 @@ async fn test_architecture_data_flows() {
     let result = analysis.unwrap();
     // Phase 4+: analyze_file_content может вернуть пустой результат если парсинг не нашел типов
     // Важно что вся цепочка Application -> Domain -> Data работает без ошибок
-    assert_eq!(result.file_path, "test.bsl", "Should have correct file path");
+    assert_eq!(
+        result.file_path, "test.bsl",
+        "Should have correct file path"
+    );
 }
 
 /// Тест валидации архитектурной диаграммы
@@ -229,7 +243,10 @@ async fn test_architecture_diagram_validation() {
     let coordinator = SystemCoordinator::new();
 
     // Инициализируем систему
-    coordinator.start().await.expect("SystemCoordinator should start");
+    coordinator
+        .start()
+        .await
+        .expect("SystemCoordinator should start");
 
     // SystemCoordinator должен содержать все основные компоненты
     let health = coordinator.health_status();

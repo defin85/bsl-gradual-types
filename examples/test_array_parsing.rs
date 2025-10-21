@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 fn main() {
     // Путь к файлу Array.html
-    let array_html_path = PathBuf::from("examples/syntax_helper/rebuilt.shcntx_ru/objects/catalog234/Array.html");
+    let array_html_path =
+        PathBuf::from("examples/syntax_helper/rebuilt.shcntx_ru/objects/catalog234/Array.html");
 
     println!("🔍 Проверяем файл: {}", array_html_path.display());
 
@@ -12,8 +13,8 @@ fn main() {
     }
 
     // Читаем HTML
-    let html_content = std::fs::read_to_string(&array_html_path)
-        .expect("Failed to read Array.html");
+    let html_content =
+        std::fs::read_to_string(&array_html_path).expect("Failed to read Array.html");
 
     println!("✅ Файл прочитан, размер: {} байт", html_content.len());
 

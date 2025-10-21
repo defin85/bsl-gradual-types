@@ -3,10 +3,10 @@
 
 use crate::api::*; // Re-exported shared DTOs + extensions
 use crate::config::get_config;
+use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response};
-use std::collections::HashMap;
 
 /// Получить метрики системы типизации
 pub async fn fetch_metrics() -> Result<MetricsDto, String> {
@@ -37,29 +37,37 @@ pub async fn fetch_types(filters: TypeFilters) -> Result<AnalysisResultDto, Stri
     // Построение URL с параметрами фильтрации
     let base_url = if let Some(ref query) = filters.search_query {
         if !query.is_empty() {
-            format!("{}?q={}&limit={}&offset={}",
+            format!(
+                "{}?q={}&limit={}&offset={}",
                 config.api_url("search"),
                 query,
                 filters.page_size,
-                filters.offset())
+                filters.offset()
+            )
         } else {
-            format!("{}?limit={}&offset={}",
+            format!(
+                "{}?limit={}&offset={}",
                 config.api_url("types"),
                 filters.page_size,
-                filters.offset())
+                filters.offset()
+            )
         }
     } else {
-        format!("{}?limit={}&offset={}",
+        format!(
+            "{}?limit={}&offset={}",
             config.api_url("types"),
             filters.page_size,
-            filters.offset())
+            filters.offset()
+        )
     };
 
     let mut url = base_url;
 
     // Фильтры категорий
-    let any_category_checked = filters.show_platform || filters.show_configuration ||
-                               filters.show_union || filters.show_dynamic;
+    let any_category_checked = filters.show_platform
+        || filters.show_configuration
+        || filters.show_union
+        || filters.show_dynamic;
 
     if any_category_checked {
         if filters.show_platform {
@@ -77,8 +85,8 @@ pub async fn fetch_types(filters: TypeFilters) -> Result<AnalysisResultDto, Stri
     }
 
     // Фильтры уровня определённости
-    let any_certainty_checked = filters.show_high_certainty || filters.show_medium_certainty ||
-                               filters.show_low_certainty;
+    let any_certainty_checked =
+        filters.show_high_certainty || filters.show_medium_certainty || filters.show_low_certainty;
 
     if any_certainty_checked {
         if filters.show_high_certainty {
@@ -100,9 +108,11 @@ pub async fn fetch_types(filters: TypeFilters) -> Result<AnalysisResultDto, Stri
     // Fetch from API
     match fetch_json::<AnalysisResultDto>(&url).await {
         Ok(result) => {
-            web_sys::console::log_1(&format!("✅ Loaded {} types from API", result.types.len()).into());
+            web_sys::console::log_1(
+                &format!("✅ Loaded {} types from API", result.types.len()).into(),
+            );
             Ok(result)
-        },
+        }
         Err(e) => {
             web_sys::console::error_1(&format!("❌ API error: {:?}", e).into());
             // Fallback to test data
@@ -122,7 +132,11 @@ fn get_test_types(filters: TypeFilters) -> Result<AnalysisResultDto, String> {
             certainty_text: "Known 100%".to_string(),
             facets: vec!["Collection".to_string()],
             methods_count: Some(5),
-            methods: vec!["Добавить".to_string(), "Удалить".to_string(), "Очистить".to_string()],
+            methods: vec![
+                "Добавить".to_string(),
+                "Удалить".to_string(),
+                "Очистить".to_string(),
+            ],
             attributes_count: None,
             properties: vec!["Количество".to_string()],
             enum_values: None,
@@ -143,7 +157,10 @@ fn get_test_types(filters: TypeFilters) -> Result<AnalysisResultDto, String> {
             certainty_text: "Known 100%".to_string(),
             facets: vec!["Manager".to_string(), "Reference".to_string()],
             methods_count: Some(3),
-            methods: vec!["НайтиПоНаименованию".to_string(), "СоздатьЭлемент".to_string()],
+            methods: vec![
+                "НайтиПоНаименованию".to_string(),
+                "СоздатьЭлемент".to_string(),
+            ],
             attributes_count: Some(5),
             properties: vec!["Наименование".to_string(), "Код".to_string()],
             enum_values: None,
@@ -186,16 +203,22 @@ fn get_test_types(filters: TypeFilters) -> Result<AnalysisResultDto, String> {
         .collect();
 
     let mut categories = HashMap::new();
-    categories.insert("Platform".to_string(), CategoryDto {
-        color: "#3498db".to_string(),
-        icon: "🔧".to_string(),
-        count: 2,
-    });
-    categories.insert("Configuration".to_string(), CategoryDto {
-        color: "#e74c3c".to_string(),
-        icon: "⚙️".to_string(),
-        count: 1,
-    });
+    categories.insert(
+        "Platform".to_string(),
+        CategoryDto {
+            color: "#3498db".to_string(),
+            icon: "🔧".to_string(),
+            count: 2,
+        },
+    );
+    categories.insert(
+        "Configuration".to_string(),
+        CategoryDto {
+            color: "#e74c3c".to_string(),
+            icon: "⚙️".to_string(),
+            count: 1,
+        },
+    );
 
     let pagination = PaginationDto {
         current_page: filters.page,

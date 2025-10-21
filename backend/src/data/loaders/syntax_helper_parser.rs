@@ -135,7 +135,10 @@ impl SyntaxHelperParser {
         }
 
         if !parsed_something {
-            warn!("📁 Не найдено подходящих файлов для парсинга в {:?}", base_path);
+            warn!(
+                "📁 Не найдено подходящих файлов для парсинга в {:?}",
+                base_path
+            );
         }
 
         Ok(())
@@ -272,10 +275,11 @@ impl SyntaxHelperParser {
                             Some(path.to_path_buf())
                         } else if extension.is_none() {
                             // Файлы без расширения - проверяем, содержат ли HTML
-                            if let Ok(first_line) = std::fs::read_to_string(path).map(|content| {
-                                content.lines().next().unwrap_or("").to_lowercase()
-                            }) {
-                                if first_line.contains("<html") || first_line.contains("<!doctype") {
+                            if let Ok(first_line) = std::fs::read_to_string(path)
+                                .map(|content| content.lines().next().unwrap_or("").to_lowercase())
+                            {
+                                if first_line.contains("<html") || first_line.contains("<!doctype")
+                                {
                                     Some(path.to_path_buf())
                                 } else {
                                     None
@@ -348,7 +352,9 @@ impl SyntaxHelperParser {
                 Ok(SyntaxNode::Constructor(constructor_info))
             }
             FileType::GlobalFunction => {
-                let global_func_info = self.document_parser.parse_global_function(path, &document)?;
+                let global_func_info = self
+                    .document_parser
+                    .parse_global_function(path, &document)?;
                 Ok(SyntaxNode::GlobalFunction(global_func_info))
             }
         }
@@ -577,7 +583,6 @@ pub struct ParsingStats {
     pub categories_count: usize,
     pub index_size: usize,
 }
-
 
 impl Default for SyntaxHelperParser {
     fn default() -> Self {

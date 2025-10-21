@@ -100,8 +100,16 @@ async fn get_semantic_tree(
 /// type_service.get_semantic_tree_html(uri, theme, compact)
 /// ```
 fn generate_html_stub(file_path: &str, theme: &str, compact: bool) -> String {
-    let bg_color = if theme == "dark" { "#1e1e1e" } else { "#ffffff" };
-    let text_color = if theme == "dark" { "#d4d4d4" } else { "#000000" };
+    let bg_color = if theme == "dark" {
+        "#1e1e1e"
+    } else {
+        "#ffffff"
+    };
+    let text_color = if theme == "dark" {
+        "#d4d4d4"
+    } else {
+        "#000000"
+    };
     let compact_mode = if compact { "Да" } else { "Нет" };
 
     format!(

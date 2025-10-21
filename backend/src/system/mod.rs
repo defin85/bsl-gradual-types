@@ -16,9 +16,9 @@ pub mod tree_sitter_adapter;
 // Re-export simplified components (specific imports to avoid conflicts)
 pub use basic_observability::{BasicObservability, SimpleMetrics, StructuredLogger};
 pub use ir_cache::{IrCache, IrCacheStats};
-pub use parallel_analyzer::{ParallelAnalyzer, ProjectAnalysisResult, PerformanceStats};
+pub use parallel_analyzer::{ParallelAnalyzer, PerformanceStats, ProjectAnalysisResult};
 pub use parser_coordinator::ParserCoordinator;
-pub use persistent_cache::{CachedAnalysis, PersistentCache, CacheStats, CacheCleanupStats};
+pub use persistent_cache::{CacheCleanupStats, CacheStats, CachedAnalysis, PersistentCache};
 pub use simple_cache::{AnalysisCache, AnalysisResult, FileHash};
 pub use system_coordinator::{SymbolInfo, SystemCoordinator};
 pub use tree_cache::{hash_content, TreeCache};

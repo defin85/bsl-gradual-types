@@ -40,10 +40,16 @@ fn main() {
             }
 
             println!("  Свойств: {}", type_info.structure.properties.len());
-            println!("  Конструкторов: {}", type_info.structure.constructors.len());
+            println!(
+                "  Конструкторов: {}",
+                type_info.structure.constructors.len()
+            );
 
             println!("\n📋 Коллекция:");
-            println!("  collection_element: {:?}", type_info.structure.collection_element);
+            println!(
+                "  collection_element: {:?}",
+                type_info.structure.collection_element
+            );
             println!("  iterable: {}", type_info.structure.iterable);
             println!("  indexable: {}", type_info.structure.indexable);
 
@@ -54,10 +60,22 @@ fn main() {
             let indexable_ok = type_info.structure.indexable;
 
             println!("\n📊 ИТОГОВАЯ ПРОВЕРКА FACT-BASED ПАРСИНГА:");
-            println!("  ✅ Методы извлечены: {}", if methods_ok { "ДА" } else { "НЕТ" });
-            println!("  ✅ Элемент коллекции: {}", if collection_ok { "ДА" } else { "НЕТ" });
-            println!("  ✅ Итерируемость: {}", if iterable_ok { "ДА" } else { "НЕТ" });
-            println!("  ✅ Индексируемость: {}", if indexable_ok { "ДА" } else { "НЕТ" });
+            println!(
+                "  ✅ Методы извлечены: {}",
+                if methods_ok { "ДА" } else { "НЕТ" }
+            );
+            println!(
+                "  ✅ Элемент коллекции: {}",
+                if collection_ok { "ДА" } else { "НЕТ" }
+            );
+            println!(
+                "  ✅ Итерируемость: {}",
+                if iterable_ok { "ДА" } else { "НЕТ" }
+            );
+            println!(
+                "  ✅ Индексируемость: {}",
+                if indexable_ok { "ДА" } else { "НЕТ" }
+            );
 
             if methods_ok && collection_ok && iterable_ok && indexable_ok {
                 println!("\n🎉 FACT-BASED ПАРСИНГ РАБОТАЕТ ПОЛНОСТЬЮ КОРРЕКТНО!");

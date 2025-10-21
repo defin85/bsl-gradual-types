@@ -5,32 +5,22 @@
 use serde::{Deserialize, Serialize};
 
 // Подключаем загрузчики данных
-pub mod loaders;
 pub mod adapters;
-
+pub mod loaders;
 
 /// Source of type information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum TypeSource {
     /// Type from 1C platform
-    Platform {
-        platform_version: String,
-    },
+    Platform { platform_version: String },
     /// Type from configuration metadata
-    Configuration {
-        config_version: String,
-    },
+    Configuration { config_version: String },
     /// User-defined type in BSL code  
-    UserDefined {
-        file_path: String,
-        line: usize,
-    },
+    UserDefined { file_path: String, line: usize },
     /// Built-in type (primitives, etc.)
     #[default]
     Builtin,
 }
-
 
 impl TypeSource {
     /// Create platform type source
@@ -39,14 +29,14 @@ impl TypeSource {
             platform_version: version,
         }
     }
-    
+
     /// Create configuration type source
     pub fn configuration(version: String) -> Self {
         TypeSource::Configuration {
             config_version: version,
         }
     }
-    
+
     /// Create user-defined type source
     pub fn user_defined(file_path: String, line: usize) -> Self {
         TypeSource::UserDefined { file_path, line }

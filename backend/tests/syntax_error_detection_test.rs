@@ -37,7 +37,8 @@ fn test_unclosed_if_statement_detected() {
                     println!("\n{}. Ошибка #{}", idx + 1, idx + 1);
                     println!("   Тип: {:?}", error.error_type);
                     println!("   Сообщение: {}", error.message);
-                    println!("   Позиция: строка {}, колонка {} - строка {}, колонка {}",
+                    println!(
+                        "   Позиция: строка {}, колонка {} - строка {}, колонка {}",
                         error.span.start_line,
                         error.span.start_column,
                         error.span.end_line,
@@ -148,7 +149,8 @@ fn test_multiple_syntax_errors() {
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     for (idx, error) in parse_result.syntax_errors.iter().enumerate() {
-        println!("{}. {} [{}:{}]",
+        println!(
+            "{}. {} [{}:{}]",
             idx + 1,
             error.message,
             error.span.start_line,

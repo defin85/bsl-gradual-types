@@ -3,7 +3,6 @@
 //! Показывает как интегрированная валидация проверяет методы и свойства
 //! на реальных данных платформы 1С
 
-use std::sync::Arc;
 use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
 use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
@@ -13,6 +12,7 @@ use bsl_shared::domain::types::{
 };
 use bsl_shared::domain::validators::TypeValidator;
 use bsl_shared::domain::TypeMetadataLookup;
+use std::sync::Arc;
 
 fn main() {
     println!("🧪 Демонстрация TypeValidator с TypeMetadataLookup\n");
@@ -80,13 +80,17 @@ fn demonstrate_method_validation(validator: &TypeValidator) {
 
     // Несуществующий метод
     println!("  Проверяем: массив.НесуществующийМетод()");
-    match validator.validate_method_exists(&array_resolution, "НесуществующийМетод") {
+    match validator.validate_method_exists(&array_resolution, "НесуществующийМетод")
+    {
         None => println!("  ✅ Метод существует\n"),
         Some(err) => {
             let diagnostic = err.to_diagnostic(10, 5);
             println!("  ❌ ОШИБКА ВАЛИДАЦИИ:");
             println!("     {}", diagnostic.message);
-            println!("     Строка: {}, Колонка: {}\n", diagnostic.line, diagnostic.column);
+            println!(
+                "     Строка: {}, Колонка: {}\n",
+                diagnostic.line, diagnostic.column
+            );
         }
     }
 
@@ -121,13 +125,17 @@ fn demonstrate_property_validation(validator: &TypeValidator) {
 
     // Несуществующее свойство
     println!("  Проверяем: таблица.НесуществующееСвойство");
-    match validator.validate_property_exists(&table_resolution, "НесуществующееСвойство") {
+    match validator.validate_property_exists(&table_resolution, "НесуществующееСвойство")
+    {
         None => println!("  ✅ Свойство существует\n"),
         Some(err) => {
             let diagnostic = err.to_diagnostic(15, 10);
             println!("  ❌ ОШИБКА ВАЛИДАЦИИ:");
             println!("     {}", diagnostic.message);
-            println!("     Строка: {}, Колонка: {}\n", diagnostic.line, diagnostic.column);
+            println!(
+                "     Строка: {}, Колонка: {}\n",
+                diagnostic.line, diagnostic.column
+            );
         }
     }
 
@@ -158,7 +166,7 @@ fn demonstrate_case_insensitive(validator: &TypeValidator) {
         "добавить",
         "ДОБАВИТЬ",
         "ДоБаВиТь",
-        "Add",  // Английское имя
+        "Add", // Английское имя
         "add",
     ];
 

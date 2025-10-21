@@ -9,9 +9,9 @@
 //! AST (backend) → AstToIrConverter → SemanticProgram (shared)
 //! ```
 
+use crate::parsing::bsl::ast::{Expression, Program, Statement};
 use anyhow::Result;
 use bsl_shared::ir::*;
-use crate::parsing::bsl::ast::{Program, Statement, Expression};
 
 /// Конвертер AST → IR
 ///
@@ -91,7 +91,8 @@ impl AstToIrConverter {
     fn collect_global_symbols(&mut self, statement: &Statement) -> Result<()> {
         match statement {
             Statement::FunctionDecl { name, params, .. } => {
-                let params_vec: Vec<Parameter> = params.iter()
+                let params_vec: Vec<Parameter> = params
+                    .iter()
                     .map(|p| Parameter {
                         name: p.clone(),
                         type_hint: None,
@@ -108,7 +109,8 @@ impl AstToIrConverter {
                 });
             }
             Statement::ProcedureDecl { name, params, .. } => {
-                let params_vec: Vec<Parameter> = params.iter()
+                let params_vec: Vec<Parameter> = params
+                    .iter()
                     .map(|p| Parameter {
                         name: p.clone(),
                         type_hint: None,
@@ -135,7 +137,11 @@ impl AstToIrConverter {
     /// Это позволяет собирать только прямые дочерние узлы, исключая вложенные.
     fn convert_statement(&mut self, statement: Statement) -> Result<Option<usize>> {
         match statement {
-            Statement::VarDeclaration { name, type_hint, span: ast_span } => {
+            Statement::VarDeclaration {
+                name,
+                type_hint,
+                span: ast_span,
+            } => {
                 let span = self.ast_span_to_ir_span(ast_span);
                 let node = SemanticNode {
                     kind: SemanticNodeKind::VariableDeclaration {
@@ -154,13 +160,18 @@ impl AstToIrConverter {
                 } else {
                     TypeHint::Unknown
                 };
-                self.symbol_table.register_variable(self.current_scope, name, hint, span);
+                self.symbol_table
+                    .register_variable(self.current_scope, name, hint, span);
 
                 self.nodes.push(node);
                 return Ok(Some(self.nodes.len() - 1));
             }
 
-            Statement::Assignment { target, value, span: ast_span } => {
+            Statement::Assignment {
+                target,
+                value,
+                span: ast_span,
+            } => {
                 if let Expression::Identifier { name: var_name, .. } = target {
                     let value_type = self.infer_expression_type(&value);
                     let span = self.ast_span_to_ir_span(ast_span);
@@ -184,10 +195,15 @@ impl AstToIrConverter {
                     self.nodes.push(node);
                     return Ok(Some(self.nodes.len() - 1));
                 }
-                return Ok(None);  // Если target не Identifier
+                return Ok(None); // Если target не Identifier
             }
 
-            Statement::If { condition, then_body, else_body, span: ast_span } => {
+            Statement::If {
+                condition,
+                then_body,
+                else_body,
+                span: ast_span,
+            } => {
                 let condition_type = self.infer_expression_type(&condition);
                 let span = self.ast_span_to_ir_span(ast_span);
 
@@ -239,7 +255,11 @@ impl AstToIrConverter {
                 return Ok(Some(self.nodes.len() - 1));
             }
 
-            Statement::While { condition, body, span: ast_span } => {
+            Statement::While {
+                condition,
+                body,
+                span: ast_span,
+            } => {
                 let condition_type = self.infer_expression_type(&condition);
                 let span = self.ast_span_to_ir_span(ast_span);
 
@@ -270,8 +290,15 @@ impl AstToIrConverter {
                 return Ok(Some(self.nodes.len() - 1));
             }
 
-            Statement::For { variable, start, end, body, span: ast_span } => {
-                let range_type = format!("{}..{}",
+            Statement::For {
+                variable,
+                start,
+                end,
+                body,
+                span: ast_span,
+            } => {
+                let range_type = format!(
+                    "{}..{}",
                     self.infer_expression_type(&start),
                     self.infer_expression_type(&end)
                 );
@@ -286,7 +313,7 @@ impl AstToIrConverter {
                     self.current_scope,
                     variable.clone(),
                     TypeHint::Explicit("Число".to_string()),
-                    span
+                    span,
                 );
 
                 // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
@@ -313,7 +340,12 @@ impl AstToIrConverter {
                 return Ok(Some(self.nodes.len() - 1));
             }
 
-            Statement::ForEach { variable, collection, body, span: ast_span } => {
+            Statement::ForEach {
+                variable,
+                collection,
+                body,
+                span: ast_span,
+            } => {
                 let collection_type = self.infer_expression_type(&collection);
                 let span = self.ast_span_to_ir_span(ast_span);
 
@@ -345,7 +377,10 @@ impl AstToIrConverter {
                 return Ok(Some(self.nodes.len() - 1));
             }
 
-            Statement::Return { value, span: ast_span } => {
+            Statement::Return {
+                value,
+                span: ast_span,
+            } => {
                 let value_type = value.as_ref().map(|v| self.infer_expression_type(v));
                 let span = self.ast_span_to_ir_span(ast_span);
 
@@ -359,7 +394,11 @@ impl AstToIrConverter {
                 return Ok(Some(self.nodes.len() - 1));
             }
 
-            Statement::Try { try_body, except_body, span: ast_span } => {
+            Statement::Try {
+                try_body,
+                except_body,
+                span: ast_span,
+            } => {
                 let span = self.ast_span_to_ir_span(ast_span);
 
                 // Try scope
@@ -404,14 +443,20 @@ impl AstToIrConverter {
                 return Ok(Some(self.nodes.len() - 1));
             }
 
-            Statement::Call { expression, span: ast_span } => {
+            Statement::Call {
+                expression,
+                span: ast_span,
+            } => {
                 let span = self.ast_span_to_ir_span(ast_span);
 
                 // Обрабатываем как FunctionCall
                 if let Expression::Call { function, args, .. } = expression {
                     self.convert_call_expression(*function, args, span)?;
                     return Ok(Some(self.nodes.len() - 1));
-                } else if let Expression::PropertyAccess { object, property, .. } = expression {
+                } else if let Expression::PropertyAccess {
+                    object, property, ..
+                } = expression
+                {
                     // Метод объекта
                     let object_type = self.infer_expression_type(&object);
 
@@ -428,7 +473,7 @@ impl AstToIrConverter {
                     self.nodes.push(node);
                     return Ok(Some(self.nodes.len() - 1));
                 }
-                return Ok(None);  // Если expression не Call и не PropertyAccess
+                return Ok(None); // Если expression не Call и не PropertyAccess
             }
 
             Statement::Break { span: ast_span } => {
@@ -453,11 +498,17 @@ impl AstToIrConverter {
                 return Ok(Some(self.nodes.len() - 1));
             }
 
-            Statement::FunctionDecl { name, params, body, span: ast_span } => {
+            Statement::FunctionDecl {
+                name,
+                params,
+                body,
+                span: ast_span,
+            } => {
                 let span = self.ast_span_to_ir_span(ast_span);
                 let body_scope = self.symbol_table.create_scope(self.current_scope);
 
-                let params_vec: Vec<Parameter> = params.iter()
+                let params_vec: Vec<Parameter> = params
+                    .iter()
                     .map(|p| Parameter {
                         name: p.clone(),
                         type_hint: None,
@@ -496,11 +547,17 @@ impl AstToIrConverter {
                 return Ok(Some(self.nodes.len() - 1));
             }
 
-            Statement::ProcedureDecl { name, params, body, span: ast_span } => {
+            Statement::ProcedureDecl {
+                name,
+                params,
+                body,
+                span: ast_span,
+            } => {
                 let span = self.ast_span_to_ir_span(ast_span);
                 let body_scope = self.symbol_table.create_scope(self.current_scope);
 
-                let params_vec: Vec<Parameter> = params.iter()
+                let params_vec: Vec<Parameter> = params
+                    .iter()
                     .map(|p| Parameter {
                         name: p.clone(),
                         type_hint: None,
@@ -547,13 +604,21 @@ impl AstToIrConverter {
     }
 
     /// Конвертация вызова функции
-    fn convert_call_expression(&mut self, function: Expression, args: Vec<Expression>, span: Span) -> Result<()> {
+    fn convert_call_expression(
+        &mut self,
+        function: Expression,
+        args: Vec<Expression>,
+        span: Span,
+    ) -> Result<()> {
         let function_name = match function {
             Expression::Identifier { name, .. } => name,
-            Expression::PropertyAccess { object, property, .. } => {
+            Expression::PropertyAccess {
+                object, property, ..
+            } => {
                 // Метод объекта: объект.Метод()
                 let object_type = self.infer_expression_type(&object);
-                let arg_types: Vec<String> = args.iter()
+                let arg_types: Vec<String> = args
+                    .iter()
                     .map(|arg| self.infer_expression_type(arg))
                     .collect();
 
@@ -573,7 +638,8 @@ impl AstToIrConverter {
             _ => "Unknown".to_string(),
         };
 
-        let arg_types: Vec<String> = args.iter()
+        let arg_types: Vec<String> = args
+            .iter()
             .map(|arg| self.infer_expression_type(arg))
             .collect();
 
@@ -604,15 +670,23 @@ impl AstToIrConverter {
                     .unwrap_or_else(|| name.clone())
             }
             Expression::New { type_name, .. } => type_name.clone(),
-            Expression::PropertyAccess { object, property, .. } => {
+            Expression::PropertyAccess {
+                object, property, ..
+            } => {
                 format!("{}.{}", self.infer_expression_type(object), property)
             }
             Expression::Call { function, .. } => {
                 // Тип результата вызова функции
-                if let Expression::Identifier { name: func_name, .. } = function.as_ref() {
+                if let Expression::Identifier {
+                    name: func_name, ..
+                } = function.as_ref()
+                {
                     // Проверяем глобальные функции
                     if let Some(sig) = self.symbol_table.global_functions.get(func_name) {
-                        return sig.return_type.clone().unwrap_or_else(|| "Dynamic".to_string());
+                        return sig
+                            .return_type
+                            .clone()
+                            .unwrap_or_else(|| "Dynamic".to_string());
                     }
                 }
                 "Dynamic".to_string()
@@ -666,8 +740,7 @@ impl AstToIrConverter {
         // Milestone 2.11 Task B1: DEBUG логи для AST → IR конвертации
         debug!(
             "AST → IR Span conversion: {}:{} - {}:{}",
-            span.start_line, span.start_column,
-            span.end_line, span.end_column
+            span.start_line, span.start_column, span.end_line, span.end_column
         );
 
         span
@@ -692,23 +765,22 @@ mod tests {
     #[test]
     fn test_variable_declaration_conversion() {
         let ast = Program {
-            statements: vec![
-                Statement::VarDeclaration {
-                    name: "x".to_string(),
-                    type_hint: Some("Число".to_string()),
-                    span: AstSpan::stub(),
-                }
-            ],
+            statements: vec![Statement::VarDeclaration {
+                name: "x".to_string(),
+                type_hint: Some("Число".to_string()),
+                span: AstSpan::stub(),
+            }],
         };
 
-        let ir = AstToIrConverter::convert(
-            ast,
-            "Перем x: Число;".to_string(),
-            "test.bsl".to_string()
-        ).unwrap();
+        let ir =
+            AstToIrConverter::convert(ast, "Перем x: Число;".to_string(), "test.bsl".to_string())
+                .unwrap();
 
         assert_eq!(ir.nodes.len(), 1);
-        if let SemanticNodeKind::VariableDeclaration { name, type_hint, .. } = &ir.nodes[0].kind {
+        if let SemanticNodeKind::VariableDeclaration {
+            name, type_hint, ..
+        } = &ir.nodes[0].kind
+        {
             assert_eq!(name, "x");
             assert_eq!(type_hint, &Some("Число".to_string()));
         } else {
@@ -719,30 +791,27 @@ mod tests {
     #[test]
     fn test_if_statement_with_scope() {
         let ast = Program {
-            statements: vec![
-                Statement::If {
-                    condition: Expression::Boolean {
-                        value: true,
-                        span: AstSpan::stub(),
-                    },
-                    then_body: vec![
-                        Statement::VarDeclaration {
-                            name: "y".to_string(),
-                            type_hint: None,
-                            span: AstSpan::stub(),
-                        }
-                    ],
-                    else_body: None,
+            statements: vec![Statement::If {
+                condition: Expression::Boolean {
+                    value: true,
                     span: AstSpan::stub(),
-                }
-            ],
+                },
+                then_body: vec![Statement::VarDeclaration {
+                    name: "y".to_string(),
+                    type_hint: None,
+                    span: AstSpan::stub(),
+                }],
+                else_body: None,
+                span: AstSpan::stub(),
+            }],
         };
 
         let ir = AstToIrConverter::convert(
             ast,
             "Если Истина Тогда Перем y; КонецЕсли".to_string(),
-            "test.bsl".to_string()
-        ).unwrap();
+            "test.bsl".to_string(),
+        )
+        .unwrap();
 
         // Должно быть 2 узла: IfStatement + VariableDeclaration
         assert_eq!(ir.nodes.len(), 2);
@@ -754,32 +823,36 @@ mod tests {
     #[test]
     fn test_function_call_with_args() {
         let ast = Program {
-            statements: vec![
-                Statement::Call {
-                    expression: Expression::Call {
-                        function: Box::new(Expression::Identifier {
-                            name: "Сообщить".to_string(),
-                            span: AstSpan::stub(),
-                        }),
-                        args: vec![Expression::String {
-                            value: "Привет".to_string(),
-                            span: AstSpan::stub(),
-                        }],
+            statements: vec![Statement::Call {
+                expression: Expression::Call {
+                    function: Box::new(Expression::Identifier {
+                        name: "Сообщить".to_string(),
                         span: AstSpan::stub(),
-                    },
+                    }),
+                    args: vec![Expression::String {
+                        value: "Привет".to_string(),
+                        span: AstSpan::stub(),
+                    }],
                     span: AstSpan::stub(),
-                }
-            ],
+                },
+                span: AstSpan::stub(),
+            }],
         };
 
         let ir = AstToIrConverter::convert(
             ast,
             "Сообщить(\"Привет\");".to_string(),
-            "test.bsl".to_string()
-        ).unwrap();
+            "test.bsl".to_string(),
+        )
+        .unwrap();
 
         assert_eq!(ir.nodes.len(), 1);
-        if let SemanticNodeKind::FunctionCall { function_name, arg_types, .. } = &ir.nodes[0].kind {
+        if let SemanticNodeKind::FunctionCall {
+            function_name,
+            arg_types,
+            ..
+        } = &ir.nodes[0].kind
+        {
             assert_eq!(function_name, "Сообщить");
             assert_eq!(arg_types.len(), 1);
             assert_eq!(arg_types[0], "Строка");
@@ -800,13 +873,11 @@ mod tests {
                 Statement::FunctionDecl {
                     name: "TestFunc".to_string(),
                     params: vec![],
-                    body: vec![
-                        Statement::VarDeclaration {
-                            name: "local".to_string(),
-                            type_hint: Some("Число".to_string()),
-                            span: AstSpan::stub(),
-                        }
-                    ],
+                    body: vec![Statement::VarDeclaration {
+                        name: "local".to_string(),
+                        type_hint: Some("Число".to_string()),
+                        span: AstSpan::stub(),
+                    }],
                     span: AstSpan::stub(),
                 },
             ],
@@ -814,9 +885,11 @@ mod tests {
 
         let ir = AstToIrConverter::convert(
             ast,
-            "Перем global: Строка;\nФункция TestFunc()\n  Перем local: Число;\nКонецФункции".to_string(),
-            "test.bsl".to_string()
-        ).unwrap();
+            "Перем global: Строка;\nФункция TestFunc()\n  Перем local: Число;\nКонецФункции"
+                .to_string(),
+            "test.bsl".to_string(),
+        )
+        .unwrap();
 
         // Должно быть 3 scope: root + function body
         assert!(ir.symbols.scopes.len() >= 2);
@@ -829,47 +902,46 @@ mod tests {
     #[test]
     fn test_function_body_indices() {
         let ast = Program {
-            statements: vec![
-                Statement::FunctionDecl {
-                    name: "TestFunc".to_string(),
-                    params: vec![],
-                    body: vec![
-                        Statement::VarDeclaration {
+            statements: vec![Statement::FunctionDecl {
+                name: "TestFunc".to_string(),
+                params: vec![],
+                body: vec![
+                    Statement::VarDeclaration {
+                        name: "local".to_string(),
+                        type_hint: Some("Число".to_string()),
+                        span: AstSpan::stub(),
+                    },
+                    Statement::Assignment {
+                        target: Expression::Identifier {
                             name: "local".to_string(),
-                            type_hint: Some("Число".to_string()),
                             span: AstSpan::stub(),
                         },
-                        Statement::Assignment {
-                            target: Expression::Identifier {
-                                name: "local".to_string(),
-                                span: AstSpan::stub(),
-                            },
-                            value: Expression::Number {
-                                value: 42.0,
-                                span: AstSpan::stub(),
-                            },
+                        value: Expression::Number {
+                            value: 42.0,
                             span: AstSpan::stub(),
                         },
-                    ],
-                    span: AstSpan::stub(),
-                },
-            ],
+                        span: AstSpan::stub(),
+                    },
+                ],
+                span: AstSpan::stub(),
+            }],
         };
 
         let ir = AstToIrConverter::convert(
             ast,
             "Функция TestFunc()\n  Перем local: Число;\n  local = 42;\nКонецФункции".to_string(),
-            "test.bsl".to_string()
-        ).unwrap();
+            "test.bsl".to_string(),
+        )
+        .unwrap();
 
         // Проверяем, что есть 3 узла: 2 внутренних + FunctionDeclaration
         assert_eq!(ir.nodes.len(), 3);
 
         // Проверяем, что FunctionDeclaration содержит индексы тела
         if let SemanticNodeKind::FunctionDeclaration { body, .. } = &ir.nodes[2].kind {
-            assert_eq!(body.len(), 2);  // VariableDeclaration + Assignment
-            assert_eq!(body[0], 0);  // Индекс первого узла тела
-            assert_eq!(body[1], 1);  // Индекс второго узла тела
+            assert_eq!(body.len(), 2); // VariableDeclaration + Assignment
+            assert_eq!(body[0], 0); // Индекс первого узла тела
+            assert_eq!(body[1], 1); // Индекс второго узла тела
         } else {
             panic!("Expected FunctionDeclaration at nodes[2]");
         }

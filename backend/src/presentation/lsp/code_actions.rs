@@ -5,8 +5,8 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
 
-use bsl_shared::domain::types::{TypeContext, TypeDiagnostic, TypeResolution};
 use crate::parsing::bsl::ast::Program;
+use bsl_shared::domain::types::{TypeContext, TypeDiagnostic, TypeResolution};
 use tower_lsp::lsp_types::*;
 
 pub struct CodeActionProvider;
@@ -25,7 +25,7 @@ impl CodeActionProvider {
         for diagnostic in diagnostics {
             // Placeholder for diagnostic-based actions
         }
-        
+
         // Add refactoring actions
         if let Some(action) = Self::refactor_extract_variable(uri, range, program) {
             actions.push(action);
@@ -34,7 +34,7 @@ impl CodeActionProvider {
         if let Some(action) = Self::add_type_annotation(uri, range, type_context) {
             actions.push(action);
         }
-        
+
         actions
     }
 
@@ -46,7 +46,7 @@ impl CodeActionProvider {
         // Placeholder
         None
     }
-    
+
     fn add_type_annotation(
         uri: &Url,
         range: Range,
@@ -58,7 +58,7 @@ impl CodeActionProvider {
         }
         None
     }
-    
+
     fn format_type_annotation(type_resolution: &TypeResolution) -> String {
         // Placeholder
         "Тип".to_string()

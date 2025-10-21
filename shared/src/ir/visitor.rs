@@ -86,18 +86,13 @@ pub trait SemanticVisitor {
         &mut self,
         _name: &str,
         _type_hint: &Option<String>,
-        _context: &mut FlowContext
+        _context: &mut FlowContext,
     ) {
         // Default implementation — ничего не делаем
     }
 
     /// Посетить присваивание
-    fn visit_assignment(
-        &mut self,
-        _variable: &str,
-        _value_type: &str,
-        _context: &mut FlowContext
-    ) {
+    fn visit_assignment(&mut self, _variable: &str, _value_type: &str, _context: &mut FlowContext) {
         // Default implementation
     }
 
@@ -106,7 +101,7 @@ pub trait SemanticVisitor {
         &mut self,
         _function: &str,
         _args: &[String],
-        _context: &mut FlowContext
+        _context: &mut FlowContext,
     ) {
         // Default implementation
     }
@@ -117,7 +112,7 @@ pub trait SemanticVisitor {
         _condition_type: &str,
         _then_branch: &[usize],
         _else_branch: &Option<Vec<usize>>,
-        _context: &mut FlowContext
+        _context: &mut FlowContext,
     ) {
         // Default implementation
     }
@@ -172,7 +167,9 @@ fn walk_node<V: SemanticVisitor>(
 
     // Затем обрабатываем специфичные типы узлов
     match &node.kind {
-        SemanticNodeKind::VariableDeclaration { name, type_hint, .. } => {
+        SemanticNodeKind::VariableDeclaration {
+            name, type_hint, ..
+        } => {
             visitor.visit_variable_declaration(name, type_hint, context);
 
             // Обновляем контекст типов
@@ -181,18 +178,29 @@ fn walk_node<V: SemanticVisitor>(
             }
         }
 
-        SemanticNodeKind::Assignment { variable, value_type } => {
+        SemanticNodeKind::Assignment {
+            variable,
+            value_type,
+        } => {
             visitor.visit_assignment(variable, value_type, context);
 
             // Обновляем контекст типов (flow-sensitive)
             context.update_variable_type(variable.clone(), value_type.clone());
         }
 
-        SemanticNodeKind::FunctionCall { function_name, arg_types, .. } => {
+        SemanticNodeKind::FunctionCall {
+            function_name,
+            arg_types,
+            ..
+        } => {
             visitor.visit_function_call(function_name, arg_types, context);
         }
 
-        SemanticNodeKind::IfStatement { condition_type, then_branch, else_branch } => {
+        SemanticNodeKind::IfStatement {
+            condition_type,
+            then_branch,
+            else_branch,
+        } => {
             visitor.visit_if_statement(condition_type, then_branch, else_branch, context);
 
             // Обходим then ветку
@@ -223,7 +231,10 @@ fn walk_node<V: SemanticVisitor>(
             }
         }
 
-        SemanticNodeKind::TryExcept { try_body, except_body } => {
+        SemanticNodeKind::TryExcept {
+            try_body,
+            except_body,
+        } => {
             // Обходим try блок
             for &node_idx in try_body {
                 if let Some(child_node) = program.nodes.get(node_idx) {
@@ -257,7 +268,10 @@ fn walk_node<V: SemanticVisitor>(
             }
         }
 
-        SemanticNodeKind::BlockScope { statements, scope_id } => {
+        SemanticNodeKind::BlockScope {
+            statements,
+            scope_id,
+        } => {
             // Входим в блок scope
             visitor.enter_scope(*scope_id, context);
 
@@ -392,7 +406,12 @@ mod tests {
                 // Не используем, отслеживаем только через visit_assignment
             }
 
-            fn visit_assignment(&mut self, variable: &str, value_type: &str, _context: &mut FlowContext) {
+            fn visit_assignment(
+                &mut self,
+                variable: &str,
+                value_type: &str,
+                _context: &mut FlowContext,
+            ) {
                 // Собираем типы после обновления контекста
                 if variable == "x" {
                     self.types_seen.push(value_type.to_string());
@@ -400,7 +419,9 @@ mod tests {
             }
         }
 
-        let mut tracker = TypeTracker { types_seen: Vec::new() };
+        let mut tracker = TypeTracker {
+            types_seen: Vec::new(),
+        };
         walk_program(&program, &mut tracker);
 
         // Должны увидеть оба типа: начальный Число и переприсвоенный Строка

@@ -53,7 +53,10 @@ fn test_incomplete_function() {
     // Проверяем, что ошибки имеют корректные span
     for error in &result.syntax_errors {
         assert!(error.span.start_line < 100, "Span должен быть валидным");
-        assert!(!error.message.is_empty(), "Сообщение об ошибке не должно быть пустым");
+        assert!(
+            !error.message.is_empty(),
+            "Сообщение об ошибке не должно быть пустым"
+        );
     }
 }
 
@@ -68,9 +71,15 @@ fn test_invalid_expression() {
             // Tree-sitter может распарсить с ERROR узлами или вернуть ошибку
             // Проверяем что если распарсилось, то есть ошибки
             if parse_result.has_errors() {
-                println!("✅ Обнаружены синтаксические ошибки: {}", parse_result.syntax_errors.len());
+                println!(
+                    "✅ Обнаружены синтаксические ошибки: {}",
+                    parse_result.syntax_errors.len()
+                );
                 for error in &parse_result.syntax_errors {
-                    println!("  - [{}:{}] {}", error.span.start_line, error.span.start_column, error.message);
+                    println!(
+                        "  - [{}:{}] {}",
+                        error.span.start_line, error.span.start_column, error.message
+                    );
                 }
             }
         }

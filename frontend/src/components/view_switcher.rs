@@ -54,11 +54,14 @@ impl ViewType {
 #[allow(non_snake_case)]
 pub fn ViewSwitcher(
     /// Текущее активное представление
-    #[prop(into)] current_view: RwSignal<ViewType>,
+    #[prop(into)]
+    current_view: RwSignal<ViewType>,
     /// Обработчик изменения представления
-    #[prop(optional)] on_view_change: Option<std::sync::Arc<dyn Fn(ViewType) + Send + Sync>>,
+    #[prop(optional)]
+    on_view_change: Option<std::sync::Arc<dyn Fn(ViewType) + Send + Sync>>,
     /// Компактный режим (только иконки)
-    #[prop(optional, default = false)] compact: bool,
+    #[prop(optional, default = false)]
+    compact: bool,
 ) -> impl IntoView {
     let views = vec![
         ViewType::Dashboard,
@@ -73,7 +76,7 @@ pub fn ViewSwitcher(
             handler(view);
         }
     };
-    
+
     let handle_view_change = std::rc::Rc::new(handle_view_change);
 
     view! {
@@ -93,7 +96,7 @@ pub fn ViewSwitcher(
                 let handler = handle_view_change.clone();
 
                 view! {
-                    <button 
+                    <button
                         class=button_class
                         on:click=move |_| handler(view_clone3.clone())
                         title=view.description()
@@ -118,9 +121,11 @@ pub fn ViewSwitcher(
 #[allow(non_snake_case)]
 pub fn ExtendedViewSwitcher(
     /// Текущее активное представление
-    #[prop(into)] current_view: RwSignal<ViewType>,
+    #[prop(into)]
+    current_view: RwSignal<ViewType>,
     /// Обработчик изменения представления
-    #[prop(optional)] on_view_change: Option<std::sync::Arc<dyn Fn(ViewType) + Send + Sync>>,
+    #[prop(optional)]
+    on_view_change: Option<std::sync::Arc<dyn Fn(ViewType) + Send + Sync>>,
 ) -> impl IntoView {
     let views = vec![
         ViewType::Dashboard,
@@ -155,7 +160,7 @@ pub fn ExtendedViewSwitcher(
                 let handler = handle_view_change.clone();
 
                 view! {
-                    <div 
+                    <div
                         class=card_class
                         on:click=move |_| handler(view_clone2.clone())
                     >
@@ -182,9 +187,11 @@ pub fn ExtendedViewSwitcher(
 #[allow(non_snake_case)]
 pub fn ViewTabs(
     /// Текущее активное представление
-    #[prop(into)] current_view: RwSignal<ViewType>,
+    #[prop(into)]
+    current_view: RwSignal<ViewType>,
     /// Обработчик изменения представления
-    #[prop(optional)] on_view_change: Option<std::sync::Arc<dyn Fn(ViewType) + Send + Sync>>,
+    #[prop(optional)]
+    on_view_change: Option<std::sync::Arc<dyn Fn(ViewType) + Send + Sync>>,
 ) -> impl IntoView {
     let views = vec![
         ViewType::Dashboard,
@@ -201,7 +208,7 @@ pub fn ViewTabs(
                 let view_for_icon = view.clone();
                 let view_for_label = view.clone();
                 let on_view_change_clone = on_view_change.clone();
-                
+
                 let tab_class = move || {
                     if current_view.get() == view_for_class {
                         "view-tab active"
@@ -211,7 +218,7 @@ pub fn ViewTabs(
                 };
 
                 view! {
-                    <button 
+                    <button
                         class=tab_class
                         on:click=move |_| {
                             current_view.set(view_for_click.clone());
@@ -234,12 +241,14 @@ pub fn ViewTabs(
 #[allow(non_snake_case)]
 pub fn ViewDropdown(
     /// Текущее активное представление
-    #[prop(into)] current_view: RwSignal<ViewType>,
+    #[prop(into)]
+    current_view: RwSignal<ViewType>,
     /// Обработчик изменения представления
-    #[prop(optional)] on_view_change: Option<std::sync::Arc<dyn Fn(ViewType) + Send + Sync>>,
+    #[prop(optional)]
+    on_view_change: Option<std::sync::Arc<dyn Fn(ViewType) + Send + Sync>>,
 ) -> impl IntoView {
     let is_open = RwSignal::new(false);
-    
+
     let toggle_dropdown = move |_| {
         is_open.update(|open| *open = !*open);
     };
@@ -251,13 +260,13 @@ pub fn ViewDropdown(
                 <span class="current-view-label">{move || current_view.get().display_name()}</span>
                 <span class="dropdown-arrow">{move || if is_open.get() { "▲" } else { "▼" }}</span>
             </button>
-            
+
             {move || {
                 let on_view_change_clone: Option<std::sync::Arc<dyn Fn(ViewType) + Send + Sync>> = on_view_change.as_ref().map(|arc| arc.clone());
                 if is_open.get() {
                     view! {
                         <div class="dropdown-menu">
-                            <button 
+                            <button
                                 class=move || if current_view.get() == ViewType::Dashboard { "dropdown-item current" } else { "dropdown-item" }
                                 on:click={
                                     let handler_clone = on_view_change_clone.clone();
@@ -281,8 +290,8 @@ pub fn ViewDropdown(
                                     view! {}.into_any()
                                 }}
                             </button>
-                            
-                            <button 
+
+                            <button
                                 class=move || if current_view.get() == ViewType::Cards { "dropdown-item current" } else { "dropdown-item" }
                                 on:click={
                                     let handler_clone = on_view_change_clone.clone();
@@ -306,8 +315,8 @@ pub fn ViewDropdown(
                                     view! {}.into_any()
                                 }}
                             </button>
-                            
-                            <button 
+
+                            <button
                                 class=move || if current_view.get() == ViewType::Table { "dropdown-item current" } else { "dropdown-item" }
                                 on:click={
                                     let handler_clone = on_view_change_clone.clone();
@@ -331,8 +340,8 @@ pub fn ViewDropdown(
                                     view! {}.into_any()
                                 }}
                             </button>
-                            
-                            <button 
+
+                            <button
                                 class=move || if current_view.get() == ViewType::Graph { "dropdown-item current" } else { "dropdown-item" }
                                 on:click={
                                     let handler_clone = on_view_change_clone.clone();

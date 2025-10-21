@@ -21,15 +21,15 @@ impl Config {
     /// Create new configuration
     pub fn new() -> Self {
         let mut config = Self::default();
-        
+
         // Try to get API base URL from window location or environment
         if let Some(base_url) = get_api_base_url() {
             config.api_base_url = base_url;
         }
-        
+
         config
     }
-    
+
     /// Get full API URL for endpoint
     pub fn api_url(&self, endpoint: &str) -> String {
         let endpoint = endpoint.strip_prefix('/').unwrap_or(endpoint);
@@ -40,22 +40,20 @@ impl Config {
 /// Get API base URL from browser environment
 fn get_api_base_url() -> Option<String> {
     use web_sys::window;
-    
+
     let window = window()?;
     let location = window.location();
-    
+
     // Try to construct base URL from current location
-    if let (Ok(protocol), Ok(hostname), Ok(port)) = (
-        location.protocol(),
-        location.hostname(),
-        location.port()
-    ) {
+    if let (Ok(protocol), Ok(hostname), Ok(port)) =
+        (location.protocol(), location.hostname(), location.port())
+    {
         let base_url = if port.is_empty() {
             format!("{}://{}", protocol.trim_end_matches(':'), hostname)
         } else {
             format!("{}://{}:{}", protocol.trim_end_matches(':'), hostname, port)
         };
-        
+
         Some(base_url)
     } else {
         None

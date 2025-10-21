@@ -1,6 +1,6 @@
 //! Data Layer: Type Repository trait and implementations
 
-use crate::domain::types::{RawTypeData};
+use crate::domain::types::RawTypeData;
 use anyhow::Result;
 use std::sync::RwLock;
 
@@ -25,10 +25,13 @@ impl CompletionItem {
             insert_text: Some(label.clone()),
             filter_text: Some(label.clone()),
             sort_text: Some(label.clone()),
-            label, kind, detail: None, documentation: None,
+            label,
+            kind,
+            detail: None,
+            documentation: None,
         }
     }
-    
+
     pub fn with_details(
         label: String,
         kind: CompletionKind,
@@ -39,7 +42,10 @@ impl CompletionItem {
             insert_text: Some(label.clone()),
             filter_text: Some(label.clone()),
             sort_text: Some(label.clone()),
-            label, kind, detail, documentation,
+            label,
+            kind,
+            detail,
+            documentation,
         }
     }
 }
@@ -47,10 +53,35 @@ impl CompletionItem {
 /// Тип элемента автодополнения
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 pub enum CompletionKind {
-    Text, Method, Function, Constructor, Field, Variable, Class, Interface, Module,
-    Property, Unit, Value, Enum, Keyword, Snippet, Color, File, Reference, Folder,
-    EnumMember, Constant, Struct, Type, Event, Operator, TypeParameter,
-    Global, Catalog, Document,
+    Text,
+    Method,
+    Function,
+    Constructor,
+    Field,
+    Variable,
+    Class,
+    Interface,
+    Module,
+    Property,
+    Unit,
+    Value,
+    Enum,
+    Keyword,
+    Snippet,
+    Color,
+    File,
+    Reference,
+    Folder,
+    EnumMember,
+    Constant,
+    Struct,
+    Type,
+    Event,
+    Operator,
+    TypeParameter,
+    Global,
+    Catalog,
+    Document,
 }
 
 // --- Type Repository Trait ---
@@ -108,7 +139,8 @@ impl TypeRepository for InMemoryTypeRepository {
 
     fn find_type(&self, name: &str) -> Option<RawTypeData> {
         let types = self.types.read().unwrap();
-        let result = types.iter()
+        let result = types
+            .iter()
             .find(|t| t.name == name || t.english_name == name)
             .cloned();
 
@@ -121,7 +153,8 @@ impl TypeRepository for InMemoryTypeRepository {
             );
             // Показываем первые 5 типов для отладки
             if !types.is_empty() {
-                let sample: Vec<String> = types.iter()
+                let sample: Vec<String> = types
+                    .iter()
                     .take(5)
                     .map(|t| format!("'{}' (en: '{}')", t.name, t.english_name))
                     .collect();
@@ -140,8 +173,8 @@ impl TypeRepository for InMemoryTypeRepository {
         RepositoryStats {
             total_types: types.len(),
             platform_types: types.len(), // Placeholder
-            configuration_types: 0, // Placeholder
-            user_defined_types: 0, // Placeholder
+            configuration_types: 0,      // Placeholder
+            user_defined_types: 0,       // Placeholder
         }
     }
 }

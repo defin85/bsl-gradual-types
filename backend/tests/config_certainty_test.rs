@@ -9,8 +9,13 @@ use std::sync::Arc;
 /// Setup функция для создания TypeSystemService с загруженными типами платформы
 async fn setup_type_system_service() -> Arc<TypeSystemService> {
     let coordinator = SystemCoordinator::new();
-    coordinator.start().await.expect("Failed to start SystemCoordinator");
-    coordinator.type_service().expect("TypeSystemService should be initialized after start()")
+    coordinator
+        .start()
+        .await
+        .expect("Failed to start SystemCoordinator");
+    coordinator
+        .type_service()
+        .expect("TypeSystemService should be initialized after start()")
 }
 
 #[tokio::test]
@@ -31,7 +36,10 @@ async fn test_config_types_without_metadata_show_inferred_50() {
     // Тест 1: Справочники.Контрагенты
     // Строка 1 (Справочник1 = ...), колонка 5 (начало имени переменной после 4 пробелов отступа)
     println!("\n--- Тест 1: Справочники.Контрагенты ---");
-    let hover_справочник = service.get_hover_info(source, 1, 5).await.expect("Hover failed");
+    let hover_справочник = service
+        .get_hover_info(source, 1, 5)
+        .await
+        .expect("Hover failed");
 
     if let Some(hover_text) = hover_справочник {
         println!("Hover text:\n{}", hover_text);
@@ -57,7 +65,10 @@ async fn test_config_types_without_metadata_show_inferred_50() {
 
     // Тест 2: Документы.РеализацияТоваровУслуг
     println!("\n--- Тест 2: Документы.РеализацияТоваровУслуг ---");
-    let hover_документ = service.get_hover_info(source, 2, 5).await.expect("Hover failed");
+    let hover_документ = service
+        .get_hover_info(source, 2, 5)
+        .await
+        .expect("Hover failed");
 
     if let Some(hover_text) = hover_документ {
         println!("Hover text:\n{}", hover_text);
@@ -79,7 +90,10 @@ async fn test_config_types_without_metadata_show_inferred_50() {
 
     // Тест 3: Перечисления.СтавкиНДС
     println!("\n--- Тест 3: Перечисления.СтавкиНДС ---");
-    let hover_перечисление = service.get_hover_info(source, 3, 5).await.expect("Hover failed");
+    let hover_перечисление = service
+        .get_hover_info(source, 3, 5)
+        .await
+        .expect("Hover failed");
 
     if let Some(hover_text) = hover_перечисление {
         println!("Hover text:\n{}", hover_text);
@@ -101,7 +115,10 @@ async fn test_config_types_without_metadata_show_inferred_50() {
 
     // Тест 4: РегистрыСведений.КурсыВалют
     println!("\n--- Тест 4: РегистрыСведений.КурсыВалют ---");
-    let hover_регистр = service.get_hover_info(source, 4, 5).await.expect("Hover failed");
+    let hover_регистр = service
+        .get_hover_info(source, 4, 5)
+        .await
+        .expect("Hover failed");
 
     if let Some(hover_text) = hover_регистр {
         println!("Hover text:\n{}", hover_text);
@@ -140,7 +157,10 @@ async fn test_platform_types_still_show_known() {
 
     // Тест 1: Строка
     println!("\n--- Тест 1: Строка ---");
-    let hover_строка = service.get_hover_info(source, 1, 5).await.expect("Hover failed");
+    let hover_строка = service
+        .get_hover_info(source, 1, 5)
+        .await
+        .expect("Hover failed");
 
     if let Some(hover_text) = hover_строка {
         println!("Hover text:\n{}", hover_text);
@@ -156,7 +176,10 @@ async fn test_platform_types_still_show_known() {
 
     // Тест 2: Число
     println!("\n--- Тест 2: Число ---");
-    let hover_число = service.get_hover_info(source, 2, 5).await.expect("Hover failed");
+    let hover_число = service
+        .get_hover_info(source, 2, 5)
+        .await
+        .expect("Hover failed");
 
     if let Some(hover_text) = hover_число {
         println!("Hover text:\n{}", hover_text);
@@ -172,7 +195,10 @@ async fn test_platform_types_still_show_known() {
 
     // Тест 3: Булево
     println!("\n--- Тест 3: Булево ---");
-    let hover_булево = service.get_hover_info(source, 3, 5).await.expect("Hover failed");
+    let hover_булево = service
+        .get_hover_info(source, 3, 5)
+        .await
+        .expect("Hover failed");
 
     if let Some(hover_text) = hover_булево {
         println!("Hover text:\n{}", hover_text);
@@ -203,14 +229,24 @@ async fn test_resolver_direct_certainty_check() {
     Тип1 = Справочники.Контрагенты;
 КонецПроцедуры"#;
 
-    let hover = service.get_hover_info(source, 1, 5).await.expect("Hover failed").unwrap();
+    let hover = service
+        .get_hover_info(source, 1, 5)
+        .await
+        .expect("Hover failed")
+        .unwrap();
 
     println!("Hover для Справочники.Контрагенты:");
     println!("{}", hover);
 
     // Детальная проверка
-    assert!(hover.contains("Inferred (50%)"), "Certainty должен быть Inferred (50%)");
-    assert!(hover.contains("Справочник"), "Должен упоминаться Справочник");
+    assert!(
+        hover.contains("Inferred (50%)"),
+        "Certainty должен быть Inferred (50%)"
+    );
+    assert!(
+        hover.contains("Справочник"),
+        "Должен упоминаться Справочник"
+    );
 
     println!("\n✅ TypeResolver возвращает Inferred (50%) для конфигурационных типов");
 }

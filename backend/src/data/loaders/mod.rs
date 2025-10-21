@@ -2,35 +2,27 @@
 //!
 //! Infrastructure компоненты для загрузки данных из внешних источников
 
+pub mod config_metadata_parser;
+pub mod config_parser;
+pub mod platform_types;
 pub mod syntax_helper;
 pub mod syntax_helper_parser;
-pub mod config_parser;
 
 // Re-exports для удобства использования
+pub use config_metadata_parser::{
+    ConfigurationDiscovery, UniversalMetadataObject, UniversalMetadataParser,
+};
 pub use syntax_helper_parser::SyntaxHelperParser;
 
 pub use syntax_helper::{
-    SyntaxHelperDatabase,
-    SyntaxNode,
-    TypeInfo,
-    CategoryInfo,
-    MethodInfo,
-    PropertyInfo,
-    ConstructorInfo,
-    GlobalFunctionInfo,
-    ParameterInfo,
-    TypeIdentity,
-    TypeDocumentation,
-    TypeStructure,
-    TypeMetadata,
-    CodeExample,
-    OptimizationSettings,
+    CategoryInfo, CodeExample, ConstructorInfo, GlobalFunctionInfo, MethodInfo,
+    OptimizationSettings, ParameterInfo, PropertyInfo, SyntaxHelperDatabase, SyntaxNode,
+    TypeDocumentation, TypeIdentity, TypeInfo, TypeMetadata, TypeStructure,
 };
 
 pub use config_parser::{
-    ConfigurationGuidedParser,
-    DiscoveredMetadata,
-    ReferenceSource,
-    AttributeInfo,
+    AttributeInfo, ConfigurationGuidedParser, DiscoveredMetadata, ReferenceSource,
     TabularSectionInfo,
 };
+
+pub use platform_types::{create_tabular_section_type, load_all_platform_types};

@@ -36,7 +36,11 @@ impl TreeCache {
     pub fn get(&self, file_path: &PathBuf) -> Option<(Arc<Tree>, String, u64)> {
         let cache = self.cache.read().ok()?;
         let cached = cache.get(file_path)?;
-        Some((cached.tree.clone(), cached.source.clone(), cached.content_hash))
+        Some((
+            cached.tree.clone(),
+            cached.source.clone(),
+            cached.content_hash,
+        ))
     }
 
     /// Сохранить дерево в кеш
@@ -54,13 +58,7 @@ impl TreeCache {
     }
 
     /// Обновить закешированное дерево после редактирования
-    pub fn update(
-        &self,
-        file_path: &PathBuf,
-        new_tree: Tree,
-        new_source: String,
-        new_hash: u64,
-    ) {
+    pub fn update(&self, file_path: &PathBuf, new_tree: Tree, new_source: String, new_hash: u64) {
         if let Ok(mut cache) = self.cache.write() {
             cache.insert(
                 file_path.clone(),
@@ -135,7 +133,10 @@ mod tests {
         let hash2 = hash_content(content2);
         let hash3 = hash_content(content3);
 
-        assert_eq!(hash1, hash2, "Одинаковый контент должен иметь одинаковый хеш");
+        assert_eq!(
+            hash1, hash2,
+            "Одинаковый контент должен иметь одинаковый хеш"
+        );
         assert_ne!(hash1, hash3, "Разный контент должен иметь разный хеш");
     }
 }

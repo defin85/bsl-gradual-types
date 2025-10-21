@@ -4,8 +4,8 @@
 
 use axum::{
     extract::{Query, State},
-    response::{IntoResponse, Json},
     http::StatusCode,
+    response::{IntoResponse, Json},
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -92,7 +92,11 @@ pub async fn validate_code(
 
     let start = Instant::now();
 
-    match state.type_service.validate_code_fragment(&payload.code).await {
+    match state
+        .type_service
+        .validate_code_fragment(&payload.code)
+        .await
+    {
         Ok(errors) => {
             let is_valid = errors.is_empty();
             let duration_ms = start.elapsed().as_millis() as u64;

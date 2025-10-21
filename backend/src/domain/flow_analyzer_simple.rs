@@ -2,10 +2,10 @@
 //!
 //! Базовая реализация flow-sensitive анализа для текущей структуры AST
 
-use std::sync::Arc;
-use std::collections::HashMap;
-use bsl_shared::domain::{FlowAnalysisContext, TypeResolver};
 use bsl_shared::domain::types::TypeResolution;
+use bsl_shared::domain::{FlowAnalysisContext, TypeResolver};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Упрощённый flow analyzer для работы с текущим AST
 pub struct SimpleFlowAnalyzer {
@@ -108,7 +108,9 @@ impl SimpleFlowAnalyzer {
 
         // Вызов конструктора: Новый Массив()
         if value.starts_with("Новый") || value.starts_with("New") {
-            let type_name = value.split_whitespace().nth(1)
+            let type_name = value
+                .split_whitespace()
+                .nth(1)
                 .unwrap_or("Произвольный")
                 .trim_end_matches("()")
                 .trim_end_matches(';');
@@ -137,7 +139,7 @@ pub struct FlowAnalysisResult {
 mod tests {
     use super::*;
     use bsl_shared::domain::repository::InMemoryTypeRepository;
-    use bsl_shared::domain::types::{ResolutionResult, ConcreteType};
+    use bsl_shared::domain::types::{ConcreteType, ResolutionResult};
 
     #[test]
     fn test_simple_variable_assignment() {

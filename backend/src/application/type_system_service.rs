@@ -541,10 +541,12 @@ impl TypeSystemService {
                 .map_err(|e| anyhow::anyhow!("Ошибка парсинга для hover: {}", e))?;
 
             // Конвертация AST → IR для Inline Scope Analysis
+            let repository = self.analysis_engine.get_repository();
             let ir = crate::application::ast_to_ir::AstToIrConverter::convert(
                 parse_result.program.clone(),
                 file_content.to_string(),
                 "hover_request.bsl".to_string(),
+                repository, // ✅ Передаём TypeRepository для Generic inference
             )?;
 
             let ir_arc = std::sync::Arc::new(ir);
@@ -559,19 +561,30 @@ impl TypeSystemService {
         // Milestone 2.11 Task B1: DEBUG логи для поиска узла
         debug!("Looking for node at position {}:{}", line, column);
 
-        // НОВОЕ: Используем find_variable_at_position() для извлечения типа из scope
-        if let Some((var_name, type_hint)) = ir_program.find_variable_at_position(line, column) {
+        // ✅ Direction 2: Используем find_variable_with_scope() для Generic inference
+        if let Some((var_name, _type_hint, scope_id)) =
+            ir_program.find_variable_with_scope(line, column)
+        {
             info!(
-                "✅ find_variable_at_position({}, {}) нашла переменную: '{}' с типом {:?}",
-                line, column, var_name, type_hint
+                "✅ find_variable_with_scope({}, {}) нашла переменную: '{}' в scope {:?}",
+                line, column, var_name, scope_id
             );
 
-            // Форматируем hover с методами/свойствами из TypeRepository
-            return Ok(Some(self.format_variable_hover(&var_name, &type_hint)));
+            // Direction 2: Резолвим переменную через TypeResolver с учётом SymbolTable
+            // Это позволяет корректно обрабатывать Generic типы из flow-sensitive анализа
+            let resolver = self.analysis_engine.get_resolver();
+            let resolution =
+                resolver.resolve_variable_with_context(&var_name, &ir_program.symbols, scope_id);
+
+            // Форматируем hover через TypeResolution (вместо TypeHint)
+            return Ok(Some(self.format_variable_hover_from_resolution(
+                &var_name,
+                &resolution,
+            )));
         } else {
             // Milestone 2.11 Task B1: Логи когда переменная не найдена
             debug!(
-                "find_variable_at_position({}, {}) не нашла переменную",
+                "find_variable_with_scope({}, {}) не нашла переменную",
                 line, column
             );
         }
@@ -1617,6 +1630,144 @@ impl TypeSystemService {
                 )
             }
         }
+    }
+
+    /// Форматирует hover для переменной из TypeResolution (Direction 2: Generic inference)
+    ///
+    /// Новый метод для работы с результатами `resolve_variable_with_context()`.
+    /// Используется когда переменная резолвится через TypeResolver с учётом SymbolTable,
+    /// что позволяет корректно обрабатывать Generic типы.
+    ///
+    /// # Аргументы
+    /// - `var_name` - имя переменной
+    /// - `resolution` - результат резолюции через TypeResolver
+    ///
+    /// # Возвращает
+    /// Форматированный markdown с информацией о типе, методах и свойствах
+    fn format_variable_hover_from_resolution(
+        &self,
+        var_name: &str,
+        resolution: &TypeResolution,
+    ) -> String {
+        use bsl_shared::domain::types::Certainty;
+
+        // Базовая информация
+        let mut output = format!("**Переменная:** `{}`\n", var_name);
+
+        // Определяем имя типа
+        let type_name = match &resolution.result {
+            ResolutionResult::Concrete(concrete) => self.format_concrete_type_name(concrete),
+            ResolutionResult::Generic(generic) => {
+                // Форматируем Generic тип: "Массив<Строка>"
+                let params = generic
+                    .type_params
+                    .iter()
+                    .map(|p| self.format_concrete_type_name(p))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}<{}>", generic.base_type, params)
+            }
+            ResolutionResult::Union(types) => {
+                let names: Vec<String> = types
+                    .iter()
+                    .map(|wt| self.format_concrete_type_name(&wt.type_))
+                    .collect();
+                names.join(" | ")
+            }
+            ResolutionResult::Nullable(base) => {
+                format!("{}?", self.format_concrete_type_name(base))
+            }
+            ResolutionResult::Intersection(types) => {
+                let names: Vec<String> = types
+                    .iter()
+                    .map(|t| self.format_concrete_type_name(t))
+                    .collect();
+                names.join(" & ")
+            }
+            ResolutionResult::Dynamic => "Dynamic".to_string(),
+        };
+
+        output.push_str(&format!("*Тип:* `{}`\n", type_name));
+
+        // Certainty
+        let certainty_text = match resolution.certainty {
+            Certainty::Known => "🟢 Known (100%)".to_string(),
+            Certainty::Inferred(val) => format!("🟡 Inferred ({:.0}%)", val * 100.0),
+            Certainty::Unknown => "⚪ Unknown (0%)".to_string(),
+        };
+        output.push_str(&format!("*Уверенность:* {}\n\n", certainty_text));
+
+        // Проверяем наличие RawTypeData для отображения методов/свойств
+        let raw_type = self.metadata_lookup.get_raw_type(resolution);
+
+        if raw_type.is_none() {
+            output.push_str("⚠️ **Детали типа недоступны**\n\n");
+            output.push_str("💡 *Возможные причины:*\n");
+            output.push_str("- Тип не загружен из Syntax Helper\n");
+            output.push_str("- Требуется парсинг документации платформы\n");
+            return output;
+        }
+
+        // Если Unknown — показываем дополнительную подсказку
+        if matches!(resolution.certainty, Certainty::Unknown) {
+            output.push_str("⚠️ **Тип не распознан системой**\n\n");
+            output.push_str("💡 *Возможные причины:*\n");
+            output.push_str("- Опечатка в имени типа\n");
+            output.push_str("- Тип из конфигурации 1С (требуется Configuration Loader)\n");
+            return output;
+        }
+
+        // RawTypeData найден — показываем полную информацию
+        let methods = self.metadata_lookup.get_methods(resolution);
+        let properties = self.metadata_lookup.get_properties(resolution);
+
+        // Описание
+        let description = raw_type
+            .as_ref()
+            .map(|rt| rt.description.clone())
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| format!("Тип {}", type_name));
+
+        output.push_str(&format!("📝 {}\n\n", description));
+
+        // Методы (первые 10)
+        if !methods.is_empty() {
+            output.push_str("📚 **Методы:**\n");
+            for method in methods.iter().take(10) {
+                let params_str = method
+                    .params
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, p.param_type))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                if !method.return_type.is_empty() {
+                    output.push_str(&format!(
+                        "- `{}({})` → `{}`\n",
+                        method.name, params_str, method.return_type
+                    ));
+                } else {
+                    output.push_str(&format!("- `{}({})`\n", method.name, params_str));
+                }
+            }
+            if methods.len() > 10 {
+                output.push_str(&format!("- ... и ещё {} методов\n", methods.len() - 10));
+            }
+            output.push('\n');
+        }
+
+        // Свойства (первые 10)
+        if !properties.is_empty() {
+            output.push_str("📦 **Свойства:**\n");
+            for prop in properties.iter().take(10) {
+                output.push_str(&format!("- `{}`: `{}`\n", prop.name, prop.prop_type));
+            }
+            if properties.len() > 10 {
+                output.push_str(&format!("- ... и ещё {} свойств\n", properties.len() - 10));
+            }
+        }
+
+        output
     }
 
     /// Форматирует информацию о переменной для hover (используя Inline Scope Analysis)

@@ -827,6 +827,130 @@ impl TypeResolver {
 
         format!("{}?", type_name)
     }
+
+    // ===== Direction 2: Generic Collections Inference - Integration =====
+
+    /// Резолюция переменной с использованием SymbolTable контекста
+    ///
+    /// Используется для вывода Generic типов из flow-sensitive анализа.
+    /// Метод получает TypeHint из SymbolTable (через Inline Scope Analysis)
+    /// и преобразует его в TypeResolution для hover/diagnostics.
+    ///
+    /// # Примеры
+    ///
+    /// ```bsl
+    /// МассивСтрок = Новый Массив();
+    /// МассивСтрок.Добавить("текст");  // ← SymbolTable содержит TypeHint::Generic { "Массив", ["Строка"], 1.0 }
+    /// // resolve_variable_with_context("МассивСтрок", symbol_table, scope_id)
+    /// // → TypeResolution::Generic(Массив<Строка>)
+    /// ```
+    pub fn resolve_variable_with_context(
+        &self,
+        var_name: &str,
+        symbol_table: &crate::ir::SymbolTable,
+        scope_id: crate::ir::ScopeId,
+    ) -> TypeResolution {
+        use crate::ir::TypeHint;
+
+        // Ищем переменную в scope hierarchy
+        if let Some(hint) = symbol_table.get_variable_type(scope_id, var_name) {
+            match hint {
+                TypeHint::Generic {
+                    base_type,
+                    type_params,
+                    certainty,
+                } => {
+                    // Резолвим Generic тип из hint
+                    return self.resolve_generic_from_hint(&base_type, &type_params, certainty);
+                }
+                TypeHint::Explicit(type_name) | TypeHint::Inferred(type_name) => {
+                    // Обычная резолюция по имени типа
+                    return self.resolve_expression_sync(&type_name);
+                }
+                TypeHint::Unknown => {
+                    // Тип неизвестен
+                    return TypeResolution::unknown();
+                }
+            }
+        }
+
+        // Переменная не найдена в SymbolTable
+        TypeResolution::unknown()
+    }
+
+    /// Резолюция Generic типа из TypeHint
+    ///
+    /// Преобразует TypeHint::Generic (IR layer) в TypeResolution::Generic (Domain layer).
+    /// Используется после flow-sensitive анализа для получения детальной информации о типе.
+    ///
+    /// # Параметры
+    /// - `base_type` - базовый тип коллекции ("Массив", "Соответствие", etc.)
+    /// - `type_params` - список типов параметров (["Строка"], ["Строка", "Число"])
+    /// - `certainty` - уверенность в выведенных типах (0.0-1.0)
+    ///
+    /// # Возвращает
+    /// TypeResolution с ResolutionResult::Generic и соответствующим Certainty
+    fn resolve_generic_from_hint(
+        &self,
+        base_type: &str,
+        type_params: &[String],
+        certainty: f32,
+    ) -> TypeResolution {
+        use crate::domain::types::{
+            Certainty, ConcreteType, GenericType, ResolutionResult, ResolutionSource,
+        };
+
+        // Конвертируем строки типов в ConcreteType
+        let concrete_params: Vec<ConcreteType> = type_params
+            .iter()
+            .filter(|p| *p != "?") // Пропускаем неизвестные параметры
+            .filter_map(|p| {
+                // Резолвим каждый параметр в ConcreteType
+                let resolved = self.resolve_expression_sync(p);
+                match resolved.result {
+                    ResolutionResult::Concrete(ct) => Some(ct),
+                    _ => None, // Пропускаем не-Concrete типы (Unknown, Dynamic, etc.)
+                }
+            })
+            .collect();
+
+        // Если после фильтрации не осталось параметров — возвращаем базовый тип без Generic
+        if concrete_params.is_empty() {
+            return self.resolve_expression_sync(base_type);
+        }
+
+        // Создаём GenericType
+        let generic_type = GenericType {
+            base_type: base_type.to_string(),
+            type_params: concrete_params,
+        };
+
+        // Определяем уровень certainty
+        let certainty_level = if certainty > 0.9 {
+            Certainty::Known
+        } else if certainty > 0.5 {
+            Certainty::Inferred(certainty)
+        } else {
+            Certainty::Inferred(0.5)
+        };
+
+        TypeResolution {
+            result: ResolutionResult::Generic(generic_type),
+            certainty: certainty_level,
+            source: ResolutionSource::Inferred, // Generic inference всегда из flow-sensitive анализа
+            metadata: crate::domain::types::ResolutionMetadata {
+                file: None,
+                line: None,
+                column: None,
+                notes: vec![format!(
+                    "Generic type inferred from flow-sensitive analysis (certainty: {:.0}%)",
+                    certainty * 100.0
+                )],
+            },
+            active_facet: Some(crate::domain::types::FacetKind::Collection),
+            available_facets: vec![crate::domain::types::FacetKind::Collection],
+        }
+    }
 }
 // Milestone 2.3: Union Types tests
 #[cfg(test)]

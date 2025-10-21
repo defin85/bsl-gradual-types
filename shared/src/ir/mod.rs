@@ -453,6 +453,68 @@ impl SemanticProgram {
         Some((var_name, type_hint))
     }
 
+    /// Найти переменную по позиции с возвратом scope_id для резолюции через TypeResolver
+    ///
+    /// Расширенная версия `find_variable_at_position()`, возвращает scope_id для использования
+    /// в `TypeResolver::resolve_variable_with_context()`.
+    ///
+    /// # Direction 2: Generic Collections Inference
+    ///
+    /// Используется для hover с Generic типами:
+    /// ```bsl
+    /// МассивСтрок = Новый Массив();
+    /// МассивСтрок.Добавить("текст");  // ← cursor здесь
+    /// // find_variable_with_scope(3, 12) → ("МассивСтрок", TypeHint::Generic{...}, scope_id)
+    /// // → TypeResolver::resolve_variable_with_context("МассивСтрок", symbols, scope_id)
+    /// // → TypeResolution::Generic(Массив<Строка>) с методами
+    /// ```
+    pub fn find_variable_with_scope(
+        &self,
+        line: u32,
+        column: u32,
+    ) -> Option<(String, TypeHint, ScopeId)> {
+        // 1. Находим узел в позиции
+        let node = self.find_node_at_position(line, column)?;
+
+        // 2. Получаем scope узла
+        let scope_id = node.scope_id;
+
+        // 3. Извлекаем имя переменной из узла
+        let var_name = match &node.kind {
+            // Присваивание: МассивДанных = Новый Массив
+            SemanticNodeKind::Assignment { variable, .. } => variable.clone(),
+
+            // Доступ к члену: МассивДанных.Добавить
+            SemanticNodeKind::MemberAccess { object_type, .. } => {
+                // object_type может быть именем переменной или типом
+                // Попробуем найти как переменную в scope
+                object_type.clone()
+            }
+
+            // Объявление переменной: Перем МассивДанных
+            SemanticNodeKind::VariableDeclaration { name, .. } => name.clone(),
+
+            // Вызов функции: может быть вызов метода переменной
+            SemanticNodeKind::FunctionCall { object_type, .. } => {
+                if let Some(obj_type) = object_type {
+                    obj_type.clone()
+                } else {
+                    // Обычный вызов функции, не метод переменной
+                    return None;
+                }
+            }
+
+            // Для остальных узлов не поддерживаем
+            _ => return None,
+        };
+
+        // 4. Ищем переменную в scope (с поиском в родительских scope)
+        let (type_hint, _span) = self.resolve_variable(&var_name, scope_id)?;
+
+        // 5. Возвращаем результат с scope_id
+        Some((var_name, type_hint, scope_id))
+    }
+
     /// Создать новую пустую программу
     pub fn new() -> Self {
         Self {
@@ -583,7 +645,7 @@ impl SymbolTable {
     /// ```
     /// # use bsl_shared::ir::{SymbolTable, TypeHint};
     /// let mut table = SymbolTable::new();
-    /// table.initialize_as_generic(table.root_scope, "МассивСтрок", "Массив", 1);
+    /// table.initialize_as_generic(table.root_scope, "МассивСтрок".to_string(), "Массив".to_string(), 1);
     ///
     /// let hint = table.get_variable_type(table.root_scope, "МассивСтрок");
     /// match hint {
@@ -631,8 +693,8 @@ impl SymbolTable {
     /// ```
     /// # use bsl_shared::ir::{SymbolTable, TypeHint};
     /// let mut table = SymbolTable::new();
-    /// table.initialize_as_generic(table.root_scope, "МассивСтрок", "Массив", 1);
-    /// table.update_generic_param(table.root_scope, "МассивСтрок", 0, "Строка");
+    /// table.initialize_as_generic(table.root_scope, "МассивСтрок".to_string(), "Массив".to_string(), 1);
+    /// table.update_generic_param(table.root_scope, "МассивСтрок", 0, "Строка".to_string());
     ///
     /// let hint = table.get_variable_type(table.root_scope, "МассивСтрок");
     /// match hint {

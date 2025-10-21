@@ -420,6 +420,7 @@ mod tests {
             attributes: vec![],
             tabular_sections: vec![],
             enum_values: vec![],
+            generic_info: None,
         };
 
         repo.load_types(vec![array_type]).unwrap();
@@ -564,6 +565,7 @@ mod tests {
             attributes: vec![],
             tabular_sections: vec![],
             enum_values: vec![],
+            generic_info: None,
         };
 
         repo.load_types(vec![tabular_type]).unwrap();

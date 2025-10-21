@@ -11,7 +11,9 @@
 
 use crate::parsing::bsl::ast::{Expression, Program, Statement};
 use anyhow::Result;
+use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::ir::*;
+use std::sync::Arc;
 
 /// Конвертер AST → IR
 ///
@@ -31,11 +33,14 @@ pub struct AstToIrConverter {
     /// Исходный код (для дополнительной информации в диагностике)
     #[allow(dead_code)]
     source: String,
+
+    /// TypeRepository для доступа к Generic метаданным коллекций
+    repository: Arc<dyn TypeRepository>,
 }
 
 impl AstToIrConverter {
     /// Создать новый конвертер
-    fn new(source: String) -> Self {
+    fn new(source: String, repository: Arc<dyn TypeRepository>) -> Self {
         let symbol_table = SymbolTable::new();
         let current_scope = symbol_table.root_scope;
 
@@ -44,6 +49,7 @@ impl AstToIrConverter {
             current_scope,
             nodes: Vec::new(),
             source,
+            repository,
         }
     }
 
@@ -54,13 +60,21 @@ impl AstToIrConverter {
     /// ```no_run
     /// use bsl_backend::application::ast_to_ir::AstToIrConverter;
     /// use bsl_backend::parsing::bsl::ast::Program;
+    /// use bsl_shared::domain::repository::InMemoryTypeRepository;
+    /// use std::sync::Arc;
     ///
     /// let ast = Program { statements: vec![] };
-    /// let ir = AstToIrConverter::convert(ast, "source code".to_string(), "test.bsl".to_string())?;
+    /// let repo = Arc::new(InMemoryTypeRepository::new());
+    /// let ir = AstToIrConverter::convert(ast, "source code".to_string(), "test.bsl".to_string(), repo)?;
     /// # Ok::<(), anyhow::Error>(())
     /// ```
-    pub fn convert(ast: Program, source: String, file_path: String) -> Result<SemanticProgram> {
-        let mut converter = Self::new(source.clone());
+    pub fn convert(
+        ast: Program,
+        source: String,
+        file_path: String,
+        repository: Arc<dyn TypeRepository>,
+    ) -> Result<SemanticProgram> {
+        let mut converter = Self::new(source.clone(), repository);
 
         // Проход 1: Сбор глобальных функций/процедур
         for statement in &ast.statements {
@@ -669,6 +683,13 @@ impl AstToIrConverter {
                     .map(|arg| self.infer_expression_type(arg))
                     .collect();
 
+                // ✅ НОВОЕ: Generic inference из вызова метода
+                // Если это вызов метода переменной (а не выражения),
+                // пытаемся вывести Generic тип
+                if let Expression::Identifier { name, .. } = &*object {
+                    self.try_infer_generic_from_method_call(name, &property, &arg_types);
+                }
+
                 let node = SemanticNode {
                     kind: SemanticNodeKind::FunctionCall {
                         function_name: property.clone(),
@@ -814,12 +835,129 @@ impl AstToIrConverter {
         content.hash(&mut hasher);
         hasher.finish()
     }
+
+    /// Попытка вывести Generic тип из вызова метода коллекции
+    ///
+    /// # Примеры
+    ///
+    /// ```ignore
+    /// МассивСтрок = Новый Массив();      // Generic<Массив, [?]>
+    /// МассивСтрок.Добавить("текст");     // → Generic<Массив, ["Строка"]>
+    /// ```
+    fn try_infer_generic_from_method_call(
+        &mut self,
+        receiver: &str,
+        method_name: &str,
+        arguments: &[String],
+    ) {
+        use tracing::debug;
+
+        // Получаем текущий тип receiver из SymbolTable
+        let current_hint = match self.symbol_table.get_variable_type(self.current_scope, receiver) {
+            Some(hint) => hint,
+            None => {
+                debug!(
+                    "try_infer_generic: переменная {} не найдена в scope",
+                    receiver
+                );
+                return;
+            }
+        };
+
+        // Проверяем, что это Generic тип
+        let base_type = match &current_hint {
+            TypeHint::Generic {
+                base_type,
+                ..
+            } => base_type.clone(),
+            _ => {
+                debug!(
+                    "try_infer_generic: {} не Generic тип, пропускаем inference",
+                    receiver
+                );
+                return;
+            }
+        };
+
+        // Проверяем, есть ли GenericInfo для базового типа
+        let type_data = match self.repository.find_type(&base_type) {
+            Some(data) => data,
+            None => {
+                debug!(
+                    "try_infer_generic: тип {} не найден в TypeRepository",
+                    base_type
+                );
+                return;
+            }
+        };
+
+        let generic_info = match &type_data.generic_info {
+            Some(info) => info,
+            None => {
+                debug!(
+                    "try_infer_generic: тип {} не имеет GenericInfo",
+                    base_type
+                );
+                return;
+            }
+        };
+
+        // Ищем метод в inference_methods
+        for inference_method in &generic_info.inference_methods {
+            if method_name != &inference_method.method_name {
+                continue;
+            }
+
+            debug!(
+                "try_infer_generic: найден inference метод {}.{}",
+                base_type, method_name
+            );
+
+            // Для каждого параметра, который определяет Generic тип
+            for (i, &param_idx) in inference_method.param_indices.iter().enumerate() {
+                if let Some(arg_type) = arguments.get(param_idx) {
+                    // Получаем индекс Generic параметра (0 для T в Массив<T>, 0 и 1 для K,V в Соответствие<K,V>)
+                    let type_param_idx = inference_method
+                        .inferred_type_params
+                        .get(i)
+                        .copied()
+                        .unwrap_or(0);
+
+                    // Обновляем Generic параметр
+                    let success = self.symbol_table.update_generic_param(
+                        self.current_scope,
+                        receiver,
+                        type_param_idx,
+                        arg_type.clone(),
+                    );
+
+                    if success {
+                        debug!(
+                            "✅ Generic inference: {}.{}() → type_param[{}] = {}",
+                            receiver, method_name, type_param_idx, arg_type
+                        );
+                    } else {
+                        debug!(
+                            "❌ Generic inference failed: не удалось обновить {} type_param[{}]",
+                            receiver, type_param_idx
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::parsing::bsl::ast::Span as AstSpan;
+    use bsl_shared::domain::repository::InMemoryTypeRepository;
+
+    /// Helper функция для тестов - создаёт пустой TypeRepository
+    fn create_test_repository() -> Arc<dyn TypeRepository> {
+        Arc::new(InMemoryTypeRepository::new())
+    }
 
     #[test]
     fn test_variable_declaration_conversion() {
@@ -831,9 +969,13 @@ mod tests {
             }],
         };
 
-        let ir =
-            AstToIrConverter::convert(ast, "Перем x: Число;".to_string(), "test.bsl".to_string())
-                .unwrap();
+        let ir = AstToIrConverter::convert(
+            ast,
+            "Перем x: Число;".to_string(),
+            "test.bsl".to_string(),
+            create_test_repository(),
+        )
+        .unwrap();
 
         assert_eq!(ir.nodes.len(), 1);
         if let SemanticNodeKind::VariableDeclaration {
@@ -869,6 +1011,7 @@ mod tests {
             ast,
             "Если Истина Тогда Перем y; КонецЕсли".to_string(),
             "test.bsl".to_string(),
+            create_test_repository(),
         )
         .unwrap();
 
@@ -902,6 +1045,7 @@ mod tests {
             ast,
             "Сообщить(\"Привет\");".to_string(),
             "test.bsl".to_string(),
+            create_test_repository(),
         )
         .unwrap();
 
@@ -947,6 +1091,7 @@ mod tests {
             "Перем global: Строка;\nФункция TestFunc()\n  Перем local: Число;\nКонецФункции"
                 .to_string(),
             "test.bsl".to_string(),
+            create_test_repository(),
         )
         .unwrap();
 
@@ -990,6 +1135,7 @@ mod tests {
             ast,
             "Функция TestFunc()\n  Перем local: Число;\n  local = 42;\nКонецФункции".to_string(),
             "test.bsl".to_string(),
+            create_test_repository(),
         )
         .unwrap();
 

@@ -26,6 +26,7 @@ impl UniversalMetadataObject {
             attributes: self.convert_attributes(),
             tabular_sections: self.convert_tabular_sections(),
             enum_values: Vec::new(), // Для перечислений будет заполнено отдельно
+            generic_info: None, // Конфигурационные типы не имеют Generic метаданных (пока)
         }
     }
 

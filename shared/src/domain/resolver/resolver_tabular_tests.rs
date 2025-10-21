@@ -46,6 +46,7 @@ fn create_test_repository_with_tabular_sections() -> Arc<InMemoryTypeRepository>
             },
         ],
         enum_values: vec![],
+        generic_info: None,
     };
 
     repo.load_types(vec![document_type]).unwrap();

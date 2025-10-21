@@ -34,6 +34,7 @@ pub struct TextEdit {
 pub struct ParserCoordinator {
     tree_sitter: TreeSitterParser,
     tree_cache: TreeCache,
+    repository: Arc<dyn TypeRepository>,
 }
 
 /// TreeSitter парсер с tree-sitter-bsl
@@ -44,9 +45,22 @@ pub struct TreeSitterParser {
 impl ParserCoordinator {
     /// Создать координатор с Tree-sitter (Milestone 2.8: удалён regex fallback)
     pub fn with_fallback() -> Self {
+        // По умолчанию используем пустой репозиторий
+        use bsl_shared::domain::repository::InMemoryTypeRepository;
+        let empty_repo = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
         Self {
             tree_sitter: TreeSitterParser::new(),
             tree_cache: TreeCache::new(),
+            repository: empty_repo,
+        }
+    }
+
+    /// Создать координатор с указанным TypeRepository
+    pub fn with_repository(repository: Arc<dyn TypeRepository>) -> Self {
+        Self {
+            tree_sitter: TreeSitterParser::new(),
+            tree_cache: TreeCache::new(),
+            repository,
         }
     }
 
@@ -171,6 +185,7 @@ impl ParserCoordinator {
             parse_result.program,
             content.to_string(),
             file_path.to_string(),
+            self.repository.clone(), // ✅ Передаём TypeRepository для Generic inference
         )
         .map_err(|e| format!("AST to IR conversion failed: {}", e))
     }

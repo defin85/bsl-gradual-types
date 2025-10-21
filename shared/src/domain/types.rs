@@ -5,6 +5,42 @@ use serde::{Deserialize, Serialize};
 // --- RawTypeData and its components ---
 // This structure is designed to hold all information from all parsers.
 
+/// Информация о Generic параметрах типа коллекции
+///
+/// # Примеры
+/// - `Массив<T>` — 1 параметр (element)
+/// - `Соответствие<K,V>` — 2 параметра (key, value)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GenericInfo {
+    /// Базовый тип (например, "Массив")
+    pub base_type: String,
+
+    /// Количество типовых параметров (1 для Массив, 2 для Соответствие)
+    pub type_param_count: usize,
+
+    /// Методы, которые позволяют вывести тип параметра
+    pub inference_methods: Vec<InferenceMethodInfo>,
+}
+
+/// Информация о методе для вывода Generic типа
+///
+/// # Примеры
+/// - `Массив.Добавить(Значение: T)` — параметр 0 определяет T
+/// - `Соответствие.Вставить(Ключ: K, Значение: V)` — параметры 0 и 1 определяют K и V
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InferenceMethodInfo {
+    /// Имя метода (например, "Добавить")
+    pub method_name: String,
+
+    /// Индексы параметров метода, которые определяют Generic типы
+    /// Для Массив.Добавить(Значение) — param_indices = [0]
+    /// Для Соответствие.Вставить(Ключ, Значение) — param_indices = [0, 1]
+    pub param_indices: Vec<usize>,
+
+    /// Какие Generic параметры выводятся (0 для T в Массив<T>, 0 и 1 для K и V в Соответствие<K,V>)
+    pub inferred_type_params: Vec<usize>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RawTypeData {
     pub name: String,
@@ -20,6 +56,9 @@ pub struct RawTypeData {
     pub tabular_sections: Vec<RawTabularSectionData>,
     /// Enum values for platform enumeration types (e.g., "Авто (Auto)", "НеИспользовать (DontUse)")
     pub enum_values: Vec<String>,
+    /// Generic метаданные для типов коллекций (Массив<T>, Соответствие<K,V>, etc.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generic_info: Option<GenericInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

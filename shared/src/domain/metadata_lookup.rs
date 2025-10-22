@@ -242,6 +242,7 @@ impl TypeMetadataLookup {
     /// - **Platform** типы: `Массив`, `ТаблицаЗначений`, `Строка`
     /// - **Configuration** типы: `Справочники.Контрагенты`, `Документы.Заказ`
     /// - **Primitive** и **Special** типы пока не поддерживаются (нет RawTypeData)
+    #[allow(clippy::only_used_in_recursion)]
     fn extract_type_name(&self, resolution: &TypeResolution) -> Option<String> {
         match &resolution.result {
             ResolutionResult::Concrete(concrete) => match concrete {

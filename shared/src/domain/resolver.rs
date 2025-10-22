@@ -323,7 +323,7 @@ impl TypeResolver {
                     let union_member = TypeResolution {
                         certainty: from.certainty,
                         result: ResolutionResult::Concrete(wt.type_.clone()),
-                        source: from.source.clone(),
+                        source: from.source,
                         metadata: from.metadata.clone(),
                         active_facet: from.active_facet,
                         available_facets: from.available_facets.clone(),
@@ -434,7 +434,7 @@ impl TypeResolver {
                 let union_member = TypeResolution {
                     certainty: union_resolution.certainty,
                     result: ResolutionResult::Concrete(weighted.type_.clone()),
-                    source: union_resolution.source.clone(),
+                    source: union_resolution.source,
                     metadata: union_resolution.metadata.clone(),
                     active_facet: union_resolution.active_facet,
                     available_facets: union_resolution.available_facets.clone(),
@@ -797,7 +797,7 @@ impl TypeResolver {
                 TypeResolution {
                     certainty: Certainty::Known,
                     result: ResolutionResult::Concrete((**base_type).clone()),
-                    source: nullable_resolution.source.clone(),
+                    source: nullable_resolution.source,
                     metadata: crate::domain::types::ResolutionMetadata {
                         file: nullable_resolution.metadata.file.clone(),
                         line: nullable_resolution.metadata.line,

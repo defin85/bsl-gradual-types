@@ -51,8 +51,8 @@ impl SimpleFlowAnalyzer {
     /// Парсинг простого присваивания
     fn parse_assignment(&self, line: &str) -> Option<(String, String)> {
         // Перем x = значение
-        if line.starts_with("Перем") || line.starts_with("Var") {
-            if line.find('=').is_some() {
+        if (line.starts_with("Перем") || line.starts_with("Var"))
+            && line.find('=').is_some() {
                 // Используем split_whitespace для корректной работы с кириллицей
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 4 && parts[0] == "Перем" || parts[0] == "Var" {
@@ -65,7 +65,6 @@ impl SimpleFlowAnalyzer {
                     return Some((var_name.to_string(), value.to_string()));
                 }
             }
-        }
 
         // x = значение (без Перем)
         if let Some(eq_pos) = line.find('=') {

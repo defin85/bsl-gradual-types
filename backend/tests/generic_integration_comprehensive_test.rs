@@ -115,7 +115,7 @@ async fn test_e2e_unicode_handling() {
 
         // Проверяем корректную обработку кириллицы
         assert!(
-            hover_text.len() > 0,
+            !hover_text.is_empty(),
             "Hover должен вернуть непустую строку для кириллицы"
         );
     }
@@ -148,7 +148,7 @@ async fn test_e2e_multiple_variables_in_scope() {
         println!("✓ Hover на Переменная3:\n{}", h3);
 
         // Все hover'ы должны быть непустыми
-        assert!(h1.len() > 0 && h2.len() > 0 && h3.len() > 0);
+        assert!(!h1.is_empty() && !h2.is_empty() && !h3.is_empty());
     }
 }
 

@@ -750,7 +750,7 @@ mod tests {
         // Проверяем свойство Количество
         let count_property = tabular_type.properties.iter().find(|p| p.name == "Количество").unwrap();
         assert_eq!(count_property.prop_type, "Число");
-        assert_eq!(count_property.is_readonly, true);
+        assert!(count_property.is_readonly);
     }
 
     #[test]

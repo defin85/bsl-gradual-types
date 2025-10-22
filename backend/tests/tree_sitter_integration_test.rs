@@ -117,11 +117,8 @@ fn test_tree_sitter_if_statement() {
             ..
         } => {
             // Условие должно быть identifier "Условие"
-            match condition {
-                Expression::Identifier { name, .. } => {
-                    assert_eq!(name, "Условие", "Условие должно быть identifier");
-                }
-                _ => {}
+            if let Expression::Identifier { name, .. } = condition {
+                assert_eq!(name, "Условие", "Условие должно быть identifier");
             }
 
             // Должны быть then и else ветки
@@ -214,11 +211,8 @@ fn test_tree_sitter_binary_expression() {
     // Должна быть функция с assignment внутри
     assert!(!program.statements.is_empty(), "Должна быть функция");
 
-    match &program.statements[0] {
-        Statement::FunctionDecl { body, .. } => {
-            // В теле должен быть assignment с binary expression
-            assert!(!body.is_empty(), "В теле функции должны быть statements");
-        }
-        _ => {}
+    if let Statement::FunctionDecl { body, .. } = &program.statements[0] {
+        // В теле должен быть assignment с binary expression
+        assert!(!body.is_empty(), "В теле функции должны быть statements");
     }
 }

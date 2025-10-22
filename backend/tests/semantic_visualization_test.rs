@@ -25,7 +25,7 @@ mod semantic_visualization_tests {
     fn test_semantic_routes_module_exists() {
         // Если этот тест компилируется, значит модуль существует
         // и публично доступен
-        use bsl_backend::presentation::semantic_routes;
+        
 
         // Проверяем, что функция создания router доступна
         // (не вызываем её, так как требуется TypeSystemService)
@@ -44,7 +44,6 @@ mod semantic_visualization_tests {
         // assert!(html.contains("#1e1e1e")); // dark theme background
 
         // MVP: просто проверяем, что тест компилируется
-        assert!(true);
     }
 
     /// Тест 3: Проверка JSON stub generation
@@ -60,7 +59,6 @@ mod semantic_visualization_tests {
         // assert!(json["metrics"].is_object());
 
         // MVP: просто проверяем, что тест компилируется
-        assert!(true);
     }
 
     /// Тест 4: Проверка интеграции с TypeSystemService (TODO)
@@ -114,7 +112,6 @@ mod semantic_visualization_tests {
         // assert!(parsed.compact);
 
         // MVP: просто проверяем, что тест компилируется
-        assert!(true);
     }
 
     /// Тест 7: Проверка VSCode Extension команды (integration test)
@@ -141,8 +138,8 @@ mod semantic_visualization_tests {
     #[test]
     fn test_dto_compatibility() {
         // Проверяем, что DTO из shared крейта доступны
-        use bsl_shared::api::RenderedHtmlDto;
-        use bsl_shared::api::SemanticTreeDto;
+        
+        
 
         // Если компилируется, значит DTO публичны и доступны
         // для использования в semantic_routes

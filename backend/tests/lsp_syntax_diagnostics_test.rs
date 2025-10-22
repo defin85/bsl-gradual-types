@@ -158,7 +158,7 @@ fn test_multiple_syntax_errors() {
 
     // Должно быть хотя бы 2 ошибки (отсутствие КонецЕсли и КонецЦикла)
     assert!(
-        parse_result.syntax_errors.len() >= 1,
+        !parse_result.syntax_errors.is_empty(),
         "Должно быть обнаружено хотя бы 1 синтаксическая ошибка"
     );
 

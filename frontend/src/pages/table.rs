@@ -1,5 +1,7 @@
 //! Table page for tabular type analysis
 
+#![allow(clippy::unused_unit)]
+
 use crate::api::*;
 use crate::components::{SearchBar, TableView};
 use leptos::prelude::*;
@@ -167,7 +169,8 @@ pub fn TablePage(
                                         </div>
                                     }.into_any()
                                 } else {
-                                    view! {}.into_any()
+                                    let _: () = view! {};
+                                    ().into_any()
                                 }
                             }}
                         </div>

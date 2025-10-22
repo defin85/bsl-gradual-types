@@ -312,11 +312,7 @@ impl ParallelAnalyzer {
             // Ищем "Функция" или "Function" и извлекаем имя после них
             let func_start_pos = if let Some(pos) = trimmed.find("Функция") {
                 Some(pos + "Функция".len())
-            } else if let Some(pos) = trimmed.find("Function") {
-                Some(pos + "Function".len())
-            } else {
-                None
-            };
+            } else { trimmed.find("Function").map(|pos| pos + "Function".len()) };
 
             if let Some(start_pos) = func_start_pos {
                 let after_keyword = &trimmed[start_pos..];

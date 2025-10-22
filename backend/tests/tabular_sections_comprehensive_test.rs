@@ -316,7 +316,7 @@ fn test_document_without_tabular_sections() {
 
     // Но должны быть атрибуты основного объекта
     assert!(
-        metadata.attributes.len() > 0 || metadata.attributes.is_empty(),
+        !metadata.attributes.is_empty() || metadata.attributes.is_empty(),
         "Атрибуты могут быть или отсутствовать"
     );
 

@@ -54,7 +54,7 @@ fn main() {
             println!("  indexable: {}", type_info.structure.indexable);
 
             // Финальный вердикт
-            let methods_ok = type_info.structure.methods.len() > 0;
+            let methods_ok = !type_info.structure.methods.is_empty();
             let collection_ok = type_info.structure.collection_element.is_some();
             let iterable_ok = type_info.structure.iterable;
             let indexable_ok = type_info.structure.indexable;

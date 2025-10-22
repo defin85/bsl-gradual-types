@@ -433,13 +433,12 @@ impl SemanticProgram {
             SemanticNodeKind::VariableDeclaration { name, .. } => name.clone(),
 
             // Вызов функции: может быть вызов метода переменной
-            SemanticNodeKind::FunctionCall { object_type, .. } => {
-                if let Some(obj_type) = object_type {
-                    obj_type.clone()
-                } else {
-                    // Обычный вызов функции, не метод переменной
-                    return None;
-                }
+            SemanticNodeKind::FunctionCall { object_type: Some(obj_type), .. } => {
+                obj_type.clone()
+            }
+            SemanticNodeKind::FunctionCall { object_type: None, .. } => {
+                // Обычный вызов функции, не метод переменной
+                return None;
             }
 
             // Для остальных узлов не поддерживаем
@@ -495,13 +494,12 @@ impl SemanticProgram {
             SemanticNodeKind::VariableDeclaration { name, .. } => name.clone(),
 
             // Вызов функции: может быть вызов метода переменной
-            SemanticNodeKind::FunctionCall { object_type, .. } => {
-                if let Some(obj_type) = object_type {
-                    obj_type.clone()
-                } else {
-                    // Обычный вызов функции, не метод переменной
-                    return None;
-                }
+            SemanticNodeKind::FunctionCall { object_type: Some(obj_type), .. } => {
+                obj_type.clone()
+            }
+            SemanticNodeKind::FunctionCall { object_type: None, .. } => {
+                // Обычный вызов функции, не метод переменной
+                return None;
             }
 
             // Для остальных узлов не поддерживаем
@@ -1003,11 +1001,11 @@ impl SemanticProgram {
     }
 
     /// Конвертировать таблицу символов в DTO
-    fn symbols_to_dto(&self, include_flow_sensitive: bool) -> HashMap<String, SymbolInfoDto> {
+    fn symbols_to_dto(&self, _include_flow_sensitive: bool) -> HashMap<String, SymbolInfoDto> {
         let mut result = HashMap::new();
 
         // Обходим все scopes
-        for (_scope_id, scope) in &self.symbols.scopes {
+        for scope in self.symbols.scopes.values() {
             for (var_name, (type_hint, span)) in &scope.variables {
                 let symbol = SymbolInfoDto {
                     name: var_name.clone(),
@@ -1018,11 +1016,8 @@ impl SemanticProgram {
                         line: span.start_line,
                         column: span.start_column,
                     },
-                    flow_variants: if include_flow_sensitive {
-                        Vec::new() // TODO: flow-sensitive analysis
-                    } else {
-                        Vec::new()
-                    },
+                    // TODO: flow-sensitive analysis (пока не реализовано)
+                    flow_variants: Vec::new(),
                     metadata: HashMap::new(),
                 };
 
@@ -1128,12 +1123,12 @@ impl SemanticProgram {
 
     /// Извлечь граф вызовов функций
     fn extract_call_graph(&self) -> Vec<CallEdgeDto> {
-        let edges = Vec::new();
+        
 
         // TODO: Реализовать извлечение call graph из узлов
         // Для MVP возвращаем пустой граф
 
-        edges
+        Vec::new()
     }
 
     /// Вычислить метрики семантического анализа
@@ -1156,8 +1151,8 @@ impl SemanticProgram {
         }
 
         // Подсчёт типов
-        for (_scope_id, scope) in &self.symbols.scopes {
-            for (_var_name, (type_hint, _span)) in &scope.variables {
+        for scope in self.symbols.scopes.values() {
+            for (type_hint, _span) in scope.variables.values() {
                 match type_hint {
                     TypeHint::Explicit(_) => known_types += 1,
                     TypeHint::Inferred(_) => inferred_types += 1,

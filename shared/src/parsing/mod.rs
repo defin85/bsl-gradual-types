@@ -110,6 +110,6 @@ mod tests {
     #[test]
     fn test_supports_incremental_default() {
         let parser = MockParser;
-        assert_eq!(parser.supports_incremental(), false);
+        assert!(!parser.supports_incremental());
     }
 }

@@ -12,6 +12,8 @@ pub mod data;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod domain;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod helpers;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod parsing;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod presentation;

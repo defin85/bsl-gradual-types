@@ -42,12 +42,18 @@ async fn test_ir_hover_variable_declaration() -> Result<()> {
 
     println!("Hover result:\n{}", hover_text);
 
-    // Проверяем что в hover есть информация о переменной или типе
+    // ✅ ОБНОВЛЕНО: Проверка для HoverFormatter (Direction 3)
+    // Hover на аннотации типа "Число" может показывать:
+    // - Информацию о типе платформы ("Тип платформы", "Число")
+    // - Информацию о переменной (если hover на "x")
+    // - Fallback информацию
     assert!(
-        hover_text.contains("Переменная")
+        hover_text.contains("Тип платформы")
+            || hover_text.contains("Переменная")
+            || hover_text.contains("Число")
             || hover_text.contains("Объявление")
             || hover_text.contains("x"),
-        "Hover должен содержать информацию о переменной или объявлении. Got: {}",
+        "Hover должен содержать информацию о типе или переменной. Got: {}",
         hover_text
     );
 
@@ -125,12 +131,16 @@ async fn test_ir_hover_platform_type() -> Result<()> {
 
     println!("Hover result:\n{}", hover_text);
 
-    // Проверяем что в hover есть какая-то информация
+    // ✅ ОБНОВЛЕНО: Проверка для HoverFormatter (Direction 3)
+    // Hover на аннотации типа "Массив" (позиция 16 в строке)
+    // Может показывать fallback информацию (т.к. это не переменная, а тип)
     assert!(
         hover_text.contains("Переменная")
+            || hover_text.contains("Массив")
+            || hover_text.contains("Идентификатор")
             || hover_text.contains("Объявление")
             || hover_text.contains("массив"),
-        "Hover должен содержать информацию о переменной. Got: {}",
+        "Hover должен содержать информацию о типе или переменной. Got: {}",
         hover_text
     );
 

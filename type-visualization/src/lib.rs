@@ -33,6 +33,7 @@ pub trait TypeRenderer {
 
 /// Опции темизации
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ThemeMode {
     /// Светлая тема
     Light,
@@ -41,14 +42,10 @@ pub enum ThemeMode {
     /// Высококонтрастная тема
     HighContrast,
     /// Автоопределение (по умолчанию VS Code)
+    #[default]
     Auto,
 }
 
-impl Default for ThemeMode {
-    fn default() -> Self {
-        ThemeMode::Auto
-    }
-}
 
 /// Настройки рендеринга
 #[derive(Debug, Clone)]

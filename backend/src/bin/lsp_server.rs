@@ -34,9 +34,11 @@ struct LspConfig {
     platform_docs_archive: Option<String>,
 
     /// Путь к Configuration.xml конфигурации 1С
+    #[allow(dead_code)]
     configuration_path: Option<String>,
 
     /// Версия платформы 1С (например, "8.3.25")
+    #[allow(dead_code)]
     platform_version: Option<String>,
 }
 
@@ -709,7 +711,7 @@ impl LanguageServer for BslLanguageServer {
 
         // ✅ MILESTONE 2.10: Используем IR-based hover с Inline Scope Analysis
         // Получаем путь к файлу
-        let file_path = match uri.to_file_path() {
+        let _file_path = match uri.to_file_path() {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(_) => "untitled".to_string(),
         };
@@ -1094,7 +1096,7 @@ impl BslLanguageServer {
         let file_content = match self.documents.read().await.get(&uri) {
             Some(content) => content.clone(),
             None => std::fs::read_to_string(&file_path)
-                .map_err(|e| tower_lsp::jsonrpc::Error::internal_error())?,
+                .map_err(|_e| tower_lsp::jsonrpc::Error::internal_error())?,
         };
 
         // Используем TypeSystemService для получения SemanticProgram

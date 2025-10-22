@@ -53,7 +53,8 @@ pub fn CardsView(
                         </div>
                     }.into_any()
                 } else {
-                    view! {}.into_any()
+                    let _: () = view! {};
+                    ().into_any()
                 }
             }}
 
@@ -164,7 +165,8 @@ pub fn CardsView(
                         </div>
                     }.into_any()
                 } else {
-                    view! {}.into_any()
+                    let _: () = view! {};
+                    ().into_any()
                 }
             }}
 

@@ -16,7 +16,7 @@ impl JsonRenderer {
         Self { pretty }
     }
 
-    pub fn default() -> Self {
+    pub fn with_pretty_print() -> Self {
         Self { pretty: true }
     }
 }

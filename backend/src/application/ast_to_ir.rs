@@ -178,7 +178,7 @@ impl AstToIrConverter {
                     .register_variable(self.current_scope, name, hint, span);
 
                 self.nodes.push(node);
-                return Ok(Some(self.nodes.len() - 1));
+                Ok(Some(self.nodes.len() - 1))
             }
 
             Statement::Assignment {
@@ -190,6 +190,55 @@ impl AstToIrConverter {
                     let value_type = self.infer_expression_type(&value);
                     let span = self.ast_span_to_ir_span(ast_span);
 
+                    // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Определяем тип для переменной
+                    let type_hint = if let Expression::New { type_name, .. } = value {
+                        // Для Generic коллекций (Массив, Соответствие, Список)
+                        match type_name.as_str() {
+                            "Массив" => TypeHint::Generic {
+                                base_type: "Массив".to_string(),
+                                type_params: vec!["?".to_string()],
+                                certainty: 0.0,
+                            },
+                            "Соответствие" => TypeHint::Generic {
+                                base_type: "Соответствие".to_string(),
+                                type_params: vec!["?".to_string(), "?".to_string()],
+                                certainty: 0.0,
+                            },
+                            "Список" => TypeHint::Generic {
+                                base_type: "Список".to_string(),
+                                type_params: vec!["?".to_string()],
+                                certainty: 0.0,
+                            },
+                            _ => TypeHint::Inferred(value_type.clone()),
+                        }
+                    } else {
+                        TypeHint::Inferred(value_type.clone())
+                    };
+
+                    // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Проверяем, существует ли переменная
+                    let variable_exists = self
+                        .symbol_table
+                        .get_variable_type(self.current_scope, &var_name)
+                        .is_some();
+
+                    if !variable_exists {
+                        // Переменная не объявлена через VarDeclaration → регистрируем её
+                        use tracing::debug;
+                        debug!(
+                            "Assignment declares new variable: {} with type {:?}",
+                            var_name, type_hint
+                        );
+                        self.symbol_table
+                            .register_variable(self.current_scope, var_name.clone(), type_hint, span);
+                    } else {
+                        // Переменная уже существует → обновляем тип (flow-sensitive)
+                        if let Some(scope) = self.symbol_table.scopes.get_mut(&self.current_scope) {
+                            if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
+                                *hint = type_hint;
+                            }
+                        }
+                    }
+
                     let node = SemanticNode {
                         kind: SemanticNodeKind::Assignment {
                             variable: var_name.clone(),
@@ -199,64 +248,10 @@ impl AstToIrConverter {
                         scope_id: self.current_scope,
                     };
 
-                    // Обновляем тип переменной в scope (flow-sensitive)
-                    if let Some(scope) = self.symbol_table.scopes.get_mut(&self.current_scope) {
-                        // Проверяем, является ли это присваиванием конструктора
-                        // Если это "Новый Тип", инициализируем как Generic (если нужно)
-                        if let Expression::New { type_name, .. } = value {
-                            // Для коллекций (Массив, Соответствие, Список) инициализируем как Generic
-                            // TODO: Здесь нужен TypeRepository для получения metadata о Generic типах
-                            // Пока используем简 эвристику: известные Generic типы
-                            match type_name.as_str() {
-                                "Массив" => {
-                                    if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
-                                        // Инициализируем как Generic Массив<?>
-                                        let mut params = vec!["?".to_string()];
-                                        *hint = TypeHint::Generic {
-                                            base_type: "Массив".to_string(),
-                                            type_params: params,
-                                            certainty: 0.0,
-                                        };
-                                    }
-                                }
-                                "Соответствие" => {
-                                    if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
-                                        // Инициализируем как Generic Соответствие<?, ?>
-                                        *hint = TypeHint::Generic {
-                                            base_type: "Соответствие".to_string(),
-                                            type_params: vec!["?".to_string(), "?".to_string()],
-                                            certainty: 0.0,
-                                        };
-                                    }
-                                }
-                                "Список" => {
-                                    if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
-                                        *hint = TypeHint::Generic {
-                                            base_type: "Список".to_string(),
-                                            type_params: vec!["?".to_string()],
-                                            certainty: 0.0,
-                                        };
-                                    }
-                                }
-                                _ => {
-                                    // Для остальных типов используем обычный Inferred
-                                    if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
-                                        *hint = TypeHint::Inferred(value_type);
-                                    }
-                                }
-                            }
-                        } else {
-                            // Для других выражений обновляем как обычно
-                            if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
-                                *hint = TypeHint::Inferred(value_type);
-                            }
-                        }
-                    }
-
                     self.nodes.push(node);
                     return Ok(Some(self.nodes.len() - 1));
                 }
-                return Ok(None); // Если target не Identifier
+                Ok(None)// Если target не Identifier
             }
 
             Statement::If {
@@ -313,7 +308,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
-                return Ok(Some(self.nodes.len() - 1));
+                Ok(Some(self.nodes.len() - 1))
             }
 
             Statement::While {
@@ -348,7 +343,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
-                return Ok(Some(self.nodes.len() - 1));
+                Ok(Some(self.nodes.len() - 1))
             }
 
             Statement::For {
@@ -398,7 +393,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
-                return Ok(Some(self.nodes.len() - 1));
+                Ok(Some(self.nodes.len() - 1))
             }
 
             Statement::ForEach {
@@ -435,7 +430,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
-                return Ok(Some(self.nodes.len() - 1));
+                Ok(Some(self.nodes.len() - 1))
             }
 
             Statement::Return {
@@ -452,7 +447,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
-                return Ok(Some(self.nodes.len() - 1));
+                Ok(Some(self.nodes.len() - 1))
             }
 
             Statement::Try {
@@ -501,7 +496,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
-                return Ok(Some(self.nodes.len() - 1));
+                Ok(Some(self.nodes.len() - 1))
             }
 
             Statement::Call {
@@ -534,7 +529,7 @@ impl AstToIrConverter {
                     self.nodes.push(node);
                     return Ok(Some(self.nodes.len() - 1));
                 }
-                return Ok(None); // Если expression не Call и не PropertyAccess
+                Ok(None)// Если expression не Call и не PropertyAccess
             }
 
             Statement::Break { span: ast_span } => {
@@ -545,7 +540,7 @@ impl AstToIrConverter {
                     scope_id: self.current_scope,
                 };
                 self.nodes.push(node);
-                return Ok(Some(self.nodes.len() - 1));
+                Ok(Some(self.nodes.len() - 1))
             }
 
             Statement::Continue { span: ast_span } => {
@@ -556,7 +551,7 @@ impl AstToIrConverter {
                     scope_id: self.current_scope,
                 };
                 self.nodes.push(node);
-                return Ok(Some(self.nodes.len() - 1));
+                Ok(Some(self.nodes.len() - 1))
             }
 
             Statement::FunctionDecl {
@@ -605,7 +600,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
-                return Ok(Some(self.nodes.len() - 1));
+                Ok(Some(self.nodes.len() - 1))
             }
 
             Statement::ProcedureDecl {
@@ -653,13 +648,13 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
-                return Ok(Some(self.nodes.len() - 1));
+                Ok(Some(self.nodes.len() - 1))
             }
 
             _ => {
                 // Другие statement типы пока пропускаем
                 // TODO: Добавить Goto, Label, Execute, RaiseError, AddHandler, RemoveHandler, Await
-                return Ok(None);
+                Ok(None)
             }
         }
     }
@@ -904,7 +899,7 @@ impl AstToIrConverter {
 
         // Ищем метод в inference_methods
         for inference_method in &generic_info.inference_methods {
-            if method_name != &inference_method.method_name {
+            if method_name != inference_method.method_name {
                 continue;
             }
 

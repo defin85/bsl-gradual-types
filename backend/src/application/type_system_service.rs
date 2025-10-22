@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tracing::info;
 
 use crate::application::TypeInferenceService;
+use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, OutputFormat};
 use crate::system::{AnalysisCache, AnalysisResult, IrCache, ParserCoordinator};
 use bsl_shared::domain::types::{ResolutionResult, TypeResolution};
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup};
@@ -27,6 +28,9 @@ pub struct TypeSystemService {
 
     // Domain Layer: TypeMetadataLookup - мост между TypeResolution и RawTypeData
     metadata_lookup: TypeMetadataLookup,
+
+    // Helper Layer: HoverFormatter - унифицированное форматирование hover responses
+    hover_formatter: HoverFormatter,
 
     // System Layer компоненты
     cache: Arc<AnalysisCache>,
@@ -53,10 +57,20 @@ impl TypeSystemService {
         // Создаем TypeMetadataLookup для получения методов/свойств из RawTypeData
         let metadata_lookup = TypeMetadataLookup::new(repository);
 
+        // Создаем HoverFormatter с конфигурацией по умолчанию
+        let hover_config = HoverFormatConfig {
+            max_methods: 10,
+            max_properties: 5,
+            output_format: OutputFormat::Markdown,
+            ..Default::default()
+        };
+        let hover_formatter = HoverFormatter::new(hover_config, metadata_lookup.clone());
+
         Self {
             analysis_engine,
             inference_service,
             metadata_lookup,
+            hover_formatter,
             cache,
             ir_cache,
             parser,
@@ -577,7 +591,7 @@ impl TypeSystemService {
                 resolver.resolve_variable_with_context(&var_name, &ir_program.symbols, scope_id);
 
             // Форматируем hover через TypeResolution (вместо TypeHint)
-            return Ok(Some(self.format_variable_hover_from_resolution(
+            return Ok(Some(self.hover_formatter.format_variable(
                 &var_name,
                 &resolution,
             )));
@@ -1644,11 +1658,18 @@ impl TypeSystemService {
     ///
     /// # Возвращает
     /// Форматированный markdown с информацией о типе, методах и свойствах
+    #[deprecated(since = "0.4.3", note = "Use hover_formatter.format_variable() instead")]
+    #[allow(dead_code)]
     fn format_variable_hover_from_resolution(
         &self,
         var_name: &str,
         resolution: &TypeResolution,
     ) -> String {
+        // ✅ НОВОЕ: Используем HoverFormatter вместо старого кода
+        self.hover_formatter.format_variable(var_name, resolution)
+
+        // Старый код оставлен для backward compatibility (закомментирован)
+        /*
         use bsl_shared::domain::types::Certainty;
 
         // Базовая информация
@@ -1768,6 +1789,7 @@ impl TypeSystemService {
         }
 
         output
+        */
     }
 
     /// Форматирует информацию о переменной для hover (используя Inline Scope Analysis)
@@ -1778,6 +1800,7 @@ impl TypeSystemService {
     ///
     /// # Возвращает
     /// Форматированный markdown с информацией о типе, методах и свойствах
+    #[allow(dead_code)]
     fn format_variable_hover(
         &self,
         var_name: &str,

@@ -40,7 +40,6 @@ impl UniversalMetadataParser {
         let mut attributes = Vec::new();
         let mut tabular_sections = Vec::new();
 
-        let mut in_properties = false;
         let mut current_element = String::new();
         let mut current_attribute: Option<AttributeInfo> = None;
         let mut current_tabular: Option<TabularSectionInfo> = None;
@@ -60,20 +59,16 @@ impl UniversalMetadataParser {
                         tracing::trace!("🔖 Тип объекта: {}", object_type_raw);
 
                         // Извлекаем UUID из атрибута
-                        for attr in e.attributes() {
-                            if let Ok(a) = attr {
-                                let key = String::from_utf8_lossy(a.key.as_ref());
-                                if key == "uuid" {
-                                    uuid = String::from_utf8_lossy(&a.value).to_string();
-                                    tracing::trace!("🆔 UUID: {}", uuid);
-                                }
+                        for a in e.attributes().flatten() {
+                            let key = String::from_utf8_lossy(a.key.as_ref());
+                            if key == "uuid" {
+                                uuid = String::from_utf8_lossy(&a.value).to_string();
+                                tracing::trace!("🆔 UUID: {}", uuid);
                             }
                         }
                     }
 
-                    if tag_name == "Properties" {
-                        in_properties = true;
-                    } else if tag_name == "Attribute" {
+                    if tag_name == "Attribute" {
                         current_attribute = Some(AttributeInfo {
                             name: String::new(),
                             type_name: String::new(),
@@ -151,9 +146,7 @@ impl UniversalMetadataParser {
                 Ok(Event::End(e)) => {
                     let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
 
-                    if tag_name == "Properties" {
-                        in_properties = false;
-                    } else if tag_name == "Attribute" {
+                    if tag_name == "Attribute" {
                         if let Some(attr) = current_attribute.take() {
                             if in_tabular_attributes {
                                 if let Some(ref mut tab) = current_tabular {

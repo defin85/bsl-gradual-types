@@ -55,7 +55,7 @@ impl TypeRenderer for MarkdownRenderer {
             for method in &type_dto.methods {
                 md.push_str(&format!("- `{}`\n", method));
             }
-            md.push_str("\n");
+            md.push('\n');
         }
 
         // Properties
@@ -64,7 +64,7 @@ impl TypeRenderer for MarkdownRenderer {
             for prop in &type_dto.properties {
                 md.push_str(&format!("- `{}`\n", prop));
             }
-            md.push_str("\n");
+            md.push('\n');
         }
 
         // Enum values
@@ -73,7 +73,7 @@ impl TypeRenderer for MarkdownRenderer {
             for value in values {
                 md.push_str(&format!("- `{}`\n", value));
             }
-            md.push_str("\n");
+            md.push('\n');
         }
 
         Ok(md)

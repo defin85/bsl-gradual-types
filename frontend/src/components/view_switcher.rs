@@ -1,5 +1,7 @@
 //! View switcher component for switching between different type views
 
+#![allow(clippy::unused_unit)]
+
 use leptos::prelude::*;
 
 /// Доступные представления
@@ -107,7 +109,8 @@ pub fn ViewSwitcher(
                                 <span class="view-label">{view.display_name()}</span>
                             }.into_any()
                         } else {
-                            view! {}.into_any()
+                            let _: () = view! {};
+                            ().into_any()
                         }}
                     </button>
                 }
@@ -172,7 +175,8 @@ pub fn ExtendedViewSwitcher(
                                 <div class="view-option-badge">"Активно"</div>
                             }.into_any()
                         } else {
-                            view! {}.into_any()
+                            let _: () = view! {};
+                            ().into_any()
                         }}
                     </div>
                 }
@@ -287,7 +291,8 @@ pub fn ViewDropdown(
                                 {move || if current_view.get() == ViewType::Dashboard {
                                     view! { <span class="item-check">"✓"</span> }.into_any()
                                 } else {
-                                    view! {}.into_any()
+                                    let _: () = view! {};
+                                    ().into_any()
                                 }}
                             </button>
 
@@ -312,7 +317,8 @@ pub fn ViewDropdown(
                                 {move || if current_view.get() == ViewType::Cards {
                                     view! { <span class="item-check">"✓"</span> }.into_any()
                                 } else {
-                                    view! {}.into_any()
+                                    let _: () = view! {};
+                                    ().into_any()
                                 }}
                             </button>
 
@@ -337,7 +343,8 @@ pub fn ViewDropdown(
                                 {move || if current_view.get() == ViewType::Table {
                                     view! { <span class="item-check">"✓"</span> }.into_any()
                                 } else {
-                                    view! {}.into_any()
+                                    let _: () = view! {};
+                                    ().into_any()
                                 }}
                             </button>
 
@@ -362,13 +369,15 @@ pub fn ViewDropdown(
                                 {move || if current_view.get() == ViewType::Graph {
                                     view! { <span class="item-check">"✓"</span> }.into_any()
                                 } else {
-                                    view! {}.into_any()
+                                    let _: () = view! {};
+                                    ().into_any()
                                 }}
                             </button>
                         </div>
                     }.into_any()
                 } else {
-                    view! {}.into_any()
+                    let _: () = view! {};
+                    ().into_any()
                 }
             }}
         </div>

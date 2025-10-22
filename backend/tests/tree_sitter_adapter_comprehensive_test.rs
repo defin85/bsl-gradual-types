@@ -388,7 +388,7 @@ fn test_boolean_expression() {
     match &program.statements[0] {
         Statement::Assignment { value, .. } => {
             if let Expression::Boolean { value: b, .. } = value {
-                assert_eq!(*b, true);
+                assert!(*b);
             } else {
                 panic!("Expected Boolean expression");
             }
@@ -672,5 +672,5 @@ fn test_comments_ignored() {
 // Еще комментарий
 "#;
     let program = parse_bsl(code).expect("Комментарии не должны мешать парсингу");
-    assert!(program.statements.len() >= 1);
+    assert!(!program.statements.is_empty());
 }

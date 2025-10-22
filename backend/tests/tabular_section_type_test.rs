@@ -124,7 +124,7 @@ fn test_tabular_section_has_count_property() {
         .find(|p| p.name == "Количество")
         .unwrap();
     assert_eq!(count_property.prop_type, "Число");
-    assert_eq!(count_property.is_readonly, true);
+    assert!(count_property.is_readonly);
 }
 
 #[test]

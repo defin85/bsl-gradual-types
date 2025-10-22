@@ -95,7 +95,7 @@ impl ConfigurationDiscovery {
                         if !obj_name.is_empty() {
                             child_objects
                                 .entry(obj_type.clone())
-                                .or_insert_with(Vec::new)
+                                .or_default()
                                 .push(obj_name.clone());
                             tracing::trace!("  ➕ Объект: {} (тип: {})", obj_name, obj_type);
                         }

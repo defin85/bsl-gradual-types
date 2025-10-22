@@ -140,6 +140,7 @@ fn get_test_types(filters: TypeFilters) -> Result<AnalysisResultDto, String> {
             attributes_count: None,
             properties: vec!["Количество".to_string()],
             enum_values: None,
+            tabular_sections: vec![],
             source: "Platform".to_string(),
             flow_sensitive: false,
             description: "Коллекция элементов с индексным доступом".to_string(),
@@ -164,6 +165,7 @@ fn get_test_types(filters: TypeFilters) -> Result<AnalysisResultDto, String> {
             attributes_count: Some(5),
             properties: vec!["Наименование".to_string(), "Код".to_string()],
             enum_values: None,
+            tabular_sections: vec![],
             source: "Configuration".to_string(),
             flow_sensitive: false,
             description: "Иерархический справочник с поддержкой групп".to_string(),
@@ -185,6 +187,7 @@ fn get_test_types(filters: TypeFilters) -> Result<AnalysisResultDto, String> {
             attributes_count: None,
             properties: vec![],
             enum_values: None,
+            tabular_sections: vec![],
             source: "Platform".to_string(),
             flow_sensitive: false,
             description: "Строковый тип данных".to_string(),
@@ -224,9 +227,9 @@ fn get_test_types(filters: TypeFilters) -> Result<AnalysisResultDto, String> {
         current_page: filters.page,
         page_size: filters.page_size,
         total_items: filtered_types.len(),
-        total_pages: (filtered_types.len() + filters.page_size - 1) / filters.page_size,
+        total_pages: filtered_types.len().div_ceil(filters.page_size),
         has_prev: filters.page > 1,
-        has_next: filters.page < (filtered_types.len() + filters.page_size - 1) / filters.page_size,
+        has_next: filters.page < filtered_types.len().div_ceil(filters.page_size),
     };
 
     Ok(AnalysisResultDto {

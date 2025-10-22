@@ -382,9 +382,9 @@ mod tabular_sections_dto_tests {
                 }],
             };
 
-            let json = serde_json::to_string(&dto).expect(&format!("Failed for {}", desc));
+            let json = serde_json::to_string(&dto).unwrap_or_else(|_| panic!("Failed for {}", desc));
             let restored: TabularSectionDto = serde_json::from_str(&json)
-                .expect(&format!("Failed to deserialize for {}", desc));
+                .unwrap_or_else(|_| panic!("Failed to deserialize for {}", desc));
 
             assert_eq!(
                 restored.attributes[0].attr_type.as_ref().unwrap(),

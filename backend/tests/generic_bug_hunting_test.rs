@@ -8,7 +8,7 @@
 /// - Производительность
 
 use bsl_shared::domain::types::{
-    ConcreteType, FacetKind, GenericType, PlatformType, PrimitiveType, RawAttributeData,
+    ConcreteType, GenericType, PlatformType, RawAttributeData,
     TabularRowType,
 };
 

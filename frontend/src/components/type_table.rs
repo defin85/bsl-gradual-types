@@ -121,8 +121,8 @@ pub fn TypeTable(
                         {move || {
                             sorted_types.get().into_iter().map(|type_info| {
                                 let type_info_clone = type_info.clone();
-                                let on_row_click_clone = on_row_click.clone();
-                                let on_action_clone = on_action.clone();
+                                let on_row_click_clone = on_row_click;
+                                let on_action_clone = on_action;
 
                                 match (on_row_click_clone, on_action_clone) {
                                     (Some(row_handler), Some(action_handler)) => view! {
@@ -181,7 +181,7 @@ fn TypeTableRow(
 
     let handle_action = move |action: &str| {
         let action = action.to_string();
-        let on_action_clone = on_action.clone();
+        let on_action_clone = on_action;
         let type_info_clone = type_info;
         move |_| {
             if let Some(ref handler) = on_action_clone {

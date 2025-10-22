@@ -84,7 +84,7 @@ fn test_full_pipeline_with_type_inference() {
 
     // Проверяем что переменные есть в таблице символов (ищем в scopes)
     let mut has_vars = false;
-    for (_scope_id, scope) in &ir_result.symbols.scopes {
+    for scope in ir_result.symbols.scopes.values() {
         if scope.variables.contains_key("Число") || scope.variables.contains_key("Строка")
         {
             has_vars = true;
@@ -134,7 +134,7 @@ fn test_full_pipeline_real_world_code() {
 
     // Проверяем что локальная переменная есть в scopes
     let mut has_result_var = false;
-    for (_scope_id, scope) in &ir_result.symbols.scopes {
+    for scope in ir_result.symbols.scopes.values() {
         if scope.variables.contains_key("Результат") {
             has_result_var = true;
             break;

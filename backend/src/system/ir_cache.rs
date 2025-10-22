@@ -232,7 +232,7 @@ mod tests {
     fn create_test_ir(name: &str) -> Arc<SemanticProgram> {
         use bsl_shared::ir::{SemanticNodeKind, SourceInfo};
 
-        let mut symbols = SymbolTable::new();
+        let symbols = SymbolTable::new();
         let root_scope = symbols.root_scope;
 
         Arc::new(SemanticProgram {

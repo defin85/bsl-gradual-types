@@ -316,7 +316,7 @@ mod tests {
 
         // После проверки в узле 2 не должно быть предупреждений
         // (но текущая реализация ещё не достаточно умная)
-        assert!(result.safe_operations.len() > 0);
+        assert!(!result.safe_operations.is_empty());
     }
 
     #[test]
@@ -365,7 +365,7 @@ mod tests {
         let result = analyzer.analyze(&context);
 
         // Должно быть предупреждение о возможном NPE
-        assert!(result.warnings.len() > 0);
+        assert!(!result.warnings.is_empty());
         assert_eq!(
             result.warnings[0].kind,
             NullWarningKind::PossibleNullDereference
@@ -455,7 +455,7 @@ mod tests {
         let result = analyzer.analyze(&context);
 
         // Должно быть предупреждение о доступе к свойству nullable объекта
-        assert!(result.warnings.len() > 0);
+        assert!(!result.warnings.is_empty());
         assert!(result.warnings[0].message.contains("доступе к свойству"));
     }
 }

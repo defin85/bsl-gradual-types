@@ -2,7 +2,7 @@
 //!
 //! Этот пример парсит BSL код и выводит все типы узлов AST
 
-use tree_sitter::{Parser, TreeCursor};
+use tree_sitter::Parser;
 
 fn main() {
     let mut parser = Parser::new();

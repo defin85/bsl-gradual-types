@@ -116,7 +116,7 @@ fn test_multiple_errors_in_file() {
 
     // Должно быть хотя бы 1 ошибка (tree-sitter может обнаружить не все)
     assert!(
-        parse_result.syntax_errors.len() >= 1,
+        !parse_result.syntax_errors.is_empty(),
         "Должно быть обнаружено хотя бы 1 ошибка"
     );
 

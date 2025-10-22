@@ -111,7 +111,8 @@ pub fn TypeDetailsModal(
                                         </section>
                                     }.into_any()
                                 } else {
-                                    view! {}.into_any()
+                                    let _: () = view! {};
+                                    ().into_any()
                                 }}
 
                                 // Facets section
@@ -131,7 +132,8 @@ pub fn TypeDetailsModal(
                                         </section>
                                     }.into_any()
                                 } else {
-                                    view! {}.into_any()
+                                    let _: () = view! {};
+                                    ().into_any()
                                 }}
 
                                 // Enum values section (for platform enumerations)
@@ -151,7 +153,8 @@ pub fn TypeDetailsModal(
                                         </section>
                                     }.into_any()
                                 } else {
-                                    view! {}.into_any()
+                                    let _: () = view! {};
+                                    ().into_any()
                                 }}
 
                                 // Methods and properties section
@@ -179,7 +182,8 @@ pub fn TypeDetailsModal(
                                                     </div>
                                                 }.into_any()
                                             } else {
-                                                view! {}.into_any()
+                                                let _: () = view! {};
+                                                ().into_any()
                                             }}
 
                                             // Properties subsection
@@ -201,7 +205,8 @@ pub fn TypeDetailsModal(
                                                     </div>
                                                 }.into_any()
                                             } else {
-                                                view! {}.into_any()
+                                                let _: () = view! {};
+                                                ().into_any()
                                             }}
 
                                             // Attributes info
@@ -218,10 +223,12 @@ pub fn TypeDetailsModal(
                                                         </div>
                                                     }.into_any()
                                                 } else {
-                                                    view! {}.into_any()
+                                                    let _: () = view! {};
+                                                    ().into_any()
                                                 }
                                             } else {
-                                                view! {}.into_any()
+                                                let _: () = view! {};
+                                                ().into_any()
                                             }}
                                         </section>
                                     }.into_any()

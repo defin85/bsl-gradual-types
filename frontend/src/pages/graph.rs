@@ -1,5 +1,7 @@
 //! Graph page for network visualization of type relationships
 
+#![allow(clippy::unused_unit)]
+
 use crate::api::*;
 use crate::components::GraphView;
 use leptos::prelude::*;
@@ -119,10 +121,7 @@ pub fn GraphPage(
         let query = search_query.get();
 
         // Фильтруем узлы по режиму отображения
-        current_graph.nodes = current_graph
-            .nodes
-            .into_iter()
-            .filter(|node| {
+        current_graph.nodes.retain(|node| {
                 match mode.as_str() {
                     "known" => node.type_info.certainty >= 90,
                     "union" => node.type_info.category == "Union",
@@ -130,15 +129,11 @@ pub fn GraphPage(
                     "config" => node.type_info.category == "Configuration",
                     _ => true, // "all"
                 }
-            })
-            .collect();
+            });
 
         // Фильтруем по поисковому запросу
         if !query.is_empty() {
-            current_graph.nodes = current_graph
-                .nodes
-                .into_iter()
-                .filter(|node| {
+            current_graph.nodes.retain(|node| {
                     node.type_info
                         .name
                         .to_lowercase()
@@ -148,17 +143,12 @@ pub fn GraphPage(
                             .name
                             .to_lowercase()
                             .contains(&query.to_lowercase())
-                })
-                .collect();
+                });
         }
 
         // Фильтруем связи - оставляем только те, у которых есть оба узла
         let node_ids: HashSet<String> = current_graph.nodes.iter().map(|n| n.id.clone()).collect();
-        current_graph.connections = current_graph
-            .connections
-            .into_iter()
-            .filter(|conn| node_ids.contains(&conn.source) && node_ids.contains(&conn.target))
-            .collect();
+        current_graph.connections.retain(|conn| node_ids.contains(&conn.source) && node_ids.contains(&conn.target));
 
         current_graph
     });
@@ -264,7 +254,8 @@ pub fn GraphPage(
                                             </div>
                                         }.into_any()
                                     } else {
-                                        view! {}.into_any()
+                                        let _: () = view! {};
+                                        ().into_any()
                                     }
                                 }}
                             </div>

@@ -54,7 +54,7 @@ impl TreeSitterAdapter {
     /// Для файла в 500 строк с 300 узлами:
     /// - **Было:** ~150,000 итераций по строкам (O(n) для каждого узла)
     /// - **Стало:** 500 итераций (O(1) доступ для каждого узла через кеш)
-    fn node_to_span_cached(node: &Node, source: &str, lines: &[String]) -> Span {
+    fn node_to_span_cached(node: &Node, _source: &str, lines: &[String]) -> Span {
         let start_pos = node.start_position();
         let end_pos = node.end_position();
 
@@ -140,6 +140,7 @@ impl TreeSitterAdapter {
     ///
     /// **ВАЖНО:** Этот метод делает O(n) итерацию для каждого узла при извлечении Span.
     /// Для производительности используйте `collect_syntax_errors_cached()` вместо него.
+    #[allow(dead_code)]
     fn collect_syntax_errors(node: &Node, source: &str) -> Vec<ParseError> {
         // Для обратной совместимости: предпросчитываем строки
         let lines: Vec<String> = source.lines().map(|s| s.to_string()).collect();
@@ -192,6 +193,7 @@ impl TreeSitterAdapter {
     ///
     /// **ВАЖНО:** Этот метод делает O(n) итерацию для каждого узла при извлечении Span.
     /// Для производительности используйте `convert_source_file_cached()` вместо него.
+    #[allow(dead_code)]
     fn convert_source_file(node: &Node, source: &str) -> Result<Vec<Statement>, String> {
         // Для обратной совместимости: предпросчитываем строки
         let lines: Vec<String> = source.lines().map(|s| s.to_string()).collect();
@@ -220,6 +222,7 @@ impl TreeSitterAdapter {
     ///
     /// **ВАЖНО:** Этот метод делает O(n) итерацию для каждого узла при извлечении Span.
     /// Для производительности используйте `convert_statement_cached()` вместо него.
+    #[allow(dead_code)]
     fn convert_statement(node: &Node, source: &str) -> Result<Option<Statement>, String> {
         // Для обратной совместимости: предпросчитываем строки
         let lines: Vec<String> = source.lines().map(|s| s.to_string()).collect();
@@ -305,6 +308,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать function_definition или procedure_definition
+    #[allow(dead_code)]
     fn convert_function_definition(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -371,6 +375,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать var_definition
+    #[allow(dead_code)]
     fn convert_var_definition(node: &Node, source: &str) -> Result<Statement, String> {
         let mut cursor = node.walk();
         let mut name = String::new();
@@ -390,6 +395,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать if_statement
+    #[allow(dead_code)]
     fn convert_if_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -447,6 +453,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать тело clause (else_clause, elseif_clause)
+    #[allow(dead_code)]
     fn convert_clause_body(node: &Node, source: &str) -> Result<Vec<Statement>, String> {
         let mut statements = Vec::new();
         let mut cursor = node.walk();
@@ -466,6 +473,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать for_statement
+    #[allow(dead_code)]
     fn convert_for_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -531,6 +539,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать assignment_statement
+    #[allow(dead_code)]
     fn convert_assignment(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -561,6 +570,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать return_statement
+    #[allow(dead_code)]
     fn convert_return(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -582,6 +592,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать call_statement (вызов процедуры/функции)
+    #[allow(dead_code)]
     fn convert_call_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -599,6 +610,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать while_statement
+    #[allow(dead_code)]
     fn convert_while_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -639,6 +651,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать try_statement
+    #[allow(dead_code)]
     fn convert_try_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -673,6 +686,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать for_each_statement
+    #[allow(dead_code)]
     fn convert_for_each_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -721,6 +735,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать goto_statement
+    #[allow(dead_code)]
     fn convert_goto_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -734,6 +749,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать label_statement
+    #[allow(dead_code)]
     fn convert_label_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -747,6 +763,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать execute_statement
+    #[allow(dead_code)]
     fn convert_execute_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -759,6 +776,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать rise_error_statement
+    #[allow(dead_code)]
     fn convert_raise_error_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();
@@ -780,6 +798,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать add_handler_statement
+    #[allow(dead_code)]
     fn convert_add_handler_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let (event, handler) = Self::extract_event_handler_pair(node, source)?;
@@ -791,6 +810,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать remove_handler_statement
+    #[allow(dead_code)]
     fn convert_remove_handler_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let (event, handler) = Self::extract_event_handler_pair(node, source)?;
@@ -833,6 +853,7 @@ impl TreeSitterAdapter {
     }
 
     /// Конвертировать await_statement
+    #[allow(dead_code)]
     fn convert_await_statement(node: &Node, source: &str) -> Result<Statement, String> {
         let span = Self::node_to_span(node, source);
         let mut cursor = node.walk();

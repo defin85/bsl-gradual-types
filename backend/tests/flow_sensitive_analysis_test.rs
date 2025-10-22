@@ -49,7 +49,7 @@ fn test_variable_reassignment() {
 
 #[test]
 fn test_conditional_branching_union_type() {
-    let mut context = FlowAnalysisContext::new();
+    let context = FlowAnalysisContext::new();
 
     // Создаём две ветки условия
     let mut then_context = context.fork();

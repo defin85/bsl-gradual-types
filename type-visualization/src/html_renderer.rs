@@ -23,7 +23,7 @@ impl HtmlRenderer {
     }
 
     /// Создать рендерер с темой по умолчанию
-    pub fn default() -> Self {
+    pub fn with_default_theme() -> Self {
         Self::new(RenderOptions::default())
     }
 
@@ -310,13 +310,13 @@ mod tests {
 
     #[test]
     fn test_html_renderer_creation() {
-        let renderer = HtmlRenderer::default();
+        let renderer = HtmlRenderer::with_default_theme();
         assert!(renderer.options.syntax_highlight);
     }
 
     #[test]
     fn test_render_facets() {
-        let renderer = HtmlRenderer::default();
+        let renderer = HtmlRenderer::with_default_theme();
         let facets = vec!["Manager".to_string(), "Object".to_string()];
         let html = renderer.render_facets(&facets);
 
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn test_render_methods_section() {
-        let renderer = HtmlRenderer::default();
+        let renderer = HtmlRenderer::with_default_theme();
         let methods = vec!["Создать".to_string(), "Удалить".to_string()];
         let html = renderer.render_methods_section(&methods);
 

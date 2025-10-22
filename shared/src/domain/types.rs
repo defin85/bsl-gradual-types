@@ -546,7 +546,7 @@ impl ParseError {
     }
 
     /// Создать общую ошибку парсинга
-    pub fn parse_error(message: String, span: crate::ir::Span) -> Self {
+    pub fn new_parse_error(message: String, span: crate::ir::Span) -> Self {
         Self {
             error_type: ErrorType::ParseError,
             message,

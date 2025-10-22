@@ -103,13 +103,15 @@ pub fn TypeCard(
                                         </span>
                                     }.into_any()
                                 } else {
-                                    view! {}.into_any()
+                                    let _: () = view! {};
+                                    ().into_any()
                                 }}
                             </div>
                         </div>
                     }.into_any()
                 } else {
-                    view! {}.into_any()
+                    let _: () = view! {};
+                    ().into_any()
                 }
             }}
 
@@ -123,7 +125,8 @@ pub fn TypeCard(
                         </div>
                     }.into_any()
                 } else {
-                    view! {}.into_any()
+                    let _: () = view! {};
+                    ().into_any()
                 }
             }}
 

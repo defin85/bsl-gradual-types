@@ -52,7 +52,7 @@ async fn test_get_all_types_as_dto_pagination() {
     let page2 = type_service.get_all_types_as_dto(5, 5, None, None, false);
 
     // Assert: страницы должны быть разными
-    if page1.types.len() == 5 && page2.types.len() > 0 {
+    if page1.types.len() == 5 && !page2.types.is_empty() {
         let first_page_names: Vec<_> = page1.types.iter().map(|t| &t.name).collect();
         let second_page_names: Vec<_> = page2.types.iter().map(|t| &t.name).collect();
 

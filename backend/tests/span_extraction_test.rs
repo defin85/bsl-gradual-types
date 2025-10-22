@@ -6,6 +6,8 @@
 /// - find_node_at_position() находит узлы по координатам
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::system::parser_coordinator::ParserCoordinator;
+use std::sync::Arc;
+use bsl_shared::domain::repository::InMemoryTypeRepository;
 
 #[test]
 fn test_span_extraction_from_tree_sitter() {
@@ -63,10 +65,12 @@ fn test_span_propagation_ast_to_ir() {
     let parse_result = parser.parse(code).expect("Парсинг должен пройти успешно");
 
     // Act: Конвертация AST → IR
+    let repository = Arc::new(InMemoryTypeRepository::new());
     let ir_program = AstToIrConverter::convert(
         parse_result.program,
         code.to_string(),
         "test_span_propagation.bsl".to_string(),
+        repository,
     )
     .expect("Конверсия AST → IR должна пройти успешно");
 
@@ -118,10 +122,12 @@ fn test_find_node_at_position() {
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(code).expect("Парсинг должен пройти успешно");
 
+    let repository = Arc::new(InMemoryTypeRepository::new());
     let ir_program = AstToIrConverter::convert(
         parse_result.program,
         code.to_string(),
         "test_find_node.bsl".to_string(),
+        repository,
     )
     .expect("Конверсия AST → IR должна пройти успешно");
 
@@ -194,10 +200,12 @@ fn test_span_for_all_statement_types() {
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(code).expect("Парсинг должен пройти успешно");
 
+    let repository = Arc::new(InMemoryTypeRepository::new());
     let ir_program = AstToIrConverter::convert(
         parse_result.program,
         code.to_string(),
         "test_all_statements.bsl".to_string(),
+        repository,
     )
     .expect("Конверсия AST → IR должна пройти успешно");
 

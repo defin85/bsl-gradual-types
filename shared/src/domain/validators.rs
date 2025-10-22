@@ -301,7 +301,7 @@ impl<'a> TypeValidator<'a> {
                 }
             }
             ResolutionResult::Nullable(inner) => {
-                format!("{} | Null", inner.to_string())
+                format!("{} | Null", inner)
             }
             ResolutionResult::Dynamic => "Произвольный".to_string(),
         }

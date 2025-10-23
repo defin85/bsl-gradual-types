@@ -576,8 +576,8 @@
     },
     "scripts": {
         "vscode:prepublish": "npm run copy-binaries && npm run package",
-        "compile": "npm run copy-binaries && node esbuild.js",
-        "package": "npm run copy-binaries && node esbuild.js --production",
+        "compile": "npm run copy-binaries && node esbuild.js && npm run build:webview",
+        "package": "npm run copy-binaries && node esbuild.js --production && npm run build:webview",
         "watch": "node esbuild.js --watch",
         "pretest": "npm run compile && npm run lint",
         "lint": "tsc --noEmit",
@@ -585,7 +585,9 @@
         "test:coverage": "c8 --reporter=html --reporter=text npm test",
         "analyze": "node esbuild.js --production --analyze",
         "copy-binaries": "node scripts/copy-binaries.js",
-        "copy-binaries:force": "node scripts/copy-binaries.js --force"
+        "copy-binaries:force": "node scripts/copy-binaries.js --force",
+        "build:webview": "cd webview && npm install && npm run build",
+        "watch:webview": "cd webview && npm run dev"
     },
     "devDependencies": {
         "@istanbuljs/nyc-config-typescript": "^1.0.2",

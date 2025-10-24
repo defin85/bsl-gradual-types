@@ -99,7 +99,7 @@ fn test_parse_constant_from_extension() {
     assert!(metadata.facets.contains(&FacetKind::Manager));
 
     // Проверяем конвертацию в RawTypeData
-    let raw_type = metadata.to_raw_type_data();
+    let raw_type = metadata.to_raw_type_data(None);
     assert_eq!(raw_type.name, "Константы.Тест_Константа1");
     assert_eq!(raw_type.kind, Some(MetadataKind::Constant));
 }
@@ -154,7 +154,7 @@ fn test_parse_role_from_extension() {
     assert!(metadata.facets.contains(&FacetKind::Metadata));
 
     // Проверяем конвертацию в RawTypeData
-    let raw_type = metadata.to_raw_type_data();
+    let raw_type = metadata.to_raw_type_data(None);
     assert!(
         raw_type.name.contains("Роли."),
         "Имя типа должно содержать 'Роли.'"
@@ -266,7 +266,7 @@ fn test_document_attributes_parsing() {
     }
 
     // Проверяем конвертацию атрибутов в RawTypeData
-    let raw_type = metadata.to_raw_type_data();
+    let raw_type = metadata.to_raw_type_data(None);
     assert_eq!(
         raw_type.attributes.len(),
         metadata.attributes.len(),
@@ -340,7 +340,7 @@ fn test_parse_all_objects_gracefully() {
         );
 
         // Проверяем конвертацию в RawTypeData
-        let raw_type = obj.to_raw_type_data();
+        let raw_type = obj.to_raw_type_data(None);
         assert!(!raw_type.name.is_empty(), "Имя типа не должно быть пустым");
     }
 }

@@ -22,8 +22,8 @@ pub struct SearchQuery {
 
 #[derive(Deserialize)]
 pub struct PaginationQuery {
+    pub page: Option<usize>,     // 1-based page number
     pub limit: Option<usize>,
-    pub offset: Option<usize>,
     pub category: Option<String>,
     pub certainty_level: Option<String>,
     pub flow_sensitive_only: Option<bool>,
@@ -48,8 +48,12 @@ pub async fn get_types(
     State(state): State<AppState>,
     Query(params): Query<PaginationQuery>,
 ) -> impl IntoResponse {
-    let limit = params.limit.unwrap_or(50).min(1000);
-    let offset = params.offset.unwrap_or(0);
+    // Валидация и значения по умолчанию
+    let page = params.page.unwrap_or(1).max(1); // Минимум страница 1
+    let limit = params.limit.unwrap_or(50).clamp(1, 1000); // 1-1000 элементов
+
+    // Конвертация page → offset для внутреннего использования
+    let offset = (page - 1) * limit;
 
     // Вся бизнес-логика и DTO конверсия теперь в Application Layer
     let result = state.type_service.get_all_types_as_dto(

@@ -81,7 +81,7 @@ pub fn TypeCard(
             {move || {
                 let info = type_info.get();
                 if !info.methods.is_empty() {
-                    let methods_to_show: Vec<String> = info.methods.iter().take(5).cloned().collect();
+                    let methods_to_show: Vec<MethodInfo> = info.methods.iter().take(5).cloned().collect();
                     let has_more = info.methods.len() > 5;
                     let remaining_count = if has_more { info.methods.len() - 5 } else { 0 };
 
@@ -92,7 +92,47 @@ pub fn TypeCard(
                                 {methods_to_show.into_iter().map(|method| {
                                     view! {
                                         <span class="method-tag">
-                                            {method}
+                                            {method.name.clone()}
+                                        </span>
+                                    }
+                                }).collect::<Vec<_>>()}
+                                {if has_more {
+                                    view! {
+                                        <span class="method-tag" style="background: #e0e0e0; color: #666;">
+                                            "+" {remaining_count} " ещё"
+                                        </span>
+                                    }.into_any()
+                                } else {
+                                    let _: () = view! {};
+                                    ().into_any()
+                                }}
+                            </div>
+                        </div>
+                    }.into_any()
+                } else {
+                    let _: () = view! {};
+                    ().into_any()
+                }
+            }}
+
+            {move || {
+                let info = type_info.get();
+                if !info.tabular_sections.is_empty() {
+                    let sections_to_show: Vec<String> = info.tabular_sections.iter()
+                        .take(3)
+                        .map(|ts| ts.name.clone())
+                        .collect();
+                    let has_more = info.tabular_sections.len() > 3;
+                    let remaining_count = if has_more { info.tabular_sections.len() - 3 } else { 0 };
+
+                    view! {
+                        <div class="tabular-sections-section">
+                            <strong>"📋 Табличные части (" {info.tabular_sections.len()} "):"</strong><br/>
+                            <div style="margin-top: 8px;">
+                                {sections_to_show.into_iter().map(|section_name| {
+                                    view! {
+                                        <span class="method-tag" style="background: #e3f2fd; color: #1976d2;">
+                                            {section_name}
                                         </span>
                                     }
                                 }).collect::<Vec<_>>()}

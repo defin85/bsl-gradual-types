@@ -51,7 +51,7 @@ fn test_parse_test_configuration() {
     assert_eq!(kontragenty.facets.len(), 5); // Manager, Object, Reference, Selection, List
 
     // Проверяем конвертацию в RawTypeData
-    let raw_type = kontragenty.to_raw_type_data();
+    let raw_type = kontragenty.to_raw_type_data(None);
     assert_eq!(raw_type.name, "Справочники.Контрагенты");
     assert_eq!(raw_type.kind, Some(MetadataKind::Catalog));
     println!("✅ Конвертация в RawTypeData успешна: {}", raw_type.name);
@@ -152,7 +152,7 @@ fn test_convert_catalog_to_raw_type() {
     let metadata =
         UniversalMetadataParser::parse_any_object(xml_path).expect("Не удалось распарсить объект");
 
-    let raw_type = metadata.to_raw_type_data();
+    let raw_type = metadata.to_raw_type_data(None);
 
     println!("🔄 Конвертация в RawTypeData:");
     println!("   name: {}", raw_type.name);

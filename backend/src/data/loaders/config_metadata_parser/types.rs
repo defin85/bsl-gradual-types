@@ -2,6 +2,7 @@
 
 use bsl_shared::domain::types::{FacetKind, MetadataKind};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Информация об атрибуте объекта метаданных
 #[derive(Debug, Clone)]
@@ -123,5 +124,68 @@ impl UniversalMetadataObject {
             Some(MetadataKind::Register) => vec![FacetKind::Manager, FacetKind::Object],
             None => vec![], // Неизвестный тип - пустой список фасетов
         }
+    }
+}
+
+/// Тип конфигурации 1С
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigurationType {
+    /// Основная конфигурация (базовая)
+    Base,
+    /// Расширение конфигурации
+    Extension,
+}
+
+/// Информация о найденной конфигурации
+#[derive(Debug, Clone)]
+pub struct ConfigurationInfo {
+    /// Путь к папке конфигурации (содержит Configuration.xml)
+    pub path: PathBuf,
+
+    /// Тип конфигурации (Base или Extension)
+    pub config_type: ConfigurationType,
+
+    /// Имя конфигурации (из <Name> тега)
+    pub name: String,
+
+    /// Префикс расширения (если есть, например "Тест_")
+    /// Для основной конфигурации всегда None
+    pub prefix: Option<String>,
+
+    /// UUID конфигурации (для диагностики)
+    pub uuid: Option<String>,
+}
+
+impl ConfigurationInfo {
+    /// Создать информацию об основной конфигурации
+    pub fn base(path: PathBuf, name: String) -> Self {
+        Self {
+            path,
+            config_type: ConfigurationType::Base,
+            name,
+            prefix: None,
+            uuid: None,
+        }
+    }
+
+    /// Создать информацию о расширении
+    pub fn extension(path: PathBuf, name: String, prefix: Option<String>) -> Self {
+        Self {
+            path,
+            config_type: ConfigurationType::Extension,
+            name,
+            prefix,
+            uuid: None,
+        }
+    }
+
+    /// Является ли конфигурация расширением
+    pub fn is_extension(&self) -> bool {
+        matches!(self.config_type, ConfigurationType::Extension)
+    }
+
+    /// Является ли конфигурация базовой
+    pub fn is_base(&self) -> bool {
+        matches!(self.config_type, ConfigurationType::Base)
     }
 }

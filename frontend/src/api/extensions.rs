@@ -3,12 +3,14 @@
 //! This module provides UI-specific functionality (colors, formatting, filters)
 //! that extends the core DTOs from bsl-shared without duplicating them.
 
-use bsl_shared::api::dtos::{CategoryDto, MetricsDto, PaginationDto, TypeDto};
+use bsl_shared::api::dtos::{CategoryDto, MetricsDto, PaginationDto, TypeDto, MethodDto, ParamDto};
 
 // Type aliases for backward compatibility during transition
 pub type TypeInfo = TypeDto;
 pub type TypeMetrics = MetricsDto;
 pub type PaginationInfo = PaginationDto;
+pub type MethodInfo = MethodDto;
+pub type ParamInfo = ParamDto;
 
 /// Frontend-specific methods for TypeDto
 pub trait TypeDtoExt {
@@ -135,10 +137,6 @@ impl TypeFilters {
             page: 1,
             page_size: 50,
         }
-    }
-
-    pub fn offset(&self) -> usize {
-        (self.page - 1) * self.page_size
     }
 
     /// Проверка, соответствует ли тип фильтрам

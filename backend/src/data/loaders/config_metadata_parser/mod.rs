@@ -18,4 +18,7 @@ pub mod types;
 // Re-export публичного API
 pub use discovery::ConfigurationDiscovery;
 pub use parser::UniversalMetadataParser;
-pub use types::{AttributeInfo, TabularSectionInfo, UniversalMetadataObject};
+pub use types::{
+    AttributeInfo, ConfigurationInfo, ConfigurationType, TabularSectionInfo,
+    UniversalMetadataObject,
+};

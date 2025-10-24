@@ -53,7 +53,8 @@ impl TypeRenderer for MarkdownRenderer {
         if !type_dto.methods.is_empty() {
             md.push_str(&format!("## Методы ({})\n\n", type_dto.methods.len()));
             for method in &type_dto.methods {
-                md.push_str(&format!("- `{}`\n", method));
+                let signature = self.format_method_signature(method);
+                md.push_str(&format!("- `{}`\n", signature));
             }
             md.push('\n');
         }
@@ -113,6 +114,27 @@ impl TypeRenderer for MarkdownRenderer {
         md.push_str(&format!("- **Всего методов:** {}\n", total_methods));
 
         Ok(md)
+    }
+}
+
+// Helper functions for MarkdownRenderer
+impl MarkdownRenderer {
+    /// Форматировать сигнатуру метода
+    fn format_method_signature(&self, method: &bsl_shared::api::dtos::MethodDto) -> String {
+        let params_str = method
+            .params
+            .iter()
+            .map(|p| format!("{}: {}", p.name, p.param_type))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let return_str = method
+            .return_type
+            .as_ref()
+            .map(|t| format!(" → {}", t))
+            .unwrap_or_default();
+
+        format!("{}({}){}", method.name, params_str, return_str)
     }
 }
 

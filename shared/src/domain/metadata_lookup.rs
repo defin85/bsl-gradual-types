@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::domain::repository::TypeRepository;
 use crate::domain::types::{
     TypeResolution, RawTypeData, RawMethodData, RawPropertyData,
-    ResolutionResult, ConcreteType, GenericType,
+    ResolutionResult, ConcreteType, GenericType, MetadataKind, FacetKind,
 };
 
 /// Сервис для получения метаданных типа по TypeResolution
@@ -105,18 +105,28 @@ impl TypeMetadataLookup {
     /// }
     /// ```
     pub fn get_methods(&self, resolution: &TypeResolution) -> Vec<RawMethodData> {
-        // Обработка Generic типов с подстановкой параметров
+        // Специальная обработка для Generic типов (СОХРАНИТЬ существующую логику!)
         if let ResolutionResult::Generic(generic_type) = &resolution.result {
             return self.get_methods_for_generic(generic_type);
         }
-
+        
+        // ✅ НОВОЕ: Приоритет 1 - Lazy lookup через active_facet
+        if let Some(facet) = resolution.active_facet {
+            if let Some(facet_methods) = self.get_facet_methods(resolution, facet) {
+                // Нашли методы платформенного типа для фасета
+                return facet_methods;
+            }
+            // Если lookup не удался, продолжаем с fallback
+        }
+        
+        // Fallback: старая логика для совместимости
+        // Используется для:
+        // - Примитивных типов (Строка, Число)
+        // - Типов без активного фасета
+        // - Случаев когда платформенный тип не загружен
         let type_name = self.extract_type_name(resolution);
-
-        let raw_type = type_name.and_then(|name| {
-            self.repository.find_type(&name)
-        });
-
-        raw_type.map(|raw| raw.methods).unwrap_or_default()
+        let raw_type = type_name.and_then(|name| self.repository.find_type(&name));
+        raw_type.map(|raw| raw.methods.clone()).unwrap_or_default()
     }
 
     /// Получить свойства для TypeResolution
@@ -377,6 +387,116 @@ impl TypeMetadataLookup {
             ConcreteType::GlobalFunction(gf) => gf.name.clone(),
             ConcreteType::TabularRow(tr) => tr.get_full_name(),
         }
+    }
+
+    /// Определяет имя платформенного типа на основе вида метаданных и активного фасета
+    /// 
+    /// # Mapping таблица:
+    /// 
+    /// | MetadataKind | FacetKind  | Platform Type Name     |
+    /// |-------------|------------|------------------------|
+    /// | Document    | Manager    | ДокументМенеджер       |
+    /// | Document    | Object     | ДокументОбъект         |
+    /// | Document    | Reference  | ДокументСсылка         |
+    /// | Document    | Selection  | ДокументВыборка        |
+    /// | Document    | List       | ДокументСписок         |
+    /// | Catalog     | Manager    | СправочникМенеджер     |
+    /// | Catalog     | Object     | СправочникОбъект       |
+    /// | Catalog     | Reference  | СправочникСсылка       |
+    /// | Catalog     | Selection  | СправочникВыборка      |
+    /// | Catalog     | List       | СправочникСписок       |
+    /// 
+    /// # Возвращает
+    /// 
+    /// * `Some(&'static str)` - имя платформенного типа для поддерживаемой комбинации
+    /// * `None` - для неподдерживаемых комбинаций (Enums, Registers пока не реализованы)
+    /// 
+    fn get_platform_facet_type(kind: MetadataKind, facet: FacetKind) -> Option<&'static str> {
+        use MetadataKind::*;
+        use FacetKind::*;
+        
+        match (kind, facet) {
+            // Documents mapping
+            (Document, Manager)   => Some("ДокументМенеджер"),
+            (Document, Object)    => Some("ДокументОбъект"),
+            (Document, Reference) => Some("ДокументСсылка"),
+            (Document, Selection) => Some("ДокументВыборка"),
+            (Document, List)      => Some("ДокументСписок"),
+            
+            // Catalogs mapping
+            (Catalog, Manager)    => Some("СправочникМенеджер"),
+            (Catalog, Object)     => Some("СправочникОбъект"),
+            (Catalog, Reference)  => Some("СправочникСсылка"),
+            (Catalog, Selection)  => Some("СправочникВыборка"),
+            (Catalog, List)       => Some("СправочникСписок"),
+            
+            // TODO: Будущие расширения
+            // (Enum, Manager) => Some("ПеречислениеМенеджер"),
+            // (InformationRegister, Manager) => Some("РегистрСведенийМенеджер"),
+            
+            // Неподдерживаемые комбинации
+            _ => None,
+        }
+    }
+
+    /// Извлекает MetadataKind из TypeResolution
+    /// 
+    /// # Возвращает
+    /// 
+    /// * `Some(MetadataKind)` - для конфигурационных типов (Документы, Справочники)
+    /// * `None` - для примитивных и других не-конфигурационных типов
+    /// 
+    fn extract_metadata_kind(&self, resolution: &TypeResolution) -> Option<MetadataKind> {
+        match &resolution.result {
+            ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) => {
+                Some(cfg.kind)
+            },
+            _ => None,
+        }
+    }
+
+    /// Выполняет lazy lookup методов для конкретного фасета
+    /// 
+    /// # Алгоритм
+    /// 
+    /// 1. Извлекает MetadataKind из resolution
+    /// 2. Определяет имя платформенного типа через mapping
+    /// 3. Ищет платформенный тип в репозитории
+    /// 4. Возвращает его методы
+    /// 
+    /// # Edge cases
+    /// 
+    /// - Если resolution не содержит ConfigurationType → None
+    /// - Если mapping не найден для комбинации → None
+    /// - Если платформенный тип не загружен → None
+    /// - Если методы пусты → Some(vec![])
+    /// 
+    /// # Примеры
+    /// 
+    /// ```ignore
+    /// // Документы.ЗаказНаряды + Manager фасет
+    /// let methods = lookup.get_facet_methods(&resolution, FacetKind::Manager);
+    /// // → Ищет "ДокументМенеджер" → Возвращает 12 методов
+    /// ```
+    /// 
+    fn get_facet_methods(
+        &self, 
+        resolution: &TypeResolution, 
+        facet: FacetKind
+    ) -> Option<Vec<RawMethodData>> {
+        // 1. Извлекаем MetadataKind
+        let metadata_kind = self.extract_metadata_kind(resolution)?;
+        
+        // 2. Получаем имя платформенного типа через mapping
+        let platform_type_name = Self::get_platform_facet_type(metadata_kind, facet)?;
+        
+        // 3. Ищем платформенный тип в репозитории
+        let platform_type = self.repository.find_type(platform_type_name)?;
+        
+        // 4. Возвращаем клонированные методы
+        // Важно: возвращаем Some даже для пустого Vec, чтобы отличать
+        // "тип найден, но методов нет" от "тип не найден"
+        Some(platform_type.methods.clone())
     }
 
 }

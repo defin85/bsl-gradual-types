@@ -6,6 +6,7 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
+use bsl_shared::api::MethodDto;
 use tracing::info;
 
 use crate::application::TypeInferenceService;
@@ -174,7 +175,7 @@ impl TypeSystemService {
                         .map(|f| format!("{:?}", f))
                         .collect(),
                     methods_count: Some(methods.len()),
-                    methods: methods.iter().map(|m| m.name.clone()).collect(),
+                    methods: methods.iter().map(|m| MethodDto { is_deprecated: false, is_constructor: false, name: m.name.clone(), english_name: None, return_type: None, params: vec![], description: None }).collect(),
                     attributes_count: raw_type.as_ref().map(|rt| rt.attributes.len()),
                     properties: properties.iter().map(|p| p.name.clone()).collect(),
                     enum_values,
@@ -758,7 +759,7 @@ impl TypeSystemService {
                         .map(|f| format!("{:?}", f))
                         .collect(),
                     methods_count: Some(methods.len()),
-                    methods: methods.iter().map(|m| m.name.clone()).collect(),
+                    methods: methods.iter().map(|m| MethodDto { is_deprecated: false, is_constructor: false, name: m.name.clone(), english_name: None, return_type: None, params: vec![], description: None }).collect(),
                     attributes_count: raw_type.as_ref().map(|rt| rt.attributes.len()),
                     properties: properties.iter().map(|p| p.name.clone()).collect(),
                     enum_values,
@@ -2160,6 +2161,24 @@ impl TypeSystemService {
     ///
     /// # Возвращает
     /// Статистику IR кеша (hits, misses, evictions, hit rate)
+
+    /// MILESTONE E2: Parse file content to SemanticProgram for visualization
+    ///
+    /// # Arguments
+    /// * `content` - File content as string
+    ///
+    /// # Returns
+    /// Result<SemanticProgram> - Parsed semantic representation
+    pub async fn parse_semantic_program(
+        &self,
+        content: &str,
+    ) -> Result<bsl_shared::ir::SemanticProgram> {
+        let program = self
+            .parser
+            .parse_to_ir(content, "visualization.bsl")
+            .map_err(|e| anyhow::anyhow!("Failed to parse semantic program: {}", e))?;
+        Ok(program)
+    }
     pub async fn get_ir_cache_stats(&self) -> crate::system::IrCacheStats {
         self.ir_cache.get_stats().await
     }

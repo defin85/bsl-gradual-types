@@ -14,11 +14,55 @@ export interface QueryTypeParams {
     type_name: string;
 }
 
+// ============================================================================
+// Query Type Response (Расширенная версия для Type Details Modal)
+// ============================================================================
+
+export interface MethodInfo {
+    name: string;
+    englishName?: string;
+    returnType?: string;
+    params: ParamInfo[];
+    description?: string;
+    isDeprecated: boolean;
+    isConstructor: boolean;
+}
+
+export interface ParamInfo {
+    name: string;
+    paramType: string;
+    isOptional: boolean;
+    defaultValue?: string;
+}
+
+export interface PropertyInfo {
+    name: string;
+    propType: string;
+    isReadonly: boolean;
+    description?: string;
+}
+
 export interface QueryTypeResponse {
-    type_name: string;
+    typeName: string;       // camelCase (serde rename_all)
     found: boolean;
+
+    // Базовая информация о типе
+    certainty?: string;     // "Known (100%)", "Inferred (50%)"
+    facet?: string;         // "Manager", "Object", "Reference"
+    description?: string;
+
+    // Полная документация типа
+    methods?: MethodInfo[];
+    properties?: PropertyInfo[];
+    facets?: string[];
+
+    // Обратная совместимость (deprecated)
     details?: string;
 }
+
+// ============================================================================
+// Other Request/Response Types
+// ============================================================================
 
 export interface BuildIndexParams {
     workspace_path: string;
@@ -74,6 +118,28 @@ export interface ExtractPlatformDocsResponse {
 }
 
 // ============================================================================
+// Search Types (LSP Integration для Quick Actions)
+// ============================================================================
+
+export interface SearchTypesRequest {
+    query: string;
+    limit?: number;
+}
+
+export interface TypeSearchResult {
+    name: string;
+    english_name?: string;
+    facet: string;
+    certainty: string;
+    description?: string;
+}
+
+export interface SearchTypesResponse {
+    types: TypeSearchResult[];
+    total: number;
+}
+
+// ============================================================================
 // Helper Functions - прямые вызовы LSP custom requests
 // ============================================================================
 
@@ -82,9 +148,23 @@ export interface ExtractPlatformDocsResponse {
  * Заменяет: executeBslCommand('query_type', ...)
  */
 export async function queryType(typeName: string): Promise<QueryTypeResponse> {
-    return await sendCustomRequest<QueryTypeResponse>('bsl/queryType', {
-        type_name: typeName
-    });
+    const client = (await import('./client')).getLanguageClient();
+    if (!client) {
+        throw new Error('LSP client not available');
+    }
+
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.queryType',  // ← Execute Command (как searchTypes)
+            arguments: [{
+                type_name: typeName
+            }]
+        });
+        return result as QueryTypeResponse;
+    } catch (error) {
+        console.error('Failed to query type via LSP:', error);
+        throw error;
+    }
 }
 
 /**
@@ -163,4 +243,37 @@ export async function extractPlatformDocs(
         platform_version: platformVersion,
         force
     });
+}
+
+/**
+ * Поиск типов в TypeRepository через LSP
+ * Заменяет: mock данные в Quick Actions Webview
+ *
+ * @param query - поисковый запрос (partial match, case-insensitive)
+ * @param limit - максимум результатов (по умолчанию 15)
+ * @returns массив найденных типов
+ */
+export async function searchTypes(
+    query: string,
+    limit?: number
+): Promise<SearchTypesResponse> {
+    const client = (await import('./client')).getLanguageClient();
+    if (!client) {
+        throw new Error('LSP client not available');
+    }
+
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.searchTypes',
+            arguments: [{
+                query,
+                limit: limit || 15
+            }]
+        });
+
+        return result as SearchTypesResponse;
+    } catch (error) {
+        console.error('Failed to search types via LSP:', error);
+        throw error;
+    }
 }

@@ -314,7 +314,7 @@ fn test_empty_synonym() {
 
     obj.synonym = Some("".to_string());
 
-    let raw_type = obj.to_raw_type_data();
+    let raw_type = obj.to_raw_type_data(None);
     assert_eq!(
         raw_type.description, "",
         "Пустой синоним должен корректно конвертироваться"
@@ -331,7 +331,7 @@ fn test_no_synonym() {
 
     assert_eq!(obj.synonym, None, "Синоним должен быть None по умолчанию");
 
-    let raw_type = obj.to_raw_type_data();
+    let raw_type = obj.to_raw_type_data(None);
     assert_eq!(
         raw_type.description, "",
         "Отсутствующий синоним должен конвертироваться в пустую строку"
@@ -369,7 +369,7 @@ fn test_empty_attributes_and_tabular_sections() {
         "Табличные части должны быть пустыми по умолчанию"
     );
 
-    let raw_type = obj.to_raw_type_data();
+    let raw_type = obj.to_raw_type_data(None);
     assert_eq!(raw_type.attributes.len(), 0);
     assert_eq!(raw_type.tabular_sections.len(), 0);
 }
@@ -386,7 +386,7 @@ fn test_full_type_name_formation() {
         "12345678-1234-1234-1234-123456789012".to_string(),
     );
 
-    let raw_type = obj.to_raw_type_data();
+    let raw_type = obj.to_raw_type_data(None);
     assert_eq!(raw_type.name, "Справочники.Контрагенты");
 }
 
@@ -398,7 +398,7 @@ fn test_document_full_type_name() {
         "12345678-1234-1234-1234-123456789012".to_string(),
     );
 
-    let raw_type = obj.to_raw_type_data();
+    let raw_type = obj.to_raw_type_data(None);
     assert_eq!(raw_type.name, "Документы.ЗаказНаряды");
 }
 
@@ -410,7 +410,7 @@ fn test_information_register_full_type_name() {
         "12345678-1234-1234-1234-123456789012".to_string(),
     );
 
-    let raw_type = obj.to_raw_type_data();
+    let raw_type = obj.to_raw_type_data(None);
     assert_eq!(raw_type.name, "РегистрыСведений.ТестовыйРегистр");
 }
 
@@ -422,7 +422,7 @@ fn test_constant_full_type_name() {
         "12345678-1234-1234-1234-123456789012".to_string(),
     );
 
-    let raw_type = obj.to_raw_type_data();
+    let raw_type = obj.to_raw_type_data(None);
     assert_eq!(raw_type.name, "Константы.ОсновнаяОрганизация");
 }
 
@@ -434,7 +434,7 @@ fn test_unknown_type_full_name() {
         "12345678-1234-1234-1234-123456789012".to_string(),
     );
 
-    let raw_type = obj.to_raw_type_data();
+    let raw_type = obj.to_raw_type_data(None);
     assert_eq!(
         raw_type.name, "СтранныйОбъект",
         "Неизвестный тип должен использовать просто имя"
@@ -452,7 +452,7 @@ fn test_raw_data_source_is_configuration() {
         "12345678-1234-1234-1234-123456789012".to_string(),
     );
 
-    let raw_type = obj.to_raw_type_data();
+    let raw_type = obj.to_raw_type_data(None);
     assert_eq!(raw_type.source, RawDataSource::Configuration);
 }
 
@@ -464,7 +464,7 @@ fn test_facets_preserved_in_raw_type() {
         "12345678-1234-1234-1234-123456789012".to_string(),
     );
 
-    let raw_type = obj.to_raw_type_data();
+    let raw_type = obj.to_raw_type_data(None);
     assert_eq!(
         raw_type.facets.len(),
         obj.facets.len(),

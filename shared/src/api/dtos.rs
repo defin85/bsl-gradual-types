@@ -29,8 +29,9 @@ pub struct TypeDto {
     pub facets: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub methods_count: Option<usize>,
+    /// Full method signatures with parameters and return types (Phase 2: Breaking change)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub methods: Vec<String>,
+    pub methods: Vec<MethodDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -198,4 +199,78 @@ pub struct ValidationMetadataDto {
     pub types_resolved: usize,
     /// Time taken for validation (milliseconds)
     pub duration_ms: u64,
+}
+
+// ============================================================================
+// Method Signature DTOs (Phase 2: Breaking change)
+// ============================================================================
+
+/// Full method signature with parameters and return type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MethodDto {
+    /// Method name in Russian (e.g., "Добавить")
+    pub name: String,
+
+    /// English method name if available (e.g., "Add")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub english_name: Option<String>,
+
+    /// Return type of the method (e.g., "Строка", "Число")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_type: Option<String>,
+
+    /// Method parameters with detailed information
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<ParamDto>,
+
+    /// Method description/documentation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Whether this method is deprecated
+    #[serde(default)]
+    pub is_deprecated: bool,
+
+    /// Whether this is a constructor method
+    #[serde(default)]
+    pub is_constructor: bool,
+}
+
+/// Method parameter information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParamDto {
+    /// Parameter name (e.g., "Значение", "Ключ")
+    pub name: String,
+
+    /// Parameter type (e.g., "Произвольный", "Строка")
+    pub param_type: String,
+
+    /// Whether parameter is optional
+    #[serde(default)]
+    pub is_optional: bool,
+
+    /// Default value if parameter is optional
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<String>,
+}
+
+/// Property information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PropertyDto {
+    /// Property name (e.g., "Код", "Наименование")
+    pub name: String,
+
+    /// Property type (e.g., "Строка", "Число")
+    pub prop_type: String,
+
+    /// Whether property is read-only
+    #[serde(default)]
+    pub is_readonly: bool,
+
+    /// Property description/documentation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }

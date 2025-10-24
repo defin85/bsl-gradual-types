@@ -101,7 +101,7 @@ impl HtmlRenderer {
     }
 
     /// Рендерить секцию методов
-    fn render_methods_section(&self, methods: &[String]) -> String {
+    fn render_methods_section(&self, methods: &[bsl_shared::api::dtos::MethodDto]) -> String {
         if methods.is_empty() {
             return String::new();
         }
@@ -112,7 +112,10 @@ impl HtmlRenderer {
             let visible: Vec<String> = methods
                 .iter()
                 .take(5)
-                .map(|m| format!(r#"<li><code>{}</code></li>"#, m))
+                .map(|m| {
+                    let signature = self.format_method_signature(m);
+                    format!(r#"<li><code>{}</code></li>"#, signature)
+                })
                 .collect();
 
             format!(
@@ -126,7 +129,10 @@ impl HtmlRenderer {
         } else {
             let all: Vec<String> = methods
                 .iter()
-                .map(|m| format!(r#"<li><code>{}</code></li>"#, m))
+                .map(|m| {
+                    let signature = self.format_method_signature(m);
+                    format!(r#"<li><code>{}</code></li>"#, signature)
+                })
                 .collect();
 
             format!(
@@ -144,6 +150,24 @@ impl HtmlRenderer {
     </div>"#,
             count, methods_list
         )
+    }
+
+    /// Форматировать сигнатуру метода
+    fn format_method_signature(&self, method: &bsl_shared::api::dtos::MethodDto) -> String {
+        let params_str = method
+            .params
+            .iter()
+            .map(|p| format!("{}: {}", p.name, p.param_type))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let return_str = method
+            .return_type
+            .as_ref()
+            .map(|t| format!(" → {}", t))
+            .unwrap_or_default();
+
+        format!("{}({}){}", method.name, params_str, return_str)
     }
 
     /// Рендерить секцию свойств

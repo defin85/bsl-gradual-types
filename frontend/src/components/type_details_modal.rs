@@ -1,6 +1,6 @@
 //! Type details modal component
 
-use crate::api::TypeInfo;
+use crate::api::{TypeInfo, MethodInfo};
 use leptos::prelude::*;
 
 #[component]
@@ -28,6 +28,7 @@ pub fn TypeDetailsModal(
                 let properties = info.properties.clone();
                 let enum_values = info.enum_values.clone();
                 let attributes_count = info.attributes_count;
+                let tabular_sections = info.tabular_sections.clone();
 
                 // Precompute flags for conditional rendering
                 let description_empty = description.is_empty();
@@ -35,9 +36,11 @@ pub fn TypeDetailsModal(
                 let methods_empty = methods.is_empty();
                 let properties_empty = properties.is_empty();
                 let enum_values_empty = enum_values.as_ref().map(|v| v.is_empty()).unwrap_or(true);
+                let tabular_sections_empty = tabular_sections.is_empty();
                 let methods_len = methods.len();
                 let properties_len = properties.len();
                 let enum_values_len = enum_values.as_ref().map(|v| v.len()).unwrap_or(0);
+                let tabular_sections_len = tabular_sections.len();
                 let has_metadata = !methods_empty || !properties_empty || attributes_count.unwrap_or(0) > 0;
 
                 view! {
@@ -157,6 +160,44 @@ pub fn TypeDetailsModal(
                                     ().into_any()
                                 }}
 
+                                // Tabular sections (for documents, catalogs)
+                                {if !tabular_sections_empty {
+                                    view! {
+                                        <section class="detail-section">
+                                            <h3 class="section-title">"📋 Табличные части (" {tabular_sections_len} ")"</h3>
+                                            {tabular_sections.iter().map(|ts| {
+                                                let ts_name = ts.name.clone();
+                                                let ts_attrs = ts.attributes.clone();
+                                                let attrs_count = ts_attrs.len();
+
+                                                view! {
+                                                    <div class="tabular-section-detail">
+                                                        <h4 class="subsection-title">
+                                                            "📄 " {ts_name.clone()} " (" {attrs_count} " атрибутов)"
+                                                        </h4>
+                                                        <div class="tabular-attributes-list">
+                                                            {ts_attrs.iter().map(|attr| {
+                                                                let attr_name = attr.name.clone();
+                                                                let attr_type = attr.attr_type.clone().unwrap_or_else(|| "?".to_string());
+
+                                                                view! {
+                                                                    <div class="tabular-attribute-item">
+                                                                        <span class="attribute-name">{attr_name}</span>
+                                                                        <span class="attribute-type">{attr_type}</span>
+                                                                    </div>
+                                                                }
+                                                            }).collect::<Vec<_>>()}
+                                                        </div>
+                                                    </div>
+                                                }
+                                            }).collect::<Vec<_>>()}
+                                        </section>
+                                    }.into_any()
+                                } else {
+                                    let _: () = view! {};
+                                    ().into_any()
+                                }}
+
                                 // Methods and properties section
                                 {if has_metadata {
                                     view! {
@@ -172,9 +213,15 @@ pub fn TypeDetailsModal(
                                                         </h4>
                                                         <div class="methods-list">
                                                             {methods.iter().map(|method| {
+                                                                let signature = format_method_signature(method);
+                                                                let tooltip = method.english_name.clone().unwrap_or_default();
                                                                 view! {
-                                                                    <div class="method-item">
-                                                                        <span class="method-name">{method.clone()}</span>
+                                                                    <div
+                                                                        class="method-item"
+                                                                        title={tooltip}
+                                                                    >
+                                                                        <span class="method-name">{method.name.clone()}</span>
+                                                                        <span class="method-signature">{signature}</span>
                                                                     </div>
                                                                 }
                                                             }).collect::<Vec<_>>()}
@@ -268,4 +315,28 @@ pub fn TypeDetailsModal(
             }}
         </Show>
     }
+}
+
+/// Helper функция для форматирования сигнатуры метода с поддержкой optional параметров
+fn format_method_signature(method: &MethodInfo) -> String {
+    let params_str = method
+        .params
+        .iter()
+        .map(|p| {
+            let param_name = &p.name;
+            let param_type = &p.param_type;
+            // Добавляем "?" для optional параметров
+            let optional_marker = if p.is_optional { "?" } else { "" };
+            format!("{}{}: {}", param_name, optional_marker, param_type)
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let return_str = method
+        .return_type
+        .as_ref()
+        .map(|t| format!(" → {}", t))
+        .unwrap_or_default();
+
+    format!("({}){}", params_str, return_str)
 }

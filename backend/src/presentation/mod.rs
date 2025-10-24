@@ -10,6 +10,9 @@ pub mod web;
 // CLI interface components
 pub mod cli;
 
+// Semantic HTML generation (MILESTONE E2 - Task 2.1)
+pub mod semantic_html_generator;
+
 // Semantic visualization API (MILESTONE 2.16)
 pub mod semantic_routes;
 

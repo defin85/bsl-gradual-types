@@ -895,6 +895,562 @@ fn syntax_errors_to_diagnostics(&self, errors: &[ParseError]) -> Vec<Diagnostic>
 
 ---
 
+### 📊 Milestone 2.20: Enhanced Status Bar (2-3 дня)
+
+**Приоритет:** 🟡 СРЕДНИЙ — улучшает user experience, даёт визуальную обратную связь
+
+**Проблема:**
+Текущая строка статуса в VSCode Extension минималистична и не даёт пользователю обратной связи о:
+- Прогрессе загрузки LSP сервера (user не знает, что происходит)
+- Прогрессе индексации конфигурации (на больших проектах может занимать минуты)
+- Текущем контексте редактора (в какой функции/процедуре находится курсор)
+- Количестве загруженных типов в TypeRepository (3927 типов платформы + конфигурация)
+
+**Референс:**
+На скриншоте показана строка статуса другого LSP расширения с индикаторами:
+```
+main ⟳ | ⊘ 0 △ 0 | Downloading BSL Language Server v0.24.2 - 0.34 % | ПричтениеНаСервере | Обновляем кэш файла № 4900 из 17689
+```
+
+**Цель:**
+Добавить расширенные индикаторы статуса для улучшения user experience:
+1. **LSP Server Status** — прогресс загрузки/инициализации сервера
+2. **Configuration Indexing** — прогресс парсинга метаданных конфигурации
+3. **Current Context** — отображение текущей функции/процедуры в редакторе
+4. **Type Repository Stats** — количество загруженных типов (платформа + конфигурация)
+
+#### Задачи:
+
+**Task 1: LSP Server Status Indicator** (0.5 дня)
+
+**Проблема:**
+Пользователь не видит, что LSP сервер стартует — статус бар показывает "BSL Analyzer: Starting..." без деталей.
+
+**Добавить в `lsp/client.ts`:**
+```typescript
+// vscode-extension/src/lsp/client.ts
+
+export interface LspServerStatus {
+    state: 'initializing' | 'connecting' | 'ready' | 'error';
+    progress?: number;  // 0-100
+    message?: string;
+}
+
+// Event emitter для обновления статуса LSP
+export const lspStatusEmitter = new vscode.EventEmitter<LspServerStatus>();
+
+async function startLanguageClient(context: vscode.ExtensionContext) {
+    // ... существующий код ...
+
+    // ✅ НОВОЕ: Уведомляем о начале инициализации
+    lspStatusEmitter.fire({
+        state: 'initializing',
+        progress: 0,
+        message: 'Starting LSP Server...'
+    });
+
+    try {
+        // Запуск сервера (как сейчас)
+        await client.start();
+
+        // ✅ НОВОЕ: Уведомляем о подключении
+        lspStatusEmitter.fire({
+            state: 'connecting',
+            progress: 50,
+            message: 'Connecting to LSP Server...'
+        });
+
+        // ✅ НОВОЕ: Уведомляем о готовности
+        lspStatusEmitter.fire({
+            state: 'ready',
+            progress: 100,
+            message: 'LSP Server Ready'
+        });
+
+    } catch (error) {
+        lspStatusEmitter.fire({
+            state: 'error',
+            message: `LSP Server failed: ${error}`
+        });
+    }
+}
+```
+
+**Обновить `extension.ts`:**
+```typescript
+// vscode-extension/src/extension.ts
+
+import { lspStatusEmitter } from './lsp/client';
+
+export async function activate(context: vscode.ExtensionContext) {
+    // ... существующий код ...
+
+    // ✅ НОВОЕ: Подписываемся на обновления LSP статуса
+    context.subscriptions.push(
+        lspStatusEmitter.event((status) => {
+            if (status.state === 'initializing' || status.state === 'connecting') {
+                const icon = '$(sync~spin)';
+                statusBarItem.text = `${icon} BSL Analyzer: ${status.message} (${status.progress}%)`;
+                statusBarItem.tooltip = `LSP Server: ${status.state}\n${status.message}`;
+            } else if (status.state === 'ready') {
+                statusBarItem.text = '$(database) BSL Analyzer: Ready';
+                statusBarItem.tooltip = 'BSL Type Safety Analyzer\nLSP Server активен';
+            } else if (status.state === 'error') {
+                statusBarItem.text = '$(error) BSL Analyzer: Error';
+                statusBarItem.tooltip = status.message;
+            }
+        })
+    );
+}
+```
+
+**Task 2: Platform & Configuration Indexing Progress** (1 день)
+
+**Проблема:**
+При парсинге больших конфигураций (17000+ файлов) или платформенных типов из Syntax Helper (3927 типов) пользователь не видит прогресс — статус бар показывает только "BSL Index: Parsing configuration... (35%)" без деталей.
+
+**Требуется индикация для ДВУХ типов парсинга:**
+1. **Platform Types** — парсинг Syntax Helper файлов (контекстная справка 1С:Предприятие)
+   - `rebuilt.shcntx_ru` — объекты, методы, свойства (~3927 типов)
+   - `rebuilt.shlang_ru` — справка по языку (примитивные типы, операторы)
+2. **Configuration Types** — парсинг метаданных конфигурации (Configuration.xml)
+   - Справочники, Документы, Регистры, Перечисления (~100-500 типов обычно)
+
+**Добавить в `lsp/progress.ts`:**
+```typescript
+// vscode-extension/src/lsp/progress.ts
+
+export type IndexingType = 'platform' | 'configuration';
+
+export interface DetailedIndexingProgress {
+    indexingType: IndexingType;     // ✅ НОВОЕ: Тип индексации
+    currentItem: number;
+    totalItems: number;
+    currentItemName?: string;        // Имя текущего файла или типа
+}
+
+// ✅ НОВОЕ: Расширяем IndexingProgress
+export interface IndexingProgress {
+    isIndexing: boolean;
+    currentStep: string;
+    progress: number;        // 0-100
+    totalSteps: number;
+    currentStepNumber: number;
+    startTime?: Date;
+    estimatedTimeRemaining?: string;
+
+    // ✅ НОВОЕ: Детали индексации (платформа или конфигурация)
+    detailedProgress?: DetailedIndexingProgress;
+}
+
+export function updateIndexingProgress(
+    stepNumber: number,
+    stepName: string,
+    progress: number,
+    configProgress?: ConfigurationIndexingProgress
+) {
+    // ... существующий код ...
+
+    globalIndexingProgress = {
+        ...globalIndexingProgress,
+        currentStep: stepName,
+        progress: Math.min(progress, 100),
+        currentStepNumber: stepNumber,
+        estimatedTimeRemaining: eta ? `${eta}s` : 'calculating...',
+        configProgress  // ✅ НОВОЕ
+    };
+
+    updateStatusBar(undefined, globalIndexingProgress);
+}
+
+export function updateStatusBar(text?: string, progress?: IndexingProgress) {
+    // ... существующий код ...
+
+    if (progress && progress.isIndexing) {
+        const icon = '$(sync~spin)';
+        const percent = Math.round(progress.progress);
+
+        // ✅ НОВОЕ: Если есть детали конфигурации — показываем их
+        let detailsText = '';
+        if (progress.configProgress) {
+            const { currentFile, totalFiles } = progress.configProgress;
+            detailsText = ` | Файл ${currentFile}/${totalFiles}`;
+        }
+
+        const eta = progress.estimatedTimeRemaining ? ` - ETA: ${progress.estimatedTimeRemaining}` : '';
+        statusBarItem.text = `${icon} BSL Index: ${progress.currentStep} (${percent}%${eta})${detailsText}`;
+        statusBarItem.tooltip = `Step ${progress.currentStepNumber}/${progress.totalSteps}\n` +
+            `Progress: ${percent}%\n${progress.currentStep}` +
+            (progress.configProgress ? `\nFile: ${progress.configProgress.currentFile}/${progress.configProgress.totalFiles}` : '');
+        statusBarItem.show();
+    }
+}
+```
+
+**Task 3: Current Context Indicator (Function/Procedure Name)** (1 день)
+
+**Проблема:**
+Пользователь не видит, в какой функции/процедуре находится курсор — нужно прокручивать код вверх для определения контекста.
+
+**Добавить новый модуль `vscode-extension/src/lsp/contextProvider.ts`:**
+```typescript
+// vscode-extension/src/lsp/contextProvider.ts
+
+import * as vscode from 'vscode';
+import { getLanguageClient } from './client';
+
+export interface CurrentContext {
+    functionName?: string;
+    procedureName?: string;
+    moduleName?: string;
+    line: number;
+    column: number;
+}
+
+// Event emitter для обновления контекста
+export const contextEmitter = new vscode.EventEmitter<CurrentContext>();
+
+/**
+ * Инициализирует отслеживание текущего контекста в редакторе
+ */
+export function initializeContextProvider(context: vscode.ExtensionContext) {
+    // Обновляем контекст при изменении позиции курсора
+    context.subscriptions.push(
+        vscode.window.onDidChangeTextEditorSelection(async (event) => {
+            await updateCurrentContext(event.textEditor);
+        })
+    );
+
+    // Обновляем контекст при переключении редактора
+    context.subscriptions.push(
+        vscode.window.onDidChangeActiveTextEditor(async (editor) => {
+            if (editor) {
+                await updateCurrentContext(editor);
+            }
+        })
+    );
+
+    // Начальное обновление контекста
+    if (vscode.window.activeTextEditor) {
+        updateCurrentContext(vscode.window.activeTextEditor);
+    }
+}
+
+async function updateCurrentContext(editor: vscode.TextEditor) {
+    // Проверяем, что это BSL файл
+    if (editor.document.languageId !== 'bsl') {
+        contextEmitter.fire({
+            line: editor.selection.active.line,
+            column: editor.selection.active.character
+        });
+        return;
+    }
+
+    const position = editor.selection.active;
+    const client = getLanguageClient();
+
+    if (!client) {
+        return;
+    }
+
+    try {
+        // ✅ ИСПОЛЬЗУЕМ LSP для получения текущего символа (Milestone 2.8 IR)
+        const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+            'vscode.executeDocumentSymbolProvider',
+            editor.document.uri
+        );
+
+        if (!symbols || symbols.length === 0) {
+            contextEmitter.fire({ line: position.line, column: position.character });
+            return;
+        }
+
+        // Ищем функцию/процедуру, которая содержит текущую позицию
+        const currentSymbol = findContainingSymbol(symbols, position);
+
+        if (currentSymbol) {
+            const context: CurrentContext = {
+                line: position.line,
+                column: position.character
+            };
+
+            if (currentSymbol.kind === vscode.SymbolKind.Function) {
+                context.functionName = currentSymbol.name;
+            } else if (currentSymbol.kind === vscode.SymbolKind.Method) {
+                context.procedureName = currentSymbol.name;
+            }
+
+            contextEmitter.fire(context);
+        }
+    } catch (error) {
+        console.error('Failed to get current context:', error);
+    }
+}
+
+function findContainingSymbol(
+    symbols: vscode.DocumentSymbol[],
+    position: vscode.Position
+): vscode.DocumentSymbol | undefined {
+    for (const symbol of symbols) {
+        // Проверяем, содержит ли символ текущую позицию
+        if (symbol.range.contains(position)) {
+            // Рекурсивно проверяем дочерние символы
+            if (symbol.children && symbol.children.length > 0) {
+                const childSymbol = findContainingSymbol(symbol.children, position);
+                if (childSymbol) {
+                    return childSymbol;
+                }
+            }
+            return symbol;
+        }
+    }
+    return undefined;
+}
+```
+
+**Обновить `extension.ts` для отображения контекста:**
+```typescript
+// vscode-extension/src/extension.ts
+
+import { initializeContextProvider, contextEmitter } from './lsp/contextProvider';
+
+export async function activate(context: vscode.ExtensionContext) {
+    // ... существующий код ...
+
+    // ✅ НОВОЕ: Инициализируем контекст-провайдер
+    initializeContextProvider(context);
+
+    // ✅ НОВОЕ: Подписываемся на обновления контекста
+    context.subscriptions.push(
+        contextEmitter.event((ctx) => {
+            // Обновляем tooltip статус-бара с информацией о текущем контексте
+            let contextText = '';
+            if (ctx.functionName) {
+                contextText = `\nТекущая функция: ${ctx.functionName}`;
+            } else if (ctx.procedureName) {
+                contextText = `\nТекущая процедура: ${ctx.procedureName}`;
+            }
+
+            if (contextText) {
+                statusBarItem.tooltip = statusBarItem.tooltip + contextText;
+            }
+        })
+    );
+}
+```
+
+**Task 4: Type Repository Statistics** (0.5 дня)
+
+**Проблема:**
+Пользователь не знает, сколько типов загружено в TypeRepository — не понятно, работает ли парсинг платформенной документации.
+
+**Добавить LSP Custom Request для статистики TypeRepository:**
+```typescript
+// vscode-extension/src/lsp/customRequests.ts
+
+export interface TypeRepositoryStats {
+    totalTypes: number;
+    platformTypes: number;
+    configurationTypes: number;
+    lastUpdateTime?: string;
+}
+
+/**
+ * Получить статистику TypeRepository из LSP Server
+ */
+export async function getTypeRepositoryStats(): Promise<TypeRepositoryStats | null> {
+    const client = getLanguageClient();
+    if (!client) {
+        return null;
+    }
+
+    try {
+        const stats = await client.sendRequest<TypeRepositoryStats>(
+            'bsl/getTypeRepositoryStats',
+            {}
+        );
+        return stats;
+    } catch (error) {
+        console.error('Failed to get type repository stats:', error);
+        return null;
+    }
+}
+```
+
+**Обновить `extension.ts` для отображения статистики:**
+```typescript
+// vscode-extension/src/extension.ts
+
+import { getTypeRepositoryStats } from './lsp/customRequests';
+
+export async function activate(context: vscode.ExtensionContext) {
+    // ... существующий код ...
+
+    // ✅ НОВОЕ: Периодически обновляем статистику TypeRepository
+    const updateTypeStatsInterval = setInterval(async () => {
+        const stats = await getTypeRepositoryStats();
+        if (stats) {
+            const tooltip = statusBarItem.tooltip as string;
+            const statsText = `\n\nTypeRepository: ${stats.totalTypes} типов` +
+                `\n- Платформа: ${stats.platformTypes}` +
+                `\n- Конфигурация: ${stats.configurationTypes}`;
+
+            // Добавляем статистику в tooltip (если её там ещё нет)
+            if (!tooltip.includes('TypeRepository:')) {
+                statusBarItem.tooltip = tooltip + statsText;
+            }
+        }
+    }, 5000);  // Обновляем каждые 5 секунд
+
+    context.subscriptions.push({
+        dispose: () => clearInterval(updateTypeStatsInterval)
+    });
+}
+```
+
+**Результат Milestone 2.20:**
+- ✅ Прогресс загрузки LSP сервера отображается в статус-баре (0-100%)
+- ✅ Прогресс индексации конфигурации с количеством файлов (например, "Файл 4900/17689")
+- ✅ Отображение текущей функции/процедуры в tooltip статус-бара
+- ✅ Статистика TypeRepository (количество типов платформы и конфигурации)
+- ✅ Визуальная обратная связь для всех длительных операций
+- ✅ Пользователь понимает, что происходит в расширении в любой момент времени
+
+**Тестирование:**
+
+**Сценарий 1: Загрузка LSP сервера**
+1. Перезапустить VSCode
+2. **Ожидаемый результат:**
+   - Статус-бар показывает: "$(sync~spin) BSL Analyzer: Starting LSP Server... (0%)"
+   - Через 1-2 секунды: "$(sync~spin) BSL Analyzer: Connecting to LSP Server... (50%)"
+   - Через 2-3 секунды: "$(database) BSL Analyzer: Ready"
+
+**Сценарий 2: Индексация конфигурации**
+1. Выполнить команду "BSL Analyzer: Build Index"
+2. **Ожидаемый результат:**
+   - Статус-бар показывает: "$(sync~spin) BSL Index: Parsing configuration... (35%) | Файл 1520/4300"
+   - Прогресс обновляется в реальном времени
+   - ETA показывает оценку оставшегося времени
+
+**Сценарий 3: Текущий контекст**
+1. Открыть `.bsl` файл с функцией
+2. Навести курсор внутрь функции
+3. **Ожидаемый результат:**
+   - Tooltip статус-бара показывает: "Текущая функция: ПолучитьДанные"
+4. Переместить курсор в процедуру
+5. **Ожидаемый результат:**
+   - Tooltip обновляется: "Текущая процедура: ОбработатьДанные"
+
+**Сценарий 4: Статистика типов**
+1. Навести мышь на статус-бар
+2. **Ожидаемый результат:**
+   - Tooltip показывает:
+     ```
+     BSL Type Safety Analyzer
+     LSP Server активен
+
+     TypeRepository: 3927 типов
+     - Платформа: 3927
+     - Конфигурация: 0
+     ```
+3. Выполнить команду "Parse Configuration"
+4. **Ожидаемый результат:**
+   - Tooltip обновляется:
+     ```
+     TypeRepository: 4150 типов
+     - Платформа: 3927
+     - Конфигурация: 223
+     ```
+
+**Интеграционные тесты:**
+```typescript
+// vscode-extension/src/test/suite/statusBar.test.ts
+
+import * as assert from 'assert';
+import * as vscode from 'vscode';
+import { lspStatusEmitter } from '../../lsp/client';
+
+suite('Status Bar Integration Tests', () => {
+    test('LSP Server status updates correctly', async () => {
+        // Эмулируем события LSP
+        lspStatusEmitter.fire({
+            state: 'initializing',
+            progress: 0,
+            message: 'Starting LSP Server...'
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Проверяем, что статус-бар обновился
+        const statusBarItems = vscode.window.visibleTextEditors;
+        // TODO: Проверить текст статус-бара (требует доступа к statusBarItem из extension.ts)
+    });
+});
+```
+
+**LSP Server Changes (Rust Backend):**
+
+**Добавить custom request `bsl/getTypeRepositoryStats` в `backend/src/bin/lsp_server.rs`:**
+```rust
+// backend/src/bin/lsp_server.rs
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TypeRepositoryStats {
+    total_types: usize,
+    platform_types: usize,
+    configuration_types: usize,
+    last_update_time: Option<String>,
+}
+
+async fn handle_custom_request(&self, method: &str, params: Value) -> Result<Value> {
+    match method {
+        // ... существующие handlers ...
+
+        // ✅ НОВОЕ: Статистика TypeRepository
+        "bsl/getTypeRepositoryStats" => {
+            let type_service = self.get_type_service();
+            let repository = type_service.repository().read().await;
+
+            let stats = TypeRepositoryStats {
+                total_types: repository.all_types().len(),
+                platform_types: repository.platform_types_count(),
+                configuration_types: repository.configuration_types_count(),
+                last_update_time: Some(chrono::Utc::now().to_rfc3339()),
+            };
+
+            Ok(serde_json::to_value(stats)?)
+        }
+
+        _ => Err(anyhow!("Unknown custom request: {}", method))
+    }
+}
+```
+
+**Добавить методы в `TypeRepository`:**
+```rust
+// shared/src/domain/repository.rs
+
+impl TypeRepository {
+    /// Количество типов платформы (из Syntax Helper)
+    pub fn platform_types_count(&self) -> usize {
+        self.types
+            .values()
+            .filter(|t| t.source == TypeSource::Platform)
+            .count()
+    }
+
+    /// Количество типов конфигурации (из Configuration.xml)
+    pub fn configuration_types_count(&self) -> usize {
+        self.types
+            .values()
+            .filter(|t| t.source == TypeSource::Configuration)
+            .count()
+    }
+}
+```
+
+---
+
 ### 📈 Milestone 2.4: Performance & Caching (1.5 недели)
 
 **Приоритет:** 🟠 ВЫСОКИЙ — критично для работы с реальными проектами
@@ -939,6 +1495,7 @@ fn syntax_errors_to_diagnostics(&self, errors: &[ParseError]) -> Vec<Diagnostic>
 ЗАВЕРШЕНО:    🎨 Milestone 2.16 - Semantic Tree Visualization (✅ ЗАВЕРШЁН 2025-10-17)
 ЗАВЕРШЕНО:    🚨 Milestone 2.18 - LSP Syntax Error Diagnostics (✅ ЗАВЕРШЁН 2025-10-18)
 ПЛАНИРУЕТСЯ:  🏗️ Milestone 2.19 - Architectural Improvements (🟡 СРЕДНИЙ)
+ПЛАНИРУЕТСЯ:  📊 Milestone 2.20 - Enhanced Status Bar (🟡 СРЕДНИЙ)
 ПЛАНИРУЕТСЯ:  📊 Milestone 2.12 - Custom LSP Requests (bsl/getAllTypes, bsl/searchTypes) (⏳ СРЕДНИЙ)
 ПЛАНИРУЕТСЯ:  ⚡ Milestone 2.13 - IR Caching & Performance Optimization (🔴 КРИТИЧНЫЙ)
 ПЛАНИРУЕТСЯ:  🔧 Milestone 2.14 - Inter-procedural Analysis (⏳ НИЗКИЙ)

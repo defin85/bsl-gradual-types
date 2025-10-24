@@ -1,112 +1,152 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import { searchTypes } from '../lsp/customRequests';
 
 /**
  * WebView провайдер для панели быстрых действий
  */
 export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
-    constructor(private readonly extensionUri: vscode.Uri) {}
+    private outputChannel?: vscode.OutputChannel;
+
+    constructor(
+        private readonly extensionUri: vscode.Uri,
+        private readonly client?: any,
+        outputChannel?: vscode.OutputChannel
+    ) {
+        this.outputChannel = outputChannel;
+    }
 
     resolveWebviewView(webviewView: vscode.WebviewView): void {
         webviewView.webview.options = {
             enableScripts: true,
-            localResourceRoots: [this.extensionUri]
+            localResourceRoots: [
+                vscode.Uri.joinPath(this.extensionUri, 'media', 'webview')
+            ]
         };
 
-        webviewView.webview.html = this.getWebviewContent();
+        webviewView.webview.html = this.getWebviewContent(webviewView.webview);
 
-        // Handle messages from webview
         webviewView.webview.onDidReceiveMessage(async (message) => {
-            switch (message.command) {
-                case 'analyzeCurrentFile':
-                    vscode.commands.executeCommand('bslAnalyzer.analyzeFile');
+            switch (message.type) {
+                case 'executeAction':
+                    await this.handleAction(message.action);
                     break;
-                case 'buildIndex':
-                    vscode.commands.executeCommand('bslAnalyzer.buildIndex');
+
+                case 'searchTypes':
+                    await this.handleSearchTypes(webviewView, message.query);
                     break;
-                case 'showMetrics':
-                    vscode.commands.executeCommand('bslAnalyzer.showMetrics');
-                    break;
-                case 'openSettings':
-                    vscode.commands.executeCommand('workbench.action.openSettings', 'bslAnalyzer');
+
+                case 'showTypeDetails':
+                    vscode.commands.executeCommand(
+                        'bslAnalyzer.showTypeDetails',
+                        message.typeName
+                    );
                     break;
             }
         });
     }
 
-    private getWebviewContent(): string {
-        return `
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>BSL Analyzer Actions</title>
-            <style>
-                body {
-                    font-family: var(--vscode-font-family);
-                    font-size: var(--vscode-font-size);
-                    color: var(--vscode-foreground);
-                    background-color: var(--vscode-editor-background);
-                    margin: 0;
-                    padding: 16px;
-                }
-                .action-button {
-                    display: block;
-                    width: 100%;
-                    padding: 8px 12px;
-                    margin: 8px 0;
-                    background-color: var(--vscode-button-background);
-                    color: var(--vscode-button-foreground);
-                    border: none;
-                    border-radius: 4px;
-                    cursor: pointer;
-                    text-align: left;
-                    font-size: 13px;
-                }
-                .action-button:hover {
-                    background-color: var(--vscode-button-hoverBackground);
-                }
-                .action-button:active {
-                    transform: translateY(1px);
-                }
-                .section-title {
-                    font-weight: bold;
-                    margin: 16px 0 8px 0;
-                    color: var(--vscode-descriptionForeground);
-                    font-size: 11px;
-                    text-transform: uppercase;
-                }
-                .icon {
-                    margin-right: 8px;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="section-title">Analysis</div>
-            <button class="action-button" onclick="sendMessage('analyzeCurrentFile')">
-                <span class="icon">🔍</span>Analyze Current File
-            </button>
-            <button class="action-button" onclick="sendMessage('buildIndex')">
-                <span class="icon">📋</span>Build Type Index
-            </button>
-            <button class="action-button" onclick="sendMessage('showMetrics')">
-                <span class="icon">📊</span>Show Metrics
-            </button>
-            
-            <div class="section-title">Configuration</div>
-            <button class="action-button" onclick="sendMessage('openSettings')">
-                <span class="icon">⚙️</span>Open Settings
-            </button>
+    private async handleAction(action: string) {
+        const commandMap: Record<string, string> = {
+            analyzeProject: 'bslAnalyzer.analyzeWorkspace',
+            buildIndex: 'bslAnalyzer.buildIndex',
+            openSettings: 'workbench.action.openSettings',
+            showDocs: 'markdown.showPreview',
+        };
 
-            <script>
-                const vscode = acquireVsCodeApi();
-                
-                function sendMessage(command) {
-                    vscode.postMessage({ command: command });
+        const command = commandMap[action];
+        if (command) {
+            if (action === 'showDocs') {
+                // Открыть CLAUDE.md из корня проекта расширения (родительская папка)
+                const extensionRoot = vscode.Uri.joinPath(this.extensionUri, '..');
+                const claudeMdPath = vscode.Uri.joinPath(extensionRoot, 'CLAUDE.md');
+
+                try {
+                    const doc = await vscode.workspace.openTextDocument(claudeMdPath);
+                    await vscode.window.showTextDocument(doc);
+                } catch (error) {
+                    vscode.window.showWarningMessage(
+                        `Не удалось открыть CLAUDE.md. Попробуйте открыть вручную: ${claudeMdPath.fsPath}`
+                    );
                 }
-            </script>
-        </body>
-        </html>
-        `;
+            } else {
+                await vscode.commands.executeCommand(command, 'bslAnalyzer');
+            }
+        }
     }
+
+    private async handleSearchTypes(
+        webviewView: vscode.WebviewView,
+        query: string
+    ) {
+        try {
+            // ✅ РЕАЛЬНЫЕ ДАННЫЕ из TypeRepository через LSP
+            const response = await searchTypes(query, 15);
+
+            // Конвертируем в формат для webview (совместим с mock данными)
+            const results = response.types.map(t => ({
+                name: t.name,
+                facet: t.facet,
+                certainty: t.certainty,
+            }));
+
+            // Отправляем результаты обратно в webview
+            webviewView.webview.postMessage({
+                type: 'searchResults',
+                data: results,
+            });
+
+            this.outputChannel?.appendLine(
+                `🔍 Search "${query}" → ${response.total} results from TypeRepository`
+            );
+        } catch (error) {
+            this.outputChannel?.appendLine(
+                `❌ Search failed: ${error}`
+            );
+
+            // Fallback на пустой массив (graceful degradation)
+            webviewView.webview.postMessage({
+                type: 'searchResults',
+                data: [],
+            });
+        }
+    }
+
+    private getWebviewContent(webview: vscode.Webview): string {
+        const scriptUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'quickActions.js')
+        );
+        const styleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'tailwind.css')
+        );
+
+        const nonce = getNonce();
+
+        return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" 
+          content="default-src 'none'; 
+                   style-src ${webview.cspSource} 'unsafe-inline'; 
+                   script-src 'nonce-${nonce}';">
+    <link href="${styleUri}" rel="stylesheet">
+    <title>BSL Quick Actions</title>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="module" nonce="${nonce}" src="${scriptUri}"><\/script>
+</body>
+</html>`;
+    }
+}
+
+function getNonce() {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
 }

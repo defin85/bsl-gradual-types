@@ -16,4 +16,4 @@ export { BslDiagnosticsProvider } from './diagnosticsProvider';
 export { BslPlatformDocsProvider } from './platformDocs';
 export { BslTypeIndexProvider } from './typeIndexProvider';
 export { HierarchicalTypeIndexProvider } from './hierarchicalTypeProvider';
-export { BslActionsWebviewProvider } from './actionsWebview';
+export { BslActionsWebviewProvider } from './actionsWebview';export { TypeDetailsWebviewProvider } from './typeDetailsWebview';

@@ -27,7 +27,8 @@ import {
     BslOverviewProvider,
     BslDiagnosticsProvider,
     HierarchicalTypeIndexProvider,
-    BslActionsWebviewProvider
+    BslActionsWebviewProvider,
+    TypeDetailsWebviewProvider,
 } from './providers';
 // Webview функции не используются напрямую в extension.ts
 // Они используются в модуле commands
@@ -398,6 +399,15 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
         context.subscriptions.push(webviewProvider);
         outputChannel.appendLine('✅ Quick Actions webview provider registered');
 
+        // Type Details modal provider
+        outputChannel.appendLine("📚 Creating Type Details modal provider...");
+        const typeDetailsProvider = new TypeDetailsWebviewProvider(context.extensionUri);
+        context.subscriptions.push(
+            vscode.commands.registerCommand("bslAnalyzer.showTypeDetails", (typeName: string) => {
+                typeDetailsProvider.showTypeDetails(typeName);
+            })
+        );
+        outputChannel.appendLine("✅ Type Details modal provider registered");
         // Register refresh commands
         context.subscriptions.push(
             vscode.commands.registerCommand('bslAnalyzer.refreshOverview', () => {

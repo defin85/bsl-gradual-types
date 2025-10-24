@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use clap::Parser;
 use serde::Deserialize;
@@ -15,7 +15,8 @@ use serde::Deserialize;
 // ✅ ИСПРАВЛЕНО: Clean Architecture - используем Application Layer
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::system::SystemCoordinator;
-use bsl_type_visualization::{HtmlRenderer, RenderOptions, ThemeMode};
+use bsl_type_visualization::{HtmlRenderer, RenderOptions, ThemeMode}; // Используется в других методах
+use bsl_shared::api::dtos::{MethodDto, ParamDto, PropertyDto}; // Используется в handle_query_type
 
 // ✅ ИСПРАВЛЕНО: временные структуры удалены, используем TypeSystemService API
 
@@ -268,6 +269,7 @@ impl LanguageServer for BslLanguageServer {
                     commands: vec![
                         "bsl.getSemanticHtml".to_string(),
                         "bsl.getSemanticTree".to_string(),
+                        "bsl.searchTypes".to_string(),
                     ],
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
@@ -786,6 +788,42 @@ impl LanguageServer for BslLanguageServer {
                 let result = self.handle_get_semantic_tree(request).await?;
                 Ok(Some(serde_json::to_value(result).unwrap()))
             }
+            "bsl.searchTypes" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing search query",
+                    ));
+                }
+
+                let request: SearchTypesRequest =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
+
+                let result = self.handle_search_types(request).await?;
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
+            "bsl.queryType" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing type name",
+                    ));
+                }
+
+                let request: QueryTypeParams =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
+
+                let result = self.handle_query_type(request).await?;
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
             _ => {
                 tracing::warn!("Unknown command: {}", params.command);
                 Err(tower_lsp::jsonrpc::Error::method_not_found())
@@ -806,10 +844,33 @@ struct QueryTypeParams {
 }
 
 #[derive(Debug, serde::Serialize)]
-#[allow(dead_code)]
+#[serde(rename_all = "camelCase")]
 struct QueryTypeResponse {
     type_name: String,
     found: bool,
+
+    // ✅ НОВЫЕ ПОЛЯ для полной информации о типе
+    #[serde(skip_serializing_if = "Option::is_none")]
+    certainty: Option<String>,  // "Known (100%)", "Inferred (50%)"
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    facet: Option<String>,      // "Manager", "Object", "Reference", etc.
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+
+    // Полная документация типа
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    methods: Vec<MethodDto>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    properties: Vec<PropertyDto>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    facets: Vec<String>,
+
+    // Обратная совместимость (deprecated, но сохраняем)
+    #[serde(skip_serializing_if = "Option::is_none")]
     details: Option<String>,
 }
 
@@ -913,22 +974,161 @@ use bsl_shared::api::semantic_dtos::{GetSemanticTreeRequest, SemanticTreeDto};
 /// Custom request: bsl/getSemanticHtml - получить HTML визуализацию семантики
 use bsl_shared::api::semantic_dtos::{GetSemanticHtmlRequest, RenderedHtmlDto};
 
+// === MILESTONE: Quick Actions Webview Integration ===
+
+/// Custom command: bsl.searchTypes - поиск типов в TypeRepository
+#[derive(Debug, serde::Deserialize)]
+struct SearchTypesRequest {
+    /// Поисковый запрос (partial match, case-insensitive)
+    query: String,
+    /// Максимум результатов (по умолчанию 15)
+    #[serde(default = "default_search_limit")]
+    limit: usize,
+}
+
+fn default_search_limit() -> usize {
+    15
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SearchTypesResponse {
+    /// Найденные типы
+    types: Vec<TypeSearchResult>,
+    /// Общее количество найденных (до лимита)
+    total: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct TypeSearchResult {
+    /// Полное имя типа (русское, например "Массив")
+    name: String,
+    /// Английское имя (например "Array")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    english_name: Option<String>,
+    /// Основной фасет типа
+    facet: String,
+    /// Уверенность в типе (всегда "Known (100%)" для типов из репозитория)
+    certainty: String,
+    /// Краткое описание (опционально)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+}
+
 #[allow(dead_code)]
 impl BslLanguageServer {
     /// Обработчик custom request: bsl/queryType
+    /// Обработчик custom request: bsl/queryType - РАСШИРЕННАЯ ВЕРСИЯ
     async fn handle_query_type(&self, params: QueryTypeParams) -> JsonRpcResult<QueryTypeResponse> {
         info!("Custom request: bsl/queryType - {}", params.type_name);
 
-        // Простая реализация — возвращаем информацию о типе
-        // TODO: Интегрировать с TypeSystemService.analyze_file() для полного анализа
-        Ok(QueryTypeResponse {
-            type_name: params.type_name.clone(),
-            found: true,
-            details: Some(format!(
-                "Type '{}' query handled by LSP server",
-                params.type_name
-            )),
-        })
+        // Получаем доступ к TypeRepository через SystemCoordinator
+        let analysis_engine = match self.coordinator.get_analysis_engine() {
+            Some(engine) => engine,
+            None => {
+                warn!("AnalysisEngine not available");
+                return Ok(QueryTypeResponse {
+                    type_name: params.type_name.clone(),
+                    found: false,
+                    certainty: None,
+                    facet: None,
+                    description: Some("AnalysisEngine not available".to_string()),
+                    methods: vec![],
+                    properties: vec![],
+                    facets: vec![],
+                    details: Some("AnalysisEngine not available".to_string()),
+                });
+            }
+        };
+
+        let repo = analysis_engine.get_repository();
+
+        // Поиск типа в TypeRepository
+        match repo.find_type(&params.type_name) {
+            Some(raw_type) => {
+                info!("Type '{}' found with {} methods, {} properties", 
+                      params.type_name, raw_type.methods.len(), raw_type.properties.len());
+                
+                // ✅ Конвертируем методы из RawMethodData → MethodDto
+                let methods: Vec<MethodDto> = raw_type.methods.iter()
+                    .map(|m| MethodDto {
+                        name: m.name.clone(),
+                        english_name: if m.english_name.is_empty() {
+                            None
+                        } else {
+                            Some(m.english_name.clone())
+                        },
+                        return_type: if m.return_type.is_empty() {
+                            None
+                        } else {
+                            Some(m.return_type.clone())
+                        },
+                        params: m.params.iter().map(|p| ParamDto {
+                            name: p.name.clone(),
+                            param_type: p.param_type.clone(),
+                            is_optional: p.is_optional,
+                            default_value: None,
+                        }).collect(),
+                        description: None,
+                        is_deprecated: false,
+                        is_constructor: false,
+                    })
+                    .collect();
+
+                // ✅ Конвертируем свойства из RawPropertyData → PropertyDto
+                let properties: Vec<PropertyDto> = raw_type.properties.iter()
+                    .map(|p| PropertyDto {
+                        name: p.name.clone(),
+                        prop_type: p.prop_type.clone(),
+                        is_readonly: p.is_readonly,
+                        description: None,
+                    })
+                    .collect();
+
+                // Форматируем фасеты как строки
+                let facets: Vec<String> = raw_type.facets.iter()
+                    .map(|f| format!("{:?}", f))  // Manager, Object, Reference, etc.
+                    .collect();
+
+                // Определяем основной фасет (первый или Object по умолчанию)
+                let main_facet = facets.first()
+                    .cloned()
+                    .or_else(|| Some("Object".to_string()));
+
+                Ok(QueryTypeResponse {
+                    type_name: params.type_name.clone(),
+                    found: true,
+                    certainty: Some("Known (100%)".to_string()),
+                    facet: main_facet,
+                    description: if raw_type.description.is_empty() {
+                        None
+                    } else {
+                        Some(raw_type.description.clone())
+                    },
+                    methods,
+                    properties,
+                    facets,
+                    details: Some(format!("Type '{}' found with {} methods, {} properties",
+                        params.type_name,
+                        raw_type.methods.len(),
+                        raw_type.properties.len())),
+                })
+            }
+            None => {
+                // ❌ Тип не найден
+                warn!("Type '{}' not found in TypeRepository", params.type_name);
+                Ok(QueryTypeResponse {
+                    type_name: params.type_name.clone(),
+                    found: false,
+                    certainty: Some("Unknown".to_string()),
+                    facet: None,
+                    description: Some("Тип не найден в TypeRepository".to_string()),
+                    methods: vec![],
+                    properties: vec![],
+                    facets: vec![],
+                    details: Some(format!("Type '{}' not found", params.type_name)),
+                })
+            }
+        }
     }
 
     /// Обработчик custom request: bsl/buildIndex
@@ -1119,6 +1319,86 @@ impl BslLanguageServer {
                 Err(tower_lsp::jsonrpc::Error::internal_error())
             }
         }
+    }
+
+    /// Обработчик custom command: bsl.searchTypes - поиск типов в TypeRepository
+    async fn handle_search_types(
+        &self,
+        params: SearchTypesRequest,
+    ) -> JsonRpcResult<SearchTypesResponse> {
+        info!("Custom command: bsl.searchTypes - query: '{}', limit: {}",
+              params.query, params.limit);
+
+        // Получаем доступ к TypeRepository через SystemCoordinator
+        let analysis_engine = match self.coordinator.get_analysis_engine() {
+            Some(engine) => engine,
+            None => {
+                warn!("AnalysisEngine not available");
+                return Ok(SearchTypesResponse {
+                    types: vec![],
+                    total: 0,
+                });
+            }
+        };
+
+        let repo = analysis_engine.get_repository();
+
+        // Получаем все типы
+        let all_types = repo.get_all_types();
+
+        // Обработка пустого репозитория
+        if all_types.is_empty() {
+            warn!("TypeRepository is empty - platform types not loaded yet");
+            return Ok(SearchTypesResponse {
+                types: vec![],
+                total: 0,
+            });
+        }
+
+        // Фильтруем по query (case-insensitive partial match)
+        let query_lower = params.query.to_lowercase();
+        let filtered: Vec<TypeSearchResult> = all_types
+            .iter()
+            .filter(|t| {
+                // Поиск в русском или английском имени
+                t.name.to_lowercase().contains(&query_lower)
+                    || (!t.english_name.is_empty() && t.english_name.to_lowercase().contains(&query_lower))
+            })
+            .take(params.limit)
+            .map(|t| {
+                // Определяем основной фасет
+                let facet = if t.facets.is_empty() {
+                    "Object".to_string()
+                } else {
+                    format!("{:?}", t.facets[0]) // Manager, Object, Reference, etc.
+                };
+
+                TypeSearchResult {
+                    name: t.name.clone(),
+                    english_name: if t.english_name.is_empty() {
+                        None
+                    } else {
+                        Some(t.english_name.clone())
+                    },
+                    facet,
+                    certainty: "Known (100%)".to_string(),
+                    description: if t.description.is_empty() {
+                        None
+                    } else {
+                        Some(t.description.clone())
+                    },
+                }
+            })
+            .collect();
+
+        let total = filtered.len();
+
+        info!("Found {} types matching '{}'", total, params.query);
+
+        Ok(SearchTypesResponse {
+            types: filtered,
+            total,
+        })
     }
 
     /// Обработчик custom request: bsl/getSemanticHtml - MILESTONE 2.12

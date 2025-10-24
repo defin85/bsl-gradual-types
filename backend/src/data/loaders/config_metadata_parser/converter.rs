@@ -10,12 +10,26 @@ impl UniversalMetadataObject {
     ///
     /// Создаёт полное имя типа (например, "Справочники.Контрагенты")
     /// и заполняет все поля RawTypeData.
-    pub fn to_raw_type_data(&self) -> RawTypeData {
-        let type_name = self.get_full_type_name();
+    ///
+    /// # Параметры
+    /// - `prefix` - Опциональный префикс расширения (например, "Тест_")
+    ///              Применяется ТОЛЬКО к имени объекта метаданных.
+    ///              Для основной конфигурации передавайте `None`.
+    ///
+    /// # Примеры
+    /// ```ignore
+    /// // Без префикса (основная конфигурация)
+    /// obj.to_raw_type_data(None) // → "Справочники.Контрагенты"
+    ///
+    /// // С префиксом (расширение)
+    /// obj.to_raw_type_data(Some("Тест_")) // → "Справочники.Тест_Контрагенты"
+    /// ```
+    pub fn to_raw_type_data(&self, prefix: Option<&str>) -> RawTypeData {
+        let type_name = self.get_full_type_name(prefix);
 
         RawTypeData {
             name: type_name.clone(),
-            english_name: self.name.clone(), // TODO: извлечь английское имя из метаданных
+            english_name: Self::apply_prefix(prefix, &self.name), // Префикс и к english name
             description: self.synonym.clone().unwrap_or_default(),
             category: self.get_category(),
             source: RawDataSource::Configuration,
@@ -30,13 +44,30 @@ impl UniversalMetadataObject {
         }
     }
 
-    /// Получить полное имя типа (Справочники.Контрагенты)
-    fn get_full_type_name(&self) -> String {
+    /// Применяет префикс к имени объекта
+    ///
+    /// # Примеры
+    /// ```ignore
+    /// apply_prefix(None, "Контрагенты") // → "Контрагенты"
+    /// apply_prefix(Some(""), "Контрагенты") // → "Контрагенты"
+    /// apply_prefix(Some("Тест_"), "Контрагенты") // → "Тест_Контрагенты"
+    /// ```
+    fn apply_prefix(prefix: Option<&str>, name: &str) -> String {
+        match prefix {
+            Some(p) if !p.is_empty() => format!("{}{}", p, name),
+            _ => name.to_string(),
+        }
+    }
+
+    /// Получить полное имя типа (Справочники.Контрагенты или Справочники.Тест_Контрагенты)
+    fn get_full_type_name(&self, prefix: Option<&str>) -> String {
+        let object_name = Self::apply_prefix(prefix, &self.name);
+
         if let Some(kind) = self.object_type {
-            format!("{}.{}", kind.display_name(), self.name)
+            format!("{}.{}", kind.display_name(), object_name)
         } else {
-            // Для неизвестных типов - просто имя
-            self.name.clone()
+            // Для неизвестных типов - просто имя с префиксом
+            object_name
         }
     }
 
@@ -111,7 +142,7 @@ mod tests {
             synonym: Some("ИНН".to_string()),
         });
 
-        let raw_type = obj.to_raw_type_data();
+        let raw_type = obj.to_raw_type_data(None);
 
         assert_eq!(raw_type.name, "Справочники.Контрагенты");
         assert_eq!(raw_type.kind, Some(MetadataKind::Catalog));
@@ -128,10 +159,33 @@ mod tests {
             "12345678-1234-1234-1234-123456789012".to_string(),
         );
 
-        let raw_type = obj.to_raw_type_data();
+        let raw_type = obj.to_raw_type_data(None);
 
         assert_eq!(raw_type.name, "СтранныйОбъект");
         assert_eq!(raw_type.kind, None);
         assert_eq!(raw_type.facets.len(), 0); // Пустой список фасетов
+    }
+
+    #[test]
+    fn test_convert_with_extension_prefix() {
+        let obj = UniversalMetadataObject::new(
+            "Catalog".to_string(),
+            "Контрагенты".to_string(),
+            "12345678-1234-1234-1234-123456789012".to_string(),
+        );
+
+        // Без префикса (основная конфигурация)
+        let raw_type_no_prefix = obj.to_raw_type_data(None);
+        assert_eq!(raw_type_no_prefix.name, "Справочники.Контрагенты");
+        assert_eq!(raw_type_no_prefix.english_name, "Контрагенты");
+
+        // С префиксом (расширение)
+        let raw_type_with_prefix = obj.to_raw_type_data(Some("Тест_"));
+        assert_eq!(raw_type_with_prefix.name, "Справочники.Тест_Контрагенты");
+        assert_eq!(raw_type_with_prefix.english_name, "Тест_Контрагенты");
+
+        // Пустой префикс (эквивалент None)
+        let raw_type_empty_prefix = obj.to_raw_type_data(Some(""));
+        assert_eq!(raw_type_empty_prefix.name, "Справочники.Контрагенты");
     }
 }

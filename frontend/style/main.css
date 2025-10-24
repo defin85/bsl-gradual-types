@@ -1110,6 +1110,42 @@ input:focus-visible,
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
 }
 
+/* Method signature styles (Phase 2: MethodDto) */
+.method-signature {
+  font-family: 'Courier New', 'Consolas', monospace;
+  font-size: 0.85rem;
+  color: #555;
+  margin-left: 8px;
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid #e0e0e0;
+}
+
+/* Optional parameter marker styling (Phase 3) */
+.method-signature .param-optional {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+/* Dark theme support */
+.dark-theme .method-signature {
+  background: #2d2d2d;
+  color: #b0b0b0;
+  border-color: #444;
+}
+
+.method-item {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.method-item:hover {
+  background-color: #f8f9fa;
+}
+
 /* Responsive pagination */
 @media (max-width: 768px) {
   .pagination {
@@ -1554,5 +1590,78 @@ input:focus-visible,
   font-size: 0.95rem;
   line-height: 1.6;
   margin: 8px 0;
+}
+
+/* Tabular sections styles (for documents/catalogs) */
+.tabular-sections-section {
+  margin-top: 12px;
+  padding: 10px;
+  background: rgba(33, 150, 243, 0.05);
+  border-radius: 6px;
+  border-left: 3px solid #2196f3;
+}
+
+.tabular-section-detail {
+  margin-top: 16px;
+  padding: 12px;
+  background: #f5f9ff;
+  border-radius: 6px;
+  border: 1px solid #e3f2fd;
+}
+
+.tabular-section-detail:first-child {
+  margin-top: 12px;
+}
+
+.tabular-attributes-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.tabular-attribute-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: white;
+  border-radius: 4px;
+  border-left: 3px solid #2196f3;
+  transition: all 0.2s ease;
+  gap: 8px;
+}
+
+.tabular-attribute-item:hover {
+  background: #e3f2fd;
+  border-left-color: #1976d2;
+  transform: translateX(2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.attribute-name {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #1976d2;
+  flex: 1;
+}
+
+.attribute-type {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.85rem;
+  color: #666;
+  background: #f0f0f0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.attribute-type:hover {
+  max-width: none;
+  white-space: normal;
 }
 

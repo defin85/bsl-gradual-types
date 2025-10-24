@@ -38,26 +38,26 @@ pub async fn fetch_types(filters: TypeFilters) -> Result<AnalysisResultDto, Stri
     let base_url = if let Some(ref query) = filters.search_query {
         if !query.is_empty() {
             format!(
-                "{}?q={}&limit={}&offset={}",
+                "{}?q={}&page={}&limit={}",
                 config.api_url("search"),
                 query,
-                filters.page_size,
-                filters.offset()
+                filters.page,
+                filters.page_size
             )
         } else {
             format!(
-                "{}?limit={}&offset={}",
+                "{}?page={}&limit={}",
                 config.api_url("types"),
-                filters.page_size,
-                filters.offset()
+                filters.page,
+                filters.page_size
             )
         }
     } else {
         format!(
-            "{}?limit={}&offset={}",
+            "{}?page={}&limit={}",
             config.api_url("types"),
-            filters.page_size,
-            filters.offset()
+            filters.page,
+            filters.page_size
         )
     };
 
@@ -133,9 +133,43 @@ fn get_test_types(filters: TypeFilters) -> Result<AnalysisResultDto, String> {
             facets: vec!["Collection".to_string()],
             methods_count: Some(5),
             methods: vec![
-                "Добавить".to_string(),
-                "Удалить".to_string(),
-                "Очистить".to_string(),
+                MethodDto {
+                    name: "Добавить".to_string(),
+                    english_name: Some("Add".to_string()),
+                    return_type: None,
+                    params: vec![ParamDto {
+                        name: "Значение".to_string(),
+                        param_type: "Произвольный".to_string(),
+                        is_optional: false,
+                        default_value: None,
+                    }],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                },
+                MethodDto {
+                    name: "Удалить".to_string(),
+                    english_name: Some("Delete".to_string()),
+                    return_type: None,
+                    params: vec![ParamDto {
+                        name: "Индекс".to_string(),
+                        param_type: "Число".to_string(),
+                        is_optional: false,
+                        default_value: None,
+                    }],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                },
+                MethodDto {
+                    name: "Очистить".to_string(),
+                    english_name: Some("Clear".to_string()),
+                    return_type: None,
+                    params: vec![],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                },
             ],
             attributes_count: None,
             properties: vec!["Количество".to_string()],
@@ -159,8 +193,29 @@ fn get_test_types(filters: TypeFilters) -> Result<AnalysisResultDto, String> {
             facets: vec!["Manager".to_string(), "Reference".to_string()],
             methods_count: Some(3),
             methods: vec![
-                "НайтиПоНаименованию".to_string(),
-                "СоздатьЭлемент".to_string(),
+                MethodDto {
+                    name: "НайтиПоНаименованию".to_string(),
+                    english_name: Some("FindByDescription".to_string()),
+                    return_type: Some("СправочникСсылка.Номенклатура".to_string()),
+                    params: vec![ParamDto {
+                        name: "Наименование".to_string(),
+                        param_type: "Строка".to_string(),
+                        is_optional: false,
+                        default_value: None,
+                    }],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                },
+                MethodDto {
+                    name: "СоздатьЭлемент".to_string(),
+                    english_name: Some("CreateItem".to_string()),
+                    return_type: Some("СправочникОбъект.Номенклатура".to_string()),
+                    params: vec![],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                },
             ],
             attributes_count: Some(5),
             properties: vec!["Наименование".to_string(), "Код".to_string()],
@@ -183,7 +238,35 @@ fn get_test_types(filters: TypeFilters) -> Result<AnalysisResultDto, String> {
             certainty_text: "Known 100%".to_string(),
             facets: vec![],
             methods_count: Some(10),
-            methods: vec!["Длина".to_string(), "НРег".to_string(), "ВРег".to_string()],
+            methods: vec![
+                MethodDto {
+                    name: "Длина".to_string(),
+                    english_name: Some("StrLen".to_string()),
+                    return_type: Some("Число".to_string()),
+                    params: vec![],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                },
+                MethodDto {
+                    name: "НРег".to_string(),
+                    english_name: Some("Lower".to_string()),
+                    return_type: Some("Строка".to_string()),
+                    params: vec![],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                },
+                MethodDto {
+                    name: "ВРег".to_string(),
+                    english_name: Some("Upper".to_string()),
+                    return_type: Some("Строка".to_string()),
+                    params: vec![],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                },
+            ],
             attributes_count: None,
             properties: vec![],
             enum_values: None,

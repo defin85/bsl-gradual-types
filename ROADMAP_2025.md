@@ -1047,7 +1047,7 @@ export function updateIndexingProgress(
     stepNumber: number,
     stepName: string,
     progress: number,
-    configProgress?: ConfigurationIndexingProgress
+    detailedProgress?: DetailedIndexingProgress  // ✅ ИЗМЕНЕНО: переименован параметр
 ) {
     // ... существующий код ...
 
@@ -1057,7 +1057,7 @@ export function updateIndexingProgress(
         progress: Math.min(progress, 100),
         currentStepNumber: stepNumber,
         estimatedTimeRemaining: eta ? `${eta}s` : 'calculating...',
-        configProgress  // ✅ НОВОЕ
+        detailedProgress  // ✅ НОВОЕ: универсальный прогресс для платформы и конфигурации
     };
 
     updateStatusBar(undefined, globalIndexingProgress);
@@ -1070,21 +1070,174 @@ export function updateStatusBar(text?: string, progress?: IndexingProgress) {
         const icon = '$(sync~spin)';
         const percent = Math.round(progress.progress);
 
-        // ✅ НОВОЕ: Если есть детали конфигурации — показываем их
+        // ✅ НОВОЕ: Если есть детали — показываем их с учётом типа индексации
         let detailsText = '';
-        if (progress.configProgress) {
-            const { currentFile, totalFiles } = progress.configProgress;
-            detailsText = ` | Файл ${currentFile}/${totalFiles}`;
+        if (progress.detailedProgress) {
+            const { indexingType, currentItem, totalItems } = progress.detailedProgress;
+
+            // Разный текст для платформы и конфигурации
+            if (indexingType === 'platform') {
+                detailsText = ` | Тип ${currentItem}/${totalItems}`;
+            } else if (indexingType === 'configuration') {
+                detailsText = ` | Файл ${currentItem}/${totalItems}`;
+            }
         }
 
         const eta = progress.estimatedTimeRemaining ? ` - ETA: ${progress.estimatedTimeRemaining}` : '';
         statusBarItem.text = `${icon} BSL Index: ${progress.currentStep} (${percent}%${eta})${detailsText}`;
+
+        // Tooltip с деталями
+        let tooltipDetails = '';
+        if (progress.detailedProgress) {
+            const { indexingType, currentItem, totalItems, currentItemName } = progress.detailedProgress;
+            const typeLabel = indexingType === 'platform' ? 'Platform Types' : 'Configuration Types';
+            tooltipDetails = `\n${typeLabel}: ${currentItem}/${totalItems}`;
+            if (currentItemName) {
+                tooltipDetails += `\nCurrent: ${currentItemName}`;
+            }
+        }
+
         statusBarItem.tooltip = `Step ${progress.currentStepNumber}/${progress.totalSteps}\n` +
-            `Progress: ${percent}%\n${progress.currentStep}` +
-            (progress.configProgress ? `\nFile: ${progress.configProgress.currentFile}/${progress.configProgress.totalFiles}` : '');
+            `Progress: ${percent}%\n${progress.currentStep}${tooltipDetails}`;
         statusBarItem.show();
     }
 }
+```
+
+**Примеры использования для разных типов индексации:**
+
+**Сценарий A: Парсинг платформенных типов (Syntax Helper)**
+```typescript
+// При старте LSP сервера с параметром --syntax-helper-path
+
+// Начало парсинга Syntax Helper
+updateIndexingProgress(1, 'Парсинг Syntax Helper...', 10, {
+    indexingType: 'platform',
+    currentItem: 150,
+    totalItems: 3927,
+    currentItemName: 'Массив'
+});
+
+// Статус-бар показывает:
+// "$(sync~spin) BSL Index: Парсинг Syntax Helper... (10%) - ETA: 15s | Тип 150/3927"
+// Tooltip:
+// "Step 1/4
+//  Progress: 10%
+//  Парсинг Syntax Helper...
+//  Platform Types: 150/3927
+//  Current: Массив"
+```
+
+**Сценарий B: Парсинг конфигурации**
+```typescript
+// При выполнении команды "Parse Configuration"
+
+// Начало парсинга Configuration.xml
+updateIndexingProgress(2, 'Парсинг конфигурации...', 35, {
+    indexingType: 'configuration',
+    currentItem: 4900,
+    totalItems: 17689,
+    currentItemName: 'Справочники/Номенклатура/Catalog.xml'
+});
+
+// Статус-бар показывает:
+// "$(sync~spin) BSL Index: Парсинг конфигурации... (35%) - ETA: 45s | Файл 4900/17689"
+// Tooltip:
+// "Step 2/4
+//  Progress: 35%
+//  Парсинг конфигурации...
+//  Configuration Types: 4900/17689
+//  Current: Справочники/Номенклатура/Catalog.xml"
+```
+
+**Интеграция с LSP Server (Rust backend):**
+
+**Добавить в `backend/src/data/loaders/syntax_helper_parser.rs`:**
+```rust
+// backend/src/data/loaders/syntax_helper_parser.rs
+
+impl SyntaxHelperParser {
+    pub async fn parse_with_progress<F>(&self, progress_callback: F) -> Result<Vec<PlatformType>>
+    where
+        F: Fn(usize, usize, &str) + Send + Sync,
+    {
+        let entries = self.discover_syntax_helper_entries()?;
+        let total = entries.len();
+
+        let mut types = Vec::new();
+
+        for (index, entry) in entries.iter().enumerate() {
+            // ✅ НОВОЕ: Отправляем прогресс в Extension
+            progress_callback(index + 1, total, &entry.type_name);
+
+            let parsed_type = self.parse_entry(entry)?;
+            types.push(parsed_type);
+        }
+
+        Ok(types)
+    }
+}
+```
+
+**Добавить LSP Custom Notification `bsl/indexingProgress`:**
+```rust
+// backend/src/bin/lsp_server.rs
+
+#[derive(Debug, Serialize)]
+struct IndexingProgressNotification {
+    indexing_type: String,  // "platform" | "configuration"
+    current_item: usize,
+    total_items: usize,
+    current_item_name: Option<String>,
+}
+
+async fn load_platform_types_with_progress(&self) {
+    let parser = SyntaxHelperParser::new(&self.syntax_helper_path);
+
+    let progress_callback = |current: usize, total: usize, name: &str| {
+        // Отправляем прогресс в Extension
+        let notification = IndexingProgressNotification {
+            indexing_type: "platform".to_string(),
+            current_item: current,
+            total_items: total,
+            current_item_name: Some(name.to_string()),
+        };
+
+        // ✅ НОВОЕ: Custom LSP Notification
+        self.client.send_notification::<notification::Custom>(
+            "bsl/indexingProgress",
+            serde_json::to_value(notification).unwrap()
+        );
+    };
+
+    let types = parser.parse_with_progress(progress_callback).await?;
+    self.type_repository.register_types(types);
+}
+```
+
+**Подписка на прогресс в Extension:**
+```typescript
+// vscode-extension/src/lsp/client.ts
+
+client.onNotification('bsl/indexingProgress', (params: any) => {
+    const { indexing_type, current_item, total_items, current_item_name } = params;
+
+    // Вычисляем процент прогресса
+    const percent = Math.round((current_item / total_items) * 100);
+
+    // Обновляем статус-бар
+    updateIndexingProgress(
+        1,  // stepNumber
+        indexing_type === 'platform' ? 'Парсинг Syntax Helper...' : 'Парсинг конфигурации...',
+        percent,
+        {
+            indexingType: indexing_type,
+            currentItem: current_item,
+            totalItems: total_items,
+            currentItemName: current_item_name
+        }
+    );
+});
 ```
 
 **Task 3: Current Context Indicator (Function/Procedure Name)** (1 день)
@@ -1310,6 +1463,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 **Результат Milestone 2.20:**
 - ✅ Прогресс загрузки LSP сервера отображается в статус-баре (0-100%)
+- ✅ Прогресс парсинга платформенных типов из Syntax Helper (например, "Тип 150/3927")
 - ✅ Прогресс индексации конфигурации с количеством файлов (например, "Файл 4900/17689")
 - ✅ Отображение текущей функции/процедуры в tooltip статус-бара
 - ✅ Статистика TypeRepository (количество типов платформы и конфигурации)
@@ -1325,14 +1479,54 @@ export async function activate(context: vscode.ExtensionContext) {
    - Через 1-2 секунды: "$(sync~spin) BSL Analyzer: Connecting to LSP Server... (50%)"
    - Через 2-3 секунды: "$(database) BSL Analyzer: Ready"
 
-**Сценарий 2: Индексация конфигурации**
+**Сценарий 2: Парсинг платформенных типов (Syntax Helper)**
+1. Запустить LSP сервер с параметром `--syntax-helper-path examples/syntax_helper`
+2. **Ожидаемый результат:**
+   - Статус-бар показывает: "$(sync~spin) BSL Index: Парсинг Syntax Helper... (15%) - ETA: 12s | Тип 580/3927"
+   - Прогресс обновляется в реальном времени
+   - Tooltip показывает:
+     ```
+     Step 1/4
+     Progress: 15%
+     Парсинг Syntax Helper...
+     Platform Types: 580/3927
+     Current: Массив
+     ```
+3. **После завершения парсинга:**
+   - Статус-бар показывает: "$(database) BSL Analyzer: Ready"
+   - Tooltip показывает:
+     ```
+     BSL Type Safety Analyzer
+     LSP Server активен
+
+     TypeRepository: 3927 типов
+     - Платформа: 3927
+     - Конфигурация: 0
+     ```
+
+**Сценарий 3: Индексация конфигурации**
 1. Выполнить команду "BSL Analyzer: Build Index"
 2. **Ожидаемый результат:**
-   - Статус-бар показывает: "$(sync~spin) BSL Index: Parsing configuration... (35%) | Файл 1520/4300"
+   - Статус-бар показывает: "$(sync~spin) BSL Index: Парсинг конфигурации... (35%) - ETA: 45s | Файл 4900/17689"
    - Прогресс обновляется в реальном времени
-   - ETA показывает оценку оставшегося времени
+   - Tooltip показывает:
+     ```
+     Step 2/4
+     Progress: 35%
+     Парсинг конфигурации...
+     Configuration Types: 4900/17689
+     Current: Справочники/Номенклатура/Catalog.xml
+     ```
+3. **После завершения парсинга:**
+   - Статус-бар показывает: "$(database) BSL Analyzer: Ready"
+   - Tooltip показывает обновлённую статистику:
+     ```
+     TypeRepository: 4150 типов
+     - Платформа: 3927
+     - Конфигурация: 223
+     ```
 
-**Сценарий 3: Текущий контекст**
+**Сценарий 4: Текущий контекст**
 1. Открыть `.bsl` файл с функцией
 2. Навести курсор внутрь функции
 3. **Ожидаемый результат:**
@@ -1341,7 +1535,7 @@ export async function activate(context: vscode.ExtensionContext) {
 5. **Ожидаемый результат:**
    - Tooltip обновляется: "Текущая процедура: ОбработатьДанные"
 
-**Сценарий 4: Статистика типов**
+**Сценарий 5: Статистика типов**
 1. Навести мышь на статус-бар
 2. **Ожидаемый результат:**
    - Tooltip показывает:

@@ -6,11 +6,12 @@
 use anyhow::Result;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use crate::application::type_system_service::TypeSystemService;
 use crate::data::adapters::convert_syntax_helper_to_raw;
-use crate::data::loaders::SyntaxHelperParser;
+use crate::data::loaders::{progress::ProgressUpdate, SyntaxHelperParser};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::RawTypeData;
@@ -73,7 +74,7 @@ impl SystemCoordinator {
 
     /// Инициализация системы с реальным парсингом синтаксис-помощника
     pub async fn start(&self) -> Result<(), StartupError> {
-        self.start_with_paths(None, None).await
+        self.start_with_paths(None, None, None).await
     }
 
     /// Инициализация системы с настраиваемыми путями
@@ -81,6 +82,7 @@ impl SystemCoordinator {
         &self,
         syntax_helper_path: Option<&Path>,
         config_path: Option<&Path>,
+        progress_tx: Option<mpsc::UnboundedSender<ProgressUpdate>>,
     ) -> Result<(), StartupError> {
         self.observability.log_startup();
 
@@ -109,13 +111,29 @@ impl SystemCoordinator {
         if let Some(syntax_path) = syntax_helper_path {
             info!("📂 Загружаем синтаксис-помощник: {}", syntax_path.display());
 
-            match syntax_parser.parse_syntax_helper(syntax_path) {
-                Ok(()) => {
-                    info!("✅ Парсинг синтаксис-помощника завершен успешно");
+            // ✅ MILESTONE 2.20.2.3: Парсим с прогрессом если передан callback
+            if let Some(tx) = progress_tx {
+                match syntax_parser.parse_with_progress(syntax_path, move |update: ProgressUpdate| {
+                    let _ = tx.send(update);  // Отправляем в channel
+                }) {
+                    Ok(()) => {
+                        info!("✅ Парсинг синтаксис-помощника завершен успешно");
+                    }
+                    Err(e) => {
+                        warn!("⚠️ Ошибка парсинга синтаксис-помощника: {}", e);
+                        info!("📦 Будем использовать базовые типы платформы 1С...");
+                    }
                 }
-                Err(e) => {
-                    warn!("⚠️ Ошибка парсинга синтаксис-помощника: {}", e);
-                    info!("📦 Будем использовать базовые типы платформы 1С...");
+            } else {
+                // Обратная совместимость: парсим без прогресса
+                match syntax_parser.parse_syntax_helper(syntax_path) {
+                    Ok(()) => {
+                        info!("✅ Парсинг синтаксис-помощника завершен успешно");
+                    }
+                    Err(e) => {
+                        warn!("⚠️ Ошибка парсинга синтаксис-помощника: {}", e);
+                        info!("📦 Будем использовать базовые типы платформы 1С...");
+                    }
                 }
             }
         }

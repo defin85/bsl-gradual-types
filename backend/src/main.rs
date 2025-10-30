@@ -79,6 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .start_with_paths(
             config.syntax_helper_path.as_deref(),
             config.project_path.as_deref(),
+            None, // ✅ MILESTONE 2.20.2.3: progress_tx для web сервера не требуется
         )
         .await?;
 

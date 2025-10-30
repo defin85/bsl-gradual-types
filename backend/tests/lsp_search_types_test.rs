@@ -82,7 +82,7 @@ fn create_coordinator_with_basic_types() -> Arc<SystemCoordinator> {
     // Инициализируем coordinator (это создаёт AnalysisEngine)
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
-        coordinator.start_with_paths(None, None).await
+        coordinator.start_with_paths(None, None, None).await
     }).expect("Failed to start coordinator");
 
     // Получаем TypeRepository для добавления тестовых типов
@@ -432,7 +432,7 @@ fn test_search_types_production_syntax_helper() {
     // Загружаем типы платформы
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
-        coordinator.start_with_paths(Some(&syntax_helper_path), None).await
+        coordinator.start_with_paths(Some(&syntax_helper_path), None, None).await
     }).expect("Failed to start coordinator with platform types");
 
     // ACT - поиск типов платформы

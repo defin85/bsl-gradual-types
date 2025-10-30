@@ -18,7 +18,7 @@ mod tabular_sections_api_tests {
         let config_path = Path::new("examples/conf/conf_test");
 
         coordinator
-            .start_with_paths(None, Some(config_path))
+            .start_with_paths(None, Some(config_path), None)
             .await
             .expect("Failed to start coordinator");
 

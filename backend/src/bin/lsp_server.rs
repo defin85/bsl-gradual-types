@@ -3,17 +3,18 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use clap::Parser;
 use serde::Deserialize;
 
 // ✅ ИСПРАВЛЕНО: Clean Architecture - используем Application Layer
 use bsl_backend::application::TypeSystemService;
+use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 use bsl_backend::system::SystemCoordinator;
 use bsl_shared::api::dtos::{MethodDto, ParamDto, PropertyDto};
 use bsl_type_visualization::{HtmlRenderer, RenderOptions, ThemeMode}; // Используется в других методах // Используется в handle_query_type
@@ -293,14 +294,11 @@ impl LanguageServer for BslLanguageServer {
                     platform_docs
                 );
 
-                // ✅ НОВОЕ: Отправляем LSP Progress notification (стандартный протокол LSP)
-                use tower_lsp::lsp_types::{
-                    NumberOrString, ProgressParams, ProgressParamsValue, WorkDoneProgress,
-                    WorkDoneProgressBegin, WorkDoneProgressEnd, WorkDoneProgressReport,
-                };
+                // ✅ MILESTONE 2.20.2.3: Создаём channel для передачи прогресса
+                let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressUpdate>();
 
-                // Генерируем уникальный токен для прогресса (timestamp-based)
-                let token = NumberOrString::String(format!(
+                // Генерируем уникальный токен для Work Done Progress
+                let token = ProgressToken::String(format!(
                     "bsl-load-types-{}",
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -308,15 +306,16 @@ impl LanguageServer for BslLanguageServer {
                         .as_millis()
                 ));
 
-                // 1. Начинаем прогресс (VSCode автоматически покажет progress bar в UI)
-                self.client
+                // ✅ НОВОЕ: Отправляем WorkDoneProgressBegin
+                let _ = self
+                    .client
                     .send_notification::<tower_lsp::lsp_types::notification::Progress>(
                         ProgressParams {
                             token: token.clone(),
                             value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
                                 WorkDoneProgressBegin {
                                     title: "Загрузка типов платформы 1С".to_string(),
-                                    message: Some("Парсинг Syntax Helper...".to_string()),
+                                    message: Some("Инициализация парсинга...".to_string()),
                                     percentage: Some(0),
                                     cancellable: Some(false),
                                 },
@@ -325,44 +324,105 @@ impl LanguageServer for BslLanguageServer {
                     )
                     .await;
 
-                // ✅ FIX: Даём VSCode время обработать Begin notification
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                // ✅ НОВОЕ: Spawn task для обработки прогресс-уведомлений
+                let client_clone = self.client.clone();
+                let token_clone = token.clone();
+                let start_time = std::time::Instant::now();
 
-                // 2. Обновляем прогресс на 50%
-                self.client
-                    .send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                        ProgressParams {
-                            token: token.clone(),
-                            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                                WorkDoneProgressReport {
-                                    message: Some(format!(
-                                        "Обработка документации из {}...",
-                                        platform_docs
-                                    )),
-                                    percentage: Some(50),
-                                    cancellable: Some(false),
+                tokio::spawn(async move {
+                    // Throttling: не чаще 2 раз в секунду (500ms интервал)
+                    let mut last_report = std::time::Instant::now();
+                    let throttle_interval = std::time::Duration::from_millis(500);
+
+                    while let Some(update) = progress_rx.recv().await {
+                        let now = std::time::Instant::now();
+
+                        // ✅ НОВОЕ: Логируем прогресс
+                        debug!(
+                            "[Progress] {:?} {:.1}% ({}/{}) - {}",
+                            update.phase,
+                            update.percentage,
+                            update.current,
+                            update.total,
+                            update.message.as_deref().unwrap_or("")
+                        );
+
+                        // Пропускаем если слишком рано (throttling)
+                        if now.duration_since(last_report) < throttle_interval {
+                            continue;
+                        }
+
+                        last_report = now;
+
+                        // Вычисляем ETA
+                        let elapsed = start_time.elapsed().as_secs_f32();
+                        let eta = if update.percentage > 5.0 {
+                            Some(((elapsed * 100.0 / update.percentage) - elapsed) as u32)
+                        } else {
+                            None
+                        };
+
+                        // Форматируем сообщение
+                        let message = match update.phase {
+                            IndexingPhase::ParsingFiles => {
+                                format!(
+                                    "Тип {}/{}{}",
+                                    update.current,
+                                    update.total,
+                                    update
+                                        .message
+                                        .as_ref()
+                                        .map(|m| format!(" - {}", m))
+                                        .unwrap_or_default()
+                                )
+                            }
+                            _ => {
+                                format!(
+                                    "{} | {}/{}",
+                                    update.phase.display_name(),
+                                    update.current,
+                                    update.total
+                                )
+                            }
+                        };
+
+                        let message_with_eta = if let Some(eta_secs) = eta {
+                            format!("{} - ETA: {}s", message, eta_secs)
+                        } else {
+                            message
+                        };
+
+                        // ✅ НОВОЕ: Отправляем WorkDoneProgressReport
+                        let _ = client_clone
+                            .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                                ProgressParams {
+                                    token: token_clone.clone(),
+                                    value: ProgressParamsValue::WorkDone(
+                                        WorkDoneProgress::Report(WorkDoneProgressReport {
+                                            message: Some(message_with_eta),
+                                            percentage: Some(update.percentage as u32),
+                                            cancellable: Some(false),
+                                        }),
+                                    ),
                                 },
-                            )),
-                        },
-                    )
-                    .await;
+                            )
+                            .await;
+                    }
+                });
 
-                // ✅ FIX: Даём VSCode время обработать Report notification
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
+                // ✅ НОВОЕ: Вызываем start_with_paths с progress_tx
                 let syntax_path = std::path::Path::new(platform_docs);
-
-                // 3. Перезапускаем SystemCoordinator с новым путём
                 match self
                     .coordinator
-                    .start_with_paths(Some(syntax_path), None)
+                    .start_with_paths(Some(syntax_path), None, Some(progress_tx))
                     .await
                 {
                     Ok(()) => {
-                        info!("✅ Types reloaded successfully with platform documentation");
+                        info!("✅ Platform types loaded successfully");
 
-                        // 4. Завершаем прогресс с успехом
-                        self.client
+                        // ✅ НОВОЕ: Отправляем WorkDoneProgressEnd (успех)
+                        let _ = self
+                            .client
                             .send_notification::<tower_lsp::lsp_types::notification::Progress>(
                                 ProgressParams {
                                     token: token.clone(),
@@ -385,10 +445,11 @@ impl LanguageServer for BslLanguageServer {
                             .await;
                     }
                     Err(e) => {
-                        error!("❌ Failed to reload types: {}", e);
+                        error!("❌ Failed to load platform types: {}", e);
 
-                        // 5. Завершаем прогресс с ошибкой
-                        self.client
+                        // ✅ НОВОЕ: Отправляем WorkDoneProgressEnd (ошибка)
+                        let _ = self
+                            .client
                             .send_notification::<tower_lsp::lsp_types::notification::Progress>(
                                 ProgressParams {
                                     token: token.clone(),

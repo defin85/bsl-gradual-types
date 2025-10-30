@@ -60,11 +60,7 @@ fn test_parse_error_structure_complete() {
             );
 
             // ✅ ПРОВЕРКА 3: Span должен быть валидным
-            assert!(error.span.start_line >= 0, "start_line должен быть >= 0");
-            assert!(
-                error.span.start_column >= 0,
-                "start_column должен быть >= 0"
-            );
+            // Примечание: start_line и start_column — unsigned типы (u32), всегда >= 0
             assert!(
                 error.span.end_line >= error.span.start_line,
                 "end_line должен быть >= start_line"
@@ -174,11 +170,7 @@ fn test_span_to_lsp_range_conversion() {
         // )
 
         // Проверяем, что координаты валидные для LSP
-        assert!(span.start_line >= 0, "start_line должен быть >= 0 для LSP");
-        assert!(
-            span.start_column >= 0,
-            "start_column должен быть >= 0 для LSP"
-        );
+        // Примечание: start_line и start_column — unsigned типы (u32), всегда >= 0
         assert!(span.end_line >= span.start_line, "end_line >= start_line");
 
         if span.start_line == span.end_line {

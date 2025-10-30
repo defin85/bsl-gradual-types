@@ -17,7 +17,7 @@ fn main() {
     println!("📚 Parsing syntax helper...");
     let mut parser = SyntaxHelperParser::new();
     parser
-        .parse_directory("examples/syntax_helper")
+        .parse_directory("examples/syntax_helper", None::<fn(_)>)
         .expect("Failed to parse");
 
     let db = parser.export_database();

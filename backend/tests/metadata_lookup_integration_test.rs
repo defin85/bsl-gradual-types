@@ -2,6 +2,7 @@
 
 use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
 use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use bsl_backend::data::loaders::progress::ProgressUpdate;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::types::{
     Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult, ResolutionSource,
@@ -15,7 +16,7 @@ fn test_metadata_lookup_with_real_syntax_helper() {
     // 1. Парсим синтаксис-помощник
     let mut parser = SyntaxHelperParser::new();
     parser
-        .parse_directory("examples/syntax_helper")
+        .parse_directory("examples/syntax_helper", None::<fn(ProgressUpdate)>)
         .expect("Failed to parse syntax helper");
 
     let db = parser.export_database();
@@ -91,7 +92,7 @@ fn test_repository_content_sample() {
     // Быстрый тест - просто посмотрим что есть в repository
     let mut parser = SyntaxHelperParser::new();
     parser
-        .parse_directory("examples/syntax_helper")
+        .parse_directory("examples/syntax_helper", None::<fn(ProgressUpdate)>)
         .expect("Failed to parse");
 
     let db = parser.export_database();

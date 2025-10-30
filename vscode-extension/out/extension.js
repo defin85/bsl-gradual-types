@@ -15065,9 +15065,9 @@ var require_client = __commonJS({
         this._progressHandlers.set(token, { type, handler });
         const connection = this.activeConnection();
         let disposable;
-        const handleWorkDoneProgress = this._clientOptions.middleware?.handleWorkDoneProgress;
-        const realHandler = vscode_languageserver_protocol_1.WorkDoneProgress.is(type) && handleWorkDoneProgress !== void 0 ? (params) => {
-          handleWorkDoneProgress(token, params, () => handler(params));
+        const handleWorkDoneProgress2 = this._clientOptions.middleware?.handleWorkDoneProgress;
+        const realHandler = vscode_languageserver_protocol_1.WorkDoneProgress.is(type) && handleWorkDoneProgress2 !== void 0 ? (params) => {
+          handleWorkDoneProgress2(token, params, () => handler(params));
         } : handler;
         if (connection !== void 0) {
           this._progressDisposables.set(token, connection.onProgress(type, token, realHandler));
@@ -17815,26 +17815,57 @@ function startIndexing(totalSteps = 4) {
   progressEmitter.fire(globalIndexingProgress);
   outputChannel?.appendLine(`\u{1F680} Index building started with ${totalSteps} steps`);
 }
-function updateIndexingProgress(stepNumber, stepName, progress) {
+function updateIndexingProgress(percentage, stepName, eta) {
   if (!globalIndexingProgress.isIndexing) {
     outputChannel?.appendLine(`\u26A0\uFE0F updateIndexingProgress called but indexing is not active`);
     return;
   }
   const elapsed = globalIndexingProgress.startTime ? ((/* @__PURE__ */ new Date()).getTime() - globalIndexingProgress.startTime.getTime()) / 1e3 : 0;
-  const eta = progress > 5 ? Math.round(elapsed * (100 / progress) - elapsed) : void 0;
+  const estimatedEta = eta !== void 0 ? eta : percentage > 5 ? Math.round(elapsed * (100 / percentage) - elapsed) : void 0;
   globalIndexingProgress = {
     ...globalIndexingProgress,
     currentStep: stepName,
-    progress: Math.min(progress, 100),
-    currentStepNumber: stepNumber,
-    estimatedTimeRemaining: eta ? `${eta}s` : "calculating..."
+    progress: Math.min(percentage, 100),
+    currentStepNumber: Math.round(percentage / 25),
+    // Примерная оценка шага (0-4)
+    estimatedTimeRemaining: estimatedEta !== void 0 ? `${estimatedEta}s` : "calculating..."
   };
-  updateStatusBar(void 0, globalIndexingProgress);
-  progressEmitter.fire(globalIndexingProgress);
-  outputChannel?.appendLine(`\u{1F4CA} Step ${stepNumber}/${globalIndexingProgress.totalSteps}: ${stepName} (${progress}%)`);
+  throttledUpdateUi(globalIndexingProgress);
 }
-function finishIndexing(success = true) {
+function throttledUpdateUi(progress) {
+  const now = Date.now();
+  const timeSinceLastUpdate = now - lastUiUpdateTime;
+  pendingProgressUpdate = progress;
+  if (timeSinceLastUpdate >= UI_UPDATE_THROTTLE_MS) {
+    flushPendingUpdate();
+  } else {
+    if (throttleTimeoutId !== void 0) {
+      clearTimeout(throttleTimeoutId);
+    }
+    const delay = UI_UPDATE_THROTTLE_MS - timeSinceLastUpdate;
+    throttleTimeoutId = setTimeout(() => {
+      flushPendingUpdate();
+    }, delay);
+  }
+}
+function flushPendingUpdate() {
+  if (pendingProgressUpdate) {
+    updateStatusBar(void 0, pendingProgressUpdate);
+    progressEmitter.fire(pendingProgressUpdate);
+    lastUiUpdateTime = Date.now();
+    throttleTimeoutId = void 0;
+    outputChannel?.appendLine(
+      `\u{1F4CA} Progress: ${pendingProgressUpdate.currentStep} (${pendingProgressUpdate.progress}%${pendingProgressUpdate.estimatedTimeRemaining ? `, ETA: ${pendingProgressUpdate.estimatedTimeRemaining}` : ""})`
+    );
+  }
+}
+function finishIndexing(message) {
+  if (throttleTimeoutId !== void 0) {
+    clearTimeout(throttleTimeoutId);
+    throttleTimeoutId = void 0;
+  }
   const elapsed = globalIndexingProgress.startTime ? ((/* @__PURE__ */ new Date()).getTime() - globalIndexingProgress.startTime.getTime()) / 1e3 : 0;
+  const success = message ? message.includes("\u2705") || message.toLowerCase().includes("\u0443\u0441\u043F\u0435\u0448\u043D\u043E") : true;
   globalIndexingProgress = {
     isIndexing: false,
     currentStep: success ? "Completed" : "Failed",
@@ -17844,8 +17875,10 @@ function finishIndexing(success = true) {
   };
   updateStatusBar(success ? "BSL Analyzer: Index Ready" : "BSL Analyzer: Index Failed", void 0);
   progressEmitter.fire(globalIndexingProgress);
+  lastUiUpdateTime = Date.now();
   const statusIcon = success ? "\u2705" : "\u274C";
-  outputChannel?.appendLine(`${statusIcon} Index building ${success ? "completed" : "failed"} in ${elapsed.toFixed(1)}s`);
+  const displayMessage = message || `Index building ${success ? "completed" : "failed"}`;
+  outputChannel?.appendLine(`${statusIcon} ${displayMessage} in ${elapsed.toFixed(1)}s`);
   if (success) {
     vscode2.window.showInformationMessage(`BSL Index built successfully in ${elapsed.toFixed(1)}s`);
   }
@@ -17904,7 +17937,7 @@ function updateLspStatus(state) {
   }
   statusBarItem.show();
 }
-var vscode2, import_node, globalIndexingProgress, progressEmitter, outputChannel, statusBarItem;
+var vscode2, import_node, globalIndexingProgress, progressEmitter, outputChannel, statusBarItem, lastUiUpdateTime, UI_UPDATE_THROTTLE_MS, pendingProgressUpdate, throttleTimeoutId;
 var init_progress = __esm({
   "src/lsp/progress.ts"() {
     "use strict";
@@ -17918,6 +17951,9 @@ var init_progress = __esm({
       currentStepNumber: 0
     };
     progressEmitter = new vscode2.EventEmitter();
+    lastUiUpdateTime = 0;
+    UI_UPDATE_THROTTLE_MS = 500;
+    pendingProgressUpdate = null;
   }
 });
 
@@ -17987,6 +18023,7 @@ __export(client_exports, {
   getLanguageClient: () => getLanguageClient,
   initializeLspClient: () => initializeLspClient,
   isClientRunning: () => isClientRunning,
+  parseProgressMessage: () => parseProgressMessage,
   restartLanguageClient: () => restartLanguageClient,
   sendCustomNotification: () => sendCustomNotification,
   sendCustomRequest: () => sendCustomRequest,
@@ -18162,6 +18199,13 @@ async function startLanguageClient(context) {
     client.onNotification("bsl/indexingProgress", (params) => {
       handleIndexingProgress(params);
     });
+    client.onNotification("$/progress", (params) => {
+      const { token } = params;
+      if (typeof token === "string" && token.startsWith("bsl-load-types-")) {
+        outputChannel3.appendLine(`[$/progress] Received notification for token: ${token}`);
+        handleWorkDoneProgress(params);
+      }
+    });
     vscode4.commands.executeCommand("bslAnalyzer.refreshOverview");
     startHealthCheck();
   } catch (error) {
@@ -18195,6 +18239,55 @@ function getLanguageClient() {
 }
 function isClientRunning() {
   return client !== null && client.isRunning();
+}
+function parseProgressMessage(message) {
+  const result = {
+    originalMessage: message
+  };
+  const match = message.match(/Тип (\d+)\/(\d+)(?: - ([^-]+))?(?: - ETA: (\d+)s)?/);
+  if (match) {
+    result.currentItem = parseInt(match[1], 10);
+    result.totalItems = parseInt(match[2], 10);
+    if (match[3]) {
+      result.itemName = match[3].trim();
+    }
+    if (match[4]) {
+      result.eta = parseInt(match[4], 10);
+    }
+  }
+  return result;
+}
+function handleWorkDoneProgress(params) {
+  const { token, value } = params;
+  outputChannel3.appendLine(`[$/progress] Token: ${token}, Kind: ${value.kind}`);
+  if (value.kind === "begin") {
+    const beginValue = value;
+    outputChannel3.appendLine(`[$/progress] BEGIN - Title: ${beginValue.title}, Message: ${beginValue.message || "N/A"}, Percentage: ${beginValue.percentage || 0}%`);
+    startIndexing();
+  } else if (value.kind === "report") {
+    const reportValue = value;
+    const message = reportValue.message || "";
+    const percentage = reportValue.percentage || 0;
+    outputChannel3.appendLine(`[$/progress] REPORT - Message: ${message}, Percentage: ${percentage}%`);
+    const parsed = parseProgressMessage(message);
+    if (parsed.currentItem && parsed.totalItems) {
+      const stepName = parsed.itemName ? `\u0422\u0438\u043F ${parsed.currentItem}/${parsed.totalItems} - ${parsed.itemName}` : `\u0422\u0438\u043F ${parsed.currentItem}/${parsed.totalItems}`;
+      updateIndexingProgress(
+        percentage,
+        stepName,
+        parsed.eta
+      );
+    } else {
+      updateIndexingProgress(percentage, message, void 0);
+    }
+  } else if (value.kind === "end") {
+    const endValue = value;
+    const message = endValue.message || "\u0417\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E";
+    outputChannel3.appendLine(`[$/progress] END - Message: ${message}`);
+    finishIndexing(message);
+  } else {
+    outputChannel3.appendLine(`[$/progress] WARN - Unknown progress kind: ${value.kind}`);
+  }
 }
 function registerCustomHandlers() {
   if (!client) return;

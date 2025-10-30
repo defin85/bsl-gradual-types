@@ -8,7 +8,7 @@ async fn debug_array_type_resolution() {
     let syntax_path = Path::new("../examples/syntax_helper");
 
     coordinator
-        .start_with_paths(Some(syntax_path), None)
+        .start_with_paths(Some(syntax_path), None, None)
         .await
         .expect("Failed to start SystemCoordinator");
 

@@ -27,6 +27,9 @@ use super::syntax_helper::*;
 // Импорт типов из shared
 use bsl_shared::domain::types::FacetKind;
 
+// Импорт структур прогресса
+use super::progress::{IndexingPhase, ProgressUpdate};
+
 // ============================================================================
 // Структуры данных импортируются из syntax_helper/types.rs
 // ============================================================================
@@ -103,7 +106,7 @@ impl SyntaxHelperParser {
         // Парсим контекстную справку (объекты, методы, свойства)
         if context_help_path.exists() {
             info!("📚 Найдена контекстная справка (shcntx_ru), запускаем парсинг...");
-            match self.parse_directory(&context_help_path) {
+            match self.parse_directory(&context_help_path, None::<fn(ProgressUpdate)>) {
                 Ok(()) => {
                     info!("✅ Парсинг контекстной справки завершен");
                     parsed_something = true;
@@ -117,7 +120,7 @@ impl SyntaxHelperParser {
         // Парсим справку по языку (примитивные типы, операторы)
         if language_help_path.exists() {
             info!("📖 Найдена справка по языку (shlang_ru), запускаем парсинг...");
-            match self.parse_directory(&language_help_path) {
+            match self.parse_directory(&language_help_path, None::<fn(ProgressUpdate)>) {
                 Ok(()) => {
                     info!("✅ Парсинг справки по языку завершен");
                     parsed_something = true;
@@ -131,7 +134,7 @@ impl SyntaxHelperParser {
         // Fallback: если стандартных папок нет, парсим как единую папку
         if !parsed_something && base_path.exists() {
             info!("📚 Стандартные папки не найдены, парсим как единую папку...");
-            self.parse_directory(base_path)?;
+            self.parse_directory(base_path, None::<fn(ProgressUpdate)>)?;
         }
 
         if !parsed_something {
@@ -144,16 +147,43 @@ impl SyntaxHelperParser {
         Ok(())
     }
 
-    /// Парсит каталог с прогресс-баром
-    pub fn parse_directory<P: AsRef<Path>>(&mut self, base_path: P) -> Result<()> {
+    /// Парсит каталог с прогресс-баром и опциональным callback
+    pub fn parse_directory<P, F>(
+        &mut self,
+        base_path: P,
+        progress_callback: Option<F>
+    ) -> Result<()>
+    where
+        P: AsRef<Path>,
+        F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static
+    {
         let base_path = base_path.as_ref();
         info!("🚀 Начинаем оптимизированный парсинг из {:?}", base_path);
 
-        // Фаза 1: Собираем все HTML файлы
+        // Фаза 1: Collecting Files (0-10%)
+        if let Some(ref callback) = progress_callback {
+            callback(ProgressUpdate::new(
+                IndexingPhase::CollectingFiles,
+                0,
+                100, // Placeholder, так как не знаем сколько файлов
+                Some("Начинаем сканирование...".to_string()),
+            ));
+        }
+
         let start = std::time::Instant::now();
         let html_files = self.collect_html_files(base_path)?;
         let file_count = html_files.len();
         self.total_files.store(file_count, Ordering::Relaxed);
+
+        // Завершение фазы сбора
+        if let Some(ref callback) = progress_callback {
+            callback(ProgressUpdate::new(
+                IndexingPhase::CollectingFiles,
+                file_count,
+                file_count,
+                Some(format!("Найдено {} HTML файлов", file_count)),
+            ));
+        }
 
         info!(
             "📊 Найдено {} HTML файлов за {:?}",
@@ -197,13 +227,13 @@ impl SyntaxHelperParser {
             None
         };
 
-        // Фаза 2: Параллельная обработка файлов
+        // Фаза 2: Parsing Files (10-70%)
         let parse_start = std::time::Instant::now();
 
         files_to_process
             .par_chunks(self.settings.batch_size)
             .for_each(|batch| {
-                self.process_batch(batch, &main_progress);
+                self.process_batch(batch, &main_progress, &progress_callback);
             });
 
         if let Some(pb) = main_progress {
@@ -213,12 +243,39 @@ impl SyntaxHelperParser {
             ));
         }
 
-        // Фаза 3: Связываем типы с категориями
+        // Фаза 3: Linking Categories (70-90%)
         info!("🔗 Связываем типы с категориями...");
+        if let Some(ref callback) = progress_callback {
+            callback(ProgressUpdate::new(
+                IndexingPhase::LinkingCategories,
+                0,
+                self.categories.len(),
+                Some("Начинаем связывание категорий...".to_string()),
+            ));
+        }
+
         self.link_types_to_categories();
 
-        // Фаза 4: Параллельное построение индексов
+        // Завершение связывания
+        if let Some(ref callback) = progress_callback {
+            callback(ProgressUpdate::new(
+                IndexingPhase::LinkingCategories,
+                self.categories.len(),
+                self.categories.len(),
+                Some("Категории связаны".to_string()),
+            ));
+        }
+
+        // Фаза 4: Building Indexes (90-100%)
         let index_start = std::time::Instant::now();
+        if let Some(ref callback) = progress_callback {
+            callback(ProgressUpdate::new(
+                IndexingPhase::BuildingIndexes,
+                0,
+                self.nodes.len(),
+                Some("Построение индексов...".to_string()),
+            ));
+        }
 
         let index = if self.settings.parallel_indexing {
             IndexBuilder::build_indexes_parallel(&self.nodes)
@@ -228,6 +285,16 @@ impl SyntaxHelperParser {
         self.type_index.insert("main".to_string(), index);
 
         info!("📚 Индексы построены за {:?}", index_start.elapsed());
+
+        // Завершение индексации
+        if let Some(ref callback) = progress_callback {
+            callback(ProgressUpdate::new(
+                IndexingPhase::BuildingIndexes,
+                self.nodes.len(),
+                self.nodes.len(),
+                Some(format!("Индексы построены ({} типов)", self.nodes.len())),
+            ));
+        }
 
         // Выводим финальную статистику
         let processed = self.processed_files.load(Ordering::Relaxed);
@@ -301,13 +368,58 @@ impl SyntaxHelperParser {
     }
 
     /// Обрабатывает батч файлов
-    fn process_batch(&self, batch: &[PathBuf], progress: &Option<ProgressBar>) {
+    fn process_batch<F>(
+        &self,
+        batch: &[PathBuf],
+        progress: &Option<ProgressBar>,
+        progress_callback: &Option<F>
+    )
+    where
+        F: Fn(ProgressUpdate) + Send + Sync
+    {
         // Параллельная обработка внутри батча
         batch.par_iter().for_each(|file_path| {
             match self.parse_html_file(file_path) {
                 Ok(node) => {
-                    self.save_node(node);
-                    self.processed_files.fetch_add(1, Ordering::Relaxed);
+                    // Сохраняем узел
+                    self.save_node(node.clone());
+                    let count = self.processed_files.fetch_add(1, Ordering::Relaxed) + 1;
+
+                    // ✅ НОВОЕ: Отправляем прогресс каждые 10 файлов
+                    if let Some(ref callback) = progress_callback {
+                        if count % 10 == 0 {
+                            let total = self.total_files.load(Ordering::Relaxed);
+
+                            // Извлекаем имя типа из узла
+                            let type_name = match &node {
+                                SyntaxNode::Type(type_info) => {
+                                    type_info.identity.russian_name.clone()
+                                }
+                                SyntaxNode::Method(method) => {
+                                    format!("Метод: {}", method.name)
+                                }
+                                SyntaxNode::Property(prop) => {
+                                    format!("Свойство: {}", prop.name)
+                                }
+                                SyntaxNode::Category(cat) => {
+                                    format!("Категория: {}", cat.name)
+                                }
+                                SyntaxNode::Constructor(_) => {
+                                    "Конструктор".to_string()
+                                }
+                                SyntaxNode::GlobalFunction(func) => {
+                                    format!("Функция: {}", func.name)
+                                }
+                            };
+
+                            callback(ProgressUpdate::new(
+                                IndexingPhase::ParsingFiles,
+                                count,
+                                total,
+                                Some(type_name),
+                            ));
+                        }
+                    }
                 }
                 Err(e) => {
                     debug!("Ошибка парсинга {:?}: {}", file_path, e);
@@ -462,6 +574,79 @@ impl SyntaxHelperParser {
     // =========================================================================
     // Публичный API
     // =========================================================================
+
+    /// Парсит синтаксис-помощник с отправкой прогресса через callback
+    ///
+    /// # Arguments
+    /// * `progress_callback` - Функция для получения обновлений прогресса
+    ///
+    /// # Example
+    /// ```no_run
+    /// use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+    /// use bsl_backend::data::loaders::progress::ProgressUpdate;
+    /// use std::path::Path;
+    ///
+    /// let mut parser = SyntaxHelperParser::new();
+    /// let path = Path::new("examples/syntax_helper");
+    /// parser.parse_with_progress(path, |update: ProgressUpdate| {
+    ///     println!("[{:?}] {:.1}%", update.phase, update.percentage);
+    /// }).unwrap();
+    /// ```
+    pub fn parse_with_progress<P, F>(&mut self, base_path: P, progress_callback: F) -> Result<()>
+    where
+        P: AsRef<Path>,
+        F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static
+    {
+        // Используем parse_syntax_helper для стандартной логики определения структуры,
+        // но парсим через parse_directory с callback
+        let base_path = base_path.as_ref();
+
+        // Проверяем стандартную структуру
+        let context_help_path = base_path.join("rebuilt.shcntx_ru");
+        let language_help_path = base_path.join("rebuilt.shlang_ru");
+
+        let mut parsed_something = false;
+
+        // Парсим контекстную справку
+        if context_help_path.exists() {
+            info!("📚 Найдена контекстная справка (shcntx_ru), запускаем парсинг...");
+            match self.parse_directory(&context_help_path, Some(progress_callback.clone())) {
+                Ok(()) => {
+                    info!("✅ Парсинг контекстной справки завершен");
+                    parsed_something = true;
+                }
+                Err(e) => {
+                    warn!("⚠️ Ошибка парсинга контекстной справки: {}", e);
+                }
+            }
+        }
+
+        // Парсим справку по языку
+        if language_help_path.exists() {
+            info!("📖 Найдена справка по языку (shlang_ru), запускаем парсинг...");
+            match self.parse_directory(&language_help_path, Some(progress_callback.clone())) {
+                Ok(()) => {
+                    info!("✅ Парсинг справки по языку завершен");
+                    parsed_something = true;
+                }
+                Err(e) => {
+                    warn!("⚠️ Ошибка парсинга справки по языку: {}", e);
+                }
+            }
+        }
+
+        // Fallback
+        if !parsed_something && base_path.exists() {
+            info!("📚 Стандартные папки не найдены, парсим как единую папку...");
+            self.parse_directory(base_path, Some(progress_callback))?;
+        }
+
+        if !parsed_something {
+            warn!("📁 Не найдено подходящих файлов для парсинга в {:?}", base_path);
+        }
+
+        Ok(())
+    }
 
     /// Получить статистику парсинга
     pub fn get_stats(&self) -> ParsingStats {
@@ -630,7 +815,7 @@ mod tests {
         };
 
         let mut parser = SyntaxHelperParser::with_settings(settings);
-        parser.parse_directory(&test_dir).unwrap();
+        parser.parse_directory(&test_dir, None::<fn(ProgressUpdate)>).unwrap();
 
         // Проверяем результаты
         let stats = parser.get_stats();
@@ -699,5 +884,105 @@ mod tests {
 
         // Проверяем, что все узлы сохранены
         assert_eq!(parser.nodes.len(), 10);
+    }
+
+    #[test]
+    fn test_parse_with_progress_callback() {
+        use std::sync::{Arc, Mutex};
+        use super::super::progress::{IndexingPhase, ProgressUpdate};
+
+        // Создаём небольшую тестовую директорию
+        let temp_dir = TempDir::new().unwrap();
+        let test_dir = temp_dir.path().join("test");
+        fs::create_dir(&test_dir).unwrap();
+
+        // Создаём несколько HTML файлов для теста
+        for i in 0..15 {
+            let html = format!(
+                r#"
+                <html>
+                <head><title>TestType{} (TestType{})</title></head>
+                <body>
+                    <h1 class="V8SH_pagetitle">TestType{} (TestType{})</h1>
+                    <p>Test description {}</p>
+                </body>
+                </html>
+            "#,
+                i, i, i, i, i
+            );
+
+            let file_path = test_dir.join(format!("type_{}.html", i));
+            fs::write(file_path, html).unwrap();
+        }
+
+        // Собираем прогресс в вектор
+        let progress_updates = Arc::new(Mutex::new(Vec::new()));
+        let progress_clone = progress_updates.clone();
+
+        let callback = move |update: ProgressUpdate| {
+            progress_clone.lock().unwrap().push(update);
+        };
+
+        // Парсим с callback
+        let settings = OptimizationSettings {
+            max_threads: Some(2),
+            batch_size: 5,
+            show_progress: false,
+            ..Default::default()
+        };
+
+        let mut parser = SyntaxHelperParser::with_settings(settings);
+        parser.parse_directory(&test_dir, Some(callback)).unwrap();
+
+        // Проверяем что прогресс был отправлен
+        let updates = progress_updates.lock().unwrap();
+
+        // Должны быть обновления для всех 4 фаз
+        let phases: Vec<IndexingPhase> = updates.iter().map(|u| u.phase).collect();
+        assert!(phases.contains(&IndexingPhase::CollectingFiles), "Нет фазы CollectingFiles");
+        assert!(phases.contains(&IndexingPhase::ParsingFiles), "Нет фазы ParsingFiles");
+        assert!(phases.contains(&IndexingPhase::LinkingCategories), "Нет фазы LinkingCategories");
+        assert!(phases.contains(&IndexingPhase::BuildingIndexes), "Нет фазы BuildingIndexes");
+
+        // Проверяем что последнее обновление - 100%
+        let last = updates.last().unwrap();
+        assert_eq!(last.percentage, 100.0, "Последний процент должен быть 100%");
+        assert_eq!(last.phase, IndexingPhase::BuildingIndexes, "Последняя фаза должна быть BuildingIndexes");
+    }
+
+    #[test]
+    fn test_parse_without_callback_still_works() {
+        // Проверяем что парсинг без callback продолжает работать
+        let temp_dir = TempDir::new().unwrap();
+        let test_dir = temp_dir.path().join("test");
+        fs::create_dir(&test_dir).unwrap();
+
+        // Создаём тестовый файл
+        let html = r#"
+            <html>
+            <head><title>TestType (TestType)</title></head>
+            <body>
+                <h1 class="V8SH_pagetitle">TestType (TestType)</h1>
+                <p>Test description</p>
+            </body>
+            </html>
+        "#;
+        fs::write(test_dir.join("test.html"), html).unwrap();
+
+        // Парсим БЕЗ callback (старый API)
+        let settings = OptimizationSettings {
+            show_progress: false,
+            ..Default::default()
+        };
+
+        let mut parser = SyntaxHelperParser::with_settings(settings);
+        let result = parser.parse_directory(&test_dir, None::<fn(ProgressUpdate)>);
+
+        // Должно работать без ошибок
+        assert!(result.is_ok(), "Парсинг без callback должен работать");
+
+        // Проверяем что файл обработан
+        let stats = parser.get_stats();
+        assert_eq!(stats.processed_files, 1, "Должен быть обработан 1 файл");
     }
 }

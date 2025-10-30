@@ -177,7 +177,7 @@ fn test_sequential_metadata_loading_all_configurations() {
         let metadata = metadata_result.unwrap();
 
         assert!(
-            metadata.len() > 0,
+            !metadata.is_empty(),
             "Конфигурация '{}' должна содержать хотя бы один объект метаданных",
             config.name
         );

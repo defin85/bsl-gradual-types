@@ -617,7 +617,7 @@ fn render_symbol_table(symbols: &bsl_shared::ir::SymbolTable) -> String {
     }
 
     // Add procedures
-    for (name, _sig) in &symbols.global_procedures {
+    for name in symbols.global_procedures.keys() {
         table_rows.push_str(&format!(
             r#"<tr>
     <td><code>{}</code></td>

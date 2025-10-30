@@ -77,7 +77,7 @@ async fn test_lsp_server_init_sequence_with_double_start() {
     }
 
     coordinator
-        .start_with_paths(Some(syntax_path), None)
+        .start_with_paths(Some(syntax_path), None, None)
         .await
         .expect("Failed to reload types from Syntax Helper");
 

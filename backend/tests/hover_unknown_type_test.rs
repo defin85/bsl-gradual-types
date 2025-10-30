@@ -10,7 +10,7 @@ async fn test_hover_shows_unknown_type_warning_for_configuration_types() {
     // Инициализация системы (только базовые типы, без Syntax Helper)
     let coordinator = SystemCoordinator::new();
     coordinator
-        .start_with_paths(None, None) // без Syntax Helper и Configuration
+        .start_with_paths(None, None, None) // без Syntax Helper и Configuration
         .await
         .expect("Failed to start SystemCoordinator");
 
@@ -79,7 +79,7 @@ async fn test_hover_shows_correct_info_for_platform_types() {
     // Инициализация системы с Platform Types (Syntax Helper)
     let coordinator = SystemCoordinator::new();
     coordinator
-        .start_with_paths(Some(std::path::Path::new("examples/syntax_helper")), None)
+        .start_with_paths(Some(std::path::Path::new("examples/syntax_helper")), None, None)
         .await
         .expect("Failed to start SystemCoordinator");
 
@@ -137,7 +137,7 @@ async fn test_hover_shows_correct_info_for_platform_types() {
 async fn test_hover_differentiates_platform_and_configuration_types() {
     let coordinator = SystemCoordinator::new();
     coordinator
-        .start_with_paths(Some(std::path::Path::new("examples/syntax_helper")), None)
+        .start_with_paths(Some(std::path::Path::new("examples/syntax_helper")), None, None)
         .await
         .expect("Failed to start SystemCoordinator");
 

@@ -2,7 +2,12 @@ import * as vscode from 'vscode';
 import {
     TypeInfoParams,
     ValidateMethodParams,
-    IndexingProgressParams
+    IndexingProgressParams,
+    ProgressParams,
+    WorkDoneProgressBegin,
+    WorkDoneProgressReport,
+    WorkDoneProgressEnd,
+    ParsedProgressMessage
 } from '../types';
 import {
     LanguageClient,
@@ -16,7 +21,7 @@ import {
 } from 'vscode-languageclient/node';
 import { getBinaryPath } from '../utils/binaryPath';
 import { BslAnalyzerConfig } from '../config/configHelper';
-import { updateStatusBar, updateLspStatus } from './progress';
+import { updateStatusBar, updateLspStatus, startIndexing, updateIndexingProgress, finishIndexing } from './progress';
 import * as fs from 'fs';
 
 /**
@@ -241,13 +246,24 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
         });
 
         outputChannel.appendLine('✅ LSP client started successfully');
-        
+
         // Регистрируем обработчики custom requests
         registerCustomHandlers();
-        
+
         // Регистрируем обработчик прогресса индексации
         client.onNotification('bsl/indexingProgress', (params: IndexingProgressParams) => {
             handleIndexingProgress(params);
+        });
+
+        // MILESTONE 2.20.2.4: Подписка на $/progress notification для Work Done Progress
+        client.onNotification('$/progress', (params: ProgressParams) => {
+            const { token } = params;
+
+            // Обрабатываем только notifications с token "bsl-load-types-*"
+            if (typeof token === 'string' && token.startsWith('bsl-load-types-')) {
+                outputChannel.appendLine(`[$/progress] Received notification for token: ${token}`);
+                handleWorkDoneProgress(params);
+            }
         });
 
         // Уведомляем провайдеры об изменении статуса
@@ -307,6 +323,98 @@ export function getLanguageClient(): LanguageClient | null {
  */
 export function isClientRunning(): boolean {
     return client !== null && client.isRunning();
+}
+
+/**
+ * MILESTONE 2.20.2.4: Парсинг прогресса из message string
+ *
+ * Ожидаемые форматы:
+ * - "Тип 150/3927 - Справочники.Контрагенты - ETA: 42s"
+ * - "Тип 150/3927 - Справочники.Контрагенты"
+ * - "Тип 150/3927"
+ * - "✅ Загружено 3927 типов за 87.3s"
+ */
+export function parseProgressMessage(message: string): ParsedProgressMessage {
+    const result: ParsedProgressMessage = {
+        originalMessage: message
+    };
+
+    // Пробуем распарсить формат: "Тип 150/3927 - Справочники.Контрагенты - ETA: 42s"
+    const match = message.match(/Тип (\d+)\/(\d+)(?: - ([^-]+))?(?: - ETA: (\d+)s)?/);
+    if (match) {
+        result.currentItem = parseInt(match[1], 10);
+        result.totalItems = parseInt(match[2], 10);
+
+        // Название элемента (если есть)
+        if (match[3]) {
+            result.itemName = match[3].trim();
+        }
+
+        // ETA (если есть)
+        if (match[4]) {
+            result.eta = parseInt(match[4], 10);
+        }
+    }
+
+    return result;
+}
+
+/**
+ * MILESTONE 2.20.2.4: Обработчик $/progress notification от LSP Server
+ *
+ * Обрабатывает Work Done Progress notifications для индексации типов платформы 1С
+ */
+function handleWorkDoneProgress(params: ProgressParams): void {
+    const { token, value } = params;
+
+    outputChannel.appendLine(`[$/progress] Token: ${token}, Kind: ${value.kind}`);
+
+    if (value.kind === 'begin') {
+        const beginValue = value as WorkDoneProgressBegin;
+        outputChannel.appendLine(`[$/progress] BEGIN - Title: ${beginValue.title}, Message: ${beginValue.message || 'N/A'}, Percentage: ${beginValue.percentage || 0}%`);
+
+        // Запускаем отслеживание индексации
+        startIndexing();
+    }
+    else if (value.kind === 'report') {
+        const reportValue = value as WorkDoneProgressReport;
+        const message = reportValue.message || '';
+        const percentage = reportValue.percentage || 0;
+
+        outputChannel.appendLine(`[$/progress] REPORT - Message: ${message}, Percentage: ${percentage}%`);
+
+        // Парсим детали из message
+        const parsed = parseProgressMessage(message);
+
+        if (parsed.currentItem && parsed.totalItems) {
+            // Формируем красивое описание прогресса
+            const stepName = parsed.itemName
+                ? `Тип ${parsed.currentItem}/${parsed.totalItems} - ${parsed.itemName}`
+                : `Тип ${parsed.currentItem}/${parsed.totalItems}`;
+
+            // Обновляем прогресс индексации
+            updateIndexingProgress(
+                percentage,
+                stepName,
+                parsed.eta
+            );
+        } else {
+            // Fallback: показываем message как есть
+            updateIndexingProgress(percentage, message, undefined);
+        }
+    }
+    else if (value.kind === 'end') {
+        const endValue = value as WorkDoneProgressEnd;
+        const message = endValue.message || 'Завершено';
+
+        outputChannel.appendLine(`[$/progress] END - Message: ${message}`);
+
+        // Завершаем отслеживание индексации
+        finishIndexing(message);
+    }
+    else {
+        outputChannel.appendLine(`[$/progress] WARN - Unknown progress kind: ${(value as any).kind}`);
+    }
 }
 
 /**

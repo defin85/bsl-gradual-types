@@ -5,6 +5,7 @@
 pub mod config_metadata_parser;
 pub mod config_parser;
 pub mod platform_types;
+pub mod progress;
 pub mod syntax_helper;
 pub mod syntax_helper_parser;
 

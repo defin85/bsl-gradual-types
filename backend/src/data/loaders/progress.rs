@@ -1,0 +1,237 @@
+//! Структуры данных для отслеживания прогресса индексации платформенных типов.
+//!
+//! Поддерживает 4 фазы парсинга Syntax Helper:
+//! - Collecting Files (0-10%)
+//! - Parsing Files (10-70%)
+//! - Linking Categories (70-90%)
+//! - Building Indexes (90-100%)
+
+/// Этапы парсинга платформенных типов
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexingPhase {
+    /// Сканирование файловой системы (0-10%)
+    CollectingFiles,
+
+    /// Парсинг HTML файлов Syntax Helper (10-70%)
+    ParsingFiles,
+
+    /// Связывание типов с категориями (70-90%)
+    LinkingCategories,
+
+    /// Построение индексов для быстрого поиска (90-100%)
+    BuildingIndexes,
+}
+
+impl IndexingPhase {
+    /// Возвращает базовый процент начала фазы (0.0-100.0)
+    pub fn base_percentage(&self) -> f32 {
+        match self {
+            Self::CollectingFiles => 0.0,
+            Self::ParsingFiles => 10.0,
+            Self::LinkingCategories => 70.0,
+            Self::BuildingIndexes => 90.0,
+        }
+    }
+
+    /// Возвращает вклад фазы в общий процент (сумма всех весов = 100.0)
+    pub fn weight(&self) -> f32 {
+        match self {
+            Self::CollectingFiles => 10.0,
+            Self::ParsingFiles => 60.0,    // Основная фаза (самая долгая)
+            Self::LinkingCategories => 20.0,
+            Self::BuildingIndexes => 10.0,
+        }
+    }
+
+    /// Человекочитаемое название фазы (для русского интерфейса)
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::CollectingFiles => "Сканирование файлов",
+            Self::ParsingFiles => "Парсинг Syntax Helper",
+            Self::LinkingCategories => "Связывание категорий",
+            Self::BuildingIndexes => "Построение индексов",
+        }
+    }
+}
+
+/// Обновление прогресса парсинга
+#[derive(Debug, Clone)]
+pub struct ProgressUpdate {
+    /// Текущая фаза индексации
+    pub phase: IndexingPhase,
+
+    /// Текущий элемент (номер обработанного файла/типа)
+    pub current: usize,
+
+    /// Всего элементов в текущей фазе
+    pub total: usize,
+
+    /// Общий процент выполнения (0.0-100.0)
+    pub percentage: f32,
+
+    /// Человекочитаемое сообщение (например, имя текущего типа)
+    pub message: Option<String>,
+}
+
+impl ProgressUpdate {
+    /// Вычисляет общий процент на основе фазы и прогресса внутри фазы
+    ///
+    /// # Формула
+    /// percentage = base_percentage + (current / total) * weight
+    ///
+    /// # Примеры
+    /// ```
+    /// use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
+    ///
+    /// // Фаза ParsingFiles: обработано 1963 из 3927 файлов
+    /// let percent = ProgressUpdate::compute_percentage(
+    ///     IndexingPhase::ParsingFiles,
+    ///     1963,
+    ///     3927
+    /// );
+    /// assert_eq!(percent, 40.0); // 10% (base) + 50% * 60% (weight)
+    /// ```
+    pub fn compute_percentage(phase: IndexingPhase, current: usize, total: usize) -> f32 {
+        let base = phase.base_percentage();
+        let weight = phase.weight();
+
+        // Защита от деления на 0
+        if total == 0 {
+            return base;
+        }
+
+        // Процент внутри фазы (0.0-1.0)
+        let phase_progress = (current as f32 / total as f32).min(1.0);
+
+        // Итоговый процент
+        let percentage = base + phase_progress * weight;
+
+        // Округление до 1 знака после запятой
+        (percentage * 10.0).round() / 10.0
+    }
+
+    /// Создаёт новое обновление прогресса с автоматическим вычислением процента
+    pub fn new(
+        phase: IndexingPhase,
+        current: usize,
+        total: usize,
+        message: Option<String>,
+    ) -> Self {
+        let percentage = Self::compute_percentage(phase, current, total);
+
+        Self {
+            phase,
+            current,
+            total,
+            percentage,
+            message,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_indexing_phase_base_percentage() {
+        assert_eq!(IndexingPhase::CollectingFiles.base_percentage(), 0.0);
+        assert_eq!(IndexingPhase::ParsingFiles.base_percentage(), 10.0);
+        assert_eq!(IndexingPhase::LinkingCategories.base_percentage(), 70.0);
+        assert_eq!(IndexingPhase::BuildingIndexes.base_percentage(), 90.0);
+    }
+
+    #[test]
+    fn test_indexing_phase_weight() {
+        assert_eq!(IndexingPhase::CollectingFiles.weight(), 10.0);
+        assert_eq!(IndexingPhase::ParsingFiles.weight(), 60.0);
+        assert_eq!(IndexingPhase::LinkingCategories.weight(), 20.0);
+        assert_eq!(IndexingPhase::BuildingIndexes.weight(), 10.0);
+
+        // Сумма весов = 100.0
+        let total_weight = IndexingPhase::CollectingFiles.weight()
+            + IndexingPhase::ParsingFiles.weight()
+            + IndexingPhase::LinkingCategories.weight()
+            + IndexingPhase::BuildingIndexes.weight();
+        assert_eq!(total_weight, 100.0);
+    }
+
+    #[test]
+    fn test_indexing_phase_display_name() {
+        assert_eq!(IndexingPhase::CollectingFiles.display_name(), "Сканирование файлов");
+        assert_eq!(IndexingPhase::ParsingFiles.display_name(), "Парсинг Syntax Helper");
+        assert_eq!(IndexingPhase::LinkingCategories.display_name(), "Связывание категорий");
+        assert_eq!(IndexingPhase::BuildingIndexes.display_name(), "Построение индексов");
+    }
+
+    #[test]
+    fn test_compute_percentage_collecting_files() {
+        // Начало фазы: 0/100
+        let percent = ProgressUpdate::compute_percentage(IndexingPhase::CollectingFiles, 0, 100);
+        assert_eq!(percent, 0.0);
+
+        // Середина фазы: 50/100
+        let percent = ProgressUpdate::compute_percentage(IndexingPhase::CollectingFiles, 50, 100);
+        assert_eq!(percent, 5.0); // 0% (base) + 50% * 10% (weight)
+
+        // Конец фазы: 100/100
+        let percent = ProgressUpdate::compute_percentage(IndexingPhase::CollectingFiles, 100, 100);
+        assert_eq!(percent, 10.0);
+    }
+
+    #[test]
+    fn test_compute_percentage_parsing_files() {
+        // Начало фазы: 0/3927
+        let percent = ProgressUpdate::compute_percentage(IndexingPhase::ParsingFiles, 0, 3927);
+        assert_eq!(percent, 10.0);
+
+        // Середина фазы: 1963/3927 (50%)
+        let percent = ProgressUpdate::compute_percentage(IndexingPhase::ParsingFiles, 1963, 3927);
+        assert_eq!(percent, 40.0); // 10% (base) + 50% * 60% (weight)
+
+        // Конец фазы: 3927/3927
+        let percent = ProgressUpdate::compute_percentage(IndexingPhase::ParsingFiles, 3927, 3927);
+        assert_eq!(percent, 70.0);
+    }
+
+    #[test]
+    fn test_compute_percentage_linking_categories() {
+        // Середина фазы: 50/100
+        let percent = ProgressUpdate::compute_percentage(IndexingPhase::LinkingCategories, 50, 100);
+        assert_eq!(percent, 80.0); // 70% (base) + 50% * 20% (weight)
+    }
+
+    #[test]
+    fn test_compute_percentage_building_indexes() {
+        // Конец фазы: 3927/3927
+        let percent = ProgressUpdate::compute_percentage(IndexingPhase::BuildingIndexes, 3927, 3927);
+        assert_eq!(percent, 100.0);
+    }
+
+    #[test]
+    fn test_compute_percentage_edge_cases() {
+        // Деление на 0
+        let percent = ProgressUpdate::compute_percentage(IndexingPhase::ParsingFiles, 10, 0);
+        assert_eq!(percent, 10.0); // Возвращает base_percentage
+
+        // current > total (защита от overflow)
+        let percent = ProgressUpdate::compute_percentage(IndexingPhase::ParsingFiles, 5000, 3927);
+        assert_eq!(percent, 70.0); // Максимум = base + weight
+    }
+
+    #[test]
+    fn test_progress_update_new() {
+        let update = ProgressUpdate::new(
+            IndexingPhase::ParsingFiles,
+            1963,
+            3927,
+            Some("Массив".to_string()),
+        );
+
+        assert_eq!(update.phase, IndexingPhase::ParsingFiles);
+        assert_eq!(update.current, 1963);
+        assert_eq!(update.total, 3927);
+        assert_eq!(update.percentage, 40.0);
+        assert_eq!(update.message, Some("Массив".to_string()));
+    }
+}

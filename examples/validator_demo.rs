@@ -21,7 +21,7 @@ fn main() {
     println!("📚 Загружаем типы платформы 1С...");
     let mut parser = SyntaxHelperParser::new();
     parser
-        .parse_directory("examples/syntax_helper")
+        .parse_directory("examples/syntax_helper", None::<fn(_)>)
         .expect("Failed to parse syntax helper");
 
     let db = parser.export_database();

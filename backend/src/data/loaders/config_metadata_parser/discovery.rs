@@ -149,7 +149,8 @@ impl ConfigurationDiscovery {
         let is_extension = has_object_belonging_adopted || has_config_extension_purpose;
 
         let config_name = name.ok_or("Не найден тег <Name> в Configuration.xml")?;
-        let config_path = config_xml.parent()
+        let config_path = config_xml
+            .parent()
             .ok_or("Не удалось получить родительскую папку Configuration.xml")?
             .to_path_buf();
 
@@ -184,19 +185,30 @@ impl ConfigurationDiscovery {
         // 1. Проверяем прямо в base_path (обратная совместимость)
         let direct_config = self.base_path.join("Configuration.xml");
         if direct_config.exists() {
-            tracing::debug!("  📄 Configuration.xml найден напрямую в {:?}", self.base_path);
+            tracing::debug!(
+                "  📄 Configuration.xml найден напрямую в {:?}",
+                self.base_path
+            );
 
             match Self::detect_configuration_type(&direct_config) {
                 Ok(info) => configurations.push(info),
-                Err(e) => tracing::warn!("⚠️ Не удалось определить тип конфигурации {:?}: {}", direct_config, e),
+                Err(e) => tracing::warn!(
+                    "⚠️ Не удалось определить тип конфигурации {:?}: {}",
+                    direct_config,
+                    e
+                ),
             }
         }
 
         // 2. Сканируем подпапки
         tracing::debug!("  🔍 Сканирование подпапок в {:?}...", self.base_path);
 
-        let entries = fs::read_dir(&self.base_path)
-            .map_err(|e| format!("Не удалось прочитать директорию {:?}: {}", self.base_path, e))?;
+        let entries = fs::read_dir(&self.base_path).map_err(|e| {
+            format!(
+                "Не удалось прочитать директорию {:?}: {}",
+                self.base_path, e
+            )
+        })?;
 
         for entry in entries.flatten() {
             if let Ok(file_type) = entry.file_type() {
@@ -209,7 +221,11 @@ impl ConfigurationDiscovery {
 
                         match Self::detect_configuration_type(&config_in_subdir) {
                             Ok(info) => configurations.push(info),
-                            Err(e) => tracing::warn!("⚠️ Не удалось определить тип конфигурации {:?}: {}", config_in_subdir, e),
+                            Err(e) => tracing::warn!(
+                                "⚠️ Не удалось определить тип конфигурации {:?}: {}",
+                                config_in_subdir,
+                                e
+                            ),
                         }
                     }
                 }
@@ -221,7 +237,8 @@ impl ConfigurationDiscovery {
                 "Configuration.xml не найден ни в {:?}, ни в подпапках. \
                 Убедитесь, что указан правильный путь к выгруженной конфигурации.",
                 self.base_path
-            ).into());
+            )
+            .into());
         }
 
         // 3. Сортировка: Base первым, Extension после
@@ -286,11 +303,13 @@ impl ConfigurationDiscovery {
                 // XML файлы могут быть в двух местах:
                 // 1. Прямо в папке типа: Catalogs/Контрагенты.xml
                 // 2. В подпапке: Catalogs/Контрагенты/Контрагенты.xml
-                let xml_file_direct = config_info.path
+                let xml_file_direct = config_info
+                    .path
                     .join(&folder_name)
                     .join(format!("{}.xml", object_name));
 
-                let xml_file_subdir = config_info.path
+                let xml_file_subdir = config_info
+                    .path
                     .join(&folder_name)
                     .join(&object_name)
                     .join(format!("{}.xml", object_name));
@@ -422,15 +441,25 @@ impl ConfigurationDiscovery {
         // Сначала проверяем прямо в base_path (обратная совместимость)
         let direct_config = self.base_path.join("Configuration.xml");
         if direct_config.exists() {
-            tracing::debug!("✅ Configuration.xml найден напрямую в {:?}", self.base_path);
+            tracing::debug!(
+                "✅ Configuration.xml найден напрямую в {:?}",
+                self.base_path
+            );
             return Ok(self.base_path.clone());
         }
 
         // Если не найден - сканируем подпапки
-        tracing::debug!("🔍 Сканирование подпапок в {:?} для поиска конфигурации...", self.base_path);
+        tracing::debug!(
+            "🔍 Сканирование подпапок в {:?} для поиска конфигурации...",
+            self.base_path
+        );
 
-        let entries = fs::read_dir(&self.base_path)
-            .map_err(|e| format!("Не удалось прочитать директорию {:?}: {}", self.base_path, e))?;
+        let entries = fs::read_dir(&self.base_path).map_err(|e| {
+            format!(
+                "Не удалось прочитать директорию {:?}: {}",
+                self.base_path, e
+            )
+        })?;
 
         for entry in entries.flatten() {
             if let Ok(file_type) = entry.file_type() {
@@ -450,7 +479,8 @@ impl ConfigurationDiscovery {
             "Configuration.xml не найден ни в {:?}, ни в подпапках. \
             Убедитесь, что указан правильный путь к выгруженной конфигурации.",
             self.base_path
-        ).into())
+        )
+        .into())
     }
 
     /// УСТАРЕВШИЙ МЕТОД: Обнаруживает все объекты метаданных (только ПЕРВОЙ конфигурации)
@@ -459,7 +489,9 @@ impl ConfigurationDiscovery {
     ///
     /// Оставлен для обратной совместимости с существующими тестами.
     pub fn discover_all_metadata(&self) -> Result<Vec<UniversalMetadataObject>> {
-        tracing::warn!("⚠️ discover_all_metadata() вызван — используйте discover_all_configurations()");
+        tracing::warn!(
+            "⚠️ discover_all_metadata() вызван — используйте discover_all_configurations()"
+        );
 
         // Обратная совместимость: возвращаем метаданные ПЕРВОЙ конфигурации
         let configurations = self.discover_all_configurations()?;

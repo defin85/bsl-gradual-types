@@ -15,8 +15,8 @@ use serde::Deserialize;
 // ✅ ИСПРАВЛЕНО: Clean Architecture - используем Application Layer
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::system::SystemCoordinator;
-use bsl_type_visualization::{HtmlRenderer, RenderOptions, ThemeMode}; // Используется в других методах
-use bsl_shared::api::dtos::{MethodDto, ParamDto, PropertyDto}; // Используется в handle_query_type
+use bsl_shared::api::dtos::{MethodDto, ParamDto, PropertyDto};
+use bsl_type_visualization::{HtmlRenderer, RenderOptions, ThemeMode}; // Используется в других методах // Используется в handle_query_type
 
 // ✅ ИСПРАВЛЕНО: временные структуры удалены, используем TypeSystemService API
 
@@ -813,8 +813,8 @@ impl LanguageServer for BslLanguageServer {
                     ));
                 }
 
-                let request: QueryTypeParams =
-                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                let request: QueryTypeParams = serde_json::from_value(params.arguments[0].clone())
+                    .map_err(|e| {
                         tower_lsp::jsonrpc::Error::invalid_params(format!(
                             "Invalid parameters: {}",
                             e
@@ -851,10 +851,10 @@ struct QueryTypeResponse {
 
     // ✅ НОВЫЕ ПОЛЯ для полной информации о типе
     #[serde(skip_serializing_if = "Option::is_none")]
-    certainty: Option<String>,  // "Known (100%)", "Inferred (50%)"
+    certainty: Option<String>, // "Known (100%)", "Inferred (50%)"
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    facet: Option<String>,      // "Manager", "Object", "Reference", etc.
+    facet: Option<String>, // "Manager", "Object", "Reference", etc.
 
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
@@ -1045,11 +1045,17 @@ impl BslLanguageServer {
         // Поиск типа в TypeRepository
         match repo.find_type(&params.type_name) {
             Some(raw_type) => {
-                info!("Type '{}' found with {} methods, {} properties", 
-                      params.type_name, raw_type.methods.len(), raw_type.properties.len());
-                
+                info!(
+                    "Type '{}' found with {} methods, {} properties",
+                    params.type_name,
+                    raw_type.methods.len(),
+                    raw_type.properties.len()
+                );
+
                 // ✅ Конвертируем методы из RawMethodData → MethodDto
-                let methods: Vec<MethodDto> = raw_type.methods.iter()
+                let methods: Vec<MethodDto> = raw_type
+                    .methods
+                    .iter()
                     .map(|m| MethodDto {
                         name: m.name.clone(),
                         english_name: if m.english_name.is_empty() {
@@ -1062,12 +1068,16 @@ impl BslLanguageServer {
                         } else {
                             Some(m.return_type.clone())
                         },
-                        params: m.params.iter().map(|p| ParamDto {
-                            name: p.name.clone(),
-                            param_type: p.param_type.clone(),
-                            is_optional: p.is_optional,
-                            default_value: None,
-                        }).collect(),
+                        params: m
+                            .params
+                            .iter()
+                            .map(|p| ParamDto {
+                                name: p.name.clone(),
+                                param_type: p.param_type.clone(),
+                                is_optional: p.is_optional,
+                                default_value: None,
+                            })
+                            .collect(),
                         description: None,
                         is_deprecated: false,
                         is_constructor: false,
@@ -1075,7 +1085,9 @@ impl BslLanguageServer {
                     .collect();
 
                 // ✅ Конвертируем свойства из RawPropertyData → PropertyDto
-                let properties: Vec<PropertyDto> = raw_type.properties.iter()
+                let properties: Vec<PropertyDto> = raw_type
+                    .properties
+                    .iter()
                     .map(|p| PropertyDto {
                         name: p.name.clone(),
                         prop_type: p.prop_type.clone(),
@@ -1085,12 +1097,15 @@ impl BslLanguageServer {
                     .collect();
 
                 // Форматируем фасеты как строки
-                let facets: Vec<String> = raw_type.facets.iter()
-                    .map(|f| format!("{:?}", f))  // Manager, Object, Reference, etc.
+                let facets: Vec<String> = raw_type
+                    .facets
+                    .iter()
+                    .map(|f| format!("{:?}", f)) // Manager, Object, Reference, etc.
                     .collect();
 
                 // Определяем основной фасет (первый или Object по умолчанию)
-                let main_facet = facets.first()
+                let main_facet = facets
+                    .first()
                     .cloned()
                     .or_else(|| Some("Object".to_string()));
 
@@ -1107,10 +1122,12 @@ impl BslLanguageServer {
                     methods,
                     properties,
                     facets,
-                    details: Some(format!("Type '{}' found with {} methods, {} properties",
+                    details: Some(format!(
+                        "Type '{}' found with {} methods, {} properties",
                         params.type_name,
                         raw_type.methods.len(),
-                        raw_type.properties.len())),
+                        raw_type.properties.len()
+                    )),
                 })
             }
             None => {
@@ -1326,8 +1343,10 @@ impl BslLanguageServer {
         &self,
         params: SearchTypesRequest,
     ) -> JsonRpcResult<SearchTypesResponse> {
-        info!("Custom command: bsl.searchTypes - query: '{}', limit: {}",
-              params.query, params.limit);
+        info!(
+            "Custom command: bsl.searchTypes - query: '{}', limit: {}",
+            params.query, params.limit
+        );
 
         // Получаем доступ к TypeRepository через SystemCoordinator
         let analysis_engine = match self.coordinator.get_analysis_engine() {
@@ -1362,7 +1381,8 @@ impl BslLanguageServer {
             .filter(|t| {
                 // Поиск в русском или английском имени
                 t.name.to_lowercase().contains(&query_lower)
-                    || (!t.english_name.is_empty() && t.english_name.to_lowercase().contains(&query_lower))
+                    || (!t.english_name.is_empty()
+                        && t.english_name.to_lowercase().contains(&query_lower))
             })
             .take(params.limit)
             .map(|t| {

@@ -351,8 +351,32 @@ mod tests {
 
     #[test]
     fn test_render_methods_section() {
+        use bsl_shared::api::dtos::MethodDto;
+
         let renderer = HtmlRenderer::with_default_theme();
-        let methods = vec!["Создать".to_string(), "Удалить".to_string()];
+
+        // Создаём правильные MethodDto объекты
+        let methods = vec![
+            MethodDto {
+                name: "Создать".to_string(),
+                english_name: Some("Create".to_string()),
+                return_type: Some("Произвольный".to_string()),
+                params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: true,
+            },
+            MethodDto {
+                name: "Удалить".to_string(),
+                english_name: Some("Delete".to_string()),
+                return_type: None,
+                params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
+            },
+        ];
+
         let html = renderer.render_methods_section(&methods);
 
         assert!(html.contains("Создать"));

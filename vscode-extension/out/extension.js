@@ -164,112 +164,6 @@ var init_config = __esm({
   }
 });
 
-// src/lsp/progress.ts
-var progress_exports = {};
-__export(progress_exports, {
-  finishIndexing: () => finishIndexing,
-  getCurrentProgress: () => getCurrentProgress,
-  initializeProgress: () => initializeProgress,
-  progressEmitter: () => progressEmitter,
-  startIndexing: () => startIndexing,
-  updateIndexingProgress: () => updateIndexingProgress,
-  updateStatusBar: () => updateStatusBar
-});
-function initializeProgress(channel, statusBar) {
-  outputChannel = channel;
-  statusBarItem = statusBar;
-}
-function startIndexing(totalSteps = 4) {
-  globalIndexingProgress = {
-    isIndexing: true,
-    currentStep: "Initializing...",
-    progress: 0,
-    totalSteps,
-    currentStepNumber: 0,
-    startTime: /* @__PURE__ */ new Date()
-  };
-  updateStatusBar(void 0, globalIndexingProgress);
-  progressEmitter.fire(globalIndexingProgress);
-  outputChannel?.appendLine(`\u{1F680} Index building started with ${totalSteps} steps`);
-}
-function updateIndexingProgress(stepNumber, stepName, progress) {
-  if (!globalIndexingProgress.isIndexing) {
-    outputChannel?.appendLine(`\u26A0\uFE0F updateIndexingProgress called but indexing is not active`);
-    return;
-  }
-  const elapsed = globalIndexingProgress.startTime ? ((/* @__PURE__ */ new Date()).getTime() - globalIndexingProgress.startTime.getTime()) / 1e3 : 0;
-  const eta = progress > 5 ? Math.round(elapsed * (100 / progress) - elapsed) : void 0;
-  globalIndexingProgress = {
-    ...globalIndexingProgress,
-    currentStep: stepName,
-    progress: Math.min(progress, 100),
-    currentStepNumber: stepNumber,
-    estimatedTimeRemaining: eta ? `${eta}s` : "calculating..."
-  };
-  updateStatusBar(void 0, globalIndexingProgress);
-  progressEmitter.fire(globalIndexingProgress);
-  outputChannel?.appendLine(`\u{1F4CA} Step ${stepNumber}/${globalIndexingProgress.totalSteps}: ${stepName} (${progress}%)`);
-}
-function finishIndexing(success = true) {
-  const elapsed = globalIndexingProgress.startTime ? ((/* @__PURE__ */ new Date()).getTime() - globalIndexingProgress.startTime.getTime()) / 1e3 : 0;
-  globalIndexingProgress = {
-    isIndexing: false,
-    currentStep: success ? "Completed" : "Failed",
-    progress: 100,
-    totalSteps: globalIndexingProgress.totalSteps,
-    currentStepNumber: globalIndexingProgress.totalSteps
-  };
-  updateStatusBar(success ? "BSL Analyzer: Index Ready" : "BSL Analyzer: Index Failed", void 0);
-  progressEmitter.fire(globalIndexingProgress);
-  const statusIcon = success ? "\u2705" : "\u274C";
-  outputChannel?.appendLine(`${statusIcon} Index building ${success ? "completed" : "failed"} in ${elapsed.toFixed(1)}s`);
-  if (success) {
-    vscode2.window.showInformationMessage(`BSL Index built successfully in ${elapsed.toFixed(1)}s`);
-  }
-}
-function updateStatusBar(text, progress) {
-  if (!statusBarItem) {
-    return;
-  }
-  if (text) {
-    statusBarItem.text = text;
-    statusBarItem.show();
-    return;
-  }
-  if (progress && progress.isIndexing) {
-    const icon = "$(sync~spin)";
-    const percent = Math.round(progress.progress);
-    const eta = progress.estimatedTimeRemaining ? ` - ETA: ${progress.estimatedTimeRemaining}` : "";
-    statusBarItem.text = `${icon} BSL Index: ${progress.currentStep} (${percent}%${eta})`;
-    statusBarItem.tooltip = `Step ${progress.currentStepNumber}/${progress.totalSteps}
-Progress: ${percent}%
-${progress.currentStep}`;
-    statusBarItem.show();
-  } else {
-    statusBarItem.text = "$(database) BSL Analyzer";
-    statusBarItem.tooltip = "BSL Type Safety Analyzer\nClick to build index";
-    statusBarItem.show();
-  }
-}
-function getCurrentProgress() {
-  return globalIndexingProgress;
-}
-var vscode2, globalIndexingProgress, progressEmitter, outputChannel, statusBarItem;
-var init_progress = __esm({
-  "src/lsp/progress.ts"() {
-    "use strict";
-    vscode2 = __toESM(require("vscode"));
-    globalIndexingProgress = {
-      isIndexing: false,
-      currentStep: "Idle",
-      progress: 0,
-      totalSteps: 4,
-      currentStepNumber: 0
-    };
-    progressEmitter = new vscode2.EventEmitter();
-  }
-});
-
 // node_modules/vscode-languageclient/lib/common/utils/is.js
 var require_is = __commonJS({
   "node_modules/vscode-languageclient/lib/common/utils/is.js"(exports2) {
@@ -14849,12 +14743,12 @@ var require_client = __commonJS({
       CloseAction2[CloseAction2["DoNotRestart"] = 1] = "DoNotRestart";
       CloseAction2[CloseAction2["Restart"] = 2] = "Restart";
     })(CloseAction = exports2.CloseAction || (exports2.CloseAction = {}));
-    var State2;
-    (function(State3) {
-      State3[State3["Stopped"] = 1] = "Stopped";
-      State3[State3["Starting"] = 3] = "Starting";
-      State3[State3["Running"] = 2] = "Running";
-    })(State2 = exports2.State || (exports2.State = {}));
+    var State3;
+    (function(State4) {
+      State4[State4["Stopped"] = 1] = "Stopped";
+      State4[State4["Starting"] = 3] = "Starting";
+      State4[State4["Running"] = 2] = "Running";
+    })(State3 = exports2.State || (exports2.State = {}));
     var SuspendMode;
     (function(SuspendMode2) {
       SuspendMode2["off"] = "off";
@@ -15044,11 +14938,11 @@ var require_client = __commonJS({
       getPublicState() {
         switch (this.$state) {
           case ClientState.Starting:
-            return State2.Starting;
+            return State3.Starting;
           case ClientState.Running:
-            return State2.Running;
+            return State3.Running;
           default:
-            return State2.Stopped;
+            return State3.Stopped;
         }
       }
       get initializeResult() {
@@ -17892,6 +17786,141 @@ var require_node3 = __commonJS({
   }
 });
 
+// src/lsp/progress.ts
+var progress_exports = {};
+__export(progress_exports, {
+  finishIndexing: () => finishIndexing,
+  getCurrentProgress: () => getCurrentProgress,
+  initializeProgress: () => initializeProgress,
+  progressEmitter: () => progressEmitter,
+  startIndexing: () => startIndexing,
+  updateIndexingProgress: () => updateIndexingProgress,
+  updateLspStatus: () => updateLspStatus,
+  updateStatusBar: () => updateStatusBar
+});
+function initializeProgress(channel, statusBar) {
+  outputChannel = channel;
+  statusBarItem = statusBar;
+}
+function startIndexing(totalSteps = 4) {
+  globalIndexingProgress = {
+    isIndexing: true,
+    currentStep: "Initializing...",
+    progress: 0,
+    totalSteps,
+    currentStepNumber: 0,
+    startTime: /* @__PURE__ */ new Date()
+  };
+  updateStatusBar(void 0, globalIndexingProgress);
+  progressEmitter.fire(globalIndexingProgress);
+  outputChannel?.appendLine(`\u{1F680} Index building started with ${totalSteps} steps`);
+}
+function updateIndexingProgress(stepNumber, stepName, progress) {
+  if (!globalIndexingProgress.isIndexing) {
+    outputChannel?.appendLine(`\u26A0\uFE0F updateIndexingProgress called but indexing is not active`);
+    return;
+  }
+  const elapsed = globalIndexingProgress.startTime ? ((/* @__PURE__ */ new Date()).getTime() - globalIndexingProgress.startTime.getTime()) / 1e3 : 0;
+  const eta = progress > 5 ? Math.round(elapsed * (100 / progress) - elapsed) : void 0;
+  globalIndexingProgress = {
+    ...globalIndexingProgress,
+    currentStep: stepName,
+    progress: Math.min(progress, 100),
+    currentStepNumber: stepNumber,
+    estimatedTimeRemaining: eta ? `${eta}s` : "calculating..."
+  };
+  updateStatusBar(void 0, globalIndexingProgress);
+  progressEmitter.fire(globalIndexingProgress);
+  outputChannel?.appendLine(`\u{1F4CA} Step ${stepNumber}/${globalIndexingProgress.totalSteps}: ${stepName} (${progress}%)`);
+}
+function finishIndexing(success = true) {
+  const elapsed = globalIndexingProgress.startTime ? ((/* @__PURE__ */ new Date()).getTime() - globalIndexingProgress.startTime.getTime()) / 1e3 : 0;
+  globalIndexingProgress = {
+    isIndexing: false,
+    currentStep: success ? "Completed" : "Failed",
+    progress: 100,
+    totalSteps: globalIndexingProgress.totalSteps,
+    currentStepNumber: globalIndexingProgress.totalSteps
+  };
+  updateStatusBar(success ? "BSL Analyzer: Index Ready" : "BSL Analyzer: Index Failed", void 0);
+  progressEmitter.fire(globalIndexingProgress);
+  const statusIcon = success ? "\u2705" : "\u274C";
+  outputChannel?.appendLine(`${statusIcon} Index building ${success ? "completed" : "failed"} in ${elapsed.toFixed(1)}s`);
+  if (success) {
+    vscode2.window.showInformationMessage(`BSL Index built successfully in ${elapsed.toFixed(1)}s`);
+  }
+}
+function updateStatusBar(text, progress) {
+  if (!statusBarItem) {
+    return;
+  }
+  if (text) {
+    statusBarItem.text = text;
+    statusBarItem.show();
+    return;
+  }
+  if (progress && progress.isIndexing) {
+    const icon = "$(sync~spin)";
+    const percent = Math.round(progress.progress);
+    const eta = progress.estimatedTimeRemaining ? ` - ETA: ${progress.estimatedTimeRemaining}` : "";
+    statusBarItem.text = `${icon} BSL Index: ${progress.currentStep} (${percent}%${eta})`;
+    statusBarItem.tooltip = `Step ${progress.currentStepNumber}/${progress.totalSteps}
+Progress: ${percent}%
+${progress.currentStep}`;
+    statusBarItem.show();
+  } else {
+    statusBarItem.text = "$(database) BSL Analyzer";
+    statusBarItem.tooltip = "BSL Type Safety Analyzer\nClick to build index";
+    statusBarItem.show();
+  }
+}
+function getCurrentProgress() {
+  return globalIndexingProgress;
+}
+function updateLspStatus(state) {
+  if (!statusBarItem) {
+    console.warn("[LSP] Status bar item not initialized");
+    return;
+  }
+  switch (state) {
+    case import_node.State.Stopped:
+      statusBarItem.text = "$(error) BSL: Disconnected";
+      statusBarItem.tooltip = "BSL Language Server \u043D\u0435 \u0430\u043A\u0442\u0438\u0432\u0435\u043D\n\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u043B\u043E\u0433\u0438 \u0434\u043B\u044F \u0434\u0435\u0442\u0430\u043B\u0435\u0439";
+      statusBarItem.backgroundColor = new vscode2.ThemeColor("statusBarItem.errorBackground");
+      break;
+    case import_node.State.Starting:
+      statusBarItem.text = "$(sync~spin) BSL: Starting...";
+      statusBarItem.tooltip = "BSL Language Server \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F...";
+      statusBarItem.backgroundColor = void 0;
+      break;
+    case import_node.State.Running:
+      statusBarItem.text = "$(check) BSL: Ready";
+      statusBarItem.tooltip = "BSL Type Safety Analyzer\nLSP Server \u0430\u043A\u0442\u0438\u0432\u0435\u043D";
+      statusBarItem.backgroundColor = void 0;
+      break;
+    default:
+      console.warn(`[LSP] Unknown state: ${state}`);
+      break;
+  }
+  statusBarItem.show();
+}
+var vscode2, import_node, globalIndexingProgress, progressEmitter, outputChannel, statusBarItem;
+var init_progress = __esm({
+  "src/lsp/progress.ts"() {
+    "use strict";
+    vscode2 = __toESM(require("vscode"));
+    import_node = __toESM(require_node3());
+    globalIndexingProgress = {
+      isIndexing: false,
+      currentStep: "Idle",
+      progress: 0,
+      totalSteps: 4,
+      currentStepNumber: 0
+    };
+    progressEmitter = new vscode2.EventEmitter();
+  }
+});
+
 // src/utils/binaryPath.ts
 var binaryPath_exports = {};
 __export(binaryPath_exports, {
@@ -17966,11 +17995,11 @@ __export(client_exports, {
 });
 function StateToString(state) {
   switch (state) {
-    case import_node.State.Stopped:
+    case import_node2.State.Stopped:
       return "Stopped";
-    case import_node.State.Starting:
+    case import_node2.State.Starting:
       return "Starting";
-    case import_node.State.Running:
+    case import_node2.State.Running:
       return "Running";
     default:
       return `Unknown(${state})`;
@@ -18032,11 +18061,11 @@ async function startLanguageClient(context) {
     outputChannel3.appendLine(`\u{1F4E1} Connecting to LSP server on port ${tcpPort}...`);
     serverOptions = {
       run: {
-        transport: import_node.TransportKind.socket,
+        transport: import_node2.TransportKind.socket,
         port: tcpPort
       },
       debug: {
-        transport: import_node.TransportKind.socket,
+        transport: import_node2.TransportKind.socket,
         port: tcpPort
       }
     };
@@ -18066,7 +18095,7 @@ async function startLanguageClient(context) {
     // ✅ MILESTONE 2.10: Передаём initializationOptions в LSP
     initializationOptions,
     outputChannel: outputChannel3,
-    revealOutputChannelOn: import_node.RevealOutputChannelOn.Never,
+    revealOutputChannelOn: import_node2.RevealOutputChannelOn.Never,
     traceOutputChannel: outputChannel3,
     middleware: {
       // Перехватываем workspace-related notifications
@@ -18080,12 +18109,12 @@ async function startLanguageClient(context) {
   };
   if (traceLevel && traceLevel !== "off") {
     if (traceLevel === "messages") {
-      clientOptions.trace = import_node.Trace.Messages;
+      clientOptions.trace = import_node2.Trace.Messages;
     } else if (traceLevel === "verbose") {
-      clientOptions.trace = import_node.Trace.Verbose;
+      clientOptions.trace = import_node2.Trace.Verbose;
     }
   }
-  client = new import_node.LanguageClient(
+  client = new import_node2.LanguageClient(
     "bslAnalyzer",
     "BSL Type Safety Analyzer",
     serverOptions,
@@ -18093,6 +18122,19 @@ async function startLanguageClient(context) {
   );
   client.onDidChangeState((event) => {
     outputChannel3.appendLine(`\u{1F504} LSP Client state: ${StateToString(event.oldState)} \u2192 ${StateToString(event.newState)}`);
+    updateLspStatus(event.newState);
+    vscode4.commands.executeCommand("bslAnalyzer.refreshOverview");
+    if (event.newState === import_node2.State.Stopped) {
+      outputChannel3.appendLine("\u26A0\uFE0F LSP server disconnected unexpectedly");
+      vscode4.window.showWarningMessage(
+        "BSL Analyzer: Language server disconnected",
+        "Restart Server"
+      ).then((selection) => {
+        if (selection === "Restart Server") {
+          vscode4.commands.executeCommand("bslAnalyzer.restartServer");
+        }
+      });
+    }
   });
   client.onConnectionError = (error, message, count) => {
     outputChannel3.appendLine(`\u274C Connection error (attempt ${count}): ${error.message}`);
@@ -18119,24 +18161,6 @@ async function startLanguageClient(context) {
     registerCustomHandlers();
     client.onNotification("bsl/indexingProgress", (params) => {
       handleIndexingProgress(params);
-    });
-    client.onDidChangeState((event) => {
-      outputChannel3.appendLine(`\u{1F4CA} LSP Client state changed: ${event.oldState} -> ${event.newState}`);
-      vscode4.commands.executeCommand("bslAnalyzer.refreshOverview");
-      if (event.newState === 1) {
-        outputChannel3.appendLine("\u26A0\uFE0F LSP server disconnected unexpectedly");
-        vscode4.window.showWarningMessage(
-          "BSL Analyzer: Language server disconnected",
-          "Restart Server"
-        ).then((selection) => {
-          if (selection === "Restart Server") {
-            vscode4.commands.executeCommand("bslAnalyzer.restartServer");
-          }
-        });
-        updateStatusBar("$(error) BSL Analyzer: Disconnected");
-      } else if (event.newState === 2) {
-        updateStatusBar("$(database) BSL Analyzer: Ready");
-      }
     });
     vscode4.commands.executeCommand("bslAnalyzer.refreshOverview");
     startHealthCheck();
@@ -18234,12 +18258,12 @@ function stopHealthCheck() {
     healthCheckInterval = null;
   }
 }
-var vscode4, import_node, fs2, client, outputChannel3, healthCheckInterval;
+var vscode4, import_node2, fs2, client, outputChannel3, healthCheckInterval;
 var init_client = __esm({
   "src/lsp/client.ts"() {
     "use strict";
     vscode4 = __toESM(require("vscode"));
-    import_node = __toESM(require_node3());
+    import_node2 = __toESM(require_node3());
     init_binaryPath();
     init_configHelper();
     init_progress();

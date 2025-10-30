@@ -1,0 +1,1 @@
+{"version":3,"file":"index.d.ts","sourceRoot":"","sources":["../../src/lsp/index.ts"],"names":[],"mappings":"AAAA;;GAEG;AAGH,OAAO,EACH,gBAAgB,EAChB,eAAe,EACf,kBAAkB,EAClB,aAAa,EACb,sBAAsB,EACtB,cAAc,EACd,eAAe,EACf,kBAAkB,EACrB,MAAM,YAAY,CAAC;AAGpB,OAAO,EACH,mBAAmB,EACnB,mBAAmB,EACnB,kBAAkB,EAClB,qBAAqB,EACrB,iBAAiB,EACjB,eAAe,EACf,iBAAiB,EACjB,sBAAsB,EACzB,MAAM,UAAU,CAAC"}

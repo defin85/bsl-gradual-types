@@ -1,46 +1,55 @@
-import * as vscode from 'vscode';
-import { State } from 'vscode-languageclient/node';
-
-/**
- * Состояние прогресса индексации
- */
-export interface IndexingProgress {
-    isIndexing: boolean;
-    currentStep: string;
-    progress: number;        // 0-100
-    totalSteps: number;
-    currentStepNumber: number;
-    startTime?: Date;
-    estimatedTimeRemaining?: string;
-}
-
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.updateLspStatus = exports.getCurrentProgress = exports.updateStatusBar = exports.finishIndexing = exports.updateIndexingProgress = exports.startIndexing = exports.initializeProgress = exports.progressEmitter = void 0;
+const vscode = __importStar(require("vscode"));
+const node_1 = require("vscode-languageclient/node");
 // Глобальное состояние индексации
-let globalIndexingProgress: IndexingProgress = {
+let globalIndexingProgress = {
     isIndexing: false,
     currentStep: 'Idle',
     progress: 0,
     totalSteps: 4,
     currentStepNumber: 0
 };
-
 // Event emitter для обновления прогресса
-export const progressEmitter = new vscode.EventEmitter<IndexingProgress>();
-
-let outputChannel: vscode.OutputChannel | undefined;
-let statusBarItem: vscode.StatusBarItem | undefined;
-
+exports.progressEmitter = new vscode.EventEmitter();
+let outputChannel;
+let statusBarItem;
 /**
  * Инициализирует модуль прогресса
  */
-export function initializeProgress(channel: vscode.OutputChannel, statusBar: vscode.StatusBarItem) {
+function initializeProgress(channel, statusBar) {
     outputChannel = channel;
     statusBarItem = statusBar;
 }
-
+exports.initializeProgress = initializeProgress;
 /**
  * Начинает отслеживание прогресса индексации
  */
-export function startIndexing(totalSteps: number = 4) {
+function startIndexing(totalSteps = 4) {
     globalIndexingProgress = {
         isIndexing: true,
         currentStep: 'Initializing...',
@@ -49,27 +58,23 @@ export function startIndexing(totalSteps: number = 4) {
         currentStepNumber: 0,
         startTime: new Date()
     };
-    
     updateStatusBar(undefined, globalIndexingProgress);
-    progressEmitter.fire(globalIndexingProgress);
+    exports.progressEmitter.fire(globalIndexingProgress);
     outputChannel?.appendLine(`🚀 Index building started with ${totalSteps} steps`);
 }
-
+exports.startIndexing = startIndexing;
 /**
  * Обновляет прогресс индексации
  */
-export function updateIndexingProgress(stepNumber: number, stepName: string, progress: number) {
+function updateIndexingProgress(stepNumber, stepName, progress) {
     if (!globalIndexingProgress.isIndexing) {
         outputChannel?.appendLine(`⚠️ updateIndexingProgress called but indexing is not active`);
         return;
     }
-    
-    const elapsed = globalIndexingProgress.startTime ? 
+    const elapsed = globalIndexingProgress.startTime ?
         (new Date().getTime() - globalIndexingProgress.startTime.getTime()) / 1000 : 0;
-    
     // Простая оценка времени: elapsed * (100 / progress) - elapsed
     const eta = progress > 5 ? Math.round((elapsed * (100 / progress)) - elapsed) : undefined;
-    
     globalIndexingProgress = {
         ...globalIndexingProgress,
         currentStep: stepName,
@@ -77,19 +82,17 @@ export function updateIndexingProgress(stepNumber: number, stepName: string, pro
         currentStepNumber: stepNumber,
         estimatedTimeRemaining: eta ? `${eta}s` : 'calculating...'
     };
-    
     updateStatusBar(undefined, globalIndexingProgress);
-    progressEmitter.fire(globalIndexingProgress);
+    exports.progressEmitter.fire(globalIndexingProgress);
     outputChannel?.appendLine(`📊 Step ${stepNumber}/${globalIndexingProgress.totalSteps}: ${stepName} (${progress}%)`);
 }
-
+exports.updateIndexingProgress = updateIndexingProgress;
 /**
  * Завершает отслеживание прогресса индексации
  */
-export function finishIndexing(success: boolean = true) {
-    const elapsed = globalIndexingProgress.startTime ? 
+function finishIndexing(success = true) {
+    const elapsed = globalIndexingProgress.startTime ?
         (new Date().getTime() - globalIndexingProgress.startTime.getTime()) / 1000 : 0;
-    
     globalIndexingProgress = {
         isIndexing: false,
         currentStep: success ? 'Completed' : 'Failed',
@@ -97,32 +100,27 @@ export function finishIndexing(success: boolean = true) {
         totalSteps: globalIndexingProgress.totalSteps,
         currentStepNumber: globalIndexingProgress.totalSteps
     };
-    
     updateStatusBar(success ? 'BSL Analyzer: Index Ready' : 'BSL Analyzer: Index Failed', undefined);
-    progressEmitter.fire(globalIndexingProgress);
-    
+    exports.progressEmitter.fire(globalIndexingProgress);
     const statusIcon = success ? '✅' : '❌';
     outputChannel?.appendLine(`${statusIcon} Index building ${success ? 'completed' : 'failed'} in ${elapsed.toFixed(1)}s`);
-    
     if (success) {
         vscode.window.showInformationMessage(`BSL Index built successfully in ${elapsed.toFixed(1)}s`);
     }
 }
-
+exports.finishIndexing = finishIndexing;
 /**
  * Обновляет статус бар
  */
-export function updateStatusBar(text?: string, progress?: IndexingProgress) {
+function updateStatusBar(text, progress) {
     if (!statusBarItem) {
         return;
     }
-    
     if (text) {
         statusBarItem.text = text;
         statusBarItem.show();
         return;
     }
-    
     if (progress && progress.isIndexing) {
         const icon = '$(sync~spin)';
         const percent = Math.round(progress.progress);
@@ -130,54 +128,52 @@ export function updateStatusBar(text?: string, progress?: IndexingProgress) {
         statusBarItem.text = `${icon} BSL Index: ${progress.currentStep} (${percent}%${eta})`;
         statusBarItem.tooltip = `Step ${progress.currentStepNumber}/${progress.totalSteps}\nProgress: ${percent}%\n${progress.currentStep}`;
         statusBarItem.show();
-    } else {
+    }
+    else {
         statusBarItem.text = '$(database) BSL Analyzer';
         statusBarItem.tooltip = 'BSL Type Safety Analyzer\nClick to build index';
         statusBarItem.show();
     }
 }
-
+exports.updateStatusBar = updateStatusBar;
 /**
  * Возвращает текущее состояние прогресса
  */
-export function getCurrentProgress(): IndexingProgress {
+function getCurrentProgress() {
     return globalIndexingProgress;
 }
-
+exports.getCurrentProgress = getCurrentProgress;
 /**
  * Обновляет status bar в зависимости от состояния LSP сервера
  *
  * @param state - состояние LSP клиента (State.Stopped | State.Starting | State.Running)
  */
-export function updateLspStatus(state: State): void {
+function updateLspStatus(state) {
     if (!statusBarItem) {
         console.warn('[LSP] Status bar item not initialized');
         return;
     }
-
     switch (state) {
-        case State.Stopped:
+        case node_1.State.Stopped:
             statusBarItem.text = '$(error) BSL: Disconnected';
             statusBarItem.tooltip = 'BSL Language Server не активен\nПроверьте логи для деталей';
             statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
             break;
-
-        case State.Starting:
+        case node_1.State.Starting:
             statusBarItem.text = '$(sync~spin) BSL: Starting...';
             statusBarItem.tooltip = 'BSL Language Server запускается...';
             statusBarItem.backgroundColor = undefined;
             break;
-
-        case State.Running:
+        case node_1.State.Running:
             statusBarItem.text = '$(check) BSL: Ready';
             statusBarItem.tooltip = 'BSL Type Safety Analyzer\nLSP Server активен';
             statusBarItem.backgroundColor = undefined;
             break;
-
         default:
             console.warn(`[LSP] Unknown state: ${state}`);
             break;
     }
-
     statusBarItem.show();
 }
+exports.updateLspStatus = updateLspStatus;
+//# sourceMappingURL=progress.js.map

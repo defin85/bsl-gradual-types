@@ -24,7 +24,9 @@ pub fn create_tabular_section_type() -> RawTypeData {
     RawTypeData {
         name: "ТабличнаяЧасть".to_string(),
         english_name: "TabularSection".to_string(),
-        description: "Табличная часть - коллекция строк конфигурационного объекта с методами управления".to_string(),
+        description:
+            "Табличная часть - коллекция строк конфигурационного объекта с методами управления"
+                .to_string(),
         category: "PlatformType".to_string(),
         source: RawDataSource::Platform,
 
@@ -34,52 +36,42 @@ pub fn create_tabular_section_type() -> RawTypeData {
             RawMethodData {
                 name: "Добавить".to_string(),
                 english_name: "Add".to_string(),
-                return_type: "T".to_string(),  // ← Generic!
+                return_type: "T".to_string(), // ← Generic!
                 params: vec![],
             },
-
             // 2. Вставить(индекс: Число) - вставляет строку в указанную позицию
             RawMethodData {
                 name: "Вставить".to_string(),
                 english_name: "Insert".to_string(),
-                return_type: "T".to_string(),  // ← Generic!
-                params: vec![
-                    RawParamData {
-                        name: "Индекс".to_string(),
-                        param_type: "Число".to_string(),
-                        is_optional: false,
-                    },
-                ],
+                return_type: "T".to_string(), // ← Generic!
+                params: vec![RawParamData {
+                    name: "Индекс".to_string(),
+                    param_type: "Число".to_string(),
+                    is_optional: false,
+                }],
             },
-
             // 3. Получить(индекс: Число): T - возвращает строку по индексу
             RawMethodData {
                 name: "Получить".to_string(),
                 english_name: "Get".to_string(),
-                return_type: "T".to_string(),  // ← Generic!
-                params: vec![
-                    RawParamData {
-                        name: "Индекс".to_string(),
-                        param_type: "Число".to_string(),
-                        is_optional: false,
-                    },
-                ],
+                return_type: "T".to_string(), // ← Generic!
+                params: vec![RawParamData {
+                    name: "Индекс".to_string(),
+                    param_type: "Число".to_string(),
+                    is_optional: false,
+                }],
             },
-
             // 4. Удалить(индекс: Число) - удаляет строку по индексу
             RawMethodData {
                 name: "Удалить".to_string(),
                 english_name: "Delete".to_string(),
                 return_type: "Неопределено".to_string(),
-                params: vec![
-                    RawParamData {
-                        name: "Индекс".to_string(),
-                        param_type: "Число".to_string(),
-                        is_optional: false,
-                    },
-                ],
+                params: vec![RawParamData {
+                    name: "Индекс".to_string(),
+                    param_type: "Число".to_string(),
+                    is_optional: false,
+                }],
             },
-
             // 5. Количество(): Число - возвращает количество строк
             RawMethodData {
                 name: "Количество".to_string(),
@@ -87,7 +79,6 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 return_type: "Число".to_string(),
                 params: vec![],
             },
-
             // 6. Очистить() - удаляет все строки
             RawMethodData {
                 name: "Очистить".to_string(),
@@ -95,26 +86,22 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 return_type: "Неопределено".to_string(),
                 params: vec![],
             },
-
             // 7. Индекс(строка: T): Число - возвращает индекс строки
             RawMethodData {
                 name: "Индекс".to_string(),
                 english_name: "IndexOf".to_string(),
                 return_type: "Число".to_string(),
-                params: vec![
-                    RawParamData {
-                        name: "Строка".to_string(),
-                        param_type: "T".to_string(),  // ← Generic!
-                        is_optional: false,
-                    },
-                ],
+                params: vec![RawParamData {
+                    name: "Строка".to_string(),
+                    param_type: "T".to_string(), // ← Generic!
+                    is_optional: false,
+                }],
             },
-
             // 8. Найти(значение: Произвольный, имяКолонки: Строка): T
             RawMethodData {
                 name: "Найти".to_string(),
                 english_name: "Find".to_string(),
-                return_type: "T".to_string(),  // ← Generic!
+                return_type: "T".to_string(), // ← Generic!
                 params: vec![
                     RawParamData {
                         name: "Значение".to_string(),
@@ -128,7 +115,6 @@ pub fn create_tabular_section_type() -> RawTypeData {
                     },
                 ],
             },
-
             // 9. Сдвинуть(строка: T, смещение: Число)
             RawMethodData {
                 name: "Сдвинуть".to_string(),
@@ -137,7 +123,7 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 params: vec![
                     RawParamData {
                         name: "Строка".to_string(),
-                        param_type: "T".to_string(),  // ← Generic!
+                        param_type: "T".to_string(), // ← Generic!
                         is_optional: false,
                     },
                     RawParamData {
@@ -147,21 +133,17 @@ pub fn create_tabular_section_type() -> RawTypeData {
                     },
                 ],
             },
-
             // 10. ВыгрузитьКолонку(имяКолонки: Строка): Массив
             RawMethodData {
                 name: "ВыгрузитьКолонку".to_string(),
                 english_name: "UnloadColumn".to_string(),
                 return_type: "Массив".to_string(),
-                params: vec![
-                    RawParamData {
-                        name: "ИмяКолонки".to_string(),
-                        param_type: "Строка".to_string(),
-                        is_optional: false,
-                    },
-                ],
+                params: vec![RawParamData {
+                    name: "ИмяКолонки".to_string(),
+                    param_type: "Строка".to_string(),
+                    is_optional: false,
+                }],
             },
-
             // 11. ЗагрузитьКолонку(массив: Массив, имяКолонки: Строка)
             RawMethodData {
                 name: "ЗагрузитьКолонку".to_string(),
@@ -180,7 +162,6 @@ pub fn create_tabular_section_type() -> RawTypeData {
                     },
                 ],
             },
-
             // 12. Свернуть(имяКолонокГруппировок: Строка, имяКолонокСуммирования: Строка)
             RawMethodData {
                 name: "Свернуть".to_string(),
@@ -199,35 +180,28 @@ pub fn create_tabular_section_type() -> RawTypeData {
                     },
                 ],
             },
-
             // 13. Скопировать(параметры: Структура): ТабличнаяЧасть<T>
             RawMethodData {
                 name: "Скопировать".to_string(),
                 english_name: "Copy".to_string(),
-                return_type: "ТабличнаяЧасть<T>".to_string(),  // ← Generic тип!
-                params: vec![
-                    RawParamData {
-                        name: "Параметры".to_string(),
-                        param_type: "Структура".to_string(),
-                        is_optional: true,
-                    },
-                ],
+                return_type: "ТабличнаяЧасть<T>".to_string(), // ← Generic тип!
+                params: vec![RawParamData {
+                    name: "Параметры".to_string(),
+                    param_type: "Структура".to_string(),
+                    is_optional: true,
+                }],
             },
-
             // 14. Итог(имяКолонки: Строка): Число
             RawMethodData {
                 name: "Итог".to_string(),
                 english_name: "Total".to_string(),
                 return_type: "Число".to_string(),
-                params: vec![
-                    RawParamData {
-                        name: "ИмяКолонки".to_string(),
-                        param_type: "Строка".to_string(),
-                        is_optional: false,
-                    },
-                ],
+                params: vec![RawParamData {
+                    name: "ИмяКолонки".to_string(),
+                    param_type: "Строка".to_string(),
+                    is_optional: false,
+                }],
             },
-
             // 15. Заполнить(значение: Произвольный, имяКолонки: Строка)
             RawMethodData {
                 name: "Заполнить".to_string(),
@@ -246,7 +220,6 @@ pub fn create_tabular_section_type() -> RawTypeData {
                     },
                 ],
             },
-
             // 16. Сортировать(имяКолонок: Строка, направление: Строка)
             RawMethodData {
                 name: "Сортировать".to_string(),
@@ -268,13 +241,11 @@ pub fn create_tabular_section_type() -> RawTypeData {
         ],
 
         // Свойства (количество доступно как свойство для чтения)
-        properties: vec![
-            RawPropertyData {
-                name: "Количество".to_string(),
-                prop_type: "Число".to_string(),
-                is_readonly: true,
-            },
-        ],
+        properties: vec![RawPropertyData {
+            name: "Количество".to_string(),
+            prop_type: "Число".to_string(),
+            is_readonly: true,
+        }],
 
         facets: vec![FacetKind::Collection],
         kind: None,
@@ -540,7 +511,7 @@ pub fn create_map_type() -> RawTypeData {
             inference_methods: vec![
                 InferenceMethodInfo {
                     method_name: "Вставить".to_string(),
-                    param_indices: vec![0], // первый параметр (Ключ)
+                    param_indices: vec![0],        // первый параметр (Ключ)
                     inferred_type_params: vec![0], // выводим K (параметр 0)
                 },
                 InferenceMethodInfo {
@@ -550,12 +521,12 @@ pub fn create_map_type() -> RawTypeData {
                 },
                 InferenceMethodInfo {
                     method_name: "Получить".to_string(),
-                    param_indices: vec![0], // первый параметр (Ключ)
+                    param_indices: vec![0],        // первый параметр (Ключ)
                     inferred_type_params: vec![0], // выводим K
                 },
                 InferenceMethodInfo {
                     method_name: "Удалить".to_string(),
-                    param_indices: vec![0], // первый параметр (Ключ)
+                    param_indices: vec![0],        // первый параметр (Ключ)
                     inferred_type_params: vec![0], // выводим K
                 },
             ],
@@ -627,7 +598,7 @@ pub fn create_value_list_type() -> RawTypeData {
             type_param_count: 1,
             inference_methods: vec![InferenceMethodInfo {
                 method_name: "Добавить".to_string(),
-                param_indices: vec![0], // первый параметр (Значение)
+                param_indices: vec![0],        // первый параметр (Значение)
                 inferred_type_params: vec![0], // выводим T
             }],
         }),
@@ -692,16 +663,28 @@ mod tests {
             .unwrap();
 
         // Проверяем методы с Generic параметром "T"
-        let add_method = tabular_type.methods.iter().find(|m| m.name == "Добавить").unwrap();
+        let add_method = tabular_type
+            .methods
+            .iter()
+            .find(|m| m.name == "Добавить")
+            .unwrap();
         assert_eq!(add_method.return_type, "T");
         assert_eq!(add_method.params.len(), 0);
 
-        let get_method = tabular_type.methods.iter().find(|m| m.name == "Получить").unwrap();
+        let get_method = tabular_type
+            .methods
+            .iter()
+            .find(|m| m.name == "Получить")
+            .unwrap();
         assert_eq!(get_method.return_type, "T");
         assert_eq!(get_method.params.len(), 1);
         assert_eq!(get_method.params[0].name, "Индекс");
 
-        let insert_method = tabular_type.methods.iter().find(|m| m.name == "Вставить").unwrap();
+        let insert_method = tabular_type
+            .methods
+            .iter()
+            .find(|m| m.name == "Вставить")
+            .unwrap();
         assert_eq!(insert_method.return_type, "T");
     }
 
@@ -715,13 +698,25 @@ mod tests {
             .unwrap();
 
         // Проверяем методы БЕЗ Generic параметра
-        let count_method = tabular_type.methods.iter().find(|m| m.name == "Количество").unwrap();
+        let count_method = tabular_type
+            .methods
+            .iter()
+            .find(|m| m.name == "Количество")
+            .unwrap();
         assert_eq!(count_method.return_type, "Число");
 
-        let clear_method = tabular_type.methods.iter().find(|m| m.name == "Очистить").unwrap();
+        let clear_method = tabular_type
+            .methods
+            .iter()
+            .find(|m| m.name == "Очистить")
+            .unwrap();
         assert_eq!(clear_method.return_type, "Неопределено");
 
-        let delete_method = tabular_type.methods.iter().find(|m| m.name == "Удалить").unwrap();
+        let delete_method = tabular_type
+            .methods
+            .iter()
+            .find(|m| m.name == "Удалить")
+            .unwrap();
         assert_eq!(delete_method.return_type, "Неопределено");
     }
 
@@ -748,7 +743,11 @@ mod tests {
             .unwrap();
 
         // Проверяем свойство Количество
-        let count_property = tabular_type.properties.iter().find(|p| p.name == "Количество").unwrap();
+        let count_property = tabular_type
+            .properties
+            .iter()
+            .find(|p| p.name == "Количество")
+            .unwrap();
         assert_eq!(count_property.prop_type, "Число");
         assert!(count_property.is_readonly);
     }
@@ -763,7 +762,11 @@ mod tests {
             .unwrap();
 
         // Проверяем метод Найти с параметрами
-        let find_method = tabular_type.methods.iter().find(|m| m.name == "Найти").unwrap();
+        let find_method = tabular_type
+            .methods
+            .iter()
+            .find(|m| m.name == "Найти")
+            .unwrap();
         assert_eq!(find_method.return_type, "T");
         assert_eq!(find_method.params.len(), 2);
         assert_eq!(find_method.params[0].name, "Значение");
@@ -791,10 +794,7 @@ mod tests {
     fn test_array_has_generic_info() {
         let platform_types = load_all_platform_types();
 
-        let array_type = platform_types
-            .iter()
-            .find(|t| t.name == "Массив")
-            .unwrap();
+        let array_type = platform_types.iter().find(|t| t.name == "Массив").unwrap();
 
         assert!(array_type.generic_info.is_some());
         let generic_info = array_type.generic_info.as_ref().unwrap();
@@ -808,10 +808,7 @@ mod tests {
     fn test_array_add_method_inference() {
         let platform_types = load_all_platform_types();
 
-        let array_type = platform_types
-            .iter()
-            .find(|t| t.name == "Массив")
-            .unwrap();
+        let array_type = platform_types.iter().find(|t| t.name == "Массив").unwrap();
 
         let generic_info = array_type.generic_info.as_ref().unwrap();
         let add_inference = generic_info
@@ -828,10 +825,7 @@ mod tests {
     fn test_array_has_generic_methods() {
         let platform_types = load_all_platform_types();
 
-        let array_type = platform_types
-            .iter()
-            .find(|t| t.name == "Массив")
-            .unwrap();
+        let array_type = platform_types.iter().find(|t| t.name == "Массив").unwrap();
 
         // Проверяем методы с Generic параметром "T"
         let add_method = array_type
@@ -976,10 +970,7 @@ mod tests {
         let collection_types = vec!["Массив", "Соответствие", "СписокЗначений", "ТабличнаяЧасть"];
 
         for type_name in collection_types {
-            let collection_type = platform_types
-                .iter()
-                .find(|t| t.name == type_name)
-                .unwrap();
+            let collection_type = platform_types.iter().find(|t| t.name == type_name).unwrap();
 
             assert!(
                 collection_type.facets.contains(&FacetKind::Collection),

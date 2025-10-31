@@ -1,7 +1,6 @@
 /// Комплексные integration тесты для Generic типов табличных частей
 ///
 /// Упрощённая версия с правильным использованием API
-
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::system::SystemCoordinator;
 use std::sync::Arc;
@@ -42,7 +41,9 @@ async fn test_e2e_array_generic_type() {
 
         // Проверяем базовое содержимое
         assert!(
-            hover_text.contains("МассивДанных") || hover_text.contains("Массив") || hover_text.contains("Переменная"),
+            hover_text.contains("МассивДанных")
+                || hover_text.contains("Массив")
+                || hover_text.contains("Переменная"),
             "Hover должен содержать информацию о переменной Массив"
         );
     } else {
@@ -169,7 +170,10 @@ async fn test_e2e_error_handling_invalid_code() {
     match result {
         Ok(hover) => {
             if let Some(text) = hover {
-                println!("✓ Hover вернул результат даже для невалидного кода: {}", text);
+                println!(
+                    "✓ Hover вернул результат даже для невалидного кода: {}",
+                    text
+                );
             } else {
                 println!("✓ Hover корректно вернул None для невалидного кода");
             }
@@ -235,7 +239,10 @@ async fn test_e2e_very_long_code() {
     let hover = service.get_hover_info(&code, 250, 10).await.ok().flatten();
 
     if let Some(hover_text) = hover {
-        println!("✓ Hover на большом файле работает: {} символов", hover_text.len());
+        println!(
+            "✓ Hover на большом файле работает: {} символов",
+            hover_text.len()
+        );
     } else {
         println!("✓ Hover вернул None для большого файла");
     }

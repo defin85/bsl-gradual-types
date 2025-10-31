@@ -17,6 +17,10 @@ import {
     finishIndexing,
     updateStatusBar
 } from './lsp/progress';
+// MILESTONE 2.20.3: Current Context Indicator
+import { initializeContextProvider } from './lsp/contextProvider';
+// MILESTONE 2.20.4: Type Repository Statistics
+import { initializeStatsProvider } from './lsp/statsProvider';
 import {
     getPlatformDocsArchive,
     initializeUtils,
@@ -74,6 +78,10 @@ export async function activate(context: vscode.ExtensionContext) {
         // Инициализируем модули
         initializeUtils(outputChannel);
         initializeProgress(outputChannel, statusBarItem);
+        // MILESTONE 2.20.3: Initialize Current Context Provider
+        initializeContextProvider(context, statusBarItem);
+        // MILESTONE 2.20.4: Initialize Type Repository Stats Provider
+        initializeStatsProvider(context, statusBarItem);
         initializeLspClient(outputChannel);
         initializeCommands(outputChannel);
         // MILESTONE 2.9: initializePlatformDocs удалён - управление типами через LSP

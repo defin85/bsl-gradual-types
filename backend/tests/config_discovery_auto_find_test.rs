@@ -141,8 +141,7 @@ fn test_workflow_with_nested_structure() {
 </MetaDataObject>"#;
 
     let config_xml_path = config_subfolder.join("Configuration.xml");
-    fs::write(&config_xml_path, config_xml_content)
-        .expect("Не удалось записать Configuration.xml");
+    fs::write(&config_xml_path, config_xml_content).expect("Не удалось записать Configuration.xml");
 
     // Создаём структуру для справочника
     let catalogs_folder = config_subfolder.join("Catalogs");
@@ -173,8 +172,7 @@ fn test_workflow_with_nested_structure() {
 </MetaDataObject>"#;
 
     let catalog_xml_path = catalogs_folder.join("ТестовыйСправочник.xml");
-    fs::write(&catalog_xml_path, catalog_xml_content)
-        .expect("Не удалось записать XML справочника");
+    fs::write(&catalog_xml_path, catalog_xml_content).expect("Не удалось записать XML справочника");
 
     // Теперь тестируем: передаём родительскую папку (temp_dir)
     let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
@@ -194,9 +192,7 @@ fn test_workflow_with_nested_structure() {
     );
 
     // Проверяем, что справочник был распарсен
-    let has_catalog = metadata
-        .iter()
-        .any(|m| m.name == "ТестовыйСправочник");
+    let has_catalog = metadata.iter().any(|m| m.name == "ТестовыйСправочник");
 
     assert!(
         has_catalog,
@@ -232,8 +228,7 @@ fn test_workflow_with_multiple_subfolders() {
 </MetaDataObject>"#;
 
     let config_xml_path = config_folder.join("Configuration.xml");
-    fs::write(&config_xml_path, config_xml_content)
-        .expect("Не удалось записать Configuration.xml");
+    fs::write(&config_xml_path, config_xml_content).expect("Не удалось записать Configuration.xml");
 
     // Тестируем
     let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
@@ -283,18 +278,9 @@ fn test_real_conf_test_configuration() {
     let has_organizacii = metadata.iter().any(|m| m.name == "Организации");
     let has_zakaz_naryady = metadata.iter().any(|m| m.name == "ЗаказНаряды");
 
-    assert!(
-        has_kontragenty,
-        "Должен быть найден справочник Контрагенты"
-    );
-    assert!(
-        has_organizacii,
-        "Должен быть найден справочник Организации"
-    );
-    assert!(
-        has_zakaz_naryady,
-        "Должен быть найден документ ЗаказНаряды"
-    );
+    assert!(has_kontragenty, "Должен быть найден справочник Контрагенты");
+    assert!(has_organizacii, "Должен быть найден справочник Организации");
+    assert!(has_zakaz_naryady, "Должен быть найден документ ЗаказНаряды");
 }
 
 #[test]
@@ -324,14 +310,13 @@ fn test_real_ext_test_configuration() {
     );
 
     // Проверяем наличие известных объектов расширения
-    let has_constant = metadata
-        .iter()
-        .any(|m| m.name == "Тест_Константа1");
-    let has_role = metadata
-        .iter()
-        .any(|m| m.name == "Тест_ОсновнаяРоль");
+    let has_constant = metadata.iter().any(|m| m.name == "Тест_Константа1");
+    let has_role = metadata.iter().any(|m| m.name == "Тест_ОсновнаяРоль");
 
-    assert!(has_constant, "Должна быть найдена константа Тест_Константа1");
+    assert!(
+        has_constant,
+        "Должна быть найдена константа Тест_Константа1"
+    );
     assert!(has_role, "Должна быть найдена роль Тест_ОсновнаяРоль");
 }
 

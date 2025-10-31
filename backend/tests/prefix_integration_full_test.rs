@@ -157,7 +157,10 @@ async fn test_base_types_have_no_prefix() {
     let all_types = search_types_by_substring(&repository, ""); // Получаем все типы
 
     if !all_types.is_empty() {
-        println!("✅ Загружено {} типов из базовой конфигурации", all_types.len());
+        println!(
+            "✅ Загружено {} типов из базовой конфигурации",
+            all_types.len()
+        );
 
         // Проверяем, что типы НЕ содержат префиксов расширений
         for type_name in all_types.iter().take(5) {
@@ -223,10 +226,7 @@ async fn test_adopted_objects_stored_separately() {
             // Проверяем, что базовый тип тоже существует (если это adopted)
             if repository.find_type(&base_name).is_some() {
                 println!("    ✅ Базовый тип существует: {}", base_name);
-                assert!(
-                    true,
-                    "Adopted объект должен храниться отдельно от базового"
-                );
+                assert!(true, "Adopted объект должен храниться отдельно от базового");
             } else {
                 println!("    ℹ️ Это новый тип расширения (не adopted): {}", ext_type);
             }
@@ -304,7 +304,10 @@ async fn test_multiple_extensions_with_different_prefixes() {
             );
         }
     } else {
-        println!("⚠️ Тест для нескольких расширений пропущен (найдено {} расширений)", result.extensions_count);
+        println!(
+            "⚠️ Тест для нескольких расширений пропущен (найдено {} расширений)",
+            result.extensions_count
+        );
     }
 }
 

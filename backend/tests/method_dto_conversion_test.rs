@@ -312,13 +312,13 @@ fn test_method_name_edge_cases() {
     // Проверка методов с необычными именами
     // Формат: (name, english_name, expected_is_constructor)
     let test_cases = vec![
-        ("НовыйОбъект", "", true),        // Начинается с "Новый"
-        ("Новый", "", true),               // Просто "Новый"
-        ("НовостиМира", "", false),        // Содержит "Новый" не в начале
-        ("НовыйГод2024", "", true),        // Начинается с "Новый"
-        ("Создать", "New", true),          // English "New" в english_name
-        ("Отчёт", "NewsReport", true),     // BUG: "NewsReport" определяется как конструктор из-за starts_with("New")
-        ("New", "", false),                // "New" в русском имени (не конструктор без english_name)
+        ("НовыйОбъект", "", true),     // Начинается с "Новый"
+        ("Новый", "", true),           // Просто "Новый"
+        ("НовостиМира", "", false),    // Содержит "Новый" не в начале
+        ("НовыйГод2024", "", true),    // Начинается с "Новый"
+        ("Создать", "New", true),      // English "New" в english_name
+        ("Отчёт", "NewsReport", true), // BUG: "NewsReport" определяется как конструктор из-за starts_with("New")
+        ("New", "", false),            // "New" в русском имени (не конструктор без english_name)
     ];
 
     for (name, english_name, expected_is_constructor) in test_cases {

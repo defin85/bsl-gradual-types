@@ -20,15 +20,28 @@ fn test_detect_base_configuration() {
     if let Err(e) = &result {
         eprintln!("Ошибка обнаружения конфигурации: {}", e);
     }
-    assert!(result.is_ok(), "Должна быть найдена конфигурация: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Должна быть найдена конфигурация: {:?}",
+        result.err()
+    );
 
     let configurations = result.unwrap();
-    assert!(!configurations.is_empty(), "Должна быть найдена хотя бы одна конфигурация");
+    assert!(
+        !configurations.is_empty(),
+        "Должна быть найдена хотя бы одна конфигурация"
+    );
 
     let first_config = &configurations[0];
-    assert!(first_config.is_base(), "Первая конфигурация должна быть базовой");
+    assert!(
+        first_config.is_base(),
+        "Первая конфигурация должна быть базовой"
+    );
     assert_eq!(first_config.config_type, ConfigurationType::Base);
-    assert!(first_config.prefix.is_none(), "Базовая конфигурация не должна иметь префикс");
+    assert!(
+        first_config.prefix.is_none(),
+        "Базовая конфигурация не должна иметь префикс"
+    );
 
     println!("✅ Базовая конфигурация: {}", first_config.name);
 }
@@ -89,7 +102,11 @@ fn test_discover_all_configurations_multiple() {
 
     for (idx, config) in configurations.iter().enumerate() {
         let icon = if config.is_base() { "📦" } else { "🧩" };
-        let config_type_str = if config.is_base() { "Base" } else { "Extension" };
+        let config_type_str = if config.is_base() {
+            "Base"
+        } else {
+            "Extension"
+        };
 
         println!(
             "  {}. {} {} (тип: {}, префикс: {:?})",
@@ -104,8 +121,10 @@ fn test_discover_all_configurations_multiple() {
     // Проверяем сортировку: Base должна быть первой
     if configurations.len() > 1 {
         let first_is_base = configurations[0].is_base();
-        println!("✅ Сортировка: первая конфигурация — {}",
-            if first_is_base { "Base" } else { "Extension" });
+        println!(
+            "✅ Сортировка: первая конфигурация — {}",
+            if first_is_base { "Base" } else { "Extension" }
+        );
     }
 }
 
@@ -136,13 +155,17 @@ fn test_discover_metadata_in_specific_configuration() {
     assert!(metadata_result.is_ok(), "Должны быть обнаружены метаданные");
 
     let metadata = metadata_result.unwrap();
-    println!("✅ Обнаружено {} объектов метаданных в конфигурации {}",
+    println!(
+        "✅ Обнаружено {} объектов метаданных в конфигурации {}",
         metadata.len(),
         first_config.name
     );
 
     // Проверяем, что метаданные действительно загружены
-    assert!(metadata.len() > 0, "Должен быть хотя бы один объект метаданных");
+    assert!(
+        metadata.len() > 0,
+        "Должен быть хотя бы один объект метаданных"
+    );
 }
 
 #[test]
@@ -155,11 +178,16 @@ fn test_backward_compatibility_discover_all_metadata() {
     let result = discovery.discover_all_metadata();
 
     // Assert
-    assert!(result.is_ok(), "Старый метод должен работать для обратной совместимости");
+    assert!(
+        result.is_ok(),
+        "Старый метод должен работать для обратной совместимости"
+    );
 
     let metadata = result.unwrap();
-    println!("✅ Обратная совместимость: обнаружено {} объектов метаданных",
-        metadata.len());
+    println!(
+        "✅ Обратная совместимость: обнаружено {} объектов метаданных",
+        metadata.len()
+    );
 
     assert!(metadata.len() > 0, "Должны быть найдены объекты метаданных");
 }

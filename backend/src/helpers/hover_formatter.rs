@@ -37,7 +37,7 @@
 //! - ✅ Переиспользование в LSP/Web/CLI
 
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
-use bsl_shared::domain::types::{Certainty, TypeResolution, ResolutionResult};
+use bsl_shared::domain::types::{Certainty, ResolutionResult, TypeResolution};
 
 /// Формат вывода hover информации
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -277,7 +277,8 @@ impl<'a> HoverBuilder<'a> {
             }
             ResolutionResult::Generic(generic_type) => {
                 // Формат: Массив<Строка>
-                let params = generic_type.type_params
+                let params = generic_type
+                    .type_params
                     .iter()
                     .map(|p| format!("{}", p))
                     .collect::<Vec<_>>()
@@ -322,27 +323,39 @@ impl<'a> HoverBuilder<'a> {
         self.add_section("Уверенность", &certainty_str)
     }
 
-    fn add_methods(mut self, resolution: &TypeResolution, metadata_lookup: &TypeMetadataLookup) -> Self {
+    fn add_methods(
+        mut self,
+        resolution: &TypeResolution,
+        metadata_lookup: &TypeMetadataLookup,
+    ) -> Self {
         let methods = metadata_lookup.get_methods(resolution);
 
         if !methods.is_empty() {
             let total_count = methods.len();
             let display_count = self.config.max_methods.min(total_count);
 
-            let mut method_lines = vec![
-                format!("Методы (показано {} из {}):", display_count, total_count)
-            ];
+            let mut method_lines = vec![format!(
+                "Методы (показано {} из {}):",
+                display_count, total_count
+            )];
 
             for method in methods.iter().take(display_count) {
                 let line = match self.config.output_format {
-                    OutputFormat::Markdown => format!("• **{}()** → {}", method.name, method.return_type),
-                    OutputFormat::PlainText => format!("  - {}() → {}", method.name, method.return_type),
+                    OutputFormat::Markdown => {
+                        format!("• **{}()** → {}", method.name, method.return_type)
+                    }
+                    OutputFormat::PlainText => {
+                        format!("  - {}() → {}", method.name, method.return_type)
+                    }
                 };
                 method_lines.push(line);
             }
 
             if total_count > display_count {
-                method_lines.push(format!("\n... и ещё {} методов", total_count - display_count));
+                method_lines.push(format!(
+                    "\n... и ещё {} методов",
+                    total_count - display_count
+                ));
             }
 
             self.sections.push(method_lines.join("\n"));
@@ -351,27 +364,39 @@ impl<'a> HoverBuilder<'a> {
         self
     }
 
-    fn add_properties(mut self, resolution: &TypeResolution, metadata_lookup: &TypeMetadataLookup) -> Self {
+    fn add_properties(
+        mut self,
+        resolution: &TypeResolution,
+        metadata_lookup: &TypeMetadataLookup,
+    ) -> Self {
         let properties = metadata_lookup.get_properties(resolution);
 
         if !properties.is_empty() {
             let total_count = properties.len();
             let display_count = self.config.max_properties.min(total_count);
 
-            let mut property_lines = vec![
-                format!("Свойства (показано {} из {}):", display_count, total_count)
-            ];
+            let mut property_lines = vec![format!(
+                "Свойства (показано {} из {}):",
+                display_count, total_count
+            )];
 
             for property in properties.iter().take(display_count) {
                 let line = match self.config.output_format {
-                    OutputFormat::Markdown => format!("• **{}**: {}", property.name, property.prop_type),
-                    OutputFormat::PlainText => format!("  - {}: {}", property.name, property.prop_type),
+                    OutputFormat::Markdown => {
+                        format!("• **{}**: {}", property.name, property.prop_type)
+                    }
+                    OutputFormat::PlainText => {
+                        format!("  - {}: {}", property.name, property.prop_type)
+                    }
                 };
                 property_lines.push(line);
             }
 
             if total_count > display_count {
-                property_lines.push(format!("\n... и ещё {} свойств", total_count - display_count));
+                property_lines.push(format!(
+                    "\n... и ещё {} свойств",
+                    total_count - display_count
+                ));
             }
 
             self.sections.push(property_lines.join("\n"));
@@ -388,11 +413,11 @@ impl<'a> HoverBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
     use bsl_shared::domain::types::{
-        RawMethodData, RawPropertyData, PlatformType, ConcreteType,
-        ResolutionSource, ResolutionMetadata,
+        ConcreteType, PlatformType, RawMethodData, RawPropertyData, ResolutionMetadata,
+        ResolutionSource,
     };
-    use bsl_shared::domain::repository::{TypeRepository, InMemoryTypeRepository};
     use std::sync::Arc;
 
     #[test]
@@ -460,7 +485,7 @@ mod tests {
 
     #[test]
     fn test_generic_type_formatting() {
-        use bsl_shared::domain::types::{ConcreteType, PrimitiveType, GenericType};
+        use bsl_shared::domain::types::{ConcreteType, GenericType, PrimitiveType};
 
         let generic = GenericType {
             base_type: "Массив".to_string(),
@@ -486,7 +511,7 @@ mod tests {
 
     // Helper functions for testing
     fn create_test_repository_with_methods(method_count: usize) -> Arc<InMemoryTypeRepository> {
-        use bsl_shared::domain::types::{RawTypeData, RawDataSource, FacetKind};
+        use bsl_shared::domain::types::{FacetKind, RawDataSource, RawTypeData};
 
         let repo = Arc::new(InMemoryTypeRepository::new());
 
@@ -519,8 +544,10 @@ mod tests {
         repo
     }
 
-    fn create_test_repository_with_properties(property_count: usize) -> Arc<InMemoryTypeRepository> {
-        use bsl_shared::domain::types::{RawTypeData, RawDataSource, FacetKind};
+    fn create_test_repository_with_properties(
+        property_count: usize,
+    ) -> Arc<InMemoryTypeRepository> {
+        use bsl_shared::domain::types::{FacetKind, RawDataSource, RawTypeData};
 
         let repo = Arc::new(InMemoryTypeRepository::new());
 

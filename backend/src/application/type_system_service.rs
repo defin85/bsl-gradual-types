@@ -4,9 +4,9 @@
 //! Phase 4: API Unification - объединяет LspTypeService + WebTypeService + AnalysisService
 
 use anyhow::Result;
+use bsl_shared::api::MethodDto;
 use std::collections::HashMap;
 use std::sync::Arc;
-use bsl_shared::api::MethodDto;
 use tracing::info;
 
 use crate::application::TypeInferenceService;
@@ -175,11 +175,22 @@ impl TypeSystemService {
                         .map(|f| format!("{:?}", f))
                         .collect(),
                     methods_count: Some(methods.len()),
-                    methods: methods.iter().map(|m| MethodDto { is_deprecated: false, is_constructor: false, name: m.name.clone(), english_name: None, return_type: None, params: vec![], description: None }).collect(),
+                    methods: methods
+                        .iter()
+                        .map(|m| MethodDto {
+                            is_deprecated: false,
+                            is_constructor: false,
+                            name: m.name.clone(),
+                            english_name: None,
+                            return_type: None,
+                            params: vec![],
+                            description: None,
+                        })
+                        .collect(),
                     attributes_count: raw_type.as_ref().map(|rt| rt.attributes.len()),
                     properties: properties.iter().map(|p| p.name.clone()).collect(),
                     enum_values,
-// Конвертируем табличные части из RawTypeData в DTO
+                    // Конвертируем табличные части из RawTypeData в DTO
                     tabular_sections: raw_type
                         .as_ref()
                         .map(|rt| {
@@ -592,10 +603,9 @@ impl TypeSystemService {
                 resolver.resolve_variable_with_context(&var_name, &ir_program.symbols, scope_id);
 
             // Форматируем hover через TypeResolution (вместо TypeHint)
-            return Ok(Some(self.hover_formatter.format_variable(
-                &var_name,
-                &resolution,
-            )));
+            return Ok(Some(
+                self.hover_formatter.format_variable(&var_name, &resolution),
+            ));
         } else {
             // Milestone 2.11 Task B1: Логи когда переменная не найдена
             debug!(
@@ -759,11 +769,22 @@ impl TypeSystemService {
                         .map(|f| format!("{:?}", f))
                         .collect(),
                     methods_count: Some(methods.len()),
-                    methods: methods.iter().map(|m| MethodDto { is_deprecated: false, is_constructor: false, name: m.name.clone(), english_name: None, return_type: None, params: vec![], description: None }).collect(),
+                    methods: methods
+                        .iter()
+                        .map(|m| MethodDto {
+                            is_deprecated: false,
+                            is_constructor: false,
+                            name: m.name.clone(),
+                            english_name: None,
+                            return_type: None,
+                            params: vec![],
+                            description: None,
+                        })
+                        .collect(),
                     attributes_count: raw_type.as_ref().map(|rt| rt.attributes.len()),
                     properties: properties.iter().map(|p| p.name.clone()).collect(),
                     enum_values,
-// Конвертируем табличные части из RawTypeData в DTO
+                    // Конвертируем табличные части из RawTypeData в DTO
                     tabular_sections: raw_type
                         .as_ref()
                         .map(|rt| {
@@ -1659,7 +1680,10 @@ impl TypeSystemService {
     ///
     /// # Возвращает
     /// Форматированный markdown с информацией о типе, методах и свойствах
-    #[deprecated(since = "0.4.3", note = "Use hover_formatter.format_variable() instead")]
+    #[deprecated(
+        since = "0.4.3",
+        note = "Use hover_formatter.format_variable() instead"
+    )]
     #[allow(dead_code)]
     fn format_variable_hover_from_resolution(
         &self,
@@ -1997,7 +2021,10 @@ impl TypeSystemService {
                     "📋 *Табличная часть:* `{}`\n",
                     row_type.tabular_section_name
                 ));
-                output.push_str(&format!("📄 *Родительский объект:* `{}`\n\n", row_type.parent_type));
+                output.push_str(&format!(
+                    "📄 *Родительский объект:* `{}`\n\n",
+                    row_type.parent_type
+                ));
 
                 // Методы коллекции
                 let methods = self.metadata_lookup.get_methods(resolution);
@@ -2076,17 +2103,17 @@ impl TypeSystemService {
     }
 
     /// Форматирует имя ConcreteType для отображения
-    fn format_concrete_type_name(&self, concrete: &bsl_shared::domain::types::ConcreteType) -> String {
+    fn format_concrete_type_name(
+        &self,
+        concrete: &bsl_shared::domain::types::ConcreteType,
+    ) -> String {
         use bsl_shared::domain::types::ConcreteType;
 
         match concrete {
             ConcreteType::Platform(pt) => pt.name.clone(),
             ConcreteType::Configuration(ct) => {
                 // Используем to_prefix() для корректного форматирования
-                format!("{}.{}",
-                    ct.kind.to_prefix(),
-                    ct.name
-                )
+                format!("{}.{}", ct.kind.to_prefix(), ct.name)
             }
             ConcreteType::Primitive(prim) => format!("{:?}", prim),
             ConcreteType::Special(spec) => format!("{:?}", spec),

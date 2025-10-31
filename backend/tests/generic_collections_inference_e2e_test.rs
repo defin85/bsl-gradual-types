@@ -12,9 +12,9 @@ use bsl_shared::ir::TypeHint;
 /// ⚠️ STUB: Требуется полная инициализация SystemCoordinator с Platform Types
 #[allow(dead_code)]
 fn create_test_resolver() -> std::sync::Arc<bsl_shared::domain::TypeResolver> {
-    use std::sync::Arc;
     use bsl_shared::domain::repository::InMemoryTypeRepository;
     use bsl_shared::domain::TypeResolver;
+    use std::sync::Arc;
 
     let repository = Arc::new(InMemoryTypeRepository::new());
     Arc::new(TypeResolver::new(repository))
@@ -97,11 +97,7 @@ fn test_resolve_generic_from_hint_basic() {
     );
 
     // Резолвим через resolve_variable_with_context()
-    let resolution = resolver.resolve_variable_with_context(
-        "МассивСтрок",
-        &symbol_table,
-        scope_id,
-    );
+    let resolution = resolver.resolve_variable_with_context("МассивСтрок", &symbol_table, scope_id);
 
     // Проверяем результат
     use bsl_shared::domain::types::ResolutionResult;
@@ -114,7 +110,10 @@ fn test_resolve_generic_from_hint_basic() {
         }
         other => {
             // В минимальной среде может вернуться Unknown — это нормально для unit-теста
-            println!("⚠️ WARNING: Не Generic тип (нужен полный TypeRepository): {:?}", other);
+            println!(
+                "⚠️ WARNING: Не Generic тип (нужен полный TypeRepository): {:?}",
+                other
+            );
         }
     }
 }
@@ -133,11 +132,7 @@ fn test_resolve_variable_with_context_explicit_type() {
         bsl_shared::ir::Span::stub(),
     );
 
-    let resolution = resolver.resolve_variable_with_context(
-        "x",
-        &symbol_table,
-        scope_id,
-    );
+    let resolution = resolver.resolve_variable_with_context("x", &symbol_table, scope_id);
 
     // Проверяем, что резолюция произошла (не Unknown)
     use bsl_shared::domain::types::Certainty;

@@ -70,4 +70,71 @@ export type NotificationHandler = (method: string, params: unknown, next: Functi
  * Обработчик конфигурации workspace
  */
 export type WorkspaceConfigurationHandler = (params: ConfigurationParams, token: unknown, next: Function) => unknown;
+/**
+ * MILESTONE 2.20.2.4: Work Done Progress notification types (LSP Standard)
+ */
+/**
+ * Параметры $/progress notification
+ */
+export interface ProgressParams {
+    /**
+     * Уникальный токен прогресса
+     */
+    token: string | number;
+    /**
+     * Значение прогресса (begin/report/end)
+     */
+    value: WorkDoneProgressBegin | WorkDoneProgressReport | WorkDoneProgressEnd;
+}
+/**
+ * Начало Work Done Progress
+ */
+export interface WorkDoneProgressBegin {
+    kind: 'begin';
+    title: string;
+    message?: string;
+    percentage?: number;
+    cancellable?: boolean;
+}
+/**
+ * Обновление Work Done Progress
+ */
+export interface WorkDoneProgressReport {
+    kind: 'report';
+    message?: string;
+    percentage?: number;
+    cancellable?: boolean;
+}
+/**
+ * Завершение Work Done Progress
+ */
+export interface WorkDoneProgressEnd {
+    kind: 'end';
+    message?: string;
+}
+/**
+ * Результат парсинга прогресса из message string
+ */
+export interface ParsedProgressMessage {
+    /**
+     * Текущий номер элемента (для "Тип 150/3927")
+     */
+    currentItem?: number;
+    /**
+     * Всего элементов (для "Тип 150/3927")
+     */
+    totalItems?: number;
+    /**
+     * Название текущего элемента (для "Справочники.Контрагенты")
+     */
+    itemName?: string;
+    /**
+     * ETA в секундах (для "ETA: 42s")
+     */
+    eta?: number;
+    /**
+     * Исходное сообщение
+     */
+    originalMessage: string;
+}
 //# sourceMappingURL=index.d.ts.map

@@ -1,8 +1,8 @@
 //! Интеграционный тест TypeValidator с реальными данными платформы 1С
 
 use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 use bsl_backend::data::loaders::progress::ProgressUpdate;
+use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::types::{
     Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult, ResolutionSource,

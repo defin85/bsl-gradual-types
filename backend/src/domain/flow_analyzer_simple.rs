@@ -51,20 +51,19 @@ impl SimpleFlowAnalyzer {
     /// Парсинг простого присваивания
     fn parse_assignment(&self, line: &str) -> Option<(String, String)> {
         // Перем x = значение
-        if (line.starts_with("Перем") || line.starts_with("Var"))
-            && line.find('=').is_some() {
-                // Используем split_whitespace для корректной работы с кириллицей
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 4 && parts[0] == "Перем" || parts[0] == "Var" {
-                    let var_name = parts[1].trim();
-                    // Всё после '=' - это значение
-                    let value_start = line.find('=').map(|pos| pos + 1)?;
-                    let value_part = &line[value_start..].trim();
-                    let value = value_part.trim_end_matches(';').trim();
+        if (line.starts_with("Перем") || line.starts_with("Var")) && line.find('=').is_some() {
+            // Используем split_whitespace для корректной работы с кириллицей
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 4 && parts[0] == "Перем" || parts[0] == "Var" {
+                let var_name = parts[1].trim();
+                // Всё после '=' - это значение
+                let value_start = line.find('=').map(|pos| pos + 1)?;
+                let value_part = &line[value_start..].trim();
+                let value = value_part.trim_end_matches(';').trim();
 
-                    return Some((var_name.to_string(), value.to_string()));
-                }
+                return Some((var_name.to_string(), value.to_string()));
             }
+        }
 
         // x = значение (без Перем)
         if let Some(eq_pos) = line.find('=') {

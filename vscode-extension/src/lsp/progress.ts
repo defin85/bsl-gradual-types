@@ -150,9 +150,10 @@ function flushPendingUpdate(): void {
  * @param message - сообщение о завершении (опционально)
  */
 export function finishIndexing(message?: string) {
-    // ✅ ДОБАВИТЬ: Сбросить pending updates перед завершением
+    // ✅ ИСПРАВЛЕНИЕ: Применяем накопленное обновление перед очисткой
     if (throttleTimeoutId !== undefined) {
         clearTimeout(throttleTimeoutId);
+        flushPendingUpdate();
         throttleTimeoutId = undefined;
     }
 

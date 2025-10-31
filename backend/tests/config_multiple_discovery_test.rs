@@ -72,7 +72,10 @@ fn test_configurations_sorted_base_first() {
 
     // Assert
     // Должна быть хотя бы одна конфигурация
-    assert!(!configurations.is_empty(), "Должна быть найдена хотя бы одна конфигурация");
+    assert!(
+        !configurations.is_empty(),
+        "Должна быть найдена хотя бы одна конфигурация"
+    );
 
     // Проверяем, что первая конфигурация — Base
     let first_config = &configurations[0];
@@ -128,10 +131,15 @@ fn test_configuration_paths_correctness() {
         conf_test.path.display()
     );
 
-    println!("✅ Путь к базовой конфигурации корректен: {}", conf_test.path.display());
+    println!(
+        "✅ Путь к базовой конфигурации корректен: {}",
+        conf_test.path.display()
+    );
 
     // Находим ext_test
-    let ext_test = configurations.iter().find(|c| c.name == "ТестовоеРасширение");
+    let ext_test = configurations
+        .iter()
+        .find(|c| c.name == "ТестовоеРасширение");
     assert!(
         ext_test.is_some(),
         "Должно быть найдено расширение 'ТестовоеРасширение'"
@@ -144,7 +152,10 @@ fn test_configuration_paths_correctness() {
         ext_test.path.display()
     );
 
-    println!("✅ Путь к расширению корректен: {}", ext_test.path.display());
+    println!(
+        "✅ Путь к расширению корректен: {}",
+        ext_test.path.display()
+    );
 }
 
 /// Тест 4: Обратная совместимость
@@ -214,10 +225,7 @@ fn test_both_base_and_extension_present() {
         base_count > 0,
         "Должна быть найдена хотя бы одна базовая конфигурация"
     );
-    assert!(
-        ext_count > 0,
-        "Должно быть найдено хотя бы одно расширение"
-    );
+    assert!(ext_count > 0, "Должно быть найдено хотя бы одно расширение");
 
     println!("✅ Найдено базовых конфигураций: {}", base_count);
     println!("✅ Найдено расширений: {}", ext_count);

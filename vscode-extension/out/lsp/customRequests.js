@@ -28,7 +28,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.searchTypes = exports.extractPlatformDocs = exports.incrementalUpdate = exports.analyzeFile = exports.checkTypeCompatibility = exports.validateMethod = exports.buildIndex = exports.queryType = void 0;
+exports.getTypeRepositoryStats = exports.searchTypes = exports.extractPlatformDocs = exports.incrementalUpdate = exports.analyzeFile = exports.checkTypeCompatibility = exports.validateMethod = exports.buildIndex = exports.queryType = void 0;
 const client_1 = require("./client");
 // ============================================================================
 // Helper Functions - прямые вызовы LSP custom requests
@@ -150,4 +150,28 @@ async function searchTypes(query, limit) {
     }
 }
 exports.searchTypes = searchTypes;
+/**
+ * Получить статистику TypeRepository из LSP Server
+ *
+ * @returns Статистика или null если LSP недоступен
+ */
+async function getTypeRepositoryStats() {
+    const client = (await Promise.resolve().then(() => __importStar(require('./client')))).getLanguageClient();
+    if (!client) {
+        console.warn('[Type Stats] LSP client not available');
+        return null;
+    }
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.getTypeRepositoryStats',
+            arguments: [{}]
+        });
+        return result || null;
+    }
+    catch (error) {
+        console.error('[Type Stats] Failed to get type repository stats:', error);
+        return null;
+    }
+}
+exports.getTypeRepositoryStats = getTypeRepositoryStats;
 //# sourceMappingURL=customRequests.js.map

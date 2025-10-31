@@ -27,11 +27,17 @@ fn test_parse_document_with_tabular_sections() {
         .expect("❌ Не удалось распарсить документ ЗаказНаряды");
 
     // Assert - базовые свойства
-    assert_eq!(metadata.name, "ЗаказНаряды", "Имя документа должно быть 'ЗаказНаряды'");
+    assert_eq!(
+        metadata.name, "ЗаказНаряды",
+        "Имя документа должно быть 'ЗаказНаряды'"
+    );
     println!("✅ Имя документа: {}", metadata.name);
 
     // Assert - количество табличных частей
-    println!("📊 Количество табличных частей: {}", metadata.tabular_sections.len());
+    println!(
+        "📊 Количество табличных частей: {}",
+        metadata.tabular_sections.len()
+    );
     assert_eq!(
         metadata.tabular_sections.len(),
         2,
@@ -61,8 +67,7 @@ fn test_parse_document_with_tabular_sections() {
     );
 
     assert_eq!(
-        raboty.attributes[0].name,
-        "ВидРаботы",
+        raboty.attributes[0].name, "ВидРаботы",
         "❌ Атрибут ТЧ 'Работы' должен называться 'ВидРаботы'"
     );
 
@@ -95,8 +100,7 @@ fn test_parse_document_with_tabular_sections() {
     );
 
     assert_eq!(
-        storony.attributes[0].name,
-        "Сторона",
+        storony.attributes[0].name, "Сторона",
         "❌ Атрибут ТЧ 'Стороны' должен называться 'Сторона'"
     );
 
@@ -130,7 +134,10 @@ fn test_document_attributes_not_mixed_with_tabular() {
     // Из XML: НомерЗаказ, СтроковыйТип1-4, ЧисловойТип1-3,
     // РеквизитИндексируемый, РеквизитИндексируемыйДопУпорядочивание,
     // РеквизитДата, РеквизитДатаВремя, РеквизитВремя = 14 атрибутов
-    println!("📊 Количество атрибутов основного объекта: {}", metadata.attributes.len());
+    println!(
+        "📊 Количество атрибутов основного объекта: {}",
+        metadata.attributes.len()
+    );
 
     for (i, attr) in metadata.attributes.iter().enumerate() {
         println!("   {}. {} ({})", i + 1, attr.name, attr.type_name);
@@ -143,7 +150,11 @@ fn test_document_attributes_not_mixed_with_tabular() {
     );
 
     // Assert - проверяем наличие ключевых атрибутов
-    let attr_names: Vec<&str> = metadata.attributes.iter().map(|a| a.name.as_str()).collect();
+    let attr_names: Vec<&str> = metadata
+        .attributes
+        .iter()
+        .map(|a| a.name.as_str())
+        .collect();
 
     assert!(
         attr_names.contains(&"НомерЗаказ"),
@@ -180,7 +191,10 @@ fn test_document_attributes_not_mixed_with_tabular() {
             ts.name
         );
 
-        println!("✅ Табличная часть '{}' не содержит атрибутов основного объекта", ts.name);
+        println!(
+            "✅ Табличная часть '{}' не содержит атрибутов основного объекта",
+            ts.name
+        );
     }
 }
 
@@ -247,10 +261,16 @@ fn test_catalog_parsing_not_broken() {
 
     // Assert
     println!("📚 Справочник: {}", metadata.name);
-    assert_eq!(metadata.name, "Контрагенты", "Имя справочника должно быть 'Контрагенты'");
+    assert_eq!(
+        metadata.name, "Контрагенты",
+        "Имя справочника должно быть 'Контрагенты'"
+    );
 
     println!("   Количество атрибутов: {}", metadata.attributes.len());
-    println!("   Количество табличных частей: {}", metadata.tabular_sections.len());
+    println!(
+        "   Количество табличных частей: {}",
+        metadata.tabular_sections.len()
+    );
 
     // Проверяем, что справочник имеет атрибуты (если они есть в XML)
     for attr in &metadata.attributes {
@@ -268,7 +288,8 @@ fn test_catalog_parsing_not_broken() {
 #[test]
 fn test_information_register_parsing() {
     // Arrange
-    let xml_path = Path::new("../examples/conf/conf_test/InformationRegisters/ТестовыйРегистрСведений.xml");
+    let xml_path =
+        Path::new("../examples/conf/conf_test/InformationRegisters/ТестовыйРегистрСведений.xml");
 
     // Act
     let metadata = UniversalMetadataParser::parse_any_object(xml_path)
@@ -276,7 +297,10 @@ fn test_information_register_parsing() {
 
     // Assert
     println!("📊 Регистр сведений: {}", metadata.name);
-    assert_eq!(metadata.name, "ТестовыйРегистрСведений", "Имя регистра должно совпадать");
+    assert_eq!(
+        metadata.name, "ТестовыйРегистрСведений",
+        "Имя регистра должно совпадать"
+    );
 
     println!("   Количество атрибутов: {}", metadata.attributes.len());
 
@@ -306,7 +330,10 @@ fn test_document_without_tabular_sections() {
 
     // Assert
     println!("📚 Объект без ТЧ: {}", metadata.name);
-    println!("   Количество табличных частей: {}", metadata.tabular_sections.len());
+    println!(
+        "   Количество табличных частей: {}",
+        metadata.tabular_sections.len()
+    );
 
     assert_eq!(
         metadata.tabular_sections.len(),
@@ -375,7 +402,10 @@ fn test_tabular_sections_have_valid_uuids() {
     println!("📊 Проверка табличных частей:");
     for ts in &metadata.tabular_sections {
         println!("   - {} (синоним: {:?})", ts.name, ts.synonym);
-        assert!(!ts.name.is_empty(), "❌ Имя табличной части не должно быть пустым");
+        assert!(
+            !ts.name.is_empty(),
+            "❌ Имя табличной части не должно быть пустым"
+        );
 
         // Проверка, что атрибуты тоже имеют имена
         for attr in &ts.attributes {
@@ -441,7 +471,10 @@ fn test_complete_parsing_coverage() {
 
     // Assert - UUID
     println!("🆔 UUID: {}", metadata.uuid);
-    assert!(!metadata.uuid.is_empty(), "❌ UUID документа не должен быть пустым");
+    assert!(
+        !metadata.uuid.is_empty(),
+        "❌ UUID документа не должен быть пустым"
+    );
     assert!(
         metadata.uuid.contains("-"),
         "❌ UUID должен быть в формате GUID (содержать дефисы)"
@@ -449,7 +482,10 @@ fn test_complete_parsing_coverage() {
 
     // Assert - Имя
     println!("📝 Имя: {}", metadata.name);
-    assert_eq!(metadata.name, "ЗаказНаряды", "❌ Имя документа должно совпадать");
+    assert_eq!(
+        metadata.name, "ЗаказНаряды",
+        "❌ Имя документа должно совпадать"
+    );
 
     // Assert - Синоним
     println!("💬 Синоним: {:?}", metadata.synonym);
@@ -480,7 +516,10 @@ fn test_complete_parsing_coverage() {
         println!("   - ТЧ '{}': {} атрибутов", ts.name, ts.attributes.len());
     }
 
-    println!("📊 Всего атрибутов в табличных частях: {}", total_ts_attributes);
+    println!(
+        "📊 Всего атрибутов в табличных частях: {}",
+        total_ts_attributes
+    );
     assert!(
         total_ts_attributes >= 2,
         "❌ Должно быть как минимум 2 атрибута в табличных частях (по 1 в каждой)"

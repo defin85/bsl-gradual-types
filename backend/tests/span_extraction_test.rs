@@ -6,8 +6,8 @@
 /// - find_node_at_position() находит узлы по координатам
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::system::parser_coordinator::ParserCoordinator;
-use std::sync::Arc;
 use bsl_shared::domain::repository::InMemoryTypeRepository;
+use std::sync::Arc;
 
 #[test]
 fn test_span_extraction_from_tree_sitter() {

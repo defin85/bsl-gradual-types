@@ -84,11 +84,7 @@ async fn get_semantic_tree(
     let source = match std::fs::read_to_string(&file_path) {
         Ok(s) => s,
         Err(e) => {
-            return (
-                StatusCode::NOT_FOUND,
-                format!("Failed to read file: {}", e),
-            )
-                .into_response()
+            return (StatusCode::NOT_FOUND, format!("Failed to read file: {}", e)).into_response()
         }
     };
 

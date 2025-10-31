@@ -66,6 +66,12 @@ fn test_debug_type_parsing() {
     }
 
     println!("\n📊 Итого извлечено типов: {:?}", type_values);
-    assert!(!type_values.is_empty(), "Должен быть извлечён хотя бы один тип");
-    assert_eq!(type_values[0], "xs:string", "Первый тип должен быть xs:string");
+    assert!(
+        !type_values.is_empty(),
+        "Должен быть извлечён хотя бы один тип"
+    );
+    assert_eq!(
+        type_values[0], "xs:string",
+        "Первый тип должен быть xs:string"
+    );
 }

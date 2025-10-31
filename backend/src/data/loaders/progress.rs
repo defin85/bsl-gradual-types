@@ -37,7 +37,7 @@ impl IndexingPhase {
     pub fn weight(&self) -> f32 {
         match self {
             Self::CollectingFiles => 10.0,
-            Self::ParsingFiles => 60.0,    // Основная фаза (самая долгая)
+            Self::ParsingFiles => 60.0, // Основная фаза (самая долгая)
             Self::LinkingCategories => 20.0,
             Self::BuildingIndexes => 10.0,
         }
@@ -158,10 +158,22 @@ mod tests {
 
     #[test]
     fn test_indexing_phase_display_name() {
-        assert_eq!(IndexingPhase::CollectingFiles.display_name(), "Сканирование файлов");
-        assert_eq!(IndexingPhase::ParsingFiles.display_name(), "Парсинг Syntax Helper");
-        assert_eq!(IndexingPhase::LinkingCategories.display_name(), "Связывание категорий");
-        assert_eq!(IndexingPhase::BuildingIndexes.display_name(), "Построение индексов");
+        assert_eq!(
+            IndexingPhase::CollectingFiles.display_name(),
+            "Сканирование файлов"
+        );
+        assert_eq!(
+            IndexingPhase::ParsingFiles.display_name(),
+            "Парсинг Syntax Helper"
+        );
+        assert_eq!(
+            IndexingPhase::LinkingCategories.display_name(),
+            "Связывание категорий"
+        );
+        assert_eq!(
+            IndexingPhase::BuildingIndexes.display_name(),
+            "Построение индексов"
+        );
     }
 
     #[test]
@@ -204,7 +216,8 @@ mod tests {
     #[test]
     fn test_compute_percentage_building_indexes() {
         // Конец фазы: 3927/3927
-        let percent = ProgressUpdate::compute_percentage(IndexingPhase::BuildingIndexes, 3927, 3927);
+        let percent =
+            ProgressUpdate::compute_percentage(IndexingPhase::BuildingIndexes, 3927, 3927);
         assert_eq!(percent, 100.0);
     }
 

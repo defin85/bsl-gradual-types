@@ -22,7 +22,7 @@ pub struct SearchQuery {
 
 #[derive(Deserialize)]
 pub struct PaginationQuery {
-    pub page: Option<usize>,     // 1-based page number
+    pub page: Option<usize>, // 1-based page number
     pub limit: Option<usize>,
     pub category: Option<String>,
     pub certainty_level: Option<String>,

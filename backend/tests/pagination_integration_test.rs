@@ -123,10 +123,22 @@ mod pagination_integration_tests {
         let json = fetch_json("/api/types?page=3&limit=50").await.unwrap();
         let pagination = extract_pagination(&json).unwrap();
 
-        assert!(pagination.get("current_page").is_some(), "Отсутствует current_page");
-        assert!(pagination.get("page_size").is_some(), "Отсутствует page_size");
-        assert!(pagination.get("total_items").is_some(), "Отсутствует total_items");
-        assert!(pagination.get("total_pages").is_some(), "Отсутствует total_pages");
+        assert!(
+            pagination.get("current_page").is_some(),
+            "Отсутствует current_page"
+        );
+        assert!(
+            pagination.get("page_size").is_some(),
+            "Отсутствует page_size"
+        );
+        assert!(
+            pagination.get("total_items").is_some(),
+            "Отсутствует total_items"
+        );
+        assert!(
+            pagination.get("total_pages").is_some(),
+            "Отсутствует total_pages"
+        );
         assert!(pagination.get("has_prev").is_some(), "Отсутствует has_prev");
         assert!(pagination.get("has_next").is_some(), "Отсутствует has_next");
     }

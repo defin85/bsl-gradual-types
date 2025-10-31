@@ -293,5 +293,8 @@ fn test_concurrent_prefix_application() {
         );
     }
 
-    println!("Concurrent test: {} потоков успешно завершены", results.len());
+    println!(
+        "Concurrent test: {} потоков успешно завершены",
+        results.len()
+    );
 }

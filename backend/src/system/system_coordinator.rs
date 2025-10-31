@@ -113,9 +113,12 @@ impl SystemCoordinator {
 
             // ✅ MILESTONE 2.20.2.3: Парсим с прогрессом если передан callback
             if let Some(tx) = progress_tx {
-                match syntax_parser.parse_with_progress(syntax_path, move |update: ProgressUpdate| {
-                    let _ = tx.send(update);  // Отправляем в channel
-                }) {
+                match syntax_parser.parse_with_progress(
+                    syntax_path,
+                    move |update: ProgressUpdate| {
+                        let _ = tx.send(update); // Отправляем в channel
+                    },
+                ) {
                     Ok(()) => {
                         info!("✅ Парсинг синтаксис-помощника завершен успешно");
                     }
@@ -183,9 +186,7 @@ impl SystemCoordinator {
                 Ok(result) => {
                     info!(
                         "✅ Загружено {} типов из {} базовых конфигураций и {} расширений",
-                        result.total_types,
-                        result.base_config_count,
-                        result.extensions_count
+                        result.total_types, result.base_config_count, result.extensions_count
                     );
                 }
                 Err(e) => {
@@ -314,6 +315,18 @@ impl SystemCoordinator {
         self.observability.health_check()
     }
 
+    /// Получить статистику TypeRepository (Task 2.20.4)
+    pub fn get_type_repository_stats(&self) -> bsl_shared::domain::repository::RepositoryStats {
+        // Получаем AnalysisEngine
+        if let Some(engine) = self.analysis_engine() {
+            let repository = engine.get_repository();
+            repository.get_stats()
+        } else {
+            // Если AnalysisEngine не инициализирован - возвращаем пустую статистику
+            bsl_shared::domain::repository::RepositoryStats::default()
+        }
+    }
+
     /// Загрузить метаданные конфигурации через универсальный парсер
     ///
     /// Использует ConfigurationDiscovery для автоматического обнаружения всех объектов метаданных
@@ -399,9 +412,12 @@ impl SystemCoordinator {
     /// println!("Базовых конфигураций: {}", result.base_config_count);
     /// println!("Расширений: {}", result.extensions_count);
     /// ```
-    pub fn load_all_configurations_metadata(&self, config_path: &Path) -> Result<LoadMetadataResult> {
+    pub fn load_all_configurations_metadata(
+        &self,
+        config_path: &Path,
+    ) -> Result<LoadMetadataResult> {
         use crate::data::loaders::config_metadata_parser::{
-            ConfigurationDiscovery, ConfigurationType
+            ConfigurationDiscovery, ConfigurationType,
         };
 
         info!("🔍 Обнаружение конфигураций в: {}", config_path.display());
@@ -427,8 +443,16 @@ impl SystemCoordinator {
             info!(
                 "📦 Загрузка конфигурации: {} ({}{})",
                 config_info.name,
-                if config_info.is_base() { "Base" } else { "Extension" },
-                config_info.prefix.as_ref().map(|p| format!(", префикс: {}", p)).unwrap_or_default()
+                if config_info.is_base() {
+                    "Base"
+                } else {
+                    "Extension"
+                },
+                config_info
+                    .prefix
+                    .as_ref()
+                    .map(|p| format!(", префикс: {}", p))
+                    .unwrap_or_default()
             );
 
             let metadata = discovery
@@ -444,7 +468,8 @@ impl SystemCoordinator {
             total_types += raw_types.len();
 
             // Загружаем типы в репозиторий
-            repository.load_types(raw_types)
+            repository
+                .load_types(raw_types)
                 .map_err(|e| anyhow::anyhow!("Ошибка загрузки типов: {}", e))?;
 
             match config_info.config_type {

@@ -27,7 +27,10 @@ fn test_detect_base_configuration_details() {
     assert!(result.is_ok(), "Должна быть найдена конфигурация");
 
     let configurations = result.unwrap();
-    assert!(!configurations.is_empty(), "Должна быть найдена хотя бы одна конфигурация");
+    assert!(
+        !configurations.is_empty(),
+        "Должна быть найдена хотя бы одна конфигурация"
+    );
 
     let config = &configurations[0];
 
@@ -38,7 +41,10 @@ fn test_detect_base_configuration_details() {
         "Должна быть определена как базовая конфигурация"
     );
     assert!(config.is_base(), "is_base() должен возвращать true");
-    assert!(!config.is_extension(), "is_extension() должен возвращать false");
+    assert!(
+        !config.is_extension(),
+        "is_extension() должен возвращать false"
+    );
 
     // Проверяем имя
     assert_eq!(
@@ -109,7 +115,10 @@ fn test_detect_extension_configuration_details() {
         ConfigurationType::Extension,
         "Должна быть определена как расширение"
     );
-    assert!(config.is_extension(), "is_extension() должен возвращать true");
+    assert!(
+        config.is_extension(),
+        "is_extension() должен возвращать true"
+    );
     assert!(!config.is_base(), "is_base() должен возвращать false");
 
     // Проверяем имя
@@ -119,10 +128,7 @@ fn test_detect_extension_configuration_details() {
     );
 
     // Проверяем префикс
-    assert!(
-        config.prefix.is_some(),
-        "Расширение должно иметь префикс"
-    );
+    assert!(config.prefix.is_some(), "Расширение должно иметь префикс");
     assert_eq!(
         config.prefix.as_ref().unwrap(),
         "Тест_",
@@ -243,7 +249,10 @@ fn test_name_prefix_extraction() {
         "Префикс должен совпадать с <NamePrefix>"
     );
 
-    println!("✅ NamePrefix корректно извлечён из XML: {:?}", config.prefix);
+    println!(
+        "✅ NamePrefix корректно извлечён из XML: {:?}",
+        config.prefix
+    );
 }
 
 /// Тест 6: Пустой NamePrefix в базовой конфигурации

@@ -135,10 +135,7 @@ mod tabular_sections_api_tests {
 
         let json_str = serde_json::to_string(&dto).expect("Failed to serialize");
 
-        assert!(
-            json_str.contains("\"name\":"),
-            "Should contain name field"
-        );
+        assert!(json_str.contains("\"name\":"), "Should contain name field");
         assert!(
             json_str.contains("\"attributes\":"),
             "Should contain attributes array"
@@ -277,7 +274,10 @@ mod tabular_sections_api_tests {
             .await
             .expect("Failed to search types");
 
-        assert!(!result.types.is_empty(), "Should find документы.ЗаказНаряды");
+        assert!(
+            !result.types.is_empty(),
+            "Should find документы.ЗаказНаряды"
+        );
 
         let doc = &result.types[0];
         let storony = doc
@@ -325,10 +325,17 @@ mod tabular_sections_api_tests {
             let doc = &result.types[0];
 
             if !doc.tabular_sections.is_empty() {
-                assert_eq!(doc.tabular_sections.len(), 2, "Should have 2 tabular sections");
+                assert_eq!(
+                    doc.tabular_sections.len(),
+                    2,
+                    "Should have 2 tabular sections"
+                );
             }
 
-            println!("✓ Test 8 PASSED: Found document with {} tabular sections", doc.tabular_sections.len());
+            println!(
+                "✓ Test 8 PASSED: Found document with {} tabular sections",
+                doc.tabular_sections.len()
+            );
         }
     }
 
@@ -340,13 +347,7 @@ mod tabular_sections_api_tests {
             .type_service()
             .expect("Failed to get TypeSystemService");
 
-        let platform_types = vec![
-            "Массив",
-            "Строка",
-            "Число",
-            "Структура",
-            "Соответствие",
-        ];
+        let platform_types = vec!["Массив", "Строка", "Число", "Структура", "Соответствие"];
 
         for type_name in platform_types {
             let result = service
@@ -359,7 +360,8 @@ mod tabular_sections_api_tests {
 
                 assert!(!type_dto.name.is_empty(), "Name should not be empty");
                 assert_eq!(
-                    type_dto.tabular_sections.len(), 0,
+                    type_dto.tabular_sections.len(),
+                    0,
                     "Platform type {} should have no tabular sections",
                     type_name
                 );
@@ -381,7 +383,10 @@ mod tabular_sections_api_tests {
             serde_json::from_str(&json_str).expect("Failed to parse JSON");
 
         assert!(json_val["name"].is_string(), "name should be string");
-        assert!(json_val["attributes"].is_array(), "attributes should be array");
+        assert!(
+            json_val["attributes"].is_array(),
+            "attributes should be array"
+        );
 
         println!("✓ Test 10 PASSED: DTO schema is valid");
     }
@@ -448,10 +453,19 @@ mod tabular_sections_api_tests {
             let doc = &result.types[0];
             let tab_sections: Vec<_> = doc.tabular_sections.iter().map(|ts| &ts.name).collect();
 
-            assert!(tab_sections.contains(&&"Работы".to_string()), "Should have Работы");
-            assert!(tab_sections.contains(&&"Стороны".to_string()), "Should have Стороны");
+            assert!(
+                tab_sections.contains(&&"Работы".to_string()),
+                "Should have Работы"
+            );
+            assert!(
+                tab_sections.contains(&&"Стороны".to_string()),
+                "Should have Стороны"
+            );
 
-            println!("✓ Test 12 PASSED: All tabular sections returned: {:?}", tab_sections);
+            println!(
+                "✓ Test 12 PASSED: All tabular sections returned: {:?}",
+                tab_sections
+            );
         }
     }
 
@@ -474,8 +488,10 @@ mod tabular_sections_api_tests {
             for section in &doc.tabular_sections {
                 for attr in &section.attributes {
                     assert!(!attr.name.is_empty(), "Attribute name should not be empty");
-                    assert!(attr.name.chars().any(|c| c as u32 > 127),
-                        "Attribute name should contain Cyrillic characters");
+                    assert!(
+                        attr.name.chars().any(|c| c as u32 > 127),
+                        "Attribute name should contain Cyrillic characters"
+                    );
                 }
             }
 

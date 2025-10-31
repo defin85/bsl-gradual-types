@@ -1,8 +1,10 @@
 //! Data Layer: Type Repository trait and implementations
 
-use crate::domain::types::RawTypeData;
+use crate::domain::types::{RawDataSource, RawTypeData};
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use std::sync::RwLock;
+use std::time::SystemTime;
 
 // Completion items are part of the repository as it's the source of truth for them.
 // --- Completion Item Structures ---
@@ -102,12 +104,14 @@ pub trait TypeRepository: Send + Sync {
 }
 
 /// Статистика репозитория
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RepositoryStats {
     pub total_types: usize,
     pub platform_types: usize,
     pub configuration_types: usize,
     pub user_defined_types: usize,
+    pub last_update_time: Option<String>, // ISO 8601 timestamp
 }
 
 // --- In-Memory Implementation ---
@@ -116,12 +120,14 @@ pub struct RepositoryStats {
 #[derive(Default)]
 pub struct InMemoryTypeRepository {
     types: RwLock<Vec<RawTypeData>>,
+    last_updated: RwLock<Option<SystemTime>>,
 }
 
 impl InMemoryTypeRepository {
     pub fn new() -> Self {
         Self {
             types: RwLock::new(Vec::new()),
+            last_updated: RwLock::new(None),
         }
     }
 }
@@ -130,6 +136,10 @@ impl TypeRepository for InMemoryTypeRepository {
     fn load_types(&self, new_types: Vec<RawTypeData>) -> Result<()> {
         let mut types = self.types.write().unwrap();
         types.extend(new_types);
+
+        // Обновляем timestamp
+        *self.last_updated.write().unwrap() = Some(SystemTime::now());
+
         Ok(())
     }
 
@@ -169,12 +179,36 @@ impl TypeRepository for InMemoryTypeRepository {
 
     fn get_stats(&self) -> RepositoryStats {
         let types = self.types.read().unwrap();
-        // TODO: Differentiate between platform, config, etc. based on RawTypeData.source
+        let last_updated = self.last_updated.read().unwrap();
+
+        // Различаем типы по источнику
+        let platform_count = types
+            .iter()
+            .filter(|t| matches!(t.source, RawDataSource::Platform))
+            .count();
+
+        let configuration_count = types
+            .iter()
+            .filter(|t| matches!(t.source, RawDataSource::Configuration))
+            .count();
+
+        let user_defined_count = types
+            .iter()
+            .filter(|t| matches!(t.source, RawDataSource::UserDefined))
+            .count();
+
+        // Конвертируем SystemTime → ISO 8601 строку
+        let last_update_time = last_updated.as_ref().map(|time| {
+            let datetime: DateTime<Utc> = (*time).into();
+            datetime.to_rfc3339() // "2025-01-18T14:30:00Z"
+        });
+
         RepositoryStats {
             total_types: types.len(),
-            platform_types: types.len(), // Placeholder
-            configuration_types: 0,      // Placeholder
-            user_defined_types: 0,       // Placeholder
+            platform_types: platform_count,
+            configuration_types: configuration_count,
+            user_defined_types: user_defined_count,
+            last_update_time,
         }
     }
 }

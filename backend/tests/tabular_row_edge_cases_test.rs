@@ -6,7 +6,6 @@
 /// - Кириллица
 /// - Множественные табличные части
 /// - Вложенные типы в атрибутах
-
 use bsl_shared::domain::types::{RawAttributeData, TabularRowType};
 
 #[test]
@@ -208,10 +207,7 @@ fn test_tabular_row_clone() {
     let cloned = row_type.clone();
 
     assert_eq!(row_type.parent_type, cloned.parent_type);
-    assert_eq!(
-        row_type.tabular_section_name,
-        cloned.tabular_section_name
-    );
+    assert_eq!(row_type.tabular_section_name, cloned.tabular_section_name);
     assert_eq!(row_type.attributes.len(), cloned.attributes.len());
 }
 
@@ -256,11 +252,7 @@ fn test_tabular_row_special_characters() {
         attr_type: "Type#1$2".to_string(),
     }];
 
-    let row_type = TabularRowType::new(
-        "Doc.Test!@#".to_string(),
-        "Items_1-2".to_string(),
-        attrs,
-    );
+    let row_type = TabularRowType::new("Doc.Test!@#".to_string(), "Items_1-2".to_string(), attrs);
 
     assert_eq!(row_type.parent_type, "Doc.Test!@#");
     assert_eq!(row_type.tabular_section_name, "Items_1-2");
@@ -291,11 +283,7 @@ fn test_tabular_row_whitespace_names() {
         attr_type: "\tType\t".to_string(),
     }];
 
-    let row_type = TabularRowType::new(
-        "  Doc.Test  ".to_string(),
-        "  Items  ".to_string(),
-        attrs,
-    );
+    let row_type = TabularRowType::new("  Doc.Test  ".to_string(), "  Items  ".to_string(), attrs);
 
     // Проверяем, что пробелы сохраняются
     assert_eq!(row_type.parent_type, "  Doc.Test  ");

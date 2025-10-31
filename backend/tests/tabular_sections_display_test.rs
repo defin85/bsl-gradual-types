@@ -1,6 +1,6 @@
 // Тест для проверки отображения табличных частей
 
-use bsl_shared::api::dtos::{TypeDto, TabularSectionDto, TabularSectionAttributeDto, MethodDto};
+use bsl_shared::api::dtos::{MethodDto, TabularSectionAttributeDto, TabularSectionDto, TypeDto};
 
 #[test]
 fn test_create_type_with_tabular_sections() {
@@ -123,7 +123,10 @@ fn test_create_type_with_tabular_sections() {
 
     println!("✅ Тестовый документ с табличными частями создан успешно:");
     println!("   - Документ: {}", test_document.name);
-    println!("   - Табличных частей: {}", test_document.tabular_sections.len());
+    println!(
+        "   - Табличных частей: {}",
+        test_document.tabular_sections.len()
+    );
     for ts in &test_document.tabular_sections {
         println!("     • {} ({} атрибутов)", ts.name, ts.attributes.len());
     }
@@ -140,17 +143,15 @@ fn test_catalog_with_tabular_sections() {
         certainty_text: "Known (100%)".to_string(),
         facets: vec!["Object".to_string()],
         methods_count: Some(1),
-        methods: vec![
-            MethodDto {
-                name: "Записать".to_string(),
-                english_name: Some("Write".to_string()),
-                return_type: None,
-                params: vec![],
-                description: None,
-                is_deprecated: false,
-                is_constructor: false,
-            },
-        ],
+        methods: vec![MethodDto {
+            name: "Записать".to_string(),
+            english_name: Some("Write".to_string()),
+            return_type: None,
+            params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+        }],
         attributes_count: Some(5),
         properties: vec![
             "Наименование".to_string(),
@@ -192,7 +193,8 @@ fn test_catalog_with_tabular_sections() {
         ],
         source: "Configuration".to_string(),
         flow_sensitive: false,
-        description: "Справочник контрагентов с контактной информацией и банковскими счетами".to_string(),
+        description: "Справочник контрагентов с контактной информацией и банковскими счетами"
+            .to_string(),
         union_types: None,
         flow_analysis: None,
         connections: None,
@@ -202,10 +204,16 @@ fn test_catalog_with_tabular_sections() {
 
     // Проверяем
     assert_eq!(test_catalog.tabular_sections.len(), 2);
-    assert_eq!(test_catalog.tabular_sections[0].name, "КонтактнаяИнформация");
+    assert_eq!(
+        test_catalog.tabular_sections[0].name,
+        "КонтактнаяИнформация"
+    );
     assert_eq!(test_catalog.tabular_sections[1].name, "БанковскиеСчета");
 
     println!("✅ Тестовый справочник с табличными частями создан успешно:");
     println!("   - Справочник: {}", test_catalog.name);
-    println!("   - Табличных частей: {}", test_catalog.tabular_sections.len());
+    println!(
+        "   - Табличных частей: {}",
+        test_catalog.tabular_sections.len()
+    );
 }

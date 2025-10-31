@@ -14,7 +14,8 @@ fn main() {
     println!("Loaded {} platform types\n", platform_types.len());
 
     // Находим тип ТабличнаяЧасть
-    if let Some(tabular_type) = platform_types.iter().find(|t| t.name == "ТабличнаяЧасть") {
+    if let Some(tabular_type) = platform_types.iter().find(|t| t.name == "ТабличнаяЧасть")
+    {
         println!("✅ Found type: {}", tabular_type.name);
         println!("   English name: {}", tabular_type.english_name);
         println!("   Category: {}", tabular_type.category);
@@ -31,11 +32,7 @@ fn main() {
 
         // Проверяем количество методов
         println!("\n📋 Methods ({} total):", tabular_type.methods.len());
-        assert_eq!(
-            tabular_type.methods.len(),
-            16,
-            "Должно быть 16 методов"
-        );
+        assert_eq!(tabular_type.methods.len(), 16, "Должно быть 16 методов");
 
         // Показываем методы с Generic параметром "T"
         println!("\n🔹 Generic methods (return type = T):");
@@ -71,7 +68,8 @@ fn main() {
                     print!("{}: {}", param.name, param.param_type);
                 }
                 print!(")");
-                if !method.return_type.is_empty() && method.return_type != "Неопределено" {
+                if !method.return_type.is_empty() && method.return_type != "Неопределено"
+                {
                     print!(" → {}", method.return_type);
                 }
                 println!();

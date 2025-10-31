@@ -140,4 +140,19 @@ export declare function extractPlatformDocs(archivePath: string, platformVersion
  * @returns массив найденных типов
  */
 export declare function searchTypes(query: string, limit?: number): Promise<SearchTypesResponse>;
+/**
+ * Статистика TypeRepository
+ */
+export interface TypeRepositoryStats {
+    totalTypes: number;
+    platformTypes: number;
+    configurationTypes: number;
+    lastUpdateTime?: string;
+}
+/**
+ * Получить статистику TypeRepository из LSP Server
+ *
+ * @returns Статистика или null если LSP недоступен
+ */
+export declare function getTypeRepositoryStats(): Promise<TypeRepositoryStats | null>;
 //# sourceMappingURL=customRequests.d.ts.map

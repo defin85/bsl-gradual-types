@@ -3,10 +3,10 @@
 //! Проверяют flow-sensitive вывод Generic параметров коллекций.
 
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
-use bsl_backend::parsing::bsl::ast::{Expression, Program, Statement, Span as AstSpan};
+use bsl_backend::parsing::bsl::ast::{Expression, Program, Span as AstSpan, Statement};
+use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::ir::TypeHint;
 use std::sync::Arc;
-use bsl_shared::domain::repository::InMemoryTypeRepository;
 
 #[test]
 fn test_array_initialization_as_generic() {
@@ -28,8 +28,9 @@ fn test_array_initialization_as_generic() {
     };
 
     let repository = Arc::new(InMemoryTypeRepository::new());
-    let program = AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
-        .expect("Failed to convert AST to IR");
+    let program =
+        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
+            .expect("Failed to convert AST to IR");
 
     // Ищем root scope и проверяем переменную МассивСтрок
     let root_scope = program.symbols.root_scope;
@@ -45,7 +46,10 @@ fn test_array_initialization_as_generic() {
             assert_eq!(base_type, "Массив", "Base type должен быть Массив");
             assert_eq!(type_params.len(), 1, "Должен быть 1 параметр");
             assert_eq!(type_params[0], "?", "Параметр должен быть неизвестен");
-            assert_eq!(certainty, 0.0, "Certainty должна быть 0 (параметры неизвестны)");
+            assert_eq!(
+                certainty, 0.0,
+                "Certainty должна быть 0 (параметры неизвестны)"
+            );
         }
         Some(hint) => panic!("Expected Generic hint, got {:?}", hint),
         None => panic!("Variable МассивСтрок not found in scope"),
@@ -72,8 +76,9 @@ fn test_map_initialization_as_generic() {
     };
 
     let repository = Arc::new(InMemoryTypeRepository::new());
-    let program = AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
-        .expect("Failed to convert AST to IR");
+    let program =
+        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
+            .expect("Failed to convert AST to IR");
 
     let root_scope = program.symbols.root_scope;
     let var_type = program.symbols.get_variable_type(root_scope, "Словарь");
@@ -85,10 +90,19 @@ fn test_map_initialization_as_generic() {
             type_params,
             certainty,
         }) => {
-            assert_eq!(base_type, "Соответствие", "Base type должен быть Соответствие");
+            assert_eq!(
+                base_type, "Соответствие",
+                "Base type должен быть Соответствие"
+            );
             assert_eq!(type_params.len(), 2, "Должно быть 2 параметра");
-            assert_eq!(type_params[0], "?", "Первый параметр (ключ) должен быть неизвестен");
-            assert_eq!(type_params[1], "?", "Второй параметр (значение) должен быть неизвестен");
+            assert_eq!(
+                type_params[0], "?",
+                "Первый параметр (ключ) должен быть неизвестен"
+            );
+            assert_eq!(
+                type_params[1], "?",
+                "Второй параметр (значение) должен быть неизвестен"
+            );
             assert_eq!(certainty, 0.0, "Certainty должна быть 0");
         }
         Some(hint) => panic!("Expected Generic hint, got {:?}", hint),
@@ -116,8 +130,9 @@ fn test_list_initialization_as_generic() {
     };
 
     let repository = Arc::new(InMemoryTypeRepository::new());
-    let program = AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
-        .expect("Failed to convert AST to IR");
+    let program =
+        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
+            .expect("Failed to convert AST to IR");
 
     let root_scope = program.symbols.root_scope;
     let var_type = program.symbols.get_variable_type(root_scope, "Список");
@@ -157,8 +172,9 @@ fn test_non_generic_types_not_converted() {
     };
 
     let repository = Arc::new(InMemoryTypeRepository::new());
-    let program = AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
-        .expect("Failed to convert AST to IR");
+    let program =
+        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
+            .expect("Failed to convert AST to IR");
 
     let root_scope = program.symbols.root_scope;
     let var_type = program.symbols.get_variable_type(root_scope, "Х");
@@ -210,8 +226,9 @@ fn test_multiple_arrays_have_independent_types() {
     };
 
     let repository = Arc::new(InMemoryTypeRepository::new());
-    let program = AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
-        .expect("Failed to convert AST to IR");
+    let program =
+        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
+            .expect("Failed to convert AST to IR");
 
     let root_scope = program.symbols.root_scope;
 
@@ -219,6 +236,12 @@ fn test_multiple_arrays_have_independent_types() {
     let x_type = program.symbols.get_variable_type(root_scope, "Х");
     let y_type = program.symbols.get_variable_type(root_scope, "Y");
 
-    assert!(matches!(x_type, Some(TypeHint::Generic { .. })), "Х должен быть Generic");
-    assert!(matches!(y_type, Some(TypeHint::Generic { .. })), "Y должен быть Generic");
+    assert!(
+        matches!(x_type, Some(TypeHint::Generic { .. })),
+        "Х должен быть Generic"
+    );
+    assert!(
+        matches!(y_type, Some(TypeHint::Generic { .. })),
+        "Y должен быть Generic"
+    );
 }

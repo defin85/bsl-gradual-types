@@ -104,7 +104,7 @@ mod api_pagination_tests {
     #[test]
     fn test_limit_validation_edge_cases() {
         // Граничные значения
-        assert_eq!(validate_limit(1), 1);    // нижняя граница
+        assert_eq!(validate_limit(1), 1); // нижняя граница
         assert_eq!(validate_limit(1000), 1000); // верхняя граница
         assert_eq!(validate_limit(1001), 1000); // чуть больше максимума
     }
@@ -170,12 +170,7 @@ mod api_pagination_tests {
         // offset = (page - 1) * limit
         // page = (offset / limit) + 1
 
-        let test_cases = vec![
-            (1, 50, 0),
-            (2, 50, 50),
-            (3, 100, 200),
-            (10, 25, 225),
-        ];
+        let test_cases = vec![(1, 50, 0), (2, 50, 50), (3, 100, 200), (10, 25, 225)];
 
         for (page, limit, expected_offset) in test_cases {
             let offset = page_to_offset(page, limit);
@@ -191,7 +186,7 @@ mod api_pagination_tests {
     fn test_offset_never_negative() {
         // offset всегда >= 0 для любых валидных page/limit
         let test_cases = vec![
-            (0, 50),  // невалидная page (будет исправлена на 1)
+            (0, 50), // невалидная page (будет исправлена на 1)
             (1, 1),
             (1, 1000),
             (999, 1),

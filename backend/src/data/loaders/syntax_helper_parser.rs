@@ -151,11 +151,11 @@ impl SyntaxHelperParser {
     pub fn parse_directory<P, F>(
         &mut self,
         base_path: P,
-        progress_callback: Option<F>
+        progress_callback: Option<F>,
     ) -> Result<()>
     where
         P: AsRef<Path>,
-        F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static
+        F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
     {
         let base_path = base_path.as_ref();
         info!("🚀 Начинаем оптимизированный парсинг из {:?}", base_path);
@@ -372,10 +372,9 @@ impl SyntaxHelperParser {
         &self,
         batch: &[PathBuf],
         progress: &Option<ProgressBar>,
-        progress_callback: &Option<F>
-    )
-    where
-        F: Fn(ProgressUpdate) + Send + Sync
+        progress_callback: &Option<F>,
+    ) where
+        F: Fn(ProgressUpdate) + Send + Sync,
     {
         // Параллельная обработка внутри батча
         batch.par_iter().for_each(|file_path| {
@@ -404,9 +403,7 @@ impl SyntaxHelperParser {
                                 SyntaxNode::Category(cat) => {
                                     format!("Категория: {}", cat.name)
                                 }
-                                SyntaxNode::Constructor(_) => {
-                                    "Конструктор".to_string()
-                                }
+                                SyntaxNode::Constructor(_) => "Конструктор".to_string(),
                                 SyntaxNode::GlobalFunction(func) => {
                                     format!("Функция: {}", func.name)
                                 }
@@ -595,7 +592,7 @@ impl SyntaxHelperParser {
     pub fn parse_with_progress<P, F>(&mut self, base_path: P, progress_callback: F) -> Result<()>
     where
         P: AsRef<Path>,
-        F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static
+        F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
     {
         // Используем parse_syntax_helper для стандартной логики определения структуры,
         // но парсим через parse_directory с callback
@@ -642,7 +639,10 @@ impl SyntaxHelperParser {
         }
 
         if !parsed_something {
-            warn!("📁 Не найдено подходящих файлов для парсинга в {:?}", base_path);
+            warn!(
+                "📁 Не найдено подходящих файлов для парсинга в {:?}",
+                base_path
+            );
         }
 
         Ok(())
@@ -815,7 +815,9 @@ mod tests {
         };
 
         let mut parser = SyntaxHelperParser::with_settings(settings);
-        parser.parse_directory(&test_dir, None::<fn(ProgressUpdate)>).unwrap();
+        parser
+            .parse_directory(&test_dir, None::<fn(ProgressUpdate)>)
+            .unwrap();
 
         // Проверяем результаты
         let stats = parser.get_stats();
@@ -888,8 +890,8 @@ mod tests {
 
     #[test]
     fn test_parse_with_progress_callback() {
-        use std::sync::{Arc, Mutex};
         use super::super::progress::{IndexingPhase, ProgressUpdate};
+        use std::sync::{Arc, Mutex};
 
         // Создаём небольшую тестовую директорию
         let temp_dir = TempDir::new().unwrap();
@@ -939,15 +941,31 @@ mod tests {
 
         // Должны быть обновления для всех 4 фаз
         let phases: Vec<IndexingPhase> = updates.iter().map(|u| u.phase).collect();
-        assert!(phases.contains(&IndexingPhase::CollectingFiles), "Нет фазы CollectingFiles");
-        assert!(phases.contains(&IndexingPhase::ParsingFiles), "Нет фазы ParsingFiles");
-        assert!(phases.contains(&IndexingPhase::LinkingCategories), "Нет фазы LinkingCategories");
-        assert!(phases.contains(&IndexingPhase::BuildingIndexes), "Нет фазы BuildingIndexes");
+        assert!(
+            phases.contains(&IndexingPhase::CollectingFiles),
+            "Нет фазы CollectingFiles"
+        );
+        assert!(
+            phases.contains(&IndexingPhase::ParsingFiles),
+            "Нет фазы ParsingFiles"
+        );
+        assert!(
+            phases.contains(&IndexingPhase::LinkingCategories),
+            "Нет фазы LinkingCategories"
+        );
+        assert!(
+            phases.contains(&IndexingPhase::BuildingIndexes),
+            "Нет фазы BuildingIndexes"
+        );
 
         // Проверяем что последнее обновление - 100%
         let last = updates.last().unwrap();
         assert_eq!(last.percentage, 100.0, "Последний процент должен быть 100%");
-        assert_eq!(last.phase, IndexingPhase::BuildingIndexes, "Последняя фаза должна быть BuildingIndexes");
+        assert_eq!(
+            last.phase,
+            IndexingPhase::BuildingIndexes,
+            "Последняя фаза должна быть BuildingIndexes"
+        );
     }
 
     #[test]

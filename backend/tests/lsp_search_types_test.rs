@@ -81,9 +81,9 @@ fn create_coordinator_with_basic_types() -> Arc<SystemCoordinator> {
 
     // Инициализируем coordinator (это создаёт AnalysisEngine)
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    runtime.block_on(async {
-        coordinator.start_with_paths(None, None, None).await
-    }).expect("Failed to start coordinator");
+    runtime
+        .block_on(async { coordinator.start_with_paths(None, None, None).await })
+        .expect("Failed to start coordinator");
 
     // Получаем TypeRepository для добавления тестовых типов
     let engine = coordinator.get_analysis_engine().unwrap();
@@ -138,7 +138,8 @@ fn create_coordinator_with_basic_types() -> Arc<SystemCoordinator> {
         },
     ];
 
-    repo.load_types(test_types).expect("Failed to load test types");
+    repo.load_types(test_types)
+        .expect("Failed to load test types");
 
     coordinator
 }
@@ -243,7 +244,7 @@ fn test_search_types_limit_respected() {
     let coordinator = create_coordinator_with_basic_types();
     let request = SearchTypesRequest {
         query: "".to_string(), // Пустой запрос → все типы
-        limit: 2, // Лимит = 2
+        limit: 2,              // Лимит = 2
     };
 
     // ACT
@@ -431,9 +432,13 @@ fn test_search_types_production_syntax_helper() {
 
     // Загружаем типы платформы
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    runtime.block_on(async {
-        coordinator.start_with_paths(Some(&syntax_helper_path), None, None).await
-    }).expect("Failed to start coordinator with platform types");
+    runtime
+        .block_on(async {
+            coordinator
+                .start_with_paths(Some(&syntax_helper_path), None, None)
+                .await
+        })
+        .expect("Failed to start coordinator with platform types");
 
     // ACT - поиск типов платформы
     let test_queries = vec!["Массив", "Структура", "ТаблицаЗначений", "Array"];

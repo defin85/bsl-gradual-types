@@ -96,8 +96,7 @@ mod tabular_sections_dto_tests {
         };
 
         let json = serde_json::to_string(&dto).expect("Failed to serialize");
-        let json_val: serde_json::Value =
-            serde_json::from_str(&json).expect("Failed to parse");
+        let json_val: serde_json::Value = serde_json::from_str(&json).expect("Failed to parse");
 
         println!("JSON: {}", json);
 
@@ -149,7 +148,11 @@ mod tabular_sections_dto_tests {
             .enumerate()
         {
             assert_eq!(rest.name, orig.name, "Attribute {} name mismatch", i);
-            assert_eq!(rest.attr_type, orig.attr_type, "Attribute {} type mismatch", i);
+            assert_eq!(
+                rest.attr_type, orig.attr_type,
+                "Attribute {} type mismatch",
+                i
+            );
         }
 
         println!("✓ Test 4 PASSED: Round-trip serialization successful");
@@ -212,7 +215,10 @@ mod tabular_sections_dto_tests {
 
         let attr_type = &restored.attributes[0].attr_type;
         assert!(attr_type.is_some());
-        assert!(attr_type.as_ref().unwrap().contains("CatalogRef.Контрагенты"));
+        assert!(attr_type
+            .as_ref()
+            .unwrap()
+            .contains("CatalogRef.Контрагенты"));
 
         println!("✓ Test 6 PASSED: Composite types preserved");
     }
@@ -382,7 +388,8 @@ mod tabular_sections_dto_tests {
                 }],
             };
 
-            let json = serde_json::to_string(&dto).unwrap_or_else(|_| panic!("Failed for {}", desc));
+            let json =
+                serde_json::to_string(&dto).unwrap_or_else(|_| panic!("Failed for {}", desc));
             let restored: TabularSectionDto = serde_json::from_str(&json)
                 .unwrap_or_else(|_| panic!("Failed to deserialize for {}", desc));
 

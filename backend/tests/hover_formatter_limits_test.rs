@@ -1,6 +1,6 @@
 //! Тесты для проверки лимитов методов и свойств в HoverFormatter
 
-use bsl_backend::helpers::hover_formatter::{HoverFormatter, HoverFormatConfig, OutputFormat};
+use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, OutputFormat};
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::types::{

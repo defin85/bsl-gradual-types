@@ -30,8 +30,14 @@ fn test_multiple_configurations_returns_first() {
     let conf_test_exists = parent_path.join("conf_test/Configuration.xml").exists();
     let ext_test_exists = parent_path.join("ext_test/Configuration.xml").exists();
 
-    println!("📂 conf_test/Configuration.xml существует: {}", conf_test_exists);
-    println!("📂 ext_test/Configuration.xml существует: {}", ext_test_exists);
+    println!(
+        "📂 conf_test/Configuration.xml существует: {}",
+        conf_test_exists
+    );
+    println!(
+        "📂 ext_test/Configuration.xml существует: {}",
+        ext_test_exists
+    );
 
     if !conf_test_exists && !ext_test_exists {
         eprintln!("⚠️ Ни одна конфигурация не найдена для теста");
@@ -51,7 +57,10 @@ fn test_multiple_configurations_returns_first() {
 
     // Проверяем, что найдена ОДНА конфигурация (не все сразу)
     // conf_test имеет ~5 объектов, ext_test имеет ~3 объекта
-    println!("✅ Найдено объектов: {} (из одной конфигурации)", metadata.len());
+    println!(
+        "✅ Найдено объектов: {} (из одной конфигурации)",
+        metadata.len()
+    );
 
     // Если бы загрузились ОБЕ конфигурации, было бы ~8 объектов
     // Но мы загружаем только первую найденную
@@ -83,7 +92,10 @@ fn test_backward_compatibility_direct_path() {
 
     let metadata = result.unwrap();
 
-    println!("✅ Обратная совместимость: найдено {} объектов", metadata.len());
+    println!(
+        "✅ Обратная совместимость: найдено {} объектов",
+        metadata.len()
+    );
 
     // Проверяем, что найдены известные объекты из conf_test
     let has_kontragenty = metadata.iter().any(|m| m.name == "Контрагенты");
@@ -126,8 +138,7 @@ fn test_deeply_nested_configuration() {
 </MetaDataObject>"#;
 
     let config_xml_path = config_folder.join("Configuration.xml");
-    fs::write(&config_xml_path, config_xml_content)
-        .expect("Не удалось записать Configuration.xml");
+    fs::write(&config_xml_path, config_xml_content).expect("Не удалось записать Configuration.xml");
 
     // Запускаем discovery с temp (корневой папки)
     let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
@@ -191,8 +202,7 @@ fn test_empty_subfolders_skip() {
 </MetaDataObject>"#;
 
     let config_xml_path = config_folder.join("Configuration.xml");
-    fs::write(&config_xml_path, config_xml_content)
-        .expect("Не удалось записать Configuration.xml");
+    fs::write(&config_xml_path, config_xml_content).expect("Не удалось записать Configuration.xml");
 
     let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
 
@@ -214,8 +224,11 @@ fn test_files_in_parent_folder_ignored() {
     // Создаём несколько файлов в корне (имитируем реальную структуру проекта)
     fs::write(temp_dir.path().join("README.md"), "# Test Project")
         .expect("Не удалось создать README.md");
-    fs::write(temp_dir.path().join("test.bsl"), "Процедура Тест() КонецПроцедуры")
-        .expect("Не удалось создать test.bsl");
+    fs::write(
+        temp_dir.path().join("test.bsl"),
+        "Процедура Тест() КонецПроцедуры",
+    )
+    .expect("Не удалось создать test.bsl");
 
     // Создаём подпапку с конфигурацией
     let config_folder = temp_dir.path().join("src");
@@ -233,8 +246,7 @@ fn test_files_in_parent_folder_ignored() {
 </MetaDataObject>"#;
 
     let config_xml_path = config_folder.join("Configuration.xml");
-    fs::write(&config_xml_path, config_xml_content)
-        .expect("Не удалось записать Configuration.xml");
+    fs::write(&config_xml_path, config_xml_content).expect("Не удалось записать Configuration.xml");
 
     let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
 
@@ -261,7 +273,10 @@ fn test_error_message_clarity() {
 
     let result = discovery.discover_all_metadata();
 
-    assert!(result.is_err(), "Должна быть ошибка если конфигурация не найдена");
+    assert!(
+        result.is_err(),
+        "Должна быть ошибка если конфигурация не найдена"
+    );
 
     if let Err(e) = result {
         let error_msg = e.to_string();
@@ -329,8 +344,7 @@ fn test_real_project_structure() {
 </MetaDataObject>"#;
 
     let config_xml_path = cf_folder.join("Configuration.xml");
-    fs::write(&config_xml_path, config_xml_content)
-        .expect("Не удалось записать Configuration.xml");
+    fs::write(&config_xml_path, config_xml_content).expect("Не удалось записать Configuration.xml");
 
     // Запускаем discovery с корня проекта
     let discovery_root = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());

@@ -23,7 +23,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendCustomNotification = exports.sendCustomRequest = exports.isClientRunning = exports.getLanguageClient = exports.restartLanguageClient = exports.stopLanguageClient = exports.startLanguageClient = exports.initializeLspClient = void 0;
+exports.sendCustomNotification = exports.sendCustomRequest = exports.parseProgressMessage = exports.isClientRunning = exports.getLanguageClient = exports.restartLanguageClient = exports.stopLanguageClient = exports.startLanguageClient = exports.initializeLspClient = void 0;
 const vscode = __importStar(require("vscode"));
 const node_1 = require("vscode-languageclient/node");
 const binaryPath_1 = require("../utils/binaryPath");
@@ -170,10 +170,22 @@ async function startLanguageClient(context) {
     // Create the language client
     client = new node_1.LanguageClient('bslAnalyzer', 'BSL Type Safety Analyzer', serverOptions, clientOptions);
     // Добавляем детальные обработчики ошибок ПЕРЕД запуском
+    // MILESTONE 2.20.1: Track LSP server status changes
     client.onDidChangeState((event) => {
         outputChannel.appendLine(`🔄 LSP Client state: ${StateToString(event.oldState)} → ${StateToString(event.newState)}`);
-        // MILESTONE 2.20.1: Обновляем Status Bar при изменении состояния LSP сервера
+        // Update status bar with LSP status indicator (red background for Stopped)
         (0, progress_1.updateLspStatus)(event.newState);
+        // Refresh UI when state changes
+        vscode.commands.executeCommand('bslAnalyzer.refreshOverview');
+        // Show warning if server disconnected unexpectedly
+        if (event.newState === node_1.State.Stopped) {
+            outputChannel.appendLine('⚠️ LSP server disconnected unexpectedly');
+            vscode.window.showWarningMessage('BSL Analyzer: Language server disconnected', 'Restart Server').then(selection => {
+                if (selection === 'Restart Server') {
+                    vscode.commands.executeCommand('bslAnalyzer.restartServer');
+                }
+            });
+        }
     });
     // Обработчик ошибок подключения
     client.onConnectionError = (error, message, count) => {
@@ -208,24 +220,13 @@ async function startLanguageClient(context) {
         client.onNotification('bsl/indexingProgress', (params) => {
             handleIndexingProgress(params);
         });
-        // Регистрируем обработчик изменения состояния клиента
-        client.onDidChangeState((event) => {
-            outputChannel.appendLine(`📊 LSP Client state changed: ${event.oldState} -> ${event.newState}`);
-            // Обновляем UI при изменении состояния
-            vscode.commands.executeCommand('bslAnalyzer.refreshOverview');
-            // Если сервер отключился неожиданно
-            if (event.newState === 1) { // Stopped state
-                outputChannel.appendLine('⚠️ LSP server disconnected unexpectedly');
-                vscode.window.showWarningMessage('BSL Analyzer: Language server disconnected', 'Restart Server').then(selection => {
-                    if (selection === 'Restart Server') {
-                        vscode.commands.executeCommand('bslAnalyzer.restartServer');
-                    }
-                });
-                // Обновляем статус бар
-                (0, progress_1.updateStatusBar)('$(error) BSL Analyzer: Disconnected');
-            }
-            else if (event.newState === 2) { // Running state
-                (0, progress_1.updateStatusBar)('$(database) BSL Analyzer: Ready');
+        // MILESTONE 2.20.2.4: Подписка на $/progress notification для Work Done Progress
+        client.onNotification('$/progress', (params) => {
+            const { token } = params;
+            // Обрабатываем только notifications с token "bsl-load-types-*"
+            if (typeof token === 'string' && token.startsWith('bsl-load-types-')) {
+                outputChannel.appendLine(`[$/progress] Received notification for token: ${token}`);
+                handleWorkDoneProgress(params);
             }
         });
         // Уведомляем провайдеры об изменении статуса
@@ -286,6 +287,81 @@ function isClientRunning() {
     return client !== null && client.isRunning();
 }
 exports.isClientRunning = isClientRunning;
+/**
+ * MILESTONE 2.20.2.4: Парсинг прогресса из message string
+ *
+ * Ожидаемые форматы:
+ * - "Тип 150/3927 - Справочники.Контрагенты - ETA: 42s"
+ * - "Тип 150/3927 - Справочники.Контрагенты"
+ * - "Тип 150/3927"
+ * - "✅ Загружено 3927 типов за 87.3s"
+ */
+function parseProgressMessage(message) {
+    const result = {
+        originalMessage: message
+    };
+    // Пробуем распарсить формат: "Тип 150/3927 - Справочники.Контрагенты - ETA: 42s"
+    const match = message.match(/Тип (\d+)\/(\d+)(?: - ([^-]+))?(?: - ETA: (\d+)s)?/);
+    if (match) {
+        result.currentItem = parseInt(match[1], 10);
+        result.totalItems = parseInt(match[2], 10);
+        // Название элемента (если есть)
+        if (match[3]) {
+            result.itemName = match[3].trim();
+        }
+        // ETA (если есть)
+        if (match[4]) {
+            result.eta = parseInt(match[4], 10);
+        }
+    }
+    return result;
+}
+exports.parseProgressMessage = parseProgressMessage;
+/**
+ * MILESTONE 2.20.2.4: Обработчик $/progress notification от LSP Server
+ *
+ * Обрабатывает Work Done Progress notifications для индексации типов платформы 1С
+ */
+function handleWorkDoneProgress(params) {
+    const { token, value } = params;
+    outputChannel.appendLine(`[$/progress] Token: ${token}, Kind: ${value.kind}`);
+    if (value.kind === 'begin') {
+        const beginValue = value;
+        outputChannel.appendLine(`[$/progress] BEGIN - Title: ${beginValue.title}, Message: ${beginValue.message || 'N/A'}, Percentage: ${beginValue.percentage || 0}%`);
+        // Запускаем отслеживание индексации
+        (0, progress_1.startIndexing)();
+    }
+    else if (value.kind === 'report') {
+        const reportValue = value;
+        const message = reportValue.message || '';
+        const percentage = reportValue.percentage || 0;
+        outputChannel.appendLine(`[$/progress] REPORT - Message: ${message}, Percentage: ${percentage}%`);
+        // Парсим детали из message
+        const parsed = parseProgressMessage(message);
+        if (parsed.currentItem && parsed.totalItems) {
+            // Формируем красивое описание прогресса
+            const stepName = parsed.itemName
+                ? `Тип ${parsed.currentItem}/${parsed.totalItems} - ${parsed.itemName}`
+                : `Тип ${parsed.currentItem}/${parsed.totalItems}`;
+            // Обновляем прогресс индексации
+            (0, progress_1.updateIndexingProgress)(percentage, stepName, parsed.eta);
+        }
+        else {
+            // Fallback: показываем message как есть
+            (0, progress_1.updateIndexingProgress)(percentage, message, undefined);
+        }
+    }
+    else if (value.kind === 'end') {
+        const endValue = value;
+        const message = endValue.message || 'Завершено';
+        outputChannel.appendLine(`[$/progress] END - Message: ${message}`);
+        // Завершаем отслеживание индексации
+        (0, progress_1.finishIndexing)(message);
+    }
+    else {
+        outputChannel.appendLine(`[$/progress] WARN - Unknown progress kind: ${value.kind}`);
+    }
+}
 /**
  * Регистрирует обработчики кастомных запросов
  */

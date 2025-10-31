@@ -25,7 +25,6 @@ mod semantic_visualization_tests {
     fn test_semantic_routes_module_exists() {
         // Если этот тест компилируется, значит модуль существует
         // и публично доступен
-        
 
         // Проверяем, что функция создания router доступна
         // (не вызываем её, так как требуется TypeSystemService)
@@ -138,8 +137,6 @@ mod semantic_visualization_tests {
     #[test]
     fn test_dto_compatibility() {
         // Проверяем, что DTO из shared крейта доступны
-        
-        
 
         // Если компилируется, значит DTO публичны и доступны
         // для использования в semantic_routes

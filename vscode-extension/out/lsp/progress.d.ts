@@ -23,12 +23,18 @@ export declare function initializeProgress(channel: vscode.OutputChannel, status
 export declare function startIndexing(totalSteps?: number): void;
 /**
  * Обновляет прогресс индексации
+ *
+ * @param percentage - процент выполнения (0-100)
+ * @param stepName - описание текущего шага
+ * @param eta - оценка оставшегося времени в секундах (опционально)
  */
-export declare function updateIndexingProgress(stepNumber: number, stepName: string, progress: number): void;
+export declare function updateIndexingProgress(percentage: number, stepName: string, eta?: number): void;
 /**
  * Завершает отслеживание прогресса индексации
+ *
+ * @param message - сообщение о завершении (опционально)
  */
-export declare function finishIndexing(success?: boolean): void;
+export declare function finishIndexing(message?: string): void;
 /**
  * Обновляет статус бар
  */

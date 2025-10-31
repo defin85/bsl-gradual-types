@@ -277,3 +277,41 @@ export async function searchTypes(
         throw error;
     }
 }
+
+// ============================================================================
+// MILESTONE 2.20.4: Type Repository Statistics
+// ============================================================================
+
+/**
+ * Статистика TypeRepository
+ */
+export interface TypeRepositoryStats {
+    totalTypes: number;
+    platformTypes: number;
+    configurationTypes: number;
+    lastUpdateTime?: string;  // ISO 8601 timestamp
+}
+
+/**
+ * Получить статистику TypeRepository из LSP Server
+ *
+ * @returns Статистика или null если LSP недоступен
+ */
+export async function getTypeRepositoryStats(): Promise<TypeRepositoryStats | null> {
+    const client = (await import('./client')).getLanguageClient();
+    if (!client) {
+        console.warn('[Type Stats] LSP client not available');
+        return null;
+    }
+
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.getTypeRepositoryStats',
+            arguments: [{}]
+        });
+        return result as TypeRepositoryStats || null;
+    } catch (error) {
+        console.error('[Type Stats] Failed to get type repository stats:', error);
+        return null;
+    }
+}

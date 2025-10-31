@@ -40,7 +40,7 @@ impl UniversalMetadataObject {
             attributes: self.convert_attributes(),
             tabular_sections: self.convert_tabular_sections(),
             enum_values: Vec::new(), // Для перечислений будет заполнено отдельно
-            generic_info: None, // Конфигурационные типы не имеют Generic метаданных (пока)
+            generic_info: None,      // Конфигурационные типы не имеют Generic метаданных (пока)
         }
     }
 
@@ -124,8 +124,8 @@ impl UniversalMetadataObject {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::AttributeInfo;
+    use super::*;
     use bsl_shared::domain::types::MetadataKind;
 
     #[test]

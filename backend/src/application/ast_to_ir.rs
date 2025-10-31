@@ -228,8 +228,12 @@ impl AstToIrConverter {
                             "Assignment declares new variable: {} with type {:?}",
                             var_name, type_hint
                         );
-                        self.symbol_table
-                            .register_variable(self.current_scope, var_name.clone(), type_hint, span);
+                        self.symbol_table.register_variable(
+                            self.current_scope,
+                            var_name.clone(),
+                            type_hint,
+                            span,
+                        );
                     } else {
                         // Переменная уже существует → обновляем тип (flow-sensitive)
                         if let Some(scope) = self.symbol_table.scopes.get_mut(&self.current_scope) {
@@ -251,7 +255,7 @@ impl AstToIrConverter {
                     self.nodes.push(node);
                     return Ok(Some(self.nodes.len() - 1));
                 }
-                Ok(None)// Если target не Identifier
+                Ok(None) // Если target не Identifier
             }
 
             Statement::If {
@@ -529,7 +533,7 @@ impl AstToIrConverter {
                     self.nodes.push(node);
                     return Ok(Some(self.nodes.len() - 1));
                 }
-                Ok(None)// Если expression не Call и не PropertyAccess
+                Ok(None) // Если expression не Call и не PropertyAccess
             }
 
             Statement::Break { span: ast_span } => {
@@ -848,7 +852,10 @@ impl AstToIrConverter {
         use tracing::debug;
 
         // Получаем текущий тип receiver из SymbolTable
-        let current_hint = match self.symbol_table.get_variable_type(self.current_scope, receiver) {
+        let current_hint = match self
+            .symbol_table
+            .get_variable_type(self.current_scope, receiver)
+        {
             Some(hint) => hint,
             None => {
                 debug!(
@@ -861,10 +868,7 @@ impl AstToIrConverter {
 
         // Проверяем, что это Generic тип
         let base_type = match &current_hint {
-            TypeHint::Generic {
-                base_type,
-                ..
-            } => base_type.clone(),
+            TypeHint::Generic { base_type, .. } => base_type.clone(),
             _ => {
                 debug!(
                     "try_infer_generic: {} не Generic тип, пропускаем inference",
@@ -889,10 +893,7 @@ impl AstToIrConverter {
         let generic_info = match &type_data.generic_info {
             Some(info) => info,
             None => {
-                debug!(
-                    "try_infer_generic: тип {} не имеет GenericInfo",
-                    base_type
-                );
+                debug!("try_infer_generic: тип {} не имеет GenericInfo", base_type);
                 return;
             }
         };

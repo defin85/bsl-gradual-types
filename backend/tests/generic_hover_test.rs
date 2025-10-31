@@ -129,7 +129,10 @@ async fn test_generic_method_return_type() {
 
     // Проверяем что hover не пустой
     if let Some(hover_text) = hover {
-        println!("Hover для Элемент (возврат из Generic метода):\n{}", hover_text);
+        println!(
+            "Hover для Элемент (возврат из Generic метода):\n{}",
+            hover_text
+        );
 
         // В будущем, когда Generic inference будет полностью реализован,
         // здесь можно проверить что тип Элемент выведен как String

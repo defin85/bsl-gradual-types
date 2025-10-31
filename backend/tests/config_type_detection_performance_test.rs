@@ -78,7 +78,11 @@ fn test_discover_all_configurations_performance() {
     assert!(result.is_ok(), "Конфигурации должны быть найдены");
 
     let configurations = result.unwrap();
-    println!("⏱️ Обнаружение {} конфигураций: {:?}", configurations.len(), duration);
+    println!(
+        "⏱️ Обнаружение {} конфигураций: {:?}",
+        configurations.len(),
+        duration
+    );
 
     // Должно быть быстрым даже для множественных конфигураций
     assert!(
@@ -112,7 +116,10 @@ fn test_detect_configuration_type_stability() {
     // Assert
     let avg_duration = total_duration / iterations;
 
-    println!("⏱️ Средняя производительность ({} итераций): {:?}", iterations, avg_duration);
+    println!(
+        "⏱️ Средняя производительность ({} итераций): {:?}",
+        iterations, avg_duration
+    );
     println!("   Общее время: {:?}", total_duration);
 
     assert!(

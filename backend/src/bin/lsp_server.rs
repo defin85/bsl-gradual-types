@@ -271,6 +271,8 @@ impl LanguageServer for BslLanguageServer {
                         "bsl.getSemanticHtml".to_string(),
                         "bsl.getSemanticTree".to_string(),
                         "bsl.searchTypes".to_string(),
+                        "bsl.getCurrentContext".to_string(), // ✅ MILESTONE 2.20.3
+                        "bsl.getTypeRepositoryStats".to_string(), // ✅ MILESTONE 2.20.4
                     ],
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
@@ -294,8 +296,9 @@ impl LanguageServer for BslLanguageServer {
                     platform_docs
                 );
 
-                // ✅ MILESTONE 2.20.2.3: Создаём channel для передачи прогресса
+                // ✅ MILESTONE 2.20.2.3: Создаём channels для передачи прогресса и результата
                 let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressUpdate>();
+                let (result_tx, result_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
                 // Генерируем уникальный токен для Work Done Progress
                 let token = ProgressToken::String(format!(
@@ -324,7 +327,7 @@ impl LanguageServer for BslLanguageServer {
                     )
                     .await;
 
-                // ✅ НОВОЕ: Spawn task для обработки прогресс-уведомлений
+                // ✅ ИСПРАВЛЕНИЕ: Spawn task обрабатывает прогресс И отправляет финальный End
                 let client_clone = self.client.clone();
                 let token_clone = token.clone();
                 let start_time = std::time::Instant::now();
@@ -334,6 +337,7 @@ impl LanguageServer for BslLanguageServer {
                     let mut last_report = std::time::Instant::now();
                     let throttle_interval = std::time::Duration::from_millis(500);
 
+                    // === PHASE 1: Обрабатываем прогресс-уведомления ===
                     while let Some(update) = progress_rx.recv().await {
                         let now = std::time::Instant::now();
 
@@ -397,45 +401,78 @@ impl LanguageServer for BslLanguageServer {
                             .send_notification::<tower_lsp::lsp_types::notification::Progress>(
                                 ProgressParams {
                                     token: token_clone.clone(),
-                                    value: ProgressParamsValue::WorkDone(
-                                        WorkDoneProgress::Report(WorkDoneProgressReport {
+                                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
+                                        WorkDoneProgressReport {
                                             message: Some(message_with_eta),
                                             percentage: Some(update.percentage as u32),
                                             cancellable: Some(false),
-                                        }),
-                                    ),
-                                },
-                            )
-                            .await;
-                    }
-                });
-
-                // ✅ НОВОЕ: Вызываем start_with_paths с progress_tx
-                let syntax_path = std::path::Path::new(platform_docs);
-                match self
-                    .coordinator
-                    .start_with_paths(Some(syntax_path), None, Some(progress_tx))
-                    .await
-                {
-                    Ok(()) => {
-                        info!("✅ Platform types loaded successfully");
-
-                        // ✅ НОВОЕ: Отправляем WorkDoneProgressEnd (успех)
-                        let _ = self
-                            .client
-                            .send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                                ProgressParams {
-                                    token: token.clone(),
-                                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                                        WorkDoneProgressEnd {
-                                            message: Some(
-                                                "✅ Типы платформы загружены успешно".to_string(),
-                                            ),
                                         },
                                     )),
                                 },
                             )
                             .await;
+                    }
+
+                    // === PHASE 2: Канал закрыт, все updates обработаны ===
+                    // Ждём результат парсинга из основного потока
+                    match result_rx.await {
+                        Ok(Ok(())) => {
+                            // ✅ УСПЕХ: Отправляем WorkDoneProgressEnd
+                            let _ = client_clone
+                                .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                                    ProgressParams {
+                                        token: token_clone.clone(),
+                                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
+                                            WorkDoneProgressEnd {
+                                                message: Some(
+                                                    "✅ Типы платформы загружены успешно".to_string(),
+                                                ),
+                                            },
+                                        )),
+                                    },
+                                )
+                                .await;
+                            info!("✅ Progress task завершён успешно");
+                        }
+                        Ok(Err(error_msg)) => {
+                            // ❌ ОШИБКА: Отправляем WorkDoneProgressEnd с ошибкой
+                            let _ = client_clone
+                                .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                                    ProgressParams {
+                                        token: token_clone.clone(),
+                                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
+                                            WorkDoneProgressEnd {
+                                                message: Some(format!("❌ Ошибка загрузки: {}", error_msg)),
+                                            },
+                                        )),
+                                    },
+                                )
+                                .await;
+                            error!("❌ Progress task завершён с ошибкой: {}", error_msg);
+                        }
+                        Err(_) => {
+                            // Канал результата закрыт без отправки (не должно случиться)
+                            warn!("⚠️ Result channel closed unexpectedly");
+                        }
+                    }
+                });
+
+                // ✅ ИСПРАВЛЕНИЕ: Вызываем start_with_paths, затем отправляем результат в spawn task
+                let syntax_path = std::path::Path::new(platform_docs);
+                let result = self
+                    .coordinator
+                    .start_with_paths(Some(syntax_path), None, Some(progress_tx))
+                    .await;
+
+                // Закрываем канал прогресса (spawn task завершит обработку updates)
+                // progress_tx автоматически drop здесь, канал закроется
+
+                match result {
+                    Ok(()) => {
+                        info!("✅ Platform types loaded successfully");
+
+                        // ✅ ИСПРАВЛЕНИЕ: Отправляем результат в spawn task (вместо End напрямую)
+                        let _ = result_tx.send(Ok(()));
 
                         self.client
                             .log_message(
@@ -447,20 +484,8 @@ impl LanguageServer for BslLanguageServer {
                     Err(e) => {
                         error!("❌ Failed to load platform types: {}", e);
 
-                        // ✅ НОВОЕ: Отправляем WorkDoneProgressEnd (ошибка)
-                        let _ = self
-                            .client
-                            .send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                                ProgressParams {
-                                    token: token.clone(),
-                                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                                        WorkDoneProgressEnd {
-                                            message: Some(format!("❌ Ошибка загрузки: {}", e)),
-                                        },
-                                    )),
-                                },
-                            )
-                            .await;
+                        // ✅ ИСПРАВЛЕНИЕ: Отправляем ошибку в spawn task (вместо End напрямую)
+                        let _ = result_tx.send(Err(e.to_string()));
 
                         self.client
                             .log_message(
@@ -867,6 +892,24 @@ impl LanguageServer for BslLanguageServer {
                 let result = self.handle_search_types(request).await?;
                 Ok(Some(serde_json::to_value(result).unwrap()))
             }
+            "bsl.getCurrentContext" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing parameters",
+                    ));
+                }
+
+                let request: GetCurrentContextParams =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
+
+                let result = self.handle_get_current_context(request).await?;
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
             "bsl.queryType" => {
                 if params.arguments.is_empty() {
                     return Err(tower_lsp::jsonrpc::Error::invalid_params(
@@ -883,6 +926,21 @@ impl LanguageServer for BslLanguageServer {
                     })?;
 
                 let result = self.handle_query_type(request).await?;
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
+            "bsl.getTypeRepositoryStats" => {
+                let request: GetTypeRepositoryStatsParams = if params.arguments.is_empty() {
+                    GetTypeRepositoryStatsParams {}
+                } else {
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?
+                };
+
+                let result = self.handle_get_type_repository_stats(request).await?;
                 Ok(Some(serde_json::to_value(result).unwrap()))
             }
             _ => {
@@ -1073,6 +1131,52 @@ struct TypeSearchResult {
     /// Краткое описание (опционально)
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
+}
+
+// ============================================================================
+// MILESTONE 2.20.3: Current Context Indicator
+// ============================================================================
+
+/// Custom command: bsl.getCurrentContext - определить текущую функцию/процедуру
+#[derive(Debug, serde::Deserialize)]
+struct GetCurrentContextParams {
+    uri: String,
+    line: u32,
+    character: u32,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CurrentContextResponse {
+    function_name: Option<String>,
+    function_kind: String, // "function", "procedure", "none"
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    return_type: Option<String>,
+}
+
+// ============================================================================
+// MILESTONE 2.20.4: Type Repository Statistics
+// ============================================================================
+
+/// Request для получения статистики TypeRepository
+#[derive(Debug, Clone, serde::Deserialize)]
+struct GetTypeRepositoryStatsParams {
+    // Пустой struct - параметров не требуется
+}
+
+/// Response со статистикой TypeRepository
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TypeRepositoryStatsResponse {
+    total_types: usize,
+    platform_types: usize,
+    configuration_types: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_update_time: Option<String>, // ISO 8601
 }
 
 #[allow(dead_code)]
@@ -1482,6 +1586,91 @@ impl BslLanguageServer {
         })
     }
 
+    /// Обработчик custom command: bsl.getCurrentContext - MILESTONE 2.20.3
+    async fn handle_get_current_context(
+        &self,
+        params: GetCurrentContextParams,
+    ) -> JsonRpcResult<CurrentContextResponse> {
+        info!(
+            "Custom command: bsl.getCurrentContext - {}:{}",
+            params.line, params.character
+        );
+
+        // Парсим URI
+        let uri = tower_lsp::lsp_types::Url::parse(&params.uri).map_err(|e| {
+            tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e))
+        })?;
+
+        // Получаем содержимое файла (из кеша или с диска)
+        let file_content = match self.documents.read().await.get(&uri) {
+            Some(content) => content.clone(),
+            None => {
+                // Fallback: читаем с диска
+                match uri.to_file_path() {
+                    Ok(path) => std::fs::read_to_string(&path).map_err(|e| {
+                        error!("Failed to read file {}: {}", path.display(), e);
+                        tower_lsp::jsonrpc::Error::internal_error()
+                    })?,
+                    Err(_) => {
+                        warn!("Could not convert URI to file path: {}", uri);
+                        return Ok(CurrentContextResponse {
+                            function_name: None,
+                            function_kind: "none".to_string(),
+                            params: None,
+                            return_type: None,
+                        });
+                    }
+                }
+            }
+        };
+
+        let file_path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| std::path::PathBuf::from("untitled"))
+            .to_string_lossy()
+            .to_string();
+
+        // Получаем SemanticProgram через TypeSystemService
+        match self
+            .get_type_service()
+            .get_semantic_tree(&file_content, &file_path)
+            .await
+        {
+            Ok(semantic_tree_dto) => {
+                // Ищем содержащую функцию в SemanticTreeDto
+                match find_containing_function_in_dto(
+                    &semantic_tree_dto,
+                    params.line,
+                    params.character,
+                ) {
+                    Some((name, kind, params_list, return_type)) => {
+                        info!("✅ Found context: {} {}", kind, name);
+                        Ok(CurrentContextResponse {
+                            function_name: Some(name),
+                            function_kind: kind,
+                            params: Some(params_list),
+                            return_type,
+                        })
+                    }
+                    None => {
+                        // Курсор в глобальной области
+                        debug!("No context found - global scope");
+                        Ok(CurrentContextResponse {
+                            function_name: None,
+                            function_kind: "none".to_string(),
+                            params: None,
+                            return_type: None,
+                        })
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to get semantic tree: {}", e);
+                Err(tower_lsp::jsonrpc::Error::internal_error())
+            }
+        }
+    }
+
     /// Обработчик custom request: bsl/getSemanticHtml - MILESTONE 2.12
     async fn handle_get_semantic_html(
         &self,
@@ -1633,6 +1822,138 @@ impl BslLanguageServer {
         html.push_str("</div>");
         html
     }
+
+    /// Обработчик custom command: bsl.getTypeRepositoryStats - MILESTONE 2.20.4
+    async fn handle_get_type_repository_stats(
+        &self,
+        _params: GetTypeRepositoryStatsParams,
+    ) -> JsonRpcResult<TypeRepositoryStatsResponse> {
+        debug!("Handling bsl.getTypeRepositoryStats request");
+
+        let stats = self.coordinator.get_type_repository_stats();
+
+        debug!(
+            "TypeRepository stats: total={}, platform={}, config={}",
+            stats.total_types, stats.platform_types, stats.configuration_types
+        );
+
+        Ok(TypeRepositoryStatsResponse {
+            total_types: stats.total_types,
+            platform_types: stats.platform_types,
+            configuration_types: stats.configuration_types,
+            last_update_time: stats.last_update_time,
+        })
+    }
+}
+
+// ============================================================================
+// MILESTONE 2.20.3: Helper Functions for Current Context
+// ============================================================================
+
+/// Найти функцию/процедуру, содержащую указанную позицию (MILESTONE 2.20.3)
+fn find_containing_function_in_dto(
+    tree_dto: &bsl_shared::api::semantic_dtos::SemanticTreeDto,
+    line: u32,
+    character: u32,
+) -> Option<(String, String, Vec<String>, Option<String>)> {
+    // Рекурсивно ищем в дереве узлов
+    for node in &tree_dto.root_nodes {
+        if let Some(result) = find_in_node(node, line, character) {
+            return Some(result);
+        }
+    }
+
+    None
+}
+
+/// Рекурсивный поиск в узле SemanticNodeDto
+fn find_in_node(
+    node: &bsl_shared::api::semantic_dtos::SemanticNodeDto,
+    line: u32,
+    character: u32,
+) -> Option<(String, String, Vec<String>, Option<String>)> {
+    // Проверяем, что позиция внутри range узла (если есть)
+    if let Some(ref range) = node.range {
+        if !range_contains(range, line, character) {
+            return None;
+        }
+    } else if !location_matches(&node.location, line, character) {
+        // Если range отсутствует, проверяем location (точное совпадение)
+        return None;
+    }
+
+    // Проверяем тип узла
+    match node.kind.as_str() {
+        "FunctionDeclaration" => {
+            let name = node
+                .name
+                .clone()
+                .unwrap_or_else(|| "<anonymous>".to_string());
+            // Извлекаем параметры из metadata (если есть)
+            let params = extract_params_from_node(node);
+            let return_type = extract_return_type_from_node(node);
+
+            return Some((name, "function".to_string(), params, return_type));
+        }
+        "ProcedureDeclaration" => {
+            let name = node
+                .name
+                .clone()
+                .unwrap_or_else(|| "<anonymous>".to_string());
+            let params = extract_params_from_node(node);
+
+            return Some((name, "procedure".to_string(), params, None));
+        }
+        _ => {
+            // Рекурсивно ищем в детях
+            for child in &node.children {
+                if let Some(result) = find_in_node(child, line, character) {
+                    return Some(result);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Проверяет, содержит ли range позицию
+fn range_contains(
+    range: &bsl_shared::api::semantic_dtos::SourceRangeDto,
+    line: u32,
+    character: u32,
+) -> bool {
+    let start = &range.start;
+    let end = &range.end;
+
+    line >= start.line
+        && line <= end.line
+        && (line > start.line || character >= start.column)
+        && (line < end.line || character <= end.column)
+}
+
+/// Проверяет, совпадает ли location с позицией
+fn location_matches(
+    location: &bsl_shared::api::semantic_dtos::SourceLocationDto,
+    line: u32,
+    character: u32,
+) -> bool {
+    location.line == line && location.column == character
+}
+/// Извлекает параметры из metadata узла (если есть)
+fn extract_params_from_node(
+    _node: &bsl_shared::api::semantic_dtos::SemanticNodeDto,
+) -> Vec<String> {
+    // Пока заглушка - можно расширить позже через metadata
+    vec![]
+}
+
+/// Извлекает return type из metadata узла (если есть)
+fn extract_return_type_from_node(
+    _node: &bsl_shared::api::semantic_dtos::SemanticNodeDto,
+) -> Option<String> {
+    // Пока заглушка - можно расширить позже через metadata
+    None
 }
 
 #[tokio::main]

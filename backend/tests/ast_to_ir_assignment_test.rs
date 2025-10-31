@@ -128,9 +128,7 @@ fn test_assignment_map_generic_type() {
         .map(|(id, _)| *id)
         .expect("Procedure scope not found");
 
-    let var_type = ir
-        .symbols
-        .get_variable_type(scope_id, "СоответствиеДанных");
+    let var_type = ir.symbols.get_variable_type(scope_id, "СоответствиеДанных");
     assert!(var_type.is_some(), "Переменная НЕ найдена в SymbolTable");
 
     match var_type.unwrap() {
@@ -329,16 +327,14 @@ fn test_multiple_assignments_in_scope() {
         .expect("Procedure scope not found");
 
     // Все 3 переменные ДОЛЖНЫ быть в SymbolTable
-    assert!(
-        ir.symbols
-            .get_variable_type(scope_id, "МассивЧисел")
-            .is_some()
-    );
-    assert!(
-        ir.symbols
-            .get_variable_type(scope_id, "МассивСтрок")
-            .is_some()
-    );
+    assert!(ir
+        .symbols
+        .get_variable_type(scope_id, "МассивЧисел")
+        .is_some());
+    assert!(ir
+        .symbols
+        .get_variable_type(scope_id, "МассивСтрок")
+        .is_some());
     assert!(ir.symbols.get_variable_type(scope_id, "Имя").is_some());
 
     println!("✅ PASSED: Множественные переменные добавлены в SymbolTable");

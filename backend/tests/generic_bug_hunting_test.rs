@@ -6,10 +6,8 @@
 /// - Вложенные Generic типы
 /// - Unicode/кириллица
 /// - Производительность
-
 use bsl_shared::domain::types::{
-    ConcreteType, GenericType, PlatformType, RawAttributeData,
-    TabularRowType,
+    ConcreteType, GenericType, PlatformType, RawAttributeData, TabularRowType,
 };
 
 // ============================================================================
@@ -91,11 +89,7 @@ fn test_bug_hunt_attribute_with_empty_type() {
         },
     ];
 
-    let row_type = TabularRowType::new(
-        "Документы.Test".to_string(),
-        "Items".to_string(),
-        attrs,
-    );
+    let row_type = TabularRowType::new("Документы.Test".to_string(), "Items".to_string(), attrs);
 
     // Не должно быть паники
     assert_eq!(
@@ -220,11 +214,7 @@ fn test_bug_hunt_emoji_in_names() {
         attr_type: "Тип🎉String".to_string(),
     }];
 
-    let row_type = TabularRowType::new(
-        "Doc🔥Test".to_string(),
-        "Items🎯".to_string(),
-        attrs,
-    );
+    let row_type = TabularRowType::new("Doc🔥Test".to_string(), "Items🎯".to_string(), attrs);
 
     // Проверяем, что создаётся без паники
     assert_eq!(row_type.parent_type, "Doc🔥Test");
@@ -350,11 +340,7 @@ fn test_bug_hunt_memory_consumption_many_row_types() {
             },
         ];
 
-        let row_type = TabularRowType::new(
-            format!("Doc.Test{}", i),
-            format!("Items{}", i),
-            attrs,
-        );
+        let row_type = TabularRowType::new(format!("Doc.Test{}", i), format!("Items{}", i), attrs);
 
         row_types.push(row_type);
     }
@@ -417,11 +403,7 @@ fn test_bug_hunt_max_string_length() {
     // 1 MB строка
     let very_long_name = "А".repeat(1_000_000);
 
-    let row_type = TabularRowType::new(
-        very_long_name.clone(),
-        "Test".to_string(),
-        vec![],
-    );
+    let row_type = TabularRowType::new(very_long_name.clone(), "Test".to_string(), vec![]);
 
     // Проверяем, что создалось
     assert_eq!(row_type.parent_type.chars().count(), 1_000_000);
@@ -438,11 +420,7 @@ fn test_bug_hunt_null_bytes_in_strings() {
         attr_type: "Type\0WithNull".to_string(),
     }];
 
-    let row_type = TabularRowType::new(
-        "Doc\0Test".to_string(),
-        "Items\0".to_string(),
-        attrs,
-    );
+    let row_type = TabularRowType::new("Doc\0Test".to_string(), "Items\0".to_string(), attrs);
 
     // Rust strings могут содержать null bytes (это не C strings)
     assert!(row_type.parent_type.contains('\0'));

@@ -3,7 +3,7 @@
 //! Generates self-contained HTML with inline CSS for displaying semantic program structures.
 //! Uses inline CSS only (no CDN) due to VSCode Content Security Policy restrictions.
 
-use bsl_shared::ir::{SemanticProgram, SemanticNodeKind};
+use bsl_shared::ir::{SemanticNodeKind, SemanticProgram};
 
 /// Theme for HTML visualization
 #[derive(Debug, Clone, Copy)]
@@ -457,7 +457,11 @@ fn generate_inline_css(colors: &ColorScheme) -> String {
 }
 
 /// Renders semantic nodes as HTML
-fn render_nodes(nodes: &[bsl_shared::ir::SemanticNode], colors: &ColorScheme, _compact: bool) -> String {
+fn render_nodes(
+    nodes: &[bsl_shared::ir::SemanticNode],
+    colors: &ColorScheme,
+    _compact: bool,
+) -> String {
     nodes
         .iter()
         .enumerate()
@@ -602,7 +606,10 @@ fn render_symbol_table(symbols: &bsl_shared::ir::SymbolTable) -> String {
 
     // Add functions
     for (name, sig) in &symbols.global_functions {
-        let return_type = sig.return_type.as_ref().map(|t| escape_html(t))
+        let return_type = sig
+            .return_type
+            .as_ref()
+            .map(|t| escape_html(t))
             .unwrap_or_else(|| "void".to_string());
 
         table_rows.push_str(&format!(
@@ -664,13 +671,20 @@ mod tests {
         let program = SemanticProgram {
             symbols: SymbolTable::new(),
             nodes: vec![],
-            source_info: bsl_shared::ir::SourceInfo { path: "test.bsl".to_string(), content_hash: 0 },
+            source_info: bsl_shared::ir::SourceInfo {
+                path: "test.bsl".to_string(),
+                content_hash: 0,
+            },
             cfg: None,
         };
-        let html = generate_semantic_html(&program, "test.bsl", RenderOptions {
-            theme: Theme::Dark,
-            compact: false,
-        });
+        let html = generate_semantic_html(
+            &program,
+            "test.bsl",
+            RenderOptions {
+                theme: Theme::Dark,
+                compact: false,
+            },
+        );
         assert!(html.contains("<!DOCTYPE html>"));
         assert!(html.contains("bg-gray-900"));
         assert!(html.contains("Semantic Tree Visualization"));
@@ -681,13 +695,20 @@ mod tests {
         let program = SemanticProgram {
             symbols: SymbolTable::new(),
             nodes: vec![],
-            source_info: bsl_shared::ir::SourceInfo { path: "test.bsl".to_string(), content_hash: 0 },
+            source_info: bsl_shared::ir::SourceInfo {
+                path: "test.bsl".to_string(),
+                content_hash: 0,
+            },
             cfg: None,
         };
-        let html = generate_semantic_html(&program, "test.bsl", RenderOptions {
-            theme: Theme::Light,
-            compact: false,
-        });
+        let html = generate_semantic_html(
+            &program,
+            "test.bsl",
+            RenderOptions {
+                theme: Theme::Light,
+                compact: false,
+            },
+        );
         assert!(html.contains("bg-white"));
         assert!(html.contains("Semantic Tree Visualization"));
     }

@@ -7,8 +7,8 @@
 
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::system::parser_coordinator::ParserCoordinator;
-use bsl_shared::ir::TypeHint;
 use bsl_shared::domain::repository::InMemoryTypeRepository;
+use bsl_shared::ir::TypeHint;
 use std::sync::Arc;
 
 /// Создаём минимальный TypeRepository для тестирования
@@ -56,13 +56,21 @@ fn test_array_empty_initialization() {
     let var_type = find_variable_in_any_scope(&ir.symbols, "МассивПустой");
 
     // Assert: Должен быть Generic тип с неопределённым параметром
-    if let Some(TypeHint::Generic { base_type, type_params, certainty }) = var_type {
+    if let Some(TypeHint::Generic {
+        base_type,
+        type_params,
+        certainty,
+    }) = var_type
+    {
         assert_eq!(base_type, "Массив", "Base type должен быть Массив");
         assert_eq!(type_params.len(), 1, "Должен быть 1 тип-параметр");
         assert_eq!(type_params[0], "?", "Параметр должен быть неизвестен");
         assert_eq!(certainty, 0.0, "Certainty должна быть 0 (неизвестно)");
     } else {
-        panic!("Переменная МассивПустой должна иметь Generic тип, получено: {:?}", var_type);
+        panic!(
+            "Переменная МассивПустой должна иметь Generic тип, получено: {:?}",
+            var_type
+        );
     }
 }
 
@@ -92,7 +100,12 @@ fn test_array_with_string_inference() {
     let var_type = find_variable_in_any_scope(&ir.symbols, "МассивСтрок");
 
     // Assert: Должен быть Generic<String>
-    if let Some(TypeHint::Generic { base_type, type_params, certainty }) = var_type {
+    if let Some(TypeHint::Generic {
+        base_type,
+        type_params,
+        certainty,
+    }) = var_type
+    {
         assert_eq!(base_type, "Массив");
         assert_eq!(type_params.len(), 1);
 
@@ -105,7 +118,10 @@ fn test_array_with_string_inference() {
             println!("⚠️ Инференс из Добавить() ещё не работает");
         }
     } else {
-        panic!("Переменная МассивСтрок должна быть Generic, получено: {:?}", var_type);
+        panic!(
+            "Переменная МассивСтрок должна быть Generic, получено: {:?}",
+            var_type
+        );
     }
 }
 
@@ -132,14 +148,22 @@ fn test_array_with_number_inference() {
 
     let var_type = find_variable_in_any_scope(&ir.symbols, "МассивЧисел");
 
-    if let Some(TypeHint::Generic { base_type, type_params, .. }) = var_type {
+    if let Some(TypeHint::Generic {
+        base_type,
+        type_params,
+        ..
+    }) = var_type
+    {
         assert_eq!(base_type, "Массив");
 
         if type_params[0] != "?" {
             assert_eq!(type_params[0], "Число");
         }
     } else {
-        panic!("Переменная МассивЧисел должна быть Generic, получено: {:?}", var_type);
+        panic!(
+            "Переменная МассивЧисел должна быть Generic, получено: {:?}",
+            var_type
+        );
     }
 }
 
@@ -166,14 +190,26 @@ fn test_map_initialization() {
     let var_type = find_variable_in_any_scope(&ir.symbols, "Словарь");
 
     // Assert: Соответствие должно иметь 2 параметра
-    if let Some(TypeHint::Generic { base_type, type_params, certainty }) = var_type {
+    if let Some(TypeHint::Generic {
+        base_type,
+        type_params,
+        certainty,
+    }) = var_type
+    {
         assert_eq!(base_type, "Соответствие");
-        assert_eq!(type_params.len(), 2, "Соответствие должно иметь 2 параметра (ключ, значение)");
+        assert_eq!(
+            type_params.len(),
+            2,
+            "Соответствие должно иметь 2 параметра (ключ, значение)"
+        );
         assert_eq!(type_params[0], "?");
         assert_eq!(type_params[1], "?");
         assert_eq!(certainty, 0.0);
     } else {
-        panic!("Переменная Словарь должна быть Generic, получено: {:?}", var_type);
+        panic!(
+            "Переменная Словарь должна быть Generic, получено: {:?}",
+            var_type
+        );
     }
 }
 
@@ -200,7 +236,12 @@ fn test_map_with_insert_inference() {
 
     let var_type = find_variable_in_any_scope(&ir.symbols, "Карта");
 
-    if let Some(TypeHint::Generic { base_type, type_params, .. }) = var_type {
+    if let Some(TypeHint::Generic {
+        base_type,
+        type_params,
+        ..
+    }) = var_type
+    {
         assert_eq!(base_type, "Соответствие");
         assert_eq!(type_params.len(), 2);
 
@@ -211,7 +252,10 @@ fn test_map_with_insert_inference() {
             println!("⚠️ Инференс из Вставить() ещё не полностью работает");
         }
     } else {
-        panic!("Переменная Карта должна быть Generic, получено: {:?}", var_type);
+        panic!(
+            "Переменная Карта должна быть Generic, получено: {:?}",
+            var_type
+        );
     }
 }
 
@@ -279,12 +323,27 @@ fn test_multiple_arrays_independent() {
     let var_b = find_variable_in_any_scope(&ir.symbols, "МассивB");
 
     // Assert: Оба должны быть Generic, но независимыми
-    assert!(matches!(var_a, Some(TypeHint::Generic { .. })), "МассивA должен быть Generic");
-    assert!(matches!(var_b, Some(TypeHint::Generic { .. })), "МассивB должен быть Generic");
+    assert!(
+        matches!(var_a, Some(TypeHint::Generic { .. })),
+        "МассивA должен быть Generic"
+    );
+    assert!(
+        matches!(var_b, Some(TypeHint::Generic { .. })),
+        "МассивB должен быть Generic"
+    );
 
     // Если инференс работает, типы должны различаться
-    if let (Some(TypeHint::Generic { type_params: params_a, .. }),
-            Some(TypeHint::Generic { type_params: params_b, .. })) = (var_a, var_b) {
+    if let (
+        Some(TypeHint::Generic {
+            type_params: params_a,
+            ..
+        }),
+        Some(TypeHint::Generic {
+            type_params: params_b,
+            ..
+        }),
+    ) = (var_a, var_b)
+    {
         if params_a[0] != "?" && params_b[0] != "?" {
             assert_eq!(params_a[0], "Строка");
             assert_eq!(params_b[0], "Число");
@@ -357,7 +416,12 @@ fn test_mixed_types_in_array() {
     let var_type = find_variable_in_any_scope(&ir.symbols, "МассивСмешанный");
 
     // Assert: Тип должен быть либо union, либо динамический
-    if let Some(TypeHint::Generic { type_params, certainty, .. }) = var_type {
+    if let Some(TypeHint::Generic {
+        type_params,
+        certainty,
+        ..
+    }) = var_type
+    {
         // Если инференс обрабатывает union
         if type_params[0].contains("|") {
             assert!(type_params[0].contains("Строка"));

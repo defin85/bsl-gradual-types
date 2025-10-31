@@ -2,9 +2,7 @@
 //!
 //! Проверяет загрузку метаданных из конкретных конфигураций.
 
-use bsl_backend::data::loaders::config_metadata_parser::{
-    ConfigurationDiscovery,
-};
+use bsl_backend::data::loaders::config_metadata_parser::ConfigurationDiscovery;
 use std::path::PathBuf;
 
 /// Тест 1: Загрузка метаданных из базовой конфигурации
@@ -24,10 +22,16 @@ fn test_load_metadata_from_base_configuration() {
     assert!(configurations_result.is_ok());
 
     let configurations = configurations_result.unwrap();
-    assert!(!configurations.is_empty(), "Должна быть найдена конфигурация");
+    assert!(
+        !configurations.is_empty(),
+        "Должна быть найдена конфигурация"
+    );
 
     let base_config = &configurations[0];
-    assert!(base_config.is_base(), "Первая конфигурация должна быть базовой");
+    assert!(
+        base_config.is_base(),
+        "Первая конфигурация должна быть базовой"
+    );
 
     let metadata_result = discovery.discover_metadata_in_configuration(base_config);
 
@@ -40,7 +44,10 @@ fn test_load_metadata_from_base_configuration() {
 
     let metadata = metadata_result.unwrap();
 
-    println!("✅ Загружено {} объектов метаданных из базовой конфигурации", metadata.len());
+    println!(
+        "✅ Загружено {} объектов метаданных из базовой конфигурации",
+        metadata.len()
+    );
 
     // Проверяем наличие ожидаемых объектов
     let object_names: Vec<_> = metadata.iter().map(|m| m.name.as_str()).collect();
@@ -116,7 +123,10 @@ fn test_load_metadata_from_extension_configuration() {
 
     let metadata = metadata_result.unwrap();
 
-    println!("✅ Загружено {} объектов метаданных из расширения", metadata.len());
+    println!(
+        "✅ Загружено {} объектов метаданных из расширения",
+        metadata.len()
+    );
 
     // Проверяем наличие объектов с префиксом
     let object_names: Vec<_> = metadata.iter().map(|m| m.name.as_str()).collect();
@@ -158,7 +168,10 @@ fn test_sequential_metadata_loading_all_configurations() {
         "Должно быть найдено минимум 2 конфигурации"
     );
 
-    println!("🔍 Последовательная загрузка метаданных из {} конфигураций:", configurations.len());
+    println!(
+        "🔍 Последовательная загрузка метаданных из {} конфигураций:",
+        configurations.len()
+    );
 
     // Загружаем метаданные из каждой конфигурации
     for (idx, config) in configurations.iter().enumerate() {
@@ -223,7 +236,10 @@ fn test_metadata_objects_structure() {
         // Проверяем обязательные поля
         assert!(!obj.name.is_empty(), "Имя объекта не должно быть пустым");
         assert!(!obj.uuid.is_empty(), "UUID объекта не должен быть пустым");
-        assert!(!obj.object_type_raw.is_empty(), "Тип объекта не должен быть пустым");
+        assert!(
+            !obj.object_type_raw.is_empty(),
+            "Тип объекта не должен быть пустым"
+        );
 
         // Проверяем, что тип объекта распознан (если возможно)
         if obj.object_type.is_some() {

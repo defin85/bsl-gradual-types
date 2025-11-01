@@ -72,7 +72,7 @@ web-sys = "0.3"
 # Backend-specific dependencies
 colored = "2.0"
 tree-sitter = "0.25"
-tree-sitter-bsl = { git = "https://github.com/alkoleft/tree-sitter-bsl", tag = "v0.1.5" }
+tree-sitter-bsl = { path = "../tree-sitter-bsl" }
 tempfile = "3.8"
 
 # Дополнительные зависимости

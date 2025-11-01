@@ -122,7 +122,11 @@ impl TreeSitterAdapter {
         let lines: Vec<String> = source.lines().map(|s| s.to_string()).collect();
 
         // Собираем синтаксические ошибки из дерева с использованием кеша строк
-        let syntax_errors = Self::collect_syntax_errors_cached(&root, source, &lines);
+        let mut syntax_errors = Self::collect_syntax_errors_cached(&root, source, &lines);
+
+        // ✅ Проверяем отсутствующие точки с запятой (BSL linter)
+        let semicolon_errors = Self::check_missing_semicolons(&root, source, &lines);
+        syntax_errors.extend(semicolon_errors);
 
         // Пытаемся извлечь statements даже при наличии ошибок (partial recovery)
         let statements = Self::convert_source_file_cached(&root, source, &lines)?;
@@ -187,6 +191,106 @@ impl TreeSitterAdapter {
         }
 
         errors
+    }
+
+    /// Проверить отсутствующие точки с запятой между statements
+    ///
+    /// В BSL точка с запятой ОБЯЗАТЕЛЬНА между операторами, кроме последнего оператора
+    /// перед закрывающим ключевым словом (КонецФункции, КонецПроцедуры).
+    fn check_missing_semicolons(
+        node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Vec<ParseError> {
+        let mut errors = Vec::new();
+
+        // Проверяем только тела функций и процедур
+        if matches!(node.kind(), "function_definition" | "procedure_definition") {
+            errors.extend(Self::check_function_body_semicolons(node, source, lines));
+        }
+
+        // Рекурсивно проверяем вложенные узлы (для вложенных конструкций)
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            errors.extend(Self::check_missing_semicolons(&child, source, lines));
+        }
+
+        errors
+    }
+
+    /// Проверить точки с запятой в теле функции/процедуры
+    fn check_function_body_semicolons(
+        func_node: &Node,
+        source: &str,
+        lines: &[String],
+    ) -> Vec<ParseError> {
+        let mut errors = Vec::new();
+        let mut cursor = func_node.walk();
+
+        // Собираем все statement узлы в теле функции
+        let mut statements: Vec<Node> = Vec::new();
+        let mut found_end_keyword = false;
+
+        for child in func_node.children(&mut cursor) {
+            match child.kind() {
+                // Statements, которые должны заканчиваться точкой с запятой (если не последние)
+                "if_statement" | "while_statement" | "for_statement" | "for_each_statement"
+                | "assignment_statement" | "call_statement" | "return_statement"
+                | "break_statement" | "continue_statement" | "var_statement" | "try_statement" => {
+                    statements.push(child);
+                }
+                // Конец функции/процедуры
+                "ENDFUNCTION_KEYWORD" | "ENDPROCEDURE_KEYWORD" => {
+                    found_end_keyword = true;
+                }
+                _ => {}
+            }
+        }
+
+        // Проверяем каждый statement (кроме последнего)
+        for (i, stmt) in statements.iter().enumerate() {
+            let is_last = i == statements.len() - 1;
+
+            // Последний statement перед КонецФункции может не иметь точку с запятой
+            if is_last && found_end_keyword {
+                continue;
+            }
+
+            // Проверяем наличие точки с запятой после statement
+            if !Self::has_semicolon_child(stmt) {
+                let span = Self::node_to_span_cached(stmt, source, lines);
+
+                // Позиция для диагностики - конец statement
+                let error_span = Span::from_positions(
+                    (span.end_line, span.end_column),
+                    (span.end_line, span.end_column),
+                );
+
+                errors.push(ParseError {
+                    message: format!(
+                        "Отсутствует точка с запятой после оператора '{}'",
+                        stmt.kind().replace("_statement", "")
+                    ),
+                    span: error_span,
+                    error_type: ErrorType::MissingToken,
+                });
+            }
+        }
+
+        errors
+    }
+
+    /// Проверить наличие точки с запятой как дочернего узла
+    fn has_semicolon_child(node: &Node) -> bool {
+        let mut cursor = node.walk();
+
+        for child in node.children(&mut cursor) {
+            if child.kind() == ";" {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Конвертировать source_file (корневой узел)

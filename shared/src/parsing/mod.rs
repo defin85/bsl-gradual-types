@@ -63,12 +63,8 @@ pub struct MockParser;
 impl Parser for MockParser {
     fn parse_to_ir(&self, content: &str, file_path: &str) -> Result<SemanticProgram> {
         use crate::ir::{SemanticProgram, SourceInfo, SymbolTable};
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
 
-        let mut hasher = DefaultHasher::new();
-        content.hash(&mut hasher);
-        let content_hash = hasher.finish();
+        let content_hash = crate::utils::hash::hash_content(content);
 
         Ok(SemanticProgram {
             symbols: SymbolTable::new(),

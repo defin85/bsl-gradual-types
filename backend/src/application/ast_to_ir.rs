@@ -13,6 +13,7 @@ use crate::parsing::bsl::ast::{Expression, Program, Statement};
 use anyhow::Result;
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::ir::*;
+use bsl_shared::utils::hash::hash_content;
 use std::sync::Arc;
 
 /// Конвертер AST → IR
@@ -95,7 +96,7 @@ impl AstToIrConverter {
             nodes: converter.nodes,
             source_info: SourceInfo {
                 path: file_path,
-                content_hash: Self::hash_content(&source),
+                content_hash: hash_content(&source),
             },
             cfg,
         })
@@ -825,15 +826,6 @@ impl AstToIrConverter {
         span
     }
 
-    /// Хэш содержимого файла
-    fn hash_content(content: &str) -> u64 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-        content.hash(&mut hasher);
-        hasher.finish()
-    }
 
     /// Попытка вывести Generic тип из вызова метода коллекции
     ///

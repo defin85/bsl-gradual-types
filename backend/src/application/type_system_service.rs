@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 use bsl_shared::api::MethodDto;
+use bsl_shared::utils::hash::hash_content;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
@@ -427,7 +428,7 @@ impl TypeSystemService {
         info!("🔍 Анализ содержимого файла: {}", file_path);
 
         // 1. Проверка кэша (Application Layer логика)
-        let cache_key = format!("{}:{}", file_path, self.hash_content(content));
+        let cache_key = format!("{}:{}", file_path, hash_content(content));
         if let Some(cached_result) = self.cache.get_analysis(&cache_key) {
             info!("💾 Кэш попадание для файла: {}", file_path);
             return Ok(cached_result);
@@ -502,15 +503,6 @@ impl TypeSystemService {
 
     // === HELPER METHODS FOR FILE ANALYSIS ===
 
-    /// Хэширование содержимого для кэш-ключа (Milestone 2.13: xxHash64)
-    ///
-    /// Использует xxHash64 для быстрого хеширования (2-3x быстрее DefaultHasher).
-    /// xxHash не криптографически стойкий, но для кеша это не требуется.
-    fn hash_content(&self, content: &str) -> u64 {
-        use xxhash_rust::xxh64::xxh64;
-
-        xxh64(content.as_bytes(), 0) // seed = 0 для детерминированности
-    }
 
     /// Извлечение имени переменной из объявления
     fn extract_var_name(&self, line: &str) -> Option<String> {
@@ -573,7 +565,7 @@ impl TypeSystemService {
         info!("🎯 Hover запрос: строка {}, колонка {}", line, column);
 
         // MILESTONE 2.13: IR Caching - проверяем кеш перед парсингом
-        let content_hash = self.hash_content(file_content);
+        let content_hash = hash_content(file_content);
 
         // ✅ MILESTONE 2.13: Замер времени парсинга и флаг cache hit
         let (ir_program, cache_hit, parse_time) = if let Some(cached_ir) =
@@ -712,7 +704,7 @@ impl TypeSystemService {
         use tracing::debug;
 
         let old_hash = self.uri_to_hash.read().await.get(file_uri).copied();
-        let new_hash = self.hash_content(new_content);
+        let new_hash = hash_content(new_content);
 
         // Логируем изменение hash (старый IR не удаляется явно, будет вытеснен LRU)
         if let Some(old) = old_hash {

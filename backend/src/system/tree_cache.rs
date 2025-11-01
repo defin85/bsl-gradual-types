@@ -2,6 +2,8 @@
 //!
 //! Хранит деревья в памяти для быстрого обновления при изменениях файлов
 
+pub use bsl_shared::utils::hash::hash_content;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -102,15 +104,6 @@ impl Default for TreeCache {
     }
 }
 
-/// Быстрый хеш для содержимого файла
-pub fn hash_content(content: &str) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    content.hash(&mut hasher);
-    hasher.finish()
-}
 
 #[cfg(test)]
 mod tests {

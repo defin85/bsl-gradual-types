@@ -36,11 +36,9 @@ struct LspConfig {
     platform_docs_archive: Option<String>,
 
     /// Путь к Configuration.xml конфигурации 1С
-    #[allow(dead_code)]
     configuration_path: Option<String>,
 
     /// Версия платформы 1С (например, "8.3.25")
-    #[allow(dead_code)]
     platform_version: Option<String>,
 }
 
@@ -459,9 +457,21 @@ impl LanguageServer for BslLanguageServer {
 
                 // ✅ ИСПРАВЛЕНИЕ: Вызываем start_with_paths, затем отправляем результат в spawn task
                 let syntax_path = std::path::Path::new(platform_docs);
+
+                // ✅ НОВОЕ: Преобразуем configuration_path из Option<String> в Option<&Path>
+                let config_path_ref = cfg.configuration_path
+                    .as_ref()
+                    .map(|s| std::path::Path::new(s.as_str()));
+
+                if let Some(ref conf_path) = config_path_ref {
+                    info!("📂 Configuration path provided: {}", conf_path.display());
+                } else {
+                    info!("⚠️ Configuration path not provided - skipping metadata loading");
+                }
+
                 let result = self
                     .coordinator
-                    .start_with_paths(Some(syntax_path), None, Some(progress_tx))
+                    .start_with_paths(Some(syntax_path), config_path_ref, Some(progress_tx))
                     .await;
 
                 // Закрываем канал прогресса (spawn task завершит обработку updates)
@@ -615,6 +625,13 @@ impl LanguageServer for BslLanguageServer {
             .write()
             .await
             .insert(uri.clone(), updated_text.clone());
+
+        // ✅ MILESTONE 2.13: Инвалидация IR кеша при изменении файла
+        let uri_str = uri.to_string();
+        self.get_type_service()
+            .invalidate_file_cache(&uri_str, &updated_text)
+            .await;
+        debug!("📝 File changed: {}, cache invalidated", uri_str);
 
         // ✅ ИНКРЕМЕНТАЛЬНЫЙ ПАРСИНГ: конвертируем LSP edits → ParserCoordinator TextEdit
         use bsl_backend::system::parser_coordinator::TextEdit;

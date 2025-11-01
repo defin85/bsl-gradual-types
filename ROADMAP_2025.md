@@ -267,50 +267,55 @@ info!("⏱️ Hover performance: parse={}ms, ir_convert={}ms, lookup={}ms, total
 
 ---
 
-### 🔧 Milestone 2.14: Hash Unification (Backlog - Low Priority)
+### 🔧 Milestone 2.14: Hash Unification — Централизация hash_content() ✅ (2025-11-01)
 
-**Статус:** 📋 ПЛАНИРУЕТСЯ
+**Статус:** ✅ ЗАВЕРШЁН
 
-**Приоритет:** 🟢 LOW — не критично для функциональности
+**Приоритет:** 🟢 LOW — улучшение единообразия кода (не критично для функциональности)
 
 **Проблема:**
-После Milestone 2.13 обнаружено, что `backend/src/application/ast_to_ir.rs:829-836` использует `DefaultHasher` вместо `xxHash64`, в то время как `TypeSystemService` использует `xxHash64`.
-
-**Код с проблемой:**
-```rust
-// backend/src/application/ast_to_ir.rs:829-836
-fn hash_content(content: &str) -> u64 {
-    use std::collections::hash_map::DefaultHasher;  // ❌ Несоответствие
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    content.hash(&mut hasher);
-    hasher.finish()
-}
-```
-
-**Влияние:**
-- ❌ НЕ влияет на производительность IR Cache (TypeSystemService использует свой xxHash64 для ключа кеша)
-- ⚠️ Проблема единообразия: два разных алгоритма хеширования для одной задачи
-- ⚠️ DefaultHasher медленнее xxHash64 в 2-3x (хотя вызывается редко)
+После Milestone 2.13 Reviewer обнаружил **4 дублирования** `hash_content()` с разными алгоритмами:
+- `backend/src/application/ast_to_ir.rs:829-836` (DefaultHasher)
+- `backend/src/application/type_system_service.rs:509-517` (xxHash64)
+- `backend/src/system/tree_cache.rs:106-113` (DefaultHasher)
+- `shared/src/parsing/mod.rs:66-71` (DefaultHasher)
 
 **Решение:**
+Централизация в `shared/src/utils/hash.rs`:
 ```rust
-// backend/src/application/ast_to_ir.rs:829-836
-fn hash_content(content: &str) -> u64 {
+/// Быстрое хеширование содержимого для кеш-ключей
+pub fn hash_content(content: &str) -> u64 {
     use xxhash_rust::xxh64::xxh64;
-    xxh64(content.as_bytes(), 0)  // ✅ Единообразие с TypeSystemService
+    xxh64(content.as_bytes(), 0) // seed = 0 для детерминированности
 }
 ```
 
-**Критерий завершения:**
-- ✅ Все функции `hash_content()` используют `xxHash64`
-- ✅ Тесты проходят без изменений (функциональность не затронута)
-- ✅ Единообразие кода
+**Результаты:**
 
-**Ссылки:**
-- Code Review Milestone 2.13: оценка 9.2/10, рекомендация вынести в отдельную задачу
-- Commit: 09762dc1d2b3cb442b538f3a00362533f8f492e2
+Архитектура:
+- ✅ **1 определение** hash_content (shared/src/utils/hash.rs:20)
+- ✅ **0 дублирований** (удалено ~25 строк кода)
+- ✅ **4 импорта** через `use bsl_shared::utils::hash::hash_content`
+- ✅ DRY принцип соблюдён идеально
+
+Тестирование (Tester: 9.5/10):
+- ✅ 215/215 core tests passed (143 shared + 72 backend)
+- ✅ 2 unit теста hash функции (deterministic, empty string)
+- ✅ IR Cache: 4/4 passed (37x ускорение сохранён)
+- ✅ Tree Cache: 2/2 passed (инкрементальный парсинг работает)
+- ✅ 0 регрессии
+
+Code Review (Reviewer: 9.2/10):
+- ✅ Архитектура: 10/10 (идеальная централизация)
+- ✅ Производительность: 10/10 (37x ускорение из 2.13 сохранён)
+- ✅ Безопасность: 10/10 (thread-safe, детерминированность)
+- ✅ Тестовое покрытие: 9/10
+- ✅ Регрессия: 10/10
+
+**Заметка:**
+Persistent Cache (`backend/src/system/persistent_cache.rs`) оставлен на SHA-256 для криптостойкости долговременного кеша на диске. In-memory cache использует xxHash64 для скорости. Это архитектурно обоснованная дифференциация.
+
+**Commit:** 5dce0f3 — feat: Milestone 2.14 - Hash Unification ✅
 
 ---
 

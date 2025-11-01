@@ -267,6 +267,53 @@ info!("⏱️ Hover performance: parse={}ms, ir_convert={}ms, lookup={}ms, total
 
 ---
 
+### 🔧 Milestone 2.14: Hash Unification (Backlog - Low Priority)
+
+**Статус:** 📋 ПЛАНИРУЕТСЯ
+
+**Приоритет:** 🟢 LOW — не критично для функциональности
+
+**Проблема:**
+После Milestone 2.13 обнаружено, что `backend/src/application/ast_to_ir.rs:829-836` использует `DefaultHasher` вместо `xxHash64`, в то время как `TypeSystemService` использует `xxHash64`.
+
+**Код с проблемой:**
+```rust
+// backend/src/application/ast_to_ir.rs:829-836
+fn hash_content(content: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;  // ❌ Несоответствие
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    hasher.finish()
+}
+```
+
+**Влияние:**
+- ❌ НЕ влияет на производительность IR Cache (TypeSystemService использует свой xxHash64 для ключа кеша)
+- ⚠️ Проблема единообразия: два разных алгоритма хеширования для одной задачи
+- ⚠️ DefaultHasher медленнее xxHash64 в 2-3x (хотя вызывается редко)
+
+**Решение:**
+```rust
+// backend/src/application/ast_to_ir.rs:829-836
+fn hash_content(content: &str) -> u64 {
+    use xxhash_rust::xxh64::xxh64;
+    xxh64(content.as_bytes(), 0)  // ✅ Единообразие с TypeSystemService
+}
+```
+
+**Критерий завершения:**
+- ✅ Все функции `hash_content()` используют `xxHash64`
+- ✅ Тесты проходят без изменений (функциональность не затронута)
+- ✅ Единообразие кода
+
+**Ссылки:**
+- Code Review Milestone 2.13: оценка 9.2/10, рекомендация вынести в отдельную задачу
+- Commit: 09762dc1d2b3cb442b538f3a00362533f8f492e2
+
+---
+
 ### 📦 Milestone 2.17: Configuration Metadata Parser (3-4 дня)
 
 **Приоритет:** 🔴 КРИТИЧНЫЙ — без типов конфигурации система типов неполная

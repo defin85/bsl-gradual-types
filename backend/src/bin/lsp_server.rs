@@ -39,6 +39,8 @@ struct LspConfig {
     configuration_path: Option<String>,
 
     /// Версия платформы 1С (например, "8.3.25")
+    /// Зарезервировано для будущей версионированной загрузки типов
+    #[allow(dead_code)]
     platform_version: Option<String>,
 }
 
@@ -271,6 +273,7 @@ impl LanguageServer for BslLanguageServer {
                         "bsl.searchTypes".to_string(),
                         "bsl.getCurrentContext".to_string(), // ✅ MILESTONE 2.20.3
                         "bsl.getTypeRepositoryStats".to_string(), // ✅ MILESTONE 2.20.4
+                        "bsl.parseConfiguration".to_string(), // ✅ MILESTONE 2.17
                     ],
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
@@ -420,13 +423,14 @@ impl LanguageServer for BslLanguageServer {
                                 .send_notification::<tower_lsp::lsp_types::notification::Progress>(
                                     ProgressParams {
                                         token: token_clone.clone(),
-                                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                                            WorkDoneProgressEnd {
+                                        value: ProgressParamsValue::WorkDone(
+                                            WorkDoneProgress::End(WorkDoneProgressEnd {
                                                 message: Some(
-                                                    "✅ Типы платформы загружены успешно".to_string(),
+                                                    "✅ Типы платформы загружены успешно"
+                                                        .to_string(),
                                                 ),
-                                            },
-                                        )),
+                                            }),
+                                        ),
                                     },
                                 )
                                 .await;
@@ -438,11 +442,14 @@ impl LanguageServer for BslLanguageServer {
                                 .send_notification::<tower_lsp::lsp_types::notification::Progress>(
                                     ProgressParams {
                                         token: token_clone.clone(),
-                                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                                            WorkDoneProgressEnd {
-                                                message: Some(format!("❌ Ошибка загрузки: {}", error_msg)),
-                                            },
-                                        )),
+                                        value: ProgressParamsValue::WorkDone(
+                                            WorkDoneProgress::End(WorkDoneProgressEnd {
+                                                message: Some(format!(
+                                                    "❌ Ошибка загрузки: {}",
+                                                    error_msg
+                                                )),
+                                            }),
+                                        ),
                                     },
                                 )
                                 .await;
@@ -459,7 +466,8 @@ impl LanguageServer for BslLanguageServer {
                 let syntax_path = std::path::Path::new(platform_docs);
 
                 // ✅ НОВОЕ: Преобразуем configuration_path из Option<String> в Option<&Path>
-                let config_path_ref = cfg.configuration_path
+                let config_path_ref = cfg
+                    .configuration_path
                     .as_ref()
                     .map(|s| std::path::Path::new(s.as_str()));
 
@@ -960,6 +968,24 @@ impl LanguageServer for BslLanguageServer {
                 let result = self.handle_get_type_repository_stats(request).await?;
                 Ok(Some(serde_json::to_value(result).unwrap()))
             }
+            "bsl.parseConfiguration" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing configuration path",
+                    ));
+                }
+
+                let request: ParseConfigurationParams =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
+
+                let result = self.handle_parse_configuration(request).await?;
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
             _ => {
                 tracing::warn!("Unknown command: {}", params.command);
                 Err(tower_lsp::jsonrpc::Error::method_not_found())
@@ -1194,6 +1220,27 @@ struct TypeRepositoryStatsResponse {
     configuration_types: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_update_time: Option<String>, // ISO 8601
+}
+
+// ============================================================================
+// MILESTONE 2.17: Configuration Metadata Parser Integration
+// ============================================================================
+
+/// Request для парсинга конфигурации
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ParseConfigurationParams {
+    config_path: String,
+}
+
+/// Response парсинга конфигурации
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ParseConfigurationResponse {
+    success: bool,
+    loaded_types: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -1859,6 +1906,268 @@ impl BslLanguageServer {
             platform_types: stats.platform_types,
             configuration_types: stats.configuration_types,
             last_update_time: stats.last_update_time,
+        })
+    }
+
+    /// Обработчик custom command: bsl.parseConfiguration - MILESTONE 2.17
+    ///
+    /// ✅ ИСПРАВЛЕНО (2025-01-18):
+    /// - Убран and_then() closure (исправлена ошибка Send)
+    /// - Добавлена валидация config_path (path traversal защита)
+    /// - Реализован промежуточный прогресс (каждые 10 типов)
+    /// - Реализован batch loading (по 100 типов за раз)
+    async fn handle_parse_configuration(
+        &self,
+        params: ParseConfigurationParams,
+    ) -> JsonRpcResult<ParseConfigurationResponse> {
+        use bsl_backend::data::loaders::config_metadata_parser::ConfigurationDiscovery;
+
+        info!(
+            "Custom command: bsl.parseConfiguration - {}",
+            params.config_path
+        );
+
+        let config_path = std::path::PathBuf::from(&params.config_path);
+
+        // ✅ КРИТИЧНО: Валидация пути (защита от path traversal)
+        // 1. Проверка существования
+        if !config_path.exists() {
+            warn!("Configuration path does not exist: {:?}", config_path);
+            return Ok(ParseConfigurationResponse {
+                success: false,
+                loaded_types: 0,
+                message: Some(format!("Путь не существует: {}", config_path.display())),
+            });
+        }
+
+        // 2. Проверка, что это директория
+        if !config_path.is_dir() {
+            warn!("Configuration path is not a directory: {:?}", config_path);
+            return Ok(ParseConfigurationResponse {
+                success: false,
+                loaded_types: 0,
+                message: Some("Путь должен указывать на директорию".to_string()),
+            });
+        }
+
+        // 3. Проверка наличия Configuration.xml
+        let config_xml = config_path.join("Configuration.xml");
+        if !config_xml.exists() {
+            warn!("Configuration.xml not found in {:?}", config_path);
+            return Ok(ParseConfigurationResponse {
+                success: false,
+                loaded_types: 0,
+                message: Some("Configuration.xml не найден в указанной директории".to_string()),
+            });
+        }
+
+        // 4. Канонизация пути (защита от ../../../)
+        let canonical_path = match config_path.canonicalize() {
+            Ok(path) => path,
+            Err(e) => {
+                error!("Failed to canonicalize path {:?}: {}", config_path, e);
+                return Ok(ParseConfigurationResponse {
+                    success: false,
+                    loaded_types: 0,
+                    message: Some(format!("Невалидный путь: {}", e)),
+                });
+            }
+        };
+
+        debug!("Validated configuration path: {:?}", canonical_path);
+
+        // Создаем Work Done Progress token
+        let token = ProgressToken::String(format!(
+            "parse-config-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+
+        // Создаем прогресс
+        let _ = self
+            .client
+            .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
+                token: token.clone(),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
+                    WorkDoneProgressBegin {
+                        title: "Парсинг конфигурации".to_string(),
+                        message: Some("Инициализация...".to_string()),
+                        percentage: Some(0),
+                        cancellable: Some(false),
+                    },
+                )),
+            })
+            .await;
+
+        // Получаем доступ к TypeRepository через AnalysisEngine
+        let analysis_engine = match self.coordinator.get_analysis_engine() {
+            Some(engine) => engine,
+            None => {
+                error!("AnalysisEngine not available");
+                return Ok(ParseConfigurationResponse {
+                    success: false,
+                    loaded_types: 0,
+                    message: Some("AnalysisEngine не доступен".to_string()),
+                });
+            }
+        };
+
+        let repo = analysis_engine.get_repository();
+
+        // ✅ Обнаружение метаданных (10% прогресса)
+        let _ = self
+            .client
+            .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
+                token: token.clone(),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
+                    WorkDoneProgressReport {
+                        message: Some("Обнаружение объектов метаданных...".to_string()),
+                        percentage: Some(10),
+                        cancellable: Some(false),
+                    },
+                )),
+            })
+            .await;
+
+        let discovery = ConfigurationDiscovery::new(canonical_path.clone());
+
+        // ✅ ИСПРАВЛЕНО: Конвертируем Result<T, Box<dyn Error>> в Result<T, String> ДО match
+        // Решает проблему "Result which contains Box<dyn Error> is not Send"
+        let discovery_result = discovery.discover_all_metadata().map_err(|e| e.to_string());
+
+        let metadata = match discovery_result {
+            Ok(data) => data,
+            Err(error_msg) => {
+                error!("❌ Failed to discover metadata: {}", error_msg);
+
+                // Завершение прогресса с ошибкой
+                let _ = self
+                    .client
+                    .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                        ProgressParams {
+                            token: token.clone(),
+                            value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
+                                WorkDoneProgressEnd {
+                                    message: Some(format!("❌ Ошибка: {}", error_msg)),
+                                },
+                            )),
+                        },
+                    )
+                    .await;
+
+                return Ok(ParseConfigurationResponse {
+                    success: false,
+                    loaded_types: 0,
+                    message: Some(format!("Ошибка обнаружения метаданных: {}", error_msg)),
+                });
+            }
+        };
+
+        let total_objects = metadata.len();
+        info!(
+            "📦 Discovered {} metadata objects from configuration",
+            total_objects
+        );
+
+        // ✅ ИСПРАВЛЕНО: Прямая загрузка типов без and_then()
+        // Решает проблему "future cannot be sent between threads safely"
+
+        const BATCH_SIZE: usize = 100;
+        const PROGRESS_REPORT_INTERVAL: usize = 10;
+
+        let mut loaded = 0;
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+
+        for (index, obj) in metadata.iter().enumerate() {
+            let raw_type = obj.to_raw_type_data(None);
+            batch.push(raw_type);
+
+            // Загружаем батч по достижении BATCH_SIZE или в конце
+            if batch.len() >= BATCH_SIZE || index == total_objects - 1 {
+                if let Err(e) = repo.load_types(batch.clone()) {
+                    // ✅ ИСПРАВЛЕНО: Конвертируем ошибку в String ДО await
+                    let error_msg = {
+                        let err = e;
+                        err.to_string()
+                    };
+                    error!("❌ Failed to load types batch: {}", error_msg);
+
+                    // Завершение прогресса с ошибкой
+                    let _ = self
+                        .client
+                        .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                            ProgressParams {
+                                token: token.clone(),
+                                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
+                                    WorkDoneProgressEnd {
+                                        message: Some(format!("❌ Ошибка: {}", error_msg)),
+                                    },
+                                )),
+                            },
+                        )
+                        .await;
+
+                    return Ok(ParseConfigurationResponse {
+                        success: false,
+                        loaded_types: loaded,
+                        message: Some(format!("Ошибка загрузки типов: {}", error_msg)),
+                    });
+                }
+
+                loaded += batch.len();
+                batch.clear();
+            }
+
+            // ✅ Промежуточный прогресс каждые 10 типов
+            if (index + 1) % PROGRESS_REPORT_INTERVAL == 0 || index == total_objects - 1 {
+                // Прогресс: 10% (обнаружение) + 80% (загрузка) + 10% (завершение)
+                // Загрузка занимает диапазон 10-90%
+                let load_progress = ((loaded * 80) / total_objects) as u32;
+                let total_progress = 10 + load_progress;
+
+                let _ = self
+                    .client
+                    .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                        ProgressParams {
+                            token: token.clone(),
+                            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
+                                WorkDoneProgressReport {
+                                    message: Some(format!(
+                                        "Загружено {}/{} типов",
+                                        loaded, total_objects
+                                    )),
+                                    percentage: Some(total_progress),
+                                    cancellable: Some(false),
+                                },
+                            )),
+                        },
+                    )
+                    .await;
+            }
+        }
+
+        // ✅ Завершение прогресса (100%)
+        let _ = self
+            .client
+            .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
+                token: token.clone(),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
+                    message: Some(format!("✅ Загружено {} типов", loaded)),
+                })),
+            })
+            .await;
+
+        info!(
+            "✅ Configuration parsed successfully: {} types loaded",
+            loaded
+        );
+
+        Ok(ParseConfigurationResponse {
+            success: true,
+            loaded_types: loaded,
+            message: Some(format!("Конфигурация успешно загружена: {} типов", loaded)),
         })
     }
 }

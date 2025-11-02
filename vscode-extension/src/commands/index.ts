@@ -28,6 +28,7 @@ import {
     showMetricsWebview
 } from '../webviews';
 import { registerSemanticVisualization } from './semanticVisualization';
+import { registerParseConfigurationCommand } from './parseConfiguration';
 
 let outputChannel: vscode.OutputChannel;
 let commandsRegistered = false;
@@ -369,8 +370,8 @@ export async function registerCommands(context: vscode.ExtensionContext) {
 
                 updateIndexingProgress(4, 'Finalizing index...', 90);
                 progress.report({ increment: 15, message: 'Finalizing...' });
-                
-                finishIndexing(true);
+
+                finishIndexing(); // Success case - no error message
 
                 const typesCount = result.types_count || 'unknown';
 
@@ -380,7 +381,7 @@ export async function registerCommands(context: vscode.ExtensionContext) {
             });
 
         } catch (error) {
-            finishIndexing(false);
+            finishIndexing(`Index build failed: ${error}`);
             vscode.window.showErrorMessage(`Index build failed: ${error}`);
             outputChannel.appendLine(`Index build error: ${error}`);
         }
@@ -439,14 +440,14 @@ export async function registerCommands(context: vscode.ExtensionContext) {
                 updateIndexingProgress(3, 'Finalizing...', 95);
                 progress.report({ increment: 20, message: 'Finalizing...' });
 
-                finishIndexing(true);
+                finishIndexing(); // Success case
 
                 vscode.window.showInformationMessage(`✅ Index updated successfully: ${result.message}`);
 
                 return result.message;
             });
         } catch (error) {
-            finishIndexing(false);
+            finishIndexing(`Incremental update failed: ${error}`);
             vscode.window.showErrorMessage(`Incremental update failed: ${error}`);
             outputChannel.appendLine(`Incremental update error: ${error}`);
         }
@@ -607,15 +608,27 @@ export async function registerCommands(context: vscode.ExtensionContext) {
                     increment: 20, 
                     message: stepName 
                 });
-                
+
                 await new Promise(resolve => setTimeout(resolve, 2000));
             }
-            
-            finishIndexing(true);
+
+            finishIndexing(); // Test completed successfully
         });
         
         outputChannel.appendLine('✅ Progress system test completed');
     });
+
+    // Parse Configuration (MILESTONE 2.17)
+    // Регистрация через отдельный модуль для лучшей организации кода
+    const client = getLanguageClient();
+    if (client) {
+        const parseConfigDisposable = registerParseConfigurationCommand(context, client);
+        if (parseConfigDisposable) {
+            outputChannel.appendLine('✅ Registered command: bslAnalyzer.parseConfiguration');
+        }
+    } else {
+        outputChannel.appendLine('⚠️ Cannot register bslAnalyzer.parseConfiguration - LSP client not ready');
+    }
 
     // Show Semantic Visualization (MILESTONE 2.16)
     // Регистрируем команду всегда, проверку client делаем внутри

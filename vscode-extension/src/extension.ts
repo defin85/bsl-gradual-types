@@ -276,13 +276,13 @@ async function initializeIndexIfNeeded() {
             updateIndexingProgress(4, 'Finalizing index...', 90);
             progress.report({ increment: 15, message: 'Finalizing...' });
 
-            finishIndexing(true);
+            finishIndexing(); // Success
 
             outputChannel.appendLine('✅ Index build completed successfully');
             updateStatusBar('BSL Analyzer: Index Ready');
         });
     } catch (error) {
-        finishIndexing(false);
+        finishIndexing(`Index build failed: ${error}`);
         outputChannel.appendLine(`❌ Index build failed: ${error}`);
         updateStatusBar('BSL Analyzer: Build Failed');
     }

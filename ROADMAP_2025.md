@@ -7,6 +7,17 @@
 
 ---
 
+## 📋 Содержание
+
+1. [Текущее состояние проекта](#-текущее-состояние-проекта-версия-10)
+2. [✅ Завершённые Milestones](#-завершённые-milestones-компактный-формат) — **Детали:** [ROADMAP_ARCHIVE_2025.md](ROADMAP_ARCHIVE_2025.md)
+3. [🎯 Планируемые Milestones](#-milestone-217-configuration-metadata-parser-3-4-дня)
+4. [🚀 Версия 3.0 — Advanced Features](#-версия-30--advanced-features-q2-2025-3-месяца)
+5. [🌐 Версия 4.0 — Collaboration & Ecosystem](#-версия-40--collaboration--ecosystem-q3-q4-2025-6-месяцев)
+6. [📅 Timeline Summary](#-timeline-summary)
+
+---
+
 ## 📊 Текущее состояние проекта (Версия 1.0)
 
 ### ✅ Что работает отлично
@@ -63,259 +74,26 @@
 
 ## ✅ Завершённые Milestones (Компактный формат)
 
-### 🧠 Milestone 2.1: Tree-sitter Integration ✅
-Подключена tree-sitter-bsl v0.1.5, TreeSitterAdapter, инкрементальный парсинг < 10ms.
+**Детальные описания доступны в архиве:** [ROADMAP_ARCHIVE_2025.md](ROADMAP_ARCHIVE_2025.md)
 
-### 📦 Milestone 2.2: VSCode Extension Optimization ✅ (2025-10-13)
-VSIX 3.2 MB (было 30 MB), 1 бинарник (было 10), все команды через LSP (0 CLI), 6 test suites.
+| Milestone | Статус | Дата завершения | Ключевой результат | Подробности |
+|-----------|--------|-----------------|-------------------|-------------|
+| 2.1 Tree-sitter Integration | ✅ | 2025-09-XX | Подключена tree-sitter-bsl v0.1.5, TreeSitterAdapter, инкрементальный парсинг < 10ms | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-21-tree-sitter-integration-) |
+| 2.2 VSCode Extension Optimization | ✅ | 2025-10-13 | VSIX 3.2 MB (было 30 MB), 1 бинарник, все команды через LSP, 6 test suites | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-22-vscode-extension-optimization--2025-10-13) |
+| 2.3 Advanced Type System | ✅ | 2025-10-13 | Union/Intersection/Generic/Nullable Types реализованы, 50 unit-тестов проходят | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-23-advanced-type-system--2025-10-13) |
+| 2.5 Унификация визуализации типов | ✅ | 2025-10-XX | Крейт `type-visualization`, HtmlRenderer/JsonRenderer, LSP custom request | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-25-унификация-визуализации-типов-) |
+| 2.7 TreeSitterAdapter | ✅ | 2025-10-XX | Полная конвертация tree-sitter AST → BSL IR, обработка ошибок с fallback | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-27-treesitteradapter-) |
+| 2.8 Semantic IR Layer | ✅ | 2025-10-XX | `SemanticProgram`, `SymbolTable`, `Parser trait` для DI, `AstToIrConverter` | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-28-semantic-ir-layer-) |
+| 2.9 Inline Scope Analysis | ✅ | 2025-10-08 | Анализ типов локальных переменных "на лету", `find_variable_at_position()` | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-29-inline-scope-analysis--2025-10-08) |
+| 2.10 LSP Configuration + Type Index | ✅ | 2025-10-08 | LSP initialization options, custom requests `bsl/renderTypeHtml`, `bsl/extractPlatformDocs` | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-210-lsp-configuration--type-index--2025-10-08) |
+| 2.11 Tree-Sitter Span Extraction | ✅ | 2025-10-13 | Реальные координаты из tree-sitter, `find_node_at_position()` работает, 10 тестов | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-211-tree-sitter-span-extraction--2025-10-13) |
+| 2.13 IR Caching & Performance | ✅ | 2025-11-01 | 37× ускорение hover (<5ms). IR Cache с LRU, xxHash64, LSP invalidation | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-213-ir-caching--performance-optimization--2025-11-01) |
+| 2.14 Hash Unification | ✅ | 2025-11-01 | Централизация hash_content в shared/utils/hash.rs, устранение 4 дублирований | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-214-hash-unification--централизация-hash_content--2025-11-01) |
+| 2.16 Semantic Tree Visualization | ✅ | 2025-10-17 | VSCode webview, LSP custom request `bsl.getSemanticHtml`, HTML/CSS expand/collapse | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-216-semantic-tree-visualization--2025-10-17) |
+| 2.18 LSP Syntax Error Diagnostics | ✅ | 2025-10-18 | Синтаксические ошибки в LSP Diagnostics, UTF-16 координаты, ~300× ускорение парсинга, 40 тестов | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-218-lsp-syntax-error-diagnostics--2025-10-18) |
 
-### 🔧 Milestone 2.3: Advanced Type System ✅ (2025-10-13)
-Union/Intersection/Generic/Nullable Types реализованы, 50 unit-тестов проходят, GenericInference готов.
-
-### 🎨 Milestone 2.5: Унификация визуализации типов ✅
-Крейт `type-visualization`, HtmlRenderer/JsonRenderer/MarkdownRenderer, LSP custom request `bsl/renderTypeHtml`.
-
-### 🔧 Milestone 2.7: TreeSitterAdapter ✅
-Полная конвертация tree-sitter AST → BSL IR, поддержка всех конструкций 1С, обработка ошибок с fallback.
-
-### 🏗️ Milestone 2.8: Semantic IR Layer ✅
-`SemanticProgram` с упрощённым набором узлов, `SymbolTable`, `Parser trait` для DI, `AstToIrConverter`.
-
-### ✨ Milestone 2.9: Inline Scope Analysis ✅ (2025-10-08)
-Анализ типов локальных переменных "на лету", `find_variable_at_position()`, работает в пределах одной процедуры.
-
-### 📦 Milestone 2.10: LSP Configuration + Type Index ✅ (2025-10-08)
-LSP принимает конфигурацию через initialization options, custom requests `bsl/renderTypeHtml`, `bsl/extractPlatformDocs`.
-
-### 🔍 Milestone 2.11: Tree-Sitter Span Extraction ✅ (2025-10-13)
-Реальные координаты из tree-sitter, `find_node_at_position()` работает, hover показывает разную информацию для переменных, 10 тестов проходят.
-
-### 🎨 Milestone 2.16: Semantic Tree Visualization ✅ (2025-10-17)
-VSCode webview с интерактивной визуализацией семантического дерева, LSP custom request `bsl.getSemanticHtml`, исправлена иерархия узлов (FunctionCall дублирование), исправлена проблема с `activeTextEditor` (Output панель становилась активным редактором), HTML/CSS визуализация с expand/collapse.
-
-### 🚨 Milestone 2.18: LSP Syntax Error Diagnostics ✅ (2025-10-18)
-Синтаксические ошибки отображаются в LSP Diagnostics, UTF-16 координаты для кириллицы, оптимизация производительности парсинга (~300× ускорение), 40 интеграционных тестов (33 для функциональности + 7 для performance).
-
----
-
-### ⚡ Milestone 2.13: IR Caching & Performance Optimization ✅ (2025-11-01)
-
-**Статус:** ✅ ЗАВЕРШЁН
-
-**Приоритет:** 🔴 КРИТИЧНЫЙ — устраняет парсинг файла при КАЖДОМ hover
-
-**Проблема:**
-В текущей реализации ([type_system_service.rs:460-519](backend/src/application/type_system_service.rs#L460-L519)) файл **парсится ЗАНОВО при каждом hover**:
-```rust
-pub async fn get_hover_info(&self, file_content: &str, line: u32, column: u32) -> Result<Option<String>> {
-    // ❌ ПРОБЛЕМА: Парсинг КАЖДЫЙ РАЗ!
-    let parse_result = self.parser.parse(file_content)?;
-
-    // ❌ ПРОБЛЕМА: Конвертация AST → IR КАЖДЫЙ РАЗ!
-    let ir_program = AstToIrConverter::convert(parse_result.program, ...)?;
-
-    // ✅ Только этот шаг быстрый
-    if let Some((var_name, type_hint)) = ir_program.find_variable_at_position(line, column) {
-        return Ok(Some(self.format_variable_hover(&var_name, &type_hint)));
-    }
-}
-```
-
-**Последствия:**
-- ⚠️ Hover на большом файле (1000+ строк) — **50-100ms задержка**
-- ⚠️ Быстрое наведение мыши → множественные парсинги → **тормоза**
-- ⚠️ CPU usage spike при активной работе с кодом
-
-#### Задачи:
-
-**Task 1: IR Caching по file_hash** (2-3 дня)
-
-**Добавить в TypeSystemService:**
-```rust
-// backend/src/application/type_system_service.rs
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-
-pub struct TypeSystemService {
-    // ... существующие поля
-
-    // ✅ НОВОЕ: Кеш IR программ по хешу содержимого
-    ir_cache: Arc<RwLock<HashMap<u64, Arc<SemanticProgram>>>>,
-}
-
-impl TypeSystemService {
-    pub async fn get_hover_info(&self, file_content: &str, line: u32, column: u32) -> Result<Option<String>> {
-        // 1. Хешируем содержимое (уже есть метод hash_content)
-        let content_hash = self.hash_content(file_content);
-
-        // 2. ✅ ПРОВЕРЯЕМ IR КЕШ
-        let ir_program = if let Some(cached_ir) = self.ir_cache.read().await.get(&content_hash) {
-            info!("✅ IR cache HIT for file hash {}", content_hash);
-            cached_ir.clone()  // ✅ Кеш попадание - парсинг НЕ нужен!
-        } else {
-            info!("❌ IR cache MISS for file hash {}, parsing...", content_hash);
-
-            // Парсим + конвертируем (как сейчас)
-            let parse_result = self.parser.parse(file_content)?;
-            let ir = AstToIrConverter::convert(parse_result.program, ...)?;
-            let ir_arc = Arc::new(ir);
-
-            // 3. ✅ СОХРАНЯЕМ В КЕШ
-            self.ir_cache.write().await.insert(content_hash, ir_arc.clone());
-
-            ir_arc
-        };
-
-        // 4. Используем IR для Inline Scope Analysis (как сейчас)
-        if let Some((var_name, type_hint)) = ir_program.find_variable_at_position(line, column) {
-            return Ok(Some(self.format_variable_hover(&var_name, &type_hint)));
-        }
-
-        Ok(None)
-    }
-}
-```
-
-**Преимущества:**
-- ✅ Парсинг только **1 раз** при первом hover
-- ✅ Последующие hover **мгновенные** (<5ms)
-- ✅ Кеш инвалидируется автоматически при изменении файла (новый hash)
-
-**Task 2: Eagerly Parse при `didOpen`** (1 день)
-
-**Модифицировать LSP Server:**
-```rust
-// backend/src/bin/lsp_server.rs
-async fn did_open(&self, params: DidOpenTextDocumentParams) {
-    let text = params.text_document.text.clone();
-
-    // 1. Кешируем текст (как сейчас)
-    self.documents.write().await.insert(uri.clone(), text.clone());
-
-    // 2. ✅ НОВОЕ: Предварительно парсим и кешируем IR
-    let file_path = uri.to_file_path().unwrap().to_string_lossy().to_string();
-    match self.type_service.parse_and_cache_ir(&text, &file_path).await {
-        Ok(_) => info!("✅ IR cached for {}", file_path),
-        Err(e) => error!("❌ Failed to cache IR for {}: {}", file_path, e),
-    }
-
-    // 3. Диагностика (как сейчас)
-    self.type_service.analyze_file(&file_path).await;
-}
-```
-
-**Преимущества:**
-- ✅ IR готов **ДО первого hover**
-- ✅ Hover **мгновенный** с самого начала
-- ✅ Парсинг при открытии файла — **незаметен** для пользователя
-
-**Task 3: Очистка старых кешей (LRU eviction)** (1 день)
-
-**Добавить в IR Cache:**
-```rust
-use lru::LruCache;
-
-// Ограничиваем размер кеша (например, 100 файлов)
-ir_cache: Arc<RwLock<LruCache<u64, Arc<SemanticProgram>>>>
-
-// Или time-based eviction
-ir_cache_timestamps: Arc<RwLock<HashMap<u64, Instant>>>
-```
-
-**Цель:**
-- ✅ Ограничение использования памяти
-- ✅ Автоматическая очистка неактуальных IR
-
-**Task 4: Метрики производительности** (1 день)
-
-**Добавить логирование:**
-```rust
-info!("📊 IR Cache stats: hits={}, misses={}, hit_rate={:.1}%",
-    cache_hits, cache_misses, hit_rate);
-
-info!("⏱️ Hover performance: parse={}ms, ir_convert={}ms, lookup={}ms, total={}ms",
-    parse_time, ir_time, lookup_time, total_time);
-```
-
-**✅ РЕАЛИЗОВАНО (2025-11-01):**
-
-**Компоненты:**
-- ✅ IR Cache с LRU eviction (capacity: 100 файлов) — [ir_cache.rs](backend/src/system/ir_cache.rs)
-- ✅ Интеграция в get_hover_info() — парсинг только при cache MISS — [type_system_service.rs:560-703](backend/src/application/type_system_service.rs#L560-L703)
-- ✅ xxHash64 для быстрого хеширования (2-3x быстрее DefaultHasher) — [type_system_service.rs:505-510](backend/src/application/type_system_service.rs#L505-L510)
-- ✅ Метрики производительности — замеры parse/lookup/total time — [type_system_service.rs:679-700](backend/src/application/type_system_service.rs#L679-L700)
-- ✅ Периодический вывод статистики (каждые 100 hovers)
-- ✅ LSP invalidation при изменении файла (didChange notification) — [lsp_server.rs:629-634](backend/src/bin/lsp_server.rs#L629-L634)
-- ✅ URI → Hash mapping для умной инвалидации кеша — [type_system_service.rs:41-54](backend/src/application/type_system_service.rs#L41-L54)
-- ✅ Async-safe через RwLock и Arc
-- ✅ 4/4 интеграционных тестов проходят — [ir_cache_integration_test.rs](backend/tests/ir_cache_integration_test.rs)
-
-**Результаты:**
-- ⚡ Первый hover: 50-100ms (парсинг + кеш)
-- ⚡ Повторный hover: <5ms (cache HIT — измерено в тестах)
-- ⚡ Cache hit rate: >90% в реальном использовании
-- 💾 Потребление памяти: ~10MB для 100 файлов
-
-**Тестирование:**
-1. Открыть большой `.bsl` файл (1000+ строк)
-2. Hover на переменной — **первый раз может быть 50ms** (парсинг + кеш)
-3. Hover на другой переменной — **<5ms** (кеш попадание)
-4. Изменить файл (добавить строку)
-5. Hover снова — **50ms** (новый hash → ре-парсинг)
-6. Hover повторно — **<5ms** (кеш попадание для нового содержимого)
-
----
-
-### 🔧 Milestone 2.14: Hash Unification — Централизация hash_content() ✅ (2025-11-01)
-
-**Статус:** ✅ ЗАВЕРШЁН
-
-**Приоритет:** 🟢 LOW — улучшение единообразия кода (не критично для функциональности)
-
-**Проблема:**
-После Milestone 2.13 Reviewer обнаружил **4 дублирования** `hash_content()` с разными алгоритмами:
-- `backend/src/application/ast_to_ir.rs:829-836` (DefaultHasher)
-- `backend/src/application/type_system_service.rs:509-517` (xxHash64)
-- `backend/src/system/tree_cache.rs:106-113` (DefaultHasher)
-- `shared/src/parsing/mod.rs:66-71` (DefaultHasher)
-
-**Решение:**
-Централизация в `shared/src/utils/hash.rs`:
-```rust
-/// Быстрое хеширование содержимого для кеш-ключей
-pub fn hash_content(content: &str) -> u64 {
-    use xxhash_rust::xxh64::xxh64;
-    xxh64(content.as_bytes(), 0) // seed = 0 для детерминированности
-}
-```
-
-**Результаты:**
-
-Архитектура:
-- ✅ **1 определение** hash_content (shared/src/utils/hash.rs:20)
-- ✅ **0 дублирований** (удалено ~25 строк кода)
-- ✅ **4 импорта** через `use bsl_shared::utils::hash::hash_content`
-- ✅ DRY принцип соблюдён идеально
-
-Тестирование (Tester: 9.5/10):
-- ✅ 215/215 core tests passed (143 shared + 72 backend)
-- ✅ 2 unit теста hash функции (deterministic, empty string)
-- ✅ IR Cache: 4/4 passed (37x ускорение сохранён)
-- ✅ Tree Cache: 2/2 passed (инкрементальный парсинг работает)
-- ✅ 0 регрессии
-
-Code Review (Reviewer: 9.2/10):
-- ✅ Архитектура: 10/10 (идеальная централизация)
-- ✅ Производительность: 10/10 (37x ускорение из 2.13 сохранён)
-- ✅ Безопасность: 10/10 (thread-safe, детерминированность)
-- ✅ Тестовое покрытие: 9/10
-- ✅ Регрессия: 10/10
-
-**Заметка:**
-Persistent Cache (`backend/src/system/persistent_cache.rs`) оставлен на SHA-256 для криптостойкости долговременного кеша на диске. In-memory cache использует xxHash64 для скорости. Это архитектурно обоснованная дифференциация.
-
-**Commit:** 5dce0f3 — feat: Milestone 2.14 - Hash Unification ✅
+**Итого завершено:** 13 Milestones
+**Прогресс Версии 2.0:** ~65% завершено
 
 ---
 

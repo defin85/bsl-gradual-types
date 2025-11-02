@@ -128,7 +128,7 @@ impl ConfigurationDiscovery {
                     let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
 
                     if tag_name == "Properties" {
-                        in_properties = false;
+                        // Завершаем парсинг при выходе из блока Properties
                         tracing::trace!("  → Вышли из </Properties> — завершаем парсинг");
                         break; // ⚡ ОПТИМИЗАЦИЯ: не читаем весь файл!
                     } else if current_tag.as_ref() == Some(&tag_name) {
@@ -437,6 +437,7 @@ impl ConfigurationDiscovery {
     ///
     /// Если Configuration.xml находится прямо в base_path - возвращает base_path.
     /// Иначе сканирует подпапки и возвращает первую подпапку с Configuration.xml.
+    #[allow(dead_code)] // Вспомогательный метод для будущего использования
     fn find_configuration_folder(&self) -> Result<PathBuf> {
         // Сначала проверяем прямо в base_path (обратная совместимость)
         let direct_config = self.base_path.join("Configuration.xml");

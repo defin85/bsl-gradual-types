@@ -2293,6 +2293,97 @@ impl TypeSystemService {
     pub async fn get_ir_cache_stats(&self) -> crate::system::IrCacheStats {
         self.ir_cache.get_stats().await
     }
+
+    /// MILESTONE 2.17: Загрузить типы из конфигурации 1С
+    ///
+    /// Правильный способ загрузки конфигурационных типов через Application Layer
+    /// (вместо прямого доступа LSP к TypeRepository).
+    ///
+    /// # Параметры
+    /// - `config_path` - Путь к папке конфигурации (содержащей Configuration.xml)
+    ///
+    /// # Возвращает
+    /// Result<usize> - Количество успешно загруженных типов
+    ///
+    /// # Ошибки
+    /// - Если config_path не существует или невалидна
+    /// - Если Configuration.xml отсутствует
+    /// - Если парсинг метаданных не удался
+    /// - Если загрузка типов в TypeRepository не удалась
+    ///
+    /// # Примечание
+    /// Этот метод обеспечивает правильное разделение слоёв архитектуры:
+    /// - LSP Server (Presentation) → TypeSystemService (Application) → TypeRepository (Domain)
+    /// - Вместо: LSP Server → TypeRepository (обход Application Layer)
+    pub fn load_configuration_types(&self, config_path: &std::path::Path) -> Result<usize> {
+        use crate::data::loaders::config_metadata_parser::ConfigurationDiscovery;
+
+        info!(
+            "📦 Loading configuration types from: {}",
+            config_path.display()
+        );
+
+        // Валидация пути (защита от path traversal)
+        if !config_path.exists() {
+            anyhow::bail!("Configuration path does not exist: {}", config_path.display());
+        }
+
+        if !config_path.is_dir() {
+            anyhow::bail!("Configuration path is not a directory");
+        }
+
+        let config_xml = config_path.join("Configuration.xml");
+        if !config_xml.exists() {
+            anyhow::bail!("Configuration.xml not found in directory");
+        }
+
+        // Канонизация пути (защита от ../..)
+        let canonical_path = config_path
+            .canonicalize()
+            .map_err(|e| anyhow::anyhow!("Invalid configuration path: {}", e))?;
+
+        // Обнаружение метаданных
+        let discovery = ConfigurationDiscovery::new(canonical_path.clone());
+        let metadata = discovery
+            .discover_all_metadata()
+            .map_err(|e| anyhow::anyhow!("Failed to discover metadata: {}", e))?;
+
+        info!("📋 Discovered {} metadata objects", metadata.len());
+
+        // Загрузка типов батчами для производительности
+        const BATCH_SIZE: usize = 100;
+        let mut loaded = 0;
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+
+        for obj in metadata.iter() {
+            let raw_type = obj.to_raw_type_data(None);
+            batch.push(raw_type);
+
+            if batch.len() >= BATCH_SIZE {
+                self.analysis_engine
+                    .get_repository()
+                    .load_types(batch.clone())?;
+                loaded += batch.len();
+                batch.clear();
+            }
+        }
+
+        // Загружаем остаток
+        if !batch.is_empty() {
+            self.analysis_engine
+                .get_repository()
+                .load_types(batch.clone())?;
+            loaded += batch.len();
+        }
+
+        info!(
+            "✅ Successfully loaded {} configuration types from {}",
+            loaded,
+            canonical_path.display()
+        );
+
+        Ok(loaded)
+    }
 }
 
 /// Контекст для автодополнения

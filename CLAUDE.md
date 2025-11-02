@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 📋 Содержание
 
 1. [Правила работы с Roadmap](#правила-работы-с-roadmap)
+   - [Навигация по Roadmap](#-навигация-по-roadmap) — ссылки на ROADMAP_2025.md и ROADMAP_ARCHIVE_2025.md
 2. [Архитектура проекта](#архитектура-проекта)
 3. [Команды разработки](#команды-разработки)
 4. [Архитектурная диаграмма](#архитектурная-диаграмма)
@@ -77,6 +78,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - Если тесты не проходят — не считай задачу выполненной
 
 **Цель:** Реальный прогресс вместо иллюзии выполнения. Пользователь должен видеть объективную картину, а не оптимистичные предположения.
+
+### 📍 Навигация по Roadmap
+
+**Актуальный roadmap:** [ROADMAP_2025.md](ROADMAP_2025.md)
+**Архив завершённых Milestones:** [ROADMAP_ARCHIVE_2025.md](ROADMAP_ARCHIVE_2025.md)
+
+**Структура документации:**
+- **ROADMAP_2025.md** — актуальный план развития проекта с компактным списком завершённых Milestones (таблица) и детальным описанием планируемых этапов
+- **ROADMAP_ARCHIVE_2025.md** — архив с полными детальными описаниями всех 13 завершённых Milestones (задачи, примеры кода, тесты)
+
+**Завершённые Milestones (13):**
+- 2.1 Tree-sitter Integration
+- 2.2 VSCode Extension Optimization
+- 2.3 Advanced Type System
+- 2.5 Унификация визуализации типов
+- 2.7 TreeSitterAdapter
+- 2.8 Semantic IR Layer
+- 2.9 Inline Scope Analysis
+- 2.10 LSP Configuration + Type Index
+- 2.11 Tree-Sitter Span Extraction
+- 2.13 IR Caching & Performance Optimization
+- 2.14 Hash Unification
+- 2.16 Semantic Tree Visualization
+- 2.18 LSP Syntax Error Diagnostics
+
+**Прогресс Версии 2.0:** ~65% завершено
 
 ---
 

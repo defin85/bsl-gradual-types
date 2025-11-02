@@ -141,9 +141,9 @@ export async function addPlatformDocumentation(provider: BslPlatformDocsProvider
                 // Финализация
                 updateIndexingProgress(currentStep++, 'Finalizing...', 95);
                 progress.report({ increment: 20, message: 'Finalizing...' });
-                
-                finishIndexing(true);
-                
+
+                finishIndexing(); // Success
+
                 // Формируем сообщение о результате
                 let message = `✅ Platform documentation added for version ${version}`;
                 if (shcntxPath && shlangPath) {
@@ -167,7 +167,7 @@ export async function addPlatformDocumentation(provider: BslPlatformDocsProvider
                 provider.refresh();
                 
             } catch (error) {
-                finishIndexing(false);
+                finishIndexing(`Failed to add platform documentation: ${error}`);
                 vscode.window.showErrorMessage(`Failed to add platform documentation: ${error}`);
                 outputChannel.appendLine(`Error adding platform docs: ${error}`);
             }
@@ -276,17 +276,17 @@ export async function parsePlatformDocumentation(version: string): Promise<void>
             // Этап 3: Завершение
             updateIndexingProgress(3, 'Finalizing...', 95);
             progress.report({ increment: 15, message: 'Finalizing...' });
-            
-            finishIndexing(true);
+
+            finishIndexing(); // Success
 
             vscode.window.showInformationMessage(
                 `✅ Platform documentation re-parsed successfully for version ${version}`
             );
-            
+
             outputChannel.appendLine(`Re-parse result: ${result}`);
-            
+
         } catch (error) {
-            finishIndexing(false);
+            finishIndexing(`Failed to re-parse platform documentation: ${error}`);
             vscode.window.showErrorMessage(`Failed to re-parse platform documentation: ${error}`);
             outputChannel.appendLine(`Error re-parsing platform docs: ${error}`);
         }

@@ -398,6 +398,12 @@
                 "title": "Показать семантическое дерево",
                 "category": "BSL",
                 "icon": "$(type-hierarchy-sub)"
+            },
+            {
+                "command": "bslAnalyzer.parseConfiguration",
+                "title": "BSL: Загрузить типы из конфигурации",
+                "category": "BSL Configuration",
+                "icon": "$(folder-opened)"
             }
         ],
         "viewsContainers": {

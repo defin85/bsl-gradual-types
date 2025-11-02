@@ -350,8 +350,10 @@ impl SystemCoordinator {
 
         // Создаём discovery и обнаруживаем все объекты
         let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+
+        // Без progress_callback в публичном методе (для обратной совместимости)
         let metadata_objects = discovery
-            .discover_all_metadata()
+            .discover_all_metadata(None::<fn(crate::data::loaders::progress::ProgressUpdate)>)
             .map_err(|e| anyhow::anyhow!("Не удалось обнаружить метаданные: {}", e))?;
 
         info!(
@@ -455,8 +457,12 @@ impl SystemCoordinator {
                     .unwrap_or_default()
             );
 
+            // Без progress_callback в публичном методе (для обратной совместимости)
             let metadata = discovery
-                .discover_metadata_in_configuration(&config_info)
+                .discover_metadata_in_configuration(
+                    &config_info,
+                    None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
+                )
                 .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))?;
 
             let prefix = config_info.prefix.as_deref();

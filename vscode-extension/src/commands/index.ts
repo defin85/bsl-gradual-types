@@ -590,32 +590,85 @@ export async function registerCommands(context: vscode.ExtensionContext) {
 
     // Test Progress System (debug only)
     await safeRegisterCommand('bslAnalyzer.testProgress', async () => {
-        outputChannel.appendLine('🧪 Testing progress system...');
-        
-        startIndexing(5);
-        
+        outputChannel.appendLine('');
+        outputChannel.appendLine('═══════════════════════════════════════════════════════');
+        outputChannel.appendLine('🧪 TESTING PROGRESS SYSTEM (Enhanced Debug Mode)');
+        outputChannel.appendLine('═══════════════════════════════════════════════════════');
+        outputChannel.appendLine('');
+
+        const totalSteps = 20; // Эмулируем парсинг 20 типов
+        const stepDelay = 500; // 500ms между обновлениями (как в реальном throttling)
+
+        outputChannel.appendLine(`📊 Configuration:`);
+        outputChannel.appendLine(`   - Total steps: ${totalSteps}`);
+        outputChannel.appendLine(`   - Delay per step: ${stepDelay}ms`);
+        outputChannel.appendLine(`   - UI Throttling: 500ms (matches production)`);
+        outputChannel.appendLine('');
+
+        outputChannel.appendLine('🚀 Calling startIndexing()...');
+        startIndexing(4); // 4 фазы как в реальной индексации
+        outputChannel.appendLine('   ✓ startIndexing() completed');
+        outputChannel.appendLine('');
+
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: 'Testing Progress System',
             cancellable: false
         }, async (progress) => {
-            for (let i = 1; i <= 5; i++) {
-                const stepName = `Step ${i}: Processing...`;
-                const progressPercent = Math.floor((i / 5) * 100);
-                
-                updateIndexingProgress(i, stepName, progressPercent);
-                progress.report({ 
-                    increment: 20, 
-                    message: stepName 
+            const mockTypes = [
+                'Строка', 'Число', 'Дата', 'Булево', 'Массив',
+                'Структура', 'Соответствие', 'СписокЗначений', 'ТаблицаЗначений',
+                'Справочники.Контрагенты', 'Документы.РеализацияТоваровУслуг',
+                'РегистрыСведений.Цены', 'Обработки.ЗагрузкаДанных',
+                'HTTPСоединение', 'XMLЧтение', 'XMLЗапись',
+                'ФайловыйПоток', 'ЧтениеJSON', 'ЗаписьJSON', 'ДвоичныеДанные'
+            ];
+
+            for (let i = 1; i <= totalSteps; i++) {
+                const currentType = mockTypes[i - 1] || `Тип${i}`;
+                const progressPercent = Math.floor((i / totalSteps) * 100);
+                const eta = Math.floor(((totalSteps - i) * stepDelay) / 1000);
+
+                // Детальное логирование каждого шага
+                outputChannel.appendLine(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+                outputChannel.appendLine(`📦 Step ${i}/${totalSteps} (${progressPercent}%)`);
+                outputChannel.appendLine(`   Current Type: ${currentType}`);
+                outputChannel.appendLine(`   ETA: ${eta}s`);
+
+                const stepName = `Парсинг типа ${i}/${totalSteps}: ${currentType}`;
+
+                outputChannel.appendLine(`   Calling updateIndexingProgress(${progressPercent}, "${stepName}", ${eta})...`);
+                updateIndexingProgress(progressPercent, stepName, eta);
+
+                outputChannel.appendLine(`   Updating VSCode notification...`);
+                progress.report({
+                    increment: Math.floor(100 / totalSteps),
+                    message: `${currentType} (${progressPercent}%)`
                 });
 
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                outputChannel.appendLine(`   ⏳ Sleeping ${stepDelay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, stepDelay));
+                outputChannel.appendLine(`   ✓ Step ${i} completed`);
             }
 
+            outputChannel.appendLine('');
+            outputChannel.appendLine('🏁 Calling finishIndexing()...');
             finishIndexing(); // Test completed successfully
+            outputChannel.appendLine('   ✓ finishIndexing() completed');
         });
-        
-        outputChannel.appendLine('✅ Progress system test completed');
+
+        outputChannel.appendLine('');
+        outputChannel.appendLine('═══════════════════════════════════════════════════════');
+        outputChannel.appendLine('✅ PROGRESS SYSTEM TEST COMPLETED');
+        outputChannel.appendLine('═══════════════════════════════════════════════════════');
+        outputChannel.appendLine('');
+        outputChannel.appendLine('📋 Summary:');
+        outputChannel.appendLine(`   - Total steps processed: ${totalSteps}`);
+        outputChannel.appendLine(`   - Total time: ~${(totalSteps * stepDelay) / 1000}s`);
+        outputChannel.appendLine(`   - Status: SUCCESS ✓`);
+        outputChannel.appendLine('');
+        outputChannel.appendLine('💡 Check the status bar at the bottom for visual progress!');
+        outputChannel.appendLine('');
     });
 
     // Parse Configuration (MILESTONE 2.17)

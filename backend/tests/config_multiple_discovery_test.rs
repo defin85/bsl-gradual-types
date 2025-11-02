@@ -176,7 +176,7 @@ fn test_backward_compatibility_discover_all_metadata() {
     let first_config = &configurations[0];
 
     // Act - старый метод (должен возвращать метаданные из первой конфигурации)
-    let old_metadata_result = discovery.discover_all_metadata();
+    let old_metadata_result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     // Assert
     assert!(

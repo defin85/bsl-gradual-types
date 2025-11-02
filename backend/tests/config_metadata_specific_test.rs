@@ -33,7 +33,7 @@ fn test_load_metadata_from_base_configuration() {
         "Первая конфигурация должна быть базовой"
     );
 
-    let metadata_result = discovery.discover_metadata_in_configuration(base_config);
+    let metadata_result = discovery.discover_metadata_in_configuration(base_config, None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     // Assert
     assert!(
@@ -112,7 +112,7 @@ fn test_load_metadata_from_extension_configuration() {
         "Имя расширения должно быть 'ТестовоеРасширение'"
     );
 
-    let metadata_result = discovery.discover_metadata_in_configuration(extension);
+    let metadata_result = discovery.discover_metadata_in_configuration(extension, None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     // Assert
     assert!(
@@ -178,7 +178,7 @@ fn test_sequential_metadata_loading_all_configurations() {
         let icon = if config.is_base() { "📦" } else { "🧩" };
         println!("  {}. {} {}", idx + 1, icon, config.name);
 
-        let metadata_result = discovery.discover_metadata_in_configuration(config);
+        let metadata_result = discovery.discover_metadata_in_configuration(config, None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
         assert!(
             metadata_result.is_ok(),
@@ -226,7 +226,7 @@ fn test_metadata_objects_structure() {
     let configurations = configurations_result.unwrap();
     let base_config = &configurations[0];
 
-    let metadata_result = discovery.discover_metadata_in_configuration(base_config);
+    let metadata_result = discovery.discover_metadata_in_configuration(base_config, None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
     assert!(metadata_result.is_ok());
 
     let metadata = metadata_result.unwrap();
@@ -285,7 +285,7 @@ fn test_catalog_facets() {
     let configurations = configurations_result.unwrap();
     let base_config = &configurations[0];
 
-    let metadata_result = discovery.discover_metadata_in_configuration(base_config);
+    let metadata_result = discovery.discover_metadata_in_configuration(base_config, None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
     assert!(metadata_result.is_ok());
 
     let metadata = metadata_result.unwrap();
@@ -330,7 +330,7 @@ fn test_attributes_and_tabular_sections() {
     let configurations = configurations_result.unwrap();
     let base_config = &configurations[0];
 
-    let metadata_result = discovery.discover_metadata_in_configuration(base_config);
+    let metadata_result = discovery.discover_metadata_in_configuration(base_config, None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
     assert!(metadata_result.is_ok());
 
     let metadata = metadata_result.unwrap();

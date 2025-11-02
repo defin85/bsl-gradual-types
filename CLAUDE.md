@@ -543,19 +543,17 @@ cargo run -p bsl-backend --bin bsl-web-server -- --port 3001 --enable-cors true
 # http://127.0.0.1:3001
 ```
 
-## Configuration-guided Discovery
+## Configuration Discovery
 
-Новый компонент для автоматического парсинга конфигураций 1С:
+Компонент для автоматического парсинга конфигураций 1С:
 
 ```bash
-# Быстрый тест
-cargo run --example test_simple
-
-# Unit-тесты
-cargo test --test config_parser_guided_test
-
 # Использование в коде
-use bsl_gradual_types::data::loaders::config_parser_guided_discovery::ConfigurationGuidedParser;
+use bsl_backend::data::loaders::ConfigurationDiscovery;
+
+let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+let configurations = discovery.discover_all_configurations()?;
+let metadata = discovery.discover_metadata_in_configuration(&configurations[0], None)?;
 ```
 
 ## Важные особенности

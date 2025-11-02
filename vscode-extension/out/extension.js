@@ -6734,8 +6734,8 @@ var require_protocolCodeAction = __commonJS({
   "node_modules/vscode-languageclient/lib/common/protocolCodeAction.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    var vscode19 = require("vscode");
-    var ProtocolCodeAction = class extends vscode19.CodeAction {
+    var vscode20 = require("vscode");
+    var ProtocolCodeAction = class extends vscode20.CodeAction {
       constructor(title, data) {
         super(title);
         this.data = data;
@@ -6751,7 +6751,7 @@ var require_protocolDiagnostic = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.ProtocolDiagnostic = exports2.DiagnosticCode = void 0;
-    var vscode19 = require("vscode");
+    var vscode20 = require("vscode");
     var Is = require_is();
     var DiagnosticCode;
     (function(DiagnosticCode2) {
@@ -6761,7 +6761,7 @@ var require_protocolDiagnostic = __commonJS({
       }
       DiagnosticCode2.is = is;
     })(DiagnosticCode = exports2.DiagnosticCode || (exports2.DiagnosticCode = {}));
-    var ProtocolDiagnostic = class extends vscode19.Diagnostic {
+    var ProtocolDiagnostic = class extends vscode20.Diagnostic {
       constructor(range, message, severity, data) {
         super(range, message, severity);
         this.data = data;
@@ -10675,7 +10675,7 @@ var require_notebook = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.NotebookDocumentSyncFeature = void 0;
-    var vscode19 = require("vscode");
+    var vscode20 = require("vscode");
     var minimatch = require_minimatch();
     var proto = require_main3();
     var UUID = require_uuid();
@@ -10730,9 +10730,9 @@ var require_notebook = __commonJS({
         c2p2.asNotebookCell = asNotebookCell;
         function asNotebookCellKind(kind) {
           switch (kind) {
-            case vscode19.NotebookCellKind.Markup:
+            case vscode20.NotebookCellKind.Markup:
               return proto.NotebookCellKind.Markup;
-            case vscode19.NotebookCellKind.Code:
+            case vscode20.NotebookCellKind.Code:
               return proto.NotebookCellKind.Code;
           }
         }
@@ -10983,25 +10983,25 @@ var require_notebook = __commonJS({
         this.notebookDidOpen = /* @__PURE__ */ new Set();
         this.disposables = [];
         this.selector = client2.protocol2CodeConverter.asDocumentSelector($NotebookDocumentSyncOptions.asDocumentSelector(options));
-        vscode19.workspace.onDidOpenNotebookDocument((notebookDocument) => {
+        vscode20.workspace.onDidOpenNotebookDocument((notebookDocument) => {
           this.notebookDidOpen.add(notebookDocument.uri.toString());
           this.didOpen(notebookDocument);
         }, void 0, this.disposables);
-        for (const notebookDocument of vscode19.workspace.notebookDocuments) {
+        for (const notebookDocument of vscode20.workspace.notebookDocuments) {
           this.notebookDidOpen.add(notebookDocument.uri.toString());
           this.didOpen(notebookDocument);
         }
-        vscode19.workspace.onDidChangeNotebookDocument((event) => this.didChangeNotebookDocument(event), void 0, this.disposables);
+        vscode20.workspace.onDidChangeNotebookDocument((event) => this.didChangeNotebookDocument(event), void 0, this.disposables);
         if (this.options.save === true) {
-          vscode19.workspace.onDidSaveNotebookDocument((notebookDocument) => this.didSave(notebookDocument), void 0, this.disposables);
+          vscode20.workspace.onDidSaveNotebookDocument((notebookDocument) => this.didSave(notebookDocument), void 0, this.disposables);
         }
-        vscode19.workspace.onDidCloseNotebookDocument((notebookDocument) => {
+        vscode20.workspace.onDidCloseNotebookDocument((notebookDocument) => {
           this.didClose(notebookDocument);
           this.notebookDidOpen.delete(notebookDocument.uri.toString());
         }, void 0, this.disposables);
       }
       getState() {
-        for (const notebook of vscode19.workspace.notebookDocuments) {
+        for (const notebook of vscode20.workspace.notebookDocuments) {
           const matchingCells = this.getMatchingCells(notebook);
           if (matchingCells !== void 0) {
             return { kind: "document", id: "$internal", registrations: true, matches: true };
@@ -11013,10 +11013,10 @@ var require_notebook = __commonJS({
         return "notebook";
       }
       handles(textDocument) {
-        return vscode19.languages.match(this.selector, textDocument) > 0;
+        return vscode20.languages.match(this.selector, textDocument) > 0;
       }
       didOpenNotebookCellTextDocument(notebookDocument, cell) {
-        if (vscode19.languages.match(this.selector, cell.document) === 0) {
+        if (vscode20.languages.match(this.selector, cell.document) === 0) {
           return;
         }
         if (!this.notebookDidOpen.has(notebookDocument.uri.toString())) {
@@ -11047,7 +11047,7 @@ var require_notebook = __commonJS({
         }
       }
       didChangeNotebookCellTextDocument(notebookDocument, event) {
-        if (vscode19.languages.match(this.selector, event.document) === 0) {
+        if (vscode20.languages.match(this.selector, event.document) === 0) {
           return;
         }
         this.doSendChange({
@@ -11320,7 +11320,7 @@ var require_notebook = __commonJS({
         this.client = client2;
         this.registrations = /* @__PURE__ */ new Map();
         this.registrationType = proto.NotebookDocumentSyncRegistrationType.type;
-        vscode19.workspace.onDidOpenTextDocument((textDocument) => {
+        vscode20.workspace.onDidOpenTextDocument((textDocument) => {
           if (textDocument.uri.scheme !== _NotebookDocumentSyncFeature.CellScheme) {
             return;
           }
@@ -11334,7 +11334,7 @@ var require_notebook = __commonJS({
             }
           }
         });
-        vscode19.workspace.onDidChangeTextDocument((event) => {
+        vscode20.workspace.onDidChangeTextDocument((event) => {
           if (event.contentChanges.length === 0) {
             return;
           }
@@ -11352,7 +11352,7 @@ var require_notebook = __commonJS({
             }
           }
         });
-        vscode19.workspace.onDidCloseTextDocument((textDocument) => {
+        vscode20.workspace.onDidCloseTextDocument((textDocument) => {
           if (textDocument.uri.scheme !== _NotebookDocumentSyncFeature.CellScheme) {
             return;
           }
@@ -11417,7 +11417,7 @@ var require_notebook = __commonJS({
         if (textDocument.uri.scheme !== _NotebookDocumentSyncFeature.CellScheme) {
           return false;
         }
-        if (this.dedicatedChannel !== void 0 && vscode19.languages.match(this.dedicatedChannel, textDocument) > 0) {
+        if (this.dedicatedChannel !== void 0 && vscode20.languages.match(this.dedicatedChannel, textDocument) > 0) {
           return true;
         }
         for (const provider of this.registrations.values()) {
@@ -11437,7 +11437,7 @@ var require_notebook = __commonJS({
       }
       findNotebookDocumentAndCell(textDocument) {
         const uri = textDocument.uri.toString();
-        for (const notebookDocument of vscode19.workspace.notebookDocuments) {
+        for (const notebookDocument of vscode20.workspace.notebookDocuments) {
           for (const cell of notebookDocument.getCells()) {
             if (cell.document.uri.toString() === uri) {
               return [notebookDocument, cell];
@@ -13919,7 +13919,7 @@ var require_semanticTokens = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.SemanticTokensFeature = void 0;
-    var vscode19 = require("vscode");
+    var vscode20 = require("vscode");
     var vscode_languageserver_protocol_1 = require_main3();
     var features_1 = require_features();
     var Is = require_is();
@@ -13997,7 +13997,7 @@ var require_semanticTokens = __commonJS({
         const selector = options.documentSelector;
         const fullProvider = Is.boolean(options.full) ? options.full : options.full !== void 0;
         const hasEditProvider = options.full !== void 0 && typeof options.full !== "boolean" && options.full.delta === true;
-        const eventEmitter = new vscode19.EventEmitter();
+        const eventEmitter = new vscode20.EventEmitter();
         const documentProvider = fullProvider ? {
           onDidChangeSemanticTokens: eventEmitter.event,
           provideDocumentSemanticTokens: (document, token) => {
@@ -14069,12 +14069,12 @@ var require_semanticTokens = __commonJS({
         const legend = client2.protocol2CodeConverter.asSemanticTokensLegend(options.legend);
         const documentSelector = client2.protocol2CodeConverter.asDocumentSelector(selector);
         if (documentProvider !== void 0) {
-          disposables.push(vscode19.languages.registerDocumentSemanticTokensProvider(documentSelector, documentProvider, legend));
+          disposables.push(vscode20.languages.registerDocumentSemanticTokensProvider(documentSelector, documentProvider, legend));
         }
         if (rangeProvider !== void 0) {
-          disposables.push(vscode19.languages.registerDocumentRangeSemanticTokensProvider(documentSelector, rangeProvider, legend));
+          disposables.push(vscode20.languages.registerDocumentRangeSemanticTokensProvider(documentSelector, rangeProvider, legend));
         }
-        return [new vscode19.Disposable(() => disposables.forEach((item) => item.dispose())), { range: rangeProvider, full: documentProvider, onDidChangeSemanticTokensEmitter: eventEmitter }];
+        return [new vscode20.Disposable(() => disposables.forEach((item) => item.dispose())), { range: rangeProvider, full: documentProvider, onDidChangeSemanticTokensEmitter: eventEmitter }];
       }
     };
     exports2.SemanticTokensFeature = SemanticTokensFeature;
@@ -18414,7 +18414,7 @@ __export(extension_exports, {
   deactivate: () => deactivate
 });
 module.exports = __toCommonJS(extension_exports);
-var vscode18 = __toESM(require("vscode"));
+var vscode19 = __toESM(require("vscode"));
 var path4 = __toESM(require("path"));
 var fs6 = __toESM(require("fs"));
 init_config();
@@ -19711,7 +19711,7 @@ function getNonce2() {
 }
 
 // src/commands/index.ts
-var vscode17 = __toESM(require("vscode"));
+var vscode18 = __toESM(require("vscode"));
 init_progress();
 
 // src/webviews/webviewContent.ts
@@ -20070,6 +20070,56 @@ function getMetricsWebviewContentSimple(metrics) {
     `;
 }
 
+// src/commands/parseConfiguration.ts
+var vscode17 = __toESM(require("vscode"));
+function registerParseConfigurationCommand(context, client2) {
+  return vscode17.commands.registerCommand("bslAnalyzer.parseConfiguration", async () => {
+    const folderUri = await vscode17.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: "\u0412\u044B\u0431\u0440\u0430\u0442\u044C \u043F\u0430\u043F\u043A\u0443 \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438",
+      title: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0430\u043F\u043A\u0443 \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438 (\u0441\u043E\u0434\u0435\u0440\u0436\u0430\u0449\u0443\u044E Configuration.xml)"
+    });
+    if (!folderUri || folderUri.length === 0) {
+      return;
+    }
+    const configPath = folderUri[0].fsPath;
+    const config = vscode17.workspace.getConfiguration("bslAnalyzer");
+    await config.update("configurationPath", configPath, vscode17.ConfigurationTarget.Workspace);
+    try {
+      const result = await vscode17.window.withProgress(
+        {
+          location: vscode17.ProgressLocation.Notification,
+          title: "\u041F\u0430\u0440\u0441\u0438\u043D\u0433 \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438",
+          cancellable: false
+        },
+        async () => {
+          return await client2.sendRequest("workspace/executeCommand", {
+            command: "bsl.parseConfiguration",
+            arguments: [{ configPath }]
+            // ✅ Соответствует camelCase в LSP
+          });
+        }
+      );
+      const response = result;
+      if (response.success) {
+        vscode17.window.showInformationMessage(
+          `\u2705 \u0422\u0438\u043F\u044B \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438 \u0443\u0441\u043F\u0435\u0448\u043D\u043E \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u044B: ${response.loadedTypes} \u0442\u0438\u043F\u043E\u0432`
+        );
+      } else {
+        vscode17.window.showErrorMessage(
+          `\u274C \u041E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438: ${response.message || "Unknown error"}`
+        );
+      }
+    } catch (error) {
+      vscode17.window.showErrorMessage(
+        `\u274C \u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0430\u0440\u0441\u0438\u043D\u0433\u0430 \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438: ${error}`
+      );
+    }
+  });
+}
+
 // src/commands/index.ts
 var outputChannel5;
 var commandsRegistered = false;
@@ -20084,7 +20134,7 @@ async function registerCommands(context) {
   outputChannel5.appendLine("\u{1F4DD} Registering BSL Analyzer commands...");
   const safeRegisterCommand = async (commandId, callback) => {
     try {
-      const disposable = vscode17.commands.registerCommand(commandId, callback);
+      const disposable = vscode18.commands.registerCommand(commandId, callback);
       context.subscriptions.push(disposable);
       outputChannel5.appendLine(`\u2705 Registered command: ${commandId}`);
       return disposable;
@@ -20098,61 +20148,61 @@ async function registerCommands(context) {
     }
   };
   await safeRegisterCommand("bslAnalyzer.analyzeFile", async () => {
-    const editor = vscode17.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode17.window.activeTextEditor;
+    const editor = vscode18.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode18.window.activeTextEditor;
     if (!editor || editor.document.languageId !== "bsl") {
-      vscode17.window.showWarningMessage("Please open a BSL file to analyze");
+      vscode18.window.showWarningMessage("Please open a BSL file to analyze");
       return;
     }
     try {
-      const client2 = getLanguageClient();
-      if (client2 && client2.isRunning()) {
-        await client2.sendRequest("textDocument/diagnostic", {
+      const client3 = getLanguageClient();
+      if (client3 && client3.isRunning()) {
+        await client3.sendRequest("textDocument/diagnostic", {
           textDocument: {
             uri: editor.document.uri.toString()
           }
         });
-        vscode17.window.showInformationMessage("\u2705 File analysis completed");
+        vscode18.window.showInformationMessage("\u2705 File analysis completed");
       } else {
         outputChannel5.appendLine("\u26A0\uFE0F LSP server not running - please start it first");
-        vscode17.window.showWarningMessage("LSP server is not running. Please wait for it to start.");
+        vscode18.window.showWarningMessage("LSP server is not running. Please wait for it to start.");
       }
     } catch (error) {
-      vscode17.window.showErrorMessage(`Analysis failed: ${error}`);
+      vscode18.window.showErrorMessage(`Analysis failed: ${error}`);
     }
   });
   await safeRegisterCommand("bslAnalyzer.analyzeWorkspace", async () => {
-    const workspaceFolders = vscode17.workspace.workspaceFolders;
+    const workspaceFolders = vscode18.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) {
-      vscode17.window.showWarningMessage("No workspace folder is open");
+      vscode18.window.showWarningMessage("No workspace folder is open");
       return;
     }
     try {
-      const client2 = getLanguageClient();
-      if (client2 && client2.isRunning()) {
+      const client3 = getLanguageClient();
+      if (client3 && client3.isRunning()) {
         const firstFolder = workspaceFolders[0];
         if (!firstFolder) {
-          vscode17.window.showErrorMessage("No workspace folder found");
+          vscode18.window.showErrorMessage("No workspace folder found");
           return;
         }
-        await client2.sendRequest("workspace/executeCommand", {
+        await client3.sendRequest("workspace/executeCommand", {
           command: "bslAnalyzer.lsp.analyzeWorkspace",
           arguments: [firstFolder.uri.toString()]
         });
-        vscode17.window.showInformationMessage("\u2705 Workspace analysis completed");
+        vscode18.window.showInformationMessage("\u2705 Workspace analysis completed");
       } else {
-        vscode17.window.showErrorMessage("LSP server not running");
+        vscode18.window.showErrorMessage("LSP server not running");
       }
     } catch (error) {
-      vscode17.window.showErrorMessage(`Workspace analysis failed: ${error}`);
+      vscode18.window.showErrorMessage(`Workspace analysis failed: ${error}`);
     }
   });
   await safeRegisterCommand("bslAnalyzer.generateReports", async () => {
-    const workspaceFolders = vscode17.workspace.workspaceFolders;
+    const workspaceFolders = vscode18.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) {
-      vscode17.window.showWarningMessage("No workspace folder is open");
+      vscode18.window.showWarningMessage("No workspace folder is open");
       return;
     }
-    const outputDir = await vscode17.window.showInputBox({
+    const outputDir = await vscode18.window.showInputBox({
       prompt: "Enter output directory for reports",
       value: "./reports"
     });
@@ -20161,92 +20211,92 @@ async function registerCommands(context) {
     }
     updateStatusBar("BSL Analyzer: Generating reports...");
     try {
-      const client2 = getLanguageClient();
-      if (!client2) {
+      const client3 = getLanguageClient();
+      if (!client3) {
         throw new Error("LSP client is not running");
       }
       const firstFolder = workspaceFolders[0];
       if (!firstFolder) {
         throw new Error("No workspace folder found");
       }
-      await client2.sendRequest("workspace/executeCommand", {
+      await client3.sendRequest("workspace/executeCommand", {
         command: "bslAnalyzer.generateReports",
         arguments: [firstFolder.uri.toString(), outputDir]
       });
-      const openReports = await vscode17.window.showInformationMessage(
+      const openReports = await vscode18.window.showInformationMessage(
         "Reports generated successfully",
         "Open Reports Folder"
       );
       if (openReports) {
-        vscode17.commands.executeCommand("vscode.openFolder", vscode17.Uri.file(outputDir));
+        vscode18.commands.executeCommand("vscode.openFolder", vscode18.Uri.file(outputDir));
       }
       updateStatusBar("BSL Analyzer: Ready");
     } catch (error) {
-      vscode17.window.showErrorMessage(`Report generation failed: ${error}`);
+      vscode18.window.showErrorMessage(`Report generation failed: ${error}`);
       updateStatusBar("BSL Analyzer: Error");
     }
   });
   await safeRegisterCommand("bslAnalyzer.showMetrics", async () => {
-    const editor = vscode17.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode17.window.activeTextEditor;
+    const editor = vscode18.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode18.window.activeTextEditor;
     if (!editor || editor.document.languageId !== "bsl") {
-      vscode17.window.showWarningMessage("Please open a BSL file to show metrics");
+      vscode18.window.showWarningMessage("Please open a BSL file to show metrics");
       return;
     }
     try {
-      const client2 = getLanguageClient();
-      if (!client2) {
+      const client3 = getLanguageClient();
+      if (!client3) {
         throw new Error("LSP client is not running");
       }
-      const metrics = await client2.sendRequest("workspace/executeCommand", {
+      const metrics = await client3.sendRequest("workspace/executeCommand", {
         command: "bslAnalyzer.getMetrics",
         arguments: [editor.document.uri.toString()]
       });
       showMetricsWebview(context, metrics);
     } catch (error) {
-      vscode17.window.showErrorMessage(`Failed to get metrics: ${error}`);
+      vscode18.window.showErrorMessage(`Failed to get metrics: ${error}`);
     }
   });
   await safeRegisterCommand("bslAnalyzer.configureRules", async () => {
-    const workspaceFolders = vscode17.workspace.workspaceFolders;
+    const workspaceFolders = vscode18.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) {
-      vscode17.window.showWarningMessage("No workspace folder is open");
+      vscode18.window.showWarningMessage("No workspace folder is open");
       return;
     }
     const firstFolder = workspaceFolders[0];
     if (!firstFolder) {
-      vscode17.window.showWarningMessage("No workspace folder found");
+      vscode18.window.showWarningMessage("No workspace folder found");
       return;
     }
-    const rulesFile = vscode17.Uri.joinPath(firstFolder.uri, "bsl-rules.toml");
+    const rulesFile = vscode18.Uri.joinPath(firstFolder.uri, "bsl-rules.toml");
     try {
-      await vscode17.workspace.fs.stat(rulesFile);
-      const document = await vscode17.workspace.openTextDocument(rulesFile);
-      await vscode17.window.showTextDocument(document);
+      await vscode18.workspace.fs.stat(rulesFile);
+      const document = await vscode18.workspace.openTextDocument(rulesFile);
+      await vscode18.window.showTextDocument(document);
     } catch {
-      const createFile = await vscode17.window.showInformationMessage(
+      const createFile = await vscode18.window.showInformationMessage(
         "Rules configuration file not found. Would you like to create one?",
         "Create Rules File"
       );
       if (createFile) {
         try {
-          const client2 = getLanguageClient();
-          if (!client2) {
+          const client3 = getLanguageClient();
+          if (!client3) {
             throw new Error("LSP client is not running");
           }
-          await client2.sendRequest("workspace/executeCommand", {
+          await client3.sendRequest("workspace/executeCommand", {
             command: "bslAnalyzer.createRulesConfig",
             arguments: [rulesFile.toString()]
           });
-          const document = await vscode17.workspace.openTextDocument(rulesFile);
-          await vscode17.window.showTextDocument(document);
+          const document = await vscode18.workspace.openTextDocument(rulesFile);
+          await vscode18.window.showTextDocument(document);
         } catch (error) {
-          vscode17.window.showErrorMessage(`Failed to create rules file: ${error}`);
+          vscode18.window.showErrorMessage(`Failed to create rules file: ${error}`);
         }
       }
     }
   });
   await safeRegisterCommand("bslAnalyzer.searchType", async () => {
-    const typeName = await vscode17.window.showInputBox({
+    const typeName = await vscode18.window.showInputBox({
       prompt: 'Enter BSL type name to search (e.g., "\u041C\u0430\u0441\u0441\u0438\u0432", "\u0421\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A\u0438.\u041D\u043E\u043C\u0435\u043D\u043A\u043B\u0430\u0442\u0443\u0440\u0430")',
       placeHolder: "Type name..."
     });
@@ -20260,19 +20310,19 @@ async function registerCommands(context) {
       showTypeInfoWebview2(context, typeName, resultText);
       updateStatusBar("BSL Analyzer: Ready");
     } catch (error) {
-      vscode17.window.showErrorMessage(`Type search failed: ${error}`);
+      vscode18.window.showErrorMessage(`Type search failed: ${error}`);
       updateStatusBar("BSL Analyzer: Error");
     }
   });
   await safeRegisterCommand("bslAnalyzer.searchMethod", async () => {
-    const typeName = await vscode17.window.showInputBox({
+    const typeName = await vscode18.window.showInputBox({
       prompt: 'Enter type name (e.g., "\u041C\u0430\u0441\u0441\u0438\u0432", "\u0421\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A\u0438.\u041D\u043E\u043C\u0435\u043D\u043A\u043B\u0430\u0442\u0443\u0440\u0430")',
       placeHolder: "Type name..."
     });
     if (!typeName) {
       return;
     }
-    const methodName = await vscode17.window.showInputBox({
+    const methodName = await vscode18.window.showInputBox({
       prompt: "Enter method name to search",
       placeHolder: "Method name..."
     });
@@ -20286,22 +20336,22 @@ async function registerCommands(context) {
       showMethodInfoWebview2(context, typeName, methodName, resultText);
       updateStatusBar("BSL Analyzer: Ready");
     } catch (error) {
-      vscode17.window.showErrorMessage(`Method search failed: ${error}`);
+      vscode18.window.showErrorMessage(`Method search failed: ${error}`);
       updateStatusBar("BSL Analyzer: Error");
     }
   });
   await safeRegisterCommand("bslAnalyzer.buildIndex", async () => {
-    const workspaceFolders = vscode17.workspace.workspaceFolders;
+    const workspaceFolders = vscode18.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) {
-      vscode17.window.showWarningMessage("No workspace folder found");
+      vscode18.window.showWarningMessage("No workspace folder found");
       return;
     }
     const configPath = getConfigurationPath();
     if (!configPath) {
-      vscode17.window.showWarningMessage("Please configure the 1C configuration path in settings");
+      vscode18.window.showWarningMessage("Please configure the 1C configuration path in settings");
       return;
     }
-    const choice = await vscode17.window.showInformationMessage(
+    const choice = await vscode18.window.showInformationMessage(
       "Building unified BSL index. This may take a few seconds...",
       "Build Index",
       "Cancel"
@@ -20312,8 +20362,8 @@ async function registerCommands(context) {
     startIndexing(4);
     const workspacePath = workspaceFolders[0].uri.fsPath;
     try {
-      await vscode17.window.withProgress({
-        location: vscode17.ProgressLocation.Notification,
+      await vscode18.window.withProgress({
+        location: vscode18.ProgressLocation.Notification,
         title: "Building BSL Index",
         cancellable: false
       }, async (progress) => {
@@ -20338,21 +20388,21 @@ async function registerCommands(context) {
         const result = await buildIndex({ workspace_path: workspacePath });
         updateIndexingProgress(4, "Finalizing index...", 90);
         progress.report({ increment: 15, message: "Finalizing..." });
-        finishIndexing(true);
+        finishIndexing();
         const typesCount = result.types_count || "unknown";
-        vscode17.window.showInformationMessage(`\u2705 BSL Index built successfully with ${typesCount} types`);
+        vscode18.window.showInformationMessage(`\u2705 BSL Index built successfully with ${typesCount} types`);
         return result;
       });
     } catch (error) {
-      finishIndexing(false);
-      vscode17.window.showErrorMessage(`Index build failed: ${error}`);
+      finishIndexing(`Index build failed: ${error}`);
+      vscode18.window.showErrorMessage(`Index build failed: ${error}`);
       outputChannel5.appendLine(`Index build error: ${error}`);
     }
   });
   await safeRegisterCommand("bslAnalyzer.showIndexStats", async () => {
     const configPath = getConfigurationPath();
     if (!configPath) {
-      vscode17.window.showWarningMessage("Please configure the 1C configuration path in settings");
+      vscode18.window.showWarningMessage("Please configure the 1C configuration path in settings");
       return;
     }
     updateStatusBar("BSL Analyzer: Loading stats...");
@@ -20362,20 +20412,20 @@ async function registerCommands(context) {
       showIndexStatsWebview(context, resultText);
       updateStatusBar("BSL Analyzer: Ready");
     } catch (error) {
-      vscode17.window.showErrorMessage(`Failed to load index stats: ${error}`);
+      vscode18.window.showErrorMessage(`Failed to load index stats: ${error}`);
       updateStatusBar("BSL Analyzer: Error");
     }
   });
   await safeRegisterCommand("bslAnalyzer.incrementalUpdate", async () => {
     const configPath = getConfigurationPath();
     if (!configPath) {
-      vscode17.window.showWarningMessage("Please configure the 1C configuration path in settings");
+      vscode18.window.showWarningMessage("Please configure the 1C configuration path in settings");
       return;
     }
     startIndexing(3);
     try {
-      await vscode17.window.withProgress({
-        location: vscode17.ProgressLocation.Notification,
+      await vscode18.window.withProgress({
+        location: vscode18.ProgressLocation.Notification,
         title: "Incremental Index Update",
         cancellable: false
       }, async (progress) => {
@@ -20388,24 +20438,24 @@ async function registerCommands(context) {
         const result = await incrementalUpdate(configPath, getPlatformVersion());
         updateIndexingProgress(3, "Finalizing...", 95);
         progress.report({ increment: 20, message: "Finalizing..." });
-        finishIndexing(true);
-        vscode17.window.showInformationMessage(`\u2705 Index updated successfully: ${result.message}`);
+        finishIndexing();
+        vscode18.window.showInformationMessage(`\u2705 Index updated successfully: ${result.message}`);
         return result.message;
       });
     } catch (error) {
-      finishIndexing(false);
-      vscode17.window.showErrorMessage(`Incremental update failed: ${error}`);
+      finishIndexing(`Incremental update failed: ${error}`);
+      vscode18.window.showErrorMessage(`Incremental update failed: ${error}`);
       outputChannel5.appendLine(`Incremental update error: ${error}`);
     }
   });
   await safeRegisterCommand("bslAnalyzer.exploreType", async () => {
-    const editor = vscode17.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode17.window.activeTextEditor;
+    const editor = vscode18.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode18.window.activeTextEditor;
     let typeName = "";
     if (editor && editor.selection && !editor.selection.isEmpty) {
       typeName = editor.document.getText(editor.selection);
     }
     if (!typeName) {
-      typeName = await vscode17.window.showInputBox({
+      typeName = await vscode18.window.showInputBox({
         prompt: "Enter type name to explore",
         placeHolder: "Type name..."
       }) || "";
@@ -20420,14 +20470,14 @@ async function registerCommands(context) {
       showTypeExplorerWebview(context, typeName, resultText);
       updateStatusBar("BSL Analyzer: Ready");
     } catch (error) {
-      vscode17.window.showErrorMessage(`Type exploration failed: ${error}`);
+      vscode18.window.showErrorMessage(`Type exploration failed: ${error}`);
       updateStatusBar("BSL Analyzer: Error");
     }
   });
   await safeRegisterCommand("bslAnalyzer.validateMethodCall", async () => {
-    const editor = vscode17.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode17.window.activeTextEditor;
+    const editor = vscode18.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode18.window.activeTextEditor;
     if (!editor || editor.document.languageId !== "bsl") {
-      vscode17.window.showWarningMessage("Please open a BSL file and select a method call");
+      vscode18.window.showWarningMessage("Please open a BSL file and select a method call");
       return;
     }
     let selectedText = "";
@@ -20435,14 +20485,14 @@ async function registerCommands(context) {
       selectedText = editor.document.getText(editor.selection);
     }
     if (!selectedText) {
-      vscode17.window.showWarningMessage("Please select a method call to validate");
+      vscode18.window.showWarningMessage("Please select a method call to validate");
       return;
     }
     updateStatusBar("BSL Analyzer: Validating method call...");
     try {
       const methodCallInfo = parseMethodCall(selectedText);
       if (!methodCallInfo) {
-        vscode17.window.showWarningMessage("Invalid method call format");
+        vscode18.window.showWarningMessage("Invalid method call format");
         return;
       }
       const result = await queryType(methodCallInfo.objectName);
@@ -20450,19 +20500,19 @@ async function registerCommands(context) {
       showMethodValidationWebview(context, methodCallInfo, resultText);
       updateStatusBar("BSL Analyzer: Ready");
     } catch (error) {
-      vscode17.window.showErrorMessage(`Method validation failed: ${error}`);
+      vscode18.window.showErrorMessage(`Method validation failed: ${error}`);
       updateStatusBar("BSL Analyzer: Error");
     }
   });
   await safeRegisterCommand("bslAnalyzer.checkTypeCompatibility", async () => {
-    const fromType = await vscode17.window.showInputBox({
+    const fromType = await vscode18.window.showInputBox({
       prompt: "Enter source type name",
       placeHolder: "e.g., \u0421\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A\u0438.\u041D\u043E\u043C\u0435\u043D\u043A\u043B\u0430\u0442\u0443\u0440\u0430"
     });
     if (!fromType) {
       return;
     }
-    const toType = await vscode17.window.showInputBox({
+    const toType = await vscode18.window.showInputBox({
       prompt: "Enter target type name",
       placeHolder: "e.g., \u0421\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A\u0421\u0441\u044B\u043B\u043A\u0430"
     });
@@ -20476,7 +20526,7 @@ async function registerCommands(context) {
       showTypeCompatibilityWebview(context, fromType, toType, resultText);
       updateStatusBar("BSL Analyzer: Ready");
     } catch (error) {
-      vscode17.window.showErrorMessage(`Type compatibility check failed: ${error}`);
+      vscode18.window.showErrorMessage(`Type compatibility check failed: ${error}`);
       updateStatusBar("BSL Analyzer: Error");
     }
   });
@@ -20488,53 +20538,122 @@ async function registerCommands(context) {
       await new Promise((resolve) => setTimeout(resolve, 1e3));
       outputChannel5.appendLine("\u{1F680} Starting new LSP client...");
       await startLanguageClient(context);
-      vscode17.window.showInformationMessage("\u2705 BSL Analyzer server restarted");
+      vscode18.window.showInformationMessage("\u2705 BSL Analyzer server restarted");
       outputChannel5.appendLine("\u2705 LSP server restart completed");
     } catch (error) {
       outputChannel5.appendLine(`\u274C Failed to restart LSP server: ${error}`);
-      vscode17.window.showErrorMessage(`Failed to restart server: ${error}`);
+      vscode18.window.showErrorMessage(`Failed to restart server: ${error}`);
       updateStatusBar("BSL Analyzer: Restart Failed");
     }
   });
   await safeRegisterCommand("bslAnalyzer.testProgress", async () => {
-    outputChannel5.appendLine("\u{1F9EA} Testing progress system...");
-    startIndexing(5);
-    await vscode17.window.withProgress({
-      location: vscode17.ProgressLocation.Notification,
+    outputChannel5.appendLine("");
+    outputChannel5.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+    outputChannel5.appendLine("\u{1F9EA} TESTING PROGRESS SYSTEM (Enhanced Debug Mode)");
+    outputChannel5.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+    outputChannel5.appendLine("");
+    const totalSteps = 20;
+    const stepDelay = 500;
+    outputChannel5.appendLine(`\u{1F4CA} Configuration:`);
+    outputChannel5.appendLine(`   - Total steps: ${totalSteps}`);
+    outputChannel5.appendLine(`   - Delay per step: ${stepDelay}ms`);
+    outputChannel5.appendLine(`   - UI Throttling: 500ms (matches production)`);
+    outputChannel5.appendLine("");
+    outputChannel5.appendLine("\u{1F680} Calling startIndexing()...");
+    startIndexing(4);
+    outputChannel5.appendLine("   \u2713 startIndexing() completed");
+    outputChannel5.appendLine("");
+    await vscode18.window.withProgress({
+      location: vscode18.ProgressLocation.Notification,
       title: "Testing Progress System",
       cancellable: false
     }, async (progress) => {
-      for (let i = 1; i <= 5; i++) {
-        const stepName = `Step ${i}: Processing...`;
-        const progressPercent = Math.floor(i / 5 * 100);
-        updateIndexingProgress(i, stepName, progressPercent);
+      const mockTypes = [
+        "\u0421\u0442\u0440\u043E\u043A\u0430",
+        "\u0427\u0438\u0441\u043B\u043E",
+        "\u0414\u0430\u0442\u0430",
+        "\u0411\u0443\u043B\u0435\u0432\u043E",
+        "\u041C\u0430\u0441\u0441\u0438\u0432",
+        "\u0421\u0442\u0440\u0443\u043A\u0442\u0443\u0440\u0430",
+        "\u0421\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u0435",
+        "\u0421\u043F\u0438\u0441\u043E\u043A\u0417\u043D\u0430\u0447\u0435\u043D\u0438\u0439",
+        "\u0422\u0430\u0431\u043B\u0438\u0446\u0430\u0417\u043D\u0430\u0447\u0435\u043D\u0438\u0439",
+        "\u0421\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A\u0438.\u041A\u043E\u043D\u0442\u0440\u0430\u0433\u0435\u043D\u0442\u044B",
+        "\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u044B.\u0420\u0435\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u044F\u0422\u043E\u0432\u0430\u0440\u043E\u0432\u0423\u0441\u043B\u0443\u0433",
+        "\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u044B\u0421\u0432\u0435\u0434\u0435\u043D\u0438\u0439.\u0426\u0435\u043D\u044B",
+        "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0438.\u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430\u0414\u0430\u043D\u043D\u044B\u0445",
+        "HTTP\u0421\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435",
+        "XML\u0427\u0442\u0435\u043D\u0438\u0435",
+        "XML\u0417\u0430\u043F\u0438\u0441\u044C",
+        "\u0424\u0430\u0439\u043B\u043E\u0432\u044B\u0439\u041F\u043E\u0442\u043E\u043A",
+        "\u0427\u0442\u0435\u043D\u0438\u0435JSON",
+        "\u0417\u0430\u043F\u0438\u0441\u044CJSON",
+        "\u0414\u0432\u043E\u0438\u0447\u043D\u044B\u0435\u0414\u0430\u043D\u043D\u044B\u0435"
+      ];
+      for (let i = 1; i <= totalSteps; i++) {
+        const currentType = mockTypes[i - 1] || `\u0422\u0438\u043F${i}`;
+        const progressPercent = Math.floor(i / totalSteps * 100);
+        const eta = Math.floor((totalSteps - i) * stepDelay / 1e3);
+        outputChannel5.appendLine(`\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`);
+        outputChannel5.appendLine(`\u{1F4E6} Step ${i}/${totalSteps} (${progressPercent}%)`);
+        outputChannel5.appendLine(`   Current Type: ${currentType}`);
+        outputChannel5.appendLine(`   ETA: ${eta}s`);
+        const stepName = `\u041F\u0430\u0440\u0441\u0438\u043D\u0433 \u0442\u0438\u043F\u0430 ${i}/${totalSteps}: ${currentType}`;
+        outputChannel5.appendLine(`   Calling updateIndexingProgress(${progressPercent}, "${stepName}", ${eta})...`);
+        updateIndexingProgress(progressPercent, stepName, eta);
+        outputChannel5.appendLine(`   Updating VSCode notification...`);
         progress.report({
-          increment: 20,
-          message: stepName
+          increment: Math.floor(100 / totalSteps),
+          message: `${currentType} (${progressPercent}%)`
         });
-        await new Promise((resolve) => setTimeout(resolve, 2e3));
+        outputChannel5.appendLine(`   \u23F3 Sleeping ${stepDelay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, stepDelay));
+        outputChannel5.appendLine(`   \u2713 Step ${i} completed`);
       }
-      finishIndexing(true);
+      outputChannel5.appendLine("");
+      outputChannel5.appendLine("\u{1F3C1} Calling finishIndexing()...");
+      finishIndexing();
+      outputChannel5.appendLine("   \u2713 finishIndexing() completed");
     });
-    outputChannel5.appendLine("\u2705 Progress system test completed");
+    outputChannel5.appendLine("");
+    outputChannel5.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+    outputChannel5.appendLine("\u2705 PROGRESS SYSTEM TEST COMPLETED");
+    outputChannel5.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+    outputChannel5.appendLine("");
+    outputChannel5.appendLine("\u{1F4CB} Summary:");
+    outputChannel5.appendLine(`   - Total steps processed: ${totalSteps}`);
+    outputChannel5.appendLine(`   - Total time: ~${totalSteps * stepDelay / 1e3}s`);
+    outputChannel5.appendLine(`   - Status: SUCCESS \u2713`);
+    outputChannel5.appendLine("");
+    outputChannel5.appendLine("\u{1F4A1} Check the status bar at the bottom for visual progress!");
+    outputChannel5.appendLine("");
   });
+  const client2 = getLanguageClient();
+  if (client2) {
+    const parseConfigDisposable = registerParseConfigurationCommand(context, client2);
+    if (parseConfigDisposable) {
+      outputChannel5.appendLine("\u2705 Registered command: bslAnalyzer.parseConfiguration");
+    }
+  } else {
+    outputChannel5.appendLine("\u26A0\uFE0F Cannot register bslAnalyzer.parseConfiguration - LSP client not ready");
+  }
   await safeRegisterCommand("bsl-gradual-types.showSemanticVisualization", async () => {
-    const editor = vscode17.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode17.window.activeTextEditor;
+    const editor = vscode18.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode18.window.activeTextEditor;
     if (!editor || editor.document.languageId !== "bsl") {
-      vscode17.window.showWarningMessage("\u041D\u0435\u0442 \u043E\u0442\u043A\u0440\u044B\u0442\u043E\u0433\u043E BSL \u0444\u0430\u0439\u043B\u0430");
+      vscode18.window.showWarningMessage("\u041D\u0435\u0442 \u043E\u0442\u043A\u0440\u044B\u0442\u043E\u0433\u043E BSL \u0444\u0430\u0439\u043B\u0430");
       return;
     }
-    const client2 = getLanguageClient();
-    if (!client2 || !client2.isRunning()) {
-      vscode17.window.showErrorMessage("LSP server \u043D\u0435 \u0437\u0430\u043F\u0443\u0449\u0435\u043D. \u041F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430, \u043F\u043E\u0434\u043E\u0436\u0434\u0438\u0442\u0435 \u0438\u043B\u0438 \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u0441\u0435\u0440\u0432\u0435\u0440.");
+    const client3 = getLanguageClient();
+    if (!client3 || !client3.isRunning()) {
+      vscode18.window.showErrorMessage("LSP server \u043D\u0435 \u0437\u0430\u043F\u0443\u0449\u0435\u043D. \u041F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430, \u043F\u043E\u0434\u043E\u0436\u0434\u0438\u0442\u0435 \u0438\u043B\u0438 \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u0441\u0435\u0440\u0432\u0435\u0440.");
       return;
     }
     const uri = editor.document.uri.toString();
     const fileName = editor.document.fileName.split(/[/\\]/).pop() || "unknown.bsl";
-    const panel = vscode17.window.createWebviewPanel(
+    const panel = vscode18.window.createWebviewPanel(
       "bslSemanticVisualization",
       `\u0421\u0435\u043C\u0430\u043D\u0442\u0438\u0447\u0435\u0441\u043A\u043E\u0435 \u0434\u0435\u0440\u0435\u0432\u043E: ${fileName}`,
-      vscode17.ViewColumn.Two,
+      vscode18.ViewColumn.Two,
       {
         enableScripts: true,
         retainContextWhenHidden: true
@@ -20576,9 +20695,9 @@ async function registerCommands(context) {
 </body>
 </html>`;
     try {
-      const isDark = vscode17.window.activeColorTheme.kind === vscode17.ColorThemeKind.Dark;
+      const isDark = vscode18.window.activeColorTheme.kind === vscode18.ColorThemeKind.Dark;
       const theme = isDark ? "dark" : "light";
-      const response = await client2.sendRequest("workspace/executeCommand", {
+      const response = await client3.sendRequest("workspace/executeCommand", {
         command: "bsl.getSemanticHtml",
         arguments: [{
           uri,
@@ -20616,7 +20735,7 @@ async function registerCommands(context) {
     <pre>${errorMessage}</pre>
 </body>
 </html>`;
-      vscode17.window.showErrorMessage(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u044F \u0441\u0435\u043C\u0430\u043D\u0442\u0438\u0447\u0435\u0441\u043A\u043E\u0433\u043E \u0434\u0435\u0440\u0435\u0432\u0430: ${errorMessage}`);
+      vscode18.window.showErrorMessage(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u044F \u0441\u0435\u043C\u0430\u043D\u0442\u0438\u0447\u0435\u0441\u043A\u043E\u0433\u043E \u0434\u0435\u0440\u0435\u0432\u0430: ${errorMessage}`);
     }
   });
   commandsRegistered = true;
@@ -20632,13 +20751,13 @@ async function activate(context) {
   extensionContext = context;
   try {
     const currentVersion = context.extension.packageJSON.version;
-    outputChannel6 = vscode18.window.createOutputChannel("BSL Analyzer");
+    outputChannel6 = vscode19.window.createOutputChannel("BSL Analyzer");
     context.subscriptions.push(outputChannel6);
     outputChannel6.appendLine(`\u{1F680} BSL Analyzer v${currentVersion} activation started (with modular architecture)`);
     outputChannel6.appendLine(`Extension path: ${context.extensionPath}`);
-    vscode18.window.showInformationMessage(`BSL Analyzer v${currentVersion} is activating...`);
+    vscode19.window.showInformationMessage(`BSL Analyzer v${currentVersion} is activating...`);
     outputChannel6.show();
-    statusBarItem4 = vscode18.window.createStatusBarItem(vscode18.StatusBarAlignment.Left, 100);
+    statusBarItem4 = vscode19.window.createStatusBarItem(vscode19.StatusBarAlignment.Left, 100);
     statusBarItem4.command = "bslAnalyzer.analyzeFile";
     statusBarItem4.text = "BSL Analyzer: Starting...";
     statusBarItem4.tooltip = "Click to analyze current file (via LSP)";
@@ -20653,13 +20772,13 @@ async function activate(context) {
     await migrateLegacySettings();
     const platformDocsArchive = BslAnalyzerConfig.platformDocsArchive;
     if (!platformDocsArchive || platformDocsArchive.trim() === "") {
-      const selection = await vscode18.window.showErrorMessage(
+      const selection = await vscode19.window.showErrorMessage(
         "\u26A0\uFE0F BSL Analyzer: platformDocsArchive \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D!\n\n\u042D\u0442\u043E \u041E\u0411\u042F\u0417\u0410\u0422\u0415\u041B\u042C\u041D\u042B\u0419 \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440 \u0434\u043B\u044F \u0440\u0430\u0431\u043E\u0442\u044B TypeRepository.\n\u0411\u0435\u0437 \u043D\u0435\u0433\u043E \u0442\u0438\u043F\u044B \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u044B 1\u0421 \u043D\u0435 \u0431\u0443\u0434\u0443\u0442 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B \u0432 LSP hover.",
         "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438",
         "\u0417\u0430\u043A\u0440\u044B\u0442\u044C"
       );
       if (selection === "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438") {
-        vscode18.commands.executeCommand("workbench.action.openSettings", "bslAnalyzer.platformDocsArchive");
+        vscode19.commands.executeCommand("workbench.action.openSettings", "bslAnalyzer.platformDocsArchive");
       }
       outputChannel6.appendLine("\u26A0\uFE0F Extension \u0431\u0443\u0434\u0435\u0442 \u0440\u0430\u0431\u043E\u0442\u0430\u0442\u044C \u0432 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u043D\u043E\u043C \u0440\u0435\u0436\u0438\u043C\u0435 \u0431\u0435\u0437 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u043E\u0432");
     } else {
@@ -20682,7 +20801,7 @@ async function activate(context) {
     outputChannel6.appendLine(`\u2705 BSL Analyzer v${currentVersion} activated successfully with auto-indexing support`);
   } catch (error) {
     outputChannel6?.appendLine(`\u274C Activation failed: ${error}`);
-    vscode18.window.showErrorMessage(`BSL Analyzer activation failed: ${error}`);
+    vscode19.window.showErrorMessage(`BSL Analyzer activation failed: ${error}`);
   }
 }
 function initializeConfiguration() {
@@ -20709,7 +20828,7 @@ async function autoDetectConfigurationIfNeeded() {
     const detectedPath = await autoDetectConfiguration(outputChannel6);
     if (detectedPath) {
       outputChannel6.appendLine(`\u2705 Configuration auto-detected: ${detectedPath}`);
-      vscode18.commands.executeCommand("bslAnalyzer.refreshTypeRepository");
+      vscode19.commands.executeCommand("bslAnalyzer.refreshTypeRepository");
     }
   } else {
     outputChannel6.appendLine(`\u{1F4CD} Using configured path: ${configPath}`);
@@ -20756,8 +20875,8 @@ async function initializeIndexIfNeeded() {
   outputChannel6.appendLine("\u{1F680} Building BSL index with user-configured settings...");
   try {
     startIndexing(4);
-    await vscode18.window.withProgress({
-      location: vscode18.ProgressLocation.Notification,
+    await vscode19.window.withProgress({
+      location: vscode19.ProgressLocation.Notification,
       title: "Building BSL Index",
       cancellable: false
     }, async (progress) => {
@@ -20778,16 +20897,16 @@ async function initializeIndexIfNeeded() {
         "--platform-docs-archive",
         platformDocsArchive
       ];
-      const workspacePath = vscode18.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+      const workspacePath = vscode19.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
       await buildIndex({ workspace_path: workspacePath });
       updateIndexingProgress(4, "Finalizing index...", 90);
       progress.report({ increment: 15, message: "Finalizing..." });
-      finishIndexing(true);
+      finishIndexing();
       outputChannel6.appendLine("\u2705 Index build completed successfully");
       updateStatusBar("BSL Analyzer: Index Ready");
     });
   } catch (error) {
-    finishIndexing(false);
+    finishIndexing(`Index build failed: ${error}`);
     outputChannel6.appendLine(`\u274C Index build failed: ${error}`);
     updateStatusBar("BSL Analyzer: Build Failed");
   }
@@ -20796,30 +20915,30 @@ function showWelcomeMessage() {
   const configPath = BslAnalyzerConfig.configurationPath;
   const platformDocs = BslAnalyzerConfig.platformDocsArchive;
   if (!configPath && !platformDocs) {
-    vscode18.window.showInformationMessage(
+    vscode19.window.showInformationMessage(
       "BSL Analyzer: No configuration. Please configure 1C path and platform documentation.",
       "Open Settings"
     ).then((selection) => {
       if (selection === "Open Settings") {
-        vscode18.commands.executeCommand("workbench.action.openSettings", "bslAnalyzer");
+        vscode19.commands.executeCommand("workbench.action.openSettings", "bslAnalyzer");
       }
     });
   } else if (!configPath) {
-    vscode18.window.showInformationMessage(
+    vscode19.window.showInformationMessage(
       "BSL Analyzer: Please configure your 1C configuration path.",
       "Open Settings"
     ).then((selection) => {
       if (selection === "Open Settings") {
-        vscode18.commands.executeCommand("workbench.action.openSettings", "bslAnalyzer.configurationPath");
+        vscode19.commands.executeCommand("workbench.action.openSettings", "bslAnalyzer.configurationPath");
       }
     });
   } else if (!platformDocs) {
-    vscode18.window.showInformationMessage(
+    vscode19.window.showInformationMessage(
       "BSL Analyzer: Please configure platform documentation archive for full functionality.",
       "Open Settings"
     ).then((selection) => {
       if (selection === "Open Settings") {
-        vscode18.commands.executeCommand("workbench.action.openSettings", "bslAnalyzer.platformDocsArchive");
+        vscode19.commands.executeCommand("workbench.action.openSettings", "bslAnalyzer.platformDocsArchive");
       }
     });
   } else {
@@ -20829,12 +20948,12 @@ function showWelcomeMessage() {
     if (projectId) {
       const indexPath = path4.join(homedir, ".bsl_analyzer", "project_indices", projectId, platformVersion, "unified_index.json");
       if (fs6.existsSync(indexPath)) {
-        vscode18.window.showInformationMessage("BSL Analyzer: Index loaded from cache. Ready to use!");
+        vscode19.window.showInformationMessage("BSL Analyzer: Index loaded from cache. Ready to use!");
       } else {
-        vscode18.window.showInformationMessage("BSL Analyzer: Configuration detected. Building index...");
+        vscode19.window.showInformationMessage("BSL Analyzer: Configuration detected. Building index...");
       }
     } else {
-      vscode18.window.showWarningMessage("BSL Analyzer: Invalid configuration (no UUID). Please check your Configuration.xml");
+      vscode19.window.showWarningMessage("BSL Analyzer: Invalid configuration (no UUID). Please check your Configuration.xml");
     }
   }
 }
@@ -20858,7 +20977,7 @@ function registerSidebarProviders(context) {
   try {
     outputChannel6.appendLine("\u{1F4CB} Creating Overview provider...");
     const overviewProvider = new BslOverviewProvider(outputChannel6);
-    const overviewTreeView = vscode18.window.createTreeView("bslAnalyzer.overview", {
+    const overviewTreeView = vscode19.window.createTreeView("bslAnalyzer.overview", {
       treeDataProvider: overviewProvider,
       showCollapseAll: true
     });
@@ -20866,7 +20985,7 @@ function registerSidebarProviders(context) {
     outputChannel6.appendLine("\u2705 Overview provider registered");
     outputChannel6.appendLine("\u{1F4CB} Creating Diagnostics provider...");
     const diagnosticsProvider = new BslDiagnosticsProvider();
-    const diagnosticsTreeView = vscode18.window.createTreeView("bslAnalyzer.diagnostics", {
+    const diagnosticsTreeView = vscode19.window.createTreeView("bslAnalyzer.diagnostics", {
       treeDataProvider: diagnosticsProvider,
       showCollapseAll: true
     });
@@ -20874,7 +20993,7 @@ function registerSidebarProviders(context) {
     outputChannel6.appendLine("\u2705 Diagnostics provider registered");
     outputChannel6.appendLine("\u{1F4CB} Creating Type Repository provider...");
     const typeIndexProvider = new HierarchicalTypeIndexProvider(outputChannel6);
-    const typeIndexTreeView = vscode18.window.createTreeView("bslAnalyzer.typeRepository", {
+    const typeIndexTreeView = vscode19.window.createTreeView("bslAnalyzer.typeRepository", {
       treeDataProvider: typeIndexProvider,
       showCollapseAll: true
     });
@@ -20882,40 +21001,40 @@ function registerSidebarProviders(context) {
     outputChannel6.appendLine("\u2705 Type Repository provider registered");
     outputChannel6.appendLine("\u{1F4CB} Creating Quick Actions webview provider...");
     const actionsProvider = new BslActionsWebviewProvider(context.extensionUri);
-    const webviewProvider = vscode18.window.registerWebviewViewProvider("bslAnalyzer.actions", actionsProvider);
+    const webviewProvider = vscode19.window.registerWebviewViewProvider("bslAnalyzer.actions", actionsProvider);
     context.subscriptions.push(webviewProvider);
     outputChannel6.appendLine("\u2705 Quick Actions webview provider registered");
     outputChannel6.appendLine("\u{1F4DA} Creating Type Details modal provider...");
     const typeDetailsProvider = new TypeDetailsWebviewProvider(context.extensionUri);
     context.subscriptions.push(
-      vscode18.commands.registerCommand("bslAnalyzer.showTypeDetails", (typeName) => {
+      vscode19.commands.registerCommand("bslAnalyzer.showTypeDetails", (typeName) => {
         typeDetailsProvider.showTypeDetails(typeName);
       })
     );
     outputChannel6.appendLine("\u2705 Type Details modal provider registered");
     context.subscriptions.push(
-      vscode18.commands.registerCommand("bslAnalyzer.refreshOverview", () => {
+      vscode19.commands.registerCommand("bslAnalyzer.refreshOverview", () => {
         outputChannel6.appendLine("\u{1F504} Refreshing Overview panel");
         overviewProvider.refresh();
       })
     );
     context.subscriptions.push(
-      vscode18.commands.registerCommand("bslAnalyzer.refreshDiagnostics", () => {
+      vscode19.commands.registerCommand("bslAnalyzer.refreshDiagnostics", () => {
         outputChannel6.appendLine("\u{1F504} Refreshing Diagnostics panel");
         diagnosticsProvider.refresh();
       })
     );
     context.subscriptions.push(
-      vscode18.commands.registerCommand("bslAnalyzer.refreshTypeRepository", () => {
+      vscode19.commands.registerCommand("bslAnalyzer.refreshTypeRepository", () => {
         outputChannel6.appendLine("\u{1F504} Refreshing Type Repository panel");
         typeIndexProvider.refresh();
       })
     );
     outputChannel6.appendLine("\u2705 All BSL Analyzer sidebar providers registered successfully");
-    vscode18.window.showInformationMessage("BSL Analyzer sidebar activated! Check the Activity Bar for the BSL Analyzer icon.");
+    vscode19.window.showInformationMessage("BSL Analyzer sidebar activated! Check the Activity Bar for the BSL Analyzer icon.");
   } catch (error) {
     outputChannel6.appendLine(`\u274C Error registering sidebar providers: ${error}`);
-    vscode18.window.showErrorMessage(`Failed to register BSL Analyzer sidebar: ${error}`);
+    vscode19.window.showErrorMessage(`Failed to register BSL Analyzer sidebar: ${error}`);
   }
 }
 async function deactivate() {

@@ -4,9 +4,15 @@ use super::parser::UniversalMetadataParser;
 use super::types::{ConfigurationInfo, ConfigurationType, UniversalMetadataObject};
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+// Импорт структур прогресса
+use crate::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 
 /// Результат операций discovery
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -270,11 +276,19 @@ impl ConfigurationDiscovery {
     /// Обнаруживает объекты метаданных в конкретной конфигурации
     ///
     /// Использует ConfigurationInfo для определения пути к Configuration.xml
-    /// и парсит все ChildObjects в этой конфигурации.
-    pub fn discover_metadata_in_configuration(
+    /// и парсит все ChildObjects в этой конфигурации параллельно через rayon.
+    ///
+    /// # Параметры
+    /// - `config_info`: Информация о конфигурации (путь, имя, тип)
+    /// - `progress_callback`: Опциональный callback для отслеживания прогресса (каждые 5 объектов)
+    pub fn discover_metadata_in_configuration<F>(
         &self,
         config_info: &ConfigurationInfo,
-    ) -> Result<Vec<UniversalMetadataObject>> {
+        progress_callback: Option<F>,
+    ) -> Result<Vec<UniversalMetadataObject>>
+    where
+        F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
+    {
         tracing::info!(
             "📦 Парсинг метаданных из конфигурации: {} ({:?})",
             config_info.name,
@@ -287,19 +301,46 @@ impl ConfigurationDiscovery {
             return Err(format!("Configuration.xml не найден: {:?}", config_xml).into());
         }
 
+        // 1. Парсим список ChildObjects из Configuration.xml
         let child_objects = self.parse_child_objects_list(&config_xml)?;
-        let mut all_metadata = Vec::new();
 
-        for (object_type, object_names) in child_objects {
-            tracing::debug!(
-                "  📂 Обработка типа объектов: {} ({} шт.)",
-                object_type,
-                object_names.len()
-            );
+        // 2. Собираем все задачи парсинга в один вектор
+        let parsing_tasks: Vec<_> = child_objects
+            .iter()
+            .flat_map(|(object_type, object_names)| {
+                object_names
+                    .iter()
+                    .map(move |name| (object_type.clone(), name.clone()))
+            })
+            .collect();
 
-            let folder_name = self.xml_tag_to_folder_name(&object_type);
+        let total_objects = parsing_tasks.len();
+        tracing::info!(
+            "📊 Найдено {} объектов для парсинга в конфигурации {}",
+            total_objects,
+            config_info.name
+        );
 
-            for object_name in object_names {
+        // Счётчик обработанных объектов (потокобезопасный)
+        let processed = Arc::new(AtomicUsize::new(0));
+
+        // Уведомляем о начале парсинга
+        if let Some(ref callback) = progress_callback {
+            callback(ProgressUpdate::new(
+                IndexingPhase::ParsingFiles,
+                0,
+                total_objects,
+                Some(format!("Начинаем парсинг конфигурации {}", config_info.name)),
+            ));
+        }
+
+        // 3. Параллельный парсинг через rayon::par_iter
+        let all_metadata: Vec<_> = parsing_tasks
+            .par_iter()
+            .filter_map(|(object_type, object_name)| {
+                // Определяем путь к XML файлу
+                let folder_name = self.xml_tag_to_folder_name(object_type);
+
                 // XML файлы могут быть в двух местах:
                 // 1. Прямо в папке типа: Catalogs/Контрагенты.xml
                 // 2. В подпапке: Catalogs/Контрагенты/Контрагенты.xml
@@ -311,7 +352,7 @@ impl ConfigurationDiscovery {
                 let xml_file_subdir = config_info
                     .path
                     .join(&folder_name)
-                    .join(&object_name)
+                    .join(object_name)
                     .join(format!("{}.xml", object_name));
 
                 let xml_file = if xml_file_direct.exists() {
@@ -327,13 +368,30 @@ impl ConfigurationDiscovery {
                         object_name,
                         xml_file
                     );
-                    continue;
+                    return None;
                 }
 
+                // Парсинг объекта
                 match UniversalMetadataParser::parse_any_object(&xml_file) {
                     Ok(metadata) => {
-                        tracing::trace!("    ✅ Распарсен объект: {}", metadata.name);
-                        all_metadata.push(metadata);
+                        // Увеличиваем счётчик обработанных объектов
+                        let count = processed.fetch_add(1, Ordering::Relaxed) + 1;
+
+                        tracing::trace!("    ✅ Распарсен объект: {} ({}/{})", metadata.name, count, total_objects);
+
+                        // Throttling: отправляем прогресс каждые 5 объектов или на последнем
+                        if let Some(ref callback) = progress_callback {
+                            if count % 5 == 0 || count == total_objects {
+                                callback(ProgressUpdate::new(
+                                    IndexingPhase::ParsingFiles,
+                                    count,
+                                    total_objects,
+                                    Some(format!("Парсинг: {}.{}", object_type, object_name)),
+                                ));
+                            }
+                        }
+
+                        Some(metadata)
                     }
                     Err(e) => {
                         tracing::error!(
@@ -342,16 +400,27 @@ impl ConfigurationDiscovery {
                             object_name,
                             e
                         );
+                        None
                     }
                 }
-            }
-        }
+            })
+            .collect();
 
         tracing::info!(
             "✅ Обнаружено {} объектов метаданных в конфигурации {}",
             all_metadata.len(),
             config_info.name
         );
+
+        // Финальное уведомление о завершении
+        if let Some(ref callback) = progress_callback {
+            callback(ProgressUpdate::new(
+                IndexingPhase::ParsingFiles,
+                all_metadata.len(),
+                total_objects,
+                Some(format!("✅ Парсинг {} завершён", config_info.name)),
+            ));
+        }
 
         Ok(all_metadata)
     }
@@ -489,7 +558,13 @@ impl ConfigurationDiscovery {
     /// ⚠️ DEPRECATION: Используйте discover_all_configurations() + discover_metadata_in_configuration()
     ///
     /// Оставлен для обратной совместимости с существующими тестами.
-    pub fn discover_all_metadata(&self) -> Result<Vec<UniversalMetadataObject>> {
+    pub fn discover_all_metadata<F>(
+        &self,
+        progress_callback: Option<F>,
+    ) -> Result<Vec<UniversalMetadataObject>>
+    where
+        F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
+    {
         tracing::warn!(
             "⚠️ discover_all_metadata() вызван — используйте discover_all_configurations()"
         );
@@ -504,6 +579,6 @@ impl ConfigurationDiscovery {
         let first_config = &configurations[0];
         tracing::info!("  → Загружаем метаданные из {}", first_config.name);
 
-        self.discover_metadata_in_configuration(first_config)
+        self.discover_metadata_in_configuration(first_config, progress_callback)
     }
 }

@@ -2345,7 +2345,7 @@ impl TypeSystemService {
         // Обнаружение метаданных
         let discovery = ConfigurationDiscovery::new(canonical_path.clone());
         let metadata = discovery
-            .discover_all_metadata()
+            .discover_all_metadata(None::<fn(crate::data::loaders::progress::ProgressUpdate)>)
             .map_err(|e| anyhow::anyhow!("Failed to discover metadata: {}", e))?;
 
         info!("📋 Discovered {} metadata objects", metadata.len());

@@ -310,6 +310,21 @@ impl LanguageServer for BslLanguageServer {
                         .as_millis()
                 ));
 
+                // ✅ ИСПРАВЛЕНИЕ Milestone 2.20: Создаём progress token через window/workDoneProgress/create
+                // КРИТИЧНО: LSP спецификация требует сначала создать token, затем отправлять $/progress
+                if let Err(e) = self
+                    .client
+                    .send_request::<tower_lsp::lsp_types::request::WorkDoneProgressCreate>(
+                        WorkDoneProgressCreateParams {
+                            token: token.clone(),
+                        },
+                    )
+                    .await
+                {
+                    error!("❌ Failed to create work done progress token: {}", e);
+                    // Продолжаем без прогресса, но не падаем
+                }
+
                 // ✅ НОВОЕ: Отправляем WorkDoneProgressBegin
                 let _ = self
                     .client
@@ -1985,6 +2000,19 @@ impl BslLanguageServer {
                 .as_millis()
         ));
 
+        // ✅ ИСПРАВЛЕНИЕ Milestone 2.20: Создаём progress token через window/workDoneProgress/create
+        if let Err(e) = self
+            .client
+            .send_request::<tower_lsp::lsp_types::request::WorkDoneProgressCreate>(
+                WorkDoneProgressCreateParams {
+                    token: token.clone(),
+                },
+            )
+            .await
+        {
+            error!("❌ Failed to create work done progress token: {}", e);
+        }
+
         // Создаем прогресс
         let _ = self
             .client
@@ -2033,9 +2061,48 @@ impl BslLanguageServer {
 
         let discovery = ConfigurationDiscovery::new(canonical_path.clone());
 
+        // Создаём callback для передачи прогресса в LSP клиент
+        let client_clone = self.client.clone();
+        let token_clone = token.clone();
+        let progress_callback = move |update: bsl_backend::data::loaders::progress::ProgressUpdate| {
+            let client = client_clone.clone();
+            let token = token_clone.clone();
+
+            // Конвертируем прогресс парсинга (10-70%) в LSP прогресс
+            let percentage = update.percentage as u32;
+            let message = update.message.unwrap_or_else(|| format!(
+                "{}: {}/{}",
+                update.phase.display_name(),
+                update.current,
+                update.total
+            ));
+
+            // Асинхронная отправка прогресса (fire-and-forget)
+            tokio::spawn(async move {
+                let _ = client
+                    .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                        tower_lsp::lsp_types::ProgressParams {
+                            token,
+                            value: tower_lsp::lsp_types::ProgressParamsValue::WorkDone(
+                                tower_lsp::lsp_types::WorkDoneProgress::Report(
+                                    tower_lsp::lsp_types::WorkDoneProgressReport {
+                                        message: Some(message),
+                                        percentage: Some(percentage),
+                                        cancellable: Some(false),
+                                    },
+                                ),
+                            ),
+                        },
+                    )
+                    .await;
+            });
+        };
+
         // ✅ ИСПРАВЛЕНО: Конвертируем Result<T, Box<dyn Error>> в Result<T, String> ДО match
         // Решает проблему "Result which contains Box<dyn Error> is not Send"
-        let discovery_result = discovery.discover_all_metadata().map_err(|e| e.to_string());
+        let discovery_result = discovery
+            .discover_all_metadata(Some(progress_callback))
+            .map_err(|e| e.to_string());
 
         let metadata = match discovery_result {
             Ok(data) => data,

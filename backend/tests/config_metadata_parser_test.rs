@@ -25,7 +25,7 @@ fn test_parse_test_configuration() {
     }
 
     let metadata = discovery
-        .discover_all_metadata()
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>)
         .expect("Не удалось обнаружить метаданные");
 
     println!("📊 Обнаружено объектов метаданных: {}", metadata.len());
@@ -188,7 +188,7 @@ fn test_graceful_handling_unknown_type() {
     let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
 
     // Даже если встретятся неизвестные типы, парсинг не должен упасть
-    let result = discovery.discover_all_metadata();
+    let result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     assert!(
         result.is_ok(),

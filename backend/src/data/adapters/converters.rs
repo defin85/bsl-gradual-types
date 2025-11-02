@@ -1,9 +1,8 @@
 //! Functions to convert parsed data into the common `RawTypeData` format.
 
-use crate::data::loaders::{DiscoveredMetadata, SyntaxHelperDatabase, SyntaxNode, TypeInfo};
+use crate::data::loaders::{SyntaxHelperDatabase, SyntaxNode, TypeInfo};
 use bsl_shared::domain::types::{
-    RawAttributeData, RawDataSource, RawMethodData, RawPropertyData, RawTabularSectionData,
-    RawTypeData, TypeResolution,
+    RawDataSource, RawMethodData, RawPropertyData, RawTypeData, TypeResolution,
 };
 
 /// Converts a full SyntaxHelperDatabase into a vector of RawTypeData.
@@ -56,51 +55,6 @@ fn convert_type_info_to_raw(type_info: &TypeInfo) -> RawTypeData {
         enum_values: type_info.structure.enum_values.clone(),
         ..Default::default()
     }
-}
-
-/// Converts a vector of DiscoveredMetadata from config parser into RawTypeData.
-pub fn convert_discovered_metadata_to_raw(metadata: &[DiscoveredMetadata]) -> Vec<RawTypeData> {
-    metadata
-        .iter()
-        .map(|meta| {
-            let attributes = meta
-                .attributes
-                .iter()
-                .map(|attr| RawAttributeData {
-                    name: attr.name.clone(),
-                    attr_type: attr.type_definition.clone(),
-                })
-                .collect();
-
-            let tabular_sections = meta
-                .tabular_sections
-                .iter()
-                .map(|ts| RawTabularSectionData {
-                    name: ts.name.clone(),
-                    attributes: ts
-                        .attributes
-                        .iter()
-                        .map(|attr| RawAttributeData {
-                            name: attr.name.clone(),
-                            attr_type: attr.type_definition.clone(),
-                        })
-                        .collect(),
-                })
-                .collect();
-
-            RawTypeData {
-                name: meta.name.clone(),
-                english_name: meta.synonym.clone().unwrap_or_default(),
-                description: format!("Конфигурационный объект: {}", meta.qualified_name),
-                category: format!("{:?}", meta.kind),
-                source: RawDataSource::Configuration,
-                kind: Some(meta.kind),
-                attributes,
-                tabular_sections,
-                ..Default::default()
-            }
-        })
-        .collect()
 }
 
 pub fn convert_resolutions_to_raw(_resolutions: &[TypeResolution]) -> Vec<RawTypeData> {

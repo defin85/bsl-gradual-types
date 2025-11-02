@@ -172,7 +172,7 @@ fn test_discovery_extension_configuration() {
 
     let discovery = ConfigurationDiscovery::new(ext_path.to_path_buf());
     let metadata = discovery
-        .discover_all_metadata()
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>)
         .expect("Не удалось обнаружить метаданные расширения");
 
     println!("📊 Расширение: найдено {} объектов", metadata.len());
@@ -313,7 +313,7 @@ fn test_parse_all_objects_gracefully() {
     }
 
     let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
-    let result = discovery.discover_all_metadata();
+    let result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     assert!(result.is_ok(), "Парсинг всей конфигурации не должен падать");
 
@@ -432,7 +432,7 @@ fn test_full_configuration_parsing_performance() {
 
     let start = Instant::now();
     let metadata = discovery
-        .discover_all_metadata()
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>)
         .expect("Парсинг конфигурации не должен падать");
     let duration = start.elapsed();
 

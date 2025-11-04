@@ -7,9 +7,6 @@ export {
     IndexingProgress,
     progressEmitter,
     initializeProgress,
-    startIndexing,
-    updateIndexingProgress,
-    finishIndexing,
     updateStatusBar,
     getCurrentProgress
 } from './progress';

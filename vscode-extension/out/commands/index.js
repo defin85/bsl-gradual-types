@@ -294,7 +294,6 @@ async function registerCommands(context) {
         if (choice !== 'Build Index') {
             return;
         }
-        (0, progress_1.startIndexing)(4);
         const workspacePath = workspaceFolders[0].uri.fsPath;
         try {
             await vscode.window.withProgress({
@@ -302,13 +301,11 @@ async function registerCommands(context) {
                 title: 'Building BSL Index',
                 cancellable: false
             }, async (progress) => {
-                (0, progress_1.updateIndexingProgress)(1, 'Loading platform cache...', 10);
+                (0, progress_1.updateStatusBar)('$(sync~spin) BSL: Loading platform cache...');
                 progress.report({ increment: 25, message: 'Loading platform cache...' });
-                await new Promise(resolve => setTimeout(resolve, 500));
-                (0, progress_1.updateIndexingProgress)(2, 'Parsing configuration...', 35);
+                (0, progress_1.updateStatusBar)('$(sync~spin) BSL: Parsing configuration...');
                 progress.report({ increment: 25, message: 'Parsing configuration...' });
-                await new Promise(resolve => setTimeout(resolve, 500));
-                (0, progress_1.updateIndexingProgress)(3, 'Building unified index...', 70);
+                (0, progress_1.updateStatusBar)('$(sync~spin) BSL: Building unified index...');
                 progress.report({ increment: 35, message: 'Building unified index...' });
                 const args = [
                     '--config', configPath,
@@ -320,16 +317,16 @@ async function registerCommands(context) {
                 }
                 // ✅ ЗАМЕНА CLI → LSP: build_unified_index #1
                 const result = await (0, customRequests_1.buildIndex)({ workspace_path: workspacePath });
-                (0, progress_1.updateIndexingProgress)(4, 'Finalizing index...', 90);
+                (0, progress_1.updateStatusBar)('$(sync~spin) BSL: Finalizing index...');
                 progress.report({ increment: 15, message: 'Finalizing...' });
-                (0, progress_1.finishIndexing)(); // Success case - no error message
+                (0, progress_1.updateStatusBar)('$(check) BSL: Ready');
                 const typesCount = result.types_count || 'unknown';
                 vscode.window.showInformationMessage(`✅ BSL Index built successfully with ${typesCount} types`);
                 return result;
             });
         }
         catch (error) {
-            (0, progress_1.finishIndexing)(`Index build failed: ${error}`);
+            (0, progress_1.updateStatusBar)(`$(error) BSL: Index build failed: ${error}`);
             vscode.window.showErrorMessage(`Index build failed: ${error}`);
             outputChannel.appendLine(`Index build error: ${error}`);
         }
@@ -361,30 +358,27 @@ async function registerCommands(context) {
             vscode.window.showWarningMessage('Please configure the 1C configuration path in settings');
             return;
         }
-        (0, progress_1.startIndexing)(3);
         try {
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
                 title: 'Incremental Index Update',
                 cancellable: false
             }, async (progress) => {
-                (0, progress_1.updateIndexingProgress)(1, 'Analyzing changes...', 20);
+                (0, progress_1.updateStatusBar)('$(sync~spin) BSL: Analyzing changes...');
                 progress.report({ increment: 30, message: 'Analyzing changes...' });
-                await new Promise(resolve => setTimeout(resolve, 400));
-                (0, progress_1.updateIndexingProgress)(2, 'Updating index...', 60);
+                (0, progress_1.updateStatusBar)('$(sync~spin) BSL: Updating index...');
                 progress.report({ increment: 50, message: 'Updating index...' });
-                await new Promise(resolve => setTimeout(resolve, 600));
                 // ✅ ЗАМЕНА CLI → LSP: incremental_update #11
                 const result = await (0, customRequests_1.incrementalUpdate)(configPath, (0, utils_1.getPlatformVersion)());
-                (0, progress_1.updateIndexingProgress)(3, 'Finalizing...', 95);
+                (0, progress_1.updateStatusBar)('$(sync~spin) BSL: Finalizing...');
                 progress.report({ increment: 20, message: 'Finalizing...' });
-                (0, progress_1.finishIndexing)(); // Success case
+                (0, progress_1.updateStatusBar)('$(check) BSL: Ready');
                 vscode.window.showInformationMessage(`✅ Index updated successfully: ${result.message}`);
                 return result.message;
             });
         }
         catch (error) {
-            (0, progress_1.finishIndexing)(`Incremental update failed: ${error}`);
+            (0, progress_1.updateStatusBar)(`$(error) BSL: Incremental update failed: ${error}`);
             vscode.window.showErrorMessage(`Incremental update failed: ${error}`);
             outputChannel.appendLine(`Incremental update error: ${error}`);
         }
@@ -490,7 +484,6 @@ async function registerCommands(context) {
         outputChannel.appendLine('🔄 Restarting LSP server...');
         try {
             await (0, lsp_1.stopLanguageClient)();
-            await new Promise(resolve => setTimeout(resolve, 1000));
             outputChannel.appendLine('🚀 Starting new LSP client...');
             await (0, lsp_1.startLanguageClient)(context);
             vscode.window.showInformationMessage('✅ BSL Analyzer server restarted');
@@ -516,9 +509,9 @@ async function registerCommands(context) {
         outputChannel.appendLine(`   - Delay per step: ${stepDelay}ms`);
         outputChannel.appendLine(`   - UI Throttling: 500ms (matches production)`);
         outputChannel.appendLine('');
-        outputChannel.appendLine('🚀 Calling startIndexing()...');
-        (0, progress_1.startIndexing)(4); // 4 фазы как в реальной индексации
-        outputChannel.appendLine('   ✓ startIndexing() completed');
+        outputChannel.appendLine('🚀 Starting test progress...');
+        (0, progress_1.updateStatusBar)('$(sync~spin) BSL: Testing progress system...');
+        outputChannel.appendLine('   ✓ Progress started');
         outputChannel.appendLine('');
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
@@ -543,8 +536,8 @@ async function registerCommands(context) {
                 outputChannel.appendLine(`   Current Type: ${currentType}`);
                 outputChannel.appendLine(`   ETA: ${eta}s`);
                 const stepName = `Парсинг типа ${i}/${totalSteps}: ${currentType}`;
-                outputChannel.appendLine(`   Calling updateIndexingProgress(${progressPercent}, "${stepName}", ${eta})...`);
-                (0, progress_1.updateIndexingProgress)(progressPercent, stepName, eta);
+                outputChannel.appendLine(`   Calling updateStatusBar("${stepName}")...`);
+                (0, progress_1.updateStatusBar)(`$(sync~spin) BSL: ${stepName}`);
                 outputChannel.appendLine(`   Updating VSCode notification...`);
                 progress.report({
                     increment: Math.floor(100 / totalSteps),
@@ -555,9 +548,9 @@ async function registerCommands(context) {
                 outputChannel.appendLine(`   ✓ Step ${i} completed`);
             }
             outputChannel.appendLine('');
-            outputChannel.appendLine('🏁 Calling finishIndexing()...');
-            (0, progress_1.finishIndexing)(); // Test completed successfully
-            outputChannel.appendLine('   ✓ finishIndexing() completed');
+            outputChannel.appendLine('🏁 Finishing progress...');
+            (0, progress_1.updateStatusBar)('$(check) BSL: Ready');
+            outputChannel.appendLine('   ✓ Progress finished');
         });
         outputChannel.appendLine('');
         outputChannel.appendLine('═══════════════════════════════════════════════════════');

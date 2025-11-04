@@ -27,6 +27,7 @@ exports.initializeContextProvider = void 0;
 const vscode = __importStar(require("vscode"));
 const client_1 = require("./client");
 const node_1 = require("vscode-languageclient/node");
+const logger_1 = require("./logger");
 let debounceTimer;
 let statusBarItem;
 // ✅ ИСПРАВЛЕНИЕ: Уникальные маркеры для секции контекста
@@ -95,7 +96,7 @@ async function updateCurrentContext(editor) {
         }
     }
     catch (error) {
-        console.error('[Context Provider] Failed to get current context:', error);
+        logger_1.logger.error('[Context Provider] Failed to get current context', error);
         // НЕ показываем ошибку пользователю (graceful degradation)
     }
 }

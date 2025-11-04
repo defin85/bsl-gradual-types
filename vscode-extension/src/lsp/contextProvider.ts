@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { getLanguageClient } from './client';
 import { State } from 'vscode-languageclient/node';
+import { logger } from './logger';
 
 export interface CurrentContext {
     functionName?: string;      // Имя функции/процедуры
@@ -98,7 +99,7 @@ async function updateCurrentContext(editor: vscode.TextEditor): Promise<void> {
             updateStatusBarTooltip(context);
         }
     } catch (error) {
-        console.error('[Context Provider] Failed to get current context:', error);
+        logger.error('[Context Provider] Failed to get current context', error);
         // НЕ показываем ошибку пользователю (graceful degradation)
     }
 }

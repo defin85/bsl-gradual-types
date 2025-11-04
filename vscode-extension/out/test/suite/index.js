@@ -25,8 +25,20 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.run = void 0;
 const path = __importStar(require("path"));
+const vscode = __importStar(require("vscode"));
 const glob = require('glob');
-function run() {
+async function run() {
+    // Настроить mock конфигурацию для тестов
+    try {
+        const config = vscode.workspace.getConfiguration('bslAnalyzer');
+        // Установить пустую строку для platformDocsArchive (тесты используют mocks)
+        await config.update('platformDocsArchive', '', // Пустая строка - тесты работают с mocks
+        vscode.ConfigurationTarget.Global);
+        console.log('[Test Setup] Mock configuration applied');
+    }
+    catch (error) {
+        console.warn('[Test Setup] Failed to apply mock configuration:', error);
+    }
     // Create the mocha test
     const Mocha = require('mocha');
     const mocha = new Mocha({

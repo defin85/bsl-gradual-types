@@ -91,9 +91,11 @@
 | 2.14 Hash Unification | ✅ | 2025-11-01 | Централизация hash_content в shared/utils/hash.rs, устранение 4 дублирований | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-214-hash-unification--централизация-hash_content--2025-11-01) |
 | 2.16 Semantic Tree Visualization | ✅ | 2025-10-17 | VSCode webview, LSP custom request `bsl.getSemanticHtml`, HTML/CSS expand/collapse | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-216-semantic-tree-visualization--2025-10-17) |
 | 2.18 LSP Syntax Error Diagnostics | ✅ | 2025-10-18 | Синтаксические ошибки в LSP Diagnostics, UTF-16 координаты, ~300× ускорение парсинга, 40 тестов | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-218-lsp-syntax-error-diagnostics--2025-10-18) |
+| 2.13 IR Caching & Performance | ✅ | 2025-11-01 | 37× ускорение hover (<5ms). IR Cache с LRU, xxHash64, 5 unit-тестов | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-213-ir-caching--performance-optimization--2025-11-01) |
+| 2.14 Hash Unification | ✅ | 2025-11-01 | Централизация hash_content в shared/utils/hash.rs, xxHash64 | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-214-hash-unification--централизация-hash_content--2025-11-01) |
 
-**Итого завершено:** 13 Milestones
-**Прогресс Версии 2.0:** ~65% завершено
+**Итого завершено:** 15 Milestones
+**Прогресс Версии 2.0:** ~75% завершено (15/20 Milestones)
 
 ---
 
@@ -1491,29 +1493,53 @@ impl TypeRepository {
 
 ### 📈 Milestone 2.4: Performance & Caching (1.5 недели)
 
-**Приоритет:** 🟠 ВЫСОКИЙ — критично для работы с реальными проектами
+**Приоритет:** 🔴 КРИТИЧНЫЙ — первый запуск после перезагрузки занимает 10-30 секунд
 
 **Можно делать параллельно с Milestone 2.5**
 
+**🚨 ОБНАРУЖЕНА КРИТИЧЕСКАЯ ПРОБЛЕМА (2025-11-04):**
+
+**Симптомы:**
+- После перезагрузки компьютера: парсинг syntax_helper занимает **10-30 секунд** (51,138 файлов, 216 MB)
+- После перезапуска LSP: парсинг занимает **1 секунду** (те же данные!)
+- Кэша приложения нет → данные парсятся каждый раз заново
+
+**Причина:** Windows File System Cache
+- После первого чтения 216 MB данных попадают в RAM (Standby List)
+- Повторные чтения = чтение из RAM (~10 GB/s) вместо диска
+- После перезагрузки кэш очищается → снова медленно
+
+**Решение:** Persistent Cache для syntax_helper
+- Сериализация распарсенной базы в `.bsl_cache/syntax_helper.bin` (bincode)
+- Инвалидация по xxHash64 директории syntax_helper
+- Выигрыш: **1-2 секунды** вместо 10-30 секунд после перезагрузки
+
 #### Задачи:
 
-1. **Межсессионное кеширование** (1 неделя)
-   - ✅ Кеш AST деревьев в `.bsl_cache/ast/`
-   - ✅ Кеш результатов анализа в `.bsl_cache/analysis/`
-   - ✅ Инвалидация при изменении файлов (по hash)
-   - ✅ TTL для устаревших кешей
+1. **Persistent Cache для Syntax Helper** (3 дня) 🔴 КРИТИЧНЫЙ
+   - ⏳ Сериализация SyntaxHelperDatabase в `.bsl_cache/syntax_helper.bin`
+   - ⏳ Инвалидация по xxHash64 директории
+   - ⏳ Fallback на парсинг при отсутствии/устаревании кэша
+   - 🎯 **Цель:** Загрузка после перезагрузки < 2 секунд
+
+2. **Межсессионное кеширование AST/Analysis** (1 неделя)
+   - ✅ Кеш IR в памяти с LRU (Milestone 2.13 ✅)
+   - ⏳ Кеш AST деревьев в `.bsl_cache/ast/`
+   - ⏳ Кеш результатов анализа в `.bsl_cache/analysis/`
+   - ⏳ TTL для устаревших кешей
    - 🎯 **Цель:** Загрузка из кеша < 50ms
 
-2. **Параллельный анализ проектов** (1 неделя)
-   - ✅ Multi-threaded анализ файлов через `rayon`
-   - ✅ Прогресс-бар для больших проектов
+3. **Параллельный анализ проектов** (1 неделя)
+   - ✅ Multi-threaded парсинг через `rayon` (реализовано)
+   - ✅ Прогресс-бар через `$/progress` (Milestone 2.20.2 ✅)
    - ✅ Graceful degradation при ошибках
    - 🎯 **Цель:** Анализ 1000 файлов < 30 секунд
 
 **Результат Milestone 2.4:**
-- ✅ Кеш работает между запусками
-- ✅ Анализ больших проектов быстрый
-- ✅ Оптимизация памяти
+- ⏳ Persistent Cache для syntax_helper — первый запуск быстрый
+- ✅ IR Cache работает (Milestone 2.13 ✅) — hover < 5ms
+- ⏳ Анализ больших проектов с кэшированием
+- ⏳ Оптимизация памяти
 
 ---
 
@@ -1535,11 +1561,11 @@ impl TypeRepository {
 ПЛАНИРУЕТСЯ:  🏗️ Milestone 2.19 - Architectural Improvements (🟡 СРЕДНИЙ)
 ПЛАНИРУЕТСЯ:  📊 Milestone 2.20 - Enhanced Status Bar (🟡 СРЕДНИЙ)
 ПЛАНИРУЕТСЯ:  📊 Milestone 2.12 - Custom LSP Requests (bsl/getAllTypes, bsl/searchTypes) (⏳ СРЕДНИЙ)
-ПЛАНИРУЕТСЯ:  ⚡ Milestone 2.13 - IR Caching & Performance Optimization (🔴 КРИТИЧНЫЙ)
-ПЛАНИРУЕТСЯ:  🔧 Milestone 2.14 - Inter-procedural Analysis (⏳ НИЗКИЙ)
+ЗАВЕРШЕНО:    ⚡ Milestone 2.13 - IR Caching & Performance (✅ ЗАВЕРШЁН 2025-11-01)
+ЗАВЕРШЕНО:    🔧 Milestone 2.14 - Hash Unification (✅ ЗАВЕРШЁН 2025-11-01)
 ПЛАНИРУЕТСЯ:  🔧 Milestone 2.15 - Flow-sensitive Analysis (CFG) (⏳ НИЗКИЙ)
 ПЛАНИРУЕТСЯ:  📦 Milestone 2.17 - Configuration Metadata Parser (🔴 КРИТИЧНЫЙ)
-ПЛАНИРУЕТСЯ:  📈 Milestone 2.4 - Performance Optimization (⏳ СРЕДНИЙ)
+ПРИОРИТЕТ:    📈 Milestone 2.4 - Performance & Caching (🔴 КРИТИЧНЫЙ — первый запуск 10-30 сек)
 ```
 
 **Технические метрики (обновлено 2025-10-16):**
@@ -1552,17 +1578,17 @@ impl TypeRepository {
 - ✅ **Advanced Type System** — Union/Intersection/Generic/Nullable — **ЗАВЕРШЕНО Milestone 2.3** 🎉
 - ✅ **50+ unit-тестов проходят** — resolver + generic_inference — **ЗАВЕРШЕНО Milestone 2.3** 🎉
 - ✅ **Span Extraction работает** — реальные координаты из tree-sitter — **ЗАВЕРШЕНО Milestone 2.11** 🎉
-- ⚠️ **Hover парсит файл КАЖДЫЙ РАЗ** — требует IR Caching — **КРИТИЧНО Milestone 2.13**
+- ✅ **IR Cache работает** — 37× ускорение hover (<5ms) — **ЗАВЕРШЕНО Milestone 2.13** 🎉
 - ⏳ **Custom LSP Requests** — bsl/getAllTypes, bsl/searchTypes — ПЛАНИРУЕТСЯ Milestone 2.12
 - ⏳ **Flow-sensitive analysis (CFG)** — структуры готовы, требуется интеграция — ПЛАНИРУЕТСЯ Milestone 2.15
-- ⏳ **Кеширование < 50ms** — ПЛАНИРУЕТСЯ Milestone 2.4
+- ✅ **IR Cache < 5ms** (Milestone 2.13 ✅), ⏳ **Persistent Cache для syntax_helper** — Milestone 2.4
 
 **Пользовательские метрики:**
 - ✅ **LSP hover работает** — показывает типы переменных через Inline Scope Analysis
 - ✅ **Hover показывает разную информацию** для разных переменных (не одинаковую)
-- ⚠️ **Hover performance** — 50-100ms на больших файлах (парсинг каждый раз) → **требует Milestone 2.13**
+- ✅ **Hover performance <5ms** — IR Cache с LRU, hover быстрый — **ЗАВЕРШЕНО Milestone 2.13** 🎉
 - ⏳ **Автодополнение** — базовое работает, требуется улучшение контекста
-- ⏳ **Syntax Error Diagnostics** — tree-sitter обнаруживает ошибки, но не показывает пользователю → **требует Milestone 2.18**
+- ✅ **Syntax Error Diagnostics** — ошибки парсинга в LSP Diagnostics — **ЗАВЕРШЕНО Milestone 2.18** 🎉
 - ⏳ **Type checking** — базовая валидация работает, требуется расширение правил
 - ❌ **Semantic highlighting** — НЕ РЕАЛИЗОВАНО (планируется Milestone 3.0)
 
@@ -1665,6 +1691,423 @@ impl TypeRepository {
 
 ---
 
+### 🤖 Milestone 3.4: MCP (Model Context Protocol) Server Integration (8-10 дней)
+
+**Приоритет:** 🟡 СРЕДНИЙ — расширение возможностей взаимодействия с LLM через стандартизированный протокол
+
+**Проблема:**
+Сейчас система типов BSL доступна только через LSP и Web API. Для эффективной работы с LLM (Claude, ChatGPT и другие) нужен стандартизированный протокол доступа к контексту кода. MCP (Model Context Protocol) от Anthropic решает эту проблему, предоставляя:
+- Универсальный протокол для подключения AI к источникам данных
+- Структурированные Resources (данные), Tools (действия) и Prompts (шаблоны)
+- Подписки на изменения и real-time обновления
+
+**Цель:**
+Создать MCP сервер для BSL Gradual Types, который предоставит LLM полный контекст о типах, коде и структуре проекта через стандартизированный протокол.
+
+**Справка:**
+- 🔗 Model Context Protocol: https://modelcontextprotocol.io/
+- 🔗 Rust MCP SDK: https://github.com/modelcontextprotocol/rust-sdk
+- 🔗 Примеры MCP серверов: https://github.com/rust-mcp-stack/rust-mcp-filesystem
+
+**Архитектура:**
+```
+┌──────────────┐     ┌────────────────┐     ┌─────────────────┐
+│  Claude/AI   │────▶│   MCP Server   │────▶│  BSL TypeSystem │
+│              │◀────│  (новый crate) │◀────│   (существующий)│
+└──────────────┘     └────────────────┘     └─────────────────┘
+                              │
+                              ▼
+                     ┌────────────────┐
+                     │ File Watcher   │
+                     │   (notify)     │
+                     └────────────────┘
+```
+
+**Принципы:**
+- **Максимальное переиспользование** — использовать существующие `TreeSitterAdapter`, `SemanticProgram`, `TypeRepository`
+- **Right-Sized Architecture** — не усложняем, добавляем только MCP-специфичную логику
+- **Кросс-платформенность** — notify crate уже есть в workspace dependencies (версия 6.1)
+
+#### Задачи:
+
+**Task 1: Создание структуры MCP Server crate (1 день)**
+
+Создать новый crate `mcp-server/`:
+
+```toml
+# mcp-server/Cargo.toml
+[package]
+name = "bsl-mcp-server"
+version.workspace = true
+
+[[bin]]
+name = "bsl-mcp"
+path = "src/main.rs"
+
+[dependencies]
+rmcp = { version = "0.8.0", features = ["server", "macros"] }
+bsl-backend = { path = "../backend" }
+bsl-shared = { workspace = true }
+notify = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serde_json = { workspace = true }
+```
+
+Структура модулей:
+```rust
+pub mod server;      // MCP server implementation
+pub mod resources;   // Resources handlers (файлы, типы, AST)
+pub mod tools;       // Tools handlers (анализ, валидация)
+pub mod prompts;     // Prompts для генерации BSL кода
+pub mod watcher;     // File watching с notify
+pub mod cache;       // Переиспользуем IrCache из backend
+```
+
+---
+
+**Task 2: File Watcher с notify (1 день)**
+
+Реализовать кросс-платформенный мониторинг BSL файлов:
+- Windows: ReadDirectoryChangesW
+- Linux: inotify
+- macOS: FSEvents
+
+```rust
+// mcp-server/src/watcher.rs
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+
+pub struct BslFileWatcher {
+    watcher: RecommendedWatcher,
+    glob_set: GlobSet,  // Фильтр для *.bsl, *.os
+}
+
+impl BslFileWatcher {
+    pub fn new(workspace_paths: Vec<PathBuf>) -> Result<Self> {
+        let mut watcher = notify::recommended_watcher(|event| {
+            match event {
+                Ok(Event { kind: Modify(_), paths, .. }) => {
+                    // Инвалидируем IR Cache
+                    // Уведомляем подписчиков MCP
+                }
+                _ => {}
+            }
+        })?;
+
+        for path in &workspace_paths {
+            watcher.watch(path, RecursiveMode::Recursive)?;
+        }
+
+        Ok(Self { watcher, glob_set })
+    }
+}
+```
+
+---
+
+**Task 3: MCP Resources для BSL контекста (2 дня)**
+
+Реализовать Resources handlers:
+
+**Resources:**
+- `bsl://files` — список всех BSL файлов в проекте
+- `bsl://file/{path}` — содержимое файла с типами и метаданными
+- `bsl://types` — индекс всех типов (платформа + конфигурация)
+- `bsl://type/{typename}` — детали типа (facets, методы, свойства)
+- `bsl://ast/{path}` — AST дерево файла
+
+```rust
+// mcp-server/src/resources.rs
+impl BslResourceHandler {
+    async fn get_file_content(&self, path: &str) -> ResourceContent {
+        let content = tokio::fs::read_to_string(path).await?;
+        let hash = hash_content(&content);
+
+        // Проверяем IR Cache (Milestone 2.13)
+        let ir = if let Some(cached) = self.ir_cache.get(hash).await {
+            cached
+        } else {
+            let tree = self.tree_adapter.parse(&content)?;
+            let ir = self.tree_adapter.convert_to_semantic(&tree)?;
+            self.ir_cache.put(hash, Arc::new(ir)).await;
+            ir
+        };
+
+        ResourceContent {
+            text: Some(content),
+            metadata: Some(json!({
+                "types": extract_types(&ir),
+                "functions": extract_functions(&ir),
+            })),
+        }
+    }
+}
+```
+
+---
+
+**Task 4: MCP Tools для анализа и валидации (2 дня)**
+
+Реализовать Tools для выполнения действий:
+
+**Tools:**
+- `validate_type` — валидация типа выражения на позиции
+- `find_type_usages` — поиск всех использований типа
+- `rename_type` — рефакторинг переименования типа
+- `generate_docs` — генерация документации для модуля
+- `analyze_complexity` — анализ сложности функций
+
+```rust
+// mcp-server/src/tools.rs
+impl BslToolHandler {
+    #[tool]
+    pub async fn validate_type(
+        &self,
+        file_path: String,
+        line: u32,
+        column: u32,
+    ) -> Result<TypeValidationResult> {
+        let content = tokio::fs::read_to_string(&file_path).await?;
+        let ir = self.tree_adapter.parse_to_semantic(&content)?;
+        let expr = ir.find_expression_at(line, column)?;
+        let inferred_type = self.type_service.infer_type(&expr)?;
+
+        Ok(TypeValidationResult {
+            expression: expr.to_string(),
+            inferred_type: inferred_type.to_string(),
+            errors: self.type_service.validate(&inferred_type)?,
+        })
+    }
+
+    #[tool]
+    pub async fn find_type_usages(
+        &self,
+        type_name: String,
+        workspace_path: String,
+    ) -> Result<Vec<TypeUsage>> {
+        // Поиск по всем BSL файлам
+        let mut usages = Vec::new();
+        for entry in walkdir::WalkDir::new(&workspace_path) {
+            // Парсинг и поиск использований типа
+        }
+        Ok(usages)
+    }
+}
+```
+
+---
+
+**Task 5: MCP Prompts для генерации кода (1 день)**
+
+Реализовать готовые Prompts для генерации BSL кода:
+
+**Prompts:**
+- `generate_function` — генерация функции с типами
+- `generate_module` — генерация модуля конфигурации
+- `generate_tests` — генерация unit-тестов для функции
+- `refactor_to_typed` — рефакторинг кода с добавлением типов
+
+```rust
+// mcp-server/src/prompts.rs
+pub struct BslPromptHandler {
+    type_service: Arc<TypeSystemService>,
+}
+
+impl BslPromptHandler {
+    pub async fn list_prompts(&self) -> Vec<Prompt> {
+        vec![
+            Prompt {
+                name: "generate_function".to_string(),
+                description: "Генерирует BSL функцию с типами параметров и возврата".to_string(),
+                arguments: vec![
+                    PromptArgument {
+                        name: "function_name".to_string(),
+                        description: "Имя функции на русском".to_string(),
+                        required: true,
+                    },
+                    PromptArgument {
+                        name: "params".to_string(),
+                        description: "Параметры функции (JSON массив)".to_string(),
+                        required: false,
+                    },
+                ],
+            },
+            Prompt {
+                name: "refactor_to_typed".to_string(),
+                description: "Добавляет типизацию в существующий BSL код".to_string(),
+                arguments: vec![
+                    PromptArgument {
+                        name: "code".to_string(),
+                        description: "BSL код для рефакторинга".to_string(),
+                        required: true,
+                    },
+                ],
+            },
+        ]
+    }
+
+    pub async fn get_prompt(&self, name: &str, args: &Value) -> Result<String> {
+        match name {
+            "generate_function" => {
+                let func_name = args["function_name"].as_str().unwrap();
+                Ok(format!(
+                    "Сгенерируй BSL функцию '{}' с типизацией параметров и возврата. \
+                     Используй доступные типы платформы 1С: {}",
+                    func_name,
+                    self.get_available_types().await?
+                ))
+            }
+            "refactor_to_typed" => {
+                let code = args["code"].as_str().unwrap();
+                let ir = self.parse_and_infer_types(code).await?;
+                Ok(format!(
+                    "Добавь типизацию в следующий BSL код:\n\n{}\n\n\
+                     Инферированные типы:\n{}",
+                    code,
+                    serde_json::to_string_pretty(&ir.inferred_types)?
+                ))
+            }
+            _ => Err(anyhow::anyhow!("Unknown prompt: {}", name)),
+        }
+    }
+}
+```
+
+---
+
+**Task 6: Subscriptions и notifications (1 день)**
+
+Реализовать подписки на изменения ресурсов:
+
+```rust
+// mcp-server/src/server.rs
+pub struct BslMcpServer {
+    subscriptions: Arc<RwLock<HashMap<String, Vec<SubscriptionId>>>>,
+}
+
+impl BslMcpServer {
+    async fn handle_file_change(&self, event: FileChangeEvent) {
+        match event {
+            FileChangeEvent::Modified(path) => {
+                // 1. Переиндексировать файл
+                self.indexer.reindex_file(&path).await;
+
+                // 2. Уведомить подписчиков через MCP
+                let uri = format!("bsl://file/{}", path.display());
+                self.notify_subscribers(&uri).await;
+            }
+            _ => {}
+        }
+    }
+
+    async fn notify_subscribers(&self, resource_uri: &str) {
+        let subs = self.subscriptions.read().await;
+        if let Some(subscribers) = subs.get(resource_uri) {
+            for sub_id in subscribers {
+                // MCP notifications/resources/updated
+                self.send_notification("resources/updated", json!({
+                    "uri": resource_uri,
+                })).await;
+            }
+        }
+    }
+}
+```
+
+---
+
+**Task 7: Главный сервер и интеграция (2 дня)**
+
+Собрать всё вместе и протестировать:
+
+```rust
+// mcp-server/src/main.rs
+#[tokio::main]
+async fn main() -> Result<()> {
+    let workspace_paths = vec![PathBuf::from(&args[1])];
+
+    // Создаём MCP сервер
+    let server = BslMcpServer::new(workspace_paths).await?;
+
+    // Запускаем через stdio transport
+    let transport = StdioTransport::new(tokio::io::stdin(), tokio::io::stdout());
+    server.serve(transport).await?;
+
+    Ok(())
+}
+```
+
+**Конфигурация для Claude Desktop:**
+```json
+// claude_desktop_config.json
+{
+  "mcpServers": {
+    "bsl-types": {
+      "command": "bsl-mcp",
+      "args": ["C:/path/to/1c/project"],
+      "env": {
+        "RUST_LOG": "info"
+      }
+    }
+  }
+}
+```
+
+**Интеграционные тесты:**
+```rust
+#[tokio::test]
+async fn test_file_watcher_detects_changes() {
+    let temp_dir = tempdir::TempDir::new("bsl_test").unwrap();
+    let watcher = BslFileWatcher::new(vec![temp_dir.path().to_path_buf()]).await.unwrap();
+
+    let test_file = temp_dir.path().join("test.bsl");
+    tokio::fs::write(&test_file, "Функция Тест()\nКонецФункции").await.unwrap();
+
+    // Проверяем событие создания
+    let event = rx.recv().await.unwrap();
+    assert!(matches!(event, FileChangeEvent::Created(_)));
+}
+
+#[tokio::test]
+async fn test_mcp_resources() {
+    let server = BslMcpServer::new(vec![PathBuf::from("./examples")]).await.unwrap();
+    let resources = server.handle_list_resources().await.unwrap();
+
+    assert!(!resources.is_empty());
+    assert!(resources.iter().any(|r| r.uri.contains("bsl://file/")));
+}
+
+#[tokio::test]
+async fn test_mcp_prompts() {
+    let server = BslMcpServer::new(vec![PathBuf::from("./examples")]).await.unwrap();
+    let prompts = server.handle_list_prompts().await.unwrap();
+
+    assert!(prompts.iter().any(|p| p.name == "generate_function"));
+    assert!(prompts.iter().any(|p| p.name == "refactor_to_typed"));
+}
+```
+
+---
+
+**Результат Milestone 3.4:**
+- ✅ MCP сервер запускается и принимает соединения
+- ✅ File watcher отслеживает изменения BSL файлов (Windows/Linux/macOS)
+- ✅ Resources: файлы, типы, AST
+- ✅ Tools: валидация, поиск, рефакторинг, анализ
+- ✅ Prompts: генерация функций, модулей, тестов, рефакторинг с типами
+- ✅ Subscriptions: real-time уведомления об изменениях
+- ✅ IR Cache переиспользуется из Milestone 2.13
+- ✅ Claude Desktop интегрирован с BSL проектом
+- ✅ Производительность: <10ms для cached resources, <100ms для парсинга
+
+**Зависимости:**
+- ✅ Milestone 2.8 (Semantic IR Layer)
+- ✅ Milestone 2.13 (IR Cache)
+- ✅ Milestone 2.7 (TreeSitterAdapter)
+
+**Оценка времени:** 8-10 дней
+
+---
+
 ### 🎯 Результаты Версии 3.0 (через 6 месяцев от старта)
 
 **Технические метрики:**
@@ -1672,12 +2115,17 @@ impl TypeRepository {
 - ✅ 20+ Code Actions (Quick Fixes, Refactorings)
 - ✅ 50+ Static Analysis Rules
 - ✅ Code Quality Dashboard
+- ✅ MCP Server для интеграции с LLM (Claude, ChatGPT)
+- ✅ File Watching (Windows/Linux/macOS) через notify
+- ✅ Resources, Tools, Prompts для AI-ассистентов
 
 **Пользовательские метрики:**
 - ✅ Навигация как в IntelliJ IDEA
 - ✅ Рефакторинг одним кликом
 - ✅ Автоматическое улучшение качества кода
 - ✅ Предотвращение security & performance проблем
+- ✅ AI-ассистент с полным контекстом BSL проекта
+- ✅ Генерация кода с типизацией через Claude
 
 ---
 

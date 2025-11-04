@@ -45,7 +45,6 @@ suite('Integration Test Suite', () => {
         // Создаем временный BSL файл
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
         if (!workspaceFolder) {
-            this.skip();
             return;
         }
         

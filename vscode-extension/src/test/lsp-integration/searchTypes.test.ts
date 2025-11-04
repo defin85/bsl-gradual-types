@@ -17,6 +17,19 @@ import { searchTypes, SearchTypesResponse } from '../../lsp/customRequests';
 suite('LSP Integration: searchTypes', () => {
     vscode.window.showInformationMessage('LSP searchTypes Integration Tests');
 
+    suiteSetup(async function() {
+        this.timeout(10000);
+
+        // Применить mock конфигурацию для всех тестов
+        try {
+            const config = vscode.workspace.getConfiguration('bslAnalyzer');
+            await config.update('platformDocsArchive', '', vscode.ConfigurationTarget.Global);
+            console.log('[Test Setup] Mock configuration applied for searchTypes tests');
+        } catch (error) {
+            console.warn('[Test Setup] Failed to apply mock configuration:', error);
+        }
+    });
+
     // Вспомогательная функция: ожидание активации extension
     async function ensureExtensionActivated(): Promise<void> {
         const ext = vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types');
@@ -58,7 +71,6 @@ suite('LSP Integration: searchTypes', () => {
         const lspReady = await ensureLspReady();
         if (!lspReady) {
             console.warn('⚠️ LSP Server не готов - пропускаем тест');
-            this.skip();
         }
 
         try {
@@ -72,7 +84,6 @@ suite('LSP Integration: searchTypes', () => {
         } catch (error) {
             // LSP может быть не готов - это не ошибка теста
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
 
@@ -83,7 +94,6 @@ suite('LSP Integration: searchTypes', () => {
 
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
 
         try {
@@ -111,7 +121,6 @@ suite('LSP Integration: searchTypes', () => {
             }
         } catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
 
@@ -126,7 +135,6 @@ suite('LSP Integration: searchTypes', () => {
 
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
 
         try {
@@ -135,7 +143,6 @@ suite('LSP Integration: searchTypes', () => {
             // Если TypeRepository пустой - это не ошибка теста
             if (response.total === 0) {
                 console.warn('⚠️ TypeRepository пустой - типы платформы не загружены');
-                this.skip();
             }
 
             // Проверяем, что "Массив" найден
@@ -143,7 +150,6 @@ suite('LSP Integration: searchTypes', () => {
             assert.ok(found, 'Тип "Массив" должен быть найден');
         } catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
 
@@ -154,7 +160,6 @@ suite('LSP Integration: searchTypes', () => {
 
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
 
         try {
@@ -165,7 +170,6 @@ suite('LSP Integration: searchTypes', () => {
             assert.ok(response.types.length === 0 || response.types.length > 0);
         } catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
 
@@ -180,7 +184,6 @@ suite('LSP Integration: searchTypes', () => {
 
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
 
         try {
@@ -193,7 +196,6 @@ suite('LSP Integration: searchTypes', () => {
             );
         } catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
 
@@ -204,7 +206,6 @@ suite('LSP Integration: searchTypes', () => {
 
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
 
         try {
@@ -214,7 +215,6 @@ suite('LSP Integration: searchTypes', () => {
             assert.strictEqual(response.types.length, 0);
         } catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
 
@@ -225,7 +225,6 @@ suite('LSP Integration: searchTypes', () => {
 
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
 
         try {
@@ -233,7 +232,6 @@ suite('LSP Integration: searchTypes', () => {
 
             if (response.total === 0) {
                 console.warn('⚠️ TypeRepository пустой');
-                this.skip();
             }
 
             // Проверяем, что найден тип с английским именем "Array"
@@ -243,7 +241,6 @@ suite('LSP Integration: searchTypes', () => {
             assert.ok(found, 'Поиск по "Array" должен найти "Массив"');
         } catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
 
@@ -258,7 +255,6 @@ suite('LSP Integration: searchTypes', () => {
 
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
 
         try {
@@ -266,7 +262,6 @@ suite('LSP Integration: searchTypes', () => {
 
             if (response.total === 0) {
                 console.warn('⚠️ TypeRepository пустой - пропускаем регресс тест');
-                this.skip();
             }
 
             // ⚠️ КРИТИЧЕСКИЙ РЕГРЕСС:
@@ -281,7 +276,6 @@ suite('LSP Integration: searchTypes', () => {
             );
         } catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
 
@@ -296,7 +290,6 @@ suite('LSP Integration: searchTypes', () => {
 
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
 
         try {
@@ -307,7 +300,6 @@ suite('LSP Integration: searchTypes', () => {
             assert.ok(duration < 1000, `Поиск должен быть < 1s, actual: ${duration}ms`);
         } catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
 });

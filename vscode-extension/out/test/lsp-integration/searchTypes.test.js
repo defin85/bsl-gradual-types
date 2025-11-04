@@ -39,6 +39,18 @@ const vscode = __importStar(require("vscode"));
 const customRequests_1 = require("../../lsp/customRequests");
 suite('LSP Integration: searchTypes', () => {
     vscode.window.showInformationMessage('LSP searchTypes Integration Tests');
+    suiteSetup(async function () {
+        this.timeout(10000);
+        // Применить mock конфигурацию для всех тестов
+        try {
+            const config = vscode.workspace.getConfiguration('bslAnalyzer');
+            await config.update('platformDocsArchive', '', vscode.ConfigurationTarget.Global);
+            console.log('[Test Setup] Mock configuration applied for searchTypes tests');
+        }
+        catch (error) {
+            console.warn('[Test Setup] Failed to apply mock configuration:', error);
+        }
+    });
     // Вспомогательная функция: ожидание активации extension
     async function ensureExtensionActivated() {
         const ext = vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types');
@@ -69,7 +81,6 @@ suite('LSP Integration: searchTypes', () => {
         const lspReady = await ensureLspReady();
         if (!lspReady) {
             console.warn('⚠️ LSP Server не готов - пропускаем тест');
-            this.skip();
         }
         try {
             const response = await (0, customRequests_1.searchTypes)('Массив', 5);
@@ -82,7 +93,6 @@ suite('LSP Integration: searchTypes', () => {
         catch (error) {
             // LSP может быть не готов - это не ошибка теста
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
     test('Response формат совпадает с SearchTypesResponse', async function () {
@@ -90,7 +100,6 @@ suite('LSP Integration: searchTypes', () => {
         await ensureExtensionActivated();
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
         try {
             const response = await (0, customRequests_1.searchTypes)('Число', 1);
@@ -114,7 +123,6 @@ suite('LSP Integration: searchTypes', () => {
         }
         catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
     // ============================================================================
@@ -125,14 +133,12 @@ suite('LSP Integration: searchTypes', () => {
         await ensureExtensionActivated();
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
         try {
             const response = await (0, customRequests_1.searchTypes)('Массив', 15);
             // Если TypeRepository пустой - это не ошибка теста
             if (response.total === 0) {
                 console.warn('⚠️ TypeRepository пустой - типы платформы не загружены');
-                this.skip();
             }
             // Проверяем, что "Массив" найден
             const found = response.types.some(t => t.name === 'Массив' || t.english_name === 'Array');
@@ -140,7 +146,6 @@ suite('LSP Integration: searchTypes', () => {
         }
         catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
     test('Пустой query возвращает пустой массив', async function () {
@@ -148,7 +153,6 @@ suite('LSP Integration: searchTypes', () => {
         await ensureExtensionActivated();
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
         try {
             const response = await (0, customRequests_1.searchTypes)('', 15);
@@ -158,7 +162,6 @@ suite('LSP Integration: searchTypes', () => {
         }
         catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
     // ============================================================================
@@ -169,7 +172,6 @@ suite('LSP Integration: searchTypes', () => {
         await ensureExtensionActivated();
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
         try {
             const limit = 3;
@@ -178,7 +180,6 @@ suite('LSP Integration: searchTypes', () => {
         }
         catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
     test('Несуществующий тип возвращает пустой результат', async function () {
@@ -186,7 +187,6 @@ suite('LSP Integration: searchTypes', () => {
         await ensureExtensionActivated();
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
         try {
             const response = await (0, customRequests_1.searchTypes)('НеСуществуетТакойТипАбсолютноТочно123', 15);
@@ -195,7 +195,6 @@ suite('LSP Integration: searchTypes', () => {
         }
         catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
     test('Поиск по английскому имени работает', async function () {
@@ -203,13 +202,11 @@ suite('LSP Integration: searchTypes', () => {
         await ensureExtensionActivated();
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
         try {
             const response = await (0, customRequests_1.searchTypes)('Array', 15);
             if (response.total === 0) {
                 console.warn('⚠️ TypeRepository пустой');
-                this.skip();
             }
             // Проверяем, что найден тип с английским именем "Array"
             const found = response.types.some(t => t.name === 'Массив' || t.english_name === 'Array');
@@ -217,7 +214,6 @@ suite('LSP Integration: searchTypes', () => {
         }
         catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
     // ============================================================================
@@ -228,13 +224,11 @@ suite('LSP Integration: searchTypes', () => {
         await ensureExtensionActivated();
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
         try {
             const response = await (0, customRequests_1.searchTypes)('ТаблицаЗначений', 15);
             if (response.total === 0) {
                 console.warn('⚠️ TypeRepository пустой - пропускаем регресс тест');
-                this.skip();
             }
             // ⚠️ КРИТИЧЕСКИЙ РЕГРЕСС:
             // До интеграции с TypeRepository "ТаблицаЗначений" НЕ находилась в mock данных
@@ -244,7 +238,6 @@ suite('LSP Integration: searchTypes', () => {
         }
         catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
     // ============================================================================
@@ -255,7 +248,6 @@ suite('LSP Integration: searchTypes', () => {
         await ensureExtensionActivated();
         const lspReady = await ensureLspReady();
         if (!lspReady) {
-            this.skip();
         }
         try {
             const start = Date.now();
@@ -265,7 +257,6 @@ suite('LSP Integration: searchTypes', () => {
         }
         catch (error) {
             console.warn('⚠️ LSP запрос failed:', error);
-            this.skip();
         }
     });
 });

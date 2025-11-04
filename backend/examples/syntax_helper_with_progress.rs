@@ -41,6 +41,10 @@ fn main() {
             IndexingPhase::ParsingFiles => "📄",
             IndexingPhase::LinkingCategories => "🔗",
             IndexingPhase::BuildingIndexes => "📚",
+            IndexingPhase::ConfigurationDiscovery => "🔍",
+            IndexingPhase::ConfigurationParsing => "📋",
+            IndexingPhase::ConfigurationLinking => "⛓",
+            IndexingPhase::ConfigurationFinalizing => "✅",
         };
 
         let message = update.message.as_deref().unwrap_or("Обработка...");

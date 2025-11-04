@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { logger } from '../lsp/logger';
 
 export interface ConfigurationInfo {
     path: string;
@@ -36,7 +37,7 @@ export async function findConfigurations(rootPath: string): Promise<Configuratio
             }
         }
     } catch (error) {
-        console.error(`Error scanning for configurations: ${error}`);
+        logger.error(`Error scanning for configurations: ${error}`);
     }
     
     return configurations;
@@ -58,7 +59,7 @@ async function analyzeConfiguration(xmlPath: string): Promise<{ isExtension: boo
         
         return { isExtension, uuid };
     } catch (error) {
-        console.error(`Error analyzing configuration: ${error}`);
+        logger.error(`Error analyzing configuration: ${error}`);
         return null;
     }
 }

@@ -10,6 +10,7 @@ import { LanguageClient } from 'vscode-languageclient/node';
 import { MethodCallInfo } from '../utils';
 import { CodeMetrics } from '../types';
 import { renderTypeHtml, showTypeInfoWebview as showTypeInfoWebviewLsp, showMethodInfoWebview as showMethodInfoWebviewLsp } from '../lsp/typeVisualization';
+import { logger } from '../lsp/logger';
 
 /**
  * Показать webview с информацией о типе
@@ -24,7 +25,7 @@ export async function showTypeInfoWebview(
     if ('sendRequest' in clientOrContext) {
         await showTypeInfoWebviewLsp(clientOrContext as LanguageClient, typeName);
     } else {
-        console.warn('showTypeInfoWebview called with ExtensionContext - LSP client required');
+        logger.warn('showTypeInfoWebview called with ExtensionContext - LSP client required');
     }
 }
 
@@ -41,7 +42,7 @@ export async function showMethodInfoWebview(
     if ('sendRequest' in clientOrContext) {
         await showMethodInfoWebviewLsp(clientOrContext as LanguageClient, typeName, methodName);
     } else {
-        console.warn('showMethodInfoWebview called with ExtensionContext - LSP client required');
+        logger.warn('showMethodInfoWebview called with ExtensionContext - LSP client required');
     }
 }
 
@@ -55,7 +56,7 @@ export async function showTypeExplorerWebview(
     _result?: string
 ): Promise<void> {
     if (!('sendRequest' in clientOrContext)) {
-        console.warn('showTypeExplorerWebview called with ExtensionContext - LSP client required');
+        logger.warn('showTypeExplorerWebview called with ExtensionContext - LSP client required');
         return;
     }
 

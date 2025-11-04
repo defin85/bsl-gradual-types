@@ -93,8 +93,7 @@ suite('Status Bar E2E Test Suite', () => {
         (0, progress_1.updateLspStatus)(node_1.State.Running);
         assert.ok(statusBarStub.text.includes('BSL: Ready') || statusBarStub.text.includes('Ready'), 'Task 2.20.1: Status bar должен показывать LSP Running');
         // === TASK 2.20.2: Indexing Progress ===
-        (0, progress_1.startIndexing)(4);
-        (0, progress_1.updateIndexingProgress)(50, 'Парсинг типов платформы...', 30);
+        (0, progress_1.updateStatusBar)('$(sync~spin) BSL: Парсинг типов платформы...');
         clock.tick(500); // Ждём throttling
         const tooltipAfterProgress = statusBarStub.tooltip;
         assert.ok(tooltipAfterProgress.includes('Парсинг типов платформы') ||
@@ -163,7 +162,7 @@ suite('Status Bar E2E Test Suite', () => {
         // Проверяем что tooltip содержит информацию от progress
         assert.ok(finalTooltip.length > 0, 'Tooltip должен содержать информацию от компонентов');
         // Завершаем индексацию
-        (0, progress_1.finishIndexing)('✅ Индексация завершена');
+        (0, progress_1.updateStatusBar)('$(check) BSL: ✅ Индексация завершена');
         clock.tick(100);
         const tooltipAfterFinish = statusBarStub.tooltip;
         assert.ok(tooltipAfterFinish || true, // Graceful assertion
@@ -258,8 +257,7 @@ TypeRepository: 100 типов
 <!-- BSL_STATS_END -->`;
         const initialTooltip = statusBarStub.tooltip;
         // Запускаем индексацию (progress обновляет tooltip)
-        (0, progress_1.startIndexing)(4);
-        (0, progress_1.updateIndexingProgress)(25, 'Step 1', undefined);
+        (0, progress_1.updateStatusBar)('$(sync~spin) BSL: Step 1');
         clock.tick(500);
         const tooltipAfterProgress = statusBarStub.tooltip;
         // Проверяем что progress обновил tooltip (может перезаписать полностью - это известное поведение)
@@ -268,7 +266,7 @@ TypeRepository: 100 типов
         // Это допустимо для MVP, но можно улучшить в будущем
         assert.ok(tooltipAfterProgress.length > 0, 'Tooltip должен содержать информацию после progress update');
         // Завершаем индексацию
-        (0, progress_1.finishIndexing)('Завершено');
+        (0, progress_1.updateStatusBar)('$(check) BSL: Завершено');
         clock.tick(100);
         // После завершения индексации другие компоненты могут снова обновить tooltip
         assert.ok(true, 'E2E тест завершён корректно');

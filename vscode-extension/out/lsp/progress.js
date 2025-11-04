@@ -23,26 +23,20 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateLspStatus = exports.getCurrentProgress = exports.updateStatusBar = exports.finishIndexing = exports.updateIndexingProgress = exports.startIndexing = exports.initializeProgress = exports.progressEmitter = void 0;
+exports.updateLspStatus = exports.getCurrentProgress = exports.updateStatusBar = exports.initializeProgress = exports.progressEmitter = void 0;
 const vscode = __importStar(require("vscode"));
 const node_1 = require("vscode-languageclient/node");
+const logger_1 = require("./logger");
 // Глобальное состояние индексации
 let globalIndexingProgress = {
     isIndexing: false,
     currentStep: 'Idle',
-    progress: 0,
-    totalSteps: 4,
-    currentStepNumber: 0
+    progress: 0
 };
 // Event emitter для обновления прогресса
 exports.progressEmitter = new vscode.EventEmitter();
 let outputChannel;
 let statusBarItem;
-// Throttling для UI обновлений (максимум 1 обновление каждые 500ms)
-let lastUiUpdateTime = 0;
-const UI_UPDATE_THROTTLE_MS = 500;
-let pendingProgressUpdate = null;
-let throttleTimeoutId;
 /**
  * Инициализирует модуль прогресса
  */
@@ -51,127 +45,6 @@ function initializeProgress(channel, statusBar) {
     statusBarItem = statusBar;
 }
 exports.initializeProgress = initializeProgress;
-/**
- * Начинает отслеживание прогресса индексации
- */
-function startIndexing(totalSteps = 4) {
-    globalIndexingProgress = {
-        isIndexing: true,
-        currentStep: 'Initializing...',
-        progress: 0,
-        totalSteps,
-        currentStepNumber: 0,
-        startTime: new Date()
-    };
-    updateStatusBar(undefined, globalIndexingProgress);
-    exports.progressEmitter.fire(globalIndexingProgress);
-    outputChannel?.appendLine(`🚀 Index building started with ${totalSteps} steps`);
-}
-exports.startIndexing = startIndexing;
-/**
- * Обновляет прогресс индексации
- *
- * @param percentage - процент выполнения (0-100)
- * @param stepName - описание текущего шага
- * @param eta - оценка оставшегося времени в секундах (опционально)
- */
-function updateIndexingProgress(percentage, stepName, eta) {
-    if (!globalIndexingProgress.isIndexing) {
-        outputChannel?.appendLine(`⚠️ updateIndexingProgress called but indexing is not active`);
-        return;
-    }
-    const elapsed = globalIndexingProgress.startTime ?
-        (new Date().getTime() - globalIndexingProgress.startTime.getTime()) / 1000 : 0;
-    // Используем ETA из параметра, если передан, иначе вычисляем
-    const estimatedEta = eta !== undefined
-        ? eta
-        : (percentage > 5 ? Math.round((elapsed * (100 / percentage)) - elapsed) : undefined);
-    globalIndexingProgress = {
-        ...globalIndexingProgress,
-        currentStep: stepName,
-        progress: Math.min(percentage, 100),
-        currentStepNumber: Math.round(percentage / 25),
-        estimatedTimeRemaining: estimatedEta !== undefined ? `${estimatedEta}s` : 'calculating...'
-    };
-    // ✅ ИЗМЕНЕНИЕ: Используем throttled update вместо прямого вызова
-    throttledUpdateUi(globalIndexingProgress);
-}
-exports.updateIndexingProgress = updateIndexingProgress;
-/**
- * Обновляет UI с throttling (максимум каждые 500ms)
- * Использует "trailing edge" паттерн - последнее значение всегда показывается
- */
-function throttledUpdateUi(progress) {
-    const now = Date.now();
-    const timeSinceLastUpdate = now - lastUiUpdateTime;
-    // Сохраняем последнее обновление
-    pendingProgressUpdate = progress;
-    if (timeSinceLastUpdate >= UI_UPDATE_THROTTLE_MS) {
-        // Прошло достаточно времени - обновляем сразу
-        flushPendingUpdate();
-    }
-    else {
-        // Слишком рано - планируем отложенное обновление
-        if (throttleTimeoutId !== undefined) {
-            clearTimeout(throttleTimeoutId);
-        }
-        const delay = UI_UPDATE_THROTTLE_MS - timeSinceLastUpdate;
-        throttleTimeoutId = setTimeout(() => {
-            flushPendingUpdate();
-        }, delay);
-    }
-}
-/**
- * Применяет накопленное обновление к UI
- */
-function flushPendingUpdate() {
-    if (pendingProgressUpdate) {
-        updateStatusBar(undefined, pendingProgressUpdate);
-        exports.progressEmitter.fire(pendingProgressUpdate);
-        lastUiUpdateTime = Date.now();
-        throttleTimeoutId = undefined;
-        // Логируем только при реальном обновлении UI
-        outputChannel?.appendLine(`📊 Progress: ${pendingProgressUpdate.currentStep} ` +
-            `(${pendingProgressUpdate.progress}%${pendingProgressUpdate.estimatedTimeRemaining
-                ? `, ETA: ${pendingProgressUpdate.estimatedTimeRemaining}`
-                : ''})`);
-    }
-}
-/**
- * Завершает отслеживание прогресса индексации
- *
- * @param message - сообщение о завершении (опционально)
- */
-function finishIndexing(message) {
-    // ✅ ИСПРАВЛЕНИЕ: Применяем накопленное обновление перед очисткой
-    if (throttleTimeoutId !== undefined) {
-        clearTimeout(throttleTimeoutId);
-        flushPendingUpdate();
-        throttleTimeoutId = undefined;
-    }
-    const elapsed = globalIndexingProgress.startTime ?
-        (new Date().getTime() - globalIndexingProgress.startTime.getTime()) / 1000 : 0;
-    // Определяем успешность на основе message (если содержит "✅" или "успешно")
-    const success = message ? (message.includes('✅') || message.toLowerCase().includes('успешно')) : true;
-    globalIndexingProgress = {
-        isIndexing: false,
-        currentStep: success ? 'Completed' : 'Failed',
-        progress: 100,
-        totalSteps: globalIndexingProgress.totalSteps,
-        currentStepNumber: globalIndexingProgress.totalSteps
-    };
-    // ✅ ИЗМЕНЕНИЕ: Финальное обновление всегда показывается сразу (без throttling)
-    updateStatusBar(success ? 'BSL Analyzer: Index Ready' : 'BSL Analyzer: Index Failed', undefined);
-    exports.progressEmitter.fire(globalIndexingProgress);
-    lastUiUpdateTime = Date.now(); // ✅ ДОБАВИТЬ: сброс времени для следующей индексации
-    const statusIcon = success ? '✅' : '❌';
-    const displayMessage = message || `Index building ${success ? 'completed' : 'failed'}`;
-    outputChannel?.appendLine(`${statusIcon} ${displayMessage} in ${elapsed.toFixed(1)}s`);
-    if (success) {
-        vscode.window.showInformationMessage(`BSL Index built successfully in ${elapsed.toFixed(1)}s`);
-    }
-}
-exports.finishIndexing = finishIndexing;
 /**
  * Обновляет статус бар
  */
@@ -187,9 +60,8 @@ function updateStatusBar(text, progress) {
     if (progress && progress.isIndexing) {
         const icon = '$(sync~spin)';
         const percent = Math.round(progress.progress);
-        const eta = progress.estimatedTimeRemaining ? ` - ETA: ${progress.estimatedTimeRemaining}` : '';
-        statusBarItem.text = `${icon} BSL Index: ${progress.currentStep} (${percent}%${eta})`;
-        statusBarItem.tooltip = `Step ${progress.currentStepNumber}/${progress.totalSteps}\nProgress: ${percent}%\n${progress.currentStep}`;
+        statusBarItem.text = `${icon} BSL Index: ${progress.currentStep} (${percent}%)`;
+        statusBarItem.tooltip = `Progress: ${percent}%\n${progress.currentStep}`;
         statusBarItem.show();
     }
     else {
@@ -213,7 +85,7 @@ exports.getCurrentProgress = getCurrentProgress;
  */
 function updateLspStatus(state) {
     if (!statusBarItem) {
-        console.warn('[LSP] Status bar item not initialized');
+        logger_1.logger.warn('[Progress] Status bar item not initialized for updateLspStatus - call initializeProgress() first');
         return;
     }
     switch (state) {
@@ -233,7 +105,7 @@ function updateLspStatus(state) {
             statusBarItem.backgroundColor = undefined;
             break;
         default:
-            console.warn(`[LSP] Unknown state: ${state}`);
+            logger_1.logger.warn(`[Progress] Unknown LSP state: ${state}`);
             break;
     }
     statusBarItem.show();

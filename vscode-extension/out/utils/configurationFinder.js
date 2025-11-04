@@ -27,6 +27,7 @@ exports.autoDetectConfiguration = exports.selectConfiguration = exports.findMain
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const vscode = __importStar(require("vscode"));
+const logger_1 = require("../lsp/logger");
 /**
  * Находит все конфигурации 1С в директории
  */
@@ -52,7 +53,7 @@ async function findConfigurations(rootPath) {
         }
     }
     catch (error) {
-        console.error(`Error scanning for configurations: ${error}`);
+        logger_1.logger.error(`Error scanning for configurations: ${error}`);
     }
     return configurations;
 }
@@ -71,7 +72,7 @@ async function analyzeConfiguration(xmlPath) {
         return { isExtension, uuid };
     }
     catch (error) {
-        console.error(`Error analyzing configuration: ${error}`);
+        logger_1.logger.error(`Error analyzing configuration: ${error}`);
         return null;
     }
 }

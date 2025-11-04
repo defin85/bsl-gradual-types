@@ -1,14 +1,23 @@
-//! Структуры данных для отслеживания прогресса индексации платформенных типов.
+//! Структуры данных для отслеживания прогресса индексации.
 //!
-//! Поддерживает 4 фазы парсинга Syntax Helper:
-//! - Collecting Files (0-10%)
-//! - Parsing Files (10-70%)
-//! - Linking Categories (70-90%)
-//! - Building Indexes (90-100%)
+//! Поддерживает парсинг:
+//! - Платформенных типов (Syntax Helper): 4 фазы
+//! - Конфигурации (Configuration.xml): 4 фазы
 
-/// Этапы парсинга платформенных типов
+/// Источник прогресса индексации
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgressSource {
+    /// Типы платформы 1С (из Syntax Helper)
+    Platform,
+    /// Типы конфигурации (из Configuration.xml)
+    Configuration,
+}
+
+/// Этапы парсинга (платформы и конфигурации)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexingPhase {
+    // === ФАЗЫ ДЛЯ ПЛАТФОРМЫ (Syntax Helper) ===
+
     /// Сканирование файловой системы (0-10%)
     CollectingFiles,
 
@@ -20,36 +29,86 @@ pub enum IndexingPhase {
 
     /// Построение индексов для быстрого поиска (90-100%)
     BuildingIndexes,
+
+    // === ФАЗЫ ДЛЯ КОНФИГУРАЦИИ (Configuration.xml) ===
+
+    /// Сканирование структуры конфигурации (0-5%)
+    ConfigurationDiscovery,
+
+    /// Парсинг XML файлов конфигурации (5-85%)
+    ConfigurationParsing,
+
+    /// Построение связей между типами (85-95%)
+    ConfigurationLinking,
+
+    /// Финализация загрузки конфигурации (95-100%)
+    ConfigurationFinalizing,
 }
 
 impl IndexingPhase {
+    /// Возвращает источник прогресса (Platform или Configuration)
+    pub fn source(&self) -> ProgressSource {
+        match self {
+            Self::CollectingFiles
+            | Self::ParsingFiles
+            | Self::LinkingCategories
+            | Self::BuildingIndexes => ProgressSource::Platform,
+
+            Self::ConfigurationDiscovery
+            | Self::ConfigurationParsing
+            | Self::ConfigurationLinking
+            | Self::ConfigurationFinalizing => ProgressSource::Configuration,
+        }
+    }
+
     /// Возвращает базовый процент начала фазы (0.0-100.0)
     pub fn base_percentage(&self) -> f32 {
         match self {
+            // Платформа
             Self::CollectingFiles => 0.0,
             Self::ParsingFiles => 10.0,
             Self::LinkingCategories => 70.0,
             Self::BuildingIndexes => 90.0,
+
+            // Конфигурация
+            Self::ConfigurationDiscovery => 0.0,
+            Self::ConfigurationParsing => 5.0,
+            Self::ConfigurationLinking => 85.0,
+            Self::ConfigurationFinalizing => 95.0,
         }
     }
 
     /// Возвращает вклад фазы в общий процент (сумма всех весов = 100.0)
     pub fn weight(&self) -> f32 {
         match self {
+            // Платформа
             Self::CollectingFiles => 10.0,
             Self::ParsingFiles => 60.0, // Основная фаза (самая долгая)
             Self::LinkingCategories => 20.0,
             Self::BuildingIndexes => 10.0,
+
+            // Конфигурация
+            Self::ConfigurationDiscovery => 5.0,
+            Self::ConfigurationParsing => 80.0, // Основная фаза парсинга XML
+            Self::ConfigurationLinking => 10.0,
+            Self::ConfigurationFinalizing => 5.0,
         }
     }
 
     /// Человекочитаемое название фазы (для русского интерфейса)
     pub fn display_name(&self) -> &'static str {
         match self {
+            // Платформа
             Self::CollectingFiles => "Сканирование файлов",
             Self::ParsingFiles => "Парсинг Syntax Helper",
             Self::LinkingCategories => "Связывание категорий",
             Self::BuildingIndexes => "Построение индексов",
+
+            // Конфигурация
+            Self::ConfigurationDiscovery => "Сканирование конфигурации",
+            Self::ConfigurationParsing => "Парсинг Configuration.xml",
+            Self::ConfigurationLinking => "Построение связей",
+            Self::ConfigurationFinalizing => "Финализация",
         }
     }
 }
@@ -106,8 +165,8 @@ impl ProgressUpdate {
         // Итоговый процент
         let percentage = base + phase_progress * weight;
 
-        // Округление до 1 знака после запятой
-        (percentage * 10.0).round() / 10.0
+        // ✅ НОВОЕ: Округление до целого числа (более стабильная прогрессия для UI)
+        percentage.round()
     }
 
     /// Создаёт новое обновление прогресса с автоматическим вычислением процента
@@ -143,17 +202,31 @@ mod tests {
 
     #[test]
     fn test_indexing_phase_weight() {
+        // Платформа
         assert_eq!(IndexingPhase::CollectingFiles.weight(), 10.0);
         assert_eq!(IndexingPhase::ParsingFiles.weight(), 60.0);
         assert_eq!(IndexingPhase::LinkingCategories.weight(), 20.0);
         assert_eq!(IndexingPhase::BuildingIndexes.weight(), 10.0);
 
-        // Сумма весов = 100.0
-        let total_weight = IndexingPhase::CollectingFiles.weight()
+        // Сумма весов платформы = 100.0
+        let total_weight_platform = IndexingPhase::CollectingFiles.weight()
             + IndexingPhase::ParsingFiles.weight()
             + IndexingPhase::LinkingCategories.weight()
             + IndexingPhase::BuildingIndexes.weight();
-        assert_eq!(total_weight, 100.0);
+        assert_eq!(total_weight_platform, 100.0);
+
+        // Конфигурация
+        assert_eq!(IndexingPhase::ConfigurationDiscovery.weight(), 5.0);
+        assert_eq!(IndexingPhase::ConfigurationParsing.weight(), 80.0);
+        assert_eq!(IndexingPhase::ConfigurationLinking.weight(), 10.0);
+        assert_eq!(IndexingPhase::ConfigurationFinalizing.weight(), 5.0);
+
+        // Сумма весов конфигурации = 100.0
+        let total_weight_config = IndexingPhase::ConfigurationDiscovery.weight()
+            + IndexingPhase::ConfigurationParsing.weight()
+            + IndexingPhase::ConfigurationLinking.weight()
+            + IndexingPhase::ConfigurationFinalizing.weight();
+        assert_eq!(total_weight_config, 100.0);
     }
 
     #[test]
@@ -199,7 +272,7 @@ mod tests {
 
         // Середина фазы: 1963/3927 (50%)
         let percent = ProgressUpdate::compute_percentage(IndexingPhase::ParsingFiles, 1963, 3927);
-        assert_eq!(percent, 40.0); // 10% (base) + 50% * 60% (weight)
+        assert_eq!(percent, 40.0); // 10% (base) + 50% * 60% (weight) = 40.0, округлено до 40
 
         // Конец фазы: 3927/3927
         let percent = ProgressUpdate::compute_percentage(IndexingPhase::ParsingFiles, 3927, 3927);
@@ -244,7 +317,7 @@ mod tests {
         assert_eq!(update.phase, IndexingPhase::ParsingFiles);
         assert_eq!(update.current, 1963);
         assert_eq!(update.total, 3927);
-        assert_eq!(update.percentage, 40.0);
+        assert_eq!(update.percentage, 40.0); // Округлено до целого
         assert_eq!(update.message, Some("Массив".to_string()));
     }
 }

@@ -31,6 +31,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.showMethodInfoWebview = exports.showTypeInfoWebview = exports.renderTypeHtml = void 0;
 const vscode = __importStar(require("vscode"));
+const logger_1 = require("./logger");
 /**
  * Определить текущую тему VSCode
  */
@@ -69,7 +70,7 @@ async function renderTypeHtml(client, typeName, theme) {
         return response.html;
     }
     catch (error) {
-        console.error('TypeVisualization error:', error);
+        logger_1.logger.error('TypeVisualization error:', error);
         // Fallback HTML на случай ошибки
         return `
             <html>

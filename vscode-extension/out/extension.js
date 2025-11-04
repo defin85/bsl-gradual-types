@@ -1943,7 +1943,7 @@ var require_connection = __commonJS({
       ConnectionState2[ConnectionState2["Disposed"] = 4] = "Disposed";
     })(ConnectionState || (ConnectionState = {}));
     function createMessageConnection(messageReader, messageWriter, _logger, options) {
-      const logger = _logger !== void 0 ? _logger : exports2.NullLogger;
+      const logger2 = _logger !== void 0 ? _logger : exports2.NullLogger;
       let sequenceNumber = 0;
       let notificationSequenceNumber = 0;
       let unknownResponseSequenceNumber = 0;
@@ -2071,7 +2071,7 @@ var require_connection = __commonJS({
                 requestTokens.delete(cancelId);
                 response.id = toCancel.id;
                 traceSendingResponse(response, message.method, Date.now());
-                messageWriter.write(response).catch(() => logger.error(`Sending response for canceled message failed.`));
+                messageWriter.write(response).catch(() => logger2.error(`Sending response for canceled message failed.`));
                 return;
               }
             }
@@ -2104,7 +2104,7 @@ var require_connection = __commonJS({
             message.result = resultOrError === void 0 ? null : resultOrError;
           }
           traceSendingResponse(message, method, startTime2);
-          messageWriter.write(message).catch(() => logger.error(`Sending response failed.`));
+          messageWriter.write(message).catch(() => logger2.error(`Sending response failed.`));
         }
         function replyError(error, method, startTime2) {
           const message = {
@@ -2113,7 +2113,7 @@ var require_connection = __commonJS({
             error: error.toJson()
           };
           traceSendingResponse(message, method, startTime2);
-          messageWriter.write(message).catch(() => logger.error(`Sending response failed.`));
+          messageWriter.write(message).catch(() => logger2.error(`Sending response failed.`));
         }
         function replySuccess(result, method, startTime2) {
           if (result === void 0) {
@@ -2125,7 +2125,7 @@ var require_connection = __commonJS({
             result
           };
           traceSendingResponse(message, method, startTime2);
-          messageWriter.write(message).catch(() => logger.error(`Sending response failed.`));
+          messageWriter.write(message).catch(() => logger2.error(`Sending response failed.`));
         }
         traceReceivedRequest(requestMessage);
         const element = requestHandlers.get(requestMessage.method);
@@ -2212,10 +2212,10 @@ var require_connection = __commonJS({
         }
         if (responseMessage.id === null) {
           if (responseMessage.error) {
-            logger.error(`Received response message without id: Error is: 
+            logger2.error(`Received response message without id: Error is: 
 ${JSON.stringify(responseMessage.error, void 0, 4)}`);
           } else {
-            logger.error(`Received response message without id. No further error information provided.`);
+            logger2.error(`Received response message without id. No further error information provided.`);
           }
         } else {
           const key = responseMessage.id;
@@ -2234,9 +2234,9 @@ ${JSON.stringify(responseMessage.error, void 0, 4)}`);
               }
             } catch (error) {
               if (error.message) {
-                logger.error(`Response handler '${responsePromise.method}' failed with message: ${error.message}`);
+                logger2.error(`Response handler '${responsePromise.method}' failed with message: ${error.message}`);
               } else {
-                logger.error(`Response handler '${responsePromise.method}' failed unexpectedly.`);
+                logger2.error(`Response handler '${responsePromise.method}' failed unexpectedly.`);
               }
             }
           }
@@ -2267,7 +2267,7 @@ ${JSON.stringify(responseMessage.error, void 0, 4)}`);
               if (message.params === void 0) {
                 if (type !== void 0) {
                   if (type.numberOfParams !== 0 && type.parameterStructures !== messages_1.ParameterStructures.byName) {
-                    logger.error(`Notification ${message.method} defines ${type.numberOfParams} params but received none.`);
+                    logger2.error(`Notification ${message.method} defines ${type.numberOfParams} params but received none.`);
                   }
                 }
                 notificationHandler();
@@ -2278,17 +2278,17 @@ ${JSON.stringify(responseMessage.error, void 0, 4)}`);
                 } else {
                   if (type !== void 0) {
                     if (type.parameterStructures === messages_1.ParameterStructures.byName) {
-                      logger.error(`Notification ${message.method} defines parameters by name but received parameters by position`);
+                      logger2.error(`Notification ${message.method} defines parameters by name but received parameters by position`);
                     }
                     if (type.numberOfParams !== message.params.length) {
-                      logger.error(`Notification ${message.method} defines ${type.numberOfParams} params but received ${params.length} arguments`);
+                      logger2.error(`Notification ${message.method} defines ${type.numberOfParams} params but received ${params.length} arguments`);
                     }
                   }
                   notificationHandler(...params);
                 }
               } else {
                 if (type !== void 0 && type.parameterStructures === messages_1.ParameterStructures.byPosition) {
-                  logger.error(`Notification ${message.method} defines parameters by position but received parameters by name`);
+                  logger2.error(`Notification ${message.method} defines parameters by position but received parameters by name`);
                 }
                 notificationHandler(message.params);
               }
@@ -2297,9 +2297,9 @@ ${JSON.stringify(responseMessage.error, void 0, 4)}`);
             }
           } catch (error) {
             if (error.message) {
-              logger.error(`Notification handler '${message.method}' failed with message: ${error.message}`);
+              logger2.error(`Notification handler '${message.method}' failed with message: ${error.message}`);
             } else {
-              logger.error(`Notification handler '${message.method}' failed unexpectedly.`);
+              logger2.error(`Notification handler '${message.method}' failed unexpectedly.`);
             }
           }
         } else {
@@ -2308,10 +2308,10 @@ ${JSON.stringify(responseMessage.error, void 0, 4)}`);
       }
       function handleInvalidMessage(message) {
         if (!message) {
-          logger.error("Received empty message.");
+          logger2.error("Received empty message.");
           return;
         }
-        logger.error(`Received message which is neither a response nor a notification message:
+        logger2.error(`Received message which is neither a response nor a notification message:
 ${JSON.stringify(message, null, 4)}`);
         const responseMessage = message;
         if (Is.string(responseMessage.id) || Is.number(responseMessage.id)) {
@@ -2596,7 +2596,7 @@ ${JSON.stringify(message, null, 4)}`);
           };
           traceSendingNotification(notificationMessage);
           return messageWriter.write(notificationMessage).catch((error) => {
-            logger.error(`Sending notification failed.`);
+            logger2.error(`Sending notification failed.`);
             throw error;
           });
         },
@@ -2688,11 +2688,11 @@ ${JSON.stringify(message, null, 4)}`);
             disposable = token.onCancellationRequested(() => {
               const p = cancellationStrategy.sender.sendCancellation(connection, id);
               if (p === void 0) {
-                logger.log(`Received no promise from cancellation strategy when cancelling id ${id}`);
+                logger2.log(`Received no promise from cancellation strategy when cancelling id ${id}`);
                 return Promise.resolve();
               } else {
                 return p.catch(() => {
-                  logger.log(`Sending cancellation messages for id ${id} failed`);
+                  logger2.log(`Sending cancellation messages for id ${id} failed`);
                 });
               }
             });
@@ -2723,7 +2723,7 @@ ${JSON.stringify(message, null, 4)}`);
               await messageWriter.write(requestMessage);
               responsePromises.set(id, responsePromise);
             } catch (error) {
-              logger.error(`Sending request failed.`);
+              logger2.error(`Sending request failed.`);
               responsePromise.reject(new messages_1.ResponseError(messages_1.ErrorCodes.MessageWriteError, error.message ? error.message : "Unknown reason"));
               throw error;
             }
@@ -3447,16 +3447,16 @@ var require_main = __commonJS({
       const candidate = value;
       return candidate.write !== void 0 && candidate.addListener !== void 0;
     }
-    function createMessageConnection(input, output, logger, options) {
-      if (!logger) {
-        logger = api_1.NullLogger;
+    function createMessageConnection(input, output, logger2, options) {
+      if (!logger2) {
+        logger2 = api_1.NullLogger;
       }
       const reader = isReadableStream(input) ? new StreamMessageReader(input) : input;
       const writer = isWritableStream(output) ? new StreamMessageWriter(output) : output;
       if (api_1.ConnectionStrategy.is(options)) {
         options = { connectionStrategy: options };
       }
-      return (0, api_1.createMessageConnection)(reader, writer, logger, options);
+      return (0, api_1.createMessageConnection)(reader, writer, logger2, options);
     }
     exports2.createMessageConnection = createMessageConnection;
   }
@@ -6337,11 +6337,11 @@ var require_connection2 = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.createProtocolConnection = void 0;
     var vscode_jsonrpc_1 = require_main();
-    function createProtocolConnection(input, output, logger, options) {
+    function createProtocolConnection(input, output, logger2, options) {
       if (vscode_jsonrpc_1.ConnectionStrategy.is(options)) {
         options = { connectionStrategy: options };
       }
-      return (0, vscode_jsonrpc_1.createMessageConnection)(input, output, logger, options);
+      return (0, vscode_jsonrpc_1.createMessageConnection)(input, output, logger2, options);
     }
     exports2.createProtocolConnection = createProtocolConnection;
   }
@@ -6414,8 +6414,8 @@ var require_main3 = __commonJS({
     var node_1 = require_node();
     __exportStar(require_node(), exports2);
     __exportStar(require_api2(), exports2);
-    function createProtocolConnection(input, output, logger, options) {
-      return (0, node_1.createMessageConnection)(input, output, logger, options);
+    function createProtocolConnection(input, output, logger2, options) {
+      return (0, node_1.createMessageConnection)(input, output, logger2, options);
     }
     exports2.createProtocolConnection = createProtocolConnection;
   }
@@ -16004,8 +16004,8 @@ var require_client = __commonJS({
       }
     };
     function createConnection(input, output, errorHandler, closeHandler, options) {
-      const logger = new ConsoleLogger();
-      const connection = (0, vscode_languageserver_protocol_1.createProtocolConnection)(input, output, logger, options);
+      const logger2 = new ConsoleLogger();
+      const connection = (0, vscode_languageserver_protocol_1.createProtocolConnection)(input, output, logger2, options);
       connection.onError((data) => {
         errorHandler(data[0], data[1], data[2]);
       });
@@ -17786,15 +17786,79 @@ var require_node3 = __commonJS({
   }
 });
 
+// src/lsp/logger.ts
+var Logger, logger;
+var init_logger = __esm({
+  "src/lsp/logger.ts"() {
+    "use strict";
+    Logger = class {
+      constructor() {
+        this.level = 1 /* Info */;
+      }
+      /**
+       * Инициализация логгера с Output Channel
+       */
+      initialize(channel, level = 1 /* Info */) {
+        this.outputChannel = channel;
+        this.level = level;
+      }
+      /**
+       * Debug сообщения (детальная отладочная информация)
+       */
+      debug(message) {
+        if (this.level <= 0 /* Debug */) {
+          this.log("\u{1F50D} [DEBUG]", message);
+        }
+      }
+      /**
+       * Info сообщения (общая информация)
+       */
+      info(message) {
+        if (this.level <= 1 /* Info */) {
+          this.log("\u2139\uFE0F [INFO]", message);
+        }
+      }
+      /**
+       * Warning сообщения (предупреждения)
+       */
+      warn(message) {
+        if (this.level <= 2 /* Warn */) {
+          this.log("\u26A0\uFE0F [WARN]", message);
+        }
+      }
+      /**
+       * Error сообщения (ошибки)
+       */
+      error(message, error) {
+        if (this.level <= 3 /* Error */) {
+          const errorStr = error instanceof Error ? error.stack || error.message : String(error);
+          const fullMessage = error ? `${message}
+${errorStr}` : message;
+          this.log("\u274C [ERROR]", fullMessage);
+        }
+      }
+      /**
+       * Внутренний метод для записи логов
+       */
+      log(prefix, message) {
+        if (this.outputChannel) {
+          const timestamp = (/* @__PURE__ */ new Date()).toISOString();
+          this.outputChannel.appendLine(`[${timestamp}] ${prefix} ${message}`);
+        } else {
+          console.log(`${prefix} ${message}`);
+        }
+      }
+    };
+    logger = new Logger();
+  }
+});
+
 // src/lsp/progress.ts
 var progress_exports = {};
 __export(progress_exports, {
-  finishIndexing: () => finishIndexing,
   getCurrentProgress: () => getCurrentProgress,
   initializeProgress: () => initializeProgress,
   progressEmitter: () => progressEmitter,
-  startIndexing: () => startIndexing,
-  updateIndexingProgress: () => updateIndexingProgress,
   updateLspStatus: () => updateLspStatus,
   updateStatusBar: () => updateStatusBar
 });
@@ -17802,104 +17866,22 @@ function initializeProgress(channel, statusBar) {
   outputChannel = channel;
   statusBarItem = statusBar;
 }
-function startIndexing(totalSteps = 4) {
-  globalIndexingProgress = {
-    isIndexing: true,
-    currentStep: "Initializing...",
-    progress: 0,
-    totalSteps,
-    currentStepNumber: 0,
-    startTime: /* @__PURE__ */ new Date()
-  };
-  updateStatusBar(void 0, globalIndexingProgress);
-  progressEmitter.fire(globalIndexingProgress);
-  outputChannel?.appendLine(`\u{1F680} Index building started with ${totalSteps} steps`);
-}
-function updateIndexingProgress(percentage, stepName, eta) {
-  if (!globalIndexingProgress.isIndexing) {
-    outputChannel?.appendLine(`\u26A0\uFE0F updateIndexingProgress called but indexing is not active`);
-    return;
-  }
-  const elapsed = globalIndexingProgress.startTime ? ((/* @__PURE__ */ new Date()).getTime() - globalIndexingProgress.startTime.getTime()) / 1e3 : 0;
-  const estimatedEta = eta !== void 0 ? eta : percentage > 5 ? Math.round(elapsed * (100 / percentage) - elapsed) : void 0;
-  globalIndexingProgress = {
-    ...globalIndexingProgress,
-    currentStep: stepName,
-    progress: Math.min(percentage, 100),
-    currentStepNumber: Math.round(percentage / 25),
-    // Примерная оценка шага (0-4)
-    estimatedTimeRemaining: estimatedEta !== void 0 ? `${estimatedEta}s` : "calculating..."
-  };
-  throttledUpdateUi(globalIndexingProgress);
-}
-function throttledUpdateUi(progress) {
-  const now = Date.now();
-  const timeSinceLastUpdate = now - lastUiUpdateTime;
-  pendingProgressUpdate = progress;
-  if (timeSinceLastUpdate >= UI_UPDATE_THROTTLE_MS) {
-    flushPendingUpdate();
-  } else {
-    if (throttleTimeoutId !== void 0) {
-      clearTimeout(throttleTimeoutId);
-    }
-    const delay = UI_UPDATE_THROTTLE_MS - timeSinceLastUpdate;
-    throttleTimeoutId = setTimeout(() => {
-      flushPendingUpdate();
-    }, delay);
-  }
-}
-function flushPendingUpdate() {
-  if (pendingProgressUpdate) {
-    updateStatusBar(void 0, pendingProgressUpdate);
-    progressEmitter.fire(pendingProgressUpdate);
-    lastUiUpdateTime = Date.now();
-    throttleTimeoutId = void 0;
-    outputChannel?.appendLine(
-      `\u{1F4CA} Progress: ${pendingProgressUpdate.currentStep} (${pendingProgressUpdate.progress}%${pendingProgressUpdate.estimatedTimeRemaining ? `, ETA: ${pendingProgressUpdate.estimatedTimeRemaining}` : ""})`
-    );
-  }
-}
-function finishIndexing(message) {
-  if (throttleTimeoutId !== void 0) {
-    clearTimeout(throttleTimeoutId);
-    flushPendingUpdate();
-    throttleTimeoutId = void 0;
-  }
-  const elapsed = globalIndexingProgress.startTime ? ((/* @__PURE__ */ new Date()).getTime() - globalIndexingProgress.startTime.getTime()) / 1e3 : 0;
-  const success = message ? message.includes("\u2705") || message.toLowerCase().includes("\u0443\u0441\u043F\u0435\u0448\u043D\u043E") : true;
-  globalIndexingProgress = {
-    isIndexing: false,
-    currentStep: success ? "Completed" : "Failed",
-    progress: 100,
-    totalSteps: globalIndexingProgress.totalSteps,
-    currentStepNumber: globalIndexingProgress.totalSteps
-  };
-  updateStatusBar(success ? "BSL Analyzer: Index Ready" : "BSL Analyzer: Index Failed", void 0);
-  progressEmitter.fire(globalIndexingProgress);
-  lastUiUpdateTime = Date.now();
-  const statusIcon = success ? "\u2705" : "\u274C";
-  const displayMessage = message || `Index building ${success ? "completed" : "failed"}`;
-  outputChannel?.appendLine(`${statusIcon} ${displayMessage} in ${elapsed.toFixed(1)}s`);
-  if (success) {
-    vscode2.window.showInformationMessage(`BSL Index built successfully in ${elapsed.toFixed(1)}s`);
-  }
-}
 function updateStatusBar(text, progress) {
   if (!statusBarItem) {
     return;
   }
   if (text) {
     statusBarItem.text = text;
+    const cleanText = text.replace(/\$\([^)]+\)/g, "").trim();
+    statusBarItem.tooltip = cleanText;
     statusBarItem.show();
     return;
   }
   if (progress && progress.isIndexing) {
     const icon = "$(sync~spin)";
     const percent = Math.round(progress.progress);
-    const eta = progress.estimatedTimeRemaining ? ` - ETA: ${progress.estimatedTimeRemaining}` : "";
-    statusBarItem.text = `${icon} BSL Index: ${progress.currentStep} (${percent}%${eta})`;
-    statusBarItem.tooltip = `Step ${progress.currentStepNumber}/${progress.totalSteps}
-Progress: ${percent}%
+    statusBarItem.text = `${icon} BSL Index: ${progress.currentStep} (${percent}%)`;
+    statusBarItem.tooltip = `Progress: ${percent}%
 ${progress.currentStep}`;
     statusBarItem.show();
   } else {
@@ -17913,7 +17895,7 @@ function getCurrentProgress() {
 }
 function updateLspStatus(state) {
   if (!statusBarItem) {
-    console.warn("[LSP] Status bar item not initialized");
+    logger.warn("[Progress] Status bar item not initialized for updateLspStatus - call initializeProgress() first");
     return;
   }
   switch (state) {
@@ -17933,28 +17915,24 @@ function updateLspStatus(state) {
       statusBarItem.backgroundColor = void 0;
       break;
     default:
-      console.warn(`[LSP] Unknown state: ${state}`);
+      logger.warn(`[Progress] Unknown LSP state: ${state}`);
       break;
   }
   statusBarItem.show();
 }
-var vscode2, import_node, globalIndexingProgress, progressEmitter, outputChannel, statusBarItem, lastUiUpdateTime, UI_UPDATE_THROTTLE_MS, pendingProgressUpdate, throttleTimeoutId;
+var vscode2, import_node, globalIndexingProgress, progressEmitter, outputChannel, statusBarItem;
 var init_progress = __esm({
   "src/lsp/progress.ts"() {
     "use strict";
     vscode2 = __toESM(require("vscode"));
     import_node = __toESM(require_node3());
+    init_logger();
     globalIndexingProgress = {
       isIndexing: false,
       currentStep: "Idle",
-      progress: 0,
-      totalSteps: 4,
-      currentStepNumber: 0
+      progress: 0
     };
     progressEmitter = new vscode2.EventEmitter();
-    lastUiUpdateTime = 0;
-    UI_UPDATE_THROTTLE_MS = 500;
-    pendingProgressUpdate = null;
   }
 });
 
@@ -18025,7 +18003,7 @@ function initializeServerStatus(channel, statusBar) {
 }
 function handleServerStatus(params) {
   if (!statusBarItem2) {
-    console.warn("[ServerStatus] statusBarItem not initialized");
+    logger.warn("[ServerStatus] statusBarItem not initialized");
     return;
   }
   if (params.loading) {
@@ -18047,6 +18025,7 @@ var statusBarItem2, outputChannel3;
 var init_serverStatus = __esm({
   "src/lsp/serverStatus.ts"() {
     "use strict";
+    init_logger();
   }
 });
 
@@ -18056,7 +18035,6 @@ __export(client_exports, {
   getLanguageClient: () => getLanguageClient,
   initializeLspClient: () => initializeLspClient,
   isClientRunning: () => isClientRunning,
-  parseProgressMessage: () => parseProgressMessage,
   restartLanguageClient: () => restartLanguageClient,
   sendCustomNotification: () => sendCustomNotification,
   sendCustomRequest: () => sendCustomRequest,
@@ -18215,14 +18193,60 @@ async function startLanguageClient(context) {
     outputChannel4.appendLine(`   Server command: ${JSON.stringify(serverOptions)}`);
     await client.start();
     outputChannel4.appendLine("\u2705 LSP client started successfully");
-    client.onNotification("bsl/indexingProgress", (params) => {
-      handleIndexingProgress(params);
-    });
-    outputChannel4.appendLine("\u2705 bsl/indexingProgress handler registered");
     client.onNotification("bsl/serverStatus", (params) => {
       handleServerStatus(params);
     });
     outputChannel4.appendLine("\u2705 bsl/serverStatus handler registered");
+    let activeProgressResolve = null;
+    let activeProgressReporter = null;
+    let lastReportedPercentage = 0;
+    client.onNotification("$/progress", (params) => {
+      const token = params.token;
+      const value = params.value;
+      if (value.kind === "begin") {
+        outputChannel4.appendLine(`\u{1F4CA} [Progress] BEGIN: ${value.title}`);
+        lastReportedPercentage = 0;
+        vscode4.window.withProgress({
+          location: vscode4.ProgressLocation.Window,
+          title: value.title,
+          cancellable: false
+        }, async (progress) => {
+          activeProgressReporter = progress;
+          progress.report({
+            message: value.message || "\u0418\u043D\u0438\u0446\u0438\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u044F...",
+            increment: 0
+          });
+          return new Promise((resolve) => {
+            activeProgressResolve = resolve;
+          });
+        });
+      }
+      if (value.kind === "report") {
+        const percentage = value.percentage || 0;
+        const message = value.message || "";
+        outputChannel4.appendLine(`\u{1F4CA} [Progress] REPORT: ${message} (${percentage}%)`);
+        if (activeProgressReporter) {
+          const increment = percentage - lastReportedPercentage;
+          lastReportedPercentage = percentage;
+          activeProgressReporter.report({
+            message,
+            increment: Math.max(0, increment)
+            // Не допускать отрицательных значений
+          });
+        }
+      }
+      if (value.kind === "end") {
+        const message = value.message || "\u0417\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E";
+        outputChannel4.appendLine(`\u{1F4CA} [Progress] END: ${message}`);
+        if (activeProgressResolve) {
+          activeProgressResolve();
+          activeProgressResolve = null;
+        }
+        activeProgressReporter = null;
+        lastReportedPercentage = 0;
+      }
+    });
+    outputChannel4.appendLine("\u2705 $/progress handler registered");
     registerCustomHandlers();
     vscode4.commands.executeCommand("bslAnalyzer.refreshOverview");
     startHealthCheck();
@@ -18257,23 +18281,6 @@ function getLanguageClient() {
 function isClientRunning() {
   return client !== null && client.isRunning();
 }
-function parseProgressMessage(message) {
-  const result = {
-    originalMessage: message
-  };
-  const match = message.match(/Тип (\d+)\/(\d+)(?: - ([^-]+))?(?: - ETA: (\d+)s)?/);
-  if (match) {
-    result.currentItem = parseInt(match[1], 10);
-    result.totalItems = parseInt(match[2], 10);
-    if (match[3]) {
-      result.itemName = match[3].trim();
-    }
-    if (match[4]) {
-      result.eta = parseInt(match[4], 10);
-    }
-  }
-  return result;
-}
 function registerCustomHandlers() {
   if (!client) return;
   client.onRequest("bsl/typeInfo", async (params) => {
@@ -18284,9 +18291,6 @@ function registerCustomHandlers() {
     outputChannel4.appendLine(`\u2713 Method validation request: ${JSON.stringify(params)}`);
     return null;
   });
-}
-function handleIndexingProgress(params) {
-  outputChannel4.appendLine(`\u{1F4CA} Indexing progress: Step ${params.step}/${params.totalSteps} - ${params.message} (${params.percentage}%)`);
 }
 async function sendCustomRequest(method, params) {
   if (!client || !client.isRunning()) {
@@ -18410,11 +18414,13 @@ init_client();
 
 // src/extension.ts
 init_progress();
+init_logger();
 
 // src/lsp/contextProvider.ts
 var vscode5 = __toESM(require("vscode"));
 init_client();
 var import_node3 = __toESM(require_node3());
+init_logger();
 var debounceTimer;
 var statusBarItem3;
 var CONTEXT_MARKER_START = "<!-- BSL_CONTEXT_START -->";
@@ -18468,7 +18474,7 @@ async function updateCurrentContext(editor) {
       updateStatusBarTooltip(context);
     }
   } catch (error) {
-    console.error("[Context Provider] Failed to get current context:", error);
+    logger.error("[Context Provider] Failed to get current context", error);
   }
 }
 function updateStatusBarTooltip(context) {
@@ -18503,7 +18509,7 @@ ${kindRu}: ${context.functionName}`;
 }
 
 // src/lsp/customRequests.ts
-init_client();
+init_logger();
 async function queryType(typeName) {
   const client2 = (await Promise.resolve().then(() => (init_client(), client_exports))).getLanguageClient();
   if (!client2) {
@@ -18519,21 +18525,24 @@ async function queryType(typeName) {
     });
     return result;
   } catch (error) {
-    console.error("Failed to query type via LSP:", error);
+    logger.error("Failed to query type via LSP", error);
     throw error;
   }
 }
 async function buildIndex(params) {
-  return await sendCustomRequest("bsl/buildIndex", params);
+  const { sendCustomRequest: sendCustomRequest2 } = await Promise.resolve().then(() => (init_client(), client_exports));
+  return await sendCustomRequest2("bsl/buildIndex", params);
 }
 async function checkTypeCompatibility(sourceType, targetType) {
-  return await sendCustomRequest("bsl/checkTypeCompatibility", {
+  const { sendCustomRequest: sendCustomRequest2 } = await Promise.resolve().then(() => (init_client(), client_exports));
+  return await sendCustomRequest2("bsl/checkTypeCompatibility", {
     source_type: sourceType,
     target_type: targetType
   });
 }
 async function incrementalUpdate(configPath, platformVersion) {
-  return await sendCustomRequest("bsl/incrementalUpdate", {
+  const { sendCustomRequest: sendCustomRequest2 } = await Promise.resolve().then(() => (init_client(), client_exports));
+  return await sendCustomRequest2("bsl/incrementalUpdate", {
     config_path: configPath,
     platform_version: platformVersion
   });
@@ -18553,14 +18562,14 @@ async function searchTypes(query, limit) {
     });
     return result;
   } catch (error) {
-    console.error("Failed to search types via LSP:", error);
+    logger.error("Failed to search types via LSP", error);
     throw error;
   }
 }
 async function getTypeRepositoryStats() {
   const client2 = (await Promise.resolve().then(() => (init_client(), client_exports))).getLanguageClient();
   if (!client2) {
-    console.warn("[Type Stats] LSP client not available");
+    logger.warn("[Type Stats] LSP client not available");
     return null;
   }
   try {
@@ -18570,7 +18579,7 @@ async function getTypeRepositoryStats() {
     });
     return result || null;
   } catch (error) {
-    console.error("[Type Stats] Failed to get type repository stats:", error);
+    logger.error("Failed to get type repository stats", error);
     return null;
   }
 }
@@ -18578,6 +18587,7 @@ async function getTypeRepositoryStats() {
 // src/lsp/statsProvider.ts
 var import_node4 = __toESM(require_node3());
 init_client();
+init_logger();
 var statusBarItem4;
 var updateInterval;
 var UPDATE_INTERVAL_MS = 5e3;
@@ -18613,7 +18623,7 @@ async function updateTypeStats() {
       updateTooltipWithoutStats();
     }
   } catch (error) {
-    console.error("[Stats Provider] Failed to update type stats:", error);
+    logger.error("[Stats Provider] Failed to update type stats", error);
     updateTooltipWithoutStats();
   }
 }
@@ -18706,6 +18716,7 @@ init_config2();
 var fs4 = __toESM(require("fs"));
 var path2 = __toESM(require("path"));
 var vscode6 = __toESM(require("vscode"));
+init_logger();
 async function findConfigurations(rootPath) {
   const configurations = [];
   try {
@@ -18727,7 +18738,7 @@ async function findConfigurations(rootPath) {
       }
     }
   } catch (error) {
-    console.error(`Error scanning for configurations: ${error}`);
+    logger.error(`Error scanning for configurations: ${error}`);
   }
   return configurations;
 }
@@ -18739,7 +18750,7 @@ async function analyzeConfiguration(xmlPath) {
     const uuid = uuidMatch ? uuidMatch[1] : void 0;
     return { isExtension, uuid };
   } catch (error) {
-    console.error(`Error analyzing configuration: ${error}`);
+    logger.error(`Error analyzing configuration: ${error}`);
     return null;
   }
 }
@@ -18889,8 +18900,8 @@ var BslOverviewProvider = class {
       const progressIcon = "$(loading~spin)";
       const progressText = `${progressIcon} ${progress.currentStep} (${progress.progress}%)`;
       const progressItem = new BslOverviewItem(progressText, vscode8.TreeItemCollapsibleState.None, "indexing-progress");
-      progressItem.tooltip = `Step ${progress.currentStepNumber}/${progress.totalSteps}${progress.estimatedTimeRemaining ? `
-ETA: ${progress.estimatedTimeRemaining}` : ""}`;
+      progressItem.tooltip = `${progress.currentStep}
+Progress: ${progress.progress}%`;
       workspaceItems.unshift(progressItem);
     }
     return Promise.resolve(workspaceItems);
@@ -19576,6 +19587,7 @@ function getNonce() {
 
 // src/providers/typeDetailsWebview.ts
 var vscode14 = __toESM(require("vscode"));
+init_logger();
 var TypeDetailsWebviewProvider = class _TypeDetailsWebviewProvider {
   constructor(extensionUri, client2) {
     this.extensionUri = extensionUri;
@@ -19618,9 +19630,9 @@ var TypeDetailsWebviewProvider = class _TypeDetailsWebviewProvider {
   async updateTypeInfo(panel, typeName) {
     try {
       const typeInfo = await queryType(typeName);
-      console.log("\u{1F50D} queryType response:", JSON.stringify(typeInfo, null, 2));
+      logger.debug("queryType response: " + JSON.stringify(typeInfo, null, 2));
       if (!typeInfo.found) {
-        console.warn(`\u26A0\uFE0F Type '${typeName}' not found in TypeRepository`);
+        logger.warn(`Type '${typeName}' not found in TypeRepository`);
         panel.webview.postMessage({
           type: "updateTypeInfo",
           data: {
@@ -19654,11 +19666,11 @@ var TypeDetailsWebviewProvider = class _TypeDetailsWebviewProvider {
         })),
         documentation: typeInfo.description || "\u041D\u0435\u0442 \u043E\u043F\u0438\u0441\u0430\u043D\u0438\u044F"
       };
-      console.log(`\u2705 Sending to webview: ${modalData.methods.length} methods, ${modalData.properties.length} properties`);
-      console.log("\u{1F4E6} Modal data:", JSON.stringify(modalData, null, 2));
+      logger.debug(`Sending to webview: ${modalData.methods.length} methods, ${modalData.properties.length} properties`);
+      logger.debug("Modal data: " + JSON.stringify(modalData, null, 2));
       panel.webview.postMessage({ type: "updateTypeInfo", data: modalData });
     } catch (error) {
-      console.error("Failed to fetch type info:", error);
+      logger.error("Failed to fetch type info", error);
       panel.webview.postMessage({
         type: "error",
         error: `\u041E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u0442\u0438\u043F\u0430: ${error}`
@@ -19707,6 +19719,7 @@ var vscode16 = __toESM(require("vscode"));
 
 // src/lsp/typeVisualization.ts
 var vscode15 = __toESM(require("vscode"));
+init_logger();
 function getCurrentTheme() {
   const themeKind = vscode15.window.activeColorTheme.kind;
   switch (themeKind) {
@@ -19736,7 +19749,7 @@ async function renderTypeHtml(client2, typeName, theme) {
     }
     return response.html;
   } catch (error) {
-    console.error("TypeVisualization error:", error);
+    logger.error("TypeVisualization error:", error);
     return `
             <html>
                 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 20px;">
@@ -19779,23 +19792,24 @@ async function showMethodInfoWebview(client2, typeName, methodName) {
 }
 
 // src/webviews/webviewContent.ts
+init_logger();
 async function showTypeInfoWebview2(clientOrContext, typeName, _result) {
   if ("sendRequest" in clientOrContext) {
     await showTypeInfoWebview(clientOrContext, typeName);
   } else {
-    console.warn("showTypeInfoWebview called with ExtensionContext - LSP client required");
+    logger.warn("showTypeInfoWebview called with ExtensionContext - LSP client required");
   }
 }
 async function showMethodInfoWebview2(clientOrContext, typeName, methodName, _result) {
   if ("sendRequest" in clientOrContext) {
     await showMethodInfoWebview(clientOrContext, typeName, methodName);
   } else {
-    console.warn("showMethodInfoWebview called with ExtensionContext - LSP client required");
+    logger.warn("showMethodInfoWebview called with ExtensionContext - LSP client required");
   }
 }
 async function showTypeExplorerWebview(clientOrContext, typeName, _result) {
   if (!("sendRequest" in clientOrContext)) {
-    console.warn("showTypeExplorerWebview called with ExtensionContext - LSP client required");
+    logger.warn("showTypeExplorerWebview called with ExtensionContext - LSP client required");
     return;
   }
   const client2 = clientOrContext;
@@ -20347,7 +20361,6 @@ async function registerCommands(context) {
     if (choice !== "Build Index") {
       return;
     }
-    startIndexing(4);
     const workspacePath = workspaceFolders[0].uri.fsPath;
     try {
       await vscode18.window.withProgress({
@@ -20355,11 +20368,11 @@ async function registerCommands(context) {
         title: "Building BSL Index",
         cancellable: false
       }, async (progress) => {
-        updateIndexingProgress(1, "Loading platform cache...", 10);
+        updateStatusBar("$(sync~spin) BSL: Loading platform cache...");
         progress.report({ increment: 25, message: "Loading platform cache..." });
-        updateIndexingProgress(2, "Parsing configuration...", 35);
+        updateStatusBar("$(sync~spin) BSL: Parsing configuration...");
         progress.report({ increment: 25, message: "Parsing configuration..." });
-        updateIndexingProgress(3, "Building unified index...", 70);
+        updateStatusBar("$(sync~spin) BSL: Building unified index...");
         progress.report({ increment: 35, message: "Building unified index..." });
         const args = [
           "--config",
@@ -20372,15 +20385,15 @@ async function registerCommands(context) {
           args.push("--platform-docs-archive", platformDocsArchive);
         }
         const result = await buildIndex({ workspace_path: workspacePath });
-        updateIndexingProgress(4, "Finalizing index...", 90);
+        updateStatusBar("$(sync~spin) BSL: Finalizing index...");
         progress.report({ increment: 15, message: "Finalizing..." });
-        finishIndexing();
+        updateStatusBar("$(check) BSL: Ready");
         const typesCount = result.types_count || "unknown";
         vscode18.window.showInformationMessage(`\u2705 BSL Index built successfully with ${typesCount} types`);
         return result;
       });
     } catch (error) {
-      finishIndexing(`Index build failed: ${error}`);
+      updateStatusBar(`$(error) BSL: Index build failed: ${error}`);
       vscode18.window.showErrorMessage(`Index build failed: ${error}`);
       outputChannel6.appendLine(`Index build error: ${error}`);
     }
@@ -20408,26 +20421,25 @@ async function registerCommands(context) {
       vscode18.window.showWarningMessage("Please configure the 1C configuration path in settings");
       return;
     }
-    startIndexing(3);
     try {
       await vscode18.window.withProgress({
         location: vscode18.ProgressLocation.Notification,
         title: "Incremental Index Update",
         cancellable: false
       }, async (progress) => {
-        updateIndexingProgress(1, "Analyzing changes...", 20);
+        updateStatusBar("$(sync~spin) BSL: Analyzing changes...");
         progress.report({ increment: 30, message: "Analyzing changes..." });
-        updateIndexingProgress(2, "Updating index...", 60);
+        updateStatusBar("$(sync~spin) BSL: Updating index...");
         progress.report({ increment: 50, message: "Updating index..." });
         const result = await incrementalUpdate(configPath, getPlatformVersion());
-        updateIndexingProgress(3, "Finalizing...", 95);
+        updateStatusBar("$(sync~spin) BSL: Finalizing...");
         progress.report({ increment: 20, message: "Finalizing..." });
-        finishIndexing();
+        updateStatusBar("$(check) BSL: Ready");
         vscode18.window.showInformationMessage(`\u2705 Index updated successfully: ${result.message}`);
         return result.message;
       });
     } catch (error) {
-      finishIndexing(`Incremental update failed: ${error}`);
+      updateStatusBar(`$(error) BSL: Incremental update failed: ${error}`);
       vscode18.window.showErrorMessage(`Incremental update failed: ${error}`);
       outputChannel6.appendLine(`Incremental update error: ${error}`);
     }
@@ -20542,9 +20554,9 @@ async function registerCommands(context) {
     outputChannel6.appendLine(`   - Delay per step: ${stepDelay}ms`);
     outputChannel6.appendLine(`   - UI Throttling: 500ms (matches production)`);
     outputChannel6.appendLine("");
-    outputChannel6.appendLine("\u{1F680} Calling startIndexing()...");
-    startIndexing(4);
-    outputChannel6.appendLine("   \u2713 startIndexing() completed");
+    outputChannel6.appendLine("\u{1F680} Starting test progress...");
+    updateStatusBar("$(sync~spin) BSL: Testing progress system...");
+    outputChannel6.appendLine("   \u2713 Progress started");
     outputChannel6.appendLine("");
     await vscode18.window.withProgress({
       location: vscode18.ProgressLocation.Notification,
@@ -20582,8 +20594,8 @@ async function registerCommands(context) {
         outputChannel6.appendLine(`   Current Type: ${currentType}`);
         outputChannel6.appendLine(`   ETA: ${eta}s`);
         const stepName = `\u041F\u0430\u0440\u0441\u0438\u043D\u0433 \u0442\u0438\u043F\u0430 ${i}/${totalSteps}: ${currentType}`;
-        outputChannel6.appendLine(`   Calling updateIndexingProgress(${progressPercent}, "${stepName}", ${eta})...`);
-        updateIndexingProgress(progressPercent, stepName, eta);
+        outputChannel6.appendLine(`   Calling updateStatusBar("${stepName}")...`);
+        updateStatusBar(`$(sync~spin) BSL: ${stepName}`);
         outputChannel6.appendLine(`   Updating VSCode notification...`);
         progress.report({
           increment: Math.floor(100 / totalSteps),
@@ -20594,9 +20606,9 @@ async function registerCommands(context) {
         outputChannel6.appendLine(`   \u2713 Step ${i} completed`);
       }
       outputChannel6.appendLine("");
-      outputChannel6.appendLine("\u{1F3C1} Calling finishIndexing()...");
-      finishIndexing();
-      outputChannel6.appendLine("   \u2713 finishIndexing() completed");
+      outputChannel6.appendLine("\u{1F3C1} Finishing progress...");
+      updateStatusBar("$(check) BSL: Ready");
+      outputChannel6.appendLine("   \u2713 Progress finished");
     });
     outputChannel6.appendLine("");
     outputChannel6.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
@@ -20736,6 +20748,8 @@ async function activate(context) {
     const currentVersion = context.extension.packageJSON.version;
     outputChannel7 = vscode19.window.createOutputChannel("BSL Analyzer");
     context.subscriptions.push(outputChannel7);
+    logger.initialize(outputChannel7, 1 /* Info */);
+    logger.info("BSL Analyzer Extension activated");
     outputChannel7.appendLine(`\u{1F680} BSL Analyzer v${currentVersion} activation started (with modular architecture)`);
     outputChannel7.appendLine(`Extension path: ${context.extensionPath}`);
     vscode19.window.showInformationMessage(`BSL Analyzer v${currentVersion} is activating...`);
@@ -20755,16 +20769,22 @@ async function activate(context) {
     initializeCommands(outputChannel7);
     await migrateLegacySettings();
     const platformDocsArchive = BslAnalyzerConfig.platformDocsArchive;
+    const isTestMode = process.env.NODE_ENV === "test" || process.env.VSCODE_TEST_MODE === "1" || context.extensionMode === vscode19.ExtensionMode.Test;
     if (!platformDocsArchive || platformDocsArchive.trim() === "") {
-      const selection = await vscode19.window.showErrorMessage(
-        "\u26A0\uFE0F BSL Analyzer: platformDocsArchive \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D!\n\n\u042D\u0442\u043E \u041E\u0411\u042F\u0417\u0410\u0422\u0415\u041B\u042C\u041D\u042B\u0419 \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440 \u0434\u043B\u044F \u0440\u0430\u0431\u043E\u0442\u044B TypeRepository.\n\u0411\u0435\u0437 \u043D\u0435\u0433\u043E \u0442\u0438\u043F\u044B \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u044B 1\u0421 \u043D\u0435 \u0431\u0443\u0434\u0443\u0442 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B \u0432 LSP hover.",
-        "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438",
-        "\u0417\u0430\u043A\u0440\u044B\u0442\u044C"
-      );
-      if (selection === "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438") {
-        vscode19.commands.executeCommand("workbench.action.openSettings", "bslAnalyzer.platformDocsArchive");
+      if (isTestMode) {
+        logger.warn("[Test Mode] platformDocsArchive not configured - using mocks");
+        outputChannel7.appendLine("\u2139\uFE0F [Test Mode] platformDocsArchive \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D - \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u044E\u0442\u0441\u044F mocks");
+      } else {
+        const selection = await vscode19.window.showErrorMessage(
+          "\u26A0\uFE0F BSL Analyzer: platformDocsArchive \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D!\n\n\u042D\u0442\u043E \u041E\u0411\u042F\u0417\u0410\u0422\u0415\u041B\u042C\u041D\u042B\u0419 \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440 \u0434\u043B\u044F \u0440\u0430\u0431\u043E\u0442\u044B TypeRepository.\n\u0411\u0435\u0437 \u043D\u0435\u0433\u043E \u0442\u0438\u043F\u044B \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u044B 1\u0421 \u043D\u0435 \u0431\u0443\u0434\u0443\u0442 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B \u0432 LSP hover.",
+          "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438",
+          "\u0417\u0430\u043A\u0440\u044B\u0442\u044C"
+        );
+        if (selection === "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438") {
+          vscode19.commands.executeCommand("workbench.action.openSettings", "bslAnalyzer.platformDocsArchive");
+        }
+        outputChannel7.appendLine("\u26A0\uFE0F Extension \u0431\u0443\u0434\u0435\u0442 \u0440\u0430\u0431\u043E\u0442\u0430\u0442\u044C \u0432 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u043D\u043E\u043C \u0440\u0435\u0436\u0438\u043C\u0435 \u0431\u0435\u0437 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u043E\u0432");
       }
-      outputChannel7.appendLine("\u26A0\uFE0F Extension \u0431\u0443\u0434\u0435\u0442 \u0440\u0430\u0431\u043E\u0442\u0430\u0442\u044C \u0432 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u043D\u043E\u043C \u0440\u0435\u0436\u0438\u043C\u0435 \u0431\u0435\u0437 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u043E\u0432");
     } else {
       outputChannel7.appendLine(`\u2705 Platform docs archive configured: ${platformDocsArchive}`);
     }
@@ -20856,17 +20876,16 @@ async function initializeIndexIfNeeded() {
   }
   outputChannel7.appendLine("\u{1F680} Building BSL index with user-configured settings...");
   try {
-    startIndexing(4);
     await vscode19.window.withProgress({
       location: vscode19.ProgressLocation.Notification,
       title: "Building BSL Index",
       cancellable: false
     }, async (progress) => {
-      updateIndexingProgress(1, "Loading platform documentation...", 10);
+      updateStatusBar("$(sync~spin) BSL: Loading platform documentation...");
       progress.report({ increment: 25, message: "Loading platform documentation..." });
-      updateIndexingProgress(2, "Parsing configuration...", 35);
+      updateStatusBar("$(sync~spin) BSL: Parsing configuration...");
       progress.report({ increment: 25, message: "Parsing configuration..." });
-      updateIndexingProgress(3, "Building unified index...", 70);
+      updateStatusBar("$(sync~spin) BSL: Building unified index...");
       progress.report({ increment: 35, message: "Building unified index..." });
       outputChannel7.appendLine(`\u{1F4C1} Configuration: ${configPath}`);
       outputChannel7.appendLine(`\u{1F4DA} Platform docs: ${platformDocsArchive}`);
@@ -20881,16 +20900,14 @@ async function initializeIndexIfNeeded() {
       ];
       const workspacePath = vscode19.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
       await buildIndex({ workspace_path: workspacePath });
-      updateIndexingProgress(4, "Finalizing index...", 90);
+      updateStatusBar("$(sync~spin) BSL: Finalizing index...");
       progress.report({ increment: 15, message: "Finalizing..." });
-      finishIndexing();
+      updateStatusBar("$(check) BSL: Index Ready");
       outputChannel7.appendLine("\u2705 Index build completed successfully");
-      updateStatusBar("BSL Analyzer: Index Ready");
     });
   } catch (error) {
-    finishIndexing(`Index build failed: ${error}`);
+    updateStatusBar(`$(error) BSL: Index build failed: ${error}`);
     outputChannel7.appendLine(`\u274C Index build failed: ${error}`);
-    updateStatusBar("BSL Analyzer: Build Failed");
   }
 }
 function showWelcomeMessage() {

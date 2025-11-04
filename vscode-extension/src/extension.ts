@@ -12,11 +12,9 @@ import {
 } from './lsp';
 import {
     initializeProgress,
-    startIndexing,
-    updateIndexingProgress,
-    finishIndexing,
     updateStatusBar
 } from './lsp/progress';
+import { logger, LogLevel } from './lsp/logger';
 // MILESTONE 2.20.3: Current Context Indicator
 import { initializeContextProvider } from './lsp/contextProvider';
 // MILESTONE 2.20.4: Type Repository Statistics
@@ -62,6 +60,10 @@ export async function activate(context: vscode.ExtensionContext) {
         outputChannel = vscode.window.createOutputChannel('BSL Analyzer');
         context.subscriptions.push(outputChannel);
 
+        // Initialize logger
+        logger.initialize(outputChannel, LogLevel.Info);
+        logger.info('BSL Analyzer Extension activated');
+
         outputChannel.appendLine(`🚀 BSL Analyzer v${currentVersion} activation started (with modular architecture)`);
         outputChannel.appendLine(`Extension path: ${context.extensionPath}`);
 
@@ -94,21 +96,34 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // MILESTONE 2.9: Валидация ОБЯЗАТЕЛЬНОГО параметра platformDocsArchive
         const platformDocsArchive = BslAnalyzerConfig.platformDocsArchive;
+
+        // Определяем, запущены ли мы в тестовом режиме
+        const isTestMode = process.env.NODE_ENV === 'test' ||
+                           process.env.VSCODE_TEST_MODE === '1' ||
+                           context.extensionMode === vscode.ExtensionMode.Test;
+
         if (!platformDocsArchive || platformDocsArchive.trim() === '') {
-            const selection = await vscode.window.showErrorMessage(
-                '⚠️ BSL Analyzer: platformDocsArchive не настроен!\n\n' +
-                'Это ОБЯЗАТЕЛЬНЫЙ параметр для работы TypeRepository.\n' +
-                'Без него типы платформы 1С не будут доступны в LSP hover.',
-                'Открыть настройки',
-                'Закрыть'
-            );
+            if (isTestMode) {
+                // В тестовом режиме только логируем (не показываем UI предупреждение)
+                logger.warn('[Test Mode] platformDocsArchive not configured - using mocks');
+                outputChannel.appendLine('ℹ️ [Test Mode] platformDocsArchive не настроен - используются mocks');
+            } else {
+                // В production режиме показываем предупреждение
+                const selection = await vscode.window.showErrorMessage(
+                    '⚠️ BSL Analyzer: platformDocsArchive не настроен!\n\n' +
+                    'Это ОБЯЗАТЕЛЬНЫЙ параметр для работы TypeRepository.\n' +
+                    'Без него типы платформы 1С не будут доступны в LSP hover.',
+                    'Открыть настройки',
+                    'Закрыть'
+                );
 
-            if (selection === 'Открыть настройки') {
-                vscode.commands.executeCommand('workbench.action.openSettings', 'bslAnalyzer.platformDocsArchive');
+                if (selection === 'Открыть настройки') {
+                    vscode.commands.executeCommand('workbench.action.openSettings', 'bslAnalyzer.platformDocsArchive');
+                }
+
+                // НЕ останавливаем активацию полностью, но показываем предупреждение
+                outputChannel.appendLine('⚠️ Extension будет работать в ограниченном режиме без платформенных типов');
             }
-
-            // НЕ останавливаем активацию полностью, но показываем предупреждение
-            outputChannel.appendLine('⚠️ Extension будет работать в ограниченном режиме без платформенных типов');
         } else {
             outputChannel.appendLine(`✅ Platform docs archive configured: ${platformDocsArchive}`);
         }
@@ -244,20 +259,18 @@ async function initializeIndexIfNeeded() {
 
     // Build index with user-provided configuration
     try {
-        startIndexing(4);
-
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: 'Building BSL Index',
             cancellable: false
         }, async (progress) => {
-            updateIndexingProgress(1, 'Loading platform documentation...', 10);
+            updateStatusBar('$(sync~spin) BSL: Loading platform documentation...');
             progress.report({ increment: 25, message: 'Loading platform documentation...' });
 
-            updateIndexingProgress(2, 'Parsing configuration...', 35);
+            updateStatusBar('$(sync~spin) BSL: Parsing configuration...');
             progress.report({ increment: 25, message: 'Parsing configuration...' });
 
-            updateIndexingProgress(3, 'Building unified index...', 70);
+            updateStatusBar('$(sync~spin) BSL: Building unified index...');
             progress.report({ increment: 35, message: 'Building unified index...' });
 
             outputChannel.appendLine(`📁 Configuration: ${configPath}`);
@@ -274,18 +287,16 @@ async function initializeIndexIfNeeded() {
             const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
             await buildIndex({ workspace_path: workspacePath });
 
-            updateIndexingProgress(4, 'Finalizing index...', 90);
+            updateStatusBar('$(sync~spin) BSL: Finalizing index...');
             progress.report({ increment: 15, message: 'Finalizing...' });
 
-            finishIndexing(); // Success
+            updateStatusBar('$(check) BSL: Index Ready');
 
             outputChannel.appendLine('✅ Index build completed successfully');
-            updateStatusBar('BSL Analyzer: Index Ready');
         });
     } catch (error) {
-        finishIndexing(`Index build failed: ${error}`);
+        updateStatusBar(`$(error) BSL: Index build failed: ${error}`);
         outputChannel.appendLine(`❌ Index build failed: ${error}`);
-        updateStatusBar('BSL Analyzer: Build Failed');
     }
 }
 

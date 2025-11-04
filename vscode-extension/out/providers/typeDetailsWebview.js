@@ -26,6 +26,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.TypeDetailsWebviewProvider = void 0;
 const vscode = __importStar(require("vscode"));
 const customRequests_1 = require("../lsp/customRequests");
+const logger_1 = require("../lsp/logger");
 class TypeDetailsWebviewProvider {
     constructor(extensionUri, client) {
         this.extensionUri = extensionUri;
@@ -67,10 +68,10 @@ class TypeDetailsWebviewProvider {
             // ✅ РЕАЛЬНЫЕ ДАННЫЕ из TypeRepository через LSP
             const typeInfo = await (0, customRequests_1.queryType)(typeName);
             // 🔍 DEBUG: Логируем полученные данные от LSP
-            console.log('🔍 queryType response:', JSON.stringify(typeInfo, null, 2));
+            logger_1.logger.debug('queryType response: ' + JSON.stringify(typeInfo, null, 2));
             if (!typeInfo.found) {
                 // ❌ Тип не найден - показываем placeholder
-                console.warn(`⚠️ Type '${typeName}' not found in TypeRepository`);
+                logger_1.logger.warn(`Type '${typeName}' not found in TypeRepository`);
                 panel.webview.postMessage({
                     type: 'updateTypeInfo',
                     data: {
@@ -106,12 +107,12 @@ class TypeDetailsWebviewProvider {
                 documentation: typeInfo.description || 'Нет описания'
             };
             // 🔍 DEBUG: Логируем данные перед отправкой в webview
-            console.log(`✅ Sending to webview: ${modalData.methods.length} methods, ${modalData.properties.length} properties`);
-            console.log('📦 Modal data:', JSON.stringify(modalData, null, 2));
+            logger_1.logger.debug(`Sending to webview: ${modalData.methods.length} methods, ${modalData.properties.length} properties`);
+            logger_1.logger.debug('Modal data: ' + JSON.stringify(modalData, null, 2));
             panel.webview.postMessage({ type: 'updateTypeInfo', data: modalData });
         }
         catch (error) {
-            console.error('Failed to fetch type info:', error);
+            logger_1.logger.error('Failed to fetch type info', error);
             // Показываем ошибку в webview
             panel.webview.postMessage({
                 type: 'error',

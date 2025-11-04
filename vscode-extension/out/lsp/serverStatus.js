@@ -1,9 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleServerStatus = exports.initializeServerStatus = void 0;
+const logger_1 = require("./logger");
 /**
  * MILESTONE 2.20.3: Server Status Handler (rust-analyzer approach)
- * Управляет status bar icon на основе loading состояния LSP server
+ *
+ * Управляет Status Bar ТОЛЬКО для initial loading state.
+ *
+ * РАЗДЕЛЕНИЕ ОТВЕТСТВЕННОСТИ:
+ * - bsl/serverStatus (этот файл) → $(loading~spin) при запуске LSP Server
+ * - $/progress (vscode-languageclient) → Прогресс индексации (автоматический Progress Window)
+ *
+ * Этот handler показывает loading icon в начале загрузки типов платформы,
+ * затем автоматический $/progress handler от vscode-languageclient берёт управление на себя.
  */
 let statusBarItem;
 let outputChannel;
@@ -21,7 +30,7 @@ exports.initializeServerStatus = initializeServerStatus;
  */
 function handleServerStatus(params) {
     if (!statusBarItem) {
-        console.warn('[ServerStatus] statusBarItem not initialized');
+        logger_1.logger.warn('[ServerStatus] statusBarItem not initialized');
         return;
     }
     if (params.loading) {

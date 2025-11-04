@@ -257,7 +257,6 @@ suite('LSP Server Status Indicator Test Suite', () => {
         // В реальной среде это происходит автоматически при старте LSP
         const ext = vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer');
         if (!ext) {
-            this.skip();
             return;
         }
 
@@ -283,7 +282,6 @@ suite('Multiple Activation Protection Test Suite', () => {
         
         const ext = vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer');
         if (!ext) {
-            this.skip();
             return;
         }
         

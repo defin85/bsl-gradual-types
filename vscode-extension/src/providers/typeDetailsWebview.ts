@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { queryType } from '../lsp/customRequests';
+import { logger } from '../lsp/logger';
 
 export class TypeDetailsWebviewProvider {
     private static currentPanel: vscode.WebviewPanel | undefined;
@@ -55,11 +56,11 @@ export class TypeDetailsWebviewProvider {
             const typeInfo = await queryType(typeName);
 
             // 🔍 DEBUG: Логируем полученные данные от LSP
-            console.log('🔍 queryType response:', JSON.stringify(typeInfo, null, 2));
+            logger.debug('queryType response: ' + JSON.stringify(typeInfo, null, 2));
 
             if (!typeInfo.found) {
                 // ❌ Тип не найден - показываем placeholder
-                console.warn(`⚠️ Type '${typeName}' not found in TypeRepository`);
+                logger.warn(`Type '${typeName}' not found in TypeRepository`);
                 panel.webview.postMessage({
                     type: 'updateTypeInfo',
                     data: {
@@ -97,13 +98,13 @@ export class TypeDetailsWebviewProvider {
             };
 
             // 🔍 DEBUG: Логируем данные перед отправкой в webview
-            console.log(`✅ Sending to webview: ${modalData.methods.length} methods, ${modalData.properties.length} properties`);
-            console.log('📦 Modal data:', JSON.stringify(modalData, null, 2));
+            logger.debug(`Sending to webview: ${modalData.methods.length} methods, ${modalData.properties.length} properties`);
+            logger.debug('Modal data: ' + JSON.stringify(modalData, null, 2));
 
             panel.webview.postMessage({ type: 'updateTypeInfo', data: modalData });
 
         } catch (error) {
-            console.error('Failed to fetch type info:', error);
+            logger.error('Failed to fetch type info', error);
             // Показываем ошибку в webview
             panel.webview.postMessage({
                 type: 'error',

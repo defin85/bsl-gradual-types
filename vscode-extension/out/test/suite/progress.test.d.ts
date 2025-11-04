@@ -1,11 +1,8 @@
 /**
- * Unit тесты для Task 2.20.2: Enhanced Indexing Progress
+ * Unit тесты для Progress Status Bar
  *
- * Проверяет корректность работы прогресса в Extension:
- * - Throttling UI обновлений (максимум 1 обновление каждые 500ms)
- * - flushPendingUpdate() корректно применяет накопленные обновления
- * - finishIndexing() сбрасывает pending throttled updates
- * - ETA корректно вычисляется
+ * Проверяет базовую функциональность Status Bar после рефакторинга.
+ * Детальное управление прогрессом теперь делегировано vscode-languageclient.
  */
 export {};
 //# sourceMappingURL=progress.test.d.ts.map

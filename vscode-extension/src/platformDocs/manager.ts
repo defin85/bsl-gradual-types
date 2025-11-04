@@ -6,9 +6,7 @@ import {
     getPlatformDocsArchive
 } from '../utils';
 import {
-    startIndexing,
-    updateIndexingProgress,
-    finishIndexing
+    updateStatusBar
 } from '../lsp/progress';
 import { extractPlatformDocs, buildIndex } from '../lsp/customRequests';
 import { BslPlatformDocsProvider } from '../providers';
@@ -100,25 +98,20 @@ export async function addPlatformDocumentation(provider: BslPlatformDocsProvider
         }
 
         // 3. Выполним парсинг через бинарь с прогрессом
-        const stepsCount = (shcntxPath && shlangPath) ? 5 : 3; // Больше шагов если есть оба архива
-        startIndexing(stepsCount);
-        
         outputChannel.appendLine('ℹ️ Using force mode to replace existing documentation if present');
-        
+
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: `Adding/updating platform documentation for version ${version}...`,
             cancellable: false
         }, async (progress) => {
             try {
-                let currentStep = 1;
-                
                 // extract_platform_docs автоматически находит второй архив в той же директории
                 // Поэтому достаточно вызвать один раз с любым из архивов
                 const primaryArchive = shcntxPath || shlangPath;
-                
+
                 if (primaryArchive) {
-                    updateIndexingProgress(currentStep++, 'Processing platform documentation archives...', 25);
+                    updateStatusBar('$(sync~spin) BSL: Processing platform documentation archives...');
                     progress.report({ increment: 25, message: 'Extracting platform types from archives...' });
 
                     // ✅ ЗАМЕНА CLI → LSP: extract_platform_docs #12
@@ -137,12 +130,12 @@ export async function addPlatformDocumentation(provider: BslPlatformDocsProvider
                         outputChannel.appendLine(`⚠️ Platform documentation extraction completed with warnings`);
                     }
                 }
-                
+
                 // Финализация
-                updateIndexingProgress(currentStep++, 'Finalizing...', 95);
+                updateStatusBar('$(sync~spin) BSL: Finalizing...');
                 progress.report({ increment: 20, message: 'Finalizing...' });
 
-                finishIndexing(); // Success
+                updateStatusBar('$(check) BSL: Ready');
 
                 // Формируем сообщение о результате
                 let message = `✅ Platform documentation added for version ${version}`;
@@ -165,9 +158,9 @@ export async function addPlatformDocumentation(provider: BslPlatformDocsProvider
                 
                 // Обновляем панель
                 provider.refresh();
-                
+
             } catch (error) {
-                finishIndexing(`Failed to add platform documentation: ${error}`);
+                updateStatusBar(`$(error) BSL: Failed to add platform documentation: ${error}`);
                 vscode.window.showErrorMessage(`Failed to add platform documentation: ${error}`);
                 outputChannel.appendLine(`Error adding platform docs: ${error}`);
             }
@@ -243,8 +236,6 @@ export async function removePlatformDocumentation(version: string, provider: Bsl
  * Перепарсит платформенную документацию
  */
 export async function parsePlatformDocumentation(version: string): Promise<void> {
-    startIndexing(3); // 3 этапа для ре-парсинга
-    
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: `Re-parsing platform documentation for version ${version}...`,
@@ -252,11 +243,11 @@ export async function parsePlatformDocumentation(version: string): Promise<void>
     }, async (progress) => {
         try {
             // Этап 1: Инициализация
-            updateIndexingProgress(1, 'Initializing re-parse...', 15);
+            updateStatusBar('$(sync~spin) BSL: Initializing re-parse...');
             progress.report({ increment: 30, message: 'Initializing re-parse...' });
-            
+
             // Этап 2: Построение индекса
-            updateIndexingProgress(2, 'Building unified index...', 70);
+            updateStatusBar('$(sync~spin) BSL: Building unified index...');
             progress.report({ increment: 55, message: 'Building unified index...' });
             
             const args = [
@@ -274,10 +265,10 @@ export async function parsePlatformDocumentation(version: string): Promise<void>
             const result = await buildIndex({ workspace_path: workspacePath });
 
             // Этап 3: Завершение
-            updateIndexingProgress(3, 'Finalizing...', 95);
+            updateStatusBar('$(sync~spin) BSL: Finalizing...');
             progress.report({ increment: 15, message: 'Finalizing...' });
 
-            finishIndexing(); // Success
+            updateStatusBar('$(check) BSL: Ready');
 
             vscode.window.showInformationMessage(
                 `✅ Platform documentation re-parsed successfully for version ${version}`
@@ -286,7 +277,7 @@ export async function parsePlatformDocumentation(version: string): Promise<void>
             outputChannel.appendLine(`Re-parse result: ${result}`);
 
         } catch (error) {
-            finishIndexing(`Failed to re-parse platform documentation: ${error}`);
+            updateStatusBar(`$(error) BSL: Failed to re-parse platform documentation: ${error}`);
             vscode.window.showErrorMessage(`Failed to re-parse platform documentation: ${error}`);
             outputChannel.appendLine(`Error re-parsing platform docs: ${error}`);
         }

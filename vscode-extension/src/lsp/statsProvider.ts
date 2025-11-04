@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { getTypeRepositoryStats, TypeRepositoryStats } from './customRequests';
 import { State } from 'vscode-languageclient/node';
 import { getLanguageClient } from './client';
+import { logger } from './logger';
 
 let statusBarItem: vscode.StatusBarItem | undefined;
 let updateInterval: NodeJS.Timeout | undefined;
@@ -62,7 +63,7 @@ async function updateTypeStats(): Promise<void> {
             updateTooltipWithoutStats();
         }
     } catch (error) {
-        console.error('[Stats Provider] Failed to update type stats:', error);
+        logger.error('[Stats Provider] Failed to update type stats', error);
         updateTooltipWithoutStats();
     }
 }

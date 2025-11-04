@@ -15,11 +15,9 @@ import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { State } from 'vscode-languageclient/node';
 import {
-    startIndexing,
-    updateIndexingProgress,
-    finishIndexing,
     initializeProgress,
-    updateLspStatus
+    updateLspStatus,
+    updateStatusBar
 } from '../../lsp/progress';
 import { initializeContextProvider, CurrentContext } from '../../lsp/contextProvider';
 import { initializeStatsProvider } from '../../lsp/statsProvider';
@@ -94,8 +92,7 @@ suite('Status Bar E2E Test Suite', () => {
         );
 
         // === TASK 2.20.2: Indexing Progress ===
-        startIndexing(4);
-        updateIndexingProgress(50, 'Парсинг типов платформы...', 30);
+        updateStatusBar('$(sync~spin) BSL: Парсинг типов платформы...');
 
         clock.tick(500); // Ждём throttling
 
@@ -188,7 +185,7 @@ suite('Status Bar E2E Test Suite', () => {
         );
 
         // Завершаем индексацию
-        finishIndexing('✅ Индексация завершена');
+        updateStatusBar('$(check) BSL: ✅ Индексация завершена');
         clock.tick(100);
 
         const tooltipAfterFinish = statusBarStub.tooltip as string;
@@ -322,8 +319,7 @@ TypeRepository: 100 типов
         const initialTooltip = statusBarStub.tooltip as string;
 
         // Запускаем индексацию (progress обновляет tooltip)
-        startIndexing(4);
-        updateIndexingProgress(25, 'Step 1', undefined);
+        updateStatusBar('$(sync~spin) BSL: Step 1');
 
         clock.tick(500);
 
@@ -340,7 +336,7 @@ TypeRepository: 100 типов
         );
 
         // Завершаем индексацию
-        finishIndexing('Завершено');
+        updateStatusBar('$(check) BSL: Завершено');
         clock.tick(100);
 
         // После завершения индексации другие компоненты могут снова обновить tooltip

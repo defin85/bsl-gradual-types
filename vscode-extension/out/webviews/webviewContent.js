@@ -32,6 +32,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.showMetricsWebview = exports.showTypeCompatibilityWebview = exports.showMethodValidationWebview = exports.showIndexStatsWebview = exports.showTypeExplorerWebview = exports.showMethodInfoWebview = exports.showTypeInfoWebview = void 0;
 const vscode = __importStar(require("vscode"));
 const typeVisualization_1 = require("../lsp/typeVisualization");
+const logger_1 = require("../lsp/logger");
 /**
  * Показать webview с информацией о типе
  * ✅ MIGRATED: Использует Rust TypeVisualization через LSP
@@ -42,7 +43,7 @@ async function showTypeInfoWebview(clientOrContext, typeName, _result) {
         await (0, typeVisualization_1.showTypeInfoWebview)(clientOrContext, typeName);
     }
     else {
-        console.warn('showTypeInfoWebview called with ExtensionContext - LSP client required');
+        logger_1.logger.warn('showTypeInfoWebview called with ExtensionContext - LSP client required');
     }
 }
 exports.showTypeInfoWebview = showTypeInfoWebview;
@@ -55,7 +56,7 @@ async function showMethodInfoWebview(clientOrContext, typeName, methodName, _res
         await (0, typeVisualization_1.showMethodInfoWebview)(clientOrContext, typeName, methodName);
     }
     else {
-        console.warn('showMethodInfoWebview called with ExtensionContext - LSP client required');
+        logger_1.logger.warn('showMethodInfoWebview called with ExtensionContext - LSP client required');
     }
 }
 exports.showMethodInfoWebview = showMethodInfoWebview;
@@ -65,7 +66,7 @@ exports.showMethodInfoWebview = showMethodInfoWebview;
  */
 async function showTypeExplorerWebview(clientOrContext, typeName, _result) {
     if (!('sendRequest' in clientOrContext)) {
-        console.warn('showTypeExplorerWebview called with ExtensionContext - LSP client required');
+        logger_1.logger.warn('showTypeExplorerWebview called with ExtensionContext - LSP client required');
         return;
     }
     const client = clientOrContext;

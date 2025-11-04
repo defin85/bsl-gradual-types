@@ -65,7 +65,7 @@ export class BslOverviewProvider implements vscode.TreeDataProvider<BslOverviewI
             const progressIcon = '$(loading~spin)';
             const progressText = `${progressIcon} ${progress.currentStep} (${progress.progress}%)`;
             const progressItem = new BslOverviewItem(progressText, vscode.TreeItemCollapsibleState.None, 'indexing-progress');
-            progressItem.tooltip = `Step ${progress.currentStepNumber}/${progress.totalSteps}${progress.estimatedTimeRemaining ? `\nETA: ${progress.estimatedTimeRemaining}` : ''}`;
+            progressItem.tooltip = `${progress.currentStep}\nProgress: ${progress.progress}%`;
             workspaceItems.unshift(progressItem); // Добавляем в начало
         }
         

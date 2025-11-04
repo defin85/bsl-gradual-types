@@ -1,7 +1,24 @@
 import * as path from 'path';
+import * as vscode from 'vscode';
 const glob = require('glob');
 
-export function run(): Promise<void> {
+export async function run(): Promise<void> {
+    // Настроить mock конфигурацию для тестов
+    try {
+        const config = vscode.workspace.getConfiguration('bslAnalyzer');
+
+        // Установить пустую строку для platformDocsArchive (тесты используют mocks)
+        await config.update(
+            'platformDocsArchive',
+            '', // Пустая строка - тесты работают с mocks
+            vscode.ConfigurationTarget.Global
+        );
+
+        console.log('[Test Setup] Mock configuration applied');
+    } catch (error) {
+        console.warn('[Test Setup] Failed to apply mock configuration:', error);
+    }
+
     // Create the mocha test
     const Mocha = require('mocha');
     const mocha = new Mocha({

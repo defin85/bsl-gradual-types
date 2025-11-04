@@ -273,24 +273,26 @@ impl ConfigurationDiscovery {
         Ok(configurations)
     }
 
-    /// Обнаруживает объекты метаданных в конкретной конфигурации
+    /// Обнаруживает объекты метаданных в конкретной конфигурации (с прогрессом через 4 фазы)
     ///
     /// Использует ConfigurationInfo для определения пути к Configuration.xml
     /// и парсит все ChildObjects в этой конфигурации параллельно через rayon.
     ///
+    /// Новая версия с поддержкой 4 фаз: Discovery → Parsing → Linking → Finalizing
+    ///
     /// # Параметры
     /// - `config_info`: Информация о конфигурации (путь, имя, тип)
-    /// - `progress_callback`: Опциональный callback для отслеживания прогресса (каждые 5 объектов)
-    pub fn discover_metadata_in_configuration<F>(
+    /// - `progress_callback`: Callback для отслеживания прогресса (обязательный для новых фаз)
+    pub fn discover_metadata_in_configuration_with_progress<F>(
         &self,
         config_info: &ConfigurationInfo,
-        progress_callback: Option<F>,
+        progress_callback: F,
     ) -> Result<Vec<UniversalMetadataObject>>
     where
         F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
     {
         tracing::info!(
-            "📦 Парсинг метаданных из конфигурации: {} ({:?})",
+            "📦 [4-Phase] Парсинг метаданных из конфигурации: {} ({:?})",
             config_info.name,
             config_info.config_type
         );
@@ -301,10 +303,17 @@ impl ConfigurationDiscovery {
             return Err(format!("Configuration.xml не найден: {:?}", config_xml).into());
         }
 
-        // 1. Парсим список ChildObjects из Configuration.xml
+        // === PHASE 1: Discovery (0-5%) ===
+        progress_callback(ProgressUpdate::new(
+            IndexingPhase::ConfigurationDiscovery,
+            0,
+            1,
+            Some(format!("Сканирование структуры конфигурации {}", config_info.name)),
+        ));
+
         let child_objects = self.parse_child_objects_list(&config_xml)?;
 
-        // 2. Собираем все задачи парсинга в один вектор
+        // Собираем все задачи парсинга в один вектор
         let parsing_tasks: Vec<_> = child_objects
             .iter()
             .flat_map(|(object_type, object_names)| {
@@ -321,20 +330,25 @@ impl ConfigurationDiscovery {
             config_info.name
         );
 
+        progress_callback(ProgressUpdate::new(
+            IndexingPhase::ConfigurationDiscovery,
+            1,
+            1,
+            Some(format!("Обнаружено {} объектов", total_objects)),
+        ));
+
+        // === PHASE 2: Parsing (5-85%) ===
+        progress_callback(ProgressUpdate::new(
+            IndexingPhase::ConfigurationParsing,
+            0,
+            total_objects,
+            Some("Начинаем парсинг XML файлов...".to_string()),
+        ));
+
         // Счётчик обработанных объектов (потокобезопасный)
         let processed = Arc::new(AtomicUsize::new(0));
 
-        // Уведомляем о начале парсинга
-        if let Some(ref callback) = progress_callback {
-            callback(ProgressUpdate::new(
-                IndexingPhase::ParsingFiles,
-                0,
-                total_objects,
-                Some(format!("Начинаем парсинг конфигурации {}", config_info.name)),
-            ));
-        }
-
-        // 3. Параллельный парсинг через rayon::par_iter
+        // Параллельный парсинг через rayon::par_iter
         let all_metadata: Vec<_> = parsing_tasks
             .par_iter()
             .filter_map(|(object_type, object_name)| {
@@ -377,18 +391,21 @@ impl ConfigurationDiscovery {
                         // Увеличиваем счётчик обработанных объектов
                         let count = processed.fetch_add(1, Ordering::Relaxed) + 1;
 
-                        tracing::trace!("    ✅ Распарсен объект: {} ({}/{})", metadata.name, count, total_objects);
+                        tracing::trace!(
+                            "    ✅ Распарсен объект: {} ({}/{})",
+                            metadata.name,
+                            count,
+                            total_objects
+                        );
 
                         // Throttling: отправляем прогресс каждые 5 объектов или на последнем
-                        if let Some(ref callback) = progress_callback {
-                            if count % 5 == 0 || count == total_objects {
-                                callback(ProgressUpdate::new(
-                                    IndexingPhase::ParsingFiles,
-                                    count,
-                                    total_objects,
-                                    Some(format!("Парсинг: {}.{}", object_type, object_name)),
-                                ));
-                            }
+                        if count % 5 == 0 || count == total_objects {
+                            progress_callback(ProgressUpdate::new(
+                                IndexingPhase::ConfigurationParsing,
+                                count,
+                                total_objects,
+                                Some(format!("Файл {}/{}: {}", count, total_objects, object_name)),
+                            ));
                         }
 
                         Some(metadata)
@@ -406,23 +423,70 @@ impl ConfigurationDiscovery {
             })
             .collect();
 
+        // === PHASE 3: Linking (85-95%) ===
+        progress_callback(ProgressUpdate::new(
+            IndexingPhase::ConfigurationLinking,
+            0,
+            1,
+            Some("Построение связей между типами...".to_string()),
+        ));
+
+        // Здесь можно добавить логику связывания типов (пока просто сообщаем о завершении)
+        progress_callback(ProgressUpdate::new(
+            IndexingPhase::ConfigurationLinking,
+            1,
+            1,
+            Some(format!("Обработано {} типов", all_metadata.len())),
+        ));
+
+        // === PHASE 4: Finalizing (95-100%) ===
+        progress_callback(ProgressUpdate::new(
+            IndexingPhase::ConfigurationFinalizing,
+            0,
+            1,
+            Some(format!("Финализация загрузки конфигурации {}", config_info.name)),
+        ));
+
         tracing::info!(
             "✅ Обнаружено {} объектов метаданных в конфигурации {}",
             all_metadata.len(),
             config_info.name
         );
 
-        // Финальное уведомление о завершении
-        if let Some(ref callback) = progress_callback {
-            callback(ProgressUpdate::new(
-                IndexingPhase::ParsingFiles,
-                all_metadata.len(),
-                total_objects,
-                Some(format!("✅ Парсинг {} завершён", config_info.name)),
-            ));
-        }
+        progress_callback(ProgressUpdate::new(
+            IndexingPhase::ConfigurationFinalizing,
+            1,
+            1,
+            Some(format!("Загружено {} типов конфигурации", all_metadata.len())),
+        ));
 
         Ok(all_metadata)
+    }
+
+    /// Обнаруживает объекты метаданных в конкретной конфигурации БЕЗ прогресса (обратная совместимость)
+    ///
+    /// Делегирует вызов методу с прогрессом, передавая no-op callback.
+    ///
+    /// # Параметры
+    /// - `config_info`: Информация о конфигурации (путь, имя, тип)
+    /// - `progress_callback`: Опциональный callback для отслеживания прогресса (каждые 5 объектов)
+    pub fn discover_metadata_in_configuration<F>(
+        &self,
+        config_info: &ConfigurationInfo,
+        progress_callback: Option<F>,
+    ) -> Result<Vec<UniversalMetadataObject>>
+    where
+        F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
+    {
+        // ✅ Делегируем методу с прогрессом, передавая callback (или no-op если None)
+        if let Some(callback) = progress_callback {
+            self.discover_metadata_in_configuration_with_progress(config_info, callback)
+        } else {
+            // No-op callback для обратной совместимости
+            self.discover_metadata_in_configuration_with_progress(config_info, |_| {
+                // Ничего не делаем - обратная совместимость для кода без прогресса
+            })
+        }
     }
 
     /// Парсит Configuration.xml и извлекает список ChildObjects

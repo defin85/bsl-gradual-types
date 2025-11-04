@@ -112,11 +112,12 @@ impl SystemCoordinator {
             info!("📂 Загружаем синтаксис-помощник: {}", syntax_path.display());
 
             // ✅ MILESTONE 2.20.2.3: Парсим с прогрессом если передан callback
-            if let Some(tx) = progress_tx {
+            if let Some(ref tx) = progress_tx {
+                let tx_clone = tx.clone();
                 match syntax_parser.parse_with_progress(
                     syntax_path,
                     move |update: ProgressUpdate| {
-                        let _ = tx.send(update); // Отправляем в channel
+                        let _ = tx_clone.send(update); // Отправляем в channel
                     },
                 ) {
                     Ok(()) => {
@@ -182,11 +183,24 @@ impl SystemCoordinator {
                 config_path.display()
             );
 
-            match self.load_all_configurations_metadata(config_path) {
-                Ok(result) => {
+            // ✅ НОВОЕ: Используем версию с прогрессом если передан progress_tx
+            let result = if let Some(ref tx) = progress_tx {
+                let tx_clone = tx.clone();
+                self.load_all_configurations_with_progress(config_path, move |update| {
+                    let _ = tx_clone.send(update); // Отправляем прогресс в channel
+                })
+            } else {
+                // Обратная совместимость: используем версию без прогресса
+                self.load_all_configurations_metadata(config_path)
+            };
+
+            match result {
+                Ok(result_data) => {
                     info!(
                         "✅ Загружено {} типов из {} базовых конфигураций и {} расширений",
-                        result.total_types, result.base_config_count, result.extensions_count
+                        result_data.total_types,
+                        result_data.base_config_count,
+                        result_data.extensions_count
                     );
                 }
                 Err(e) => {
@@ -382,6 +396,109 @@ impl SystemCoordinator {
 
         info!("✅ Загружено {} типов из конфигурации", count);
         Ok(count)
+    }
+
+    /// Загружает метаданные из ВСЕХ конфигураций с прогрессом (4 фазы для каждой)
+    ///
+    /// Новая версия с поддержкой прогресса через callback.
+    /// Автоматически обнаруживает все конфигурации в указанной папке:
+    /// - Базовую конфигурацию (ObjectBelonging = "Own")
+    /// - Расширения конфигурации (ObjectBelonging = "Adopted")
+    ///
+    /// Для каждой конфигурации отправляет прогресс через 4 фазы:
+    /// - ConfigurationDiscovery (0-5%)
+    /// - ConfigurationParsing (5-85%)
+    /// - ConfigurationLinking (85-95%)
+    /// - ConfigurationFinalizing (95-100%)
+    ///
+    /// # Аргументы
+    /// * `config_path` - Путь к папке с конфигурациями (содержит Configuration.xml или подпапки)
+    /// * `progress_callback` - Callback для отслеживания прогресса
+    ///
+    /// # Возвращает
+    /// * `LoadMetadataResult` - Статистика загруженных типов
+    pub fn load_all_configurations_with_progress<F>(
+        &self,
+        config_path: &Path,
+        progress_callback: F,
+    ) -> Result<LoadMetadataResult>
+    where
+        F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
+    {
+        use crate::data::loaders::config_metadata_parser::{
+            ConfigurationDiscovery, ConfigurationType,
+        };
+
+        info!(
+            "🔍 [WITH PROGRESS] Обнаружение конфигураций в: {}",
+            config_path.display()
+        );
+
+        let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+        let configurations = discovery
+            .discover_all_configurations()
+            .map_err(|e| anyhow::anyhow!("Ошибка обнаружения конфигураций: {}", e))?;
+
+        info!("✅ Найдено {} конфигураций", configurations.len());
+
+        let mut base_count = 0;
+        let mut ext_count = 0;
+        let mut total_types = 0;
+
+        // Получаем AnalysisEngine и TypeRepository один раз
+        let engine = self.analysis_engine().ok_or_else(|| {
+            anyhow::anyhow!("AnalysisEngine не инициализирован. Вызовите start() сначала.")
+        })?;
+        let repository = engine.get_repository();
+
+        for config_info in configurations {
+            info!(
+                "📦 Загрузка конфигурации: {} ({}{})",
+                config_info.name,
+                if config_info.is_base() {
+                    "Base"
+                } else {
+                    "Extension"
+                },
+                config_info
+                    .prefix
+                    .as_ref()
+                    .map(|p| format!(", префикс: {}", p))
+                    .unwrap_or_default()
+            );
+
+            // ✅ НОВОЕ: Используем новый метод с прогрессом через 4 фазы
+            let metadata = discovery
+                .discover_metadata_in_configuration_with_progress(
+                    &config_info,
+                    progress_callback.clone(),
+                )
+                .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))?;
+
+            let prefix = config_info.prefix.as_deref();
+            let raw_types: Vec<RawTypeData> = metadata
+                .into_iter()
+                .map(|obj| obj.to_raw_type_data(prefix))
+                .collect();
+
+            total_types += raw_types.len();
+
+            // Загружаем типы в репозиторий
+            repository
+                .load_types(raw_types)
+                .map_err(|e| anyhow::anyhow!("Ошибка загрузки типов: {}", e))?;
+
+            match config_info.config_type {
+                ConfigurationType::Base => base_count += 1,
+                ConfigurationType::Extension => ext_count += 1,
+            }
+        }
+
+        Ok(LoadMetadataResult {
+            base_config_count: base_count,
+            extensions_count: ext_count,
+            total_types,
+        })
     }
 
     /// Загружает метаданные из ВСЕХ конфигураций (базовой + расширений) с применением префиксов

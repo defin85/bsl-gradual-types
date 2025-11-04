@@ -29,7 +29,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getTypeRepositoryStats = exports.searchTypes = exports.extractPlatformDocs = exports.incrementalUpdate = exports.analyzeFile = exports.checkTypeCompatibility = exports.validateMethod = exports.buildIndex = exports.queryType = void 0;
-const client_1 = require("./client");
+const logger_1 = require("./logger");
 // ============================================================================
 // Helper Functions - прямые вызовы LSP custom requests
 // ============================================================================
@@ -52,7 +52,7 @@ async function queryType(typeName) {
         return result;
     }
     catch (error) {
-        console.error('Failed to query type via LSP:', error);
+        logger_1.logger.error('Failed to query type via LSP', error);
         throw error;
     }
 }
@@ -62,7 +62,8 @@ exports.queryType = queryType;
  * Заменяет: executeBslCommand('build_unified_index', ...)
  */
 async function buildIndex(params) {
-    return await (0, client_1.sendCustomRequest)('bsl/buildIndex', params);
+    const { sendCustomRequest } = await Promise.resolve().then(() => __importStar(require('./client')));
+    return await sendCustomRequest('bsl/buildIndex', params);
 }
 exports.buildIndex = buildIndex;
 /**
@@ -70,7 +71,8 @@ exports.buildIndex = buildIndex;
  * Заменяет: executeBslCommand('check_type_compatibility', ...)
  */
 async function validateMethod(objectType, methodName, args) {
-    return await (0, client_1.sendCustomRequest)('bsl/validateMethod', {
+    const { sendCustomRequest } = await Promise.resolve().then(() => __importStar(require('./client')));
+    return await sendCustomRequest('bsl/validateMethod', {
         object_type: objectType,
         method_name: methodName,
         arguments: args
@@ -82,7 +84,8 @@ exports.validateMethod = validateMethod;
  * Заменяет: executeBslCommand('check_type_compatibility', ...)
  */
 async function checkTypeCompatibility(sourceType, targetType) {
-    return await (0, client_1.sendCustomRequest)('bsl/checkTypeCompatibility', {
+    const { sendCustomRequest } = await Promise.resolve().then(() => __importStar(require('./client')));
+    return await sendCustomRequest('bsl/checkTypeCompatibility', {
         source_type: sourceType,
         target_type: targetType
     });
@@ -95,7 +98,7 @@ exports.checkTypeCompatibility = checkTypeCompatibility;
 async function analyzeFile(filePath) {
     // Файл анализируется автоматически при открытии через LSP
     // Дополнительно можно отправить custom request если нужно
-    console.log(`File ${filePath} will be analyzed via LSP textDocument/didOpen`);
+    logger_1.logger.debug(`File ${filePath} will be analyzed via LSP textDocument/didOpen`);
 }
 exports.analyzeFile = analyzeFile;
 /**
@@ -103,7 +106,8 @@ exports.analyzeFile = analyzeFile;
  * Заменяет: executeBslCommand('incremental_update', ...)
  */
 async function incrementalUpdate(configPath, platformVersion) {
-    return await (0, client_1.sendCustomRequest)('bsl/incrementalUpdate', {
+    const { sendCustomRequest } = await Promise.resolve().then(() => __importStar(require('./client')));
+    return await sendCustomRequest('bsl/incrementalUpdate', {
         config_path: configPath,
         platform_version: platformVersion
     });
@@ -114,7 +118,8 @@ exports.incrementalUpdate = incrementalUpdate;
  * Заменяет: executeBslCommand('extract_platform_docs', ...)
  */
 async function extractPlatformDocs(archivePath, platformVersion, force = false) {
-    return await (0, client_1.sendCustomRequest)('bsl/extractPlatformDocs', {
+    const { sendCustomRequest } = await Promise.resolve().then(() => __importStar(require('./client')));
+    return await sendCustomRequest('bsl/extractPlatformDocs', {
         archive_path: archivePath,
         platform_version: platformVersion,
         force
@@ -145,7 +150,7 @@ async function searchTypes(query, limit) {
         return result;
     }
     catch (error) {
-        console.error('Failed to search types via LSP:', error);
+        logger_1.logger.error('Failed to search types via LSP', error);
         throw error;
     }
 }
@@ -158,7 +163,7 @@ exports.searchTypes = searchTypes;
 async function getTypeRepositoryStats() {
     const client = (await Promise.resolve().then(() => __importStar(require('./client')))).getLanguageClient();
     if (!client) {
-        console.warn('[Type Stats] LSP client not available');
+        logger_1.logger.warn('[Type Stats] LSP client not available');
         return null;
     }
     try {
@@ -169,7 +174,7 @@ async function getTypeRepositoryStats() {
         return result || null;
     }
     catch (error) {
-        console.error('[Type Stats] Failed to get type repository stats:', error);
+        logger_1.logger.error('Failed to get type repository stats', error);
         return null;
     }
 }

@@ -4,7 +4,7 @@
  * Все запросы идут через LSP server вместо fork процессов
  */
 
-import { sendCustomRequest } from './client';
+import { logger } from './logger';
 
 // ============================================================================
 // Request/Response Types
@@ -162,7 +162,7 @@ export async function queryType(typeName: string): Promise<QueryTypeResponse> {
         });
         return result as QueryTypeResponse;
     } catch (error) {
-        console.error('Failed to query type via LSP:', error);
+        logger.error('Failed to query type via LSP', error);
         throw error;
     }
 }
@@ -172,6 +172,7 @@ export async function queryType(typeName: string): Promise<QueryTypeResponse> {
  * Заменяет: executeBslCommand('build_unified_index', ...)
  */
 export async function buildIndex(params: BuildIndexParams): Promise<BuildIndexResponse> {
+    const { sendCustomRequest } = await import('./client');
     return await sendCustomRequest<BuildIndexResponse>('bsl/buildIndex', params);
 }
 
@@ -184,6 +185,7 @@ export async function validateMethod(
     methodName: string,
     args: string[]
 ): Promise<ValidateMethodResponse> {
+    const { sendCustomRequest } = await import('./client');
     return await sendCustomRequest<ValidateMethodResponse>('bsl/validateMethod', {
         object_type: objectType,
         method_name: methodName,
@@ -199,6 +201,7 @@ export async function checkTypeCompatibility(
     sourceType: string,
     targetType: string
 ): Promise<CheckCompatibilityResponse> {
+    const { sendCustomRequest } = await import('./client');
     return await sendCustomRequest<CheckCompatibilityResponse>('bsl/checkTypeCompatibility', {
         source_type: sourceType,
         target_type: targetType
@@ -212,7 +215,7 @@ export async function checkTypeCompatibility(
 export async function analyzeFile(filePath: string): Promise<void> {
     // Файл анализируется автоматически при открытии через LSP
     // Дополнительно можно отправить custom request если нужно
-    console.log(`File ${filePath} will be analyzed via LSP textDocument/didOpen`);
+    logger.debug(`File ${filePath} will be analyzed via LSP textDocument/didOpen`);
 }
 
 /**
@@ -223,6 +226,7 @@ export async function incrementalUpdate(
     configPath: string,
     platformVersion: string
 ): Promise<IncrementalUpdateResponse> {
+    const { sendCustomRequest } = await import('./client');
     return await sendCustomRequest<IncrementalUpdateResponse>('bsl/incrementalUpdate', {
         config_path: configPath,
         platform_version: platformVersion
@@ -238,6 +242,7 @@ export async function extractPlatformDocs(
     platformVersion: string,
     force: boolean = false
 ): Promise<ExtractPlatformDocsResponse> {
+    const { sendCustomRequest } = await import('./client');
     return await sendCustomRequest<ExtractPlatformDocsResponse>('bsl/extractPlatformDocs', {
         archive_path: archivePath,
         platform_version: platformVersion,
@@ -273,7 +278,7 @@ export async function searchTypes(
 
         return result as SearchTypesResponse;
     } catch (error) {
-        console.error('Failed to search types via LSP:', error);
+        logger.error('Failed to search types via LSP', error);
         throw error;
     }
 }
@@ -300,7 +305,7 @@ export interface TypeRepositoryStats {
 export async function getTypeRepositoryStats(): Promise<TypeRepositoryStats | null> {
     const client = (await import('./client')).getLanguageClient();
     if (!client) {
-        console.warn('[Type Stats] LSP client not available');
+        logger.warn('[Type Stats] LSP client not available');
         return null;
     }
 
@@ -311,7 +316,7 @@ export async function getTypeRepositoryStats(): Promise<TypeRepositoryStats | nu
         });
         return result as TypeRepositoryStats || null;
     } catch (error) {
-        console.error('[Type Stats] Failed to get type repository stats:', error);
+        logger.error('Failed to get type repository stats', error);
         return null;
     }
 }

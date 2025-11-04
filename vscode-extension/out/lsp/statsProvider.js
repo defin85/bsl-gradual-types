@@ -5,6 +5,7 @@ exports.initializeStatsProvider = void 0;
 const customRequests_1 = require("./customRequests");
 const node_1 = require("vscode-languageclient/node");
 const client_1 = require("./client");
+const logger_1 = require("./logger");
 let statusBarItem;
 let updateInterval;
 const UPDATE_INTERVAL_MS = 5000; // 5 секунд
@@ -53,7 +54,7 @@ async function updateTypeStats() {
         }
     }
     catch (error) {
-        console.error('[Stats Provider] Failed to update type stats:', error);
+        logger_1.logger.error('[Stats Provider] Failed to update type stats', error);
         updateTooltipWithoutStats();
     }
 }

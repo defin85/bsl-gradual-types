@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 
+import { logger } from './logger';
 /**
  * LSP Request параметры для bsl/renderTypeHtml
  */
@@ -74,7 +75,7 @@ export async function renderTypeHtml(
 
         return response.html;
     } catch (error) {
-        console.error('TypeVisualization error:', error);
+        logger.error('TypeVisualization error:', error);
 
         // Fallback HTML на случай ошибки
         return `

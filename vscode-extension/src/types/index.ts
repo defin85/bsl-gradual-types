@@ -44,15 +44,6 @@ export interface ValidateMethodParams {
     }>;
 }
 
-/**
- * Прогресс индексации
- */
-export interface IndexingProgressParams {
-    step: number;
-    totalSteps: number;
-    message: string;
-    percentage: number;
-}
 
 /**
  * Конфигурационные параметры
@@ -127,35 +118,6 @@ export interface WorkDoneProgressEnd {
     message?: string;
 }
 
-/**
- * Результат парсинга прогресса из message string
- */
-export interface ParsedProgressMessage {
-    /**
-     * Текущий номер элемента (для "Тип 150/3927")
-     */
-    currentItem?: number;
-
-    /**
-     * Всего элементов (для "Тип 150/3927")
-     */
-    totalItems?: number;
-
-    /**
-     * Название текущего элемента (для "Справочники.Контрагенты")
-     */
-    itemName?: string;
-
-    /**
-     * ETA в секундах (для "ETA: 42s")
-     */
-    eta?: number;
-
-    /**
-     * Исходное сообщение
-     */
-    originalMessage: string;
-}
 /**
  * MILESTONE 2.20.3: Server Status notification (rust-analyzer approach)
  * Custom bsl/serverStatus notification для управления status bar icon

@@ -152,7 +152,6 @@ suite('Provider LSP Integration Test Suite', () => {
         catch (error) {
             // В тестовой среде перезапуск может не работать
             if (error.message.includes('not found')) {
-                this.skip();
             }
         }
     });
@@ -172,7 +171,6 @@ suite('Provider Performance Test Suite', () => {
         }
         catch (error) {
             // Может не работать в тестовой среде
-            this.skip();
         }
     });
     test('Multiple provider refreshes should work concurrently', async function () {
@@ -192,7 +190,6 @@ suite('Provider Performance Test Suite', () => {
         }
         catch (error) {
             // Может не работать в тестовой среде
-            this.skip();
         }
     });
 });

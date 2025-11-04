@@ -9,10 +9,6 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, error, info, warn};
 
-// ✅ НОВОЕ: Для детального логирования прогресса во внешний файл
-use std::fs::OpenOptions;
-use std::io::Write;
-
 use clap::Parser;
 use serde::Deserialize;
 
@@ -59,24 +55,6 @@ impl ServerStatusParams {
     }
 }
 // ✅ ИСПРАВЛЕНО: временные структуры удалены, используем TypeSystemService API
-
-/// ✅ НОВОЕ: Логирование прогресса в отдельный файл для детальной отладки
-/// Записывает сообщение в vscode-extension/progress_debug.log с временной меткой
-/// Использует абсолютный путь (как и rust_lsp_server.log)
-fn log_progress_to_file(message: &str) {
-    let log_path = "C:\\1CProject\\bsl-gradual-types\\vscode-extension\\progress_debug.log";
-    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-    let log_line = format!("[{}] {}\n", timestamp, message);
-
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
-    {
-        let _ = file.write_all(log_line.as_bytes());
-        let _ = file.flush(); // ✅ Принудительно сбрасываем буфер
-    }
-}
 
 #[derive(Parser, Debug)]
 #[command(name = "lsp-server")]
@@ -390,7 +368,6 @@ impl LanguageServer for BslLanguageServer {
 
                 // MILESTONE 2.20.3: Отправляем bsl/serverStatus (loading: true) - rust-analyzer approach
                 info!("📤 [LSP→Extension] Sending bsl/serverStatus: loading=true");
-                log_progress_to_file("📤 [LSP→Extension] SEND bsl/serverStatus: loading=true");
 
                 let _ = self
                     .client
@@ -403,7 +380,13 @@ impl LanguageServer for BslLanguageServer {
 
                 // ✅ НОВОЕ: Отправляем WorkDoneProgressBegin
                 info!("📤 [LSP→Extension] Sending WorkDoneProgressBegin: token={:?}", token);
-                log_progress_to_file(&format!("📤 [LSP→Extension] SEND WorkDoneProgressBegin: token={:?}", token));
+
+                // Определяем заголовок в зависимости от наличия конфигурации
+                let title = if cfg.configuration_path.is_some() {
+                    "Загрузка типов платформы и конфигурации 1С".to_string()
+                } else {
+                    "Загрузка типов платформы 1С".to_string()
+                };
 
                 let _ = self
                     .client
@@ -412,7 +395,7 @@ impl LanguageServer for BslLanguageServer {
                             token: token.clone(),
                             value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
                                 WorkDoneProgressBegin {
-                                    title: "Загрузка типов платформы 1С".to_string(),
+                                    title,
                                     message: Some("Инициализация парсинга...".to_string()),
                                     percentage: Some(0),
                                     cancellable: Some(false),
@@ -422,7 +405,6 @@ impl LanguageServer for BslLanguageServer {
                     )
                     .await;
                 info!("✅ [LSP→Extension] WorkDoneProgressBegin sent successfully");
-                log_progress_to_file("✅ [LSP→Extension] WorkDoneProgressBegin sent successfully");
 
                 // ✅ ИСПРАВЛЕНИЕ: Spawn task обрабатывает прогресс И отправляет финальный End
                 let client_clone = self.client.clone();
@@ -439,7 +421,7 @@ impl LanguageServer for BslLanguageServer {
                         let now = std::time::Instant::now();
 
                         // ✅ НОВОЕ: Логируем КАЖДОЕ прогресс-обновление (ДО throttling)
-                        let progress_msg = format!(
+                        debug!(
                             "📥 [RECV] {:?} {:.1}% ({}/{}) - {}",
                             update.phase,
                             update.percentage,
@@ -447,15 +429,13 @@ impl LanguageServer for BslLanguageServer {
                             update.total,
                             update.message.as_deref().unwrap_or("")
                         );
-                        debug!("[Progress] {}", progress_msg);
-                        log_progress_to_file(&progress_msg);
 
-                        // Пропускаем если слишком рано (throttling)
-                        if now.duration_since(last_report) < throttle_interval {
-                            log_progress_to_file(&format!(
+                        // Пропускаем если слишком рано (throttling), НО всегда отправляем 100%
+                        if now.duration_since(last_report) < throttle_interval && update.percentage < 100.0 {
+                            debug!(
                                 "⏭️ [THROTTLED] Skipped (too early, {}ms since last report)",
                                 now.duration_since(last_report).as_millis()
-                            ));
+                            );
                             continue;
                         }
 
@@ -469,9 +449,10 @@ impl LanguageServer for BslLanguageServer {
                             None
                         };
 
-                        // Форматируем сообщение
+                        // Форматируем сообщение (универсально для Platform и Configuration)
                         let message = match update.phase {
                             IndexingPhase::ParsingFiles => {
+                                // Платформа: парсинг Syntax Helper
                                 format!(
                                     "Тип {}/{}{}",
                                     update.current,
@@ -483,7 +464,19 @@ impl LanguageServer for BslLanguageServer {
                                         .unwrap_or_default()
                                 )
                             }
+                            IndexingPhase::ConfigurationParsing => {
+                                // Конфигурация: парсинг XML файлов
+                                update.message.clone().unwrap_or_else(|| {
+                                    format!(
+                                        "{} | {}/{}",
+                                        update.phase.display_name(),
+                                        update.current,
+                                        update.total
+                                    )
+                                })
+                            }
                             _ => {
+                                // Остальные фазы (Platform и Configuration)
                                 format!(
                                     "{} | {}/{}",
                                     update.phase.display_name(),
@@ -500,13 +493,7 @@ impl LanguageServer for BslLanguageServer {
                         };
 
                         // ✅ НОВОЕ: Отправляем WorkDoneProgressReport
-                        let report_msg = format!(
-                            "📤 [SEND REPORT] {}% - {}",
-                            update.percentage as u32,
-                            message_with_eta
-                        );
                         info!("[LSP→Extension] Sending WorkDoneProgressReport: {}% - {}", update.percentage as u32, message_with_eta);
-                        log_progress_to_file(&report_msg);
 
                         let _ = client_clone
                             .send_notification::<tower_lsp::lsp_types::notification::Progress>(
@@ -523,18 +510,16 @@ impl LanguageServer for BslLanguageServer {
                             )
                             .await;
 
-                        info!("✅ [LSP→Extension] WorkDoneProgressReport sent successfully");
-                        log_progress_to_file("✅ [SENT] WorkDoneProgressReport delivered");
+                        debug!("✅ [LSP→Extension] WorkDoneProgressReport sent successfully");
                     }
 
                     // === PHASE 2: Канал закрыт, все updates обработаны ===
                     // Ждём результат парсинга из основного потока
-                    log_progress_to_file("🔄 [WAIT] Waiting for parsing result from main thread...");
+                    debug!("🔄 [WAIT] Waiting for parsing result from main thread...");
                     match result_rx.await {
                         Ok(Ok(())) => {
                             // ✅ УСПЕХ: Отправляем WorkDoneProgressEnd
                             info!("📤 [LSP→Extension] Sending WorkDoneProgressEnd (SUCCESS)");
-                            log_progress_to_file("📤 [SEND END] WorkDoneProgressEnd (SUCCESS)");
 
                             let _ = client_clone
                                 .send_notification::<tower_lsp::lsp_types::notification::Progress>(
@@ -553,12 +538,9 @@ impl LanguageServer for BslLanguageServer {
                                 .await;
 
                             info!("✅ [LSP→Extension] WorkDoneProgressEnd sent successfully");
-                            log_progress_to_file("✅ [SENT] WorkDoneProgressEnd delivered (SUCCESS)");
-
 
                             // MILESTONE 2.20.3: Отправляем bsl/serverStatus (loading: false) - готово
                             info!("📤 [LSP→Extension] Sending bsl/serverStatus: loading=false");
-                            log_progress_to_file("📤 [LSP→Extension] SEND bsl/serverStatus: loading=false");
 
                             let _ = client_clone
                                 .send_notification::<ServerStatus>(ServerStatusParams::ready())
@@ -569,7 +551,6 @@ impl LanguageServer for BslLanguageServer {
                         Ok(Err(error_msg)) => {
                             // ❌ ОШИБКА: Отправляем WorkDoneProgressEnd с ошибкой
                             info!("📤 [LSP→Extension] Sending WorkDoneProgressEnd (ERROR): {}", error_msg);
-                            log_progress_to_file(&format!("📤 [SEND END] WorkDoneProgressEnd (ERROR): {}", error_msg));
 
                             let _ = client_clone
                                 .send_notification::<tower_lsp::lsp_types::notification::Progress>(
@@ -588,12 +569,9 @@ impl LanguageServer for BslLanguageServer {
                                 .await;
 
                             info!("✅ [LSP→Extension] WorkDoneProgressEnd (ERROR) sent");
-                            log_progress_to_file("✅ [SENT] WorkDoneProgressEnd delivered (ERROR)");
-
 
                             // MILESTONE 2.20.3: Отправляем bsl/serverStatus (loading: false) даже при ошибке
                             info!("📤 [LSP→Extension] Sending bsl/serverStatus: loading=false (after error)");
-                            log_progress_to_file("📤 [LSP→Extension] SEND bsl/serverStatus: loading=false (error case)");
 
                             let _ = client_clone
                                 .send_notification::<ServerStatus>(ServerStatusParams::ready())
@@ -605,7 +583,6 @@ impl LanguageServer for BslLanguageServer {
                         Err(_) => {
                             // Канал результата закрыт без отправки (не должно случиться)
                             warn!("⚠️ Result channel closed unexpectedly");
-                            log_progress_to_file("⚠️ [ERROR] Result channel closed unexpectedly");
                         }
                     }
                 });

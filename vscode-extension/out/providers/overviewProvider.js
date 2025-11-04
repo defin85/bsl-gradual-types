@@ -82,7 +82,7 @@ class BslOverviewProvider {
             const progressIcon = '$(loading~spin)';
             const progressText = `${progressIcon} ${progress.currentStep} (${progress.progress}%)`;
             const progressItem = new items_1.BslOverviewItem(progressText, vscode.TreeItemCollapsibleState.None, 'indexing-progress');
-            progressItem.tooltip = `Step ${progress.currentStepNumber}/${progress.totalSteps}${progress.estimatedTimeRemaining ? `\nETA: ${progress.estimatedTimeRemaining}` : ''}`;
+            progressItem.tooltip = `${progress.currentStep}\nProgress: ${progress.progress}%`;
             workspaceItems.unshift(progressItem); // Добавляем в начало
         }
         return Promise.resolve(workspaceItems);

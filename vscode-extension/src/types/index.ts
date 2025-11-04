@@ -156,3 +156,20 @@ export interface ParsedProgressMessage {
      */
     originalMessage: string;
 }
+/**
+ * MILESTONE 2.20.3: Server Status notification (rust-analyzer approach)
+ * Custom bsl/serverStatus notification для управления status bar icon
+ */
+export interface ServerStatusParams {
+    /**
+     * Загружается ли LSP server (парсинг типов платформы)
+     * true = показывать $(loading~spin) icon
+     * false = обычный status bar
+     */
+    loading: boolean;
+
+    /**
+     * Опциональное сообщение о текущей операции
+     */
+    message?: string;
+}

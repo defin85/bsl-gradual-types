@@ -346,12 +346,10 @@ export async function registerCommands(context: vscode.ExtensionContext) {
             }, async (progress) => {
                 updateIndexingProgress(1, 'Loading platform cache...', 10);
                 progress.report({ increment: 25, message: 'Loading platform cache...' });
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
+
                 updateIndexingProgress(2, 'Parsing configuration...', 35);
                 progress.report({ increment: 25, message: 'Parsing configuration...' });
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
+
                 updateIndexingProgress(3, 'Building unified index...', 70);
                 progress.report({ increment: 35, message: 'Building unified index...' });
                 
@@ -428,11 +426,9 @@ export async function registerCommands(context: vscode.ExtensionContext) {
             }, async (progress) => {
                 updateIndexingProgress(1, 'Analyzing changes...', 20);
                 progress.report({ increment: 30, message: 'Analyzing changes...' });
-                await new Promise(resolve => setTimeout(resolve, 400));
-                
+
                 updateIndexingProgress(2, 'Updating index...', 60);
                 progress.report({ increment: 50, message: 'Updating index...' });
-                await new Promise(resolve => setTimeout(resolve, 600));
 
                 // ✅ ЗАМЕНА CLI → LSP: incremental_update #11
                 const result = await incrementalUpdate(configPath, getPlatformVersion());
@@ -574,8 +570,7 @@ export async function registerCommands(context: vscode.ExtensionContext) {
         
         try {
             await stopLanguageClient();
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
+
             outputChannel.appendLine('🚀 Starting new LSP client...');
             await startLanguageClient(context);
             

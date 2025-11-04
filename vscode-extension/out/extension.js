@@ -15065,9 +15065,9 @@ var require_client = __commonJS({
         this._progressHandlers.set(token, { type, handler });
         const connection = this.activeConnection();
         let disposable;
-        const handleWorkDoneProgress2 = this._clientOptions.middleware?.handleWorkDoneProgress;
-        const realHandler = vscode_languageserver_protocol_1.WorkDoneProgress.is(type) && handleWorkDoneProgress2 !== void 0 ? (params) => {
-          handleWorkDoneProgress2(token, params, () => handler(params));
+        const handleWorkDoneProgress = this._clientOptions.middleware?.handleWorkDoneProgress;
+        const realHandler = vscode_languageserver_protocol_1.WorkDoneProgress.is(type) && handleWorkDoneProgress !== void 0 ? (params) => {
+          handleWorkDoneProgress(token, params, () => handler(params));
         } : handler;
         if (connection !== void 0) {
           this._progressDisposables.set(token, connection.onProgress(type, token, realHandler));
@@ -18018,6 +18018,38 @@ var init_binaryPath = __esm({
   }
 });
 
+// src/lsp/serverStatus.ts
+function initializeServerStatus(channel, statusBar) {
+  outputChannel3 = channel;
+  statusBarItem2 = statusBar;
+}
+function handleServerStatus(params) {
+  if (!statusBarItem2) {
+    console.warn("[ServerStatus] statusBarItem not initialized");
+    return;
+  }
+  if (params.loading) {
+    const message = params.message || "\u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u0442\u0438\u043F\u043E\u0432 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u044B...";
+    statusBarItem2.text = `$(loading~spin) BSL: ${message}`;
+    statusBarItem2.tooltip = `BSL Language Server \u0437\u0430\u0433\u0440\u0443\u0436\u0430\u0435\u0442\u0441\u044F
+${message}`;
+    statusBarItem2.backgroundColor = void 0;
+  } else {
+    statusBarItem2.text = "$(check) BSL: Ready";
+    statusBarItem2.tooltip = "BSL Type Safety Analyzer\nLSP Server \u0433\u043E\u0442\u043E\u0432";
+    statusBarItem2.backgroundColor = void 0;
+  }
+  statusBarItem2.show();
+  const msg = params.message || "N/A";
+  outputChannel3?.appendLine(`\u{1F4CA} [ServerStatus] loading=${params.loading}, message=${msg}`);
+}
+var statusBarItem2, outputChannel3;
+var init_serverStatus = __esm({
+  "src/lsp/serverStatus.ts"() {
+    "use strict";
+  }
+});
+
 // src/lsp/client.ts
 var client_exports = {};
 __export(client_exports, {
@@ -18044,7 +18076,7 @@ function StateToString(state) {
   }
 }
 function initializeLspClient(channel) {
-  outputChannel3 = channel;
+  outputChannel4 = channel;
 }
 async function startLanguageClient(context) {
   const serverMode = BslAnalyzerConfig.serverMode;
@@ -18053,22 +18085,22 @@ async function startLanguageClient(context) {
   let serverPath;
   try {
     serverPath = getBinaryPath("lsp_server", context);
-    outputChannel3.appendLine(`\u{1F680} LSP server path resolved: ${serverPath}`);
+    outputChannel4.appendLine(`\u{1F680} LSP server path resolved: ${serverPath}`);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    outputChannel3.appendLine(`\u274C Failed to locate LSP server: ${errorMessage}`);
+    outputChannel4.appendLine(`\u274C Failed to locate LSP server: ${errorMessage}`);
     vscode4.window.showWarningMessage(
       "BSL Analyzer: LSP server not found. Extension features will be limited.",
       "Show Details"
     ).then((selection) => {
       if (selection === "Show Details") {
-        outputChannel3.show();
+        outputChannel4.show();
       }
     });
     return;
   }
   if (!fs2.existsSync(serverPath)) {
-    outputChannel3.appendLine(`\u274C LSP server file not found: ${serverPath}`);
+    outputChannel4.appendLine(`\u274C LSP server file not found: ${serverPath}`);
     vscode4.window.showWarningMessage(
       "BSL Analyzer: LSP server binary not found. Please build the project first.",
       "Open Build Instructions"
@@ -18079,8 +18111,8 @@ async function startLanguageClient(context) {
     });
     return;
   }
-  outputChannel3.appendLine(`\u{1F527} Starting LSP server in ${serverMode} mode...`);
-  outputChannel3.appendLine(`\u{1F4CD} Server path: ${serverPath}`);
+  outputChannel4.appendLine(`\u{1F527} Starting LSP server in ${serverMode} mode...`);
+  outputChannel4.appendLine(`\u{1F4CD} Server path: ${serverPath}`);
   let serverOptions;
   if (serverMode === "stdio") {
     const newEnv = { ...process.env };
@@ -18094,9 +18126,9 @@ async function startLanguageClient(context) {
       run,
       debug: run
     };
-    outputChannel3.appendLine(`\u{1F4DD} Rust server logs: ${context.extensionPath}\\rust_lsp_server.log`);
+    outputChannel4.appendLine(`\u{1F4DD} Rust server logs: ${context.extensionPath}\\rust_lsp_server.log`);
   } else {
-    outputChannel3.appendLine(`\u{1F4E1} Connecting to LSP server on port ${tcpPort}...`);
+    outputChannel4.appendLine(`\u{1F4E1} Connecting to LSP server on port ${tcpPort}...`);
     serverOptions = {
       run: {
         transport: import_node2.TransportKind.socket,
@@ -18113,10 +18145,10 @@ async function startLanguageClient(context) {
     configurationPath: BslAnalyzerConfig.configurationPath,
     platformVersion: BslAnalyzerConfig.platformVersion
   };
-  outputChannel3.appendLine(`\u{1F4E4} Sending initializationOptions to LSP:`);
-  outputChannel3.appendLine(`   platformDocsArchive: ${initializationOptions.platformDocsArchive || "NOT SET"}`);
-  outputChannel3.appendLine(`   configurationPath: ${initializationOptions.configurationPath || "NOT SET"}`);
-  outputChannel3.appendLine(`   platformVersion: ${initializationOptions.platformVersion || "NOT SET"}`);
+  outputChannel4.appendLine(`\u{1F4E4} Sending initializationOptions to LSP:`);
+  outputChannel4.appendLine(`   platformDocsArchive: ${initializationOptions.platformDocsArchive || "NOT SET"}`);
+  outputChannel4.appendLine(`   configurationPath: ${initializationOptions.configurationPath || "NOT SET"}`);
+  outputChannel4.appendLine(`   platformVersion: ${initializationOptions.platformVersion || "NOT SET"}`);
   const clientOptions = {
     documentSelector: [
       { scheme: "file", language: "bsl" },
@@ -18132,26 +18164,23 @@ async function startLanguageClient(context) {
     },
     // ✅ MILESTONE 2.10: Передаём initializationOptions в LSP
     initializationOptions,
-    outputChannel: outputChannel3,
+    // ❌ УБРАНО: progressOnInitialization работает ТОЛЬКО для прогресса во время initialize request
+    // Наш прогресс создаётся ПОСЛЕ в initialized() callback, поэтому нужен custom handler
+    outputChannel: outputChannel4,
     revealOutputChannelOn: import_node2.RevealOutputChannelOn.Never,
-    traceOutputChannel: outputChannel3,
+    traceOutputChannel: outputChannel4,
     middleware: {
       // Перехватываем workspace-related notifications
       workspace: {
         configuration: (params, token, next) => {
-          outputChannel3.appendLine(`\u{1F4CA} Configuration request: ${JSON.stringify(params)}`);
+          outputChannel4.appendLine(`\u{1F4CA} Configuration request: ${JSON.stringify(params)}`);
           return next(params, token);
         }
       }
     }
   };
-  if (traceLevel && traceLevel !== "off") {
-    if (traceLevel === "messages") {
-      clientOptions.trace = import_node2.Trace.Messages;
-    } else if (traceLevel === "verbose") {
-      clientOptions.trace = import_node2.Trace.Verbose;
-    }
-  }
+  clientOptions.trace = import_node2.Trace.Verbose;
+  outputChannel4.appendLine("\u{1F50D} TRACE: Verbose logging enabled");
   client = new import_node2.LanguageClient(
     "bslAnalyzer",
     "BSL Type Safety Analyzer",
@@ -18159,11 +18188,11 @@ async function startLanguageClient(context) {
     clientOptions
   );
   client.onDidChangeState((event) => {
-    outputChannel3.appendLine(`\u{1F504} LSP Client state: ${StateToString(event.oldState)} \u2192 ${StateToString(event.newState)}`);
+    outputChannel4.appendLine(`\u{1F504} LSP Client state: ${StateToString(event.oldState)} \u2192 ${StateToString(event.newState)}`);
     updateLspStatus(event.newState);
     vscode4.commands.executeCommand("bslAnalyzer.refreshOverview");
     if (event.newState === import_node2.State.Stopped) {
-      outputChannel3.appendLine("\u26A0\uFE0F LSP server disconnected unexpectedly");
+      outputChannel4.appendLine("\u26A0\uFE0F LSP server disconnected unexpectedly");
       vscode4.window.showWarningMessage(
         "BSL Analyzer: Language server disconnected",
         "Restart Server"
@@ -18175,42 +18204,30 @@ async function startLanguageClient(context) {
     }
   });
   client.onConnectionError = (error, message, count) => {
-    outputChannel3.appendLine(`\u274C Connection error (attempt ${count}): ${error.message}`);
-    outputChannel3.appendLine(`   Error stack: ${error.stack}`);
+    outputChannel4.appendLine(`\u274C Connection error (attempt ${count}): ${error.message}`);
+    outputChannel4.appendLine(`   Error stack: ${error.stack}`);
     if (message) {
-      outputChannel3.appendLine(`   Last message: ${JSON.stringify(message)}`);
+      outputChannel4.appendLine(`   Last message: ${JSON.stringify(message)}`);
     }
   };
   try {
-    outputChannel3.appendLine("\u{1F680} Starting LSP client...");
-    outputChannel3.appendLine(`   Server command: ${JSON.stringify(serverOptions)}`);
-    await vscode4.window.withProgress({
-      location: vscode4.ProgressLocation.Window,
-      title: "BSL Analyzer: \u0417\u0430\u043F\u0443\u0441\u043A LSP \u0441\u0435\u0440\u0432\u0435\u0440\u0430",
-      cancellable: false
-    }, async (progress) => {
-      progress.report({ increment: 0, message: "\u0418\u043D\u0438\u0446\u0438\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u044F..." });
-      await client.start();
-      progress.report({ increment: 50, message: "\u041F\u0430\u0440\u0441\u0438\u043D\u0433 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430\u0446\u0438\u0438 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u044B 1\u0421..." });
-      await new Promise((resolve) => setTimeout(resolve, 2e3));
-      progress.report({ increment: 100, message: "\u0413\u043E\u0442\u043E\u0432 \u043A \u0440\u0430\u0431\u043E\u0442\u0435" });
-    });
-    outputChannel3.appendLine("\u2705 LSP client started successfully");
-    registerCustomHandlers();
+    outputChannel4.appendLine("\u{1F680} Starting LSP client...");
+    outputChannel4.appendLine(`   Server command: ${JSON.stringify(serverOptions)}`);
+    await client.start();
+    outputChannel4.appendLine("\u2705 LSP client started successfully");
     client.onNotification("bsl/indexingProgress", (params) => {
       handleIndexingProgress(params);
     });
-    client.onNotification("$/progress", (params) => {
-      const { token } = params;
-      if (typeof token === "string" && token.startsWith("bsl-load-types-")) {
-        outputChannel3.appendLine(`[$/progress] Received notification for token: ${token}`);
-        handleWorkDoneProgress(params);
-      }
+    outputChannel4.appendLine("\u2705 bsl/indexingProgress handler registered");
+    client.onNotification("bsl/serverStatus", (params) => {
+      handleServerStatus(params);
     });
+    outputChannel4.appendLine("\u2705 bsl/serverStatus handler registered");
+    registerCustomHandlers();
     vscode4.commands.executeCommand("bslAnalyzer.refreshOverview");
     startHealthCheck();
   } catch (error) {
-    outputChannel3.appendLine(`\u274C Failed to start LSP client: ${error}`);
+    outputChannel4.appendLine(`\u274C Failed to start LSP client: ${error}`);
     vscode4.window.showErrorMessage(`Failed to start BSL Analyzer: ${error}`);
     updateStatusBar("$(error) BSL Analyzer: Failed to start");
   }
@@ -18218,21 +18235,20 @@ async function startLanguageClient(context) {
 async function stopLanguageClient() {
   stopHealthCheck();
   if (client) {
-    outputChannel3.appendLine("\u{1F6D1} Stopping LSP client...");
+    outputChannel4.appendLine("\u{1F6D1} Stopping LSP client...");
     try {
       await client.stop();
-      outputChannel3.appendLine("\u2705 LSP client stopped");
+      outputChannel4.appendLine("\u2705 LSP client stopped");
     } catch (error) {
-      outputChannel3.appendLine(`\u26A0\uFE0F Error stopping LSP client: ${error}`);
+      outputChannel4.appendLine(`\u26A0\uFE0F Error stopping LSP client: ${error}`);
     }
     client = null;
   }
 }
 async function restartLanguageClient(context) {
-  outputChannel3.appendLine("\u{1F504} Restarting LSP server...");
+  outputChannel4.appendLine("\u{1F504} Restarting LSP server...");
   await stopLanguageClient();
   vscode4.commands.executeCommand("bslAnalyzer.refreshOverview");
-  await new Promise((resolve) => setTimeout(resolve, 500));
   await startLanguageClient(context);
 }
 function getLanguageClient() {
@@ -18258,51 +18274,19 @@ function parseProgressMessage(message) {
   }
   return result;
 }
-function handleWorkDoneProgress(params) {
-  const { token, value } = params;
-  outputChannel3.appendLine(`[$/progress] Token: ${token}, Kind: ${value.kind}`);
-  if (value.kind === "begin") {
-    const beginValue = value;
-    outputChannel3.appendLine(`[$/progress] BEGIN - Title: ${beginValue.title}, Message: ${beginValue.message || "N/A"}, Percentage: ${beginValue.percentage || 0}%`);
-    startIndexing();
-  } else if (value.kind === "report") {
-    const reportValue = value;
-    const message = reportValue.message || "";
-    const percentage = reportValue.percentage || 0;
-    outputChannel3.appendLine(`[$/progress] REPORT - Message: ${message}, Percentage: ${percentage}%`);
-    const parsed = parseProgressMessage(message);
-    if (parsed.currentItem && parsed.totalItems) {
-      const stepName = parsed.itemName ? `\u0422\u0438\u043F ${parsed.currentItem}/${parsed.totalItems} - ${parsed.itemName}` : `\u0422\u0438\u043F ${parsed.currentItem}/${parsed.totalItems}`;
-      updateIndexingProgress(
-        percentage,
-        stepName,
-        parsed.eta
-      );
-    } else {
-      updateIndexingProgress(percentage, message, void 0);
-    }
-  } else if (value.kind === "end") {
-    const endValue = value;
-    const message = endValue.message || "\u0417\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E";
-    outputChannel3.appendLine(`[$/progress] END - Message: ${message}`);
-    finishIndexing(message);
-  } else {
-    outputChannel3.appendLine(`[$/progress] WARN - Unknown progress kind: ${value.kind}`);
-  }
-}
 function registerCustomHandlers() {
   if (!client) return;
   client.onRequest("bsl/typeInfo", async (params) => {
-    outputChannel3.appendLine(`\u{1F4CB} Type info request: ${JSON.stringify(params)}`);
+    outputChannel4.appendLine(`\u{1F4CB} Type info request: ${JSON.stringify(params)}`);
     return null;
   });
   client.onRequest("bsl/validateMethod", async (params) => {
-    outputChannel3.appendLine(`\u2713 Method validation request: ${JSON.stringify(params)}`);
+    outputChannel4.appendLine(`\u2713 Method validation request: ${JSON.stringify(params)}`);
     return null;
   });
 }
 function handleIndexingProgress(params) {
-  outputChannel3.appendLine(`\u{1F4CA} Indexing progress: Step ${params.step}/${params.totalSteps} - ${params.message} (${params.percentage}%)`);
+  outputChannel4.appendLine(`\u{1F4CA} Indexing progress: Step ${params.step}/${params.totalSteps} - ${params.message} (${params.percentage}%)`);
 }
 async function sendCustomRequest(method, params) {
   if (!client || !client.isRunning()) {
@@ -18312,13 +18296,13 @@ async function sendCustomRequest(method, params) {
     const result = await client.sendRequest(method, params);
     return result;
   } catch (error) {
-    outputChannel3.appendLine(`\u274C Custom request failed: ${error}`);
+    outputChannel4.appendLine(`\u274C Custom request failed: ${error}`);
     throw error;
   }
 }
 function sendCustomNotification(method, params) {
   if (!client || !client.isRunning()) {
-    outputChannel3.appendLine(`\u26A0\uFE0F Cannot send notification: LSP client is not running`);
+    outputChannel4.appendLine(`\u26A0\uFE0F Cannot send notification: LSP client is not running`);
     return;
   }
   client.sendNotification(method, params);
@@ -18329,7 +18313,7 @@ function startHealthCheck() {
     if (client) {
       const isRunning = client.isRunning();
       if (!isRunning) {
-        outputChannel3.appendLine("\u26A0\uFE0F Health check: LSP client is not running");
+        outputChannel4.appendLine("\u26A0\uFE0F Health check: LSP client is not running");
         updateStatusBar("$(error) BSL Analyzer: Disconnected");
         vscode4.commands.executeCommand("bslAnalyzer.refreshOverview");
         stopHealthCheck();
@@ -18352,7 +18336,7 @@ function stopHealthCheck() {
     healthCheckInterval = null;
   }
 }
-var vscode4, import_node2, fs2, client, outputChannel3, healthCheckInterval;
+var vscode4, import_node2, fs2, client, outputChannel4, healthCheckInterval;
 var init_client = __esm({
   "src/lsp/client.ts"() {
     "use strict";
@@ -18360,6 +18344,7 @@ var init_client = __esm({
     import_node2 = __toESM(require_node3());
     init_binaryPath();
     init_configHelper();
+    init_serverStatus();
     init_progress();
     fs2 = __toESM(require("fs"));
     client = null;
@@ -18376,7 +18361,7 @@ __export(config_exports, {
   setOutputChannel: () => setOutputChannel2
 });
 function setOutputChannel2(channel) {
-  outputChannel4 = channel;
+  outputChannel5 = channel;
 }
 function getConfigurationPath() {
   return BslAnalyzerConfig.configurationPath;
@@ -18387,18 +18372,18 @@ function getPlatformVersion() {
 function getPlatformDocsArchive() {
   const userArchive = BslAnalyzerConfig.platformDocsArchive;
   if (userArchive && fs3.existsSync(userArchive)) {
-    outputChannel4?.appendLine(`\u{1F4DA} Using user-specified platform documentation: ${userArchive}`);
+    outputChannel5?.appendLine(`\u{1F4DA} Using user-specified platform documentation: ${userArchive}`);
     return userArchive;
   }
   if (!userArchive) {
-    outputChannel4?.appendLine(`\u26A0\uFE0F Platform documentation not configured. Some features may be limited.`);
-    outputChannel4?.appendLine(`\u{1F4A1} Specify path to rebuilt.shcntx_ru.zip or rebuilt.shlang_ru.zip in settings.`);
+    outputChannel5?.appendLine(`\u26A0\uFE0F Platform documentation not configured. Some features may be limited.`);
+    outputChannel5?.appendLine(`\u{1F4A1} Specify path to rebuilt.shcntx_ru.zip or rebuilt.shlang_ru.zip in settings.`);
   } else {
-    outputChannel4?.appendLine(`\u274C Platform documentation not found at: ${userArchive}`);
+    outputChannel5?.appendLine(`\u274C Platform documentation not found at: ${userArchive}`);
   }
   return "";
 }
-var fs3, outputChannel4;
+var fs3, outputChannel5;
 var init_config2 = __esm({
   "src/utils/config.ts"() {
     "use strict";
@@ -18431,11 +18416,11 @@ var vscode5 = __toESM(require("vscode"));
 init_client();
 var import_node3 = __toESM(require_node3());
 var debounceTimer;
-var statusBarItem2;
+var statusBarItem3;
 var CONTEXT_MARKER_START = "<!-- BSL_CONTEXT_START -->";
 var CONTEXT_MARKER_END = "<!-- BSL_CONTEXT_END -->";
 function initializeContextProvider(context, statusBar) {
-  statusBarItem2 = statusBar;
+  statusBarItem3 = statusBar;
   context.subscriptions.push(
     vscode5.window.onDidChangeTextEditorSelection((event) => {
       handleCursorMove(event.textEditor);
@@ -18487,10 +18472,10 @@ async function updateCurrentContext(editor) {
   }
 }
 function updateStatusBarTooltip(context) {
-  if (!statusBarItem2) {
+  if (!statusBarItem3) {
     return;
   }
-  let currentTooltip = statusBarItem2.tooltip || "";
+  let currentTooltip = statusBarItem3.tooltip || "";
   const markerRegex = /<!-- BSL_CONTEXT_START -->[\s\S]*?<!-- BSL_CONTEXT_END -->/;
   currentTooltip = currentTooltip.replace(markerRegex, "");
   let contextSection = "";
@@ -18514,7 +18499,7 @@ ${kindRu}: ${context.functionName}`;
     currentTooltip = "BSL Type Safety Analyzer\nLSP Server \u0430\u043A\u0442\u0438\u0432\u0435\u043D\n";
     currentTooltip += "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501";
   }
-  statusBarItem2.tooltip = currentTooltip + "\n" + wrappedSection;
+  statusBarItem3.tooltip = currentTooltip + "\n" + wrappedSection;
 }
 
 // src/lsp/customRequests.ts
@@ -18593,13 +18578,13 @@ async function getTypeRepositoryStats() {
 // src/lsp/statsProvider.ts
 var import_node4 = __toESM(require_node3());
 init_client();
-var statusBarItem3;
+var statusBarItem4;
 var updateInterval;
 var UPDATE_INTERVAL_MS = 5e3;
 var STATS_MARKER_START = "<!-- BSL_STATS_START -->";
 var STATS_MARKER_END = "<!-- BSL_STATS_END -->";
 function initializeStatsProvider(context, statusBar) {
-  statusBarItem3 = statusBar;
+  statusBarItem4 = statusBar;
   updateTypeStats();
   updateInterval = setInterval(() => {
     const client2 = getLanguageClient();
@@ -18617,7 +18602,7 @@ function initializeStatsProvider(context, statusBar) {
   });
 }
 async function updateTypeStats() {
-  if (!statusBarItem3) {
+  if (!statusBarItem4) {
     return;
   }
   try {
@@ -18633,16 +18618,16 @@ async function updateTypeStats() {
   }
 }
 function updateTooltipWithStats(stats) {
-  if (!statusBarItem3) {
+  if (!statusBarItem4) {
     return;
   }
-  let currentTooltip = statusBarItem3.tooltip || "";
+  let currentTooltip = statusBarItem4.tooltip || "";
   const markerRegex = /<!-- BSL_STATS_START -->[\s\S]*?<!-- BSL_STATS_END -->/;
   currentTooltip = currentTooltip.replace(markerRegex, "");
   const statsSection = formatStatsSection(stats);
   const wrappedSection = `
 ${STATS_MARKER_START}${statsSection}${STATS_MARKER_END}`;
-  statusBarItem3.tooltip = currentTooltip + wrappedSection;
+  statusBarItem4.tooltip = currentTooltip + wrappedSection;
 }
 function formatStatsSection(stats) {
   let result = "\n\nTypeRepository: ";
@@ -18681,18 +18666,21 @@ function formatUpdateTime(isoTimestamp) {
   }
 }
 function updateTooltipWithoutStats() {
-  if (!statusBarItem3) {
+  if (!statusBarItem4) {
     return;
   }
-  let currentTooltip = statusBarItem3.tooltip || "";
+  let currentTooltip = statusBarItem4.tooltip || "";
   const markerRegex = /<!-- BSL_STATS_START -->[\s\S]*?<!-- BSL_STATS_END -->/;
   currentTooltip = currentTooltip.replace(markerRegex, "");
   const placeholder = `
 ${STATS_MARKER_START}
 
 TypeRepository: \u23F3 \u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430...${STATS_MARKER_END}`;
-  statusBarItem3.tooltip = currentTooltip + placeholder;
+  statusBarItem4.tooltip = currentTooltip + placeholder;
 }
+
+// src/extension.ts
+init_serverStatus();
 
 // src/utils/index.ts
 init_binaryPath();
@@ -18779,16 +18767,16 @@ async function findMainConfiguration() {
   }
   return null;
 }
-async function autoDetectConfiguration(outputChannel7) {
-  outputChannel7?.appendLine("\u{1F50D} Searching for 1C configuration in workspace...");
+async function autoDetectConfiguration(outputChannel8) {
+  outputChannel8?.appendLine("\u{1F50D} Searching for 1C configuration in workspace...");
   const mainConfig = await findMainConfiguration();
   if (mainConfig) {
-    outputChannel7?.appendLine(`\u2705 Found main configuration: ${mainConfig.name} at ${mainConfig.path}`);
+    outputChannel8?.appendLine(`\u2705 Found main configuration: ${mainConfig.name} at ${mainConfig.path}`);
     const config = vscode6.workspace.getConfiguration("bslAnalyzer");
     await config.update("configurationPath", mainConfig.path, vscode6.ConfigurationTarget.Workspace);
     return mainConfig.path;
   } else {
-    outputChannel7?.appendLine("\u274C No 1C configuration found in workspace");
+    outputChannel8?.appendLine("\u274C No 1C configuration found in workspace");
     const result = await vscode6.window.showInformationMessage(
       "\u041A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044F 1\u0421 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438",
       "\u0412\u044B\u0431\u0440\u0430\u0442\u044C \u043F\u0430\u043F\u043A\u0443",
@@ -18814,9 +18802,9 @@ async function autoDetectConfiguration(outputChannel7) {
 }
 
 // src/utils/index.ts
-function initializeUtils(outputChannel7) {
-  (init_binaryPath(), __toCommonJS(binaryPath_exports)).setOutputChannel(outputChannel7);
-  (init_config2(), __toCommonJS(config_exports)).setOutputChannel(outputChannel7);
+function initializeUtils(outputChannel8) {
+  (init_binaryPath(), __toCommonJS(binaryPath_exports)).setOutputChannel(outputChannel8);
+  (init_config2(), __toCommonJS(config_exports)).setOutputChannel(outputChannel8);
 }
 
 // src/providers/items.ts
@@ -18856,10 +18844,10 @@ init_progress();
 init_client();
 init_configHelper();
 var BslOverviewProvider = class {
-  constructor(outputChannel7) {
+  constructor(outputChannel8) {
     this._onDidChangeTreeData = new vscode8.EventEmitter();
     this.onDidChangeTreeData = this._onDidChangeTreeData.event;
-    this.outputChannel = outputChannel7;
+    this.outputChannel = outputChannel8;
     progressEmitter.event(() => {
       this.refresh();
     });
@@ -19060,13 +19048,13 @@ var HierarchicalTypeItem = class extends vscode12.TreeItem {
   }
 };
 var HierarchicalTypeIndexProvider = class {
-  constructor(outputChannel7) {
+  constructor(outputChannel8) {
     this._onDidChangeTreeData = new vscode12.EventEmitter();
     this.onDidChangeTreeData = this._onDidChangeTreeData.event;
     this.platformTypes = /* @__PURE__ */ new Map();
     this.configTypes = /* @__PURE__ */ new Map();
     this.typeCategories = /* @__PURE__ */ new Map();
-    this.outputChannel = outputChannel7;
+    this.outputChannel = outputChannel8;
     this.loadTypes();
   }
   refresh() {
@@ -19470,10 +19458,10 @@ var HierarchicalTypeIndexProvider = class {
 // src/providers/actionsWebview.ts
 var vscode13 = __toESM(require("vscode"));
 var BslActionsWebviewProvider = class {
-  constructor(extensionUri, client2, outputChannel7) {
+  constructor(extensionUri, client2, outputChannel8) {
     this.extensionUri = extensionUri;
     this.client = client2;
-    this.outputChannel = outputChannel7;
+    this.outputChannel = outputChannel8;
   }
   resolveWebviewView(webviewView) {
     webviewView.webview.options = {
@@ -20121,29 +20109,29 @@ function registerParseConfigurationCommand(context, client2) {
 }
 
 // src/commands/index.ts
-var outputChannel5;
+var outputChannel6;
 var commandsRegistered = false;
 function initializeCommands(channel) {
-  outputChannel5 = channel;
+  outputChannel6 = channel;
 }
 async function registerCommands(context) {
   if (commandsRegistered) {
-    outputChannel5.appendLine("\u26A0\uFE0F Commands already registered, skipping...");
+    outputChannel6.appendLine("\u26A0\uFE0F Commands already registered, skipping...");
     return;
   }
-  outputChannel5.appendLine("\u{1F4DD} Registering BSL Analyzer commands...");
+  outputChannel6.appendLine("\u{1F4DD} Registering BSL Analyzer commands...");
   const safeRegisterCommand = async (commandId, callback) => {
     try {
       const disposable = vscode18.commands.registerCommand(commandId, callback);
       context.subscriptions.push(disposable);
-      outputChannel5.appendLine(`\u2705 Registered command: ${commandId}`);
+      outputChannel6.appendLine(`\u2705 Registered command: ${commandId}`);
       return disposable;
     } catch (error) {
       if (error.message && error.message.includes("already exists")) {
-        outputChannel5.appendLine(`\u26A0\uFE0F Command already registered: ${commandId}, skipping...`);
+        outputChannel6.appendLine(`\u26A0\uFE0F Command already registered: ${commandId}, skipping...`);
         return null;
       }
-      outputChannel5.appendLine(`\u274C Failed to register command ${commandId}: ${error}`);
+      outputChannel6.appendLine(`\u274C Failed to register command ${commandId}: ${error}`);
       return null;
     }
   };
@@ -20163,7 +20151,7 @@ async function registerCommands(context) {
         });
         vscode18.window.showInformationMessage("\u2705 File analysis completed");
       } else {
-        outputChannel5.appendLine("\u26A0\uFE0F LSP server not running - please start it first");
+        outputChannel6.appendLine("\u26A0\uFE0F LSP server not running - please start it first");
         vscode18.window.showWarningMessage("LSP server is not running. Please wait for it to start.");
       }
     } catch (error) {
@@ -20369,10 +20357,8 @@ async function registerCommands(context) {
       }, async (progress) => {
         updateIndexingProgress(1, "Loading platform cache...", 10);
         progress.report({ increment: 25, message: "Loading platform cache..." });
-        await new Promise((resolve) => setTimeout(resolve, 500));
         updateIndexingProgress(2, "Parsing configuration...", 35);
         progress.report({ increment: 25, message: "Parsing configuration..." });
-        await new Promise((resolve) => setTimeout(resolve, 500));
         updateIndexingProgress(3, "Building unified index...", 70);
         progress.report({ increment: 35, message: "Building unified index..." });
         const args = [
@@ -20396,7 +20382,7 @@ async function registerCommands(context) {
     } catch (error) {
       finishIndexing(`Index build failed: ${error}`);
       vscode18.window.showErrorMessage(`Index build failed: ${error}`);
-      outputChannel5.appendLine(`Index build error: ${error}`);
+      outputChannel6.appendLine(`Index build error: ${error}`);
     }
   });
   await safeRegisterCommand("bslAnalyzer.showIndexStats", async () => {
@@ -20431,10 +20417,8 @@ async function registerCommands(context) {
       }, async (progress) => {
         updateIndexingProgress(1, "Analyzing changes...", 20);
         progress.report({ increment: 30, message: "Analyzing changes..." });
-        await new Promise((resolve) => setTimeout(resolve, 400));
         updateIndexingProgress(2, "Updating index...", 60);
         progress.report({ increment: 50, message: "Updating index..." });
-        await new Promise((resolve) => setTimeout(resolve, 600));
         const result = await incrementalUpdate(configPath, getPlatformVersion());
         updateIndexingProgress(3, "Finalizing...", 95);
         progress.report({ increment: 20, message: "Finalizing..." });
@@ -20445,7 +20429,7 @@ async function registerCommands(context) {
     } catch (error) {
       finishIndexing(`Incremental update failed: ${error}`);
       vscode18.window.showErrorMessage(`Incremental update failed: ${error}`);
-      outputChannel5.appendLine(`Incremental update error: ${error}`);
+      outputChannel6.appendLine(`Incremental update error: ${error}`);
     }
   });
   await safeRegisterCommand("bslAnalyzer.exploreType", async () => {
@@ -20532,37 +20516,36 @@ async function registerCommands(context) {
   });
   await safeRegisterCommand("bslAnalyzer.restartServer", async () => {
     updateStatusBar("BSL Analyzer: Restarting...");
-    outputChannel5.appendLine("\u{1F504} Restarting LSP server...");
+    outputChannel6.appendLine("\u{1F504} Restarting LSP server...");
     try {
       await stopLanguageClient();
-      await new Promise((resolve) => setTimeout(resolve, 1e3));
-      outputChannel5.appendLine("\u{1F680} Starting new LSP client...");
+      outputChannel6.appendLine("\u{1F680} Starting new LSP client...");
       await startLanguageClient(context);
       vscode18.window.showInformationMessage("\u2705 BSL Analyzer server restarted");
-      outputChannel5.appendLine("\u2705 LSP server restart completed");
+      outputChannel6.appendLine("\u2705 LSP server restart completed");
     } catch (error) {
-      outputChannel5.appendLine(`\u274C Failed to restart LSP server: ${error}`);
+      outputChannel6.appendLine(`\u274C Failed to restart LSP server: ${error}`);
       vscode18.window.showErrorMessage(`Failed to restart server: ${error}`);
       updateStatusBar("BSL Analyzer: Restart Failed");
     }
   });
   await safeRegisterCommand("bslAnalyzer.testProgress", async () => {
-    outputChannel5.appendLine("");
-    outputChannel5.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
-    outputChannel5.appendLine("\u{1F9EA} TESTING PROGRESS SYSTEM (Enhanced Debug Mode)");
-    outputChannel5.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
-    outputChannel5.appendLine("");
+    outputChannel6.appendLine("");
+    outputChannel6.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+    outputChannel6.appendLine("\u{1F9EA} TESTING PROGRESS SYSTEM (Enhanced Debug Mode)");
+    outputChannel6.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+    outputChannel6.appendLine("");
     const totalSteps = 20;
     const stepDelay = 500;
-    outputChannel5.appendLine(`\u{1F4CA} Configuration:`);
-    outputChannel5.appendLine(`   - Total steps: ${totalSteps}`);
-    outputChannel5.appendLine(`   - Delay per step: ${stepDelay}ms`);
-    outputChannel5.appendLine(`   - UI Throttling: 500ms (matches production)`);
-    outputChannel5.appendLine("");
-    outputChannel5.appendLine("\u{1F680} Calling startIndexing()...");
+    outputChannel6.appendLine(`\u{1F4CA} Configuration:`);
+    outputChannel6.appendLine(`   - Total steps: ${totalSteps}`);
+    outputChannel6.appendLine(`   - Delay per step: ${stepDelay}ms`);
+    outputChannel6.appendLine(`   - UI Throttling: 500ms (matches production)`);
+    outputChannel6.appendLine("");
+    outputChannel6.appendLine("\u{1F680} Calling startIndexing()...");
     startIndexing(4);
-    outputChannel5.appendLine("   \u2713 startIndexing() completed");
-    outputChannel5.appendLine("");
+    outputChannel6.appendLine("   \u2713 startIndexing() completed");
+    outputChannel6.appendLine("");
     await vscode18.window.withProgress({
       location: vscode18.ProgressLocation.Notification,
       title: "Testing Progress System",
@@ -20594,48 +20577,48 @@ async function registerCommands(context) {
         const currentType = mockTypes[i - 1] || `\u0422\u0438\u043F${i}`;
         const progressPercent = Math.floor(i / totalSteps * 100);
         const eta = Math.floor((totalSteps - i) * stepDelay / 1e3);
-        outputChannel5.appendLine(`\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`);
-        outputChannel5.appendLine(`\u{1F4E6} Step ${i}/${totalSteps} (${progressPercent}%)`);
-        outputChannel5.appendLine(`   Current Type: ${currentType}`);
-        outputChannel5.appendLine(`   ETA: ${eta}s`);
+        outputChannel6.appendLine(`\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`);
+        outputChannel6.appendLine(`\u{1F4E6} Step ${i}/${totalSteps} (${progressPercent}%)`);
+        outputChannel6.appendLine(`   Current Type: ${currentType}`);
+        outputChannel6.appendLine(`   ETA: ${eta}s`);
         const stepName = `\u041F\u0430\u0440\u0441\u0438\u043D\u0433 \u0442\u0438\u043F\u0430 ${i}/${totalSteps}: ${currentType}`;
-        outputChannel5.appendLine(`   Calling updateIndexingProgress(${progressPercent}, "${stepName}", ${eta})...`);
+        outputChannel6.appendLine(`   Calling updateIndexingProgress(${progressPercent}, "${stepName}", ${eta})...`);
         updateIndexingProgress(progressPercent, stepName, eta);
-        outputChannel5.appendLine(`   Updating VSCode notification...`);
+        outputChannel6.appendLine(`   Updating VSCode notification...`);
         progress.report({
           increment: Math.floor(100 / totalSteps),
           message: `${currentType} (${progressPercent}%)`
         });
-        outputChannel5.appendLine(`   \u23F3 Sleeping ${stepDelay}ms...`);
+        outputChannel6.appendLine(`   \u23F3 Sleeping ${stepDelay}ms...`);
         await new Promise((resolve) => setTimeout(resolve, stepDelay));
-        outputChannel5.appendLine(`   \u2713 Step ${i} completed`);
+        outputChannel6.appendLine(`   \u2713 Step ${i} completed`);
       }
-      outputChannel5.appendLine("");
-      outputChannel5.appendLine("\u{1F3C1} Calling finishIndexing()...");
+      outputChannel6.appendLine("");
+      outputChannel6.appendLine("\u{1F3C1} Calling finishIndexing()...");
       finishIndexing();
-      outputChannel5.appendLine("   \u2713 finishIndexing() completed");
+      outputChannel6.appendLine("   \u2713 finishIndexing() completed");
     });
-    outputChannel5.appendLine("");
-    outputChannel5.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
-    outputChannel5.appendLine("\u2705 PROGRESS SYSTEM TEST COMPLETED");
-    outputChannel5.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
-    outputChannel5.appendLine("");
-    outputChannel5.appendLine("\u{1F4CB} Summary:");
-    outputChannel5.appendLine(`   - Total steps processed: ${totalSteps}`);
-    outputChannel5.appendLine(`   - Total time: ~${totalSteps * stepDelay / 1e3}s`);
-    outputChannel5.appendLine(`   - Status: SUCCESS \u2713`);
-    outputChannel5.appendLine("");
-    outputChannel5.appendLine("\u{1F4A1} Check the status bar at the bottom for visual progress!");
-    outputChannel5.appendLine("");
+    outputChannel6.appendLine("");
+    outputChannel6.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+    outputChannel6.appendLine("\u2705 PROGRESS SYSTEM TEST COMPLETED");
+    outputChannel6.appendLine("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550");
+    outputChannel6.appendLine("");
+    outputChannel6.appendLine("\u{1F4CB} Summary:");
+    outputChannel6.appendLine(`   - Total steps processed: ${totalSteps}`);
+    outputChannel6.appendLine(`   - Total time: ~${totalSteps * stepDelay / 1e3}s`);
+    outputChannel6.appendLine(`   - Status: SUCCESS \u2713`);
+    outputChannel6.appendLine("");
+    outputChannel6.appendLine("\u{1F4A1} Check the status bar at the bottom for visual progress!");
+    outputChannel6.appendLine("");
   });
   const client2 = getLanguageClient();
   if (client2) {
     const parseConfigDisposable = registerParseConfigurationCommand(context, client2);
     if (parseConfigDisposable) {
-      outputChannel5.appendLine("\u2705 Registered command: bslAnalyzer.parseConfiguration");
+      outputChannel6.appendLine("\u2705 Registered command: bslAnalyzer.parseConfiguration");
     }
   } else {
-    outputChannel5.appendLine("\u26A0\uFE0F Cannot register bslAnalyzer.parseConfiguration - LSP client not ready");
+    outputChannel6.appendLine("\u26A0\uFE0F Cannot register bslAnalyzer.parseConfiguration - LSP client not ready");
   }
   await safeRegisterCommand("bsl-gradual-types.showSemanticVisualization", async () => {
     const editor = vscode18.window.visibleTextEditors.find((e) => e.document.languageId === "bsl") || vscode18.window.activeTextEditor;
@@ -20739,36 +20722,37 @@ async function registerCommands(context) {
     }
   });
   commandsRegistered = true;
-  outputChannel5.appendLine("\u2705 Successfully registered 16 extension commands");
+  outputChannel6.appendLine("\u2705 Successfully registered 16 extension commands");
 }
 
 // src/extension.ts
 var indexServerPath;
-var outputChannel6;
-var statusBarItem4;
+var outputChannel7;
+var statusBarItem5;
 var extensionContext;
 async function activate(context) {
   extensionContext = context;
   try {
     const currentVersion = context.extension.packageJSON.version;
-    outputChannel6 = vscode19.window.createOutputChannel("BSL Analyzer");
-    context.subscriptions.push(outputChannel6);
-    outputChannel6.appendLine(`\u{1F680} BSL Analyzer v${currentVersion} activation started (with modular architecture)`);
-    outputChannel6.appendLine(`Extension path: ${context.extensionPath}`);
+    outputChannel7 = vscode19.window.createOutputChannel("BSL Analyzer");
+    context.subscriptions.push(outputChannel7);
+    outputChannel7.appendLine(`\u{1F680} BSL Analyzer v${currentVersion} activation started (with modular architecture)`);
+    outputChannel7.appendLine(`Extension path: ${context.extensionPath}`);
     vscode19.window.showInformationMessage(`BSL Analyzer v${currentVersion} is activating...`);
-    outputChannel6.show();
-    statusBarItem4 = vscode19.window.createStatusBarItem(vscode19.StatusBarAlignment.Left, 100);
-    statusBarItem4.command = "bslAnalyzer.analyzeFile";
-    statusBarItem4.text = "BSL Analyzer: Starting...";
-    statusBarItem4.tooltip = "Click to analyze current file (via LSP)";
-    statusBarItem4.show();
-    context.subscriptions.push(statusBarItem4);
-    initializeUtils(outputChannel6);
-    initializeProgress(outputChannel6, statusBarItem4);
-    initializeContextProvider(context, statusBarItem4);
-    initializeStatsProvider(context, statusBarItem4);
-    initializeLspClient(outputChannel6);
-    initializeCommands(outputChannel6);
+    outputChannel7.show();
+    statusBarItem5 = vscode19.window.createStatusBarItem(vscode19.StatusBarAlignment.Left, 100);
+    statusBarItem5.command = "bslAnalyzer.analyzeFile";
+    statusBarItem5.text = "BSL Analyzer: Starting...";
+    statusBarItem5.tooltip = "Click to analyze current file (via LSP)";
+    statusBarItem5.show();
+    context.subscriptions.push(statusBarItem5);
+    initializeUtils(outputChannel7);
+    initializeProgress(outputChannel7, statusBarItem5);
+    initializeServerStatus(outputChannel7, statusBarItem5);
+    initializeContextProvider(context, statusBarItem5);
+    initializeStatsProvider(context, statusBarItem5);
+    initializeLspClient(outputChannel7);
+    initializeCommands(outputChannel7);
     await migrateLegacySettings();
     const platformDocsArchive = BslAnalyzerConfig.platformDocsArchive;
     if (!platformDocsArchive || platformDocsArchive.trim() === "") {
@@ -20780,27 +20764,25 @@ async function activate(context) {
       if (selection === "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438") {
         vscode19.commands.executeCommand("workbench.action.openSettings", "bslAnalyzer.platformDocsArchive");
       }
-      outputChannel6.appendLine("\u26A0\uFE0F Extension \u0431\u0443\u0434\u0435\u0442 \u0440\u0430\u0431\u043E\u0442\u0430\u0442\u044C \u0432 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u043D\u043E\u043C \u0440\u0435\u0436\u0438\u043C\u0435 \u0431\u0435\u0437 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u043E\u0432");
+      outputChannel7.appendLine("\u26A0\uFE0F Extension \u0431\u0443\u0434\u0435\u0442 \u0440\u0430\u0431\u043E\u0442\u0430\u0442\u044C \u0432 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u043D\u043E\u043C \u0440\u0435\u0436\u0438\u043C\u0435 \u0431\u0435\u0437 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u043E\u0432");
     } else {
-      outputChannel6.appendLine(`\u2705 Platform docs archive configured: ${platformDocsArchive}`);
+      outputChannel7.appendLine(`\u2705 Platform docs archive configured: ${platformDocsArchive}`);
     }
     initializeConfiguration();
     await autoDetectConfigurationIfNeeded();
-    setTimeout(async () => {
-      outputChannel6.appendLine("\u{1F680} Starting LSP server with delay...");
-      await startLanguageClient(context);
-      const currentProgress = (init_progress(), __toCommonJS(progress_exports)).getCurrentProgress();
-      if (!currentProgress || !currentProgress.isIndexing) {
-        updateStatusBar("$(database) BSL Analyzer: Ready");
-      }
-    }, 1e3);
+    outputChannel7.appendLine("\u{1F680} Starting LSP server...");
+    await startLanguageClient(context);
+    const currentProgress = (init_progress(), __toCommonJS(progress_exports)).getCurrentProgress();
+    if (!currentProgress || !currentProgress.isIndexing) {
+      updateStatusBar("$(database) BSL Analyzer: Ready");
+    }
     registerSidebarProviders(context);
     await registerCommands(context);
     initializeIndexIfNeeded();
     showWelcomeMessage();
-    outputChannel6.appendLine(`\u2705 BSL Analyzer v${currentVersion} activated successfully with auto-indexing support`);
+    outputChannel7.appendLine(`\u2705 BSL Analyzer v${currentVersion} activated successfully with auto-indexing support`);
   } catch (error) {
-    outputChannel6?.appendLine(`\u274C Activation failed: ${error}`);
+    outputChannel7?.appendLine(`\u274C Activation failed: ${error}`);
     vscode19.window.showErrorMessage(`BSL Analyzer activation failed: ${error}`);
   }
 }
@@ -20812,43 +20794,43 @@ function initializeConfiguration() {
       const bundledBinPath = path4.join(extensionPath, "bin");
       if (fs6.existsSync(bundledBinPath)) {
         indexServerPath = bundledBinPath;
-        outputChannel6.appendLine(`Using bundled BSL Analyzer binaries at: ${indexServerPath}`);
+        outputChannel7.appendLine(`Using bundled BSL Analyzer binaries at: ${indexServerPath}`);
       }
     }
     if (!indexServerPath) {
-      outputChannel6.appendLine(`\u274C BSL Analyzer binaries not found in extension.`);
-      outputChannel6.appendLine(`\u{1F4A1} Please run 'npm run copy:binaries' to update extension binaries.`);
+      outputChannel7.appendLine(`\u274C BSL Analyzer binaries not found in extension.`);
+      outputChannel7.appendLine(`\u{1F4A1} Please run 'npm run copy:binaries' to update extension binaries.`);
     }
   }
 }
 async function autoDetectConfigurationIfNeeded() {
   const configPath = BslAnalyzerConfig.configurationPath;
   if (!configPath) {
-    outputChannel6.appendLine("\u{1F4CD} Configuration path not set, attempting auto-detection...");
-    const detectedPath = await autoDetectConfiguration(outputChannel6);
+    outputChannel7.appendLine("\u{1F4CD} Configuration path not set, attempting auto-detection...");
+    const detectedPath = await autoDetectConfiguration(outputChannel7);
     if (detectedPath) {
-      outputChannel6.appendLine(`\u2705 Configuration auto-detected: ${detectedPath}`);
+      outputChannel7.appendLine(`\u2705 Configuration auto-detected: ${detectedPath}`);
       vscode19.commands.executeCommand("bslAnalyzer.refreshTypeRepository");
     }
   } else {
-    outputChannel6.appendLine(`\u{1F4CD} Using configured path: ${configPath}`);
+    outputChannel7.appendLine(`\u{1F4CD} Using configured path: ${configPath}`);
   }
 }
 async function initializeIndexIfNeeded() {
   const autoIndexBuild = BslAnalyzerConfig.autoIndexBuild;
   const configPath = BslAnalyzerConfig.configurationPath;
   if (!autoIndexBuild) {
-    outputChannel6.appendLine("\u2139\uFE0F Auto-index build is disabled");
+    outputChannel7.appendLine("\u2139\uFE0F Auto-index build is disabled");
     return;
   }
   if (!configPath) {
-    outputChannel6.appendLine("\u26A0\uFE0F Configuration path not set - user must configure it");
+    outputChannel7.appendLine("\u26A0\uFE0F Configuration path not set - user must configure it");
     updateStatusBar("BSL Analyzer: No Config");
     return;
   }
   const projectId = extractUuidProjectId(configPath);
   if (!projectId) {
-    outputChannel6.appendLine("\u274C Cannot find UUID in Configuration.xml - no fallback, index cannot be built");
+    outputChannel7.appendLine("\u274C Cannot find UUID in Configuration.xml - no fallback, index cannot be built");
     updateStatusBar("BSL Analyzer: Invalid Config");
     return;
   }
@@ -20861,18 +20843,18 @@ async function initializeIndexIfNeeded() {
     platformVersion
   );
   if (fs6.existsSync(path4.join(indexCachePath, "unified_index.json"))) {
-    outputChannel6.appendLine(`\u2705 Index found in cache: ${projectId}/${platformVersion}`);
+    outputChannel7.appendLine(`\u2705 Index found in cache: ${projectId}/${platformVersion}`);
     updateStatusBar("BSL Analyzer: Index Ready");
     return;
   }
   const platformDocsArchive = getPlatformDocsArchive();
   if (!platformDocsArchive) {
-    outputChannel6.appendLine("\u274C Platform documentation not configured - cannot build full index");
-    outputChannel6.appendLine("\u{1F4A1} User must specify platform documentation archive in settings");
+    outputChannel7.appendLine("\u274C Platform documentation not configured - cannot build full index");
+    outputChannel7.appendLine("\u{1F4A1} User must specify platform documentation archive in settings");
     updateStatusBar("BSL Analyzer: No Platform Docs");
     return;
   }
-  outputChannel6.appendLine("\u{1F680} Building BSL index with user-configured settings...");
+  outputChannel7.appendLine("\u{1F680} Building BSL index with user-configured settings...");
   try {
     startIndexing(4);
     await vscode19.window.withProgress({
@@ -20886,9 +20868,9 @@ async function initializeIndexIfNeeded() {
       progress.report({ increment: 25, message: "Parsing configuration..." });
       updateIndexingProgress(3, "Building unified index...", 70);
       progress.report({ increment: 35, message: "Building unified index..." });
-      outputChannel6.appendLine(`\u{1F4C1} Configuration: ${configPath}`);
-      outputChannel6.appendLine(`\u{1F4DA} Platform docs: ${platformDocsArchive}`);
-      outputChannel6.appendLine(`\u{1F522} Platform version: ${platformVersion}`);
+      outputChannel7.appendLine(`\u{1F4C1} Configuration: ${configPath}`);
+      outputChannel7.appendLine(`\u{1F4DA} Platform docs: ${platformDocsArchive}`);
+      outputChannel7.appendLine(`\u{1F522} Platform version: ${platformVersion}`);
       const args = [
         "--config",
         configPath,
@@ -20902,12 +20884,12 @@ async function initializeIndexIfNeeded() {
       updateIndexingProgress(4, "Finalizing index...", 90);
       progress.report({ increment: 15, message: "Finalizing..." });
       finishIndexing();
-      outputChannel6.appendLine("\u2705 Index build completed successfully");
+      outputChannel7.appendLine("\u2705 Index build completed successfully");
       updateStatusBar("BSL Analyzer: Index Ready");
     });
   } catch (error) {
     finishIndexing(`Index build failed: ${error}`);
-    outputChannel6.appendLine(`\u274C Index build failed: ${error}`);
+    outputChannel7.appendLine(`\u274C Index build failed: ${error}`);
     updateStatusBar("BSL Analyzer: Build Failed");
   }
 }
@@ -20968,72 +20950,72 @@ function extractUuidProjectId(configPath) {
       return `${path4.basename(configPath)}_${uuid}`;
     }
   } catch (e) {
-    outputChannel6.appendLine(`Failed to extract UUID: ${e}`);
+    outputChannel7.appendLine(`Failed to extract UUID: ${e}`);
   }
   return null;
 }
 function registerSidebarProviders(context) {
-  outputChannel6.appendLine("\u{1F4CB} Registering BSL Analyzer sidebar providers...");
+  outputChannel7.appendLine("\u{1F4CB} Registering BSL Analyzer sidebar providers...");
   try {
-    outputChannel6.appendLine("\u{1F4CB} Creating Overview provider...");
-    const overviewProvider = new BslOverviewProvider(outputChannel6);
+    outputChannel7.appendLine("\u{1F4CB} Creating Overview provider...");
+    const overviewProvider = new BslOverviewProvider(outputChannel7);
     const overviewTreeView = vscode19.window.createTreeView("bslAnalyzer.overview", {
       treeDataProvider: overviewProvider,
       showCollapseAll: true
     });
     context.subscriptions.push(overviewTreeView);
-    outputChannel6.appendLine("\u2705 Overview provider registered");
-    outputChannel6.appendLine("\u{1F4CB} Creating Diagnostics provider...");
+    outputChannel7.appendLine("\u2705 Overview provider registered");
+    outputChannel7.appendLine("\u{1F4CB} Creating Diagnostics provider...");
     const diagnosticsProvider = new BslDiagnosticsProvider();
     const diagnosticsTreeView = vscode19.window.createTreeView("bslAnalyzer.diagnostics", {
       treeDataProvider: diagnosticsProvider,
       showCollapseAll: true
     });
     context.subscriptions.push(diagnosticsTreeView);
-    outputChannel6.appendLine("\u2705 Diagnostics provider registered");
-    outputChannel6.appendLine("\u{1F4CB} Creating Type Repository provider...");
-    const typeIndexProvider = new HierarchicalTypeIndexProvider(outputChannel6);
+    outputChannel7.appendLine("\u2705 Diagnostics provider registered");
+    outputChannel7.appendLine("\u{1F4CB} Creating Type Repository provider...");
+    const typeIndexProvider = new HierarchicalTypeIndexProvider(outputChannel7);
     const typeIndexTreeView = vscode19.window.createTreeView("bslAnalyzer.typeRepository", {
       treeDataProvider: typeIndexProvider,
       showCollapseAll: true
     });
     context.subscriptions.push(typeIndexTreeView);
-    outputChannel6.appendLine("\u2705 Type Repository provider registered");
-    outputChannel6.appendLine("\u{1F4CB} Creating Quick Actions webview provider...");
+    outputChannel7.appendLine("\u2705 Type Repository provider registered");
+    outputChannel7.appendLine("\u{1F4CB} Creating Quick Actions webview provider...");
     const actionsProvider = new BslActionsWebviewProvider(context.extensionUri);
     const webviewProvider = vscode19.window.registerWebviewViewProvider("bslAnalyzer.actions", actionsProvider);
     context.subscriptions.push(webviewProvider);
-    outputChannel6.appendLine("\u2705 Quick Actions webview provider registered");
-    outputChannel6.appendLine("\u{1F4DA} Creating Type Details modal provider...");
+    outputChannel7.appendLine("\u2705 Quick Actions webview provider registered");
+    outputChannel7.appendLine("\u{1F4DA} Creating Type Details modal provider...");
     const typeDetailsProvider = new TypeDetailsWebviewProvider(context.extensionUri);
     context.subscriptions.push(
       vscode19.commands.registerCommand("bslAnalyzer.showTypeDetails", (typeName) => {
         typeDetailsProvider.showTypeDetails(typeName);
       })
     );
-    outputChannel6.appendLine("\u2705 Type Details modal provider registered");
+    outputChannel7.appendLine("\u2705 Type Details modal provider registered");
     context.subscriptions.push(
       vscode19.commands.registerCommand("bslAnalyzer.refreshOverview", () => {
-        outputChannel6.appendLine("\u{1F504} Refreshing Overview panel");
+        outputChannel7.appendLine("\u{1F504} Refreshing Overview panel");
         overviewProvider.refresh();
       })
     );
     context.subscriptions.push(
       vscode19.commands.registerCommand("bslAnalyzer.refreshDiagnostics", () => {
-        outputChannel6.appendLine("\u{1F504} Refreshing Diagnostics panel");
+        outputChannel7.appendLine("\u{1F504} Refreshing Diagnostics panel");
         diagnosticsProvider.refresh();
       })
     );
     context.subscriptions.push(
       vscode19.commands.registerCommand("bslAnalyzer.refreshTypeRepository", () => {
-        outputChannel6.appendLine("\u{1F504} Refreshing Type Repository panel");
+        outputChannel7.appendLine("\u{1F504} Refreshing Type Repository panel");
         typeIndexProvider.refresh();
       })
     );
-    outputChannel6.appendLine("\u2705 All BSL Analyzer sidebar providers registered successfully");
+    outputChannel7.appendLine("\u2705 All BSL Analyzer sidebar providers registered successfully");
     vscode19.window.showInformationMessage("BSL Analyzer sidebar activated! Check the Activity Bar for the BSL Analyzer icon.");
   } catch (error) {
-    outputChannel6.appendLine(`\u274C Error registering sidebar providers: ${error}`);
+    outputChannel7.appendLine(`\u274C Error registering sidebar providers: ${error}`);
     vscode19.window.showErrorMessage(`Failed to register BSL Analyzer sidebar: ${error}`);
   }
 }
@@ -21045,21 +21027,21 @@ async function deactivate() {
   try {
     const timeoutPromise = new Promise((resolve) => {
       setTimeout(() => {
-        outputChannel6.appendLine("\u26A0\uFE0F LSP client shutdown timeout reached");
+        outputChannel7.appendLine("\u26A0\uFE0F LSP client shutdown timeout reached");
         resolve();
       }, 5e3);
     });
     const stopPromise = stopLanguageClient().then(() => {
-      outputChannel6.appendLine("\u2705 LSP client stopped successfully");
+      outputChannel7.appendLine("\u2705 LSP client stopped successfully");
     }).catch((error) => {
-      outputChannel6.appendLine(`\u26A0\uFE0F Error stopping LSP client: ${error}`);
+      outputChannel7.appendLine(`\u26A0\uFE0F Error stopping LSP client: ${error}`);
     });
     await Promise.race([stopPromise, timeoutPromise]);
   } catch (error) {
-    outputChannel6.appendLine(`\u26A0\uFE0F Error during deactivation: ${error}`);
+    outputChannel7.appendLine(`\u26A0\uFE0F Error during deactivation: ${error}`);
   } finally {
-    outputChannel6.appendLine("\u{1F44B} BSL Analyzer extension deactivated");
-    outputChannel6.dispose();
+    outputChannel7.appendLine("\u{1F44B} BSL Analyzer extension deactivated");
+    outputChannel7.dispose();
   }
 }
 // Annotate the CommonJS export names for ESM import in node:

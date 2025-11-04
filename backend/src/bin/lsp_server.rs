@@ -9,6 +9,10 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, error, info, warn};
 
+// ✅ НОВОЕ: Для детального логирования прогресса во внешний файл
+use std::fs::OpenOptions;
+use std::io::Write;
+
 use clap::Parser;
 use serde::Deserialize;
 
@@ -19,7 +23,60 @@ use bsl_backend::system::SystemCoordinator;
 use bsl_shared::api::dtos::{MethodDto, ParamDto, PropertyDto};
 use bsl_type_visualization::{HtmlRenderer, RenderOptions, ThemeMode}; // Используется в других методах // Используется в handle_query_type
 
+// MILESTONE 2.20.3: Server Status notification module
+use serde::Serialize;
+use tower_lsp::lsp_types::notification::Notification;
+
+/// Custom bsl/serverStatus notification type
+pub enum ServerStatus {}
+
+impl Notification for ServerStatus {
+    type Params = ServerStatusParams;
+    const METHOD: &'static str = "bsl/serverStatus";
+}
+
+/// Параметры bsl/serverStatus notification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerStatusParams {
+    pub loading: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+impl ServerStatusParams {
+    pub fn loading(message: impl Into<String>) -> Self {
+        Self {
+            loading: true,
+            message: Some(message.into()),
+        }
+    }
+
+    pub fn ready() -> Self {
+        Self {
+            loading: false,
+            message: None,
+        }
+    }
+}
 // ✅ ИСПРАВЛЕНО: временные структуры удалены, используем TypeSystemService API
+
+/// ✅ НОВОЕ: Логирование прогресса в отдельный файл для детальной отладки
+/// Записывает сообщение в vscode-extension/progress_debug.log с временной меткой
+/// Использует абсолютный путь (как и rust_lsp_server.log)
+fn log_progress_to_file(message: &str) {
+    let log_path = "C:\\1CProject\\bsl-gradual-types\\vscode-extension\\progress_debug.log";
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    let log_line = format!("[{}] {}\n", timestamp, message);
+
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+    {
+        let _ = file.write_all(log_line.as_bytes());
+        let _ = file.flush(); // ✅ Принудительно сбрасываем буфер
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "lsp-server")]
@@ -220,6 +277,12 @@ impl LanguageServer for BslLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> JsonRpcResult<InitializeResult> {
         info!("Initializing BSL Language Server");
 
+        // 🔍 DEBUG: Логируем ClientCapabilities
+        debug!("📥 [JSON-RPC] initialize: ClientCapabilities.window.workDoneProgress = {:?}",
+            params.capabilities.window.as_ref().and_then(|w| w.work_done_progress));
+        debug!("📥 [JSON-RPC] initialize: ClientCapabilities.general.regularExpressions = {:?}",
+            params.capabilities.general.as_ref().and_then(|g| g.regular_expressions.as_ref()));
+
         // ✅ MILESTONE 2.10: Читаем initializationOptions из Extension
         if let Some(options) = params.initialization_options {
             match serde_json::from_value::<LspConfig>(options.clone()) {
@@ -325,7 +388,23 @@ impl LanguageServer for BslLanguageServer {
                     // Продолжаем без прогресса, но не падаем
                 }
 
+                // MILESTONE 2.20.3: Отправляем bsl/serverStatus (loading: true) - rust-analyzer approach
+                info!("📤 [LSP→Extension] Sending bsl/serverStatus: loading=true");
+                log_progress_to_file("📤 [LSP→Extension] SEND bsl/serverStatus: loading=true");
+
+                let _ = self
+                    .client
+                    .send_notification::<ServerStatus>(ServerStatusParams::loading(
+                        "Загрузка типов..."
+                    ))
+                    .await;
+
+                info!("✅ [LSP→Extension] bsl/serverStatus sent successfully");
+
                 // ✅ НОВОЕ: Отправляем WorkDoneProgressBegin
+                info!("📤 [LSP→Extension] Sending WorkDoneProgressBegin: token={:?}", token);
+                log_progress_to_file(&format!("📤 [LSP→Extension] SEND WorkDoneProgressBegin: token={:?}", token));
+
                 let _ = self
                     .client
                     .send_notification::<tower_lsp::lsp_types::notification::Progress>(
@@ -342,6 +421,8 @@ impl LanguageServer for BslLanguageServer {
                         },
                     )
                     .await;
+                info!("✅ [LSP→Extension] WorkDoneProgressBegin sent successfully");
+                log_progress_to_file("✅ [LSP→Extension] WorkDoneProgressBegin sent successfully");
 
                 // ✅ ИСПРАВЛЕНИЕ: Spawn task обрабатывает прогресс И отправляет финальный End
                 let client_clone = self.client.clone();
@@ -349,26 +430,32 @@ impl LanguageServer for BslLanguageServer {
                 let start_time = std::time::Instant::now();
 
                 tokio::spawn(async move {
-                    // Throttling: не чаще 2 раз в секунду (500ms интервал)
+                    // Оптимальный баланс: достаточно быстрые обновления без overhead
                     let mut last_report = std::time::Instant::now();
-                    let throttle_interval = std::time::Duration::from_millis(500);
+                    let throttle_interval = std::time::Duration::from_millis(50);
 
                     // === PHASE 1: Обрабатываем прогресс-уведомления ===
                     while let Some(update) = progress_rx.recv().await {
                         let now = std::time::Instant::now();
 
-                        // ✅ НОВОЕ: Логируем прогресс
-                        debug!(
-                            "[Progress] {:?} {:.1}% ({}/{}) - {}",
+                        // ✅ НОВОЕ: Логируем КАЖДОЕ прогресс-обновление (ДО throttling)
+                        let progress_msg = format!(
+                            "📥 [RECV] {:?} {:.1}% ({}/{}) - {}",
                             update.phase,
                             update.percentage,
                             update.current,
                             update.total,
                             update.message.as_deref().unwrap_or("")
                         );
+                        debug!("[Progress] {}", progress_msg);
+                        log_progress_to_file(&progress_msg);
 
                         // Пропускаем если слишком рано (throttling)
                         if now.duration_since(last_report) < throttle_interval {
+                            log_progress_to_file(&format!(
+                                "⏭️ [THROTTLED] Skipped (too early, {}ms since last report)",
+                                now.duration_since(last_report).as_millis()
+                            ));
                             continue;
                         }
 
@@ -413,13 +500,21 @@ impl LanguageServer for BslLanguageServer {
                         };
 
                         // ✅ НОВОЕ: Отправляем WorkDoneProgressReport
+                        let report_msg = format!(
+                            "📤 [SEND REPORT] {}% - {}",
+                            update.percentage as u32,
+                            message_with_eta
+                        );
+                        info!("[LSP→Extension] Sending WorkDoneProgressReport: {}% - {}", update.percentage as u32, message_with_eta);
+                        log_progress_to_file(&report_msg);
+
                         let _ = client_clone
                             .send_notification::<tower_lsp::lsp_types::notification::Progress>(
                                 ProgressParams {
                                     token: token_clone.clone(),
                                     value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
                                         WorkDoneProgressReport {
-                                            message: Some(message_with_eta),
+                                            message: Some(message_with_eta.clone()),
                                             percentage: Some(update.percentage as u32),
                                             cancellable: Some(false),
                                         },
@@ -427,13 +522,20 @@ impl LanguageServer for BslLanguageServer {
                                 },
                             )
                             .await;
+
+                        info!("✅ [LSP→Extension] WorkDoneProgressReport sent successfully");
+                        log_progress_to_file("✅ [SENT] WorkDoneProgressReport delivered");
                     }
 
                     // === PHASE 2: Канал закрыт, все updates обработаны ===
                     // Ждём результат парсинга из основного потока
+                    log_progress_to_file("🔄 [WAIT] Waiting for parsing result from main thread...");
                     match result_rx.await {
                         Ok(Ok(())) => {
                             // ✅ УСПЕХ: Отправляем WorkDoneProgressEnd
+                            info!("📤 [LSP→Extension] Sending WorkDoneProgressEnd (SUCCESS)");
+                            log_progress_to_file("📤 [SEND END] WorkDoneProgressEnd (SUCCESS)");
+
                             let _ = client_clone
                                 .send_notification::<tower_lsp::lsp_types::notification::Progress>(
                                     ProgressParams {
@@ -449,10 +551,26 @@ impl LanguageServer for BslLanguageServer {
                                     },
                                 )
                                 .await;
-                            info!("✅ Progress task завершён успешно");
+
+                            info!("✅ [LSP→Extension] WorkDoneProgressEnd sent successfully");
+                            log_progress_to_file("✅ [SENT] WorkDoneProgressEnd delivered (SUCCESS)");
+
+
+                            // MILESTONE 2.20.3: Отправляем bsl/serverStatus (loading: false) - готово
+                            info!("📤 [LSP→Extension] Sending bsl/serverStatus: loading=false");
+                            log_progress_to_file("📤 [LSP→Extension] SEND bsl/serverStatus: loading=false");
+
+                            let _ = client_clone
+                                .send_notification::<ServerStatus>(ServerStatusParams::ready())
+                                .await;
+
+                            info!("✅ [LSP→Extension] bsl/serverStatus (ready) sent successfully");
                         }
                         Ok(Err(error_msg)) => {
                             // ❌ ОШИБКА: Отправляем WorkDoneProgressEnd с ошибкой
+                            info!("📤 [LSP→Extension] Sending WorkDoneProgressEnd (ERROR): {}", error_msg);
+                            log_progress_to_file(&format!("📤 [SEND END] WorkDoneProgressEnd (ERROR): {}", error_msg));
+
                             let _ = client_clone
                                 .send_notification::<tower_lsp::lsp_types::notification::Progress>(
                                     ProgressParams {
@@ -468,11 +586,26 @@ impl LanguageServer for BslLanguageServer {
                                     },
                                 )
                                 .await;
+
+                            info!("✅ [LSP→Extension] WorkDoneProgressEnd (ERROR) sent");
+                            log_progress_to_file("✅ [SENT] WorkDoneProgressEnd delivered (ERROR)");
+
+
+                            // MILESTONE 2.20.3: Отправляем bsl/serverStatus (loading: false) даже при ошибке
+                            info!("📤 [LSP→Extension] Sending bsl/serverStatus: loading=false (after error)");
+                            log_progress_to_file("📤 [LSP→Extension] SEND bsl/serverStatus: loading=false (error case)");
+
+                            let _ = client_clone
+                                .send_notification::<ServerStatus>(ServerStatusParams::ready())
+                                .await;
+
+                            info!("✅ [LSP→Extension] bsl/serverStatus (ready after error) sent");
                             error!("❌ Progress task завершён с ошибкой: {}", error_msg);
                         }
                         Err(_) => {
                             // Канал результата закрыт без отправки (не должно случиться)
                             warn!("⚠️ Result channel closed unexpectedly");
+                            log_progress_to_file("⚠️ [ERROR] Result channel closed unexpectedly");
                         }
                     }
                 });
@@ -2375,6 +2508,19 @@ async fn main() -> Result<()> {
         .init();
 
     info!("Starting BSL Language Server - Clean Architecture");
+
+    // ✅ НОВОЕ: Очищаем progress_debug.log при каждом запуске (как rust_lsp_server.log)
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true) // Перезатираем файл при старте
+        .open("C:\\1CProject\\bsl-gradual-types\\vscode-extension\\progress_debug.log")
+    {
+        use std::io::Write;
+        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+        let _ = writeln!(file, "[{}] === BSL Progress Debug Log - LSP Server Started ===", timestamp);
+        let _ = writeln!(file, "[{}] LSP server initialized, waiting for progress events...", timestamp);
+    }
 
     // Параметры запуска
     let _args = Args::parse();

@@ -30,6 +30,7 @@ const progress_1 = require("../lsp/progress");
 const utils_1 = require("../utils");
 const customRequests_1 = require("../lsp/customRequests");
 const webviews_1 = require("../webviews");
+const parseConfiguration_1 = require("./parseConfiguration");
 let outputChannel;
 let commandsRegistered = false;
 function initializeCommands(channel) {
@@ -321,14 +322,14 @@ async function registerCommands(context) {
                 const result = await (0, customRequests_1.buildIndex)({ workspace_path: workspacePath });
                 (0, progress_1.updateIndexingProgress)(4, 'Finalizing index...', 90);
                 progress.report({ increment: 15, message: 'Finalizing...' });
-                (0, progress_1.finishIndexing)(true);
+                (0, progress_1.finishIndexing)(); // Success case - no error message
                 const typesCount = result.types_count || 'unknown';
                 vscode.window.showInformationMessage(`✅ BSL Index built successfully with ${typesCount} types`);
                 return result;
             });
         }
         catch (error) {
-            (0, progress_1.finishIndexing)(false);
+            (0, progress_1.finishIndexing)(`Index build failed: ${error}`);
             vscode.window.showErrorMessage(`Index build failed: ${error}`);
             outputChannel.appendLine(`Index build error: ${error}`);
         }
@@ -377,13 +378,13 @@ async function registerCommands(context) {
                 const result = await (0, customRequests_1.incrementalUpdate)(configPath, (0, utils_1.getPlatformVersion)());
                 (0, progress_1.updateIndexingProgress)(3, 'Finalizing...', 95);
                 progress.report({ increment: 20, message: 'Finalizing...' });
-                (0, progress_1.finishIndexing)(true);
+                (0, progress_1.finishIndexing)(); // Success case
                 vscode.window.showInformationMessage(`✅ Index updated successfully: ${result.message}`);
                 return result.message;
             });
         }
         catch (error) {
-            (0, progress_1.finishIndexing)(false);
+            (0, progress_1.finishIndexing)(`Incremental update failed: ${error}`);
             vscode.window.showErrorMessage(`Incremental update failed: ${error}`);
             outputChannel.appendLine(`Incremental update error: ${error}`);
         }
@@ -503,27 +504,86 @@ async function registerCommands(context) {
     });
     // Test Progress System (debug only)
     await safeRegisterCommand('bslAnalyzer.testProgress', async () => {
-        outputChannel.appendLine('🧪 Testing progress system...');
-        (0, progress_1.startIndexing)(5);
+        outputChannel.appendLine('');
+        outputChannel.appendLine('═══════════════════════════════════════════════════════');
+        outputChannel.appendLine('🧪 TESTING PROGRESS SYSTEM (Enhanced Debug Mode)');
+        outputChannel.appendLine('═══════════════════════════════════════════════════════');
+        outputChannel.appendLine('');
+        const totalSteps = 20; // Эмулируем парсинг 20 типов
+        const stepDelay = 500; // 500ms между обновлениями (как в реальном throttling)
+        outputChannel.appendLine(`📊 Configuration:`);
+        outputChannel.appendLine(`   - Total steps: ${totalSteps}`);
+        outputChannel.appendLine(`   - Delay per step: ${stepDelay}ms`);
+        outputChannel.appendLine(`   - UI Throttling: 500ms (matches production)`);
+        outputChannel.appendLine('');
+        outputChannel.appendLine('🚀 Calling startIndexing()...');
+        (0, progress_1.startIndexing)(4); // 4 фазы как в реальной индексации
+        outputChannel.appendLine('   ✓ startIndexing() completed');
+        outputChannel.appendLine('');
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: 'Testing Progress System',
             cancellable: false
         }, async (progress) => {
-            for (let i = 1; i <= 5; i++) {
-                const stepName = `Step ${i}: Processing...`;
-                const progressPercent = Math.floor((i / 5) * 100);
-                (0, progress_1.updateIndexingProgress)(i, stepName, progressPercent);
+            const mockTypes = [
+                'Строка', 'Число', 'Дата', 'Булево', 'Массив',
+                'Структура', 'Соответствие', 'СписокЗначений', 'ТаблицаЗначений',
+                'Справочники.Контрагенты', 'Документы.РеализацияТоваровУслуг',
+                'РегистрыСведений.Цены', 'Обработки.ЗагрузкаДанных',
+                'HTTPСоединение', 'XMLЧтение', 'XMLЗапись',
+                'ФайловыйПоток', 'ЧтениеJSON', 'ЗаписьJSON', 'ДвоичныеДанные'
+            ];
+            for (let i = 1; i <= totalSteps; i++) {
+                const currentType = mockTypes[i - 1] || `Тип${i}`;
+                const progressPercent = Math.floor((i / totalSteps) * 100);
+                const eta = Math.floor(((totalSteps - i) * stepDelay) / 1000);
+                // Детальное логирование каждого шага
+                outputChannel.appendLine(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+                outputChannel.appendLine(`📦 Step ${i}/${totalSteps} (${progressPercent}%)`);
+                outputChannel.appendLine(`   Current Type: ${currentType}`);
+                outputChannel.appendLine(`   ETA: ${eta}s`);
+                const stepName = `Парсинг типа ${i}/${totalSteps}: ${currentType}`;
+                outputChannel.appendLine(`   Calling updateIndexingProgress(${progressPercent}, "${stepName}", ${eta})...`);
+                (0, progress_1.updateIndexingProgress)(progressPercent, stepName, eta);
+                outputChannel.appendLine(`   Updating VSCode notification...`);
                 progress.report({
-                    increment: 20,
-                    message: stepName
+                    increment: Math.floor(100 / totalSteps),
+                    message: `${currentType} (${progressPercent}%)`
                 });
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                outputChannel.appendLine(`   ⏳ Sleeping ${stepDelay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, stepDelay));
+                outputChannel.appendLine(`   ✓ Step ${i} completed`);
             }
-            (0, progress_1.finishIndexing)(true);
+            outputChannel.appendLine('');
+            outputChannel.appendLine('🏁 Calling finishIndexing()...');
+            (0, progress_1.finishIndexing)(); // Test completed successfully
+            outputChannel.appendLine('   ✓ finishIndexing() completed');
         });
-        outputChannel.appendLine('✅ Progress system test completed');
+        outputChannel.appendLine('');
+        outputChannel.appendLine('═══════════════════════════════════════════════════════');
+        outputChannel.appendLine('✅ PROGRESS SYSTEM TEST COMPLETED');
+        outputChannel.appendLine('═══════════════════════════════════════════════════════');
+        outputChannel.appendLine('');
+        outputChannel.appendLine('📋 Summary:');
+        outputChannel.appendLine(`   - Total steps processed: ${totalSteps}`);
+        outputChannel.appendLine(`   - Total time: ~${(totalSteps * stepDelay) / 1000}s`);
+        outputChannel.appendLine(`   - Status: SUCCESS ✓`);
+        outputChannel.appendLine('');
+        outputChannel.appendLine('💡 Check the status bar at the bottom for visual progress!');
+        outputChannel.appendLine('');
     });
+    // Parse Configuration (MILESTONE 2.17)
+    // Регистрация через отдельный модуль для лучшей организации кода
+    const client = (0, lsp_1.getLanguageClient)();
+    if (client) {
+        const parseConfigDisposable = (0, parseConfiguration_1.registerParseConfigurationCommand)(context, client);
+        if (parseConfigDisposable) {
+            outputChannel.appendLine('✅ Registered command: bslAnalyzer.parseConfiguration');
+        }
+    }
+    else {
+        outputChannel.appendLine('⚠️ Cannot register bslAnalyzer.parseConfiguration - LSP client not ready');
+    }
     // Show Semantic Visualization (MILESTONE 2.16)
     // Регистрируем команду всегда, проверку client делаем внутри
     await safeRegisterCommand('bsl-gradual-types.showSemanticVisualization', async () => {

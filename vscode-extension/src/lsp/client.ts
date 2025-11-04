@@ -7,7 +7,8 @@ import {
     WorkDoneProgressBegin,
     WorkDoneProgressReport,
     WorkDoneProgressEnd,
-    ParsedProgressMessage
+    ParsedProgressMessage,
+    ServerStatusParams
 } from '../types';
 import {
     LanguageClient,
@@ -21,6 +22,7 @@ import {
 } from 'vscode-languageclient/node';
 import { getBinaryPath } from '../utils/binaryPath';
 import { BslAnalyzerConfig } from '../config/configHelper';
+import { handleServerStatus, initializeServerStatus } from './serverStatus';
 import { updateStatusBar, updateLspStatus, startIndexing, updateIndexingProgress, finishIndexing } from './progress';
 import * as fs from 'fs';
 
@@ -54,7 +56,7 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
     const serverMode = BslAnalyzerConfig.serverMode;
     const tcpPort = BslAnalyzerConfig.serverTcpPort;
     const traceLevel = BslAnalyzerConfig.serverTrace;
-    
+
     // Используем getBinaryPath для получения пути к LSP серверу
     let serverPath: string;
     try {
@@ -74,7 +76,7 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
         });
         return;
     }
-    
+
     // Проверяем существование файла
     if (!fs.existsSync(serverPath)) {
         outputChannel.appendLine(`❌ LSP server file not found: ${serverPath}`);
@@ -88,13 +90,13 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
         });
         return;
     }
-    
+
     outputChannel.appendLine(`🔧 Starting LSP server in ${serverMode} mode...`);
     outputChannel.appendLine(`📍 Server path: ${serverPath}`);
-    
+
     // Server options configuration
     let serverOptions: ServerOptions;
-    
+
     if (serverMode === 'stdio') {
         // STDIO mode - прямой запуск (как в rust-analyzer)
         const newEnv = { ...process.env };
@@ -126,7 +128,7 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
             } as any
         };
     }
-    
+
     // ✅ MILESTONE 2.10: Подготавливаем initializationOptions для передачи в LSP
     const initializationOptions = {
         platformDocsArchive: BslAnalyzerConfig.platformDocsArchive,
@@ -155,6 +157,8 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
         },
         // ✅ MILESTONE 2.10: Передаём initializationOptions в LSP
         initializationOptions: initializationOptions,
+        // ❌ УБРАНО: progressOnInitialization работает ТОЛЬКО для прогресса во время initialize request
+        // Наш прогресс создаётся ПОСЛЕ в initialized() callback, поэтому нужен custom handler
         outputChannel: outputChannel,
         revealOutputChannelOn: RevealOutputChannelOn.Never,
         traceOutputChannel: outputChannel,
@@ -168,17 +172,11 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
             }
         }
     };
-    
-    // Устанавливаем уровень трассировки
-    if (traceLevel && traceLevel !== 'off') {
-        // Convert string to Trace enum
-        if (traceLevel === 'messages') {
-            (clientOptions as any).trace = Trace.Messages;
-        } else if (traceLevel === 'verbose') {
-            (clientOptions as any).trace = Trace.Verbose;
-        }
-    }
-    
+
+    // ✅ ПРИНУДИТЕЛЬНО устанавливаем VERBOSE tracing для отладки Work Done Progress
+    (clientOptions as any).trace = Trace.Verbose;
+    outputChannel.appendLine('🔍 TRACE: Verbose logging enabled');
+
     // Create the language client
     client = new LanguageClient(
         'bslAnalyzer',
@@ -186,7 +184,7 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
         serverOptions,
         clientOptions
     );
-    
+
     // Добавляем детальные обработчики ошибок ПЕРЕД запуском
     // MILESTONE 2.20.1: Track LSP server status changes
     client.onDidChangeState((event) => {
@@ -221,57 +219,41 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
         }
     };
 
-    // Start the client with progress notification
+    // ❌ НЕ регистрируем custom $/progress handler!
+    // vscode-languageclient автоматически обрабатывает Work Done Progress и показывает Progress window
+    // Кастомный handler нужен ТОЛЬКО для status bar через bsl/indexingProgress
+
+    // Start the client
     try {
         outputChannel.appendLine('🚀 Starting LSP client...');
         outputChannel.appendLine(`   Server command: ${JSON.stringify(serverOptions)}`);
 
-        // MILESTONE 2.9: Показываем прогресс парсинга документации
-        // Используем Window (status bar) вместо Notification для меньшей навязчивости
-        await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Window,
-            title: "BSL Analyzer: Запуск LSP сервера",
-            cancellable: false
-        }, async (progress) => {
-            progress.report({ increment: 0, message: "Инициализация..." });
-
-            await client!.start();
-
-            progress.report({ increment: 50, message: "Парсинг документации платформы 1С..." });
-
-            // Даём серверу время на парсинг (он делает это при старте)
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
-            progress.report({ increment: 100, message: "Готов к работе" });
-        });
+        await client!.start();
 
         outputChannel.appendLine('✅ LSP client started successfully');
 
-        // Регистрируем обработчики custom requests
-        registerCustomHandlers();
-
-        // Регистрируем обработчик прогресса индексации
+        // Регистрируем обработчик прогресса индексации (для status bar)
         client.onNotification('bsl/indexingProgress', (params: IndexingProgressParams) => {
             handleIndexingProgress(params);
         });
 
-        // MILESTONE 2.20.2.4: Подписка на $/progress notification для Work Done Progress
-        client.onNotification('$/progress', (params: ProgressParams) => {
-            const { token } = params;
-
-            // Обрабатываем только notifications с token "bsl-load-types-*"
-            if (typeof token === 'string' && token.startsWith('bsl-load-types-')) {
-                outputChannel.appendLine(`[$/progress] Received notification for token: ${token}`);
-                handleWorkDoneProgress(params);
-            }
+        outputChannel.appendLine('✅ bsl/indexingProgress handler registered');
+        // MILESTONE 2.20.3: Обработчик server status (для loading icon)
+        client.onNotification('bsl/serverStatus', (params: ServerStatusParams) => {
+            handleServerStatus(params);
         });
+
+        outputChannel.appendLine('✅ bsl/serverStatus handler registered');
+
+        // Регистрируем обработчики custom requests
+        registerCustomHandlers();
 
         // Уведомляем провайдеры об изменении статуса
         vscode.commands.executeCommand('bslAnalyzer.refreshOverview');
-        
+
         // Запускаем периодическую проверку состояния (каждые 30 секунд)
         startHealthCheck();
-        
+
     } catch (error) {
         outputChannel.appendLine(`❌ Failed to start LSP client: ${error}`);
         vscode.window.showErrorMessage(`Failed to start BSL Analyzer: ${error}`);
@@ -285,7 +267,7 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
 export async function stopLanguageClient(): Promise<void> {
     // Останавливаем health check
     stopHealthCheck();
-    
+
     if (client) {
         outputChannel.appendLine('🛑 Stopping LSP client...');
         try {
@@ -306,8 +288,6 @@ export async function restartLanguageClient(context: vscode.ExtensionContext): P
     await stopLanguageClient();
     // Уведомляем об остановке
     vscode.commands.executeCommand('bslAnalyzer.refreshOverview');
-    // Небольшая задержка перед перезапуском
-    await new Promise(resolve => setTimeout(resolve, 500));
     await startLanguageClient(context);
 }
 
@@ -364,6 +344,12 @@ export function parseProgressMessage(message: string): ParsedProgressMessage {
  *
  * Обрабатывает Work Done Progress notifications для индексации типов платформы 1С
  */
+// ✅ MILESTONE 2.20: Visual Progress Window
+// Глобальная переменная для хранения Progress UI
+let activeProgressResolve: ((value: void) => void) | null = null;
+let activeProgressReporter: vscode.Progress<{ message?: string; increment?: number }> | null = null;
+let lastReportedPercentage: number = 0; // Для вычисления increment
+
 function handleWorkDoneProgress(params: ProgressParams): void {
     const { token, value } = params;
 
@@ -371,20 +357,57 @@ function handleWorkDoneProgress(params: ProgressParams): void {
 
     if (value.kind === 'begin') {
         const beginValue = value as WorkDoneProgressBegin;
-        outputChannel.appendLine(`[$/progress] BEGIN - Title: ${beginValue.title}, Message: ${beginValue.message || 'N/A'}, Percentage: ${beginValue.percentage || 0}%`);
+        outputChannel.appendLine(`📥 [Extension←LSP] Received WorkDoneProgressBegin`);
+        outputChannel.appendLine(`   Title: ${beginValue.title}`);
+        outputChannel.appendLine(`   Message: ${beginValue.message || 'N/A'}`);
+        outputChannel.appendLine(`   Percentage: ${beginValue.percentage || 0}%`);
 
-        // Запускаем отслеживание индексации
+        // Сбрасываем счётчик прогресса
+        lastReportedPercentage = 0;
+
+        // Запускаем отслеживание индексации (status bar)
+        outputChannel.appendLine(`🔄 [Extension] Starting indexing tracking (status bar)`);
         startIndexing();
+        outputChannel.appendLine(`✅ [Extension] Status bar tracking started`);
+
+        // ✅ НОВОЕ: Показываем визуальный Progress window
+        outputChannel.appendLine(`🪟 [Extension] Opening visual Progress window (Window + Notification)`);
+        vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification | vscode.ProgressLocation.Window,
+            title: beginValue.title,
+            cancellable: false
+        }, async (progress) => {
+            outputChannel.appendLine(`✅ [Extension] Progress window opened successfully`);
+
+            // Сохраняем reporter для последующих обновлений
+            activeProgressReporter = progress;
+
+            // Показываем начальное сообщение
+            progress.report({
+                increment: 0,
+                message: beginValue.message || 'Инициализация...'
+            });
+            outputChannel.appendLine(`📊 [Extension] Initial progress reported: "${beginValue.message}"`);
+
+            // Ждём завершения (будет вызван resolve в 'end' handler)
+            return new Promise<void>((resolve) => {
+                activeProgressResolve = resolve;
+                outputChannel.appendLine(`⏳ [Extension] Progress window awaiting completion...`);
+            });
+        });
     }
     else if (value.kind === 'report') {
         const reportValue = value as WorkDoneProgressReport;
         const message = reportValue.message || '';
         const percentage = reportValue.percentage || 0;
 
-        outputChannel.appendLine(`[$/progress] REPORT - Message: ${message}, Percentage: ${percentage}%`);
+        outputChannel.appendLine(`📥 [Extension←LSP] Received WorkDoneProgressReport`);
+        outputChannel.appendLine(`   Percentage: ${percentage}%`);
+        outputChannel.appendLine(`   Message: ${message}`);
 
         // Парсим детали из message
         const parsed = parseProgressMessage(message);
+        outputChannel.appendLine(`🔍 [Extension] Parsed progress: currentItem=${parsed.currentItem}, totalItems=${parsed.totalItems}, eta=${parsed.eta}`);
 
         if (parsed.currentItem && parsed.totalItems) {
             // Формируем красивое описание прогресса
@@ -392,28 +415,75 @@ function handleWorkDoneProgress(params: ProgressParams): void {
                 ? `Тип ${parsed.currentItem}/${parsed.totalItems} - ${parsed.itemName}`
                 : `Тип ${parsed.currentItem}/${parsed.totalItems}`;
 
-            // Обновляем прогресс индексации
+            outputChannel.appendLine(`📊 [Extension] Updating status bar: ${percentage}% - ${stepName}`);
+            // Обновляем прогресс индексации (status bar)
             updateIndexingProgress(
                 percentage,
                 stepName,
                 parsed.eta
             );
+
+            // ✅ НОВОЕ: Обновляем визуальный Progress window
+            if (activeProgressReporter) {
+                const windowMessage = `${stepName}${parsed.eta ? ` - ETA: ${parsed.eta}s` : ''}`;
+                const increment = percentage - lastReportedPercentage;
+                lastReportedPercentage = percentage;
+
+                outputChannel.appendLine(`🪟 [Extension] Updating Progress window: "${windowMessage}" (increment: ${increment}%)`);
+                activeProgressReporter.report({
+                    message: windowMessage,
+                    increment: increment
+                });
+                outputChannel.appendLine(`✅ [Extension] Progress window updated`);
+            } else {
+                outputChannel.appendLine(`⚠️ [Extension] Progress window reporter is NULL - cannot update!`);
+            }
         } else {
             // Fallback: показываем message как есть
+            outputChannel.appendLine(`📊 [Extension] Updating status bar (fallback): ${percentage}% - ${message}`);
             updateIndexingProgress(percentage, message, undefined);
+
+            // ✅ НОВОЕ: Обновляем визуальный Progress window
+            if (activeProgressReporter) {
+                const increment = percentage - lastReportedPercentage;
+                lastReportedPercentage = percentage;
+
+                outputChannel.appendLine(`🪟 [Extension] Updating Progress window (fallback): "${message}" (increment: ${increment}%)`);
+                activeProgressReporter.report({
+                    message,
+                    increment: increment
+                });
+                outputChannel.appendLine(`✅ [Extension] Progress window updated (fallback)`);
+            } else {
+                outputChannel.appendLine(`⚠️ [Extension] Progress window reporter is NULL - cannot update!`);
+            }
         }
     }
     else if (value.kind === 'end') {
         const endValue = value as WorkDoneProgressEnd;
         const message = endValue.message || 'Завершено';
 
-        outputChannel.appendLine(`[$/progress] END - Message: ${message}`);
+        outputChannel.appendLine(`📥 [Extension←LSP] Received WorkDoneProgressEnd`);
+        outputChannel.appendLine(`   Message: ${message}`);
 
-        // Завершаем отслеживание индексации
+        // Завершаем отслеживание индексации (status bar)
+        outputChannel.appendLine(`📊 [Extension] Finishing status bar tracking`);
         finishIndexing(message);
+        outputChannel.appendLine(`✅ [Extension] Status bar tracking finished`);
+
+        // ✅ НОВОЕ: Закрываем визуальный Progress window
+        if (activeProgressResolve) {
+            outputChannel.appendLine(`🪟 [Extension] Closing Progress window`);
+            activeProgressResolve();
+            activeProgressResolve = null;
+            activeProgressReporter = null;
+            outputChannel.appendLine(`✅ [Extension] Progress window closed successfully`);
+        } else {
+            outputChannel.appendLine(`⚠️ [Extension] Progress resolve is NULL - window already closed or never opened!`);
+        }
     }
     else {
-        outputChannel.appendLine(`[$/progress] WARN - Unknown progress kind: ${(value as any).kind}`);
+        outputChannel.appendLine(`⚠️ [Extension] WARN - Unknown progress kind: ${(value as any).kind}`);
     }
 }
 
@@ -422,14 +492,14 @@ function handleWorkDoneProgress(params: ProgressParams): void {
  */
 function registerCustomHandlers() {
     if (!client) return;
-    
+
     // Обработчик запросов информации о типе
     client.onRequest('bsl/typeInfo', async (params: TypeInfoParams) => {
         outputChannel.appendLine(`📋 Type info request: ${JSON.stringify(params)}`);
         // Здесь можно добавить обработку запроса
         return null;
     });
-    
+
     // Обработчик запросов валидации метода
     client.onRequest('bsl/validateMethod', async (params: ValidateMethodParams) => {
         outputChannel.appendLine(`✓ Method validation request: ${JSON.stringify(params)}`);
@@ -443,7 +513,7 @@ function registerCustomHandlers() {
  */
 function handleIndexingProgress(params: IndexingProgressParams) {
     outputChannel.appendLine(`📊 Indexing progress: Step ${params.step}/${params.totalSteps} - ${params.message} (${params.percentage}%)`);
-    
+
     // Здесь можно обновить UI с прогрессом
     // Например, вызвать event emitter для обновления status bar
 }
@@ -455,7 +525,7 @@ export async function sendCustomRequest<T = unknown>(method: string, params?: un
     if (!client || !client.isRunning()) {
         throw new Error('LSP client is not running');
     }
-    
+
     try {
         const result = await client.sendRequest(method, params);
         return result as T;
@@ -473,7 +543,7 @@ export function sendCustomNotification(method: string, params?: unknown): void {
         outputChannel.appendLine(`⚠️ Cannot send notification: LSP client is not running`);
         return;
     }
-    
+
     client.sendNotification(method, params);
 }
 
@@ -483,7 +553,7 @@ export function sendCustomNotification(method: string, params?: unknown): void {
 function startHealthCheck(): void {
     // Останавливаем предыдущий интервал, если он есть
     stopHealthCheck();
-    
+
     // Проверяем состояние каждые 30 секунд
     healthCheckInterval = setInterval(() => {
         if (client) {
@@ -492,7 +562,7 @@ function startHealthCheck(): void {
                 outputChannel.appendLine('⚠️ Health check: LSP client is not running');
                 updateStatusBar('$(error) BSL Analyzer: Disconnected');
                 vscode.commands.executeCommand('bslAnalyzer.refreshOverview');
-                
+
                 // Показываем уведомление только один раз
                 stopHealthCheck();
                 vscode.window.showWarningMessage(

@@ -21,6 +21,8 @@ import {
 import { initializeContextProvider } from './lsp/contextProvider';
 // MILESTONE 2.20.4: Type Repository Statistics
 import { initializeStatsProvider } from './lsp/statsProvider';
+// MILESTONE 2.20.3: Server Status Handler (rust-analyzer approach)
+import { initializeServerStatus } from './lsp/serverStatus';
 import {
     getPlatformDocsArchive,
     initializeUtils,
@@ -78,6 +80,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // Инициализируем модули
         initializeUtils(outputChannel);
         initializeProgress(outputChannel, statusBarItem);
+        initializeServerStatus(outputChannel, statusBarItem);
         // MILESTONE 2.20.3: Initialize Current Context Provider
         initializeContextProvider(context, statusBarItem);
         // MILESTONE 2.20.4: Initialize Type Repository Stats Provider
@@ -117,17 +120,15 @@ export async function activate(context: vscode.ExtensionContext) {
         await autoDetectConfigurationIfNeeded();
 
         // Start LSP client FIRST (it may register some commands)
-        // Запускаем с задержкой для стабильности
-        setTimeout(async () => {
-            outputChannel.appendLine('🚀 Starting LSP server with delay...');
-            await startLanguageClient(context);
-            // ✅ ИСПРАВЛЕНО: НЕ перезаписываем статус, если идёт индексация
-            // updateStatusBar обновит статус сам, когда индексация завершится
-            const currentProgress = require('./lsp/progress').getCurrentProgress();
-            if (!currentProgress || !currentProgress.isIndexing) {
-                updateStatusBar('$(database) BSL Analyzer: Ready');
-            }
-        }, 1000);
+        // Запускаем сразу без задержки
+        outputChannel.appendLine('🚀 Starting LSP server...');
+        await startLanguageClient(context);
+        // ✅ ИСПРАВЛЕНО: НЕ перезаписываем статус, если идёт индексация
+        // updateStatusBar обновит статус сам, когда индексация завершится
+        const currentProgress = require('./lsp/progress').getCurrentProgress();
+        if (!currentProgress || !currentProgress.isIndexing) {
+            updateStatusBar('$(database) BSL Analyzer: Ready');
+        }
 
         // Register sidebar providers
         registerSidebarProviders(context);

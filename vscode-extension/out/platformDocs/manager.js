@@ -142,7 +142,7 @@ async function addPlatformDocumentation(provider) {
                 // Финализация
                 (0, progress_1.updateIndexingProgress)(currentStep++, 'Finalizing...', 95);
                 progress.report({ increment: 20, message: 'Finalizing...' });
-                (0, progress_1.finishIndexing)(true);
+                (0, progress_1.finishIndexing)(); // Success
                 // Формируем сообщение о результате
                 let message = `✅ Platform documentation added for version ${version}`;
                 if (shcntxPath && shlangPath) {
@@ -166,7 +166,7 @@ async function addPlatformDocumentation(provider) {
                 provider.refresh();
             }
             catch (error) {
-                (0, progress_1.finishIndexing)(false);
+                (0, progress_1.finishIndexing)(`Failed to add platform documentation: ${error}`);
                 vscode.window.showErrorMessage(`Failed to add platform documentation: ${error}`);
                 outputChannel.appendLine(`Error adding platform docs: ${error}`);
             }
@@ -256,12 +256,12 @@ async function parsePlatformDocumentation(version) {
             // Этап 3: Завершение
             (0, progress_1.updateIndexingProgress)(3, 'Finalizing...', 95);
             progress.report({ increment: 15, message: 'Finalizing...' });
-            (0, progress_1.finishIndexing)(true);
+            (0, progress_1.finishIndexing)(); // Success
             vscode.window.showInformationMessage(`✅ Platform documentation re-parsed successfully for version ${version}`);
             outputChannel.appendLine(`Re-parse result: ${result}`);
         }
         catch (error) {
-            (0, progress_1.finishIndexing)(false);
+            (0, progress_1.finishIndexing)(`Failed to re-parse platform documentation: ${error}`);
             vscode.window.showErrorMessage(`Failed to re-parse platform documentation: ${error}`);
             outputChannel.appendLine(`Error re-parsing platform docs: ${error}`);
         }

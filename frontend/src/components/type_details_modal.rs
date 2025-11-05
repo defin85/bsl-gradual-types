@@ -2,6 +2,7 @@
 
 use crate::api::{TypeInfo, MethodInfo};
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
 
 // ============================================================================
 // Helper Functions for Tailwind CSS Classes
@@ -83,9 +84,15 @@ pub fn TypeDetailsModal(
                     <div
                         class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200"
                         on:click=move |_| on_close.run(())
+                        on:keydown=move |ev| {
+                            if ev.key() == "Escape" {
+                                on_close.run(());
+                            }
+                        }
                         role="dialog"
                         aria-modal="true"
                         aria-labelledby="modal-title"
+                        tabindex="-1"
                     >
                         <div
                             class="bg-white dark:bg-gray-900 rounded-2xl max-w-4xl w-[90%] max-h-[90vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-4 duration-300"
@@ -382,7 +389,14 @@ pub fn TypeDetailsModal(
                                 <button
                                     class="px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-900 bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 focus:ring-gray-500"
                                     on:click=move |_| {
-                                        web_sys::console::log_1(&format!("Copy: {}", name.clone()).into());
+                                        let name_copy = name.clone();
+
+                                        if let Some(window) = web_sys::window() {
+                                            if let Some(navigator) = window.navigator().clipboard() {
+                                                let _ = navigator.write_text(&name_copy);
+                                                web_sys::console::log_1(&"Имя типа скопировано в буфер обмена".into());
+                                            }
+                                        }
                                     }
                                     aria-label="Скопировать имя типа в буфер обмена"
                                 >

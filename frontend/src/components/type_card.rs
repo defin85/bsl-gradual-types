@@ -2,6 +2,7 @@
 
 use crate::api::*;
 use leptos::prelude::*;
+use leptos::For;
 
 /// Helper function for type card classes based on category
 fn type_card_classes(category: &str) -> String {
@@ -87,140 +88,151 @@ pub fn TypeCard(
     };
 
     view! {
-        <div class=card_class on:click=handle_click>
-            <div class="flex items-center justify-between mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
-                <div class="text-xl font-bold text-gray-900 dark:text-white">{move || type_info.get().name.clone()}</div>
-                <div class=certainty_badge_class>
-                    {move || type_info.get().certainty_percentage()}
-                </div>
-            </div>
+        <div
+            class=card_class
+            on:click=handle_click
+            on:keydown=move |ev| {
+                if ev.key() == "Enter" || ev.key() == " " {
+                    ev.prevent_default();
+                    if let Some(handler) = on_click {
+                        handler.run(type_info.get());
+                    }
+                }
+            }
+            role="button"
+            tabindex="0"
+            aria-label=move || format!("Открыть подробности типа {}", type_info.get().name)
+        >
+            {move || {
+                let info = type_info.get();
 
-            <div class="space-y-2 mb-4">
-                <div class="flex justify-between items-center py-1">
-                    <span class="text-sm text-gray-600 dark:text-gray-400 font-medium">"Категория:"</span>
-                    <span class="text-sm text-gray-900 dark:text-white">{move || type_info.get().category.clone()}</span>
-                </div>
-                <div class="flex justify-between items-center py-1">
-                    <span class="text-sm text-gray-600 dark:text-gray-400 font-medium">"Источник:"</span>
-                    <span class="text-sm text-gray-900 dark:text-white">{move || type_info.get().source.clone()}</span>
-                </div>
-                <div class="flex justify-between items-center py-1">
-                    <span class="text-sm text-gray-600 dark:text-gray-400 font-medium">"Уверенность:"</span>
-                    <span class="text-sm text-gray-900 dark:text-white">{move || type_info.get().certainty_text.clone()}</span>
-                </div>
-            </div>
+                view! {
+                    <div class="flex items-center justify-between mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
+                        <div class="text-xl font-bold text-gray-900 dark:text-white">{info.name.clone()}</div>
+                        <div class={certainty_badge_classes(info.certainty)}>
+                            {info.certainty_percentage()}
+                        </div>
+                    </div>
 
-            <div class={section_container_classes("facets")}>
-                <strong class="text-gray-900 dark:text-white">"Доступные фасеты:"</strong><br/>
-                {move || {
-                    type_info.get().facets.into_iter().map(|facet| {
-                        let facet_class = facet_tag_classes(&facet);
+                    <div class="space-y-2 mb-4">
+                        <div class="flex justify-between items-center py-1">
+                            <span class="text-sm text-gray-600 dark:text-gray-400 font-medium">"Категория:"</span>
+                            <span class="text-sm text-gray-900 dark:text-white">{info.category.clone()}</span>
+                        </div>
+                        <div class="flex justify-between items-center py-1">
+                            <span class="text-sm text-gray-600 dark:text-gray-400 font-medium">"Источник:"</span>
+                            <span class="text-sm text-gray-900 dark:text-white">{info.source.clone()}</span>
+                        </div>
+                        <div class="flex justify-between items-center py-1">
+                            <span class="text-sm text-gray-600 dark:text-gray-400 font-medium">"Уверенность:"</span>
+                            <span class="text-sm text-gray-900 dark:text-white">{info.certainty_text.clone()}</span>
+                        </div>
+                    </div>
+
+                    <div class={section_container_classes("facets")}>
+                        <strong class="text-gray-900 dark:text-white">"Доступные фасеты:"</strong><br/>
+                        {info.facets.into_iter().map(|facet| {
+                            let facet_class = facet_tag_classes(&facet);
+                            view! {
+                                <span class=facet_class>
+                                    {facet.clone()}
+                                </span>
+                            }
+                        }).collect::<Vec<_>>()}
+                    </div>
+
+                    {if !info.methods.is_empty() {
+                        let methods_to_show: Vec<MethodInfo> = info.methods.iter().take(5).cloned().collect();
+                        let has_more = info.methods.len() > 5;
+                        let remaining_count = if has_more { info.methods.len() - 5 } else { 0 };
+                        let methods_len = info.methods.len();
+
                         view! {
-                            <span class=facet_class>
-                                {facet.clone()}
-                            </span>
-                        }
-                    }).collect::<Vec<_>>()
-                }}
-            </div>
-
-            {move || {
-                let info = type_info.get();
-                if !info.methods.is_empty() {
-                    let methods_to_show: Vec<MethodInfo> = info.methods.iter().take(5).cloned().collect();
-                    let has_more = info.methods.len() > 5;
-                    let remaining_count = if has_more { info.methods.len() - 5 } else { 0 };
-
-                    view! {
-                        <div class={section_container_classes("methods")}>
-                            <strong class="text-gray-900 dark:text-white">"📋 Методы (" {info.methods.len()} "):"</strong><br/>
-                            <div class="mt-2">
-                                {methods_to_show.into_iter().map(|method| {
-                                    view! {
-                                        <span class="inline-block px-3 py-1 mr-2 mb-2 bg-blue-600 dark:bg-blue-700 text-white text-xs font-medium rounded shadow-sm hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors">
-                                            {method.name.clone()}
-                                        </span>
-                                    }
-                                }).collect::<Vec<_>>()}
-                                {if has_more {
-                                    view! {
-                                        <span class={remaining_badge_classes()}>
-                                            "+" {remaining_count} " ещё"
-                                        </span>
-                                    }.into_any()
-                                } else {
-                                    let _: () = view! {};
-                                    ().into_any()
-                                }}
+                            <div class={section_container_classes("methods")}>
+                                <strong class="text-gray-900 dark:text-white">"📋 Методы (" {methods_len} "):"</strong><br/>
+                                <div class="mt-2">
+                                    {methods_to_show.into_iter().map(|method| {
+                                        view! {
+                                            <span class="inline-block px-3 py-1 mr-2 mb-2 bg-blue-600 dark:bg-blue-700 text-white text-xs font-medium rounded shadow-sm hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors">
+                                                {method.name.clone()}
+                                            </span>
+                                        }
+                                    }).collect::<Vec<_>>()}
+                                    {if has_more {
+                                        view! {
+                                            <span class={remaining_badge_classes()}>
+                                                "+" {remaining_count} " ещё"
+                                            </span>
+                                        }.into_any()
+                                    } else {
+                                        let _: () = view! {};
+                                        ().into_any()
+                                    }}
+                                </div>
                             </div>
-                        </div>
-                    }.into_any()
-                } else {
-                    let _: () = view! {};
-                    ().into_any()
-                }
-            }}
+                        }.into_any()
+                    } else {
+                        let _: () = view! {};
+                        ().into_any()
+                    }}
 
-            {move || {
-                let info = type_info.get();
-                if !info.tabular_sections.is_empty() {
-                    let sections_to_show: Vec<String> = info.tabular_sections.iter()
-                        .take(3)
-                        .map(|ts| ts.name.clone())
-                        .collect();
-                    let has_more = info.tabular_sections.len() > 3;
-                    let remaining_count = if has_more { info.tabular_sections.len() - 3 } else { 0 };
+                    {if !info.tabular_sections.is_empty() {
+                        let sections_to_show: Vec<String> = info.tabular_sections.iter()
+                            .take(3)
+                            .map(|ts| ts.name.clone())
+                            .collect();
+                        let has_more = info.tabular_sections.len() > 3;
+                        let remaining_count = if has_more { info.tabular_sections.len() - 3 } else { 0 };
+                        let sections_len = info.tabular_sections.len();
 
-                    view! {
-                        <div class={section_container_classes("tabular")}>
-                            <strong class="text-gray-900 dark:text-white">"📋 Табличные части (" {info.tabular_sections.len()} "):"</strong><br/>
-                            <div class="mt-2">
-                                {sections_to_show.into_iter().map(|section_name| {
-                                    view! {
-                                        <span class="inline-block px-3 py-1 mr-2 mb-2 bg-cyan-100 dark:bg-cyan-900 text-cyan-800 dark:text-cyan-200 text-xs font-medium rounded shadow-sm">
-                                            {section_name}
-                                        </span>
-                                    }
-                                }).collect::<Vec<_>>()}
-                                {if has_more {
-                                    view! {
-                                        <span class={remaining_badge_classes()}>
-                                            "+" {remaining_count} " ещё"
-                                        </span>
-                                    }.into_any()
-                                } else {
-                                    let _: () = view! {};
-                                    ().into_any()
-                                }}
+                        view! {
+                            <div class={section_container_classes("tabular")}>
+                                <strong class="text-gray-900 dark:text-white">"📋 Табличные части (" {sections_len} "):"</strong><br/>
+                                <div class="mt-2">
+                                    {sections_to_show.into_iter().map(|section_name| {
+                                        view! {
+                                            <span class="inline-block px-3 py-1 mr-2 mb-2 bg-cyan-100 dark:bg-cyan-900 text-cyan-800 dark:text-cyan-200 text-xs font-medium rounded shadow-sm">
+                                                {section_name}
+                                            </span>
+                                        }
+                                    }).collect::<Vec<_>>()}
+                                    {if has_more {
+                                        view! {
+                                            <span class={remaining_badge_classes()}>
+                                                "+" {remaining_count} " ещё"
+                                            </span>
+                                        }.into_any()
+                                    } else {
+                                        let _: () = view! {};
+                                        ().into_any()
+                                    }}
+                                </div>
                             </div>
+                        }.into_any()
+                    } else {
+                        let _: () = view! {};
+                        ().into_any()
+                    }}
+
+                    {if info.is_flow_sensitive() {
+                        view! {
+                            <div class={section_container_classes("flow")}>
+                                <strong class="text-gray-900 dark:text-white">"🔄 Flow-Sensitive Analysis"</strong><br/>
+                                <span class="text-sm text-purple-700 dark:text-purple-300">"Тип может изменяться в ходе выполнения"</span>
+                            </div>
+                        }.into_any()
+                    } else {
+                        let _: () = view! {};
+                        ().into_any()
+                    }}
+
+                    <div class="mt-4">
+                        <div class="bg-blue-50 dark:bg-blue-950/30 p-3 rounded-lg border-l-4 border-blue-500">
+                            <small class="text-gray-900 dark:text-white"><strong>"Описание:"</strong>" " {info.description.clone()}</small>
                         </div>
-                    }.into_any()
-                } else {
-                    let _: () = view! {};
-                    ().into_any()
+                    </div>
                 }
             }}
-
-            {move || {
-                let info = type_info.get();
-                if info.is_flow_sensitive() {
-                    view! {
-                        <div class={section_container_classes("flow")}>
-                            <strong class="text-gray-900 dark:text-white">"🔄 Flow-Sensitive Analysis"</strong><br/>
-                            <span class="text-sm text-purple-700 dark:text-purple-300">"Тип может изменяться в ходе выполнения"</span>
-                        </div>
-                    }.into_any()
-                } else {
-                    let _: () = view! {};
-                    ().into_any()
-                }
-            }}
-
-            <div class="mt-4">
-                <div class="bg-blue-50 dark:bg-blue-950/30 p-3 rounded-lg border-l-4 border-blue-500">
-                    <small class="text-gray-900 dark:text-white"><strong>"Описание:"</strong>" " {move || type_info.get().description.clone()}</small>
-                </div>
-            </div>
         </div>
     }
 }
@@ -238,8 +250,10 @@ pub fn TypeCardsGrid(
 ) -> impl IntoView {
     view! {
         <div class={cards_grid_classes()}>
-            {move || {
-                types.get().into_iter().map(|type_info| {
+            <For
+                each=move || types.get()
+                key=|type_info| type_info.id.clone()
+                children=move |type_info: TypeInfo| {
                     let type_signal = Signal::derive(move || type_info.clone());
                     let click_handler = on_card_click;
 
@@ -256,8 +270,8 @@ pub fn TypeCardsGrid(
                             />
                         }.into_view(),
                     }
-                }).collect::<Vec<_>>()
-            }}
+                }
+            />
         </div>
     }
 }

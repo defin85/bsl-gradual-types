@@ -20,4 +20,7 @@ pub use syntax_helper::{
     TypeDocumentation, TypeIdentity, TypeInfo, TypeMetadata, TypeStructure,
 };
 
-pub use platform_types::{create_tabular_section_type, load_all_platform_types};
+pub use platform_types::{
+    create_tabular_section_type, load_all_platform_types,
+    populate_signature_index_from_platform_types,
+};

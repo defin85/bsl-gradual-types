@@ -13,11 +13,19 @@
 
 ### 📚 Основные разделы
 - **[API](api/)** — документация API
+- **[Architecture](architecture/)** — архитектурные описания
 - **[Guides](guides/)** — руководства и инструкции
 - **[Reference](reference/)** — справочные материалы
 - **[Tutorials](tutorials/)** — обучающие материалы
 - **[Images](images/)** — графические файлы
 - **[Assets](assets/)** — дополнительные ресурсы
+
+### 🏗️ [Архитектура](architecture/)
+Детальное описание компонентов системы:
+- **[Type System Architecture](architecture/type_system_architecture.md)** — визуализация системы типов
+- **[Components Detailed](architecture/components-detailed.md)** — детальные компоненты
+- **[Constructor Support](architecture/constructor-support.md)** — поддержка конструкторов
+- **[Milestones History](architecture/milestones-history.md)** — история Milestone 2.8-2.18
 
 ### 🎯 [Целевая архитектура](reference/target_architecture/)
 Прагматичная версия «революционной» архитектуры:

@@ -96,6 +96,18 @@ impl AnalysisEngine {
         self.repository.clone()
     }
 
+    /// Найти конструктор для указанного типа
+    ///
+    /// # Arguments
+    /// * `type_name` - Имя типа (регистронезависимо)
+    ///
+    /// # Returns
+    /// * `Some(ConstructorSignature)` - если конструктор найден
+    /// * `None` - если конструктор не найден
+    pub fn find_constructor(&self, type_name: &str) -> Option<crate::domain::signature_index::ConstructorSignature> {
+        self.repository.find_constructor(type_name)
+    }
+
     /// Резолвит тип по имени (Domain Use Case для hover/completion)
     ///
     /// Принимает имя типа (например: "Число", "Массив", "Справочники.Контрагенты")

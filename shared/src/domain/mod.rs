@@ -7,6 +7,7 @@ pub mod metadata_lookup; // Bridge between TypeResolution and RawTypeData
 pub mod null_safety; // Null safety analysis via CFG (Milestone 2.3)
 pub mod repository;
 pub mod resolver;
+pub mod signature_index; // Function signature validation system (Milestone 2.20)
 pub mod types;
 pub mod validators; // Type validation rules from Balyuk & Popova (2021)
 
@@ -21,6 +22,9 @@ pub use generic_inference::{GenericInference, GenericTypeInfo};
 pub use metadata_lookup::TypeMetadataLookup;
 pub use null_safety::{NullSafetyAnalyzer, NullSafetyResult, NullSafetyWarning, NullWarningKind};
 pub use repository::{CompletionItem, CompletionKind, TypeRepository};
-pub use resolver::TypeResolver;
+pub use resolver::{TypeResolver, ValidationResult, ConstructorResolution};
+pub use signature_index::{
+    MethodSignature, SignatureIndex, SignatureSource, SignatureValidationResult, SignatureMismatch,
+};
 pub use types::{RawTypeData, TypeResolution};
 pub use validators::{TypeErrorKind, TypeValidator};

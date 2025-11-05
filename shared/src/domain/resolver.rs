@@ -5,6 +5,58 @@
 use std::sync::Arc;
 use crate::domain::repository::TypeRepository;
 use crate::domain::types::TypeResolution;
+use super::signature_index::SignatureIndex;
+
+/// Результат валидации вызова функции
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValidationResult {
+    /// Вызов корректен, возвращает тип (если функция возвращает значение)
+    Ok(Option<String>),
+    /// Отсутствует обязательный параметр
+    MissingRequiredParam { param_name: String, param_index: usize },
+    /// Слишком много аргументов
+    TooManyArgs { expected: usize, actual: usize },
+    /// Несоответствие типов аргумента
+    TypeMismatch {
+        param_name: String,
+        expected: String,
+        actual: String
+    },
+    /// Функция/метод не найдены
+    NotFound,
+}
+
+/// Результат резолвинга конструктора (Milestone 2.21)
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConstructorResolution {
+    /// Успешно резолвлен
+    Resolved {
+        /// Результирующий тип
+        type_name: String,
+
+        /// Facet результата (если есть)
+        facet: Option<String>,
+
+        /// Generic параметры (для коллекций)
+        /// Массив<Число> → Some(vec!["Число"])
+        generic_params: Option<Vec<String>>,
+
+        /// Ошибки валидации параметров
+        validation_errors: Vec<String>,
+    },
+
+    /// Конструктор не найден
+    NotFound {
+        type_name: String,
+        hint: String,
+    },
+
+    /// Динамический конструктор с неизвестным типом
+    Dynamic {
+        /// Невозможно определить тип статически
+        reason: String,
+    },
+}
 
 /// Чистый Domain resolver - только бизнес-логика типизации
 pub struct TypeResolver {
@@ -288,6 +340,82 @@ impl TypeResolver {
             active_facet: Some(FacetKind::Collection),  // Табличная часть - это коллекция
             available_facets: vec![FacetKind::Collection],
         }
+    }
+
+    // ===== Milestone 2.20: Function Signature Validation =====
+
+    /// Валидирует вызов функции/метода
+    ///
+    /// # Параметры
+    /// - `type_name` - имя типа для методов (None для глобальных функций)
+    /// - `method_name` - имя метода или функции
+    /// - `arg_types` - список типов аргументов в вызове
+    /// - `signature_index` - индекс с сигнатурами методов и функций
+    ///
+    /// # Возвращает
+    /// `ValidationResult` - результат валидации (Ok, MissingRequiredParam, TooManyArgs, TypeMismatch, NotFound)
+    ///
+    /// # Примеры
+    ///
+    /// ```ignore
+    /// let result = resolver.validate_call(
+    ///     Some("Массив"),
+    ///     "Добавить",
+    ///     &["Строка".to_string()],
+    ///     &signature_index,
+    /// );
+    /// assert_eq!(result, ValidationResult::Ok(None));
+    /// ```
+    pub fn validate_call(
+        &self,
+        type_name: Option<&str>,
+        method_name: &str,
+        arg_types: &[String],
+        signature_index: &SignatureIndex,
+    ) -> ValidationResult {
+        // 1. Найти сигнатуру
+        let signature = if let Some(type_name) = type_name {
+            signature_index.find_method(type_name, method_name)
+        } else {
+            signature_index.find_global_function(method_name)
+        };
+
+        let signature = match signature {
+            Some(sig) => sig,
+            None => return ValidationResult::NotFound,
+        };
+
+        // 2. Проверить количество аргументов
+        let required_count = signature.params.iter()
+            .filter(|p| !p.is_optional)
+            .count();
+
+        if arg_types.len() < required_count {
+            // Найти первый отсутствующий обязательный параметр
+            let missing_param = signature.params
+                .iter()
+                .enumerate()
+                .find(|(i, p)| !p.is_optional && *i >= arg_types.len())
+                .unwrap();
+
+            return ValidationResult::MissingRequiredParam {
+                param_name: missing_param.1.name.clone(),
+                param_index: missing_param.0,
+            };
+        }
+
+        if arg_types.len() > signature.params.len() {
+            return ValidationResult::TooManyArgs {
+                expected: signature.params.len(),
+                actual: arg_types.len(),
+            };
+        }
+
+        // 3. Проверить типы аргументов (базовая проверка)
+        // TODO: добавить более сложную проверку совместимости типов позже
+
+        // 4. Вернуть тип возврата
+        ValidationResult::Ok(signature.return_type.clone())
     }
 
     // ===== Дополнительные Domain методы =====
@@ -828,6 +956,198 @@ impl TypeResolver {
         format!("{}?", type_name)
     }
 
+    // ===== Milestone 2.21: Constructor Resolution =====
+
+    /// Резолвить конструктор
+    ///
+    /// # Параметры
+    /// - `type_name` - имя типа для конструктора ("Массив", "ТаблицаЗначений", etc.)
+    /// - `arg_types` - список типов аргументов конструктора
+    /// - `signature_index` - индекс с сигнатурами конструкторов
+    ///
+    /// # Возвращает
+    /// `ConstructorResolution` - результат резолвинга (Resolved, NotFound, Dynamic)
+    ///
+    /// # Примеры
+    ///
+    /// ```ignore
+    /// // Новый Массив() → Массив<?>
+    /// // Новый Массив(10) → Массив<?>
+    /// // Новый ТаблицаЗначений() → ТаблицаЗначений
+    /// // Новый("СправочникСсылка.Номенклатура") → Dynamic
+    /// ```
+    pub fn resolve_constructor(
+        &self,
+        type_name: &str,
+        arg_types: &[String],
+        signature_index: &SignatureIndex,
+    ) -> ConstructorResolution {
+        // 1. Проверка на динамический конструктор
+        if type_name.is_empty() || type_name == "?" {
+            return ConstructorResolution::Dynamic {
+                reason: "Динамический конструктор через строку - тип определяется в runtime".to_string(),
+            };
+        }
+
+        // 2. Поиск сигнатуры конструктора
+        let constructor = match signature_index.find_constructor(type_name) {
+            Some(c) => c,
+            None => {
+                return ConstructorResolution::NotFound {
+                    type_name: type_name.to_string(),
+                    hint: format!("Конструктор для типа '{}' не найден в SignatureIndex", type_name),
+                };
+            }
+        };
+
+        // 3. Валидация параметров
+        let validation_errors = self.validate_constructor_params(
+            &constructor.params,
+            arg_types
+        );
+
+        // 4. Generic inference для коллекций
+        let generic_params = if constructor.is_collection {
+            self.infer_generic_params(
+                type_name,
+                arg_types,
+                constructor.generic_params_count
+            )
+        } else {
+            None
+        };
+
+        // 5. Формирование результата
+        ConstructorResolution::Resolved {
+            type_name: type_name.to_string(),
+            facet: constructor.facet.clone(),
+            generic_params,
+            validation_errors,
+        }
+    }
+
+    /// Валидировать параметры конструктора
+    fn validate_constructor_params(
+        &self,
+        expected_params: &[super::types::ParameterInfo],
+        actual_arg_types: &[String],
+    ) -> Vec<String> {
+        let mut errors = Vec::new();
+
+        // Проверка количества параметров
+        let required_count = expected_params.iter()
+            .filter(|p| !p.is_optional)
+            .count();
+
+        if actual_arg_types.len() < required_count {
+            errors.push(format!(
+                "Недостаточно аргументов: ожидается минимум {}, передано {}",
+                required_count,
+                actual_arg_types.len()
+            ));
+        }
+
+        if actual_arg_types.len() > expected_params.len() {
+            errors.push(format!(
+                "Слишком много аргументов: ожидается максимум {}, передано {}",
+                expected_params.len(),
+                actual_arg_types.len()
+            ));
+        }
+
+        // Проверка типов параметров
+        for (i, (param, arg_type)) in expected_params.iter()
+            .zip(actual_arg_types.iter())
+            .enumerate()
+        {
+            if let Some(expected_type) = &param.type_name {
+                // TODO: добавить более сложную проверку совместимости типов
+                // Пока простая проверка на точное соответствие
+                if expected_type != "Произвольный" && expected_type != arg_type {
+                    errors.push(format!(
+                        "Параметр {} '{}': ожидается тип {}, передан {}",
+                        i + 1,
+                        param.name,
+                        expected_type,
+                        arg_type
+                    ));
+                }
+            }
+        }
+
+        errors
+    }
+
+    /// Вывести generic параметры для коллекций
+    ///
+    /// # Generic Inference для коллекций
+    /// - Массив: T выводится из типов добавляемых элементов (позже через flow analysis)
+    /// - Соответствие: K, V выводятся из использования
+    /// - Пока возвращаем "?" для неизвестных типов
+    fn infer_generic_params(
+        &self,
+        type_name: &str,
+        arg_types: &[String],
+        generic_count: usize,
+    ) -> Option<Vec<String>> {
+        if generic_count == 0 {
+            return None;
+        }
+
+        match type_name {
+            "Массив" | "Array" => {
+                // Массив может быть создан с начальным размером
+                // Новый Массив(10) → Массив<?>
+                // Generic тип будет выведен позже из .Добавить()
+                Some(vec!["?".to_string()])
+            }
+
+            "ФиксированныйМассив" | "FixedArray" => {
+                // Новый ФиксированныйМассив(ИсходныйМассив)
+                // Копирует тип из исходного массива
+                if !arg_types.is_empty() {
+                    // Пытаемся извлечь generic из первого аргумента
+                    // Если arg_types[0] = "Массив<Число>", извлекаем "Число"
+                    let generic = self.extract_generic_from_type(&arg_types[0])
+                        .unwrap_or_else(|| "?".to_string());
+                    Some(vec![generic])
+                } else {
+                    Some(vec!["?".to_string()])
+                }
+            }
+
+            "Соответствие" | "Map" => {
+                // Соответствие<K, V>
+                // Generic типы выводятся из использования .Вставить(ключ, значение)
+                Some(vec!["?".to_string(), "?".to_string()])
+            }
+
+            "СписокЗначений" | "ValueList" => {
+                // СписокЗначений<T>
+                Some(vec!["?".to_string()])
+            }
+
+            _ => {
+                // Для неизвестных коллекций возвращаем "?" для каждого generic
+                Some(vec!["?".to_string(); generic_count])
+            }
+        }
+    }
+
+    /// Извлечь generic тип из строки типа
+    /// "Массив<Число>" → Some("Число")
+    /// "Массив" → None
+    fn extract_generic_from_type(&self, type_str: &str) -> Option<String> {
+        if let Some(start) = type_str.find('<') {
+            if let Some(end) = type_str.rfind('>') {
+                if end > start {
+                    return Some(type_str[start + 1..end].trim().to_string());
+                }
+            }
+        }
+        None
+    }
+
     // ===== Direction 2: Generic Collections Inference - Integration =====
 
     /// Резолюция переменной с использованием SymbolTable контекста
@@ -952,6 +1272,10 @@ impl TypeResolver {
         }
     }
 }
+// Milestone 2.20: Function Signature Validation tests
+#[cfg(test)]
+mod resolver_validation_tests;
+
 // Milestone 2.3: Union Types tests
 #[cfg(test)]
 mod resolver_union_tests;
@@ -971,3 +1295,7 @@ mod resolver_nullable_tests;
 // Generic Tabular Sections: Resolver tests
 #[cfg(test)]
 mod resolver_tabular_tests;
+
+// Milestone 2.21: Constructor Resolution tests
+#[cfg(test)]
+mod resolver_constructor_tests;

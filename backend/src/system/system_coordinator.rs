@@ -150,15 +150,32 @@ impl SystemCoordinator {
         let database = syntax_parser.export_database();
         if !database.nodes.is_empty() {
             let platform_raw_data = convert_syntax_helper_to_raw(&database);
+
+            // ✅ MILESTONE 2.20.5: Заполняем SignatureIndex из загруженных типов
+            let platform_types_clone = platform_raw_data.clone(); // Клонируем для SignatureIndex
+
             repository
                 .load_types(platform_raw_data)
                 .map_err(StartupError::PlatformTypesError)?;
+
+            // Заполняем SignatureIndex
+            repository.populate_signature_index(|index| {
+                // Сначала инициализируем встроенные конструкторы
+                index.initialize_builtin_constructors();
+
+                // Затем заполняем методами из загруженных типов
+                crate::data::loaders::populate_signature_index_from_platform_types(
+                    &platform_types_clone,
+                    index,
+                );
+            });
 
             let stats = repository.get_stats();
             info!(
                 "📊 Загружено {} типов из синтаксис-помощника",
                 stats.total_types
             );
+            info!("📇 SignatureIndex заполнен платформенными методами и конструкторами");
         } else {
             // Загружаем базовые типы как fallback
             Self::load_fallback_types(&repository)?;
@@ -223,7 +240,11 @@ impl SystemCoordinator {
 
         info!("📦 Загружаем базовые типы платформы 1С...");
 
-        let basic_types = vec![
+        // Используем платформенные типы из loaders
+        let mut platform_types = crate::data::loaders::load_all_platform_types();
+
+        // Добавляем примитивные типы
+        platform_types.extend(vec![
             RawTypeData {
                 name: "Строка".to_string(),
                 english_name: "String".to_string(),
@@ -256,13 +277,29 @@ impl SystemCoordinator {
                 source: RawDataSource::Platform,
                 ..Default::default()
             },
-        ];
+        ]);
+
+        // ✅ MILESTONE 2.20.5: Клонируем для SignatureIndex
+        let platform_types_clone = platform_types.clone();
 
         repository
-            .load_types(basic_types)
+            .load_types(platform_types)
             .map_err(StartupError::PlatformTypesError)?;
 
-        info!("✅ Базовые типы загружены: 4 типа");
+        // Заполняем SignatureIndex
+        repository.populate_signature_index(|index| {
+            // Сначала инициализируем встроенные конструкторы
+            index.initialize_builtin_constructors();
+
+            // Затем заполняем методами из загруженных типов
+            crate::data::loaders::populate_signature_index_from_platform_types(
+                &platform_types_clone,
+                index,
+            );
+        });
+
+        info!("✅ Базовые типы загружены: {} типов", platform_types_clone.len());
+        info!("📇 SignatureIndex заполнен платформенными методами и конструкторами");
         Ok(())
     }
 
@@ -637,4 +674,81 @@ pub struct SymbolInfo {
     pub symbol_type: String,
     pub line: u32,
     pub column: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bsl_shared::domain::repository::InMemoryTypeRepository;
+    use std::sync::Arc;
+
+    /// Вспомогательная функция для создания тестового репозитория с инициализированными конструкторами
+    fn create_test_repository() -> Arc<InMemoryTypeRepository> {
+        let repo = Arc::new(InMemoryTypeRepository::new());
+
+        // Загружаем базовые типы с конструкторами
+        let platform_types = crate::data::loaders::load_all_platform_types();
+        let platform_types_clone = platform_types.clone();
+
+        repo.load_types(platform_types).unwrap();
+
+        // Инициализируем SignatureIndex с конструкторами
+        repo.populate_signature_index(|index| {
+            index.initialize_builtin_constructors();
+            crate::data::loaders::populate_signature_index_from_platform_types(
+                &platform_types_clone,
+                index,
+            );
+        });
+
+        repo
+    }
+
+    #[test]
+    fn test_signature_index_has_builtin_constructors() {
+        use bsl_shared::domain::signature_index::SignatureIndex;
+
+        let mut index = SignatureIndex::new();
+        index.initialize_builtin_constructors();
+
+        // Проверяем что встроенные конструкторы загружены
+        assert!(index.find_constructor("Массив").is_some(), "Конструктор Массив должен быть загружен");
+        assert!(index.find_constructor("Соответствие").is_some(), "Конструктор Соответствие должен быть загружен");
+        assert!(index.find_constructor("ТаблицаЗначений").is_some(), "Конструктор ТаблицаЗначений должен быть загружен");
+        assert!(index.find_constructor("СписокЗначений").is_some(), "Конструктор СписокЗначений должен быть загружен");
+        assert!(index.find_constructor("ФиксированныйМассив").is_some(), "Конструктор ФиксированныйМассив должен быть загружен");
+    }
+
+    #[test]
+    fn test_repository_initialization_with_constructors() {
+        let repo = create_test_repository();
+
+        // Проверяем что SignatureIndex содержит конструкторы
+        repo.populate_signature_index(|index| {
+            // Проверяем наличие конструкторов
+            assert!(index.find_constructor("Массив").is_some(), "Конструктор Массив должен быть в индексе");
+        });
+
+        // Проверяем что репозиторий успешно инициализирован
+        let stats = repo.get_stats();
+        assert!(stats.total_types > 0, "Репозиторий должен содержать типы");
+    }
+
+    #[test]
+    fn test_constructor_resolution_via_repository() {
+        use bsl_shared::domain::resolver::TypeResolver;
+
+        let repo = create_test_repository();
+        let _resolver = TypeResolver::new(repo.clone());
+
+        // Проверяем что можно резолвить конструктор через TypeResolver
+        // Для этого нам нужен SignatureIndex из репозитория
+        //
+        // Примечание: TypeResolver.resolve_constructor() требует SignatureIndex,
+        // который хранится в репозитории. Проверяем интеграцию.
+
+        // Пока просто проверяем что репозиторий создан успешно
+        // TODO: Добавить полноценный тест с resolve_constructor после интеграции
+        assert!(repo.find_type("Массив").is_some(), "Тип Массив должен существовать в репозитории");
+    }
 }

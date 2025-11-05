@@ -1,6 +1,7 @@
 //! Data Layer: Type Repository trait and implementations
 
 use crate::domain::types::{RawDataSource, RawTypeData};
+use crate::domain::signature_index::{SignatureIndex, SignatureValidationResult};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use std::sync::RwLock;
@@ -101,6 +102,36 @@ pub trait TypeRepository: Send + Sync {
 
     /// Получить статистику
     fn get_stats(&self) -> RepositoryStats;
+
+    /// Валидировать сигнатуру метода
+    ///
+    /// Проверяет соответствие типов параметров и возвращаемого значения
+    fn validate_method_signature(
+        &self,
+        owner_type: &str,
+        method_name: &str,
+        actual_params: &[crate::domain::types::ParameterInfo],
+        actual_return_type: Option<&str>,
+    ) -> SignatureValidationResult;
+
+    /// Найти сигнатуру метода (для SignatureHelp)
+    ///
+    /// Ищет сигнатуру метода в индексе платформенных и конфигурационных типов
+    fn find_method_signature(
+        &self,
+        owner_type: Option<&str>,
+        method_name: &str,
+    ) -> Option<crate::domain::signature_index::MethodSignature>;
+
+    /// Найти конструктор для указанного типа
+    ///
+    /// # Arguments
+    /// * `type_name` - Имя типа (регистронезависимо)
+    ///
+    /// # Returns
+    /// * `Some(ConstructorSignature)` - если конструктор найден
+    /// * `None` - если конструктор не найден или произошла ошибка
+    fn find_constructor(&self, type_name: &str) -> Option<crate::domain::signature_index::ConstructorSignature>;
 }
 
 /// Статистика репозитория
@@ -117,10 +148,11 @@ pub struct RepositoryStats {
 // --- In-Memory Implementation ---
 
 /// In-memory реализация репозитория
-#[derive(Default)]
 pub struct InMemoryTypeRepository {
     types: RwLock<Vec<RawTypeData>>,
     last_updated: RwLock<Option<SystemTime>>,
+    /// Индекс сигнатур методов для валидации (thread-safe)
+    signature_index: RwLock<SignatureIndex>,
 }
 
 impl InMemoryTypeRepository {
@@ -128,7 +160,25 @@ impl InMemoryTypeRepository {
         Self {
             types: RwLock::new(Vec::new()),
             last_updated: RwLock::new(None),
+            signature_index: RwLock::new(SignatureIndex::new()),
         }
+    }
+
+    /// Получить мутабельный доступ к SignatureIndex для заполнения
+    ///
+    /// Используется при загрузке платформенных типов для заполнения индекса
+    pub fn populate_signature_index<F>(&self, populate_fn: F)
+    where
+        F: FnOnce(&mut SignatureIndex),
+    {
+        let mut index = self.signature_index.write().unwrap();
+        populate_fn(&mut index);
+    }
+}
+
+impl Default for InMemoryTypeRepository {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -209,6 +259,59 @@ impl TypeRepository for InMemoryTypeRepository {
             configuration_types: configuration_count,
             user_defined_types: user_defined_count,
             last_update_time,
+        }
+    }
+
+    fn validate_method_signature(
+        &self,
+        owner_type: &str,
+        method_name: &str,
+        actual_params: &[crate::domain::types::ParameterInfo],
+        actual_return_type: Option<&str>,
+    ) -> SignatureValidationResult {
+        use crate::domain::signature_index::{MethodSignature, SignatureSource};
+
+        let index = self.signature_index.read().unwrap();
+
+        // Ищем метод в индексе
+        let expected_signature = index.find_method(owner_type, method_name);
+
+        // Создаём актуальную сигнатуру
+        let actual_signature = MethodSignature {
+            name: method_name.to_string(),
+            owner_type: Some(owner_type.to_string()),
+            params: actual_params.to_vec(),
+            return_type: actual_return_type.map(|s| s.to_string()),
+            source: SignatureSource::UserCode,
+        };
+
+        // Валидируем
+        index.validate_signature(expected_signature, &actual_signature)
+    }
+
+    fn find_method_signature(
+        &self,
+        owner_type: Option<&str>,
+        method_name: &str,
+    ) -> Option<crate::domain::signature_index::MethodSignature> {
+        let index = self.signature_index.read().unwrap();
+
+        if let Some(owner) = owner_type {
+            // Ищем метод типа
+            index.find_method(owner, method_name).cloned()
+        } else {
+            // Ищем глобальную функцию
+            index.find_global_function(method_name).cloned()
+        }
+    }
+
+    fn find_constructor(&self, type_name: &str) -> Option<crate::domain::signature_index::ConstructorSignature> {
+        match self.signature_index.read() {
+            Ok(index) => index.find_constructor(type_name).cloned(),
+            Err(poisoned) => {
+                tracing::warn!("SignatureIndex RwLock is poisoned, recovering");
+                poisoned.into_inner().find_constructor(type_name).cloned()
+            }
         }
     }
 }

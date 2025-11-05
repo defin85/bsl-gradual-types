@@ -9,6 +9,13 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, error, info, warn};
 
+// SignatureHelp support
+use tower_lsp::lsp_types::{
+    SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    SignatureInformation, ParameterInformation, ParameterLabel,
+    WorkDoneProgressOptions,
+};
+
 use clap::Parser;
 use serde::Deserialize;
 
@@ -17,6 +24,7 @@ use bsl_backend::application::TypeSystemService;
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 use bsl_backend::system::SystemCoordinator;
 use bsl_shared::api::dtos::{MethodDto, ParamDto, PropertyDto};
+use bsl_shared::domain::signature_index::MethodSignature;
 use bsl_type_visualization::{HtmlRenderer, RenderOptions, ThemeMode}; // Используется в других методах // Используется в handle_query_type
 
 // MILESTONE 2.20.3: Server Status notification module
@@ -79,6 +87,14 @@ struct LspConfig {
     platform_version: Option<String>,
 }
 
+/// Структура для контекста вызова функции (SignatureHelp)
+#[derive(Debug)]
+struct CallContext {
+    function_name: String,
+    receiver_type: Option<String>,
+    call_start: Position,
+}
+
 /// BSL Language Server backend - CLEAN ARCHITECTURE
 struct BslLanguageServer {
     client: Client,
@@ -107,6 +123,15 @@ impl BslLanguageServer {
         self.coordinator
             .type_service()
             .expect("TypeSystemService not available - coordinator not initialized")
+    }
+
+    /// Получить содержимое документа из кеша
+    async fn get_document_content(&self, uri: &Url) -> Result<String, String> {
+        let documents = self.documents.read().await;
+        documents
+            .get(uri)
+            .cloned()
+            .ok_or_else(|| format!("Document not found: {}", uri))
     }
 
     /// Конвертирует UTF-16 offset (LSP character) в UTF-8 byte offset
@@ -317,6 +342,18 @@ impl LanguageServer for BslLanguageServer {
                         "bsl.parseConfiguration".to_string(), // ✅ MILESTONE 2.17
                     ],
                     work_done_progress_options: WorkDoneProgressOptions::default(),
+                }),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec![
+                        "(".to_string(),
+                        ",".to_string(),
+                    ]),
+                    retrigger_characters: Some(vec![
+                        ")".to_string(),
+                    ]),
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: Some(false),
+                    },
                 }),
                 ..Default::default()
             },
@@ -1117,6 +1154,56 @@ impl LanguageServer for BslLanguageServer {
             }
         }
     }
+
+    /// SignatureHelp - подсказки по параметрам функций
+    async fn signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> JsonRpcResult<Option<SignatureHelp>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        tracing::info!("SignatureHelp requested at {}:{}", position.line, position.character);
+
+        // Получаем содержимое документа
+        let file_content = match self.get_document_content(&uri).await {
+            Ok(content) => content,
+            Err(e) => {
+                tracing::warn!("Failed to get document content: {}", e);
+                return Ok(None);
+            }
+        };
+
+        // Находим контекст вызова функции
+        let call_context = match self.find_call_context(&file_content, position) {
+            Some(ctx) => ctx,
+            None => {
+                tracing::debug!("No call context found");
+                return Ok(None);
+            }
+        };
+
+        tracing::debug!("Found call context: function={}, receiver={:?}",
+            call_context.function_name, call_context.receiver_type);
+
+        // Получаем сигнатуру через TypeSystemService
+        let signature_info = match self.get_signature_for_function(
+            &call_context.function_name,
+            call_context.receiver_type.as_deref(),
+        ) {
+            Some(info) => info,
+            None => {
+                tracing::debug!("No signature found for {}", call_context.function_name);
+                return Ok(None);
+            }
+        };
+
+        // Определяем активный параметр
+        let active_param = self.calculate_active_parameter(&file_content, &call_context, position);
+
+        // Формируем ответ
+        Ok(Some(self.build_signature_help_response(signature_info, active_param)))
+    }
 }
 
 // ============================================================================
@@ -1407,7 +1494,7 @@ impl BslLanguageServer {
                 );
 
                 // ✅ Конвертируем методы из RawMethodData → MethodDto
-                let methods: Vec<MethodDto> = raw_type
+                let mut methods: Vec<MethodDto> = raw_type
                     .methods
                     .iter()
                     .map(|m| MethodDto {
@@ -1437,6 +1524,39 @@ impl BslLanguageServer {
                         is_constructor: false,
                     })
                     .collect();
+
+                // ✅ Получить конструкторы из SignatureIndex
+                if let Some(constructor) = analysis_engine.find_constructor(&params.type_name) {
+                    // Конвертировать ConstructorSignature → MethodDto
+                    let constructor_dto = MethodDto {
+                        name: format!("Новый {}", constructor.type_name),
+                        english_name: Some(format!("New {}", constructor.type_name)),
+                        return_type: Some(constructor.type_name.clone()),
+                        params: constructor.params.iter().map(|p| ParamDto {
+                            name: p.name.clone(),
+                            param_type: p.type_name.clone()
+                                .unwrap_or_else(|| "Произвольный".to_string()),
+                            is_optional: p.is_optional,
+                            default_value: p.default_value.clone(),
+                        }).collect(),
+                        description: Some(format!(
+                            "Конструктор типа {}{}{}",
+                            constructor.type_name,
+                            if constructor.is_collection {
+                                format!(" (коллекция, {} generic параметров)",
+                                        constructor.generic_params_count)
+                            } else {
+                                String::new()
+                            },
+                            constructor.facet.as_ref()
+                                .map(|f| format!(", facet: {}", f))
+                                .unwrap_or_default()
+                        )),
+                        is_deprecated: false,
+                        is_constructor: true, // ← Ключевой флаг!
+                    };
+                    methods.push(constructor_dto);
+                }
 
                 // ✅ Конвертируем свойства из RawPropertyData → PropertyDto
                 let properties: Vec<PropertyDto> = raw_type
@@ -2346,6 +2466,275 @@ impl BslLanguageServer {
             loaded_types: loaded,
             message: Some(format!("Конфигурация успешно загружена: {} типов", loaded)),
         })
+    }
+
+    // ============================================================================
+    // SignatureHelp Helper Methods
+    // ============================================================================
+
+    /// Конвертировать UTF-16 code unit index в char index
+    ///
+    /// LSP позиции используют UTF-16 code units (из-за VSCode/TypeScript),
+    /// а Rust строки используют UTF-8 байты и char индексы.
+    /// Эта функция конвертирует UTF-16 позицию в char индекс для безопасной
+    /// работы с chars() итератором.
+    fn utf16_to_char_index(text: &str, utf16_index: usize) -> Option<usize> {
+        let mut current_utf16 = 0;
+
+        for (char_idx, ch) in text.chars().enumerate() {
+            if current_utf16 >= utf16_index {
+                return Some(char_idx);
+            }
+            current_utf16 += ch.len_utf16();
+        }
+
+        // Если мы достигли конца строки и utf16_index точно совпадает
+        if current_utf16 == utf16_index {
+            Some(text.chars().count())
+        } else {
+            None
+        }
+    }
+
+    /// Конвертировать char index в UTF-16 code unit index
+    ///
+    /// Обратная операция: char индекс -> UTF-16 позиция для LSP.
+    fn char_to_utf16_index(text: &str, char_index: usize) -> usize {
+        text.chars()
+            .take(char_index)
+            .map(|ch| ch.len_utf16())
+            .sum()
+    }
+
+    /// Найти контекст вызова функции
+    fn find_call_context(&self, content: &str, position: Position) -> Option<CallContext> {
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Ищем открывающую скобку, двигаясь назад от курсора
+        let mut paren_depth = 0;
+        let mut call_start: Option<(usize, usize)> = None; // (line_idx, char_idx)
+
+        // ИСПРАВЛЕНИЕ: если position.line выходит за границы (после последнего \n),
+        // используем последнюю существующую строку
+        let max_line = if lines.is_empty() {
+            return None;
+        } else {
+            lines.len() - 1
+        };
+        let search_until_line = position.line.min(max_line as u32) as usize;
+
+        for line_idx in (0..=search_until_line).rev() {
+            let line = lines.get(line_idx)?;
+
+            // ИСПРАВЛЕНИЕ: конвертируем UTF-16 позицию в char index
+            let end_char_idx = if line_idx == position.line as usize {
+                Self::utf16_to_char_index(line, position.character as usize)?
+            } else {
+                line.chars().count()
+            };
+
+            // Итерируем по СИМВОЛАМ, не по байтам
+            let chars: Vec<char> = line.chars().collect();
+
+            for char_idx in (0..end_char_idx).rev() {
+                let ch = chars.get(char_idx)?;
+
+                match ch {
+                    ')' => paren_depth += 1,
+                    '(' => {
+                        if paren_depth == 0 {
+                            call_start = Some((line_idx, char_idx));
+                            break;
+                        }
+                        paren_depth -= 1;
+                    }
+                    _ => {}
+                }
+            }
+
+            if call_start.is_some() {
+                break;
+            }
+        }
+
+        let (line_idx, char_idx) = call_start?;
+
+        // Извлекаем имя функции перед скобкой
+        let line = lines.get(line_idx)?;
+
+        // ИСПРАВЛЕНИЕ: используем char индексы для извлечения подстроки
+        let before_paren: String = line.chars().take(char_idx).collect();
+
+        let (function_name, receiver_type) = self.extract_function_name(&before_paren)?;
+
+        // ИСПРАВЛЕНИЕ: конвертируем char index обратно в UTF-16 для LSP
+        let utf16_char = Self::char_to_utf16_index(line, char_idx);
+
+        Some(CallContext {
+            function_name,
+            receiver_type,
+            call_start: Position {
+                line: line_idx as u32,
+                character: utf16_char as u32,
+            },
+        })
+    }
+
+    /// Извлечь имя функции из текста перед скобкой
+    fn extract_function_name(&self, text: &str) -> Option<(String, Option<String>)> {
+        let trimmed = text.trim_end();
+
+        // Сначала ищем точку (для методов объектов)
+        if let Some(dot_byte_pos) = trimmed.rfind('.') {
+            // Метод объекта: "Объект.Метод"
+            // ИСПРАВЛЕНИЕ: безопасное извлечение после точки
+            // (dot_byte_pos + 1 безопасно т.к. '.' занимает 1 байт)
+            let after_dot = &trimmed[dot_byte_pos + 1..];
+
+            // Извлекаем только валидное имя идентификатора после точки
+            let method_name = after_dot.chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_' || (*c >= '\u{0410}' && *c <= '\u{044F}') || *c == '\u{0401}' || *c == '\u{0451}')
+                .collect::<String>();
+
+            if !method_name.is_empty() {
+                // TODO: определить тип получателя через type inference
+                return Some((method_name, None));
+            }
+        }
+
+        // Глобальная функция: извлекаем последний валидный идентификатор
+        // Идём с конца и собираем символы пока они валидны для идентификатора
+        let function_name = trimmed.chars()
+            .rev()
+            .take_while(|c| c.is_alphanumeric() || *c == '_' || (*c >= '\u{0410}' && *c <= '\u{044F}') || *c == '\u{0401}' || *c == '\u{0451}')
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect::<String>();
+
+        if !function_name.is_empty() {
+            Some((function_name, None))
+        } else {
+            None
+        }
+    }
+
+    /// Определить индекс активного параметра
+    fn calculate_active_parameter(
+        &self,
+        content: &str,
+        context: &CallContext,
+        position: Position,
+    ) -> u32 {
+        let lines: Vec<&str> = content.lines().collect();
+        let mut param_index = 0;
+        let mut paren_depth = 0;
+        let mut in_string = false;
+
+        // Считаем запятые от начала вызова до курсора
+        for line_idx in context.call_start.line..=position.line {
+            let line = match lines.get(line_idx as usize) {
+                Some(l) => l,
+                None => {
+                    tracing::warn!("Invalid line_idx {} in calculate_active_parameter", line_idx);
+                    break;
+                }
+            };
+            let chars: Vec<char> = line.chars().collect();
+
+            // ИСПРАВЛЕНИЕ: конвертируем UTF-16 в char indices
+            let start_char_idx = if line_idx == context.call_start.line {
+                Self::utf16_to_char_index(line, (context.call_start.character + 1) as usize)
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+
+            let end_char_idx = if line_idx == position.line {
+                Self::utf16_to_char_index(line, position.character as usize)
+                    .unwrap_or(chars.len())
+            } else {
+                chars.len()
+            };
+
+            // Итерируем по символам
+            for char_idx in start_char_idx..end_char_idx {
+                if let Some(&ch) = chars.get(char_idx) {
+                    match ch {
+                        '"' => in_string = !in_string,
+                        '(' if !in_string => paren_depth += 1,
+                        ')' if !in_string => paren_depth -= 1,
+                        ',' if !in_string && paren_depth == 0 => {
+                            param_index += 1;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        param_index
+    }
+
+    /// Получить сигнатуру функции через TypeSystemService
+    fn get_signature_for_function(
+        &self,
+        function_name: &str,
+        receiver_type: Option<&str>,
+    ) -> Option<MethodSignature> {
+        let analysis_engine = self.coordinator.get_analysis_engine()?;
+        let repo = analysis_engine.get_repository();
+
+        repo.find_method_signature(receiver_type, function_name)
+    }
+
+    /// Построить LSP SignatureHelp response
+    fn build_signature_help_response(
+        &self,
+        signature: MethodSignature,
+        active_param: u32,
+    ) -> SignatureHelp {
+        // Форматируем label
+        let params_str = signature.params.iter()
+            .map(|p| {
+                let type_str = p.type_name.as_deref().unwrap_or("Произвольный");
+                if p.is_optional {
+                    format!("[{}: {}]", p.name, type_str)
+                } else {
+                    format!("{}: {}", p.name, type_str)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let label = format!("{}({})", signature.name, params_str);
+
+        // Создаём ParameterInformation для каждого параметра
+        let parameters = signature.params.iter()
+            .map(|p| {
+                let param_label = format!(
+                    "{}: {}",
+                    p.name,
+                    p.type_name.as_deref().unwrap_or("Произвольный")
+                );
+
+                ParameterInformation {
+                    label: ParameterLabel::Simple(param_label),
+                    documentation: None,
+                }
+            })
+            .collect();
+
+        SignatureHelp {
+            signatures: vec![SignatureInformation {
+                label,
+                documentation: None,
+                parameters: Some(parameters),
+                active_parameter: Some(active_param),
+            }],
+            active_signature: Some(0),
+            active_parameter: Some(active_param),
+        }
     }
 }
 

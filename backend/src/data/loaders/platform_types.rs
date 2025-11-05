@@ -4,8 +4,9 @@
 
 use bsl_shared::domain::types::{
     FacetKind, GenericInfo, InferenceMethodInfo, RawDataSource, RawMethodData, RawParamData,
-    RawPropertyData, RawTypeData,
+    RawPropertyData, RawTypeData, ParameterInfo,
 };
+use bsl_shared::domain::signature_index::{SignatureIndex, MethodSignature, SignatureSource};
 
 /// Создаёт тип "ТабличнаяЧасть" с Generic методами
 ///
@@ -624,6 +625,72 @@ pub fn load_all_platform_types() -> Vec<RawTypeData> {
     ]
 }
 
+/// Заполняет SignatureIndex из платформенных типов
+///
+/// # Arguments
+/// * `platform_types` - Список платформенных типов (RawTypeData)
+/// * `index` - Индекс сигнатур для заполнения
+///
+/// # Example
+/// ```
+/// use bsl_backend::data::loaders::platform_types::{load_all_platform_types, populate_signature_index_from_platform_types};
+/// use bsl_shared::domain::signature_index::SignatureIndex;
+///
+/// let platform_types = load_all_platform_types();
+/// let mut index = SignatureIndex::new();
+/// populate_signature_index_from_platform_types(&platform_types, &mut index);
+///
+/// let found = index.find_method("Массив", "Добавить");
+/// assert!(found.is_some());
+/// ```
+pub fn populate_signature_index_from_platform_types(
+    platform_types: &[RawTypeData],
+    index: &mut SignatureIndex,
+) {
+    for platform_type in platform_types {
+        // Конвертируем методы в MethodSignature
+        for method in &platform_type.methods {
+            let signature = raw_method_to_signature(
+                method,
+                &platform_type.name
+            );
+
+            index.add_platform_method(
+                platform_type.name.clone(),
+                signature,
+            );
+        }
+    }
+}
+
+/// Конвертирует RawMethodData в MethodSignature
+///
+/// # Arguments
+/// * `method` - Метод из RawTypeData
+/// * `owner_type` - Имя типа-владельца
+fn raw_method_to_signature(
+    method: &RawMethodData,
+    owner_type: &str,
+) -> MethodSignature {
+    let params = method.params.iter()
+        .map(|p| ParameterInfo {
+            name: p.name.clone(),
+            type_name: Some(p.param_type.clone()),
+            is_optional: p.is_optional,
+            default_value: None, // RawParamData не хранит default_value
+            description: None,
+        })
+        .collect();
+
+    MethodSignature {
+        name: method.name.clone(),
+        owner_type: Some(owner_type.to_string()),
+        params,
+        return_type: Some(method.return_type.clone()),
+        source: SignatureSource::Platform,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -978,5 +1045,88 @@ mod tests {
                 type_name
             );
         }
+    }
+
+    // --- Тесты для SignatureIndex интеграции (Milestone 2.20.5) ---
+
+    #[test]
+    fn test_populate_signature_index() {
+        let platform_types = load_all_platform_types();
+        let mut index = SignatureIndex::new();
+
+        populate_signature_index_from_platform_types(&platform_types, &mut index);
+
+        // Проверяем что методы Массива добавлены
+        let add_method = index.find_method("Массив", "Добавить");
+        assert!(add_method.is_some(), "Метод Массив.Добавить должен быть найден");
+
+        let signature = add_method.unwrap();
+        assert_eq!(signature.name, "Добавить");
+        assert_eq!(signature.owner_type, Some("Массив".to_string()));
+        assert_eq!(signature.params.len(), 1);
+        assert_eq!(signature.params[0].name, "Значение");
+        assert_eq!(signature.params[0].type_name, Some("T".to_string())); // Generic параметр
+    }
+
+    #[test]
+    fn test_signature_index_multiple_types() {
+        let platform_types = load_all_platform_types();
+        let mut index = SignatureIndex::new();
+
+        populate_signature_index_from_platform_types(&platform_types, &mut index);
+
+        // Проверяем методы разных типов
+        assert!(index.find_method("Массив", "Добавить").is_some());
+        assert!(index.find_method("Массив", "Получить").is_some());
+        assert!(index.find_method("Соответствие", "Вставить").is_some());
+        assert!(index.find_method("ТабличнаяЧасть", "Добавить").is_some());
+    }
+
+    #[test]
+    fn test_signature_index_method_with_multiple_params() {
+        let platform_types = load_all_platform_types();
+        let mut index = SignatureIndex::new();
+
+        populate_signature_index_from_platform_types(&platform_types, &mut index);
+
+        // Проверяем метод Соответствие.Вставить(Ключ: K, Значение: V)
+        let insert_method = index.find_method("Соответствие", "Вставить");
+        assert!(insert_method.is_some());
+
+        let signature = insert_method.unwrap();
+        assert_eq!(signature.params.len(), 2);
+        assert_eq!(signature.params[0].name, "Ключ");
+        assert_eq!(signature.params[0].type_name, Some("K".to_string()));
+        assert_eq!(signature.params[1].name, "Значение");
+        assert_eq!(signature.params[1].type_name, Some("V".to_string()));
+    }
+
+    #[test]
+    fn test_signature_index_return_types() {
+        let platform_types = load_all_platform_types();
+        let mut index = SignatureIndex::new();
+
+        populate_signature_index_from_platform_types(&platform_types, &mut index);
+
+        // Проверяем типы возврата
+        let get_method = index.find_method("Массив", "Получить");
+        assert!(get_method.is_some());
+        assert_eq!(get_method.unwrap().return_type, Some("T".to_string()));
+
+        let count_method = index.find_method("Массив", "Количество");
+        assert!(count_method.is_some());
+        assert_eq!(count_method.unwrap().return_type, Some("Число".to_string()));
+    }
+
+    #[test]
+    fn test_signature_source_is_platform() {
+        let platform_types = load_all_platform_types();
+        let mut index = SignatureIndex::new();
+
+        populate_signature_index_from_platform_types(&platform_types, &mut index);
+
+        // Все методы должны иметь источник Platform
+        let method = index.find_method("Массив", "Добавить").unwrap();
+        assert_eq!(method.source, SignatureSource::Platform);
     }
 }

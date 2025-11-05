@@ -7,6 +7,7 @@ interface TypeMethod {
   description: string;
   returns?: string;
   parameters?: Array<{ name: string; type: string }>;
+  isConstructor?: boolean; // ← Добавить
 }
 
 interface TypeProperty {
@@ -92,7 +93,11 @@ export function TypeDetailsModal() {
     );
   }
 
-  const certaintyClass = typeInfo.certainty === 'Known' || typeInfo.certainty.includes('100%') 
+  // Разделить методы и конструкторы
+  const constructors = typeInfo?.methods.filter(m => m.isConstructor) || [];
+  const regularMethods = typeInfo?.methods.filter(m => !m.isConstructor) || [];
+
+  const certaintyClass = typeInfo.certainty === 'Known' || typeInfo.certainty.includes('100%')
     ? 'bg-green-600 text-white'
     : typeInfo.certainty.includes('Inferred')
     ? 'bg-yellow-600 text-white'
@@ -128,13 +133,65 @@ export function TypeDetailsModal() {
           )}
         </div>
 
+        {/* Секция конструкторов */}
+        {constructors.length > 0 && (
+          <section className="mb-8">
+            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+              <span>🏗️</span> Конструкторы ({constructors.length})
+            </h2>
+            <div className="space-y-3">
+              {constructors.map((constructor, idx) => (
+                <div
+                  key={idx}
+                  className="p-4 bg-gray-800 rounded-lg border border-gray-700"
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <code className="text-blue-400 font-semibold text-base">
+                      {constructor.name}()
+                    </code>
+                    {constructor.description?.includes("коллекция") && (
+                      <span className="px-2 py-1 text-xs bg-purple-600 text-white rounded">
+                        Коллекция
+                      </span>
+                    )}
+                    {constructor.returns && (
+                      <span className="text-xs text-vscode-fg/60 bg-vscode-bg px-2 py-1 rounded">
+                        → {constructor.returns}
+                      </span>
+                    )}
+                  </div>
+                  {constructor.parameters && constructor.parameters.length > 0 && (
+                    <div className="mt-3 pl-4 border-l-2 border-vscode-fg/20">
+                      <p className="text-xs text-vscode-fg/60 mb-1">Параметры:</p>
+                      <div className="space-y-1">
+                        {constructor.parameters.map((param, pidx) => (
+                          <div key={pidx} className="text-xs">
+                            <code className="text-green-400">{param.name}</code>
+                            <span className="text-vscode-fg/60 ml-2">: {param.type}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {constructor.description && (
+                    <p className="text-sm text-vscode-fg/70 mt-2 leading-relaxed">
+                      {constructor.description}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Секция обычных методов */}
         <section className="mb-8">
           <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-            <span>📝</span> Методы ({typeInfo.methods.length})
+            <span>📝</span> Методы ({regularMethods.length})
           </h2>
-          {typeInfo.methods.length > 0 ? (
+          {regularMethods.length > 0 ? (
             <div className="space-y-3">
-              {typeInfo.methods.map((method, idx) => (
+              {regularMethods.map((method, idx) => (
                 <div
                   key={idx}
                   className="p-4 bg-vscode-input-bg hover:bg-vscode-list-hover rounded-lg transition-colors group"

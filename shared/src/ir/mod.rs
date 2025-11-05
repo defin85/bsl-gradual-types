@@ -160,6 +160,61 @@ pub enum SemanticNodeKind {
         statements: Vec<usize>, // Индексы SemanticNode
         scope_id: ScopeId,
     },
+
+    // === Конструкторы (Constructor Support) ===
+    /// Выражение конструктора: `Новый Массив`, `Новый Массив(10)`, `Новый("Строка")`
+    ///
+    /// # Примеры
+    ///
+    /// ```bsl
+    /// // Конструктор без параметров
+    /// МассивДанных = Новый Массив;
+    ///
+    /// // Конструктор с параметрами
+    /// МассивФиксированный = Новый Массив(10);
+    ///
+    /// // Динамический конструктор через строку
+    /// Ссылка = Новый("СправочникСсылка.Номенклатура");
+    /// ```
+    ///
+    /// # Семантика
+    ///
+    /// - `type_name` - имя типа для создания ("Массив", "ТаблицаЗначений", etc.)
+    /// - `arg_types` - типы аргументов конструктора (для валидации и inference)
+    /// - `is_dynamic` - `true` для динамических конструкторов `Новый("Тип")`
+    /// - `result_type` - результирующий тип (обычно равен type_name, для Generic может быть "Массив<T>")
+    /// - `generic_params` - параметры Generic типов для коллекций (None если не Generic)
+    NewExpression {
+        /// Имя типа для создания ("Массив", "ТаблицаЗначений", "СправочникСсылка.Номенклатура")
+        type_name: String,
+
+        /// Типы аргументов конструктора
+        ///
+        /// # Примеры
+        /// - `Новый Массив(10)` → `vec!["Число"]`
+        /// - `Новый ТаблицаЗначений` → `vec![]` (без аргументов)
+        arg_types: Vec<String>,
+
+        /// Динамический конструктор через строку
+        ///
+        /// `true` для выражений вида `Новый("СправочникСсылка.Номенклатура")`
+        is_dynamic: bool,
+
+        /// Результирующий тип конструктора
+        ///
+        /// Обычно равен `type_name`, но для Generic коллекций может включать параметры:
+        /// - `Массив` → "Массив" (без параметров, inference отложен)
+        /// - `Массив<Число>` → "Массив<Число>" (явно указанный Generic параметр)
+        result_type: String,
+
+        /// Generic параметры для коллекций (None если тип не Generic)
+        ///
+        /// # Примеры
+        /// - `Массив` → None (inference будет выполнен позже из использования)
+        /// - `Массив<Число>` → Some(vec!["Число"]) (явный параметр)
+        /// - `Соответствие<Строка, Число>` → Some(vec!["Строка", "Число"])
+        generic_params: Option<Vec<String>>,
+    },
 }
 
 /// Параметр функции/процедуры
@@ -948,6 +1003,37 @@ impl SemanticProgram {
                 )
             }
             SemanticNodeKind::BlockScope { .. } => ("BlockScope".to_string(), None, attributes),
+            SemanticNodeKind::NewExpression {
+                type_name,
+                arg_types,
+                is_dynamic,
+                result_type,
+                generic_params,
+            } => {
+                attributes.insert("type_name".to_string(), type_name.clone());
+                attributes.insert("arg_count".to_string(), arg_types.len().to_string());
+                attributes.insert("is_dynamic".to_string(), is_dynamic.to_string());
+                attributes.insert("result_type".to_string(), result_type.clone());
+
+                if let Some(params) = generic_params {
+                    attributes.insert("generic_params".to_string(), params.join(", "));
+                }
+
+                // Форматируем имя для отображения в UI
+                let display_name = if *is_dynamic {
+                    format!("Новый(\"{}\")", type_name)
+                } else if arg_types.is_empty() {
+                    format!("Новый {}", type_name)
+                } else {
+                    format!("Новый {}({} args)", type_name, arg_types.len())
+                };
+
+                (
+                    "NewExpression".to_string(),
+                    Some(display_name),
+                    attributes,
+                )
+            }
         }
     }
 
@@ -1514,5 +1600,159 @@ mod tests {
             hint.is_none(),
             "Child scope variable should not be visible from parent"
         );
+    }
+
+    // === Tests for NewExpression ===
+
+    #[test]
+    fn test_new_expression_simple() {
+        let mut program = SemanticProgram::new();
+
+        // Простой конструктор: Новый Массив
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::NewExpression {
+                type_name: "Массив".to_string(),
+                arg_types: vec![],
+                is_dynamic: false,
+                result_type: "Массив".to_string(),
+                generic_params: None,
+            },
+            span: Span::new(1, 0, 1, 12),
+            scope_id: program.symbols.root_scope,
+        });
+
+        assert_eq!(program.nodes.len(), 1);
+
+        if let SemanticNodeKind::NewExpression {
+            type_name,
+            is_dynamic,
+            ..
+        } = &program.nodes[0].kind
+        {
+            assert_eq!(type_name, "Массив");
+            assert!(!is_dynamic);
+        } else {
+            panic!("Expected NewExpression node");
+        }
+    }
+
+    #[test]
+    fn test_new_expression_with_args() {
+        let mut program = SemanticProgram::new();
+
+        // Конструктор с параметром: Новый Массив(10)
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::NewExpression {
+                type_name: "Массив".to_string(),
+                arg_types: vec!["Число".to_string()],
+                is_dynamic: false,
+                result_type: "Массив".to_string(),
+                generic_params: None,
+            },
+            span: Span::new(1, 0, 1, 16),
+            scope_id: program.symbols.root_scope,
+        });
+
+        if let SemanticNodeKind::NewExpression { arg_types, .. } = &program.nodes[0].kind {
+            assert_eq!(arg_types.len(), 1);
+            assert_eq!(arg_types[0], "Число");
+        } else {
+            panic!("Expected NewExpression node");
+        }
+    }
+
+    #[test]
+    fn test_new_expression_dynamic() {
+        let mut program = SemanticProgram::new();
+
+        // Динамический конструктор: Новый("СправочникСсылка.Номенклатура")
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::NewExpression {
+                type_name: "СправочникСсылка.Номенклатура".to_string(),
+                arg_types: vec![],
+                is_dynamic: true,
+                result_type: "СправочникСсылка.Номенклатура".to_string(),
+                generic_params: None,
+            },
+            span: Span::new(1, 0, 1, 40),
+            scope_id: program.symbols.root_scope,
+        });
+
+        if let SemanticNodeKind::NewExpression {
+            type_name,
+            is_dynamic,
+            ..
+        } = &program.nodes[0].kind
+        {
+            assert_eq!(type_name, "СправочникСсылка.Номенклатура");
+            assert!(is_dynamic);
+        } else {
+            panic!("Expected NewExpression node");
+        }
+    }
+
+    #[test]
+    fn test_new_expression_with_generics() {
+        let mut program = SemanticProgram::new();
+
+        // Generic конструктор: Новый Массив<Число>
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::NewExpression {
+                type_name: "Массив".to_string(),
+                arg_types: vec![],
+                is_dynamic: false,
+                result_type: "Массив<Число>".to_string(),
+                generic_params: Some(vec!["Число".to_string()]),
+            },
+            span: Span::new(1, 0, 1, 20),
+            scope_id: program.symbols.root_scope,
+        });
+
+        if let SemanticNodeKind::NewExpression {
+            result_type,
+            generic_params,
+            ..
+        } = &program.nodes[0].kind
+        {
+            assert_eq!(result_type, "Массив<Число>");
+            assert!(generic_params.is_some());
+            let params = generic_params.as_ref().unwrap();
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0], "Число");
+        } else {
+            panic!("Expected NewExpression node");
+        }
+    }
+
+    #[test]
+    fn test_new_expression_to_dto() {
+        let mut program = SemanticProgram::new();
+
+        // Добавляем NewExpression узел
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::NewExpression {
+                type_name: "Массив".to_string(),
+                arg_types: vec!["Число".to_string()],
+                is_dynamic: false,
+                result_type: "Массив".to_string(),
+                generic_params: None,
+            },
+            span: Span::new(1, 0, 1, 16),
+            scope_id: program.symbols.root_scope,
+        });
+
+        // Конвертируем в DTO
+        let dto = program.to_dto(false, false);
+
+        assert_eq!(dto.root_nodes.len(), 1);
+
+        let node_dto = &dto.root_nodes[0];
+        assert_eq!(node_dto.kind, "NewExpression");
+        assert!(node_dto.name.is_some());
+
+        // Проверяем атрибуты
+        assert_eq!(node_dto.attributes.get("type_name"), Some(&"Массив".to_string()));
+        assert_eq!(node_dto.attributes.get("arg_count"), Some(&"1".to_string()));
+        assert_eq!(node_dto.attributes.get("is_dynamic"), Some(&"false".to_string()));
     }
 }

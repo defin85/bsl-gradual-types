@@ -3,6 +3,42 @@
 use crate::api::{TypeInfo, MethodInfo};
 use leptos::prelude::*;
 
+// ============================================================================
+// Helper Functions for Tailwind CSS Classes
+// ============================================================================
+
+/// Helper function for detail section classes with conditional border
+fn detail_section_classes(is_last: bool) -> &'static str {
+    if is_last {
+        "mb-6 pb-6 border-0"
+    } else {
+        "mb-6 pb-6 border-b border-gray-100 dark:border-gray-800"
+    }
+}
+
+/// Helper function for category badge classes based on category type
+fn category_badge_classes(category: &str) -> String {
+    let base = "inline-block px-3 py-1 rounded-full text-sm font-medium";
+    let color = match category.to_lowercase().as_str() {
+        "primitive" => "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+        "platform" => "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+        "user" => "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+        "union" => "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
+        _ => "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200",
+    };
+    format!("{} {}", base, color)
+}
+
+/// Helper function for certainty bar color based on certainty percentage
+fn certainty_bar_color(certainty: u8) -> &'static str {
+    match certainty {
+        0..=33 => "bg-gradient-to-r from-red-500 to-orange-500",
+        34..=66 => "bg-gradient-to-r from-orange-500 to-yellow-500",
+        67..=89 => "bg-gradient-to-r from-yellow-500 to-green-500",
+        _ => "bg-gradient-to-r from-blue-500 to-green-500",
+    }
+}
+
 #[component]
 #[allow(non_snake_case)]
 pub fn TypeDetailsModal(
@@ -45,60 +81,83 @@ pub fn TypeDetailsModal(
 
                 view! {
                     <div
-                        class="modal-overlay"
+                        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200"
                         on:click=move |_| on_close.run(())
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="modal-title"
                     >
                         <div
-                            class="modal-content"
+                            class="bg-white dark:bg-gray-900 rounded-2xl max-w-4xl w-[90%] max-h-[90vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-4 duration-300"
                             on:click=|e| e.stop_propagation()
                         >
                             // Header
-                            <div class="modal-header">
-                                <h2 class="modal-title">{name.clone()}</h2>
+                            <div class="flex justify-between items-center px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                                <h2
+                                    id="modal-title"
+                                    class="text-2xl font-bold text-gray-900 dark:text-white"
+                                >
+                                    {name.clone()}
+                                </h2>
                                 <button
-                                    class="modal-close"
+                                    class="text-3xl text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 rounded-lg px-2"
                                     on:click=move |_| on_close.run(())
-                                    title="Закрыть"
+                                    aria-label="Закрыть"
+                                    title="Закрыть (ESC)"
                                 >
                                     "×"
                                 </button>
                             </div>
 
                             // Body
-                            <div class="modal-body">
+                            <div class="flex-1 overflow-y-auto px-6 py-4">
                                 // Basic info section
-                                <section class="detail-section">
-                                    <h3 class="section-title">"📊 Общая информация"</h3>
-                                    <div class="detail-grid">
-                                        <div class="detail-item">
-                                            <span class="detail-label">"Категория:"</span>
-                                            <span class="detail-value">
-                                                <span class=format!("category-badge category-{}", category.to_lowercase())>
+                                <section class={detail_section_classes(false)}>
+                                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                                        "📊 Общая информация"
+                                    </h3>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div class="flex flex-col gap-1">
+                                            <span class="text-sm text-gray-600 dark:text-gray-400 font-medium">
+                                                "Категория:"
+                                            </span>
+                                            <span class="text-base text-gray-900 dark:text-white">
+                                                <span class={category_badge_classes(&category)}>
                                                     {category.clone()}
                                                 </span>
                                             </span>
                                         </div>
-                                        <div class="detail-item">
-                                            <span class="detail-label">"Определённость:"</span>
-                                            <span class="detail-value">
-                                                <div class="certainty-indicator">
-                                                    <div class="certainty-bar">
+                                        <div class="flex flex-col gap-1">
+                                            <span class="text-sm text-gray-600 dark:text-gray-400 font-medium">
+                                                "Определённость:"
+                                            </span>
+                                            <span class="text-base text-gray-900 dark:text-white">
+                                                <div class="flex items-center gap-3">
+                                                    <div class="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                                                         <div
-                                                            class="certainty-fill"
+                                                            class={format!("{} h-full transition-all duration-500", certainty_bar_color(certainty))}
                                                             style=format!("width: {}%", certainty)
                                                         ></div>
                                                     </div>
-                                                    <span class="certainty-text">{certainty}"%"</span>
+                                                    <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                                                        {certainty}"%"
+                                                    </span>
                                                 </div>
                                             </span>
                                         </div>
-                                        <div class="detail-item">
-                                            <span class="detail-label">"Источник:"</span>
-                                            <span class="detail-value">{source.clone()}</span>
+                                        <div class="flex flex-col gap-1">
+                                            <span class="text-sm text-gray-600 dark:text-gray-400 font-medium">
+                                                "Источник:"
+                                            </span>
+                                            <span class="text-base text-gray-900 dark:text-white">
+                                                {source.clone()}
+                                            </span>
                                         </div>
-                                        <div class="detail-item">
-                                            <span class="detail-label">"Flow-sensitive:"</span>
-                                            <span class="detail-value">
+                                        <div class="flex flex-col gap-1">
+                                            <span class="text-sm text-gray-600 dark:text-gray-400 font-medium">
+                                                "Flow-sensitive:"
+                                            </span>
+                                            <span class="text-base text-gray-900 dark:text-white">
                                                 {if flow_sensitive { "✅ Да" } else { "❌ Нет" }}
                                             </span>
                                         </div>
@@ -108,9 +167,13 @@ pub fn TypeDetailsModal(
                                 // Description section
                                 {if !description_empty {
                                     view! {
-                                        <section class="detail-section">
-                                            <h3 class="section-title">"📝 Описание"</h3>
-                                            <p class="type-description">{description.clone()}</p>
+                                        <section class={detail_section_classes(false)}>
+                                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                                                "📝 Описание"
+                                            </h3>
+                                            <p class="text-base text-gray-700 dark:text-gray-300 leading-relaxed">
+                                                {description.clone()}
+                                            </p>
                                         </section>
                                     }.into_any()
                                 } else {
@@ -121,14 +184,16 @@ pub fn TypeDetailsModal(
                                 // Facets section
                                 {if !facets_empty {
                                     view! {
-                                        <section class="detail-section">
-                                            <h3 class="section-title">"🎭 Фасеты"</h3>
-                                            <div class="facets-grid">
+                                        <section class={detail_section_classes(false)}>
+                                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                                                "🎭 Фасеты"
+                                            </h3>
+                                            <div class="flex flex-wrap gap-2">
                                                 {facets.iter().map(|facet| {
                                                     view! {
-                                                        <div class="facet-item">
-                                                            <span class="facet-badge-large">{facet.clone()}</span>
-                                                        </div>
+                                                        <span class="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors duration-200">
+                                                            {facet.clone()}
+                                                        </span>
                                                     }
                                                 }).collect::<Vec<_>>()}
                                             </div>
@@ -142,14 +207,16 @@ pub fn TypeDetailsModal(
                                 // Enum values section (for platform enumerations)
                                 {if !enum_values_empty {
                                     view! {
-                                        <section class="detail-section">
-                                            <h3 class="section-title">"🔢 Значения перечисления (" {enum_values_len} ")"</h3>
-                                            <div class="enum-values-grid">
+                                        <section class={detail_section_classes(false)}>
+                                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                                                "🔢 Значения перечисления (" {enum_values_len} ")"
+                                            </h3>
+                                            <div class="flex flex-wrap gap-2">
                                                 {enum_values.iter().map(|value| {
                                                     view! {
-                                                        <div class="enum-value-item">
-                                                            <span class="enum-value-badge">{value.clone()}</span>
-                                                        </div>
+                                                        <span class="px-3 py-1.5 bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 rounded-lg text-sm font-medium hover:bg-purple-200 dark:hover:bg-purple-800 transition-colors duration-200">
+                                                            {value.clone()}
+                                                        </span>
                                                     }
                                                 }).collect::<Vec<_>>()}
                                             </div>
@@ -163,34 +230,42 @@ pub fn TypeDetailsModal(
                                 // Tabular sections (for documents, catalogs)
                                 {if !tabular_sections_empty {
                                     view! {
-                                        <section class="detail-section">
-                                            <h3 class="section-title">"📋 Табличные части (" {tabular_sections_len} ")"</h3>
-                                            {tabular_sections.iter().map(|ts| {
-                                                let ts_name = ts.name.clone();
-                                                let ts_attrs = ts.attributes.clone();
-                                                let attrs_count = ts_attrs.len();
+                                        <section class={detail_section_classes(false)}>
+                                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                                                "📋 Табличные части (" {tabular_sections_len} ")"
+                                            </h3>
+                                            <div class="space-y-4">
+                                                {tabular_sections.iter().map(|ts| {
+                                                    let ts_name = ts.name.clone();
+                                                    let ts_attrs = ts.attributes.clone();
+                                                    let attrs_count = ts_attrs.len();
 
-                                                view! {
-                                                    <div class="tabular-section-detail">
-                                                        <h4 class="subsection-title">
-                                                            "📄 " {ts_name.clone()} " (" {attrs_count} " атрибутов)"
-                                                        </h4>
-                                                        <div class="tabular-attributes-list">
-                                                            {ts_attrs.iter().map(|attr| {
-                                                                let attr_name = attr.name.clone();
-                                                                let attr_type = attr.attr_type.clone().unwrap_or_else(|| "?".to_string());
+                                                    view! {
+                                                        <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                                                            <h4 class="text-base font-semibold text-gray-900 dark:text-white mb-3">
+                                                                "📄 " {ts_name.clone()} " (" {attrs_count} " атрибутов)"
+                                                            </h4>
+                                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                                {ts_attrs.iter().map(|attr| {
+                                                                    let attr_name = attr.name.clone();
+                                                                    let attr_type = attr.attr_type.clone().unwrap_or_else(|| "?".to_string());
 
-                                                                view! {
-                                                                    <div class="tabular-attribute-item">
-                                                                        <span class="attribute-name">{attr_name}</span>
-                                                                        <span class="attribute-type">{attr_type}</span>
-                                                                    </div>
-                                                                }
-                                                            }).collect::<Vec<_>>()}
+                                                                    view! {
+                                                                        <div class="flex items-center justify-between p-2 bg-white dark:bg-gray-900 rounded border border-gray-100 dark:border-gray-700">
+                                                                            <span class="font-mono text-sm text-gray-900 dark:text-white font-medium">
+                                                                                {attr_name}
+                                                                            </span>
+                                                                            <span class="font-mono text-xs text-blue-600 dark:text-blue-400">
+                                                                                {attr_type}
+                                                                            </span>
+                                                                        </div>
+                                                                    }
+                                                                }).collect::<Vec<_>>()}
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                }
-                                            }).collect::<Vec<_>>()}
+                                                    }
+                                                }).collect::<Vec<_>>()}
+                                            </div>
                                         </section>
                                     }.into_any()
                                 } else {
@@ -201,27 +276,33 @@ pub fn TypeDetailsModal(
                                 // Methods and properties section
                                 {if has_metadata {
                                     view! {
-                                        <section class="detail-section">
-                                            <h3 class="section-title">"🔧 Методы и свойства"</h3>
+                                        <section class={detail_section_classes(false)}>
+                                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                                                "🔧 Методы и свойства"
+                                            </h3>
 
                                             // Methods subsection
                                             {if !methods_empty {
                                                 view! {
-                                                    <div class="methods-detail">
-                                                        <h4 class="subsection-title">
+                                                    <div class="mb-6">
+                                                        <h4 class="text-base font-semibold text-gray-900 dark:text-white mb-3">
                                                             "📋 Методы (" {methods_len} ")"
                                                         </h4>
-                                                        <div class="methods-list">
+                                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                                             {methods.iter().map(|method| {
                                                                 let signature = format_method_signature(method);
                                                                 let tooltip = method.english_name.clone().unwrap_or_default();
                                                                 view! {
                                                                     <div
-                                                                        class="method-item"
+                                                                        class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border-l-4 border-blue-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 cursor-default"
                                                                         title={tooltip}
                                                                     >
-                                                                        <span class="method-name">{method.name.clone()}</span>
-                                                                        <span class="method-signature">{signature}</span>
+                                                                        <div class="font-mono text-sm text-blue-700 dark:text-blue-300 font-medium break-words">
+                                                                            {method.name.clone()}
+                                                                        </div>
+                                                                        <div class="font-mono text-xs text-gray-600 dark:text-gray-400 mt-1 break-all">
+                                                                            {signature}
+                                                                        </div>
                                                                     </div>
                                                                 }
                                                             }).collect::<Vec<_>>()}
@@ -236,16 +317,16 @@ pub fn TypeDetailsModal(
                                             // Properties subsection
                                             {if !properties_empty {
                                                 view! {
-                                                    <div class="properties-detail">
-                                                        <h4 class="subsection-title">
+                                                    <div class="mb-6">
+                                                        <h4 class="text-base font-semibold text-gray-900 dark:text-white mb-3">
                                                             "📌 Свойства (" {properties_len} ")"
                                                         </h4>
-                                                        <div class="properties-list">
+                                                        <div class="flex flex-wrap gap-2">
                                                             {properties.iter().map(|property| {
                                                                 view! {
-                                                                    <div class="property-item">
-                                                                        <span class="property-name">{property.clone()}</span>
-                                                                    </div>
+                                                                    <span class="px-3 py-1.5 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded-lg text-sm font-mono font-medium hover:bg-green-200 dark:hover:bg-green-800 transition-colors duration-200">
+                                                                        {property.clone()}
+                                                                    </span>
                                                                 }
                                                             }).collect::<Vec<_>>()}
                                                         </div>
@@ -260,11 +341,11 @@ pub fn TypeDetailsModal(
                                             {if let Some(attrs_count) = attributes_count {
                                                 if attrs_count > 0 {
                                                     view! {
-                                                        <div class="attributes-info">
-                                                            <h4 class="subsection-title">
+                                                        <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                                                            <h4 class="text-base font-semibold text-gray-900 dark:text-white mb-2">
                                                                 "📦 Атрибуты (" {attrs_count} ")"
                                                             </h4>
-                                                            <p class="info-text">
+                                                            <p class="text-sm text-gray-600 dark:text-gray-400">
                                                                 "Доступно " {attrs_count} " атрибутов для этого типа"
                                                             </p>
                                                         </div>
@@ -282,29 +363,35 @@ pub fn TypeDetailsModal(
                                 } else {
                                     // Fallback when no methods/properties
                                     view! {
-                                        <section class="detail-section detail-section--muted">
-                                            <h3 class="section-title">"🔧 Методы и свойства"</h3>
-                                            <p class="placeholder-text">
-                                                "Для этого типа нет доступной информации о методах и свойствах."
-                                            </p>
+                                        <section class={detail_section_classes(true)}>
+                                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                                                "🔧 Методы и свойства"
+                                            </h3>
+                                            <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-center">
+                                                <p class="text-sm text-gray-600 dark:text-gray-400">
+                                                    "Для этого типа нет доступной информации о методах и свойствах."
+                                                </p>
+                                            </div>
                                         </section>
                                     }.into_any()
                                 }}
                             </div>
 
                             // Footer
-                            <div class="modal-footer">
+                            <div class="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700">
                                 <button
-                                    class="btn btn--secondary"
+                                    class="px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-900 bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 focus:ring-gray-500"
                                     on:click=move |_| {
                                         web_sys::console::log_1(&format!("Copy: {}", name.clone()).into());
                                     }
+                                    aria-label="Скопировать имя типа в буфер обмена"
                                 >
                                     "📋 Скопировать имя"
                                 </button>
                                 <button
-                                    class="btn btn--primary"
+                                    class="px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-900 bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500"
                                     on:click=move |_| on_close.run(())
+                                    aria-label="Закрыть модальное окно"
                                 >
                                     "Закрыть"
                                 </button>

@@ -116,9 +116,9 @@ pub fn TableView(
     };
 
     view! {
-        <div class="table-view">
+        <div class="flex flex-col gap-4">
             // Top pagination (sticky)
-            <div class="pagination-top-sticky">
+            <div class="sticky top-0 z-30 bg-bsl-surface dark:bg-gray-900 py-4">
                 <Pagination
                     pagination=Signal::derive(move || search_result.get().and_then(|r| r.pagination))
                     on_page_change=on_page_change
@@ -126,8 +126,8 @@ pub fn TableView(
             </div>
 
             // Summary information
-            <div class="table-summary">
-                <p class="results-info">
+            <div class="px-4 py-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <p class="text-sm text-gray-700 dark:text-gray-300 font-medium">
                     {move || {
                         if let Some(result) = search_result.get() {
                             format!("Найдено типов: {} (показано: {})",
@@ -140,87 +140,87 @@ pub fn TableView(
                 </p>
             </div>
 
-            // Table container
-            <div class="table-container">
-                <table class="data-table">
-                    <thead>
+            // Table container with responsive scroll
+            <div class="overflow-x-auto bg-white dark:bg-gray-900 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
+                <table class="w-full border-collapse">
+                    <thead class="sticky top-20 z-20 bg-gray-50 dark:bg-gray-800">
                         <tr>
                             <th
-                                class="sortable"
+                                class="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors border-b border-gray-200 dark:border-gray-700"
                                 on:click=move |_| handle_sort("name".to_string())
                             >
                                 "Название "
-                                <span class="sort-indicator">{move || get_sort_indicator("name")}</span>
+                                <span class="ml-2 opacity-50 hover:opacity-100 transition-opacity">{move || get_sort_indicator("name")}</span>
                             </th>
                             <th
-                                class="sortable"
+                                class="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors border-b border-gray-200 dark:border-gray-700"
                                 on:click=move |_| handle_sort("category".to_string())
                             >
                                 "Категория "
-                                <span class="sort-indicator">{move || get_sort_indicator("category")}</span>
+                                <span class="ml-2 opacity-50 hover:opacity-100 transition-opacity">{move || get_sort_indicator("category")}</span>
                             </th>
                             <th
-                                class="sortable"
+                                class="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors border-b border-gray-200 dark:border-gray-700"
                                 on:click=move |_| handle_sort("certainty".to_string())
                             >
                                 "Определенность "
-                                <span class="sort-indicator">{move || get_sort_indicator("certainty")}</span>
+                                <span class="ml-2 opacity-50 hover:opacity-100 transition-opacity">{move || get_sort_indicator("certainty")}</span>
                             </th>
-                            <th>"Фасеты"</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">"Фасеты"</th>
                             <th
-                                class="sortable"
+                                class="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors border-b border-gray-200 dark:border-gray-700"
                                 on:click=move |_| handle_sort("flow_sensitive".to_string())
                             >
                                 "Flow-sensitive "
-                                <span class="sort-indicator">{move || get_sort_indicator("flow_sensitive")}</span>
+                                <span class="ml-2 opacity-50 hover:opacity-100 transition-opacity">{move || get_sort_indicator("flow_sensitive")}</span>
                             </th>
-                            <th>"Действия"</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">"Действия"</th>
                         </tr>
                     </thead>
                     <tbody>
                         {move || {
-                            sorted_types.get().into_iter().map(|type_info| {
-                                let category_class = get_category_class(&type_info.category);
+                            sorted_types.get().into_iter().enumerate().map(|(idx, type_info)| {
+                                let row_bg = if idx % 2 == 0 { "" } else { "bg-gray-50/50 dark:bg-gray-800/50" };
 
                                 view! {
-                                    <tr class=format!("type-row {}", category_class)>
+                                    <tr class=format!("{} hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors", row_bg)>
                                         // Name
-                                        <td class="name-cell">
-                                            <div class="type-name">{type_info.name.clone()}</div>
-                                            <div class="type-id">{type_info.id.clone()}</div>
+                                        <td class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                                            <div class="font-medium text-gray-900 dark:text-white">{type_info.name.clone()}</div>
+                                            <div class="text-sm text-gray-500 dark:text-gray-400 font-mono">{type_info.id.clone()}</div>
                                         </td>
 
                                         // Category
-                                        <td class="category-cell">
-                                            <span class="category-badge">
+                                        <td class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                                            <span class=get_category_badge_class(&type_info.category)>
                                                 {get_category_icon(&type_info.category)} " " {type_info.category.clone()}
                                             </span>
                                         </td>
 
                                         // Certainty
-                                        <td class="certainty-cell">
-                                            <div class="certainty-container">
-                                                <div class="certainty-bar">
+                                        <td class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                                            <div class="flex items-center gap-2">
+                                                <div class="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                                                     <div
-                                                        class="certainty-fill"
+                                                        class="h-full bg-bsl-primary dark:bg-bsl-accent transition-all duration-300"
                                                         style=format!("width: {}%", type_info.certainty)
                                                     ></div>
                                                 </div>
-                                                <span class="certainty-text">{type_info.certainty}"%"</span>
+                                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300 min-w-[3rem] text-right">{type_info.certainty}"%"</span>
                                             </div>
                                         </td>
 
                                         // Facets
-                                        <td class="facets-cell">
-                                            <div class="facets-list">
+                                        <td class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                                            <div class="flex flex-wrap gap-1">
                                                 {type_info.facets.iter().take(3).map(|facet| {
                                                     view! {
-                                                        <span class="facet-tag">{facet.clone()}</span>
+                                                        <span class="inline-block px-2 py-1 text-xs font-medium bg-bsl-primary/10 dark:bg-bsl-accent/10 text-bsl-primary dark:text-bsl-accent rounded">{facet.clone()}</span>
                                                     }
                                                 }).collect::<Vec<_>>()}
                                                 {if type_info.facets.len() > 3 {
                                                     view! {
-                                                        <span class="facet-more">
+                                                        <span class="inline-block px-2 py-1 text-xs font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded">
                                                             "+" {type_info.facets.len() - 3}
                                                         </span>
                                                     }.into_any()
@@ -232,17 +232,23 @@ pub fn TableView(
                                         </td>
 
                                         // Flow-sensitive
-                                        <td class="flow-cell">
-                                            <span class=format!("flow-status {}", if type_info.flow_sensitive { "active" } else { "inactive" })>
+                                        <td class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                                            <span class={
+                                                if type_info.flow_sensitive {
+                                                    "inline-flex items-center justify-center w-8 h-8 text-lg bg-bsl-warning/10 dark:bg-bsl-warning/20 rounded-full"
+                                                } else {
+                                                    "inline-flex items-center justify-center w-8 h-8 text-lg bg-gray-100 dark:bg-gray-800 rounded-full opacity-50"
+                                                }
+                                            }>
                                                 {if type_info.flow_sensitive { "🔄" } else { "📊" }}
                                             </span>
                                         </td>
 
                                         // Actions
-                                        <td class="actions-cell">
-                                            <div class="action-buttons">
+                                        <td class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                                            <div class="flex gap-1">
                                                 <button
-                                                    class="action-btn action-btn--view"
+                                                    class="inline-flex items-center justify-center w-8 h-8 text-sm bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
                                                     title="Просмотр"
                                                     on:click={
                                                         let type_info = type_info.clone();
@@ -252,7 +258,7 @@ pub fn TableView(
                                                     "👁️"
                                                 </button>
                                                 <button
-                                                    class="action-btn action-btn--copy"
+                                                    class="inline-flex items-center justify-center w-8 h-8 text-sm bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/40 text-green-600 dark:text-green-400 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1"
                                                     title="Копировать"
                                                     on:click={
                                                         let type_info = type_info.clone();
@@ -262,7 +268,7 @@ pub fn TableView(
                                                     "📋"
                                                 </button>
                                                 <button
-                                                    class="action-btn action-btn--link"
+                                                    class="inline-flex items-center justify-center w-8 h-8 text-sm bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1"
                                                     title="Связи"
                                                     on:click={
                                                         let type_info = type_info.clone();
@@ -285,10 +291,10 @@ pub fn TableView(
             {move || {
                 if sorted_types.get().is_empty() {
                     view! {
-                        <div class="empty-state">
-                            <div class="empty-state__icon">"📋"</div>
-                            <h3 class="empty-state__title">"Таблица пуста"</h3>
-                            <p class="empty-state__description">
+                        <div class="flex flex-col items-center justify-center py-16 px-4 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
+                            <div class="text-6xl mb-4 opacity-50">"📋"</div>
+                            <h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">"Таблица пуста"</h3>
+                            <p class="text-gray-600 dark:text-gray-400 text-center max-w-md">
                                 "Попробуйте изменить фильтры поиска или очистить их"
                             </p>
                         </div>
@@ -308,16 +314,15 @@ pub fn TableView(
     }
 }
 
-/// Get CSS class for category
-fn get_category_class(category: &str) -> String {
+/// Get Tailwind classes for category badge
+fn get_category_badge_class(category: &str) -> &'static str {
     match category {
-        "Platform" => "category-platform",
-        "Configuration" => "category-configuration",
-        "Union" => "category-union",
-        "Dynamic" => "category-dynamic",
-        _ => "category-unknown",
+        "Platform" => "inline-flex items-center gap-1 px-3 py-1 text-sm font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full",
+        "Configuration" => "inline-flex items-center gap-1 px-3 py-1 text-sm font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full",
+        "Union" => "inline-flex items-center gap-1 px-3 py-1 text-sm font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 rounded-full",
+        "Dynamic" => "inline-flex items-center gap-1 px-3 py-1 text-sm font-medium bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300 rounded-full",
+        _ => "inline-flex items-center gap-1 px-3 py-1 text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-full",
     }
-    .to_string()
 }
 
 /// Get icon for category

@@ -81,129 +81,145 @@ pub fn Sidebar(
     };
 
     view! {
-        <aside class=move || format!("sidebar {}", if sidebar_open.get() { "open" } else { "closed" })>
-            <div class="sidebar__header">
-                <h3>"Фильтры"</h3>
+        <aside
+            class=move || format!(
+                "bg-bsl-cream-100 dark:bg-bsl-charcoal-900 border border-bsl-teal-200 dark:border-gray-700 rounded-lg p-6 h-fit sticky transition-all duration-300 {} {}",
+                "top-[calc(1.5rem+80px)]",
+                if sidebar_open.get() { "w-72" } else { "w-0 overflow-hidden p-0" }
+            )
+            aria-expanded=move || if sidebar_open.get() { "true" } else { "false" }
+        >
+            <div class="flex justify-between items-center mb-5">
+                <h3 class="m-0 text-xl font-semibold text-bsl-charcoal-900 dark:text-bsl-cream-100">"Фильтры"</h3>
                 <button
-                    class="sidebar__toggle"
+                    class="hidden md:hidden bg-transparent border-0 text-xl cursor-pointer text-bsl-charcoal-700 dark:text-bsl-cream-300 hover:text-bsl-charcoal-900 dark:hover:text-bsl-cream-100 transition-colors"
                     on:click=move |_| sidebar_open.set(!sidebar_open.get())
+                    aria-label=move || if sidebar_open.get() { "Закрыть меню" } else { "Открыть меню" }
                 >
                     {move || if sidebar_open.get() { "×" } else { "☰" }}
                 </button>
             </div>
 
             // Categories filter
-                <div class="filter-section">
-                    <h4>"Категории"</h4>
-                    <div class="filter-group">
-                        <label class="filter-item">
+                <div class="mb-6">
+                    <h4 class="m-0 mb-3 text-base font-semibold text-bsl-charcoal-900 dark:text-bsl-cream-100">"Категории"</h4>
+                    <div class="flex flex-col gap-2">
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-bsl-cream-200 dark:hover:bg-bsl-charcoal-800 transition-colors">
                             <input
                                 type="checkbox"
+                                class="m-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-bsl-teal-500 focus:ring-offset-2 dark:focus:ring-offset-bsl-charcoal-900"
                                 prop:checked=move || filters.get().show_platform
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
                                     handle_platform_change(checked);
                                 }
                             />
-                            <span>"🔧 Platform"</span>
+                            <span class="text-sm text-bsl-charcoal-900 dark:text-bsl-cream-100">"🔧 Platform"</span>
                         </label>
-                        <label class="filter-item">
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-bsl-cream-200 dark:hover:bg-bsl-charcoal-800 transition-colors">
                             <input
                                 type="checkbox"
+                                class="m-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-bsl-teal-500 focus:ring-offset-2 dark:focus:ring-offset-bsl-charcoal-900"
                                 prop:checked=move || filters.get().show_configuration
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
                                     handle_configuration_change(checked);
                                 }
                             />
-                            <span>"⚙️ Configuration"</span>
+                            <span class="text-sm text-bsl-charcoal-900 dark:text-bsl-cream-100">"⚙️ Configuration"</span>
                         </label>
-                        <label class="filter-item">
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-bsl-cream-200 dark:hover:bg-bsl-charcoal-800 transition-colors">
                             <input
                                 type="checkbox"
+                                class="m-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-bsl-teal-500 focus:ring-offset-2 dark:focus:ring-offset-bsl-charcoal-900"
                                 prop:checked=move || filters.get().show_union
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
                                     handle_union_change(checked);
                                 }
                             />
-                            <span>"🔗 Union"</span>
+                            <span class="text-sm text-bsl-charcoal-900 dark:text-bsl-cream-100">"🔗 Union"</span>
                         </label>
-                        <label class="filter-item">
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-bsl-cream-200 dark:hover:bg-bsl-charcoal-800 transition-colors">
                             <input
                                 type="checkbox"
+                                class="m-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-bsl-teal-500 focus:ring-offset-2 dark:focus:ring-offset-bsl-charcoal-900"
                                 prop:checked=move || filters.get().show_dynamic
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
                                     handle_dynamic_change(checked);
                                 }
                             />
-                            <span>"🌟 Dynamic"</span>
+                            <span class="text-sm text-bsl-charcoal-900 dark:text-bsl-cream-100">"🌟 Dynamic"</span>
                         </label>
                     </div>
                 </div>
 
                 // Certainty filter
-                <div class="filter-section">
-                    <h4>"Определенность"</h4>
-                    <div class="filter-group">
-                        <label class="filter-item">
+                <div class="mb-6">
+                    <h4 class="m-0 mb-3 text-base font-semibold text-bsl-charcoal-900 dark:text-bsl-cream-100">"Определенность"</h4>
+                    <div class="flex flex-col gap-2">
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-bsl-cream-200 dark:hover:bg-bsl-charcoal-800 transition-colors">
                             <input
                                 type="checkbox"
+                                class="m-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-bsl-teal-500 focus:ring-offset-2 dark:focus:ring-offset-bsl-charcoal-900"
                                 prop:checked=move || filters.get().show_high_certainty
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
                                     handle_high_certainty_change(checked);
                                 }
                             />
-                            <span>"Высокая (≥80%)"</span>
+                            <span class="text-sm text-bsl-charcoal-900 dark:text-bsl-cream-100">"Высокая (≥80%)"</span>
                         </label>
-                        <label class="filter-item">
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-bsl-cream-200 dark:hover:bg-bsl-charcoal-800 transition-colors">
                             <input
                                 type="checkbox"
+                                class="m-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-bsl-teal-500 focus:ring-offset-2 dark:focus:ring-offset-bsl-charcoal-900"
                                 prop:checked=move || filters.get().show_medium_certainty
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
                                     handle_medium_certainty_change(checked);
                                 }
                             />
-                            <span>"Средняя (30-79%)"</span>
+                            <span class="text-sm text-bsl-charcoal-900 dark:text-bsl-cream-100">"Средняя (30-79%)"</span>
                         </label>
-                        <label class="filter-item">
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-bsl-cream-200 dark:hover:bg-bsl-charcoal-800 transition-colors">
                             <input
                                 type="checkbox"
+                                class="m-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-bsl-teal-500 focus:ring-offset-2 dark:focus:ring-offset-bsl-charcoal-900"
                                 prop:checked=move || filters.get().show_low_certainty
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
                                     handle_low_certainty_change(checked);
                                 }
                             />
-                            <span>"Низкая (<30%)"</span>
+                            <span class="text-sm text-bsl-charcoal-900 dark:text-bsl-cream-100">"Низкая (<30%)"</span>
                         </label>
                     </div>
                 </div>
 
                 // Additional filters
-                <div class="filter-section">
-                    <h4>"Дополнительно"</h4>
-                    <div class="filter-group">
-                        <label class="filter-item">
+                <div class="mb-6">
+                    <h4 class="m-0 mb-3 text-base font-semibold text-bsl-charcoal-900 dark:text-bsl-cream-100">"Дополнительно"</h4>
+                    <div class="flex flex-col gap-2">
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-bsl-cream-200 dark:hover:bg-bsl-charcoal-800 transition-colors">
                             <input
                                 type="checkbox"
+                                class="m-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-bsl-teal-500 focus:ring-offset-2 dark:focus:ring-offset-bsl-charcoal-900"
                                 prop:checked=move || filters.get().flow_sensitive_only
                                 on:change=move |ev| {
                                     let checked = event_target_checked(&ev);
                                     handle_flow_sensitive_change(checked);
                                 }
                             />
-                            <span>"Flow-sensitive"</span>
+                            <span class="text-sm text-bsl-charcoal-900 dark:text-bsl-cream-100">"Flow-sensitive"</span>
                         </label>
                     </div>
                 </div>
 
             // Clear filters button
             <button
-                class="btn btn--outline btn--sm"
+                class="inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded border border-bsl-teal-600 dark:border-bsl-teal-500 bg-transparent text-bsl-teal-700 dark:text-bsl-teal-400 text-sm font-medium cursor-pointer transition-all duration-200 hover:bg-bsl-teal-600 hover:text-white dark:hover:bg-bsl-teal-500 dark:hover:text-white hover:-translate-y-0.5 active:translate-y-0 focus:outline-none focus:ring-2 focus:ring-bsl-teal-500 focus:ring-offset-2 dark:focus:ring-offset-bsl-charcoal-900"
                 on:click=clear_filters
             >
                 "Сбросить фильтры"

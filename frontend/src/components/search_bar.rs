@@ -74,22 +74,31 @@ pub fn SearchBar(
     };
 
     view! {
-        <div class="search-bar">
-            <input
-                type="text"
-                placeholder=placeholder_text
-                node_ref=search_input_ref
-                on:input=handle_search_input
-            />
+        <div class="relative w-full max-w-2xl mx-auto">
+            <div class="relative">
+                <input
+                    type="text"
+                    placeholder=placeholder_text
+                    node_ref=search_input_ref
+                    on:input=handle_search_input
+                    class="w-full px-3 py-2 pl-10 text-base text-bsl-slate-900 dark:text-bsl-gray-200 bg-bsl-cream-100 dark:bg-bsl-charcoal-700 border border-bsl-brown-600/20 dark:border-bsl-gray-400/30 rounded focus:border-bsl-teal-500 focus:outline-none focus:ring-2 focus:ring-bsl-teal-500/20 transition-colors duration-fast placeholder:text-bsl-slate-500/50 dark:placeholder:text-bsl-gray-300/50"
+                />
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-bsl-slate-500/70 dark:text-bsl-gray-300/70">
+                    "🔍"
+                </span>
+            </div>
         </div>
 
         // Примечание: Фильтры категорий и certainty теперь находятся в Sidebar
         // Этот компонент SearchBar остался для обратной совместимости,
         // но в текущей версии используется только поле поиска
-        <div class="filters-toolbar">
-            <div class="filter-group">
-                <label>"Фасеты:"</label>
-                <select on:change=handle_facet_change>
+        <div class="flex flex-wrap gap-4 mt-4">
+            <div class="flex flex-col gap-2">
+                <label class="text-sm font-medium text-bsl-slate-900 dark:text-bsl-gray-200">"Фасеты:"</label>
+                <select
+                    on:change=handle_facet_change
+                    class="px-3 py-2 text-base text-bsl-slate-900 dark:text-bsl-gray-200 bg-bsl-cream-100 dark:bg-bsl-charcoal-700 border border-bsl-brown-600/20 dark:border-bsl-gray-400/30 rounded focus:border-bsl-teal-500 focus:outline-none focus:ring-2 focus:ring-bsl-teal-500/20 transition-colors duration-fast"
+                >
                     <option value="all">"Все фасеты"</option>
                     <option value="Manager">"Manager"</option>
                     <option value="Object">"Object"</option>
@@ -99,19 +108,20 @@ pub fn SearchBar(
                 </select>
             </div>
 
-            <div class="filter-group">
-                <label>
+            <div class="flex items-center gap-2">
+                <label class="flex items-center gap-2 cursor-pointer px-3 py-2 rounded hover:bg-bsl-brown-600/5 dark:hover:bg-bsl-gray-400/10 transition-colors duration-fast">
                     <input
                         type="checkbox"
                         on:change=handle_flow_sensitive_change
+                        class="cursor-pointer"
                     />
-                    " Flow-Sensitive только"
+                    <span class="text-sm text-bsl-slate-900 dark:text-bsl-gray-200">" Flow-Sensitive только"</span>
                 </label>
             </div>
 
-            <div class="filter-group">
+            <div class="flex items-end">
                 <button
-                    class="filter-reset-btn"
+                    class="px-4 py-2 text-sm font-medium text-bsl-cream-50 bg-bsl-teal-500 hover:bg-bsl-teal-600 active:bg-bsl-teal-700 rounded transition-colors duration-fast focus:outline-none focus:ring-2 focus:ring-bsl-teal-500/40"
                     on:click=move |_| {
                         filters.set(TypeFilters::default());
                         if let Some(input) = search_input_ref.get() {
@@ -159,14 +169,20 @@ pub fn SimpleSearchBar(
     };
 
     view! {
-        <div class="search-bar">
-            <input
-                type="text"
-                placeholder=placeholder_text
-                node_ref=search_input_ref
-                value=move || search_value.get()
-                on:input=handle_input
-            />
+        <div class="relative w-full max-w-2xl mx-auto">
+            <div class="relative">
+                <input
+                    type="text"
+                    placeholder=placeholder_text
+                    node_ref=search_input_ref
+                    value=move || search_value.get()
+                    on:input=handle_input
+                    class="w-full px-3 py-2 pl-10 text-base text-bsl-slate-900 dark:text-bsl-gray-200 bg-bsl-cream-100 dark:bg-bsl-charcoal-700 border border-bsl-brown-600/20 dark:border-bsl-gray-400/30 rounded focus:border-bsl-teal-500 focus:outline-none focus:ring-2 focus:ring-bsl-teal-500/20 transition-colors duration-fast placeholder:text-bsl-slate-500/50 dark:placeholder:text-bsl-gray-300/50"
+                />
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-bsl-slate-500/70 dark:text-bsl-gray-300/70">
+                    "🔍"
+                </span>
+            </div>
         </div>
     }
 }
@@ -203,14 +219,19 @@ pub fn HeaderSearchBar(
     };
 
     view! {
-        <input
-            type="text"
-            placeholder="Поиск типов..."
-            node_ref=input_ref
-            value=move || search_query.get()
-            on:input=handle_input
-            on:keydown=handle_keydown
-            class="form-control"
-        />
+        <div class="relative w-full">
+            <input
+                type="text"
+                placeholder="Поиск типов..."
+                node_ref=input_ref
+                value=move || search_query.get()
+                on:input=handle_input
+                on:keydown=handle_keydown
+                class="w-full px-3 py-2 pl-10 text-base text-bsl-slate-900 dark:text-bsl-gray-200 bg-bsl-cream-100 dark:bg-bsl-charcoal-700 border border-bsl-brown-600/20 dark:border-bsl-gray-400/30 rounded focus:border-bsl-teal-500 focus:outline-none focus:ring-2 focus:ring-bsl-teal-500/20 transition-colors duration-fast placeholder:text-bsl-slate-500/50 dark:placeholder:text-bsl-gray-300/50"
+            />
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-bsl-slate-500/70 dark:text-bsl-gray-300/70">
+                "🔍"
+            </span>
+        </div>
     }
 }

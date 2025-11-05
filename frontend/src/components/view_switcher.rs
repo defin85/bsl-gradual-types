@@ -82,17 +82,16 @@ pub fn ViewSwitcher(
     let handle_view_change = std::rc::Rc::new(handle_view_change);
 
     view! {
-        <div class="view-switcher">
+        <div class="flex gap-2 bg-bsl-brown-600/8 dark:bg-bsl-gray-400/10 rounded-lg p-1">
             {views.into_iter().map(|view| {
-                let view_clone = view.clone();
                 let view_clone2 = view.clone();
                 let view_clone3 = view.clone();
-                let _is_active = move || current_view.get() == view_clone;
                 let button_class = move || {
+                    let base = "flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition-colors duration-fast";
                     if current_view.get() == view_clone2 {
-                        "view-btn active"
+                        format!("{} bg-bsl-cream-100 dark:bg-bsl-charcoal-700 text-bsl-teal-500 shadow-sm", base)
                     } else {
-                        "view-btn"
+                        format!("{} text-bsl-slate-900 dark:text-bsl-gray-200 hover:bg-bsl-cream-100/50 dark:hover:bg-bsl-charcoal-700/50", base)
                     }
                 };
                 let handler = handle_view_change.clone();
@@ -103,10 +102,10 @@ pub fn ViewSwitcher(
                         on:click=move |_| handler(view_clone3.clone())
                         title=view.description()
                     >
-                        <span class="view-icon">{view.icon()}</span>
+                        <span class="text-lg">{view.icon()}</span>
                         {if !compact {
                             view! {
-                                <span class="view-label">{view.display_name()}</span>
+                                <span>{view.display_name()}</span>
                             }.into_any()
                         } else {
                             let _: () = view! {};
@@ -145,19 +144,22 @@ pub fn ExtendedViewSwitcher(
     };
 
     view! {
-        <div class="extended-view-switcher">
-            <h3>"Выберите представление"</h3>
-            <div class="view-options">
+        <div class="p-6">
+            <h3 class="text-lg font-semibold mb-4 text-bsl-slate-900 dark:text-bsl-gray-200">
+                "Выберите представление"
+            </h3>
+            <div class="grid grid-cols-2 gap-3">
                 {views.into_iter().map(|view| {
                     let view_clone = view.clone();
                 let view_clone2 = view.clone();
                 let view_clone3 = view.clone();
                 let view_clone4 = view.clone();
                 let card_class = move || {
+                    let base = "p-4 rounded-lg border cursor-pointer transition-all duration-fast";
                     if current_view.get() == view_clone {
-                        "view-option-card active"
+                        format!("{} border-bsl-teal-500 bg-bsl-teal-500/10 dark:bg-bsl-teal-500/20", base)
                     } else {
-                        "view-option-card"
+                        format!("{} border-bsl-brown-600/20 dark:border-bsl-gray-400/30 hover:border-bsl-teal-500/50", base)
                     }
                 };
                 let handler = handle_view_change.clone();
@@ -167,12 +169,14 @@ pub fn ExtendedViewSwitcher(
                         class=card_class
                         on:click=move |_| handler(view_clone2.clone())
                     >
-                        <div class="view-option-icon">{view_clone3.icon()}</div>
-                        <div class="view-option-title">{view_clone3.display_name()}</div>
-                        <div class="view-option-description">{view_clone3.description()}</div>
+                        <div class="text-2xl mb-2">{view_clone3.icon()}</div>
+                        <div class="font-medium text-bsl-slate-900 dark:text-bsl-gray-200">{view_clone3.display_name()}</div>
+                        <div class="text-xs text-bsl-slate-500/70 dark:text-bsl-gray-300/70 mt-1">{view_clone3.description()}</div>
                         {if current_view.get() == view_clone4 {
                             view! {
-                                <div class="view-option-badge">"Активно"</div>
+                                <div class="mt-2 inline-block px-2 py-0.5 bg-bsl-teal-500 text-white text-xs rounded">
+                                    "Активно"
+                                </div>
                             }.into_any()
                         } else {
                             let _: () = view! {};
@@ -205,7 +209,7 @@ pub fn ViewTabs(
     ];
 
     view! {
-        <div class="view-tabs">
+        <div class="flex border-b border-bsl-brown-600/20 dark:border-bsl-gray-400/30">
             {views.into_iter().map(|view| {
                 let view_for_click = view.clone();
                 let view_for_class = view.clone();
@@ -214,10 +218,11 @@ pub fn ViewTabs(
                 let on_view_change_clone = on_view_change.clone();
 
                 let tab_class = move || {
+                    let base = "flex items-center gap-2 px-4 py-2 font-medium text-sm transition-colors duration-fast";
                     if current_view.get() == view_for_class {
-                        "view-tab active"
+                        format!("{} text-bsl-teal-500 border-b-2 border-bsl-teal-500", base)
                     } else {
-                        "view-tab"
+                        format!("{} text-bsl-slate-500/70 dark:text-bsl-gray-300/70 hover:text-bsl-slate-900 dark:hover:text-bsl-gray-200", base)
                     }
                 };
 
@@ -231,8 +236,8 @@ pub fn ViewTabs(
                             }
                         }
                     >
-                        <span class="tab-icon">{view_for_icon.icon()}</span>
-                        <span class="tab-label">{view_for_label.display_name()}</span>
+                        <span>{view_for_icon.icon()}</span>
+                        <span>{view_for_label.display_name()}</span>
                     </button>
                 }
             }).collect::<Vec<_>>()}
@@ -258,20 +263,30 @@ pub fn ViewDropdown(
     };
 
     view! {
-        <div class="view-dropdown">
-            <button class="dropdown-trigger" on:click=toggle_dropdown>
-                <span class="current-view-icon">{move || current_view.get().icon()}</span>
-                <span class="current-view-label">{move || current_view.get().display_name()}</span>
-                <span class="dropdown-arrow">{move || if is_open.get() { "▲" } else { "▼" }}</span>
+        <div class="relative inline-block">
+            <button
+                class="flex items-center gap-2 px-4 py-2 bg-bsl-cream-100 dark:bg-bsl-charcoal-700 border border-bsl-brown-600/20 dark:border-bsl-gray-400/30 rounded hover:bg-bsl-cream-50 dark:hover:bg-bsl-charcoal-600 transition-colors"
+                on:click=toggle_dropdown
+            >
+                <span>{move || current_view.get().icon()}</span>
+                <span>{move || current_view.get().display_name()}</span>
+                <span>{move || if is_open.get() { "▲" } else { "▼" }}</span>
             </button>
 
             {move || {
                 let on_view_change_clone: Option<std::sync::Arc<dyn Fn(ViewType) + Send + Sync>> = on_view_change.as_ref().map(|arc| arc.clone());
                 if is_open.get() {
                     view! {
-                        <div class="dropdown-menu">
+                        <div class="absolute right-0 mt-2 w-64 bg-bsl-cream-100 dark:bg-bsl-charcoal-700 border border-bsl-brown-600/20 dark:border-bsl-gray-400/30 rounded-lg shadow-lg z-10">
                             <button
-                                class=move || if current_view.get() == ViewType::Dashboard { "dropdown-item current" } else { "dropdown-item" }
+                                class=move || {
+                                    let base = "flex items-center gap-3 w-full text-left px-4 py-3 transition-colors duration-fast";
+                                    if current_view.get() == ViewType::Dashboard {
+                                        format!("{} bg-bsl-teal-500/10 dark:bg-bsl-teal-500/20 text-bsl-teal-500", base)
+                                    } else {
+                                        format!("{} hover:bg-bsl-brown-600/8 dark:hover:bg-bsl-gray-400/10", base)
+                                    }
+                                }
                                 on:click={
                                     let handler_clone = on_view_change_clone.clone();
                                     move |_| {
@@ -283,13 +298,13 @@ pub fn ViewDropdown(
                                     }
                                 }
                             >
-                                <span class="item-icon">{ViewType::Dashboard.icon()}</span>
-                                <div class="item-content">
-                                    <div class="item-title">{ViewType::Dashboard.display_name()}</div>
-                                    <div class="item-description">{ViewType::Dashboard.description()}</div>
+                                <span class="text-xl">{ViewType::Dashboard.icon()}</span>
+                                <div class="flex-1">
+                                    <div class="font-medium text-bsl-slate-900 dark:text-bsl-gray-200">{ViewType::Dashboard.display_name()}</div>
+                                    <div class="text-xs text-bsl-slate-500/70 dark:text-bsl-gray-300/70">{ViewType::Dashboard.description()}</div>
                                 </div>
                                 {move || if current_view.get() == ViewType::Dashboard {
-                                    view! { <span class="item-check">"✓"</span> }.into_any()
+                                    view! { <span class="text-bsl-teal-500">"✓"</span> }.into_any()
                                 } else {
                                     let _: () = view! {};
                                     ().into_any()
@@ -297,7 +312,14 @@ pub fn ViewDropdown(
                             </button>
 
                             <button
-                                class=move || if current_view.get() == ViewType::Cards { "dropdown-item current" } else { "dropdown-item" }
+                                class=move || {
+                                    let base = "flex items-center gap-3 w-full text-left px-4 py-3 transition-colors duration-fast";
+                                    if current_view.get() == ViewType::Cards {
+                                        format!("{} bg-bsl-teal-500/10 dark:bg-bsl-teal-500/20 text-bsl-teal-500", base)
+                                    } else {
+                                        format!("{} hover:bg-bsl-brown-600/8 dark:hover:bg-bsl-gray-400/10", base)
+                                    }
+                                }
                                 on:click={
                                     let handler_clone = on_view_change_clone.clone();
                                     move |_| {
@@ -309,13 +331,13 @@ pub fn ViewDropdown(
                                     }
                                 }
                             >
-                                <span class="item-icon">{ViewType::Cards.icon()}</span>
-                                <div class="item-content">
-                                    <div class="item-title">{ViewType::Cards.display_name()}</div>
-                                    <div class="item-description">{ViewType::Cards.description()}</div>
+                                <span class="text-xl">{ViewType::Cards.icon()}</span>
+                                <div class="flex-1">
+                                    <div class="font-medium text-bsl-slate-900 dark:text-bsl-gray-200">{ViewType::Cards.display_name()}</div>
+                                    <div class="text-xs text-bsl-slate-500/70 dark:text-bsl-gray-300/70">{ViewType::Cards.description()}</div>
                                 </div>
                                 {move || if current_view.get() == ViewType::Cards {
-                                    view! { <span class="item-check">"✓"</span> }.into_any()
+                                    view! { <span class="text-bsl-teal-500">"✓"</span> }.into_any()
                                 } else {
                                     let _: () = view! {};
                                     ().into_any()
@@ -323,7 +345,14 @@ pub fn ViewDropdown(
                             </button>
 
                             <button
-                                class=move || if current_view.get() == ViewType::Table { "dropdown-item current" } else { "dropdown-item" }
+                                class=move || {
+                                    let base = "flex items-center gap-3 w-full text-left px-4 py-3 transition-colors duration-fast";
+                                    if current_view.get() == ViewType::Table {
+                                        format!("{} bg-bsl-teal-500/10 dark:bg-bsl-teal-500/20 text-bsl-teal-500", base)
+                                    } else {
+                                        format!("{} hover:bg-bsl-brown-600/8 dark:hover:bg-bsl-gray-400/10", base)
+                                    }
+                                }
                                 on:click={
                                     let handler_clone = on_view_change_clone.clone();
                                     move |_| {
@@ -335,13 +364,13 @@ pub fn ViewDropdown(
                                     }
                                 }
                             >
-                                <span class="item-icon">{ViewType::Table.icon()}</span>
-                                <div class="item-content">
-                                    <div class="item-title">{ViewType::Table.display_name()}</div>
-                                    <div class="item-description">{ViewType::Table.description()}</div>
+                                <span class="text-xl">{ViewType::Table.icon()}</span>
+                                <div class="flex-1">
+                                    <div class="font-medium text-bsl-slate-900 dark:text-bsl-gray-200">{ViewType::Table.display_name()}</div>
+                                    <div class="text-xs text-bsl-slate-500/70 dark:text-bsl-gray-300/70">{ViewType::Table.description()}</div>
                                 </div>
                                 {move || if current_view.get() == ViewType::Table {
-                                    view! { <span class="item-check">"✓"</span> }.into_any()
+                                    view! { <span class="text-bsl-teal-500">"✓"</span> }.into_any()
                                 } else {
                                     let _: () = view! {};
                                     ().into_any()
@@ -349,7 +378,14 @@ pub fn ViewDropdown(
                             </button>
 
                             <button
-                                class=move || if current_view.get() == ViewType::Graph { "dropdown-item current" } else { "dropdown-item" }
+                                class=move || {
+                                    let base = "flex items-center gap-3 w-full text-left px-4 py-3 transition-colors duration-fast";
+                                    if current_view.get() == ViewType::Graph {
+                                        format!("{} bg-bsl-teal-500/10 dark:bg-bsl-teal-500/20 text-bsl-teal-500", base)
+                                    } else {
+                                        format!("{} hover:bg-bsl-brown-600/8 dark:hover:bg-bsl-gray-400/10", base)
+                                    }
+                                }
                                 on:click={
                                     let handler_clone = on_view_change_clone.clone();
                                     move |_| {
@@ -361,13 +397,13 @@ pub fn ViewDropdown(
                                     }
                                 }
                             >
-                                <span class="item-icon">{ViewType::Graph.icon()}</span>
-                                <div class="item-content">
-                                    <div class="item-title">{ViewType::Graph.display_name()}</div>
-                                    <div class="item-description">{ViewType::Graph.description()}</div>
+                                <span class="text-xl">{ViewType::Graph.icon()}</span>
+                                <div class="flex-1">
+                                    <div class="font-medium text-bsl-slate-900 dark:text-bsl-gray-200">{ViewType::Graph.display_name()}</div>
+                                    <div class="text-xs text-bsl-slate-500/70 dark:text-bsl-gray-300/70">{ViewType::Graph.description()}</div>
                                 </div>
                                 {move || if current_view.get() == ViewType::Graph {
-                                    view! { <span class="item-check">"✓"</span> }.into_any()
+                                    view! { <span class="text-bsl-teal-500">"✓"</span> }.into_any()
                                 } else {
                                     let _: () = view! {};
                                     ().into_any()

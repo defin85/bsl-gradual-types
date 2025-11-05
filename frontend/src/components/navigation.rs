@@ -12,10 +12,10 @@ pub fn Navigation(
     current_view: RwSignal<ViewType>,
 ) -> impl IntoView {
     view! {
-        <nav class="main-nav">
-            <div class="nav-brand">
-                <h1>"BSL Gradual Type System"</h1>
-                <div class="nav-subtitle">
+        <nav class="bg-bsl-cream-100 dark:bg-bsl-charcoal-800 border-b border-bsl-brown-600/20 dark:border-bsl-gray-400/30 px-6 py-4 flex items-center justify-between">
+            <div class="flex flex-col gap-1">
+                <h1 class="text-2xl font-bold text-bsl-slate-900 dark:text-bsl-gray-200">"BSL Gradual Type System"</h1>
+                <div class="text-sm text-bsl-slate-500/70 dark:text-bsl-gray-300/70">
                     {move || {
                         match current_view.get() {
                             ViewType::Dashboard => "Executive Dashboard - Обзор метрик системы",
@@ -26,14 +26,14 @@ pub fn Navigation(
                     }}
                 </div>
             </div>
-            <div class="nav-info">
-                <div class="current-view-indicator">
-                    <span class="view-icon">{move || current_view.get().icon()}</span>
-                    <span class="view-name">{move || current_view.get().display_name()}</span>
+            <div class="flex items-center gap-6">
+                <div class="flex items-center gap-2">
+                    <span class="text-lg">{move || current_view.get().icon()}</span>
+                    <span class="text-sm font-medium text-bsl-slate-900 dark:text-bsl-gray-200">{move || current_view.get().display_name()}</span>
                 </div>
-                <div class="nav-status">
-                    <span class="status-indicator online">"●"</span>
-                    <span class="status-text">"Online"</span>
+                <div class="flex items-center gap-1">
+                    <span class="text-bsl-teal-500 text-xs">"●"</span>
+                    <span class="text-xs text-bsl-slate-500/70 dark:text-bsl-gray-300/70">"Online"</span>
                 </div>
             </div>
         </nav>

@@ -15,20 +15,22 @@ pub fn Pagination(
     view! {
         {move || {
             if let Some(info) = pagination.get() {
+                let start = info.current_page * info.page_size - info.page_size + 1;
+                let end = std::cmp::min(info.current_page * info.page_size, info.total_items);
+                let total = info.total_items;
+
                 view! {
-                    <div class="pagination">
-                        <div class="pagination__info">
-                            <span class="pagination__text">
-                                "Показано " {info.current_page * info.page_size - info.page_size + 1}
-                                "-" {std::cmp::min(info.current_page * info.page_size, info.total_items)}
-                                " из " {info.total_items} " типов"
-                            </span>
+                    <div class="flex flex-col sm:flex-row items-center justify-between gap-4 py-3 px-4 bg-bsl-cream-50 dark:bg-bsl-charcoal-800 border-t border-bsl-brown-600/20 dark:border-bsl-gray-400/30">
+                        // Info
+                        <div class="text-sm text-bsl-slate-500/70 dark:text-bsl-gray-300/70">
+                            "Показано " {start} "-" {end} " из " {total} " типов"
                         </div>
 
-                        <div class="pagination__controls">
+                        // Controls
+                        <div class="flex items-center gap-1">
                             // Первая страница
                             <button
-                                class="pagination__btn pagination__btn--first"
+                                class="px-2 py-1 text-sm rounded hover:bg-bsl-brown-600/8 dark:hover:bg-bsl-gray-400/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-fast"
                                 disabled=!info.has_prev
                                 on:click=move |_| on_page_change.run(1)
                                 title="Первая страница"
@@ -38,7 +40,7 @@ pub fn Pagination(
 
                             // Предыдущая страница
                             <button
-                                class="pagination__btn pagination__btn--prev"
+                                class="px-2 py-1 text-sm rounded hover:bg-bsl-brown-600/8 dark:hover:bg-bsl-gray-400/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-fast"
                                 disabled=!info.has_prev
                                 on:click=move |_| on_page_change.run(info.current_page - 1)
                                 title="Предыдущая страница"
@@ -47,17 +49,21 @@ pub fn Pagination(
                             </button>
 
                             // Номера страниц
-                            <div class="pagination__pages">
+                            <div class="flex items-center gap-1 mx-2">
                                 {get_page_numbers(info.current_page, info.total_pages).into_iter().map(|page_item| {
                                     match page_item {
                                         PageItem::Page(page) => {
                                             let is_current = page == info.current_page;
                                             view! {
                                                 <button
-                                                    class=format!(
-                                                        "pagination__btn pagination__btn--page {}",
-                                                        if is_current { "pagination__btn--current" } else { "" }
-                                                    )
+                                                    class=move || {
+                                                        let base = "min-w-[32px] px-2 py-1 text-sm rounded transition-colors duration-fast";
+                                                        if is_current {
+                                                            format!("{} bg-bsl-teal-500 text-white font-medium", base)
+                                                        } else {
+                                                            format!("{} hover:bg-bsl-brown-600/8 dark:hover:bg-bsl-gray-400/10 text-bsl-slate-900 dark:text-bsl-gray-200", base)
+                                                        }
+                                                    }
                                                     disabled=is_current
                                                     on:click=move |_| on_page_change.run(page)
                                                 >
@@ -67,7 +73,9 @@ pub fn Pagination(
                                         },
                                         PageItem::Ellipsis => {
                                             view! {
-                                                <span class="pagination__ellipsis">"..."</span>
+                                                <span class="px-2 text-bsl-slate-500/50 dark:text-bsl-gray-300/50">
+                                                    "..."
+                                                </span>
                                             }.into_any()
                                         }
                                     }
@@ -76,7 +84,7 @@ pub fn Pagination(
 
                             // Следующая страница
                             <button
-                                class="pagination__btn pagination__btn--next"
+                                class="px-2 py-1 text-sm rounded hover:bg-bsl-brown-600/8 dark:hover:bg-bsl-gray-400/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-fast"
                                 disabled=!info.has_next
                                 on:click=move |_| on_page_change.run(info.current_page + 1)
                                 title="Следующая страница"
@@ -86,7 +94,7 @@ pub fn Pagination(
 
                             // Последняя страница
                             <button
-                                class="pagination__btn pagination__btn--last"
+                                class="px-2 py-1 text-sm rounded hover:bg-bsl-brown-600/8 dark:hover:bg-bsl-gray-400/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-fast"
                                 disabled=!info.has_next
                                 on:click=move |_| on_page_change.run(info.total_pages)
                                 title="Последняя страница"
@@ -95,13 +103,14 @@ pub fn Pagination(
                             </button>
                         </div>
 
-                        <div class="pagination__page-size">
-                            <label for="page-size-select" class="pagination__label">
+                        // Page size selector
+                        <div class="flex items-center gap-2">
+                            <label for="page-size-select" class="text-sm text-bsl-slate-500/70 dark:text-bsl-gray-300/70">
                                 "Показывать по:"
                             </label>
                             <select
                                 id="page-size-select"
-                                class="pagination__select"
+                                class="px-2 py-1 text-sm bg-bsl-cream-100 dark:bg-bsl-charcoal-700 border border-bsl-brown-600/20 dark:border-bsl-gray-400/30 rounded focus:border-bsl-teal-500 focus:ring-2 focus:ring-bsl-teal-500/20"
                                 on:change=move |ev| {
                                     let value = event_target_value(&ev);
                                     if let Ok(_page_size) = value.parse::<usize>() {

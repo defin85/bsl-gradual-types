@@ -222,19 +222,52 @@ impl HtmlExtractor {
     }
 
     pub fn extract_return_info(&self, document: &Html) -> (Option<String>, Option<String>) {
-        // Ищем информацию о возвращаемом значении
-        if let Ok(selector) = Selector::parse("div.V8SH_return, div.return") {
-            if let Some(return_div) = document.select(&selector).next() {
-                let text = return_div.text().collect::<String>();
-                // Разделяем тип и описание
-                if let Some(colon) = text.find(':') {
-                    let return_type = text[..colon].trim().to_string();
-                    let return_desc = text[colon + 1..].trim().to_string();
-                    return (Some(return_type), Some(return_desc));
-                }
-                return (Some(text.trim().to_string()), None);
-            }
+        use regex::Regex;
+
+        let html_text = document.html();
+
+        // Проверяем наличие раздела "Возвращаемое значение:"
+        if !html_text.contains("Возвращаемое значение:") && !html_text.contains("Return value:") {
+            return (None, None);
         }
+
+        // Парсер возвращаемого типа - ищет паттерн:
+        // <p class="V8SH_chapter">Возвращаемое значение:</p>
+        // Тип: <a href="...">ТИП</a>. <br>
+        // Описание возвращаемого значения.
+        //
+        // ВАЖНО: Используем greedy режим [^<]+ чтобы захватить весь тип до <
+        let return_regex = match Regex::new(
+            r#"Возвращаемое значение:[\s\S]{0,200}?Тип:\s*(?:<a[^>]*>)?([^<]+)(?:</a>)?\.?\s*<br>\s*([^<]*)"#
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                debug!("❌ Ошибка компиляции regex для возвращаемого типа: {}", e);
+                return (None, None);
+            }
+        };
+
+        if let Some(cap) = return_regex.captures(&html_text) {
+            let mut return_type = cap.get(1)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
+
+            // Убираем точку в конце если есть
+            if return_type.ends_with('.') {
+                return_type.pop();
+            }
+            return_type = return_type.trim().to_string();
+
+            let return_desc = cap.get(2)
+                .map(|m| m.as_str().trim().to_string())
+                .filter(|s| !s.is_empty());
+
+            debug!("✓ Извлечён возвращаемый тип: {} {:?}", return_type, return_desc);
+
+            return (Some(return_type), return_desc);
+        }
+
+        debug!("⚠️  Не удалось извлечь возвращаемый тип из HTML");
         (None, None)
     }
 
@@ -754,5 +787,50 @@ mod tests {
 
         let (ru, _) = extractor.parse_bilingual_name("Метод без английского");
         assert_eq!(ru, "Метод без английского");
+    }
+
+    #[test]
+    fn test_extract_return_info_from_value_table_insert() {
+        // Реальная HTML структура из ValueTable.Insert
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Возвращаемое значение:</p>
+            Тип: <a href="v8help://SyntaxHelperContext/objects/catalog234/catalog236/ValueTableRow.html">СтрокаТаблицыЗначений</a>. <br>
+            Вставленная строка.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let (return_type, return_desc) = extractor.extract_return_info(&document);
+
+        assert_eq!(
+            return_type,
+            Some("СтрокаТаблицыЗначений".to_string()),
+            "Возвращаемый тип должен быть СтрокаТаблицыЗначений"
+        );
+        assert_eq!(
+            return_desc,
+            Some("Вставленная строка.".to_string()),
+            "Описание должно быть 'Вставленная строка.'"
+        );
+    }
+
+    #[test]
+    fn test_extract_return_info_no_return_section() {
+        // HTML без раздела "Возвращаемое значение:"
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Параметры:</p>
+            <p>Метод без возвращаемого значения</p>
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let (return_type, return_desc) = extractor.extract_return_info(&document);
+
+        assert_eq!(return_type, None, "Не должно быть возвращаемого типа");
+        assert_eq!(return_desc, None, "Не должно быть описания");
     }
 }

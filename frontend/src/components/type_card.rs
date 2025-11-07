@@ -2,7 +2,6 @@
 
 use crate::api::*;
 use leptos::prelude::*;
-use leptos::For;
 
 /// Helper function for type card classes based on category
 fn type_card_classes(category: &str) -> String {
@@ -76,7 +75,7 @@ pub fn TypeCard(
         type_card_classes(&info.category)
     };
 
-    let certainty_badge_class = move || {
+    let _certainty_badge_class = move || {
         let info = type_info.get();
         certainty_badge_classes(info.certainty)
     };
@@ -131,8 +130,8 @@ pub fn TypeCard(
 
                     <div class={section_container_classes("facets")}>
                         <strong class="text-gray-900 dark:text-white">"Доступные фасеты:"</strong><br/>
-                        {info.facets.into_iter().map(|facet| {
-                            let facet_class = facet_tag_classes(&facet);
+                        {info.facets.iter().map(|facet| {
+                            let facet_class = facet_tag_classes(facet);
                             view! {
                                 <span class=facet_class>
                                     {facet.clone()}

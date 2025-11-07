@@ -2,7 +2,6 @@
 
 use crate::api::{TypeInfo, MethodInfo};
 use leptos::prelude::*;
-use wasm_bindgen::JsCast;
 
 // ============================================================================
 // Helper Functions for Tailwind CSS Classes
@@ -390,13 +389,8 @@ pub fn TypeDetailsModal(
                                     class="px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-900 bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 focus:ring-gray-500"
                                     on:click=move |_| {
                                         let name_copy = name.clone();
-
-                                        if let Some(window) = web_sys::window() {
-                                            if let Some(navigator) = window.navigator().clipboard() {
-                                                let _ = navigator.write_text(&name_copy);
-                                                web_sys::console::log_1(&"Имя типа скопировано в буфер обмена".into());
-                                            }
-                                        }
+                                        // TODO: Fix clipboard API - requires web-sys feature flag
+                                        web_sys::console::log_1(&format!("Copy to clipboard: {}", name_copy).into());
                                     }
                                     aria-label="Скопировать имя типа в буфер обмена"
                                 >

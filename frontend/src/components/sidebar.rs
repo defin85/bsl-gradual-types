@@ -83,8 +83,7 @@ pub fn Sidebar(
     view! {
         <aside
             class=move || format!(
-                "bg-bsl-cream-100 dark:bg-bsl-charcoal-900 border border-bsl-teal-200 dark:border-gray-700 rounded-lg p-6 h-fit sticky transition-all duration-300 {} {}",
-                "top-[calc(1.5rem+80px)]",
+                "bg-bsl-cream-100 dark:bg-bsl-charcoal-800 border border-bsl-brown-600/20 dark:border-bsl-gray-400/20 rounded-lg p-6 h-fit transition-all duration-300 {}",
                 if sidebar_open.get() { "w-72" } else { "w-0 overflow-hidden p-0" }
             )
             aria-expanded=move || if sidebar_open.get() { "true" } else { "false" }

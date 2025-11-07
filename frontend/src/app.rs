@@ -81,10 +81,10 @@ pub fn App() -> impl IntoView {
     };
 
     view! {
-        <div class="app">
-            // Header with navigation
-            <header class="header">
-                <div class="container">
+        <div class="min-h-screen flex flex-col bg-bsl-cream-50 dark:bg-bsl-charcoal-700">
+            // Header with navigation (sticky at top)
+            <header class="sticky top-0 z-50 bg-gradient-to-r from-bsl-cream-100 to-bsl-bg-1 dark:from-bsl-charcoal-800 dark:to-bsl-bg-1 border-b border-bsl-brown-600/20 dark:border-bsl-gray-400/30 shadow-sm">
+                <div class="container max-w-[1280px] mx-auto px-6">
                     <div class="header__content">
                         <h1 class="header__title">"Система типизации BSL"</h1>
                         <nav class="mode-tabs">
@@ -129,10 +129,10 @@ pub fn App() -> impl IntoView {
                 </div>
             </header>
 
-            // Main content
-            <main class="main">
-                <div class="container">
-                    <div class="layout">
+            // Main content (scrollable)
+            <main class="flex-1 overflow-auto">
+                <div class="container max-w-[1280px] mx-auto px-6">
+                    <div class="grid grid-cols-[280px_1fr] gap-6 py-6">
                         // Sidebar with filters
                         <Sidebar
                             filters=filters

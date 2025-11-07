@@ -10,7 +10,7 @@ pub mod api;
 pub mod app;
 pub mod components;
 pub mod config;
-pub mod pages;
+// pub mod pages; // Legacy - removed
 pub mod utils;
 
 // Re-export main app component

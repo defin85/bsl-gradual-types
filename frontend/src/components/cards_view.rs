@@ -83,13 +83,13 @@ pub fn CardsView(
                         view! {
                             <div
                                 class=move || {
-                                    let base = "bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-5 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all cursor-pointer relative overflow-hidden";
+                                    let base = "bg-bsl-cream-100 dark:bg-bsl-charcoal-800 border border-bsl-brown-600/12 dark:border-bsl-gray-400/20 rounded-lg p-5 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all cursor-pointer relative overflow-hidden";
                                     let category_border = match category.as_str() {
-                                        "Platform" => "border-t-4 border-t-bsl-teal-500 dark:border-t-bsl-teal-400",
-                                        "Configuration" => "border-t-4 border-t-amber-500 dark:border-t-amber-400",
-                                        "Union" => "border-t-4 border-t-blue-500 dark:border-t-blue-400",
-                                        "Dynamic" => "border-t-4 border-t-purple-500 dark:border-t-purple-400",
-                                        _ => "border-t-4 border-t-gray-500 dark:border-t-gray-400"
+                                        "Platform" => "border-t-4 border-t-[#3498db]", // Blue
+                                        "Configuration" => "border-t-4 border-t-[#e74c3c]", // Red
+                                        "Union" => "border-t-4 border-t-[#9b59b6]", // Purple
+                                        "Dynamic" => "border-t-4 border-t-[#f39c12]", // Orange
+                                        _ => "border-t-4 border-t-bsl-gray-400"
                                     };
                                     format!("{} {}", base, category_border)
                                 }
@@ -99,51 +99,99 @@ pub fn CardsView(
                                     move |_| handle_card_click(type_info.clone())
                                 }
                             >
-                                // Card header
-                                <div class="flex items-start justify-between mb-3">
-                                    <h3 class="text-lg font-bold text-gray-900 dark:text-white truncate flex-1">{type_info.name.clone()}</h3>
-                                    <span class="text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-2 py-1 rounded ml-2 whitespace-nowrap">
+                                // Card header (allow 2 lines for long names + tooltip)
+                                <div class="flex items-start justify-between mb-3 gap-2">
+                                    <h3
+                                        class="text-base font-bold text-bsl-slate-900 dark:text-bsl-gray-200 line-clamp-2 flex-1 leading-tight cursor-help"
+                                        title={type_info.name.clone()}
+                                    >
+                                        {type_info.name.clone()}
+                                    </h3>
+                                    <span class="text-xs font-semibold bg-bsl-brown-600/8 dark:bg-bsl-gray-400/10 text-bsl-slate-900 dark:text-bsl-gray-300 px-2 py-1 rounded whitespace-nowrap shrink-0">
                                         {get_category_icon(&type_info.category)} " " {type_info.category.clone()}
                                     </span>
                                 </div>
 
-                                // Certainty indicator
+                                // Certainty indicator with gradient (red→yellow→green)
                                 <div class="mb-3">
                                     <div class="flex items-center gap-2">
-                                        <div class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-700 rounded overflow-hidden">
+                                        <div class="flex-1 h-1.5 bg-bsl-brown-600/12 dark:bg-bsl-gray-400/20 rounded-full overflow-hidden">
                                             <div
-                                                class="h-full bg-bsl-primary dark:bg-bsl-accent transition-all duration-300"
+                                                class="h-full bg-gradient-to-r from-bsl-red-500 via-bsl-orange-500 to-bsl-teal-500 rounded-full transition-all duration-300"
                                                 style=move || format!("width: {}%", certainty)
                                             ></div>
                                         </div>
-                                        <span class="text-xs font-medium text-gray-600 dark:text-gray-400">{type_info.certainty}"%"</span>
+                                        <span class="text-xs font-medium text-bsl-slate-900 dark:text-bsl-gray-300">{type_info.certainty}"%"</span>
                                     </div>
                                 </div>
 
-                                // Description
-                                <p class="text-sm text-gray-600 dark:text-gray-400 mb-3 line-clamp-2">{type_info.description.clone()}</p>
+                                // Description (3 lines for better readability + tooltip)
+                                <p
+                                    class="text-sm text-bsl-slate-500 dark:text-bsl-gray-400 mb-3 line-clamp-3 leading-relaxed cursor-help"
+                                    title={type_info.description.clone()}
+                                >
+                                    {type_info.description.clone()}
+                                </p>
 
-                                // Facets
+                                // Facets (neutral colors like in original)
                                 <div class="flex flex-wrap gap-1.5 mb-3">
                                     {type_info.facets.iter().map(|facet| {
                                         view! {
-                                            <span class="text-xs font-medium bg-bsl-teal-100 dark:bg-bsl-teal-900/30 text-bsl-teal-700 dark:text-bsl-teal-300 px-2 py-0.5 rounded">{facet.clone()}</span>
+                                            <span class="text-xs font-medium bg-bsl-bg-3 dark:bg-bsl-bg-3 text-bsl-slate-900 dark:text-bsl-gray-200 border border-bsl-brown-600/20 dark:border-bsl-gray-400/20 px-2 py-0.5 rounded">{facet.clone()}</span>
                                         }
                                     }).collect::<Vec<_>>()}
                                 </div>
 
+                                // Union Types section (for Union and Dynamic types)
+                                {if let Some(ref union_types) = type_info.union_types {
+                                    if !union_types.is_empty() {
+                                        view! {
+                                            <div class="mb-3">
+                                                <h4 class="text-xs font-semibold text-bsl-slate-900 dark:text-bsl-gray-200 mb-2">"Union типы:"</h4>
+                                                <div class="flex flex-col gap-1.5">
+                                                    {union_types.iter().map(|component| {
+                                                        let prob = component.probability;
+                                                        view! {
+                                                            <div class="flex items-center gap-2">
+                                                                <span class="text-xs text-bsl-slate-900 dark:text-bsl-gray-300 min-w-[80px]">{component.type_name.clone()}</span>
+                                                                <div class="flex-1 h-1 bg-bsl-brown-600/12 dark:bg-bsl-gray-400/20 rounded-full overflow-hidden">
+                                                                    <div
+                                                                        class="h-full bg-bsl-teal-500 dark:bg-bsl-teal-400 rounded-full"
+                                                                        style=move || format!("width: {}%", prob)
+                                                                    ></div>
+                                                                </div>
+                                                                <span class="text-xs font-medium text-bsl-slate-500 dark:text-bsl-gray-400">{prob}"%"</span>
+                                                            </div>
+                                                        }
+                                                    }).collect::<Vec<_>>()}
+                                                </div>
+                                            </div>
+                                        }.into_any()
+                                    } else {
+                                        let _: () = view! {};
+                                        ().into_any()
+                                    }
+                                } else {
+                                    let _: () = view! {};
+                                    ().into_any()
+                                }}
+
                                 // Flow-sensitive indicator and source
                                 <div class="flex items-center justify-between text-xs mb-3">
-                                    <span class="font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-2 py-1 rounded">{type_info.source.clone()}</span>
-                                    <span class=move || {
-                                        if type_info.flow_sensitive {
-                                            "font-medium text-blue-600 dark:text-blue-400"
-                                        } else {
-                                            "font-medium text-gray-500 dark:text-gray-500"
-                                        }
-                                    }>
-                                        {if type_info.flow_sensitive { "🔄 Flow-sensitive" } else { "📊 Static" }}
-                                    </span>
+                                    <span class="font-medium bg-bsl-brown-600/8 dark:bg-bsl-gray-400/10 text-bsl-slate-900 dark:text-bsl-gray-300 px-2 py-1 rounded">{type_info.source.clone()}</span>
+                                    {if type_info.flow_sensitive {
+                                        view! {
+                                            <span class="font-medium bg-[#3498db]/10 dark:bg-[#3498db]/20 text-[#3498db] dark:text-[#5dade2] px-2 py-1 rounded border border-[#3498db]/20">
+                                                "🔄 Flow-sensitive"
+                                            </span>
+                                        }.into_any()
+                                    } else {
+                                        view! {
+                                            <span class="font-medium text-bsl-slate-500 dark:text-bsl-gray-500">
+                                                "📊 Static"
+                                            </span>
+                                        }.into_any()
+                                    }}
                                 </div>
 
                                 // Actions

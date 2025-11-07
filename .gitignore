@@ -44,3 +44,5 @@ sourcebot/config.json.tmp.*
 
 examples/syntax_helper/rebuilt.shcntx_ru
 examples/syntax_helper/rebuilt.shlang_ru
+# Tools (downloadable utilities)
+tools/EmptyStandbyList.exe

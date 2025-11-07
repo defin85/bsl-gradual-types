@@ -91,19 +91,6 @@ cargo clippy --workspace --all-targets --all-features
 cargo fmt --check
 ```
 
-### 6. Backend бинарные сборки
-
-```bash
-# LSP Server
-cargo build -p bsl-backend --bin bsl-lsp-server
-
-# Web Server
-cargo build -p bsl-backend --bin bsl-web-server
-
-# CLI
-cargo build -p bsl-cli
-```
-
 ## 📊 Формат отчёта
 
 ```markdown
@@ -167,17 +154,6 @@ cargo build -p bsl-cli
 
 ---
 
-## ✅ Backend бинарные сборки
-
-**Команда:** `cargo build -p bsl-backend --bin bsl-lsp-server`
-
-**Результат:**
-- ✅ bsl-lsp-server: сборка успешна (12.3 MB)
-- ✅ bsl-web-server: сборка успешна (14.1 MB)
-- ✅ bsl-cli: сборка успешна (2.8 MB)
-
----
-
 ## 📊 Общий итог
 
 | Категория | Результат | Статус |
@@ -187,7 +163,6 @@ cargo build -p bsl-cli
 | VSCode Extension | 8/8 | ✅ |
 | Компиляция | Успешна | ✅ |
 | Clippy | 3 warning | ⚠️ |
-| Сборка бинарных файлов | Успешна | ✅ |
 
 **Общая оценка:** ✅ **Все тесты прошли успешно**
 
@@ -198,7 +173,7 @@ cargo build -p bsl-cli
 ---
 
 **Время выполнения:** 45 секунд
-**Следующая проверка:** После коммита изменений
+**Следующий шаг:** Сборка компонентов (`/build`)
 ```
 
 ## ❌ Обработка ошибок

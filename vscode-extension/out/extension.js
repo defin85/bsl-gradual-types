@@ -18205,6 +18205,12 @@ async function startLanguageClient(context) {
       const value = params.value;
       if (value.kind === "begin") {
         outputChannel4.appendLine(`\u{1F4CA} [Progress] BEGIN: ${value.title}`);
+        if (activeProgressResolve) {
+          outputChannel4.appendLine("\u{1F9F9} Clearing previous progress before starting new one");
+          activeProgressResolve();
+          activeProgressResolve = null;
+          activeProgressReporter = null;
+        }
         lastReportedPercentage = 0;
         vscode4.window.withProgress({
           location: vscode4.ProgressLocation.Window,

@@ -39,6 +39,9 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 english_name: "Add".to_string(),
                 return_type: "T".to_string(), // ← Generic!
                 params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 2. Вставить(индекс: Число) - вставляет строку в указанную позицию
             RawMethodData {
@@ -49,7 +52,11 @@ pub fn create_tabular_section_type() -> RawTypeData {
                     name: "Индекс".to_string(),
                     param_type: "Число".to_string(),
                     is_optional: false,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 3. Получить(индекс: Число): T - возвращает строку по индексу
             RawMethodData {
@@ -60,7 +67,11 @@ pub fn create_tabular_section_type() -> RawTypeData {
                     name: "Индекс".to_string(),
                     param_type: "Число".to_string(),
                     is_optional: false,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 4. Удалить(индекс: Число) - удаляет строку по индексу
             RawMethodData {
@@ -71,7 +82,11 @@ pub fn create_tabular_section_type() -> RawTypeData {
                     name: "Индекс".to_string(),
                     param_type: "Число".to_string(),
                     is_optional: false,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 5. Количество(): Число - возвращает количество строк
             RawMethodData {
@@ -79,6 +94,9 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 english_name: "Count".to_string(),
                 return_type: "Число".to_string(),
                 params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 6. Очистить() - удаляет все строки
             RawMethodData {
@@ -86,6 +104,9 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 english_name: "Clear".to_string(),
                 return_type: "Неопределено".to_string(),
                 params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 7. Индекс(строка: T): Число - возвращает индекс строки
             RawMethodData {
@@ -96,7 +117,11 @@ pub fn create_tabular_section_type() -> RawTypeData {
                     name: "Строка".to_string(),
                     param_type: "T".to_string(), // ← Generic!
                     is_optional: false,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 8. Найти(значение: Произвольный, имяКолонки: Строка): T
             RawMethodData {
@@ -108,13 +133,18 @@ pub fn create_tabular_section_type() -> RawTypeData {
                         name: "Значение".to_string(),
                         param_type: "Произвольный".to_string(),
                         is_optional: false,
+                    default_value: None,
                     },
                     RawParamData {
                         name: "ИмяКолонки".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
+                    default_value: None,
                     },
                 ],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 9. Сдвинуть(строка: T, смещение: Число)
             RawMethodData {
@@ -126,13 +156,18 @@ pub fn create_tabular_section_type() -> RawTypeData {
                         name: "Строка".to_string(),
                         param_type: "T".to_string(), // ← Generic!
                         is_optional: false,
+                    default_value: None,
                     },
                     RawParamData {
                         name: "Смещение".to_string(),
                         param_type: "Число".to_string(),
                         is_optional: false,
+                    default_value: None,
                     },
                 ],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 10. ВыгрузитьКолонку(имяКолонки: Строка): Массив
             RawMethodData {
@@ -143,7 +178,11 @@ pub fn create_tabular_section_type() -> RawTypeData {
                     name: "ИмяКолонки".to_string(),
                     param_type: "Строка".to_string(),
                     is_optional: false,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 11. ЗагрузитьКолонку(массив: Массив, имяКолонки: Строка)
             RawMethodData {
@@ -155,13 +194,18 @@ pub fn create_tabular_section_type() -> RawTypeData {
                         name: "Массив".to_string(),
                         param_type: "Массив".to_string(),
                         is_optional: false,
+                    default_value: None,
                     },
                     RawParamData {
                         name: "ИмяКолонки".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: false,
+                    default_value: None,
                     },
                 ],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 12. Свернуть(имяКолонокГруппировок: Строка, имяКолонокСуммирования: Строка)
             RawMethodData {
@@ -173,13 +217,18 @@ pub fn create_tabular_section_type() -> RawTypeData {
                         name: "ИменаКолонокГруппировок".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
+                    default_value: None,
                     },
                     RawParamData {
                         name: "ИменаКолонокСуммирования".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
+                    default_value: None,
                     },
                 ],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 13. Скопировать(параметры: Структура): ТабличнаяЧасть<T>
             RawMethodData {
@@ -190,7 +239,11 @@ pub fn create_tabular_section_type() -> RawTypeData {
                     name: "Параметры".to_string(),
                     param_type: "Структура".to_string(),
                     is_optional: true,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 14. Итог(имяКолонки: Строка): Число
             RawMethodData {
@@ -201,7 +254,11 @@ pub fn create_tabular_section_type() -> RawTypeData {
                     name: "ИмяКолонки".to_string(),
                     param_type: "Строка".to_string(),
                     is_optional: false,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 15. Заполнить(значение: Произвольный, имяКолонки: Строка)
             RawMethodData {
@@ -213,13 +270,18 @@ pub fn create_tabular_section_type() -> RawTypeData {
                         name: "Значение".to_string(),
                         param_type: "Произвольный".to_string(),
                         is_optional: false,
+                    default_value: None,
                     },
                     RawParamData {
                         name: "ИмяКолонки".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
+                    default_value: None,
                     },
                 ],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             // 16. Сортировать(имяКолонок: Строка, направление: Строка)
             RawMethodData {
@@ -231,13 +293,18 @@ pub fn create_tabular_section_type() -> RawTypeData {
                         name: "ИменаКолонок".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
+                    default_value: None,
                     },
                     RawParamData {
                         name: "Направление".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
+                    default_value: None,
                     },
                 ],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
         ],
 
@@ -323,7 +390,11 @@ pub fn create_array_type() -> RawTypeData {
                     name: "Значение".to_string(),
                     param_type: "T".to_string(), // ← Generic!
                     is_optional: false,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             RawMethodData {
                 name: "Вставить".to_string(),
@@ -334,13 +405,18 @@ pub fn create_array_type() -> RawTypeData {
                         name: "Индекс".to_string(),
                         param_type: "Число".to_string(),
                         is_optional: false,
+                    default_value: None,
                     },
                     RawParamData {
                         name: "Значение".to_string(),
                         param_type: "T".to_string(), // ← Generic!
                         is_optional: false,
+                    default_value: None,
                     },
                 ],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             RawMethodData {
                 name: "Получить".to_string(),
@@ -350,7 +426,11 @@ pub fn create_array_type() -> RawTypeData {
                     name: "Индекс".to_string(),
                     param_type: "Число".to_string(),
                     is_optional: false,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             RawMethodData {
                 name: "Удалить".to_string(),
@@ -360,19 +440,29 @@ pub fn create_array_type() -> RawTypeData {
                     name: "Индекс".to_string(),
                     param_type: "Число".to_string(),
                     is_optional: false,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             RawMethodData {
                 name: "Количество".to_string(),
                 english_name: "Count".to_string(),
                 return_type: "Число".to_string(),
                 params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             RawMethodData {
                 name: "Очистить".to_string(),
                 english_name: "Clear".to_string(),
                 return_type: "Неопределено".to_string(),
                 params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             RawMethodData {
                 name: "Найти".to_string(),
@@ -382,7 +472,11 @@ pub fn create_array_type() -> RawTypeData {
                     name: "Значение".to_string(),
                     param_type: "T".to_string(), // ← Generic!
                     is_optional: false,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
         ],
 
@@ -455,13 +549,18 @@ pub fn create_map_type() -> RawTypeData {
                         name: "Ключ".to_string(),
                         param_type: "K".to_string(), // ← Generic параметр K
                         is_optional: false,
+                    default_value: None,
                     },
                     RawParamData {
                         name: "Значение".to_string(),
                         param_type: "V".to_string(), // ← Generic параметр V
                         is_optional: false,
+                    default_value: None,
                     },
                 ],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             RawMethodData {
                 name: "Получить".to_string(),
@@ -471,13 +570,20 @@ pub fn create_map_type() -> RawTypeData {
                     name: "Ключ".to_string(),
                     param_type: "K".to_string(), // ← Generic параметр K
                     is_optional: false,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             RawMethodData {
                 name: "Количество".to_string(),
                 english_name: "Count".to_string(),
                 return_type: "Число".to_string(),
                 params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             RawMethodData {
                 name: "Удалить".to_string(),
@@ -487,13 +593,20 @@ pub fn create_map_type() -> RawTypeData {
                     name: "Ключ".to_string(),
                     param_type: "K".to_string(), // ← Generic параметр K
                     is_optional: false,
+                    default_value: None,
                 }],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             RawMethodData {
                 name: "Очистить".to_string(),
                 english_name: "Clear".to_string(),
                 return_type: "Неопределено".to_string(),
                 params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
         ],
 
@@ -569,19 +682,27 @@ pub fn create_value_list_type() -> RawTypeData {
                         name: "Значение".to_string(),
                         param_type: "T".to_string(), // ← Generic!
                         is_optional: false,
+                    default_value: None,
                     },
                     RawParamData {
                         name: "Представление".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
+                    default_value: None,
                     },
                 ],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
             RawMethodData {
                 name: "Количество".to_string(),
                 english_name: "Count".to_string(),
                 return_type: "Число".to_string(),
                 params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             },
         ],
 
@@ -677,7 +798,7 @@ fn raw_method_to_signature(
             name: p.name.clone(),
             type_name: Some(p.param_type.clone()),
             is_optional: p.is_optional,
-            default_value: None, // RawParamData не хранит default_value
+            default_value: p.default_value.clone(),
             description: None,
         })
         .collect();

@@ -77,6 +77,12 @@ pub struct RawMethodData {
     pub english_name: String,
     pub return_type: String,
     pub params: Vec<RawParamData>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub is_deprecated: bool,
+    #[serde(default)]
+    pub is_constructor: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -86,11 +92,13 @@ pub struct RawPropertyData {
     pub is_readonly: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RawParamData {
     pub name: String,
     pub param_type: String,
     pub is_optional: bool,
+    #[serde(default)]
+    pub default_value: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

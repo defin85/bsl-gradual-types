@@ -147,27 +147,30 @@ export function TypeDetailsModal() {
                 >
                   <div className="flex items-center gap-2 flex-wrap">
                     <code className="text-blue-400 font-semibold text-base">
-                      {constructor.name}()
+                      {constructor.name}
+                      ({constructor.params?.map((p, i) =>
+                        `${i > 0 ? ', ' : ''}${p.name}${p.isOptional ? '?' : ''}: ${p.paramType}`
+                      ).join('') || ''})
                     </code>
                     {constructor.description?.includes("коллекция") && (
                       <span className="px-2 py-1 text-xs bg-purple-600 text-white rounded">
                         Коллекция
                       </span>
                     )}
-                    {constructor.returns && (
+                    {constructor.returnType && (
                       <span className="text-xs text-vscode-fg/60 bg-vscode-bg px-2 py-1 rounded">
-                        → {constructor.returns}
+                        → {constructor.returnType}
                       </span>
                     )}
                   </div>
-                  {constructor.parameters && constructor.parameters.length > 0 && (
+                  {constructor.params && constructor.params.length > 0 && (
                     <div className="mt-3 pl-4 border-l-2 border-vscode-fg/20">
                       <p className="text-xs text-vscode-fg/60 mb-1">Параметры:</p>
                       <div className="space-y-1">
-                        {constructor.parameters.map((param, pidx) => (
+                        {constructor.params.map((param, pidx) => (
                           <div key={pidx} className="text-xs">
                             <code className="text-green-400">{param.name}</code>
-                            <span className="text-vscode-fg/60 ml-2">: {param.type}</span>
+                            <span className="text-vscode-fg/60 ml-2">: {param.paramType}</span>
                           </div>
                         ))}
                       </div>
@@ -198,25 +201,28 @@ export function TypeDetailsModal() {
                 >
                   <div className="flex items-start justify-between">
                     <code className="text-blue-400 font-semibold text-base">
-                      {method.name}()
+                      {method.name}
+                      ({method.params?.map((p, i) =>
+                        `${i > 0 ? ', ' : ''}${p.name}${p.isOptional ? '?' : ''}: ${p.paramType}`
+                      ).join('') || ''})
                     </code>
-                    {method.returns && (
+                    {method.returnType && (
                       <span className="text-xs text-vscode-fg/60 bg-vscode-bg px-2 py-1 rounded">
-                        → {method.returns}
+                        → {method.returnType}
                       </span>
                     )}
                   </div>
                   <p className="text-sm text-vscode-fg/70 mt-2 leading-relaxed">
                     {method.description}
                   </p>
-                  {method.parameters && method.parameters.length > 0 && (
+                  {method.params && method.params.length > 0 && (
                     <div className="mt-3 pl-4 border-l-2 border-vscode-fg/20">
                       <p className="text-xs text-vscode-fg/60 mb-1">Параметры:</p>
                       <div className="space-y-1">
-                        {method.parameters.map((param, pidx) => (
+                        {method.params.map((param, pidx) => (
                           <div key={pidx} className="text-xs">
                             <code className="text-green-400">{param.name}</code>
-                            <span className="text-vscode-fg/60 ml-2">: {param.type}</span>
+                            <span className="text-vscode-fg/60 ml-2">: {param.paramType}</span>
                           </div>
                         ))}
                       </div>

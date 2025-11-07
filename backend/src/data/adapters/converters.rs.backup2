@@ -27,28 +27,11 @@ fn convert_type_info_to_raw(type_info: &TypeInfo, db: &SyntaxHelperDatabase) -> 
         .methods
         .iter()
         .map(|(russian, english)| {
-            // Ищем метод несколькими способами в порядке приоритета:
-            // 1. По полному ключу с типом: "method_ТипДанных.МетодИмя"
-            // 2. По простому ключу: "method_МетодИмя"
-            // 3. Fallback: ищем метод нашего типа с совпадающим именем
+            // Ключ метода: "method_{имя_метода}"
+            let method_key = format!("method_{}", russian);
 
-            let method_info = {
-                let type_qualified_key = format!("method_{}.{}", type_info.identity.russian_name, russian);
-                db.methods.get(&type_qualified_key)
-                    .or_else(|| {
-                        let simple_key = format!("method_{}", russian);
-                        db.methods.get(&simple_key)
-                    })
-                    .or_else(|| {
-                        db.methods.values().find(|method| {
-                            (method.name.starts_with(&format!("{}.", type_info.identity.russian_name)) &&
-                             method.name.contains(&format!(".{}", russian))) ||
-                            (method.name.as_str() == russian)
-                        })
-                    })
-            };
-
-            if let Some(method_info) = method_info {
+            // Ищем полную информацию в db.methods
+            if let Some(method_info) = db.methods.get(&method_key) {
                 RawMethodData {
                     name: russian.clone(),
                     english_name: method_info.english_name.clone().unwrap_or_else(|| english.clone()),
@@ -65,6 +48,7 @@ fn convert_type_info_to_raw(type_info: &TypeInfo, db: &SyntaxHelperDatabase) -> 
                                    method_info.name.starts_with("New"),
                 }
             } else {
+                // Fallback если метод не найден в db.methods
                 warn!("⚠️ Method {} not found in database for type {}", russian, type_info.identity.russian_name);
                 RawMethodData {
                     name: russian.clone(),

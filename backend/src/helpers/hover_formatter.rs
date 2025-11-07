@@ -340,12 +340,31 @@ impl<'a> HoverBuilder<'a> {
             )];
 
             for method in methods.iter().take(display_count) {
+                // Форматирование параметров
+                let params_str = method.params.iter()
+                    .map(|p| {
+                        let optional_marker = if p.is_optional { "?" } else { "" };
+                        let default_suffix = p.default_value.as_ref()
+                            .map(|v| format!(" = {}", v))
+                            .unwrap_or_default();
+                        format!("{}{}: {}{}", p.name, optional_marker, p.param_type, default_suffix)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                // Форматирование возвращаемого типа
+                let return_str = if method.return_type.is_empty() {
+                    "void".to_string()
+                } else {
+                    method.return_type.clone()
+                };
+
                 let line = match self.config.output_format {
                     OutputFormat::Markdown => {
-                        format!("• **{}()** → {}", method.name, method.return_type)
+                        format!("• **{}({})** → {}", method.name, params_str, return_str)
                     }
                     OutputFormat::PlainText => {
-                        format!("  - {}() → {}", method.name, method.return_type)
+                        format!("  - {}({}) → {}", method.name, params_str, return_str)
                     }
                 };
                 method_lines.push(line);
@@ -521,6 +540,9 @@ mod tests {
                 english_name: format!("Method{}", i),
                 return_type: "Строка".to_string(),
                 params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
             })
             .collect();
 

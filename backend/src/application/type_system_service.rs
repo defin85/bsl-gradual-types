@@ -4,7 +4,7 @@
 //! Phase 4: API Unification - объединяет LspTypeService + WebTypeService + AnalysisService
 
 use anyhow::Result;
-use bsl_shared::api::MethodDto;
+use bsl_shared::api::{MethodDto, ParamDto};
 use bsl_shared::utils::hash::hash_content;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -200,10 +200,15 @@ impl TypeSystemService {
                             is_deprecated: false,
                             is_constructor: false,
                             name: m.name.clone(),
-                            english_name: None,
-                            return_type: None,
-                            params: vec![],
-                            description: None,
+                            english_name: Some(m.english_name.clone()),
+                            return_type: Some(m.return_type.clone()),
+                            params: m.params.iter().map(|p| ParamDto {
+                                name: p.name.clone(),
+                                param_type: p.param_type.clone(),
+                                is_optional: p.is_optional,
+                                default_value: None, // TODO: добавить default_value в RawParamData
+                            }).collect(),
+                            description: None, // RawMethodData не содержит description
                         })
                         .collect(),
                     attributes_count: raw_type.as_ref().map(|rt| rt.attributes.len()),
@@ -859,10 +864,15 @@ impl TypeSystemService {
                             is_deprecated: false,
                             is_constructor: false,
                             name: m.name.clone(),
-                            english_name: None,
-                            return_type: None,
-                            params: vec![],
-                            description: None,
+                            english_name: Some(m.english_name.clone()),
+                            return_type: Some(m.return_type.clone()),
+                            params: m.params.iter().map(|p| ParamDto {
+                                name: p.name.clone(),
+                                param_type: p.param_type.clone(),
+                                is_optional: p.is_optional,
+                                default_value: None, // TODO: добавить default_value в RawParamData
+                            }).collect(),
+                            description: None, // RawMethodData не содержит description
                         })
                         .collect(),
                     attributes_count: raw_type.as_ref().map(|rt| rt.attributes.len()),

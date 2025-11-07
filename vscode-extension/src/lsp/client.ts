@@ -253,6 +253,14 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
             if (value.kind === 'begin') {
                 outputChannel.appendLine(`📊 [Progress] BEGIN: ${value.title}`);
 
+                // Завершаем старый прогресс если он ещё активен (из-за crash/restart LSP)
+                if (activeProgressResolve) {
+                    outputChannel.appendLine('🧹 Clearing previous progress before starting new one');
+                    activeProgressResolve();
+                    activeProgressResolve = null;
+                    activeProgressReporter = null;
+                }
+
                 // Сброс состояния
                 lastReportedPercentage = 0;
 

@@ -5,10 +5,13 @@
 //! 2. Convert ConstructorSignature → MethodDto with is_constructor=true
 //! 3. Frontend: filter and display constructors separately from methods
 
-use bsl_shared::domain::types::{RawTypeData, RawMethodData, RawPropertyData, RawParamData, FacetKind, RawDataSource, ParameterInfo};
-use bsl_shared::domain::signature_index::{SignatureIndex, ConstructorSignature, SignatureSource};
-use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::api::dtos::{MethodDto, ParamDto};
+use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+use bsl_shared::domain::signature_index::{ConstructorSignature, SignatureIndex, SignatureSource};
+use bsl_shared::domain::types::{
+    FacetKind, ParameterInfo, RawDataSource, RawMethodData, RawParamData, RawPropertyData,
+    RawTypeData,
+};
 
 /// Test 1.1: Repository find_constructor works correctly
 #[test]
@@ -29,15 +32,13 @@ fn test_repository_populate_signature_index() {
     repo.populate_signature_index(|index| {
         let constructor = ConstructorSignature {
             type_name: "Массив".to_string(),
-            params: vec![
-                ParameterInfo {
-                    name: "Элемент1".to_string(),
-                    type_name: Some("Произвольный".to_string()),
-                    is_optional: true,
-                    default_value: None,
-                    description: None,
-                },
-            ],
+            params: vec![ParameterInfo {
+                name: "Элемент1".to_string(),
+                type_name: Some("Произвольный".to_string()),
+                is_optional: true,
+                default_value: None,
+                description: None,
+            }],
             is_collection: true,
             generic_params_count: 1,
             facet: Some("Object".to_string()),
@@ -65,15 +66,13 @@ fn test_repository_constructor_type_handling() {
     repo.populate_signature_index(|index| {
         let constructor = ConstructorSignature {
             type_name: "СложныйТип".to_string(),
-            params: vec![
-                ParameterInfo {
-                    name: "Параметр".to_string(),
-                    type_name: None, // No explicit type - will fallback to "Произвольный"
-                    is_optional: false,
-                    default_value: None,
-                    description: None,
-                },
-            ],
+            params: vec![ParameterInfo {
+                name: "Параметр".to_string(),
+                type_name: None, // No explicit type - will fallback to "Произвольный"
+                is_optional: false,
+                default_value: None,
+                description: None,
+            }],
             is_collection: false,
             generic_params_count: 0,
             facet: None,
@@ -121,24 +120,34 @@ fn test_constructor_to_method_dto_conversion() {
         name: format!("Новый {}", constructor.type_name),
         english_name: Some(format!("New {}", constructor.type_name)),
         return_type: Some(constructor.type_name.clone()),
-        params: constructor.params.iter().map(|p| ParamDto {
-            name: p.name.clone(),
-            param_type: p.type_name.as_ref()
-                .unwrap_or(&"Произвольный".to_string())
-                .clone(),
-            is_optional: p.is_optional,
-            default_value: p.default_value.clone(),
-        }).collect(),
+        params: constructor
+            .params
+            .iter()
+            .map(|p| ParamDto {
+                name: p.name.clone(),
+                param_type: p
+                    .type_name
+                    .as_ref()
+                    .unwrap_or(&"Произвольный".to_string())
+                    .clone(),
+                is_optional: p.is_optional,
+                default_value: p.default_value.clone(),
+            })
+            .collect(),
         description: Some(format!(
             "Конструктор типа {}{}{}",
             constructor.type_name,
             if constructor.is_collection {
-                format!(" (коллекция, {} generic параметров)",
-                        constructor.generic_params_count)
+                format!(
+                    " (коллекция, {} generic параметров)",
+                    constructor.generic_params_count
+                )
             } else {
                 String::new()
             },
-            constructor.facet.as_ref()
+            constructor
+                .facet
+                .as_ref()
                 .map(|f| format!(", facet: {}", f))
                 .unwrap_or_default()
         )),
@@ -148,7 +157,10 @@ fn test_constructor_to_method_dto_conversion() {
 
     // Verify conversion
     assert_eq!(method_dto.name, "Новый Соответствие");
-    assert_eq!(method_dto.english_name, Some("New Соответствие".to_string()));
+    assert_eq!(
+        method_dto.english_name,
+        Some("New Соответствие".to_string())
+    );
     assert_eq!(method_dto.return_type, Some("Соответствие".to_string()));
     assert!(method_dto.is_constructor);
     assert_eq!(method_dto.params.len(), 2);
@@ -163,8 +175,16 @@ fn test_constructor_to_method_dto_conversion() {
     assert!(method_dto.params[1].is_optional);
 
     // Verify description
-    assert!(method_dto.description.as_ref().unwrap().contains("коллекция"));
-    assert!(method_dto.description.as_ref().unwrap().contains("2 generic"));
+    assert!(method_dto
+        .description
+        .as_ref()
+        .unwrap()
+        .contains("коллекция"));
+    assert!(method_dto
+        .description
+        .as_ref()
+        .unwrap()
+        .contains("2 generic"));
 }
 
 /// Test 2.2: Regular method vs constructor distinction
@@ -241,13 +261,33 @@ fn test_builtin_collection_constructors() {
     assert!(repo.find_constructor("СписокЗначений").is_some());
 
     // Verify generic parameters
-    assert_eq!(repo.find_constructor("Массив").unwrap().generic_params_count, 1);
-    assert_eq!(repo.find_constructor("Соответствие").unwrap().generic_params_count, 2);
+    assert_eq!(
+        repo.find_constructor("Массив")
+            .unwrap()
+            .generic_params_count,
+        1
+    );
+    assert_eq!(
+        repo.find_constructor("Соответствие")
+            .unwrap()
+            .generic_params_count,
+        2
+    );
 
     // All should be marked as collections
-    for type_name in &["Массив", "Соответствие", "ФиксированныйМассив", "ТаблицаЗначений", "СписокЗначений"] {
+    for type_name in &[
+        "Массив",
+        "Соответствие",
+        "ФиксированныйМассив",
+        "ТаблицаЗначений",
+        "СписокЗначений",
+    ] {
         let constructor = repo.find_constructor(type_name).unwrap();
-        assert!(constructor.is_collection, "{} should be marked as collection", type_name);
+        assert!(
+            constructor.is_collection,
+            "{} should be marked as collection",
+            type_name
+        );
     }
 }
 
@@ -272,14 +312,12 @@ fn test_handle_query_type_no_constructor_graceful() {
         description: "Числовой тип".to_string(),
         category: "PrimitiveType".to_string(),
         source: RawDataSource::Platform,
-        methods: vec![
-            RawMethodData {
-                name: "Целое".to_string(),
-                english_name: "Int".to_string(),
-                return_type: "Число".to_string(),
-                params: vec![],
-            },
-        ],
+        methods: vec![RawMethodData {
+            name: "Целое".to_string(),
+            english_name: "Int".to_string(),
+            return_type: "Число".to_string(),
+            params: vec![],
+        }],
         properties: vec![],
         facets: vec![FacetKind::Object],
         kind: None,
@@ -300,15 +338,27 @@ fn test_handle_query_type_no_constructor_graceful() {
 
     // Simulate what handle_query_type does:
     // Convert methods
-    let methods: Vec<MethodDto> = raw_type.methods.iter().map(|m| MethodDto {
-        name: m.name.clone(),
-        english_name: if m.english_name.is_empty() { None } else { Some(m.english_name.clone()) },
-        return_type: if m.return_type.is_empty() { None } else { Some(m.return_type.clone()) },
-        params: vec![],
-        description: None,
-        is_deprecated: false,
-        is_constructor: false,
-    }).collect();
+    let methods: Vec<MethodDto> = raw_type
+        .methods
+        .iter()
+        .map(|m| MethodDto {
+            name: m.name.clone(),
+            english_name: if m.english_name.is_empty() {
+                None
+            } else {
+                Some(m.english_name.clone())
+            },
+            return_type: if m.return_type.is_empty() {
+                None
+            } else {
+                Some(m.return_type.clone())
+            },
+            params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+        })
+        .collect();
 
     // Try to get constructor
     let constructor_opt = repo.find_constructor("Число");
@@ -388,7 +438,10 @@ fn test_backward_compatibility_optional_is_constructor() {
 
     // Serialization should include the field
     let json = serde_json::to_string(&method_with_constructor_flag).unwrap();
-    assert!(json.contains("\"isConstructor\":true"), "Serialized JSON should contain isConstructor field");
+    assert!(
+        json.contains("\"isConstructor\":true"),
+        "Serialized JSON should contain isConstructor field"
+    );
 
     // Deserialization with the field
     let deserialized: MethodDto = serde_json::from_str(&json).unwrap();
@@ -468,13 +521,19 @@ fn test_constructor_with_optional_parameters() {
         name: format!("Новый {}", constructor.type_name),
         english_name: None,
         return_type: Some(constructor.type_name.clone()),
-        params: constructor.params.iter().map(|p| ParamDto {
-            name: p.name.clone(),
-            param_type: p.type_name.clone()
-                .unwrap_or_else(|| "Произвольный".to_string()),
-            is_optional: p.is_optional,
-            default_value: p.default_value.clone(),
-        }).collect(),
+        params: constructor
+            .params
+            .iter()
+            .map(|p| ParamDto {
+                name: p.name.clone(),
+                param_type: p
+                    .type_name
+                    .clone()
+                    .unwrap_or_else(|| "Произвольный".to_string()),
+                is_optional: p.is_optional,
+                default_value: p.default_value.clone(),
+            })
+            .collect(),
         description: Some("Конструктор таблицы значений".to_string()),
         is_deprecated: false,
         is_constructor: true,

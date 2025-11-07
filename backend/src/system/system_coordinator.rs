@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -22,9 +22,31 @@ use super::ir_cache::IrCache;
 use super::parser_coordinator::ParserCoordinator;
 use super::simple_cache::AnalysisCache;
 
+// ============================================================================
+// LOCK ORDER CONVENTION
+// ============================================================================
+//
+// To prevent deadlocks, ALWAYS acquire RwLocks in this order:
+//
+// 1. analysis_engine_cache (first)
+// 2. type_service_cache (second)
+//
+// NEVER acquire locks in reverse order!
+//
+// Example of CORRECT usage:
+//   let engine = self.analysis_engine_cache.read().unwrap_or_else(...);
+//   let service = self.type_service_cache.read().unwrap_or_else(...);
+//
+// Example of INCORRECT usage (DEADLOCK RISK):
+//   let service = self.type_service_cache.read().unwrap_or_else(...);  // ❌ WRONG ORDER
+//   let engine = self.analysis_engine_cache.read().unwrap_or_else(...);
+//
+// ============================================================================
+
 /// Упрощенный системный координатор
 ///
 /// Заменяет CentralTypeSystem, координирует только System Layer компоненты
+#[derive(Clone)]
 pub struct SystemCoordinator {
     // === SYSTEM LAYER COMPONENTS ONLY ===
     cache: Arc<AnalysisCache>,
@@ -33,10 +55,11 @@ pub struct SystemCoordinator {
     observability: Arc<BasicObservability>,
 
     // === ANALYSIS ENGINE CACHE ===
-    analysis_engine_cache: Mutex<Option<Arc<AnalysisEngine>>>,
+    // Используем Arc<RwLock> для оптимизации read-heavy паттернов
+    analysis_engine_cache: Arc<RwLock<Option<Arc<AnalysisEngine>>>>,
 
     // === TYPE SERVICE CACHE ===
-    type_service_cache: Mutex<Option<Arc<TypeSystemService>>>,
+    type_service_cache: Arc<RwLock<Option<Arc<TypeSystemService>>>>,
 }
 
 impl Default for SystemCoordinator {
@@ -67,9 +90,16 @@ impl SystemCoordinator {
             ir_cache,
             parser,
             observability,
-            analysis_engine_cache: Mutex::new(None),
-            type_service_cache: Mutex::new(None),
+            analysis_engine_cache: Arc::new(RwLock::new(None)),
+            type_service_cache: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Клонирование для передачи в spawn_blocking
+    ///
+    /// Все поля уже обёрнуты в Arc, так что это дешёвая операция
+    fn clone_for_blocking(&self) -> Self {
+        self.clone()
     }
 
     /// Инициализация системы с реальным парсингом синтаксис-помощника
@@ -77,8 +107,47 @@ impl SystemCoordinator {
         self.start_with_paths(None, None, None).await
     }
 
-    /// Инициализация системы с настраиваемыми путями
+    /// Инициализация системы с настраиваемыми путями (async версия)
+    ///
+    /// ВНИМАНИЕ: Эта функция выполняется в основном tokio event loop.
+    /// Для CPU-intensive парсинга используйте start_with_paths_blocking() через spawn_blocking()
     pub async fn start_with_paths(
+        &self,
+        syntax_helper_path: Option<&Path>,
+        config_path: Option<&Path>,
+        progress_tx: Option<mpsc::UnboundedSender<ProgressUpdate>>,
+    ) -> Result<(), StartupError> {
+        info!("🔄 Starting platform types parser in blocking thread...");
+
+        // Делегируем синхронной версии через spawn_blocking для предотвращения блокировки event loop
+        let coordinator = self.clone_for_blocking();
+        let syntax_path_owned = syntax_helper_path.map(|p| p.to_path_buf());
+        let config_path_owned = config_path.map(|p| p.to_path_buf());
+
+        let parser_handle = tokio::task::spawn_blocking(move || {
+            info!("🔄 [BLOCKING THREAD] Parser started");
+            let result = coordinator.start_with_paths_blocking(
+                syntax_path_owned.as_deref(),
+                config_path_owned.as_deref(),
+                progress_tx,
+            );
+            info!("🔄 [BLOCKING THREAD] Parser finished");
+            result
+        });
+
+        info!("🔄 Parser spawned in blocking thread, event loop remains free");
+
+        match parser_handle.await {
+            Ok(result) => result,
+            Err(e) => Err(StartupError::CacheError(format!("Blocking task panicked: {}", e))),
+        }
+    }
+
+    /// Синхронная версия инициализации системы (для spawn_blocking)
+    ///
+    /// Выполняет CPU-intensive парсинг типов платформы в отдельном блокирующем потоке,
+    /// не блокируя основной tokio event loop.
+    pub fn start_with_paths_blocking(
         &self,
         syntax_helper_path: Option<&Path>,
         config_path: Option<&Path>,
@@ -86,16 +155,25 @@ impl SystemCoordinator {
     ) -> Result<(), StartupError> {
         self.observability.log_startup();
 
-        info!("🎯 SystemCoordinator: инициализация System Layer...");
+        info!("🎯 [BLOCKING THREAD] SystemCoordinator: инициализация System Layer...");
 
         // ✅ КРИТИЧЕСКИ ВАЖНО: Очищаем кеши при повторной инициализации
         // Это гарантирует, что TypeSystemService получит НОВЫЙ AnalysisEngine с НОВЫМ TypeRepository
+        // Соблюдаем lock order convention: analysis_engine_cache → type_service_cache
         {
-            let mut engine_cache = self.analysis_engine_cache.lock().unwrap();
-            let mut service_cache = self.type_service_cache.lock().unwrap();
+            let mut engine_cache = self.analysis_engine_cache.write()
+                .unwrap_or_else(|poisoned| {
+                    warn!("⚠️ Analysis engine cache RwLock poisoned (write), recovering data. This indicates a panic in another thread.");
+                    poisoned.into_inner()
+                });
+            let mut service_cache = self.type_service_cache.write()
+                .unwrap_or_else(|poisoned| {
+                    warn!("⚠️ Type service cache RwLock poisoned (write), recovering data. This indicates a panic in another thread.");
+                    poisoned.into_inner()
+                });
 
             if engine_cache.is_some() || service_cache.is_some() {
-                info!("🔄 Очищаем кеши AnalysisEngine и TypeSystemService для повторной инициализации");
+                info!("🔄 [BLOCKING THREAD] Очищаем кеши AnalysisEngine и TypeSystemService для повторной инициализации");
                 *engine_cache = None;
                 *service_cache = None;
             }
@@ -189,7 +267,11 @@ impl SystemCoordinator {
 
         // Кешируем AnalysisEngine
         {
-            let mut cache = self.analysis_engine_cache.lock().unwrap();
+            let mut cache = self.analysis_engine_cache.write()
+                .unwrap_or_else(|poisoned| {
+                    warn!("⚠️ Analysis engine cache RwLock poisoned (write), recovering data. This indicates a panic in another thread.");
+                    poisoned.into_inner()
+                });
             *cache = Some(Arc::new(analysis_engine));
         }
 
@@ -227,10 +309,10 @@ impl SystemCoordinator {
             }
         }
 
-        info!("💾 SystemCoordinator: прогрев кеша...");
+        info!("💾 [BLOCKING THREAD] SystemCoordinator: прогрев кеша...");
         self.cache.warm_cache()?;
 
-        info!("✅ SystemCoordinator: система готова!");
+        info!("✅ [BLOCKING THREAD] SystemCoordinator: система готова!");
         Ok(())
     }
 
@@ -320,24 +402,44 @@ impl SystemCoordinator {
 
     /// Получить AnalysisEngine (делегирует Domain Layer логику)
     pub fn get_analysis_engine(&self) -> Option<Arc<AnalysisEngine>> {
-        let cache = self.analysis_engine_cache.lock().unwrap();
+        let cache = self.analysis_engine_cache.read()
+            .unwrap_or_else(|poisoned| {
+                warn!("⚠️ Analysis engine cache RwLock poisoned (read), recovering data. This indicates a panic in another thread.");
+                poisoned.into_inner()
+            });
         cache.clone()
     }
 
     /// Создать TypeSystemService (singleton)
     ///
     /// Согласно архитектуре: TypeSystemService использует AnalysisEngine для доступа к Domain Layer
+    ///
+    /// # Lock Order
+    /// Соблюдает lock order convention: analysis_engine_cache → type_service_cache
     pub fn type_service(&self) -> Option<Arc<TypeSystemService>> {
-        let mut cache = self.type_service_cache.lock().unwrap();
-        if let Some(service) = cache.as_ref() {
-            return Some(service.clone());
-        }
+        // Сначала пробуем прочитать из кеша (read lock - быстро)
+        {
+            let cache = self.type_service_cache.read()
+                .unwrap_or_else(|poisoned| {
+                    warn!("⚠️ Type service cache RwLock poisoned (read), recovering data. This indicates a panic in another thread.");
+                    poisoned.into_inner()
+                });
+            if let Some(service) = cache.as_ref() {
+                return Some(service.clone());
+            }
+        } // 🔓 Освобождаем read lock
 
-        // Получаем AnalysisEngine
+        // Кеш пуст, нужно создать service
+
+        // Читаем analysis_engine (read lock, соблюдаем lock order)
         let analysis_engine = {
-            let engine_cache = self.analysis_engine_cache.lock().unwrap();
+            let engine_cache = self.analysis_engine_cache.read()
+                .unwrap_or_else(|poisoned| {
+                    warn!("⚠️ Analysis engine cache RwLock poisoned (read), recovering data. This indicates a panic in another thread.");
+                    poisoned.into_inner()
+                });
             engine_cache.clone()
-        };
+        }; // 🔓 Освобождаем read lock
 
         if let Some(engine) = analysis_engine {
             // TypeSystemService теперь использует AnalysisEngine вместо прямого доступа к Domain Layer
@@ -348,7 +450,16 @@ impl SystemCoordinator {
                 self.ir_cache.clone(), // Milestone 2.13: передаём IR Cache
             ));
 
-            *cache = Some(service.clone());
+            // Обновляем кеш (write lock - эксклюзивный)
+            {
+                let mut cache = self.type_service_cache.write()
+                    .unwrap_or_else(|poisoned| {
+                        warn!("⚠️ Type service cache RwLock poisoned (write), recovering data. This indicates a panic in another thread.");
+                        poisoned.into_inner()
+                    });
+                *cache = Some(service.clone());
+            } // 🔓 Освобождаем write lock
+
             Some(service)
         } else {
             None
@@ -357,7 +468,11 @@ impl SystemCoordinator {
 
     /// Получить AnalysisEngine для CLI/прямого использования
     pub fn analysis_engine(&self) -> Option<Arc<AnalysisEngine>> {
-        let cache = self.analysis_engine_cache.lock().unwrap();
+        let cache = self.analysis_engine_cache.read()
+            .unwrap_or_else(|poisoned| {
+                warn!("⚠️ Analysis engine cache RwLock poisoned (read), recovering data. This indicates a panic in another thread.");
+                poisoned.into_inner()
+            });
         cache.clone()
     }
 

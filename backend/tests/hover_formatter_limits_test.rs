@@ -20,6 +20,9 @@ fn create_test_repository_with_n_methods(method_count: usize) -> Arc<InMemoryTyp
             english_name: format!("Method{}", i),
             return_type: "Строка".to_string(),
             params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
         })
         .collect();
 

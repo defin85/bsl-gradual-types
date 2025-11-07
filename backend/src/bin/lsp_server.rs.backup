@@ -138,8 +138,10 @@ impl BslLanguageServer {
     }
 
     /// Получить актуальный TypeSystemService (всегда fresh после reload)
-    fn get_type_service(&self) -> Option<Arc<TypeSystemService>> {
-self.coordinator.type_service()
+    fn get_type_service(&self) -> Arc<TypeSystemService> {
+        self.coordinator
+            .type_service()
+            .expect("TypeSystemService not available - coordinator not initialized")
     }
 
     /// Получить содержимое документа из кеша
@@ -743,7 +745,10 @@ impl LanguageServer for BslLanguageServer {
         // ✅ MILESTONE 2.13: Прогрев IR кеша при didOpen (Eagerly Parse)
         // Вызываем get_hover_info с dummy position (0, 0) для кеширования IR
         // Это делает последующие hover мгновенными (<5ms вместо 50-100ms)
-if let Some(service) = self.get_type_service() {            match service.get_hover_info(&text, 0, 0).await {                Ok(_) => info!("✅ IR cache preheated for {}", uri),                Err(e) => error!("❌ Failed to preheat IR cache for {}: {}", uri, e),            }        } else {            warn!("⚠️ TypeSystemService not yet initialized, skipping IR cache preheat");        }
+        match self.get_type_service().get_hover_info(&text, 0, 0).await {
+            Ok(_) => info!("✅ IR cache preheated for {}", uri),
+            Err(e) => error!("❌ Failed to preheat IR cache for {}: {}", uri, e),
+        }
 
         // ✅ MILESTONE 2.18: Получаем синтаксические ошибки из парсера
         let mut diagnostics = Vec::new();
@@ -838,7 +843,9 @@ if let Some(service) = self.get_type_service() {            match service.get_ho
 
         // ✅ MILESTONE 2.13: Инвалидация IR кеша при изменении файла
         let uri_str = uri.to_string();
-if let Some(service) = self.get_type_service() {            service.invalidate_file_cache(&uri_str, &updated_text).await;            debug!("📝 File changed: {}, cache invalidated", uri_str);        }
+        self.get_type_service()
+            .invalidate_file_cache(&uri_str, &updated_text)
+            .await;
         debug!("📝 File changed: {}, cache invalidated", uri_str);
 
         // ✅ ИНКРЕМЕНТАЛЬНЫЙ ПАРСИНГ: конвертируем LSP edits → ParserCoordinator TextEdit
@@ -868,7 +875,15 @@ if let Some(service) = self.get_type_service() {            service.invalidate_f
         let file_path = PathBuf::from(uri.path());
 
         // Используем инкрементальный парсинг через TypeSystemService
-if let Some(service) = self.get_type_service() {            if let Err(e) = service                .parse_incremental(file_path, updated_text.clone(), text_edits)                .await            {                error!("Incremental parsing failed: {}", e);            } else {                info!("✅ Incremental parsing succeeded for: {}", uri.path());            }        }
+        if let Err(e) = self
+            .get_type_service()
+            .parse_incremental(file_path, updated_text.clone(), text_edits)
+            .await
+        {
+            error!("Incremental parsing failed: {}", e);
+        } else {
+            info!("✅ Incremental parsing succeeded for: {}", uri.path());
+        }
 
         // ✅ MILESTONE 2.18: Получаем синтаксические ошибки из парсера
         let mut diagnostics = Vec::new();
@@ -958,7 +973,33 @@ if let Some(service) = self.get_type_service() {            if let Err(e) = serv
         };
 
         // Получаем автодополнение через TypeSystemService
-if let Some(service) = self.get_type_service() {            match service                .get_completion(&file_content, position.line, position.character)                .await            {                Ok(completions) => {                    let lsp_completions: Vec<tower_lsp::lsp_types::CompletionItem> = completions                        .into_iter()                        .map(|item| tower_lsp::lsp_types::CompletionItem {                            label: item.label,                            detail: item.detail,                            insert_text: item.insert_text,                            kind: Some(CompletionItemKind::KEYWORD),                            insert_text_format: Some(InsertTextFormat::SNIPPET),                            ..Default::default()                        })                        .collect();                    info!("Returning {} completions", lsp_completions.len());                    Ok(Some(CompletionResponse::Array(lsp_completions)))                }                Err(e) => {                    error!("Failed to get completions: {}", e);                    Ok(Some(CompletionResponse::Array(vec![])))                }            }        } else {            Ok(Some(CompletionResponse::Array(vec![])))        }
+        match self
+            .get_type_service()
+            .get_completion(&file_content, position.line, position.character)
+            .await
+        {
+            Ok(completions) => {
+                // Преобразуем наши CompletionItem в LSP CompletionItem
+                let lsp_completions: Vec<tower_lsp::lsp_types::CompletionItem> = completions
+                    .into_iter()
+                    .map(|item| tower_lsp::lsp_types::CompletionItem {
+                        label: item.label,
+                        detail: item.detail,
+                        insert_text: item.insert_text,
+                        kind: Some(CompletionItemKind::KEYWORD),
+                        insert_text_format: Some(InsertTextFormat::SNIPPET),
+                        ..Default::default()
+                    })
+                    .collect();
+
+                info!("Returning {} completions", lsp_completions.len());
+                Ok(Some(CompletionResponse::Array(lsp_completions)))
+            }
+            Err(e) => {
+                error!("Failed to get completions: {}", e);
+                Ok(Some(CompletionResponse::Array(vec![])))
+            }
+        }
     }
 
     async fn hover(&self, params: HoverParams) -> JsonRpcResult<Option<Hover>> {
@@ -996,7 +1037,26 @@ if let Some(service) = self.get_type_service() {            match service       
         };
 
         // Используем get_hover_info() с IR-based анализом
-if let Some(service) = self.get_type_service() {            match service                .get_hover_info(&file_content, position.line, position.character)                .await            {                Ok(hover_info) => {                    if let Some(info) = hover_info {                        Ok(Some(Hover {                            contents: HoverContents::Scalar(MarkedString::String(info)),                            range: None,                        }))                    } else {                        Ok(None)                    }                }                Err(e) => {                    error!("Failed to get hover info: {}", e);                    Ok(None)                }            }        } else {            Ok(None)        }
+        match self
+            .get_type_service()
+            .get_hover_info(&file_content, position.line, position.character)
+            .await
+        {
+            Ok(hover_info) => {
+                if let Some(info) = hover_info {
+                    Ok(Some(Hover {
+                        contents: HoverContents::Scalar(MarkedString::String(info)),
+                        range: None,
+                    }))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => {
+                error!("Failed to get hover info: {}", e);
+                Ok(None)
+            }
+        }
     }
 
     async fn execute_command(
@@ -1777,7 +1837,24 @@ impl BslLanguageServer {
 
         // Используем TypeSystemService для получения SemanticProgram
         // TypeSystemService уже содержит всю логику парсинга и конвертации AST → IR
-if let Some(service) = self.get_type_service() {            match service                .get_semantic_tree(&file_content, &file_path_str)                .await            {                Ok(dto) => {                    info!(                        "✅ Semantic tree generated: {} nodes, {} symbols",                        dto.root_nodes.len(),                        dto.symbol_table.len()                    );                    Ok(dto)                }                Err(e) => {                    error!("Failed to generate semantic tree: {}", e);                    Err(tower_lsp::jsonrpc::Error::internal_error())                }            }        } else {            error!("TypeSystemService not yet initialized");            Err(tower_lsp::jsonrpc::Error::internal_error())        }
+        match self
+            .get_type_service()
+            .get_semantic_tree(&file_content, &file_path_str)
+            .await
+        {
+            Ok(dto) => {
+                info!(
+                    "✅ Semantic tree generated: {} nodes, {} symbols",
+                    dto.root_nodes.len(),
+                    dto.symbol_table.len()
+                );
+                Ok(dto)
+            }
+            Err(e) => {
+                error!("Failed to generate semantic tree: {}", e);
+                Err(tower_lsp::jsonrpc::Error::internal_error())
+            }
+        }
     }
 
     /// Обработчик custom command: bsl.searchTypes - поиск типов в TypeRepository
@@ -1908,7 +1985,44 @@ if let Some(service) = self.get_type_service() {            match service       
             .to_string();
 
         // Получаем SemanticProgram через TypeSystemService
-if let Some(service) = self.get_type_service() {            match service                .get_semantic_tree(&file_content, &file_path)                .await            {                Ok(semantic_tree_dto) => {                    match find_containing_function_in_dto(                        &semantic_tree_dto,                        params.line,                        params.character,                    ) {                        Some((name, kind, params_list, return_type)) => {                            info!("✅ Found context: {} {}", kind, name);                            Ok(CurrentContextResponse {                                function_name: Some(name),                                function_kind: kind,                                params: Some(params_list),                                return_type,                            })                        }                        None => {                            debug!("No context found - global scope");                            Ok(CurrentContextResponse {                                function_name: None,                                function_kind: "none".to_string(),                                params: None,                                return_type: None,                            })                        }                    }                }                Err(e) => {                    error!("Failed to get semantic tree: {}", e);                    Err(tower_lsp::jsonrpc::Error::internal_error())                }            }        } else {            error!("TypeSystemService not yet initialized");            Err(tower_lsp::jsonrpc::Error::internal_error())        }
+        match self
+            .get_type_service()
+            .get_semantic_tree(&file_content, &file_path)
+            .await
+        {
+            Ok(semantic_tree_dto) => {
+                // Ищем содержащую функцию в SemanticTreeDto
+                match find_containing_function_in_dto(
+                    &semantic_tree_dto,
+                    params.line,
+                    params.character,
+                ) {
+                    Some((name, kind, params_list, return_type)) => {
+                        info!("✅ Found context: {} {}", kind, name);
+                        Ok(CurrentContextResponse {
+                            function_name: Some(name),
+                            function_kind: kind,
+                            params: Some(params_list),
+                            return_type,
+                        })
+                    }
+                    None => {
+                        // Курсор в глобальной области
+                        debug!("No context found - global scope");
+                        Ok(CurrentContextResponse {
+                            function_name: None,
+                            function_kind: "none".to_string(),
+                            params: None,
+                            return_type: None,
+                        })
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to get semantic tree: {}", e);
+                Err(tower_lsp::jsonrpc::Error::internal_error())
+            }
+        }
     }
 
     /// Обработчик custom request: bsl/getSemanticHtml - MILESTONE 2.12

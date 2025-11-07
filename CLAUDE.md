@@ -41,12 +41,12 @@ AI-ассистент инструкции для BSL Gradual Type System про
 
 ### Доступные Skills
 
-**Roadmap Checker** — автоматическая проверка выполнения Milestone задач
+**Build** — комплексная сборка всех компонентов проекта
 ```bash
-/roadmap-checker
+/build
 ```
-Что делает: grep/Read/cargo test для честной проверки прогресса
-**Файл:** [.claude/skills/roadmap-checker.md](.claude/skills/roadmap-checker.md)
+Что делает: сборка Rust бинарников (LSP, Web, CLI), VSCode Extension, копирование в bin/
+**Файл:** [.claude/skills/build.md](.claude/skills/build.md)
 
 **Test Runner** — комплексное тестирование проекта
 ```bash
@@ -61,6 +61,13 @@ AI-ассистент инструкции для BSL Gradual Type System про
 ```
 Что делает: проверка всех endpoints с URL-encoding для кириллицы
 **Файл:** [.claude/skills/api-tester.md](.claude/skills/api-tester.md)
+
+**Roadmap Checker** — автоматическая проверка выполнения Milestone задач
+```bash
+/roadmap-checker
+```
+Что делает: grep/Read/cargo test для честной проверки прогресса
+**Файл:** [.claude/skills/roadmap-checker.md](.claude/skills/roadmap-checker.md)
 
 ---
 
@@ -162,9 +169,10 @@ bsl-gradual-types/
 │
 ├── .claude/
 │   └── skills/                  # Автоматизированные навыки
-│       ├── roadmap-checker.md   # Проверка Milestone
+│       ├── build.md             # Сборка всех компонентов
 │       ├── test-runner.md       # Тестирование
-│       └── api-tester.md        # API тестирование
+│       ├── api-tester.md        # API тестирование
+│       └── roadmap-checker.md   # Проверка Milestone
 │
 └── docs/
     ├── README.md                # Главный навигатор

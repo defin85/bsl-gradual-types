@@ -77,35 +77,145 @@ impl HtmlExtractor {
         examples
     }
 
+    /// КРИТИЧНЫЙ МЕТОД: Извлечение параметров методов из HTML
+    ///
+    /// Извлекает параметры из HTML в формате:
+    /// ```html
+    /// <p class="V8SH_chapter">Параметры:</p>
+    /// <div class="V8SH_rubric">
+    ///     <p>&lt;Индекс&gt; (обязательный)</div>
+    /// Тип: Число. <br>
+    /// Описание параметра.
+    /// ```
+    ///
+    /// Используется более надёжный парсер на основе regex с учётом реальной структуры HTML
     pub fn extract_parameters(&self, document: &Html) -> Vec<ParameterInfo> {
+        use regex::Regex;
+
         let mut parameters = Vec::new();
+        let html_text = document.html();
 
-        // Ищем таблицу параметров
-        if let Ok(selector) = Selector::parse("table.V8SH_params tr, table tr") {
-            for row in document.select(&selector).skip(1) {
-                // Пропускаем заголовок
-                let cells: Vec<String> = Selector::parse("td")
-                    .ok()
-                    .map(|s| {
-                        row.select(&s)
-                            .map(|cell| cell.text().collect::<String>().trim().to_string())
-                            .collect()
-                    })
-                    .unwrap_or_default();
+        // Проверяем наличие раздела "Параметры:"
+        if !html_text.contains("Параметры:") && !html_text.contains("Parameters:") {
+            debug!("⚠️  Раздел 'Параметры' не найден в HTML");
+            return parameters;
+        }
 
-                if cells.len() >= 2 {
-                    parameters.push(ParameterInfo {
-                        name: cells[0].clone(),
-                        type_name: Some(cells[1].clone()),
-                        is_optional: cells
-                            .get(2)
-                            .map(|s| s.contains("Необязательный") || s.contains("Optional"))
-                            .unwrap_or(false),
-                        default_value: cells.get(3).cloned(),
-                        description: cells.get(4).cloned(),
-                    });
-                }
+        // Парсер параметров - ищет паттерн:
+        // &lt;ИМЯ&gt; (обязательный) ... Тип: ТИП
+        //
+        // [\s\S]{0,500}? - матчит любые символы в non-greedy режиме до "Тип:"
+        // [^<\n]+ - захватить тип GREEDY (не содержит < или перевод строки)
+        // Точка после типа может быть или опциональна
+        let param_regex = match Regex::new(
+            r#"&lt;([^>]+)&gt;\s*\(([^)]+)\)[\s\S]{0,500}?Тип:\s*(?:<a[^>]*>)?([^<\n]+)(?:</a>)?\.?"#
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                debug!("❌ Ошибка компиляции regex для параметров: {}", e);
+                return parameters;
             }
+        };
+
+        debug!("🔍 Начинаем извлечение параметров с помощью regex");
+
+        for cap in param_regex.captures_iter(&html_text) {
+            let name = cap.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+            let optional_text = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+            let mut param_type = cap.get(3).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+
+            // Пропускаем если имя пусто
+            if name.is_empty() {
+                continue;
+            }
+
+            // Удаляем точку в конце типа если она есть
+            if param_type.ends_with('.') {
+                param_type.pop();
+            }
+            param_type = param_type.trim().to_string();
+
+            // Определяем опциональность
+            let is_optional = optional_text.contains("необязательный")
+                || optional_text.contains("optional")
+                || optional_text.to_lowercase().contains("optional");
+
+            // Извлекаем описание параметра
+            // Ищем текст после "<br>" до "<div" или следующего параметра
+            let description = {
+                // Берём текст начиная с конца типа параметра
+                let search_start = cap.get(3).map(|m| m.end()).unwrap_or(0);
+                // Убедимся что search_start - это valid char boundary
+                let search_start = if html_text.is_char_boundary(search_start) {
+                    search_start
+                } else {
+                    // Если нет, то идём назад до valid boundary
+                    (0..search_start).rev().find(|&i| html_text.is_char_boundary(i)).unwrap_or(0)
+                };
+
+                let search_end = std::cmp::min(search_start + 500, html_text.len());
+                let search_end = if html_text.is_char_boundary(search_end) {
+                    search_end
+                } else {
+                    // Если нет, то идём назад до valid boundary
+                    (0..=search_end).rev().find(|&i| html_text.is_char_boundary(i)).unwrap_or(0)
+                };
+
+                let search_text = &html_text[search_start..search_end];
+
+                // Ищем текст после <br>
+                if let Some(br_pos) = search_text.find("<br>") {
+                    let text_after_br = &search_text[br_pos + 4..];
+                    // Берём текст до следующего <div или конца
+                    if let Some(next_div) = text_after_br.find("<div") {
+                        text_after_br[..next_div].trim().to_string()
+                    } else {
+                        text_after_br.trim().to_string()
+                    }
+                } else if let Some(br_pos) = search_text.find("<br") {
+                    // Некорректный <br без закрытия
+                    let text_after_br = &search_text[br_pos..];
+                    if let Some(gt_pos) = text_after_br.find('>') {
+                        let desc = &text_after_br[gt_pos + 1..];
+                        if let Some(next_div) = desc.find("<div") {
+                            desc[..next_div].trim().to_string()
+                        } else {
+                            desc.trim().to_string()
+                        }
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                }
+            };
+
+            let description = if description.is_empty() {
+                None
+            } else {
+                Some(description.replace("&nbsp;", " "))
+            };
+
+            parameters.push(ParameterInfo {
+                name: name.clone(),
+                type_name: Some(param_type.clone()),
+                is_optional,
+                default_value: None,
+                description,
+            });
+
+            debug!(
+                "✓ Извлечён параметр: {} : {} ({})",
+                name,
+                param_type,
+                if is_optional { "необязательный" } else { "обязательный" }
+            );
+        }
+
+        if parameters.is_empty() {
+            debug!("⚠️  Не удалось извлечь параметры из HTML");
+        } else {
+            debug!("✓ Извлечено {} параметров", parameters.len());
         }
 
         parameters
@@ -522,5 +632,127 @@ impl HtmlExtractor {
 impl Default for HtmlExtractor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_parameters_from_real_html_insert() {
+        // Реальная HTML структура из Array.Insert
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Параметры:</p>
+            <div class="V8SH_rubric">
+                <p style="margin-top: 2px; margin-bottom: 1px">&lt;Индекс&gt; (обязательный)</div>
+            Тип: <a href="v8help://SyntaxHelperLanguage/def_Number">Число</a>. <br>
+            Индекс вставляемого значения.
+            <div class="V8SH_rubric">
+                <p style="margin-top: 2px; margin-bottom: 1px">&lt;Значение&gt; (необязательный)</div>
+            Тип: Произвольный. <br>
+            Вставляемое значение. Если не указан, то будет добавлено значение типа Неопределено.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let params = extractor.extract_parameters(&document);
+
+        assert_eq!(params.len(), 2, "Должно быть 2 параметра");
+
+        // Первый параметр: Индекс (обязательный)
+        assert_eq!(params[0].name, "Индекс");
+        assert_eq!(params[0].type_name, Some("Число".to_string()));
+        assert_eq!(params[0].is_optional, false);
+        assert!(
+            params[0].description.as_ref().map(|d| d.contains("Индекс вставляемого")).unwrap_or(false),
+            "Описание должно содержать текст о вставляемом значении"
+        );
+
+        // Второй параметр: Значение (необязательный)
+        assert_eq!(params[1].name, "Значение");
+        assert_eq!(params[1].type_name, Some("Произвольный".to_string()));
+        assert_eq!(params[1].is_optional, true);
+    }
+
+    #[test]
+    fn test_extract_parameters_from_real_html_find() {
+        // Реальная HTML структура из Array.Find
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Параметры:</p>
+            <div class="V8SH_rubric">
+                <p style="margin-top: 2px; margin-bottom: 1px">&lt;Значение&gt; (обязательный)</div>
+            Тип: Произвольный. <br>
+            Искомое значение.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let params = extractor.extract_parameters(&document);
+
+        assert_eq!(params.len(), 1, "Должен быть 1 параметр");
+        assert_eq!(params[0].name, "Значение");
+        assert_eq!(params[0].type_name, Some("Произвольный".to_string()));
+        assert_eq!(params[0].is_optional, false);
+    }
+
+    #[test]
+    fn test_extract_parameters_from_real_html_get() {
+        // Реальная HTML структура из Array.Get
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Параметры:</p>
+            <div class="V8SH_rubric">
+                <p style="margin-top: 2px; margin-bottom: 1px">&lt;Индекс&gt; (обязательный)</div>
+            Тип: <a href="v8help://SyntaxHelperLanguage/def_Number">Число</a>. <br>
+            Индекс элемента.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let params = extractor.extract_parameters(&document);
+
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "Индекс");
+        assert_eq!(params[0].type_name, Some("Число".to_string()));
+        assert_eq!(params[0].is_optional, false);
+    }
+
+    #[test]
+    fn test_extract_parameters_no_params_section() {
+        // HTML без раздела "Параметры:"
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Описание:</p>
+            <p>Метод без параметров</p>
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let params = extractor.extract_parameters(&document);
+
+        assert_eq!(params.len(), 0, "Не должно быть параметров");
+    }
+
+    #[test]
+    fn test_parse_bilingual_name() {
+        let extractor = HtmlExtractor::new();
+
+        let (ru, en) = extractor.parse_bilingual_name("Добавить (Add)");
+        assert_eq!(ru, "Добавить");
+        assert_eq!(en, "Add");
+
+        let (ru, en) = extractor.parse_bilingual_name("ВГраница (UBound)");
+        assert_eq!(ru, "ВГраница");
+        assert_eq!(en, "UBound");
+
+        let (ru, _) = extractor.parse_bilingual_name("Метод без английского");
+        assert_eq!(ru, "Метод без английского");
     }
 }

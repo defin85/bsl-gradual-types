@@ -49,7 +49,11 @@ fn test_method_with_params_conversion() {
             name: "Значение".to_string(),
             param_type: "Произвольный".to_string(),
             is_optional: false,
+            default_value: None,
         }],
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -72,6 +76,9 @@ fn test_method_with_return_type() {
         english_name: "CreateDocument".to_string(),
         return_type: "ДокументОбъект".to_string(),
         params: vec![],
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -89,6 +96,9 @@ fn test_constructor_detection_russian() {
         english_name: "".to_string(),
         return_type: "Массив".to_string(),
         params: vec![],
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -107,6 +117,9 @@ fn test_constructor_detection_english() {
         english_name: "New".to_string(),
         return_type: "Array".to_string(),
         params: vec![],
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -124,6 +137,9 @@ fn test_empty_english_name_becomes_none() {
         english_name: "".to_string(), // пустая строка
         return_type: "".to_string(),
         params: vec![],
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -142,7 +158,11 @@ fn test_optional_param_without_default() {
             name: "Параметр".to_string(),
             param_type: "Число".to_string(),
             is_optional: true,
+            default_value: None,
         }],
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -163,13 +183,18 @@ fn test_method_with_multiple_params() {
                 name: "Значение".to_string(),
                 param_type: "Произвольный".to_string(),
                 is_optional: false,
+                default_value: None,
             },
             RawParamData {
                 name: "НачальнаяПозиция".to_string(),
                 param_type: "Число".to_string(),
                 is_optional: true,
+                default_value: None,
             },
         ],
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -189,6 +214,9 @@ fn test_method_without_params_and_return_type() {
         english_name: "Clear".to_string(),
         return_type: "".to_string(),
         params: vec![],
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -209,7 +237,11 @@ fn test_method_with_complex_type_names() {
             name: "ИсточникДанных".to_string(),
             param_type: "Структура, Соответствие".to_string(), // Составной тип
             is_optional: false,
+            default_value: None,
         }],
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -228,7 +260,11 @@ fn test_method_with_cyrillic_only() {
             name: "Ключ".to_string(),
             param_type: "Строка".to_string(),
             is_optional: false,
+            default_value: None,
         }],
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -327,6 +363,9 @@ fn test_method_name_edge_cases() {
             english_name: english_name.to_string(),
             return_type: "".to_string(),
             params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
         };
 
         let dto = convert_to_method_dto(&raw_method);
@@ -347,6 +386,7 @@ fn test_method_with_many_params() {
             name: format!("Параметр{}", i),
             param_type: "Произвольный".to_string(),
             is_optional: i % 2 == 1, // Нечётные параметры опциональные
+            default_value: None,
         })
         .collect();
 
@@ -355,6 +395,9 @@ fn test_method_with_many_params() {
         english_name: "ComplexMethod".to_string(),
         return_type: "Структура".to_string(),
         params,
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -378,7 +421,11 @@ fn test_param_with_special_characters() {
             name: "ДопПараметры".to_string(),
             param_type: "Структура".to_string(),
             is_optional: true,
+            default_value: None,
         }],
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -394,6 +441,9 @@ fn test_empty_method_name() {
         english_name: "".to_string(),
         return_type: "".to_string(),
         params: vec![],
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -422,6 +472,9 @@ fn test_return_type_edge_cases() {
             english_name: "Method".to_string(),
             return_type: return_type.to_string(),
             params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
         };
 
         let dto = convert_to_method_dto(&raw_method);

@@ -7,8 +7,8 @@
 //! 2. Координаты ошибок корректны (UTF-16)
 //! 3. Типы ошибок правильно классифицированы
 
-use bsl_backend::parsing::bsl::ast::ErrorType;
 use bsl_backend::system::ParserCoordinator;
+use bsl_shared::domain::types::ErrorType;
 
 #[test]
 fn test_missing_endif_detected() {

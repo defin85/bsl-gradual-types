@@ -3,8 +3,8 @@
 //! Проверяем что TreeSitterAdapter корректно собирает ERROR узлы
 //! и возвращает ParseResult с syntax_errors
 
-use bsl_backend::parsing::bsl::ast::ErrorType;
 use bsl_backend::system::tree_sitter_adapter::TreeSitterAdapter;
+use bsl_shared::domain::types::ErrorType;
 use tree_sitter::Parser;
 
 /// Парсит BSL код и возвращает ParseResult (с возможными ошибками)

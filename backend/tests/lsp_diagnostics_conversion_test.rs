@@ -8,8 +8,8 @@
 //! **ПРОБЛЕМА:** Метод `syntax_errors_to_diagnostics()` — приватный в LSP Server.
 //! **РЕШЕНИЕ:** Тестируем через публичный API и проверяем структуру ParseError.
 
-use bsl_backend::parsing::bsl::ast::ErrorType;
 use bsl_backend::system::ParserCoordinator;
+use bsl_shared::domain::types::ErrorType;
 use bsl_shared::ir::Span;
 
 // === ПУБЛИЧНЫЙ API ТЕСТ: ParseError структура ===

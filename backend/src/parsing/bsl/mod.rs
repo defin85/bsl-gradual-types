@@ -1,57 +1,24 @@
 //! BSL parsing module
 
 pub mod ast {
-    /// Позиция в исходном коде (копия из shared::ir::Span для избежания зависимости)
-    #[derive(Debug, Clone, Copy, PartialEq)]
-    pub struct Span {
-        pub start_line: u32,
-        pub start_column: u32,
-        pub end_line: u32,
-        pub end_column: u32,
-    }
+    //! # Unified ParseError (Milestone 2.19 Phase 1)
+    //!
+    //! **Single Source of Truth:** ParseError и ErrorType теперь определены
+    //! в `shared::domain::types` вместо `backend::parsing::bsl`.
+    //!
+    //! ## История
+    //! - **До Milestone 2.19:** дублированные определения в `backend/src/parsing/bsl/mod.rs` (~57 строк)
+    //! - **После Milestone 2.19:** единое определение в `shared/src/domain/types.rs`
+    //!
+    //! ## Архитектура
+    //! ```text
+    //! shared (Domain Layer) ← backend (Application Layer)
+    //!    ↑
+    //!    └─── Single Source of Truth для типов ошибок
+    //! ```
 
-    impl Span {
-        /// Создать stub span (0,0)-(0,0) для случаев, когда позиция неизвестна
-        pub fn stub() -> Self {
-            Self {
-                start_line: 0,
-                start_column: 0,
-                end_line: 0,
-                end_column: 0,
-            }
-        }
-
-        /// Создать span из tree-sitter позиций
-        pub fn from_positions(start: (u32, u32), end: (u32, u32)) -> Self {
-            Self {
-                start_line: start.0,
-                start_column: start.1,
-                end_line: end.0,
-                end_column: end.1,
-            }
-        }
-    }
-
-    /// Синтаксическая ошибка при парсинге
-    #[derive(Debug, Clone)]
-    pub struct ParseError {
-        pub message: String,
-        pub span: Span,
-        pub error_type: ErrorType,
-    }
-
-    /// Тип синтаксической ошибки
-    #[derive(Debug, Clone, PartialEq)]
-    pub enum ErrorType {
-        /// Неожиданный токен
-        UnexpectedToken,
-        /// Отсутствующий токен
-        MissingToken,
-        /// Неверная структура
-        InvalidSyntax,
-        /// Общая ошибка парсинга
-        ParseError,
-    }
+    pub use bsl_shared::domain::types::{ErrorType, ParseError};
+    pub use bsl_shared::ir::Span;
 
     /// Результат парсинга с поддержкой частичного восстановления
     #[derive(Debug, Clone)]

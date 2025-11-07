@@ -2394,6 +2394,44 @@ impl TypeSystemService {
 
         Ok(loaded)
     }
+
+    /// MILESTONE 2.19: Парсинг и валидация BSL кода (Unified API для LSP/CLI)
+    ///
+    /// # Phase 2: Architectural Improvements
+    ///
+    /// Unified API скрывает детали парсера от Presentation Layer.
+    /// LSP Server не должен знать о ParserCoordinator напрямую.
+    ///
+    /// # Аргументы
+    /// * `source` - исходный код BSL для парсинга
+    ///
+    /// # Возвращает
+    /// - `Ok(Vec<ParseError>)` — список синтаксических ошибок (может быть пустым)
+    /// - `Err(anyhow::Error)` — критическая ошибка парсера
+    ///
+    /// # Примечание
+    /// Этот метод обеспечивает правильное разделение слоёв архитектуры:
+    /// - LSP Server (Presentation) → TypeSystemService (Application) → ParserCoordinator (System)
+    /// - Вместо: LSP Server → ParserCoordinator (обход Application Layer)
+    ///
+    /// # Пример
+    /// ```rust
+    /// let errors = type_service.parse_and_validate("Функция Тест()\nКонецФункции")?;
+    /// if errors.is_empty() {
+    ///     println!("✅ Код валиден");
+    /// }
+    /// ```
+    pub fn parse_and_validate(
+        &self,
+        source: &str,
+    ) -> Result<Vec<bsl_shared::domain::types::ParseError>> {
+        // Делегируем ParserCoordinator (System Layer)
+        let parse_result = self.parser.parse(source)
+            .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
+
+        // Возвращаем синтаксические ошибки (может быть пустой Vec)
+        Ok(parse_result.syntax_errors)
+    }
 }
 
 /// Контекст для автодополнения

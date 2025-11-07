@@ -2,9 +2,9 @@
 //!
 //! Преобразует узлы tree-sitter в структуры из backend/src/parsing/bsl/mod.rs
 
-use crate::parsing::bsl::ast::{
-    ErrorType, Expression, ParseError, ParseResult, Program, Span, Statement,
-};
+use crate::parsing::bsl::ast::{Expression, ParseResult, Program, Statement};
+use bsl_shared::domain::types::{ErrorType, ParseError};
+use bsl_shared::ir::Span;
 use tracing::debug;
 use tree_sitter::{Node, Tree};
 

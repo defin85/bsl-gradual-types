@@ -167,47 +167,6 @@ self.coordinator.type_service()
         line.len() // Если offset за пределами строки, возвращаем конец
     }
 
-    /// Конвертировать backend ParseError → shared ParseError (Milestone 2.18)
-    ///
-    /// Преобразует локальный ParseError из bsl::ast в shared::domain::types::ParseError
-    fn convert_parse_errors(
-        &self,
-        backend_errors: &[bsl_backend::parsing::bsl::ast::ParseError],
-    ) -> Vec<bsl_shared::domain::types::ParseError> {
-        use bsl_backend::parsing::bsl::ast::ErrorType as BackendErrorType;
-        use bsl_shared::domain::types::{
-            ErrorType as SharedErrorType, ParseError as SharedParseError,
-        };
-
-        backend_errors
-            .iter()
-            .map(|error| {
-                // Конвертируем ErrorType
-                let shared_error_type = match error.error_type {
-                    BackendErrorType::ParseError => SharedErrorType::ParseError,
-                    BackendErrorType::InvalidSyntax => SharedErrorType::InvalidSyntax,
-                    BackendErrorType::MissingToken => SharedErrorType::MissingToken,
-                    BackendErrorType::UnexpectedToken => SharedErrorType::UnexpectedToken,
-                };
-
-                // Конвертируем Span (backend::bsl::ast::Span → shared::ir::Span)
-                let shared_span = bsl_shared::ir::Span::new(
-                    error.span.start_line,
-                    error.span.start_column,
-                    error.span.end_line,
-                    error.span.end_column,
-                );
-
-                // Создаём shared ParseError
-                SharedParseError {
-                    error_type: shared_error_type,
-                    message: error.message.clone(),
-                    span: shared_span,
-                }
-            })
-            .collect()
-    }
-
     /// Конвертировать синтаксические ошибки в LSP Diagnostics (Milestone 2.18)
     ///
     /// Преобразует ParseError из парсера в LSP Diagnostic для отображения в VSCode.
@@ -745,47 +704,40 @@ impl LanguageServer for BslLanguageServer {
         // Это делает последующие hover мгновенными (<5ms вместо 50-100ms)
 if let Some(service) = self.get_type_service() {            match service.get_hover_info(&text, 0, 0).await {                Ok(_) => info!("✅ IR cache preheated for {}", uri),                Err(e) => error!("❌ Failed to preheat IR cache for {}: {}", uri, e),            }        } else {            warn!("⚠️ TypeSystemService not yet initialized, skipping IR cache preheat");        }
 
-        // ✅ MILESTONE 2.18: Получаем синтаксические ошибки из парсера
+        // ✅ MILESTONE 2.19: Clean Architecture - TypeSystemService API
         let mut diagnostics = Vec::new();
 
-        // Парсим файл через ParserCoordinator (доступен через SystemCoordinator)
-        match self.coordinator.parser_coordinator() {
-            Some(parser) => {
-                match parser.parse(&text) {
-                    Ok(parse_result) => {
-                        if parse_result.has_errors() {
-                            info!(
-                                "⚠️ Found {} syntax errors in {}",
-                                parse_result.syntax_errors.len(),
-                                uri
-                            );
+        // Парсим файл через TypeSystemService (Application Layer)
+        if let Some(type_service) = self.get_type_service() {
+            match type_service.parse_and_validate(&text) {
+                Ok(errors) => {
+                    if !errors.is_empty() {
+                        info!(
+                            "⚠️ Found {} syntax errors in {}",
+                            errors.len(),
+                            uri
+                        );
 
-                            // Конвертируем backend ParseError → shared ParseError
-                            let shared_errors =
-                                self.convert_parse_errors(&parse_result.syntax_errors);
-
-                            // Конвертируем shared ParseError → LSP Diagnostics
-                            diagnostics.extend(self.syntax_errors_to_diagnostics(&shared_errors));
-                        } else {
-                            info!("✅ No syntax errors in {}", uri);
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to parse document {}: {}", uri, e);
-                        // Создаём диагностику об ошибке парсинга
-                        diagnostics.push(Diagnostic {
-                            range: Range::new(Position::new(0, 0), Position::new(0, 1)),
-                            severity: Some(DiagnosticSeverity::ERROR),
-                            message: format!("❌ Ошибка парсинга: {}", e),
-                            source: Some("bsl-syntax".to_string()),
-                            ..Default::default()
-                        });
+                        // Конвертируем shared ParseError → LSP Diagnostics
+                        diagnostics.extend(self.syntax_errors_to_diagnostics(&errors));
+                    } else {
+                        info!("✅ No syntax errors in {}", uri);
                     }
                 }
+                Err(e) => {
+                    error!("Failed to parse document {}: {}", uri, e);
+                    // Создаём диагностику об ошибке парсинга
+                    diagnostics.push(Diagnostic {
+                        range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        message: format!("❌ Ошибка парсинга: {}", e),
+                        source: Some("bsl-syntax".to_string()),
+                        ..Default::default()
+                    });
+                }
             }
-            None => {
-                error!("ParserCoordinator not available");
-            }
+        } else {
+            warn!("⚠️ TypeSystemService not yet initialized, skipping syntax validation");
         }
 
         // Отправляем диагностики
@@ -870,7 +822,7 @@ if let Some(service) = self.get_type_service() {            service.invalidate_f
         // Используем инкрементальный парсинг через TypeSystemService
 if let Some(service) = self.get_type_service() {            if let Err(e) = service                .parse_incremental(file_path, updated_text.clone(), text_edits)                .await            {                error!("Incremental parsing failed: {}", e);            } else {                info!("✅ Incremental parsing succeeded for: {}", uri.path());            }        }
 
-        // ✅ MILESTONE 2.18: Получаем синтаксические ошибки из парсера
+        // ✅ MILESTONE 2.19: Clean Architecture - TypeSystemService API
         let mut diagnostics = Vec::new();
 
         // Берём актуальный текст документа
@@ -878,37 +830,38 @@ if let Some(service) = self.get_type_service() {            if let Err(e) = serv
         if let Some(text) = documents.get(&uri) {
             info!("🔍 Обновление диагностики файла: {}", uri.path());
 
-            // Парсим файл через ParserCoordinator
-            match self.coordinator.parser_coordinator() {
-                Some(parser) => {
-                    match parser.parse(text) {
-                        Ok(parse_result) => {
-                            if parse_result.has_errors() {
-                                info!(
-                                    "⚠️ Found {} syntax errors in {}",
-                                    parse_result.syntax_errors.len(),
-                                    uri
-                                );
+            // Парсим файл через TypeSystemService (Application Layer)
+            if let Some(type_service) = self.get_type_service() {
+                match type_service.parse_and_validate(text) {
+                    Ok(errors) => {
+                        if !errors.is_empty() {
+                            info!(
+                                "⚠️ Found {} syntax errors in {}",
+                                errors.len(),
+                                uri
+                            );
 
-                                // Конвертируем backend ParseError → shared ParseError
-                                let shared_errors =
-                                    self.convert_parse_errors(&parse_result.syntax_errors);
-
-                                // Конвертируем shared ParseError → LSP Diagnostics
-                                diagnostics
-                                    .extend(self.syntax_errors_to_diagnostics(&shared_errors));
-                            } else {
-                                info!("✅ No syntax errors in {}", uri);
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to parse document {}: {}", uri, e);
+                            // Конвертируем shared ParseError → LSP Diagnostics
+                            diagnostics
+                                .extend(self.syntax_errors_to_diagnostics(&errors));
+                        } else {
+                            info!("✅ No syntax errors in {}", uri);
                         }
                     }
+                    Err(e) => {
+                        error!("Failed to parse document {}: {}", uri, e);
+                        // Создаём диагностику об ошибке парсинга
+                        diagnostics.push(Diagnostic {
+                            range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            message: format!("❌ Ошибка парсинга: {}", e),
+                            source: Some("bsl-syntax".to_string()),
+                            ..Default::default()
+                        });
+                    }
                 }
-                None => {
-                    error!("ParserCoordinator not available");
-                }
+            } else {
+                warn!("⚠️ TypeSystemService not yet initialized, skipping syntax validation");
             }
         }
 

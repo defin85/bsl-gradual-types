@@ -304,7 +304,7 @@ pub struct FunctionSignature {
 }
 
 /// Позиция в исходном коде
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Span {
     pub start_line: u32,
     pub start_column: u32,
@@ -344,6 +344,16 @@ impl Span {
             start_column,
             end_line,
             end_column,
+        }
+    }
+
+    /// Создать span из tree-sitter позиций (для совместимости с backend)
+    pub fn from_positions(start: (u32, u32), end: (u32, u32)) -> Self {
+        Self {
+            start_line: start.0,
+            start_column: start.1,
+            end_line: end.0,
+            end_column: end.1,
         }
     }
 }

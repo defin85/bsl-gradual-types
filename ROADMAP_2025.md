@@ -1353,6 +1353,348 @@ fn add_documentation_links(mut self, resolution: &TypeResolution) -> Self {
 
 ---
 
+### 🚨 Milestone 3.7: Semantic Diagnostics MVP (3-5 дней)
+
+**Приоритет:** 🔴 КРИТИЧНЫЙ — валидаторы готовы, нужна только интеграция в LSP
+
+**Проблема:**
+
+TypeValidator уже реализован и работает в Web API, но **НЕ используется в LSP**. Разработчики 1С не видят ошибки в редакторе:
+
+```bsl
+МассивДанных = Новый Массив;
+МассивДанных.НесуществующийМетод();  // ❌ LSP НЕ показывает ошибку
+Число = 42;
+Число.Добавить(1);  // ❌ LSP НЕ показывает ошибку (примитив как коллекция)
+```
+
+**Текущее состояние:**
+
+✅ **Что УЖЕ работает (Web API):**
+- `POST /api/validate` — валидация методов/свойств
+- `TypeValidator` с 4 типами валидаций
+- 3927 типов платформы в TypeMetadataLookup
+- 3 integration теста проходят
+
+❌ **Что НЕ работает (LSP):**
+- LSP показывает только **syntax errors** (Milestone 2.18)
+- Semantic errors НЕ публикуются в `textDocument/publishDiagnostics`
+- VSCode НЕ показывает красные волнистые линии для semantic ошибок
+
+**Исследование:**
+
+Проведён анализ валидаций (см. architect отчёт). Рекомендован **Уровень 1 (MVP)**: 3 критичные валидации, покрывающие ~70% типовых ошибок (Balyuk & Popova, 2021).
+
+**Решение:**
+
+Интегрировать TypeValidator в LSP lifecycle (`did_open`, `did_change`) для публикации semantic diagnostics.
+
+#### Задачи:
+
+**Task 1: SemanticValidationVisitor (1-2 дня)**
+
+**Файл:** Создать `backend/src/application/semantic_validation_visitor.rs`
+
+Visitor для обхода SemanticProgram и сбора semantic errors:
+
+```rust
+use bsl_shared::domain::validators::TypeValidator;
+use bsl_shared::ir::SemanticProgram;
+
+/// Visitor для сбора семантических ошибок из IR
+pub struct SemanticValidationVisitor<'a> {
+    validator: &'a TypeValidator<'a>,
+}
+
+impl<'a> SemanticValidationVisitor<'a> {
+    pub fn new(validator: &'a TypeValidator<'a>) -> Self {
+        Self { validator }
+    }
+
+    /// Обход программы и сбор ошибок
+    pub fn collect_errors(&self, program: &SemanticProgram) -> Vec<TypeDiagnostic> {
+        let mut errors = Vec::new();
+
+        for node in &program.nodes {
+            self.visit_node(node, &mut errors);
+        }
+
+        errors
+    }
+
+    fn visit_node(&self, node: &SemanticNode, errors: &mut Vec<TypeDiagnostic>) {
+        match &node.kind {
+            // Проверка вызова метода
+            SemanticNodeKind::FunctionCall {
+                function_name,
+                object_type: Some(obj_type),
+                object_name: Some(_),
+                ..
+            } => {
+                // Резолвим тип объекта
+                let resolution = TypeResolution::simple(obj_type.clone());
+
+                // Проверяем существование метода
+                if let Some(error) = self.validator.validate_method_exists(&resolution, function_name) {
+                    errors.push(error.to_diagnostic(node.span.start_line, node.span.start_column));
+                }
+            }
+
+            // Проверка доступа к свойству
+            SemanticNodeKind::MemberAccess {
+                object_type,
+                member_name,
+                is_method: false,  // Свойство, не метод
+                ..
+            } => {
+                let resolution = TypeResolution::simple(object_type.clone());
+
+                if let Some(error) = self.validator.validate_property_exists(&resolution, member_name) {
+                    errors.push(error.to_diagnostic(node.span.start_line, node.span.start_column));
+                }
+            }
+
+            // Другие узлы
+            _ => {}
+        }
+    }
+}
+```
+
+---
+
+**Task 2: Интеграция в TypeSystemService (1 день)**
+
+**Файл:** `backend/src/application/type_system_service.rs`
+
+Добавить метод для semantic validation:
+
+```rust
+/// Валидация семантических ошибок (Milestone 3.7 MVP)
+///
+/// Проверяет:
+/// - Несуществующие методы
+/// - Несуществующие свойства
+/// - Примитивы как коллекции
+pub async fn validate_semantics(&self, code: &str) -> Result<Vec<TypeDiagnostic>> {
+    // 1. Парсим код → SemanticProgram (IR)
+    let parse_result = self.parser_coordinator.parse(code)?;
+    let ir_program = AstToIrConverter::convert(
+        parse_result.program,
+        code.to_string(),
+        "temp.bsl".to_string(),
+        self.analysis_engine.get_repository(),
+    )?;
+
+    // 2. Создаём TypeValidator
+    let validator = TypeValidator::new(&self.metadata_lookup);
+
+    // 3. Обходим IR и собираем ошибки
+    let visitor = SemanticValidationVisitor::new(&validator);
+    let errors = visitor.collect_errors(&ir_program);
+
+    Ok(errors)
+}
+```
+
+---
+
+**Task 3: Интеграция в LSP Server (1 день)**
+
+**Файл:** `backend/src/bin/lsp_server.rs`
+
+**Обновить `did_open()` (строки 708-746):**
+
+```rust
+async fn did_open(&self, params: DidOpenTextDocumentParams) {
+    let uri = params.text_document.uri;
+    let text = params.text_document.text.clone();
+    let version = params.text_document.version;
+
+    let mut diagnostics = Vec::new();
+
+    // 1. Syntax validation (уже есть)
+    if let Some(type_service) = self.get_type_service() {
+        match type_service.parse_and_validate(&text) {
+            Ok(syntax_errors) => {
+                diagnostics.extend(self.syntax_errors_to_diagnostics(&syntax_errors));
+            }
+            Err(e) => { /* ... */ }
+        }
+
+        // 2. ✅ НОВОЕ: Semantic validation
+        match type_service.validate_semantics(&text).await {
+            Ok(semantic_errors) => {
+                for error in semantic_errors {
+                    diagnostics.push(self.semantic_error_to_diagnostic(&error));
+                }
+            }
+            Err(e) => {
+                warn!("Semantic validation failed: {}", e);
+            }
+        }
+    }
+
+    // 3. Публикуем ВСЕ диагностики (syntax + semantic)
+    self.client
+        .publish_diagnostics(uri.clone(), diagnostics, Some(version))
+        .await;
+}
+```
+
+**Добавить метод конвертации:**
+
+```rust
+/// Конвертировать TypeDiagnostic → LSP Diagnostic
+fn semantic_error_to_diagnostic(&self, error: &TypeDiagnostic) -> Diagnostic {
+    // Создаём range для подчёркивания
+    let start_pos = Position::new(error.line, error.column);
+    let end_pos = Position::new(error.line, error.column + 15);  // TODO: точная длина токена
+
+    Diagnostic {
+        range: Range::new(start_pos, end_pos),
+        severity: Some(match error.severity {
+            DiagnosticSeverity::Error => tower_lsp::lsp_types::DiagnosticSeverity::ERROR,
+            DiagnosticSeverity::Warning => tower_lsp::lsp_types::DiagnosticSeverity::WARNING,
+            _ => tower_lsp::lsp_types::DiagnosticSeverity::INFORMATION,
+        }),
+        message: error.message.clone(),
+        source: Some("bsl-semantic".to_string()),  // ✅ Отличается от "bsl-syntax"
+        ..Default::default()
+    }
+}
+```
+
+**Аналогично обновить `did_change()`** (строки 826+)
+
+---
+
+**Task 4: Тестирование (1 день)**
+
+**Файл:** Создать `backend/tests/semantic_diagnostics_lsp_test.rs`
+
+**Integration тесты:**
+
+```rust
+#[tokio::test]
+async fn test_lsp_shows_nonexistent_method_error() {
+    let lsp_server = create_test_lsp_server().await;
+
+    let code = r#"
+Функция Тест()
+    МассивДанных = Новый Массив;
+    МассивДанных.НесуществующийМетод();
+КонецФункции
+    "#;
+
+    // Открываем документ
+    let diagnostics = lsp_server.open_and_get_diagnostics(code).await;
+
+    // Проверяем, что есть semantic error
+    let semantic_errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.source == Some("bsl-semantic".to_string()))
+        .collect();
+
+    assert!(
+        !semantic_errors.is_empty(),
+        "❌ LSP должен показать semantic error для несуществующего метода"
+    );
+
+    let error = &semantic_errors[0];
+    assert!(error.message.contains("НесуществующийМетод"));
+    assert!(error.message.contains("не существует"));
+}
+
+#[tokio::test]
+async fn test_lsp_shows_primitive_as_collection_error() {
+    let code = r#"
+Функция Тест()
+    Число = 42;
+    Число.Добавить(1);
+КонецФункции
+    "#;
+
+    let diagnostics = lsp_server.open_and_get_diagnostics(code).await;
+
+    let semantic_errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.source == Some("bsl-semantic".to_string()))
+        .collect();
+
+    assert!(!semantic_errors.is_empty());
+    let error = &semantic_errors[0];
+    assert!(error.message.contains("Число") || error.message.contains("примитив"));
+}
+
+#[tokio::test]
+async fn test_lsp_shows_nonexistent_property_error() {
+    let code = r#"
+Функция Тест()
+    Таблица = Новый ТаблицаЗначений;
+    Значение = Таблица.НесуществующееСвойство;
+КонецФункции
+    "#;
+
+    let diagnostics = lsp_server.open_and_get_diagnostics(code).await;
+
+    let semantic_errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.source == Some("bsl-semantic".to_string()))
+        .collect();
+
+    assert!(!semantic_errors.is_empty());
+    assert!(semantic_errors[0].message.contains("НесуществующееСвойство"));
+}
+```
+
+---
+
+**Результат Milestone 3.7:**
+
+**MVP Валидации (3 категории):**
+- ✅ Несуществующие методы — LSP показывает ошибку с красной волнистой линией
+- ✅ Несуществующие свойства — LSP показывает ошибку
+- ✅ Примитивы как коллекции — LSP показывает ошибку
+
+**LSP Integration:**
+- ✅ `did_open()` публикует syntax + semantic diagnostics
+- ✅ `did_change()` публикует syntax + semantic diagnostics
+- ✅ Source tag: `"bsl-semantic"` (отличается от `"bsl-syntax"`)
+- ✅ Severity levels: Error, Warning, Info
+
+**TypeValidator:**
+- ✅ Переиспользуется из Web API (нет дублирования)
+- ✅ 3927 типов платформы из TypeMetadataLlookup
+- ✅ Case-insensitive поиск (русские + английские имена)
+
+**Тесты:**
+- ✅ 3+ integration тестов для LSP semantic diagnostics
+- ✅ Покрытие всех 3 категорий MVP валидаций
+- ✅ Все тесты проходят
+
+**Performance:**
+- ✅ Semantic validation не блокирует UI (async)
+- ✅ IR Cache переиспользуется из Milestone 2.13
+- ✅ Latency <10ms для файлов <1000 строк
+
+**Зависимости:**
+- ✅ Milestone 2.8 (Semantic IR Layer)
+- ✅ Milestone 2.18 (Syntax Error Diagnostics)
+- ✅ Milestone 3.5 (Flow-Sensitive Analysis) — корректный object_name для методов
+
+**Оценка времени:** 3-5 дней
+
+**Связь с научной базой:**
+
+Balyuk & Popova (2021) выделяют 3 категории типовых ошибок:
+- **Категория 2:** Несуществующие методы/свойства — ~40% ошибок
+- **Категория 3:** Операции с несовместимыми типами — ~30% ошибок
+
+Milestone 3.7 MVP покрывает **~70% типовых ошибок** разработчиков 1С.
+
+---
+
 ### 🎯 Результаты Версии 3.0 (через 6 месяцев от старта)
 
 **Технические метрики:**
@@ -1361,6 +1703,7 @@ fn add_documentation_links(mut self, resolution: &TypeResolution) -> Self {
 - ✅ 50+ Static Analysis Rules
 - ✅ Code Quality Dashboard
 - ✅ Flow-Sensitive Analysis — hover корректно работает на вызовах методов
+- ✅ Semantic Diagnostics MVP — несуществующие методы/свойства показываются в LSP
 - ✅ Enhanced Hover — три уровня детализации, фасеты, Generic типы, ссылки на документацию
 - ✅ LSP Settings для кастомизации hover (как Rust Analyzer)
 - ✅ MCP Server для интеграции с LLM (Claude, ChatGPT)
@@ -1376,6 +1719,8 @@ fn add_documentation_links(mut self, resolution: &TypeResolution) -> Self {
 - ✅ Hover кастомизируется через VSCode Settings (compact/full/detailed)
 - ✅ Фасеты объясняются понятно (Manager vs Object vs Reference)
 - ✅ Ссылки на platform documentation в hover
+- ✅ Красные волнистые линии для несуществующих методов/свойств (покрывает ~70% типовых ошибок)
+- ✅ Semantic diagnostics в реальном времени (latency <10ms)
 - ✅ AI-ассистент с полным контекстом BSL проекта
 - ✅ Генерация кода с типизацией через Claude
 

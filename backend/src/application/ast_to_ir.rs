@@ -518,12 +518,19 @@ impl AstToIrConverter {
                     object, property, ..
                 } = expression
                 {
-                    // Метод объекта
+                    // ✅ Извлекаем ИМЯ переменной (только для Identifier)
+                    let object_name = match object.as_ref() {
+                        Expression::Identifier { name, .. } => Some(name.clone()),
+                        _ => None,  // Для сложных выражений object_name = None
+                    };
+
+                    // Инферим ТИП объекта (всегда)
                     let object_type = self.infer_expression_type(&object);
 
                     let node = SemanticNode {
                         kind: SemanticNodeKind::MemberAccess {
-                            object_type,
+                            object_name,    // ✅ Имя переменной
+                            object_type,    // ✅ Тип переменной
                             member_name: property,
                             is_method: true,
                         },
@@ -686,15 +693,19 @@ impl AstToIrConverter {
                 // ✅ НОВОЕ: Generic inference из вызова метода
                 // Если это вызов метода переменной (а не выражения),
                 // пытаемся вывести Generic тип
-                if let Expression::Identifier { name, .. } = &*object {
+                let object_name = if let Expression::Identifier { name, .. } = &*object {
                     self.try_infer_generic_from_method_call(name, &property, &arg_types);
-                }
+                    Some(name.clone())
+                } else {
+                    None
+                };
 
                 let node = SemanticNode {
                     kind: SemanticNodeKind::FunctionCall {
                         function_name: property.clone(),
-                        arg_types,
+                        object_name,  // ✅ НОВОЕ: имя объекта для методов
                         object_type: Some(object_type),
+                        arg_types,
                     },
                     span,
                     scope_id: self.current_scope,
@@ -714,8 +725,9 @@ impl AstToIrConverter {
         let node = SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name,
-                arg_types,
+                object_name: None,  // ✅ НОВОЕ: обычная функция, не метод
                 object_type: None,
+                arg_types,
             },
             span,
             scope_id: self.current_scope,

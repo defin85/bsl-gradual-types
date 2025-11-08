@@ -350,8 +350,9 @@ mod tests {
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name: "Сообщить".to_string(),
-                arg_types: vec!["Строка".to_string()],
+                object_name: None,
                 object_type: None,
+                arg_types: vec!["Строка".to_string()],
             },
             span: Span::stub(),
             scope_id: program.symbols.root_scope,

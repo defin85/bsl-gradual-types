@@ -141,17 +141,37 @@ pub enum SemanticNodeKind {
 
     // === Member Access (КРИТИЧНО для LSP hover) ===
     /// Доступ к члену объекта: `объект.свойство` или `объект.Метод()`
+    ///
+    /// # Семантика полей
+    ///
+    /// - `object_name`: **Имя переменной** из исходного кода (Some("МассивДанных"))
+    ///   - Some(name) для простых переменных (Identifier)
+    ///   - None для сложных выражений (PropertyAccess, Call, New, etc.)
+    /// - `object_type`: **Тип объекта** (результат type inference, например, "Массив")
+    /// - `member_name`: Имя свойства или метода (например, "Добавить")
+    /// - `is_method`: true если это вызов метода, false если доступ к свойству
+    ///
+    /// # Примеры
+    ///
+    /// ```bsl
+    /// МассивДанных = Новый Массив();
+    /// МассивДанных.Добавить("текст");  // object_name=Some("МассивДанных"), object_type="Массив"
+    ///
+    /// obj.prop1.prop2.Метод();  // object_name=None, object_type="<inferred_type>"
+    /// ```
     MemberAccess {
-        object_type: String,
+        object_name: Option<String>,  // ✅ ИСПРАВЛЕНО: Option вместо String
+        object_type: String,          // Тип переменной (результат inference)
         member_name: String,
-        is_method: bool, // true = метод, false = свойство
+        is_method: bool,              // true = метод, false = свойство
     },
 
     /// Вызов функции/метода
     FunctionCall {
         function_name: String,
+        object_name: Option<String>,  // ✅ НОВОЕ: имя объекта для методов
+        object_type: Option<String>,  // Тип объекта
         arg_types: Vec<String>,
-        object_type: Option<String>, // Some если это метод объекта
     },
 
     // === Scope tracking ===
@@ -488,20 +508,23 @@ impl SemanticProgram {
             SemanticNodeKind::Assignment { variable, .. } => variable.clone(),
 
             // Доступ к члену: МассивДанных.Добавить
-            SemanticNodeKind::MemberAccess { object_type, .. } => {
-                // object_type может быть именем переменной или типом
-                // Попробуем найти как переменную в scope
-                object_type.clone()
+            SemanticNodeKind::MemberAccess { object_name: Some(obj_name), .. } => {
+                // ✅ Phase 2: Извлекаем имя переменной из source code
+                obj_name.clone()
+            }
+            SemanticNodeKind::MemberAccess { object_name: None, .. } => {
+                // Сложное выражение (не переменная) — не поддерживаем hover
+                return None;
             }
 
             // Объявление переменной: Перем МассивДанных
             SemanticNodeKind::VariableDeclaration { name, .. } => name.clone(),
 
             // Вызов функции: может быть вызов метода переменной
-            SemanticNodeKind::FunctionCall { object_type: Some(obj_type), .. } => {
-                obj_type.clone()
+            SemanticNodeKind::FunctionCall { object_name: Some(obj_name), .. } => {
+                obj_name.clone()
             }
-            SemanticNodeKind::FunctionCall { object_type: None, .. } => {
+            SemanticNodeKind::FunctionCall { object_name: None, .. } => {
                 // Обычный вызов функции, не метод переменной
                 return None;
             }
@@ -549,20 +572,23 @@ impl SemanticProgram {
             SemanticNodeKind::Assignment { variable, .. } => variable.clone(),
 
             // Доступ к члену: МассивДанных.Добавить
-            SemanticNodeKind::MemberAccess { object_type, .. } => {
-                // object_type может быть именем переменной или типом
-                // Попробуем найти как переменную в scope
-                object_type.clone()
+            SemanticNodeKind::MemberAccess { object_name: Some(obj_name), .. } => {
+                // ✅ Phase 2: Извлекаем имя переменной из source code
+                obj_name.clone()
+            }
+            SemanticNodeKind::MemberAccess { object_name: None, .. } => {
+                // Сложное выражение (не переменная) — не поддерживаем hover
+                return None;
             }
 
             // Объявление переменной: Перем МассивДанных
             SemanticNodeKind::VariableDeclaration { name, .. } => name.clone(),
 
             // Вызов функции: может быть вызов метода переменной
-            SemanticNodeKind::FunctionCall { object_type: Some(obj_type), .. } => {
-                obj_type.clone()
+            SemanticNodeKind::FunctionCall { object_name: Some(obj_name), .. } => {
+                obj_name.clone()
             }
-            SemanticNodeKind::FunctionCall { object_type: None, .. } => {
+            SemanticNodeKind::FunctionCall { object_name: None, .. } => {
                 // Обычный вызов функции, не метод переменной
                 return None;
             }
@@ -974,11 +1000,15 @@ impl SemanticProgram {
             SemanticNodeKind::WhileLoop { .. } => ("WhileLoop".to_string(), None, attributes),
             SemanticNodeKind::FunctionCall {
                 function_name,
+                object_name,
                 arg_types,
                 ..
             } => {
                 attributes.insert("function_name".to_string(), function_name.clone());
                 attributes.insert("arg_count".to_string(), arg_types.len().to_string());
+                if let Some(obj_name) = object_name {
+                    attributes.insert("object_name".to_string(), obj_name.clone());
+                }
                 (
                     "FunctionCall".to_string(),
                     Some(function_name.clone()),
@@ -999,16 +1029,27 @@ impl SemanticProgram {
                 ("ForEachLoop".to_string(), None, attributes)
             }
             SemanticNodeKind::MemberAccess {
+                object_name,
                 object_type,
                 member_name,
                 is_method,
             } => {
+                // object_name теперь Option<String>
+                if let Some(name) = object_name {
+                    attributes.insert("object_name".to_string(), name.clone());
+                }
                 attributes.insert("object_type".to_string(), object_type.clone());
                 attributes.insert("member_name".to_string(), member_name.clone());
                 attributes.insert("is_method".to_string(), is_method.to_string());
+
+                let description = object_name
+                    .as_ref()
+                    .map(|name| format!("{}.{}", name, member_name))
+                    .unwrap_or_else(|| format!("<expr>.{}", member_name));
+
                 (
                     "MemberAccess".to_string(),
-                    Some(member_name.clone()),
+                    Some(description),
                     attributes,
                 )
             }

@@ -41,9 +41,15 @@ fn facet_tag_classes(facet: &str) -> &'static str {
 /// Helper function for section container classes
 fn section_container_classes(section_type: &str) -> &'static str {
     match section_type {
-        "methods" => "bg-blue-50/50 dark:bg-blue-950/20 p-3 rounded-lg border-l-4 border-blue-500 mb-4",
-        "tabular" => "bg-cyan-50/50 dark:bg-cyan-950/20 p-3 rounded-lg border-l-4 border-cyan-500 mb-4",
-        "flow" => "bg-purple-50 dark:bg-purple-950/30 p-4 rounded-lg border-l-4 border-purple-500 mb-4",
+        "methods" => {
+            "bg-blue-50/50 dark:bg-blue-950/20 p-3 rounded-lg border-l-4 border-blue-500 mb-4"
+        }
+        "tabular" => {
+            "bg-cyan-50/50 dark:bg-cyan-950/20 p-3 rounded-lg border-l-4 border-cyan-500 mb-4"
+        }
+        "flow" => {
+            "bg-purple-50 dark:bg-purple-950/30 p-4 rounded-lg border-l-4 border-purple-500 mb-4"
+        }
         "facets" => "bg-blue-50 dark:bg-blue-950/30 p-4 rounded-lg mb-4",
         _ => "p-3 rounded-lg mb-4",
     }

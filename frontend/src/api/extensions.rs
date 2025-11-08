@@ -3,7 +3,7 @@
 //! This module provides UI-specific functionality (colors, formatting, filters)
 //! that extends the core DTOs from bsl-shared without duplicating them.
 
-use bsl_shared::api::dtos::{CategoryDto, MetricsDto, PaginationDto, TypeDto, MethodDto, ParamDto};
+use bsl_shared::api::dtos::{CategoryDto, MethodDto, MetricsDto, PaginationDto, ParamDto, TypeDto};
 
 // Type aliases for backward compatibility during transition
 pub type TypeInfo = TypeDto;

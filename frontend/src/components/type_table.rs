@@ -228,7 +228,7 @@ fn TypeTableRow(
             "Configuration" => "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200",
             "Union" => "bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200",
             "Dynamic" => "bg-pink-100 dark:bg-pink-900 text-pink-800 dark:text-pink-200",
-            _ => "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200"
+            _ => "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200",
         }
     };
 

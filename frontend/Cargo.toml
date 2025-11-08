@@ -6,6 +6,11 @@ authors.workspace = true
 license.workspace = true
 description = "Web frontend for BSL Gradual Type System"
 
+[features]
+default = ["web"]
+web = []
+vscode = ["leptos/csr"]  # Client-side rendering for VSCode webviews
+
 [lib]
 crate-type = ["cdylib"]
 path = "src/lib.rs"

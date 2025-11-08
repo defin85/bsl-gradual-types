@@ -1,6 +1,6 @@
 //! Type details modal component
 
-use crate::api::{TypeInfo, MethodInfo};
+use crate::api::{MethodInfo, TypeInfo};
 use leptos::prelude::*;
 
 // ============================================================================

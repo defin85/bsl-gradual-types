@@ -405,3 +405,108 @@ async fn test_hover_with_typed_parameters() {
 
     println!("✅ PASSED: test_hover_with_typed_parameters");
 }
+
+// ============================================================================
+// Phase 4: Performance & Edge Case Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_hover_performance_meets_milestone_2_13_requirement() {
+    // Milestone 2.13: hover должен быть <5ms благодаря IR Cache
+    let service = create_test_service();
+
+    let code = r#"
+Процедура БольшаяПроцедура()
+    МассивДанных = Новый Массив;
+    Для Индекс = 0 По 100 Цикл
+        МассивДанных.Добавить(Индекс);
+    КонецЦикла;
+
+    СтруктураДанных = Новый Структура;
+    СтруктураДанных.Вставить("ключ", МассивДанных);
+
+    Результат = МассивДанных.Количество();
+КонецПроцедуры
+    "#;
+
+    // Первый вызов - парсинг + создание IR (может быть медленнее)
+    let _ = service.get_hover_info(code, 10, 20).await;
+
+    // Последующие вызовы должны использовать IR Cache
+    let mut durations = Vec::new();
+
+    for _ in 0..50 {
+        let start = std::time::Instant::now();
+        let _ = service.get_hover_info(code, 10, 20).await;
+        durations.push(start.elapsed());
+    }
+
+    let avg_duration = durations.iter().sum::<std::time::Duration>() / durations.len() as u32;
+
+    println!("📊 Hover Performance (Milestone 2.13 requirement):");
+    println!("  Average: {:?}", avg_duration);
+    println!("  Requirement: <5ms");
+
+    assert!(
+        avg_duration.as_millis() < 5,
+        "❌ Hover должен быть <5ms (Milestone 2.13), средняя: {}ms",
+        avg_duration.as_millis()
+    );
+
+    println!("✅ PASSED: test_hover_performance_meets_milestone_2_13_requirement");
+}
+
+#[tokio::test]
+async fn test_hover_edge_case_eof() {
+    let service = create_test_service();
+    let code = "Процедура Тест()\nКонецПроцедуры";
+
+    // Позиция за пределами файла
+    let result = service.get_hover_info(code, 100, 0).await;
+
+    assert!(
+        result.is_ok(),
+        "❌ Hover на EOF не должен крашиться"
+    );
+    // Note: hover на EOF может вернуть Some или None - главное не крашится
+    let _ = result.unwrap();
+
+    println!("✅ PASSED: test_hover_edge_case_eof");
+}
+
+#[tokio::test]
+async fn test_hover_edge_case_empty_line() {
+    let service = create_test_service();
+    let code = r#"
+Процедура Тест()
+
+    МассивДанных = Новый Массив;
+КонецПроцедуры
+    "#;
+
+    // Позиция на пустой строке (строка 2)
+    let result = service.get_hover_info(code, 2, 0).await;
+
+    assert!(
+        result.is_ok(),
+        "❌ Hover на пустой строке не должен крашиться"
+    );
+
+    println!("✅ PASSED: test_hover_edge_case_empty_line");
+}
+
+#[tokio::test]
+async fn test_hover_edge_case_zero_position() {
+    let service = create_test_service();
+    let code = "Процедура Тест()\nКонецПроцедуры";
+
+    // Позиция (0, 0) — начало файла
+    let result = service.get_hover_info(code, 0, 0).await;
+
+    assert!(
+        result.is_ok(),
+        "❌ Hover на (0,0) не должен крашиться"
+    );
+
+    println!("✅ PASSED: test_hover_edge_case_zero_position");
+}

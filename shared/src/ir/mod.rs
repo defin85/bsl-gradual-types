@@ -166,11 +166,36 @@ pub enum SemanticNodeKind {
         is_method: bool,              // true = метод, false = свойство
     },
 
-    /// Вызов функции/метода
+    /// Вызов функции или метода: `Функция()` или `объект.Метод(args)`
+    ///
+    /// # Семантика полей
+    ///
+    /// - `function_name`: Имя функции/метода
+    /// - `object_name`: **Имя переменной-объекта** для вызовов методов
+    ///   - Some(name) для методов переменных: `МассивДанных.Добавить("x")`
+    ///   - None для глобальных функций: `Сообщить("текст")`
+    ///   - None для сложных выражений: `ПолучитьОбъект().Метод()`
+    /// - `object_type`: **Тип объекта** для вызовов методов
+    ///   - Some(type) для методов: `object_type = "Массив"`
+    ///   - None для глобальных функций
+    /// - `arg_types`: Типы аргументов вызова
+    ///
+    /// # Примеры
+    ///
+    /// ```bsl
+    /// Сообщить("текст");  // object_name=None, object_type=None
+    /// МассивДанных.Добавить("x");  // object_name=Some("МассивДанных"), object_type=Some("Массив")
+    /// ```
+    ///
+    /// # Milestone 3.5 Phase 2
+    ///
+    /// `object_name` введён для flow-sensitive анализа, чтобы различать:
+    /// - **Имя переменной** (для lookup в SymbolTable)
+    /// - **Тип объекта** (для резолюции методов)
     FunctionCall {
         function_name: String,
-        object_name: Option<String>,  // ✅ НОВОЕ: имя объекта для методов
-        object_type: Option<String>,  // Тип объекта
+        object_name: Option<String>,
+        object_type: Option<String>,
         arg_types: Vec<String>,
     },
 
@@ -495,6 +520,40 @@ impl SemanticProgram {
     ///     }
     /// }
     /// ```
+
+    /// Извлечь имя переменной из узла IR (если узел содержит переменную)
+    ///
+    /// # Returns
+    /// - `Some(name)` если узел содержит переменную с именем
+    /// - `None` если узел не содержит переменную или это сложное выражение
+    ///
+    /// # Phase 4: DRY refactoring
+    /// Устраняет дублирование между find_variable_at_position() и find_variable_with_scope()
+    fn extract_variable_name(node: &SemanticNode) -> Option<String> {
+        match &node.kind {
+            // Присваивание: МассивДанных = Новый Массив
+            SemanticNodeKind::Assignment { variable, .. } => Some(variable.clone()),
+
+            // Доступ к члену: МассивДанных.Добавить
+            SemanticNodeKind::MemberAccess { object_name: Some(obj_name), .. } => {
+                Some(obj_name.clone())
+            }
+            SemanticNodeKind::MemberAccess { object_name: None, .. } => None,
+
+            // Объявление переменной: Перем МассивДанных
+            SemanticNodeKind::VariableDeclaration { name, .. } => Some(name.clone()),
+
+            // Вызов функции: может быть вызов метода переменной
+            SemanticNodeKind::FunctionCall { object_name: Some(obj_name), .. } => {
+                Some(obj_name.clone())
+            }
+            SemanticNodeKind::FunctionCall { object_name: None, .. } => None,
+
+            // Для остальных узлов не поддерживаем
+            _ => None,
+        }
+    }
+
     pub fn find_variable_at_position(&self, line: u32, column: u32) -> Option<(String, TypeHint)> {
         // 1. Находим узел в позиции
         let node = self.find_node_at_position(line, column)?;
@@ -502,36 +561,8 @@ impl SemanticProgram {
         // 2. Получаем scope узла
         let scope_id = node.scope_id;
 
-        // 3. Извлекаем имя переменной из узла
-        let var_name = match &node.kind {
-            // Присваивание: МассивДанных = Новый Массив
-            SemanticNodeKind::Assignment { variable, .. } => variable.clone(),
-
-            // Доступ к члену: МассивДанных.Добавить
-            SemanticNodeKind::MemberAccess { object_name: Some(obj_name), .. } => {
-                // ✅ Phase 2: Извлекаем имя переменной из source code
-                obj_name.clone()
-            }
-            SemanticNodeKind::MemberAccess { object_name: None, .. } => {
-                // Сложное выражение (не переменная) — не поддерживаем hover
-                return None;
-            }
-
-            // Объявление переменной: Перем МассивДанных
-            SemanticNodeKind::VariableDeclaration { name, .. } => name.clone(),
-
-            // Вызов функции: может быть вызов метода переменной
-            SemanticNodeKind::FunctionCall { object_name: Some(obj_name), .. } => {
-                obj_name.clone()
-            }
-            SemanticNodeKind::FunctionCall { object_name: None, .. } => {
-                // Обычный вызов функции, не метод переменной
-                return None;
-            }
-
-            // Для остальных узлов не поддерживаем
-            _ => return None,
-        };
+        // 3. Извлекаем имя переменной из узла (✅ Phase 4: используем общий метод)
+        let var_name = Self::extract_variable_name(node)?;
 
         // 4. Ищем переменную в scope (с поиском в родительских scope)
         let (type_hint, _span) = self.resolve_variable(&var_name, scope_id)?;
@@ -566,36 +597,8 @@ impl SemanticProgram {
         // 2. Получаем scope узла
         let scope_id = node.scope_id;
 
-        // 3. Извлекаем имя переменной из узла
-        let var_name = match &node.kind {
-            // Присваивание: МассивДанных = Новый Массив
-            SemanticNodeKind::Assignment { variable, .. } => variable.clone(),
-
-            // Доступ к члену: МассивДанных.Добавить
-            SemanticNodeKind::MemberAccess { object_name: Some(obj_name), .. } => {
-                // ✅ Phase 2: Извлекаем имя переменной из source code
-                obj_name.clone()
-            }
-            SemanticNodeKind::MemberAccess { object_name: None, .. } => {
-                // Сложное выражение (не переменная) — не поддерживаем hover
-                return None;
-            }
-
-            // Объявление переменной: Перем МассивДанных
-            SemanticNodeKind::VariableDeclaration { name, .. } => name.clone(),
-
-            // Вызов функции: может быть вызов метода переменной
-            SemanticNodeKind::FunctionCall { object_name: Some(obj_name), .. } => {
-                obj_name.clone()
-            }
-            SemanticNodeKind::FunctionCall { object_name: None, .. } => {
-                // Обычный вызов функции, не метод переменной
-                return None;
-            }
-
-            // Для остальных узлов не поддерживаем
-            _ => return None,
-        };
+        // 3. Извлекаем имя переменной из узла (✅ Phase 4: используем общий метод)
+        let var_name = Self::extract_variable_name(node)?;
 
         // 4. Ищем переменную в scope (с поиском в родительских scope)
         let (type_hint, _span) = self.resolve_variable(&var_name, scope_id)?;

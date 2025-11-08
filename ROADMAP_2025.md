@@ -11,7 +11,7 @@
 
 1. [Текущее состояние проекта](#-текущее-состояние-проекта-версия-10)
 2. [✅ Завершённые Milestones](#-завершённые-milestones-компактный-формат) — **Детали:** [ROADMAP_ARCHIVE_2025.md](ROADMAP_ARCHIVE_2025.md)
-3. [🎯 Планируемые Milestones](#-milestone-217-configuration-metadata-parser-3-4-дня)
+3. [🎯 Планируемые Milestones (Версия 2.0)](#-планируемые-milestones-версия-20)
 4. [🚀 Версия 3.0 — Advanced Features](#-версия-30--advanced-features-q2-2025-3-месяца)
 5. [🌐 Версия 4.0 — Collaboration & Ecosystem](#-версия-40--collaboration--ecosystem-q3-q4-2025-6-месяцев)
 6. [📅 Timeline Summary](#-timeline-summary)
@@ -59,7 +59,7 @@
 #### Backend
 - ⚠️ **Tree-sitter НЕ используется** — BslParser возвращает пустой AST
 - ⚠️ **Парсинг кода не работает** — валидация только по именам типов
-- ⚠️ **Flow-sensitive analysis** — не реализован
+- ⚠️ **Flow-sensitive analysis** — планируется в версии 3.0 (Milestone 3.5)
 - ⚠️ **Union types** — базовая поддержка без нормализации
 
 ---
@@ -99,6 +99,135 @@
 **Прогресс Версии 2.0:** ~90% завершено (18/20 Milestones)
 
 ---
+
+## 🎯 Планируемые Milestones (Версия 2.0)
+
+### 📈 Milestone 2.4: Persistent Cache & Parallel Analysis (1.5-2 недели)
+
+**Приоритет:** 🟡 СРЕДНИЙ — улучшение производительности при работе с большими проектами
+
+**Контекст:**
+Milestone 2.4 частично реализован в рамках Milestone 2.13 (IR Caching) и 2.14 (Hash Unification):
+- ✅ In-memory IR Cache с LRU (37× ускорение hover)
+- ✅ xxHash64 для быстрого хеширования
+- ✅ LSP invalidation при изменении файлов
+
+**Что осталось сделать:**
+
+#### Задачи:
+
+**Task 1: Persistent Cache на диске** (1 неделя)
+- ✅ Кеширование AST деревьев в `.bsl_cache/ast/`
+- ✅ Кеширование IR (SemanticProgram) в `.bsl_cache/ir/`
+- ✅ Инвалидация при изменении файлов (по hash)
+- ✅ TTL для автоматической очистки старых файлов (7 дней)
+- ✅ Компрессия кеша (gzip или zstd) для экономии места
+- 🎯 **Цель:** Загрузка проекта из кеша < 100ms (vs 5-10s холодный старт)
+
+**Архитектура:**
+```rust
+// backend/src/system/persistent_cache.rs
+pub struct PersistentCache {
+    cache_dir: PathBuf,  // .bsl_cache/
+    ttl_days: u32,       // 7 дней по умолчанию
+}
+
+impl PersistentCache {
+    pub fn get_ir(&self, file_hash: u64) -> Result<Option<Arc<SemanticProgram>>> {
+        let cache_file = self.cache_dir.join("ir").join(format!("{}.bin.gz", file_hash));
+        // Читаем, декомпрессируем, deserialize
+    }
+
+    pub fn put_ir(&self, file_hash: u64, ir: &SemanticProgram) -> Result<()> {
+        let cache_file = self.cache_dir.join("ir").join(format!("{}.bin.gz", file_hash));
+        // Serialize, compress, записываем
+    }
+
+    pub fn cleanup_old_entries(&self) -> Result<usize> {
+        // Удаляем файлы старше ttl_days
+    }
+}
+```
+
+**Интеграция с Milestone 2.13 (IR Cache):**
+```rust
+// TypeSystemService::get_hover_info()
+// 1. Проверяем in-memory cache (Milestone 2.13)
+// 2. MISS → проверяем persistent cache (Milestone 2.4)
+// 3. MISS → парсим и кешируем в оба слоя
+```
+
+**Task 2: Параллельный анализ больших проектов** (1 неделя)
+- ✅ Multi-threaded анализ файлов через `rayon`
+- ✅ Batch processing: анализ 1000+ файлов
+- ✅ Progress bar для CLI/LSP (через `indicatif`)
+- ✅ Graceful degradation при ошибках (продолжаем анализ остальных файлов)
+- 🎯 **Цель:** Анализ 1000 файлов < 30 секунд (vs 5+ минут последовательно)
+
+**Архитектура:**
+```rust
+// backend/src/application/batch_analyzer.rs
+use rayon::prelude::*;
+use indicatif::{ProgressBar, ProgressStyle};
+
+pub struct BatchAnalyzer {
+    type_service: Arc<TypeSystemService>,
+    thread_pool_size: usize,  // По умолчанию num_cpus
+}
+
+impl BatchAnalyzer {
+    pub fn analyze_workspace(&self, workspace_path: &Path) -> Result<AnalysisReport> {
+        let bsl_files = self.discover_bsl_files(workspace_path)?;
+
+        let pb = ProgressBar::new(bsl_files.len() as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("[{elapsed}] {bar:40} {pos}/{len} {msg}")?);
+
+        let results: Vec<_> = bsl_files.par_iter()
+            .map(|file| {
+                let result = self.type_service.analyze_file(file);
+                pb.inc(1);
+                result
+            })
+            .collect();
+
+        pb.finish_with_message("Анализ завершен");
+        Ok(AnalysisReport::from_results(results))
+    }
+}
+```
+
+**LSP Integration:**
+```rust
+// При открытии workspace:
+// 1. Загружаем metadata из persistent cache
+// 2. Запускаем background task для переиндексации измененных файлов
+// 3. Показываем прогресс в status bar (Milestone 2.20)
+```
+
+**Результат Milestone 2.4:**
+- ✅ Persistent Cache между сеансами LSP
+- ✅ Холодный старт проекта < 100ms (vs 5-10s без кеша)
+- ✅ Параллельный анализ 1000+ файлов < 30s
+- ✅ Progress bar для больших операций
+- ✅ TTL для автоматической очистки старых кешей
+- ✅ Производительность сравнима с rust-analyzer и gopls
+
+**Зависимости:**
+- ✅ Milestone 2.13 (IR Caching) — переиспользуем in-memory cache
+- ✅ Milestone 2.14 (Hash Unification) — используем hash_content для ключей кеша
+
+**Оценка времени:** 1.5-2 недели
+
+**Тестирование:**
+- Unit-тесты: persistent cache read/write/invalidation
+- Integration-тесты: batch analysis с rayon
+- E2E-тесты: холодный старт LSP с persistent cache
+- Performance-тесты: 1000 файлов, замер времени
+
+---
+
+## 🚀 Версия 3.0 — "Advanced Features" (Q2 2025: 3 месяца)
 
 ### 📦 Milestone 3.1: Code Intelligence (4 недели)
 
@@ -610,6 +739,619 @@ async fn test_mcp_prompts() {
 
 ---
 
+### 🔧 Milestone 3.5: Flow-Sensitive Analysis (5-7 дней)
+
+**Приоритет:** 🔴 КРИТИЧНЫЙ — исправляет баг с hover на вызовах методов
+
+**Проблема:**
+
+Текущая реализация hover теряет тип переменной при обращении к её методам. Пример из `test_hover_milestone_2_11.bsl`:
+
+```bsl
+ТаблицаЗначенійТип = Новый ТаблицаЗначений;  // Строка 25
+Кол = ТаблицаЗначенійТип.НеСуществующийМетод();  // Строка 26
+```
+
+**Актуальное поведение:**
+- Строка 25: hover на `ТаблицаЗначенійТип` → ✅ показывает `Тип: ТаблицаЗначений` с методами
+- Строка 26: hover на `ТаблицаЗначенійТип` → ❌ показывает `Тип: Неопределено`
+
+**Причина бага:**
+
+В `backend/src/application/ast_to_ir.rs:522`:
+```rust
+let object_type = self.infer_expression_type(&object);  // Возвращает "ТаблицаЗначений" (тип)
+
+let node = SemanticNode {
+    kind: SemanticNodeKind::MemberAccess {
+        object_type,  // ← Хранится ТИП, а не ИМЯ переменной!
+        member_name: property,
+        is_method: true,
+    },
+    ...
+};
+```
+
+Потом в `shared/src/ir/mod.rs:491-495`:
+```rust
+SemanticNodeKind::MemberAccess { object_type, .. } => {
+    // object_type может быть именем переменной или типом
+    // Попробуем найти как переменную в scope
+    object_type.clone()  // ← Ищем переменную "ТаблицаЗначений" вместо "ТаблицаЗначенійТип"
+}
+```
+
+**Решение:**
+
+Хранить в `MemberAccess` **и имя переменной, и её тип**:
+```rust
+SemanticNodeKind::MemberAccess {
+    object_name: String,   // ← "ТаблицаЗначенійТип" (имя переменной)
+    object_type: String,   // ← "ТаблицаЗначений" (тип)
+    member_name: String,
+    is_method: bool,
+}
+```
+
+#### Задачи:
+
+**Task 1: Рефакторинг SemanticNodeKind::MemberAccess (1 день)**
+
+Обновить структуру в `shared/src/ir/mod.rs`:
+
+```rust
+pub enum SemanticNodeKind {
+    // ... другие варианты
+
+    MemberAccess {
+        object_name: String,   // ✅ НОВОЕ: имя переменной для резолюции
+        object_type: String,   // Тип переменной
+        member_name: String,
+        is_method: bool,
+    },
+
+    FunctionCall {
+        function_name: String,
+        object_name: Option<String>,  // ✅ НОВОЕ: имя объекта для методов
+        object_type: Option<String>,  // Тип объекта (если вызов метода)
+        argument_types: Vec<String>,
+    },
+
+    // ... другие варианты
+}
+```
+
+**Обновить все места использования:**
+- `backend/src/application/ast_to_ir.rs` — добавить извлечение `object_name`
+- `shared/src/ir/mod.rs:find_variable_at_position()` — использовать `object_name`
+- `backend/src/bin/lsp_server.rs` — обновить обработку hover
+
+---
+
+**Task 2: Извлечение object_name в ast_to_ir (1-2 дня)**
+
+Обновить `backend/src/application/ast_to_ir.rs`:
+
+```rust
+// Обработка PropertyAccess
+if let Expression::PropertyAccess { object, property, .. } = expression {
+    // ✅ НОВОЕ: Извлекаем ИМЯ переменной
+    let object_name = if let Expression::Identifier { name, .. } = &**object {
+        Some(name.clone())
+    } else {
+        None
+    };
+
+    // Инферим ТИП
+    let object_type = self.infer_expression_type(&object);
+
+    let node = SemanticNode {
+        kind: SemanticNodeKind::MemberAccess {
+            object_name: object_name.unwrap_or_else(|| object_type.clone()),
+            object_type,
+            member_name: property,
+            is_method: true,
+        },
+        span,
+        scope_id: self.current_scope,
+    };
+
+    self.nodes.push(node);
+    return Ok(Some(self.nodes.len() - 1));
+}
+```
+
+**Аналогично для FunctionCall:**
+```rust
+Expression::Call { function, args, .. } => {
+    if let Expression::PropertyAccess { object, property, .. } = &**function {
+        let object_name = if let Expression::Identifier { name, .. } = &**object {
+            Some(name.clone())
+        } else {
+            None
+        };
+
+        let object_type = self.infer_expression_type(&object);
+
+        let node = SemanticNode {
+            kind: SemanticNodeKind::FunctionCall {
+                function_name: property.clone(),
+                object_name,
+                object_type: Some(object_type),
+                argument_types,
+            },
+            span,
+            scope_id: self.current_scope,
+        };
+
+        self.nodes.push(node);
+        return Ok(Some(self.nodes.len() - 1));
+    }
+}
+```
+
+---
+
+**Task 3: Обновить find_variable_at_position (1 день)**
+
+Обновить `shared/src/ir/mod.rs`:
+
+```rust
+pub fn find_variable_at_position(&self, line: u32, column: u32) -> Option<(String, TypeHint)> {
+    let node = self.find_node_at_position(line, column)?;
+    let scope_id = node.scope_id;
+
+    let var_name = match &node.kind {
+        SemanticNodeKind::Assignment { variable, .. } => variable.clone(),
+
+        // ✅ ИСПРАВЛЕНО: Используем object_name вместо object_type
+        SemanticNodeKind::MemberAccess { object_name, .. } => {
+            object_name.clone()
+        }
+
+        SemanticNodeKind::VariableDeclaration { name, .. } => name.clone(),
+
+        // ✅ ИСПРАВЛЕНО: Используем object_name вместо object_type
+        SemanticNodeKind::FunctionCall { object_name: Some(obj_name), .. } => {
+            obj_name.clone()
+        }
+        SemanticNodeKind::FunctionCall { object_name: None, .. } => {
+            return None;
+        }
+
+        _ => return None,
+    };
+
+    // Ищем переменную по ИМЕНИ (не по типу!)
+    let (type_hint, _span) = self.resolve_variable(&var_name, scope_id)?;
+
+    Some((var_name, type_hint))
+}
+```
+
+---
+
+**Task 4: Обновить обработку hover в LSP (1 день)**
+
+Обновить `backend/src/bin/lsp_server.rs`:
+
+```rust
+async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+    let uri = params.text_document_position_params.text_document.uri;
+    let position = params.text_document_position_params.position;
+
+    // ... получение текста файла
+
+    // ✅ Используем обновлённую логику
+    if let Some((var_name, type_hint)) = ir_program.find_variable_at_position(line, column) {
+        // var_name теперь корректно содержит имя переменной,
+        // даже если hover на вызове метода
+        return Ok(Some(self.format_variable_hover(&var_name, &type_hint)));
+    }
+
+    Ok(None)
+}
+```
+
+---
+
+**Task 5: Тесты для Flow-Sensitive Analysis (1-2 дня)**
+
+Создать `backend/tests/flow_sensitive_hover_test.rs`:
+
+```rust
+#[tokio::test]
+async fn test_hover_on_method_call_preserves_type() {
+    let code = r#"
+Функция Тест()
+    ТаблицаТип = Новый ТаблицаЗначений;
+    Кол = ТаблицаТип.Количество();
+    // ↑ hover на "ТаблицаТип" должен показывать "ТаблицаЗначений", а не "Неопределено"
+КонецФункции
+    "#;
+
+    let service = TypeSystemService::new(...);
+    let ir = service.parse_bsl_code(code).await.unwrap();
+
+    // Позиция на "ТаблицаТип" в строке 4
+    let (var_name, type_hint) = ir.find_variable_at_position(4, 10).unwrap();
+
+    assert_eq!(var_name, "ТаблицаТип");
+    assert!(matches!(type_hint, TypeHint::Inferred(t) if t == "ТаблицаЗначений"));
+}
+
+#[tokio::test]
+async fn test_hover_on_nonexistent_method() {
+    let code = r#"
+Функция Тест()
+    Массив = Новый Массив;
+    Результат = Массив.НеСуществующийМетод();
+    // ↑ hover должен показывать тип "Массив" + error о несуществующем методе
+КонецФункции
+    "#;
+
+    let service = TypeSystemService::new(...);
+    let ir = service.parse_bsl_code(code).await.unwrap();
+
+    let (var_name, type_hint) = ir.find_variable_at_position(4, 17).unwrap();
+
+    assert_eq!(var_name, "Массив");
+    assert!(matches!(type_hint, TypeHint::Inferred(t) if t == "Массив"));
+}
+```
+
+---
+
+**Результат Milestone 3.5:**
+- ✅ Hover на вызовах методов показывает корректный тип переменной
+- ✅ `SemanticNodeKind::MemberAccess` хранит и `object_name`, и `object_type`
+- ✅ `SemanticNodeKind::FunctionCall` хранит и `object_name`, и `object_type`
+- ✅ `find_variable_at_position()` корректно резолвит переменные в вызовах методов
+- ✅ Тест из `test_hover_milestone_2_11.bsl:26` проходит
+- ✅ 2+ новых интеграционных теста для flow-sensitive анализа
+
+**Зависимости:**
+- ✅ Milestone 2.8 (Semantic IR Layer)
+- ✅ Milestone 2.9 (Inline Scope Analysis)
+- ✅ Milestone 2.11 (Tree-Sitter Span Extraction)
+
+**Оценка времени:** 5-7 дней
+
+---
+
+### 🎨 Milestone 3.6: Enhanced Hover Experience (10-12 дней)
+
+**Приоритет:** 🟡 СРЕДНИЙ — значительное улучшение UX, но не критично для функциональности
+
+**Проблема:**
+
+Текущий hover недостаточно гибкий и информативный:
+- ❌ Нет настроек — пользователь не может выбрать уровень детализации
+- ❌ Не показываются фасеты (Manager vs Object vs Reference)
+- ❌ Generic типы не объясняются (`Массив<Строка>` выглядит как обычный тип)
+- ❌ Нет ссылок на platform documentation
+- ❌ Методы с большим количеством параметров плохо читаются
+
+**Исследование:**
+
+Проведён детальный анализ hover в современных IDE (Rust Analyzer, TypeScript, Pylance, JetBrains IDEA).
+**Документ:** `docs/research/hover-best-practices-2025.md` (67 страниц)
+
+**Ключевые находки:**
+- 🏆 **Rust Analyzer** — золотой стандарт (настройки, интерактивность, expandable sections)
+- ⚙️ **TypeScript** — фокус на кастомизации (уровни детализации)
+- 📖 **Pylance** — rich formatting с docstrings
+- 💡 **Best Practice:** три уровня детализации (compact → full → detailed)
+
+**Решение:**
+
+Реализовать настраиваемый hover с тремя уровнями детализации, фасетами, Generic типами и ссылками на документацию.
+
+#### Задачи:
+
+**Phase 1: Settings & Detail Levels (5 дней)**
+
+**Task 1.1: VSCode Extension Settings (1 день)**
+
+Добавить конфигурацию в `vscode-extension/package.json`:
+
+```json
+"bsl.hover.detailLevel": {
+  "type": "string",
+  "enum": ["compact", "full", "detailed"],
+  "default": "full",
+  "enumDescriptions": [
+    "Только тип переменной",
+    "Тип + методы (до max)",
+    "Тип + методы + свойства + фасеты + документация"
+  ]
+},
+"bsl.hover.maxMethods": {
+  "type": "number",
+  "default": 10,
+  "minimum": 1,
+  "maximum": 50
+},
+"bsl.hover.maxProperties": {
+  "type": "number",
+  "default": 5
+},
+"bsl.hover.showCertainty": {
+  "type": "boolean",
+  "default": true,
+  "description": "Показывать уверенность в типе (🟢🟡⚪)"
+}
+```
+
+Передавать настройки в LSP через `workspace/didChangeConfiguration`.
+
+---
+
+**Task 1.2: LSP Server Configuration Handling (1 день)**
+
+Обновить `backend/src/bin/lsp_server.rs`:
+
+```rust
+#[derive(Debug, Clone, Deserialize)]
+struct BslHoverSettings {
+    #[serde(rename = "detailLevel")]
+    detail_level: String,  // "compact" | "full" | "detailed"
+
+    #[serde(rename = "maxMethods")]
+    max_methods: usize,
+
+    #[serde(rename = "maxProperties")]
+    max_properties: usize,
+
+    #[serde(rename = "showCertainty")]
+    show_certainty: bool,
+}
+
+// Handler для workspace/didChangeConfiguration
+async fn on_did_change_configuration(
+    params: DidChangeConfigurationParams,
+    state: Arc<ServerState>,
+) {
+    // Обновить hover_settings в state
+}
+```
+
+---
+
+**Task 1.3: HoverFormatter с DetailLevel (2 дня)**
+
+Обновить `backend/src/helpers/hover_formatter.rs`:
+
+```rust
+#[derive(Debug, Clone, Copy)]
+pub enum DetailLevel {
+    /// Только тип переменной
+    Compact,
+
+    /// Тип + методы (до max_methods)
+    Full,
+
+    /// Тип + методы + свойства + фасеты + документация
+    Detailed,
+}
+
+pub struct HoverFormatConfig {
+    pub max_methods: usize,
+    pub max_properties: usize,
+    pub detail_level: DetailLevel,
+    pub show_certainty: bool,
+    // ... остальное
+}
+
+// Обновить format_variable с учётом detail_level
+pub fn format_variable(&self, name: &str, resolution: &TypeResolution) -> String {
+    match self.config.detail_level {
+        DetailLevel::Compact => {
+            // Только тип
+        }
+        DetailLevel::Full => {
+            // Тип + методы
+        }
+        DetailLevel::Detailed => {
+            // Тип + методы + свойства + фасеты
+        }
+    }
+}
+```
+
+---
+
+**Task 1.4: Multiline Formatting для методов (1 день)**
+
+Улучшить форматирование методов с 4+ параметрами:
+
+```markdown
+**До:**
+• Вставить(Индекс: Число, Строка1: СтрокаТаблицыЗначений, Строка2: СтрокаТаблицыЗначений, ...) → СтрокаТаблицыЗначений
+
+**После:**
+• Вставить(
+    Индекс: Число,
+    Строка1: СтрокаТаблицыЗначений,
+    Строка2: СтрокаТаблицыЗначений,
+    ...
+  ) → СтрокаТаблицыЗначений
+```
+
+---
+
+**Phase 2: Facets, Generics, Documentation (7 дней)**
+
+**Task 2.1: Фасеты в hover (2 дня)**
+
+Добавить отображение фасетов в `DetailLevel::Detailed`:
+
+```markdown
+Переменная: НоменклатураСсылка
+Тип: СправочникСсылка.Номенклатура
+**Фасет:** Reference (ссылка на элемент)
+
+💡 **Доступные фасеты:** Manager, Object, Reference, Selection
+```
+
+Реализация в `backend/src/helpers/hover_formatter.rs`:
+
+```rust
+fn add_facet_info(mut self, resolution: &TypeResolution) -> Self {
+    if let Some(active_facet) = &resolution.active_facet {
+        let facet_description = match active_facet {
+            FacetKind::Manager => "менеджер объекта",
+            FacetKind::Object => "объект с данными",
+            FacetKind::Reference => "ссылка на элемент",
+            FacetKind::Selection => "выборка элементов",
+            FacetKind::List => "список значений",
+        };
+
+        self.sections.push(format!(
+            "**Фасет:** {:?} ({})",
+            active_facet, facet_description
+        ));
+    }
+
+    self
+}
+```
+
+---
+
+**Task 2.2: Generic типы (2 дня)**
+
+Добавить пояснения для Generic типов:
+
+```markdown
+Переменная: СписокИмен
+Тип: Массив<Строка>
+
+💡 **Generic тип:**
+• Базовый тип: Массив
+• Параметры: Строка
+```
+
+Реализация:
+
+```rust
+fn add_generic_info(mut self, resolution: &TypeResolution) -> Self {
+    if let ResolutionResult::Generic(generic) = &resolution.result {
+        let params_str = generic.type_params
+            .join(", ");
+
+        self.sections.push(format!(
+            "💡 **Generic тип:**\n• Базовый тип: {}\n• Параметры: {}",
+            generic.base_type, params_str
+        ));
+    }
+
+    self
+}
+```
+
+---
+
+**Task 2.3: Ссылки на документацию (3 дня)**
+
+Добавить ссылки на platform documentation:
+
+```markdown
+📖 **Документация:**
+• [Синтакс Помощник: Массив](file:///C:/examples/syntax_helper/Array.html)
+• [1С Platform Docs](https://docs.1c.ru/search?q=Массив)
+```
+
+Реализация:
+
+```rust
+fn add_documentation_links(mut self, resolution: &TypeResolution) -> Self {
+    if let Some(type_name) = self.get_platform_type_name(resolution) {
+        let mut links = Vec::new();
+
+        // Ссылка на локальный syntax_helper
+        if let Some(path) = &self.config.syntax_helper_path {
+            let html_path = path.join(format!("{}.html", type_name));
+            if html_path.exists() {
+                links.push(format!(
+                    "[Синтакс Помощник: {}](file://{})",
+                    type_name,
+                    html_path.display()
+                ));
+            }
+        }
+
+        // Ссылка на онлайн документацию
+        links.push(format!(
+            "[1С Platform Docs](https://docs.1c.ru/search?q={})",
+            type_name
+        ));
+
+        if !links.is_empty() {
+            self.sections.push(format!(
+                "📖 **Документация:**\n{}",
+                links.iter().map(|l| format!("• {}", l)).collect::<Vec<_>>().join("\n")
+            ));
+        }
+    }
+
+    self
+}
+```
+
+---
+
+**Результат Milestone 3.6:**
+
+**Phase 1:**
+- ✅ VSCode settings UI для hover кастомизации
+- ✅ LSP Server принимает и обрабатывает настройки
+- ✅ Три уровня детализации (compact → full → detailed)
+- ✅ Multiline форматирование для методов с 4+ параметрами
+- ✅ Настройки применяются динамически без перезапуска
+
+**Phase 2:**
+- ✅ Фасеты отображаются в hover с пояснениями на русском
+- ✅ Generic типы объясняются понятно (`Массив<Строка>`)
+- ✅ Ссылки на локальный syntax_helper и онлайн документацию
+- ✅ Hover информативен и кастомизируем
+
+**Зависимости:**
+- ✅ Milestone 2.9 (Inline Scope Analysis) — hover уже работает
+- ✅ Milestone 2.11 (Span Extraction) — координаты корректны
+- 📄 Исследование hover best practices (завершено)
+
+**Оценка времени:** 10-12 дней
+
+**Пример итогового hover (DetailLevel::Detailed):**
+
+```markdown
+Переменная: ТаблицаЗначенійТип
+Тип: ТаблицаЗначений
+Уверенность: 🟢 Known (100%)
+**Фасет:** Object (объект с данными)
+
+💡 **Доступные фасеты:** Manager, Object
+
+Методы (показано 10 из 19):
+• Вставить(
+    Индекс: Число
+  ) → СтрокаТаблицыЗначений
+• Добавить() → СтрокаТаблицыЗначений
+• Количество() → Число
+... и ещё 16 методов
+
+Свойства (показано 2 из 2):
+• Индексы: КоллекцияИндексов
+• Колонки: КоллекцияКолонок
+
+📖 **Документация:**
+• [Синтакс Помощник: ТаблицаЗначений](file:///C:/examples/syntax_helper/ValueTable.html)
+• [1С Platform Docs](https://docs.1c.ru/search?q=ТаблицаЗначений)
+```
+
+---
+
 ### 🎯 Результаты Версии 3.0 (через 6 месяцев от старта)
 
 **Технические метрики:**
@@ -617,6 +1359,9 @@ async fn test_mcp_prompts() {
 - ✅ 20+ Code Actions (Quick Fixes, Refactorings)
 - ✅ 50+ Static Analysis Rules
 - ✅ Code Quality Dashboard
+- ✅ Flow-Sensitive Analysis — hover корректно работает на вызовах методов
+- ✅ Enhanced Hover — три уровня детализации, фасеты, Generic типы, ссылки на документацию
+- ✅ LSP Settings для кастомизации hover (как Rust Analyzer)
 - ✅ MCP Server для интеграции с LLM (Claude, ChatGPT)
 - ✅ File Watching (Windows/Linux/macOS) через notify
 - ✅ Resources, Tools, Prompts для AI-ассистентов
@@ -626,6 +1371,10 @@ async fn test_mcp_prompts() {
 - ✅ Рефакторинг одним кликом
 - ✅ Автоматическое улучшение качества кода
 - ✅ Предотвращение security & performance проблем
+- ✅ Hover показывает тип переменной даже при вызове методов (исправлен баг из test_hover_milestone_2_11.bsl)
+- ✅ Hover кастомизируется через VSCode Settings (compact/full/detailed)
+- ✅ Фасеты объясняются понятно (Manager vs Object vs Reference)
+- ✅ Ссылки на platform documentation в hover
 - ✅ AI-ассистент с полным контекстом BSL проекта
 - ✅ Генерация кода с типизацией через Claude
 

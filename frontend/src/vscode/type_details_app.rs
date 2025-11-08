@@ -50,18 +50,23 @@ pub struct VsCodeProperty {
 
 /// Convert VSCode format to TypeDto format
 fn convert_to_type_dto(vscode_info: VsCodeTypeInfo) -> TypeDto {
+    // ✅ Extract values для переиспользования
+    let name = vscode_info.name;
+    let facet = vscode_info.facet;
+    let certainty = vscode_info.certainty;
+
     TypeDto {
-        id: vscode_info.name.clone(),
-        name: vscode_info.name.clone(),
-        category: vscode_info.facet.clone(),
-        certainty: match vscode_info.certainty.as_str() {
+        id: name.clone(),              // ✅ 1 clone (нужен для id и name)
+        name,                          // ✅ Move
+        category: facet.clone(),       // ✅ 1 clone (нужен для category и facets)
+        certainty: match certainty.as_str() {
             "High" | "Высокая" => 90,
             "Medium" | "Средняя" => 60,
             "Low" | "Низкая" => 30,
             _ => 50,
         },
-        certainty_text: vscode_info.certainty.clone(),
-        facets: vec![vscode_info.facet.clone()],
+        certainty_text: certainty,     // ✅ Move
+        facets: vec![facet],           // ✅ Move
         methods_count: Some(vscode_info.methods.len()),
         methods: vscode_info
             .methods
@@ -128,9 +133,12 @@ pub fn VsCodeTypeDetailsApp() -> impl IntoView {
             }
         });
 
-        // Keep listener alive
+        // ✅ NOTE: Используем forget() - это ПРАВИЛЬНОЕ решение для WASM CSR
+        // Closure не реализует Send+Sync+Clone, что требуется для StoredValue
+        // В WASM single-threaded окружении нет проблем с памятью
+        // Closure должен жить весь lifecycle компонента (до unmount webview целиком)
         if let Ok(closure) = listener {
-            closure.forget();
+            std::mem::forget(closure);
         }
     });
 
@@ -178,8 +186,8 @@ fn log_warning(msg: &str) {
 // ============================================================================
 
 #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
-#[wasm_bindgen(start)]
-pub fn start_vscode_app() {
+#[wasm_bindgen]
+pub fn start_type_details_app() {
     // Setup panic hook for better error messages
     console_error_panic_hook::set_once();
 

@@ -19474,6 +19474,7 @@ var HierarchicalTypeIndexProvider = class {
 
 // src/providers/actionsWebview.ts
 var vscode13 = __toESM(require("vscode"));
+init_logger();
 var BslActionsWebviewProvider = class {
   constructor(extensionUri, client2, outputChannel8) {
     this.extensionUri = extensionUri;
@@ -19489,17 +19490,30 @@ var BslActionsWebviewProvider = class {
     };
     webviewView.webview.html = this.getWebviewContent(webviewView.webview);
     webviewView.webview.onDidReceiveMessage(async (message) => {
+      if (!message || !message.type || typeof message.type !== "string") {
+        logger.warn("Invalid message format received from Quick Actions webview");
+        return;
+      }
+      const ALLOWED_MESSAGE_TYPES = ["ready", "executeAction", "searchTypes", "showTypeDetails"];
+      if (!ALLOWED_MESSAGE_TYPES.includes(message.type)) {
+        logger.warn(`Unknown message type from Quick Actions webview: ${message.type}`);
+        return;
+      }
       switch (message.type) {
+        case "ready":
+          logger.debug("Quick Actions webview ready");
+          break;
         case "executeAction":
-          await this.handleAction(message.action);
+          await this.handleAction(message.data);
           break;
         case "searchTypes":
-          await this.handleSearchTypes(webviewView, message.query);
+          await this.handleSearchTypes(webviewView, message.data);
           break;
         case "showTypeDetails":
           vscode13.commands.executeCommand(
             "bslAnalyzer.showTypeDetails",
-            message.typeName
+            message.data
+            // Type name sent in data field from Leptos
           );
           break;
       }
@@ -19556,8 +19570,19 @@ var BslActionsWebviewProvider = class {
     }
   }
   getWebviewContent(webview) {
+    const fs7 = require("fs");
+    const webviewPath = vscode13.Uri.joinPath(this.extensionUri, "media", "webview").fsPath;
+    const files = fs7.readdirSync(webviewPath);
+    const wasmFile = files.find((f) => f.match(/^bsl-frontend-.*\.wasm$/));
+    const jsFile = files.find((f) => f.match(/^bsl-frontend-.*\.js$/));
+    if (!wasmFile || !jsFile) {
+      throw new Error("WASM bundle not found. Run: npm run build:wasm");
+    }
+    const wasmUri = webview.asWebviewUri(
+      vscode13.Uri.joinPath(this.extensionUri, "media", "webview", wasmFile)
+    );
     const scriptUri = webview.asWebviewUri(
-      vscode13.Uri.joinPath(this.extensionUri, "media", "webview", "quickActions.js")
+      vscode13.Uri.joinPath(this.extensionUri, "media", "webview", jsFile)
     );
     const styleUri = webview.asWebviewUri(
       vscode13.Uri.joinPath(this.extensionUri, "media", "webview", "tailwind.css")
@@ -19568,16 +19593,22 @@ var BslActionsWebviewProvider = class {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" 
-          content="default-src 'none'; 
-                   style-src ${webview.cspSource} 'unsafe-inline'; 
-                   script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none';
+                   style-src ${webview.cspSource};
+                   script-src 'nonce-${nonce}' 'wasm-unsafe-eval';
+                   img-src ${webview.cspSource} data:;">
     <link href="${styleUri}" rel="stylesheet">
     <title>BSL Quick Actions</title>
 </head>
 <body>
     <div id="root"></div>
-    <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
+    <script type="module" nonce="${nonce}">
+        import init, { start_quick_actions_app } from '${scriptUri}';
+        init('${wasmUri}').then(() => {
+            start_quick_actions_app();
+        });
+    </script>
 </body>
 </html>`;
   }
@@ -19625,10 +19656,22 @@ var TypeDetailsWebviewProvider = class _TypeDetailsWebviewProvider {
     }
     const panel = _TypeDetailsWebviewProvider.currentPanel;
     panel.webview.onDidReceiveMessage(async (message) => {
-      if (message.type === "ready") {
-        await this.updateTypeInfo(panel, typeName);
-      } else if (message.type === "close") {
-        panel.dispose();
+      if (!message || !message.type || typeof message.type !== "string") {
+        logger.warn("Invalid message format received from webview");
+        return;
+      }
+      const ALLOWED_MESSAGE_TYPES = ["ready", "close"];
+      if (!ALLOWED_MESSAGE_TYPES.includes(message.type)) {
+        logger.warn(`Unknown message type from webview: ${message.type}`);
+        return;
+      }
+      switch (message.type) {
+        case "ready":
+          await this.updateTypeInfo(panel, typeName);
+          break;
+        case "close":
+          panel.dispose();
+          break;
       }
     });
     await this.updateTypeInfo(panel, typeName);
@@ -19696,7 +19739,7 @@ var TypeDetailsWebviewProvider = class _TypeDetailsWebviewProvider {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}' 'wasm-unsafe-eval'; img-src ${webview.cspSource} data:;">
     <link href="${styleUri}" rel="stylesheet">
     <title>Type Details</title>
 </head>

@@ -13,6 +13,10 @@ pub mod config;
 // pub mod pages; // Legacy - removed
 pub mod utils;
 
+// VSCode webview integration (feature-gated)
+#[cfg(feature = "vscode")]
+pub mod vscode;
+
 // Re-export main app component
 pub use app::App;
 
@@ -22,8 +26,8 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use leptos::prelude::*;
 
-/// Main entry point for WASM application
-#[cfg(target_arch = "wasm32")]
+/// Main entry point for WASM application (Web Frontend only, not VSCode)
+#[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
 #[wasm_bindgen(start)]
 pub fn main() {
     console_error_panic_hook::set_once();

@@ -582,8 +582,8 @@
     },
     "scripts": {
         "vscode:prepublish": "npm run copy-binaries && npm run package",
-        "compile": "npm run copy-binaries && node esbuild.js && npm run build:webview",
-        "package": "npm run copy-binaries && node esbuild.js --production && npm run build:webview",
+        "compile": "npm run copy-binaries && node esbuild.js && npm run build:wasm",
+        "package": "npm run copy-binaries && node esbuild.js --production && npm run build:wasm:release",
         "watch": "node esbuild.js --watch",
         "pretest": "npm run compile && npm run lint",
         "lint": "tsc --noEmit",
@@ -592,8 +592,10 @@
         "analyze": "node esbuild.js --production --analyze",
         "copy-binaries": "node scripts/copy-binaries.js",
         "copy-binaries:force": "node scripts/copy-binaries.js --force",
-        "build:webview": "cd webview && npm install && npm run build",
-        "watch:webview": "cd webview && npm run dev"
+        "build:wasm": "node scripts/build-wasm.js type_details && node scripts/build-wasm.js quick_actions",
+        "build:wasm:release": "node scripts/build-wasm.js type_details --release && node scripts/build-wasm.js quick_actions --release",
+        "watch:wasm:type-details": "cd ../frontend && trunk watch type_details.html --dist ../vscode-extension/media/webview",
+        "watch:wasm:quick-actions": "cd ../frontend && trunk watch quick_actions.html --dist ../vscode-extension/media/webview"
     },
     "devDependencies": {
         "@istanbuljs/nyc-config-typescript": "^1.0.2",

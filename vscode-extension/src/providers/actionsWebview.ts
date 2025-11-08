@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { searchTypes } from '../lsp/customRequests';
+import { logger } from '../lsp/logger';
 
 /**
  * WebView провайдер для панели быстрых действий
@@ -27,19 +28,37 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = this.getWebviewContent(webviewView.webview);
 
         webviewView.webview.onDidReceiveMessage(async (message) => {
+            // ✅ Валидация структуры сообщения
+            if (!message || !message.type || typeof message.type !== 'string') {
+                logger.warn('Invalid message format received from Quick Actions webview');
+                return;
+            }
+
+            // ✅ Whitelist допустимых типов сообщений
+            const ALLOWED_MESSAGE_TYPES = ['ready', 'executeAction', 'searchTypes', 'showTypeDetails'];
+            if (!ALLOWED_MESSAGE_TYPES.includes(message.type)) {
+                logger.warn(`Unknown message type from Quick Actions webview: ${message.type}`);
+                return;
+            }
+
             switch (message.type) {
+                case 'ready':
+                    // Quick Actions initialized
+                    logger.debug('Quick Actions webview ready');
+                    break;
+
                 case 'executeAction':
-                    await this.handleAction(message.action);
+                    await this.handleAction(message.data);
                     break;
 
                 case 'searchTypes':
-                    await this.handleSearchTypes(webviewView, message.query);
+                    await this.handleSearchTypes(webviewView, message.data);
                     break;
 
                 case 'showTypeDetails':
                     vscode.commands.executeCommand(
                         'bslAnalyzer.showTypeDetails',
-                        message.typeName
+                        message.data  // Type name sent in data field from Leptos
                     );
                     break;
             }
@@ -113,8 +132,23 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     private getWebviewContent(webview: vscode.Webview): string {
+        // 🆕 Find WASM files dynamically (hash changes on rebuild)
+        const fs = require('fs');
+        const webviewPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'webview').fsPath;
+        const files = fs.readdirSync(webviewPath);
+
+        const wasmFile = files.find((f: string) => f.match(/^bsl-frontend-.*\.wasm$/));
+        const jsFile = files.find((f: string) => f.match(/^bsl-frontend-.*\.js$/));
+
+        if (!wasmFile || !jsFile) {
+            throw new Error('WASM bundle not found. Run: npm run build:wasm');
+        }
+
+        const wasmUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', wasmFile)
+        );
         const scriptUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'quickActions.js')
+            vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', jsFile)
         );
         const styleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'tailwind.css')
@@ -127,16 +161,22 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" 
-          content="default-src 'none'; 
-                   style-src ${webview.cspSource} 'unsafe-inline'; 
-                   script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none';
+                   style-src ${webview.cspSource};
+                   script-src 'nonce-${nonce}' 'wasm-unsafe-eval';
+                   img-src ${webview.cspSource} data:;">
     <link href="${styleUri}" rel="stylesheet">
     <title>BSL Quick Actions</title>
 </head>
 <body>
     <div id="root"></div>
-    <script type="module" nonce="${nonce}" src="${scriptUri}"><\/script>
+    <script type="module" nonce="${nonce}">
+        import init, { start_quick_actions_app } from '${scriptUri}';
+        init('${wasmUri}').then(() => {
+            start_quick_actions_app();
+        });
+    <\/script>
 </body>
 </html>`;
     }

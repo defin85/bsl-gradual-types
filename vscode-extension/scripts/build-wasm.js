@@ -4,7 +4,13 @@
  * Build WASM webview bundles using Trunk
  *
  * This script builds Leptos/WASM bundles for VSCode webviews.
- * Usage: node scripts/build-wasm.js [--release] [--optimize]
+ * Usage: node scripts/build-wasm.js [webview_name] [--release] [--optimize]
+ *
+ * Examples:
+ *   npm run build:wasm                    # Build type_details (default)
+ *   npm run build:wasm quick_actions      # Build quick_actions
+ *   npm run build:wasm -- --release       # Build type_details in release mode
+ *   npm run build:wasm quick_actions --release  # Build quick_actions in release mode
  */
 
 const { execSync } = require('child_process');
@@ -16,21 +22,36 @@ const WEBVIEW_DIST = path.resolve(__dirname, '../media/webview');
 
 // Parse arguments
 const args = process.argv.slice(2);
-const isRelease = args.includes('--release');
-const shouldOptimize = args.includes('--optimize');
 
-console.log('🚀 Building WASM webview bundles...');
-console.log(`   Mode: ${isRelease ? 'RELEASE' : 'DEBUG'}`);
-console.log(`   Optimize: ${shouldOptimize ? 'YES' : 'NO'}`);
+// Extract webview name (first non-flag argument)
+let webviewName = 'type_details'; // default
+for (const arg of args) {
+    if (!arg.startsWith('--')) {
+        webviewName = arg;
+        break;
+    }
+}
+
+const isRelease = args.includes('--release');
+// ✅ Автоматически оптимизировать для release builds
+const shouldOptimize = isRelease || args.includes('--optimize');
+
+console.log(`🚀 Building ${webviewName} WASM webview bundle...`);
+console.log(`   Build mode: ${isRelease ? 'RELEASE (--release mode)' : 'DEBUG'}`);
+console.log(`   Optimize: ${shouldOptimize ? 'YES (trunk default)' : 'NO'}`);
 
 // Ensure dist directory exists
 if (!fs.existsSync(WEBVIEW_DIST)) {
     fs.mkdirSync(WEBVIEW_DIST, { recursive: true });
 }
 
-// Build command
+// ✅ Build command с использованием --release для оптимального размера
+// Note: trunk 0.21.14 не поддерживает --profile флаг, используем --release вместо этого
 const releaseArg = isRelease ? '--release' : '';
-const buildCmd = `trunk build ${releaseArg} --dist ${WEBVIEW_DIST} type_details.html`;
+const htmlFile = `${webviewName}.html`;
+// ⚠️ wasm-opt может иметь проблемы с bulk-memory в release mode
+// Решение: использовать TRUNK_WATCH_IGNORE для пропуска оптимизации если нужно
+const buildCmd = `trunk build ${releaseArg} --dist ${WEBVIEW_DIST} --features vscode ${htmlFile}`;
 
 try {
     console.log(`\n📦 Running: cd ${FRONTEND_DIR} && ${buildCmd}`);
@@ -41,26 +62,12 @@ try {
     });
     console.log('✅ WASM bundle built successfully');
 
-    // Optimize WASM if requested
+    // ⚠️ WASM optimization временно отключена из-за bulk-memory проблем
+    // Trunk уже применяет базовую оптимизацию в release mode
     if (shouldOptimize) {
-        // Find WASM file (trunk creates files with hash in name)
-        const files = fs.readdirSync(WEBVIEW_DIST);
-        const wasmFile = files.find(f => f.endsWith('_bg.wasm'));
-
-        if (wasmFile) {
-            const wasmPath = path.join(WEBVIEW_DIST, wasmFile);
-            console.log('\n🔧 Optimizing WASM with wasm-opt...');
-            try {
-                execSync(`wasm-opt -Oz -o ${wasmPath} ${wasmPath}`, {
-                    stdio: 'inherit',
-                    shell: true
-                });
-                console.log('✅ WASM optimized successfully');
-            } catch (err) {
-                console.warn('⚠️  wasm-opt not found, skipping optimization');
-                console.warn('   Install it from: https://github.com/WebAssembly/binaryen');
-            }
-        }
+        console.log('\n⚠️  WASM optimization disabled due to bulk-memory issues');
+        console.log('   Trunk applies basic optimization in release mode');
+        console.log('   Bundle size optimizations applied via Cargo profile settings');
     }
 
     // Show bundle sizes

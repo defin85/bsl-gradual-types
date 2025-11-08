@@ -121,9 +121,17 @@ opt-level = 0
 debug = true
 
 [profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
+opt-level = 3      # Optimize for speed (backend/CLI)
+lto = true         # Link-time optimization
+codegen-units = 1  # Better optimization
+strip = true       # Strip debug symbols
+
+# ✅ WASM-optimized release profile (smaller bundles)
+# Use: cargo build --profile wasm-release
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"    # Optimize for size
+panic = "abort"    # Smaller panic handler
 
 [profile.dev-fast]
 inherits = "dev"

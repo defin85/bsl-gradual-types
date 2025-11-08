@@ -1,6 +1,8 @@
 //! Back to top button component
 
 use leptos::prelude::*;
+use leptos::leptos_dom::helpers::StoredValue;
+use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 /// Back to top button (floating, shows after 300px scroll)
@@ -8,6 +10,9 @@ use wasm_bindgen::JsCast;
 #[allow(non_snake_case)]
 pub fn BackToTop() -> impl IntoView {
     let visible = RwSignal::new(false);
+
+    // ✅ Store closure для cleanup (паттерн из type_details_app.rs)
+    let listener_ref = StoredValue::new(None::<Closure<dyn FnMut()>>);
 
     // Track scroll position
     Effect::new(move |_| {
@@ -20,15 +25,29 @@ pub fn BackToTop() -> impl IntoView {
             };
 
             // Create closure for event listener
-            let closure =
-                wasm_bindgen::closure::Closure::wrap(Box::new(handle_scroll) as Box<dyn FnMut()>);
+            let closure = Closure::wrap(Box::new(handle_scroll) as Box<dyn FnMut()>);
 
-            window
-                .add_event_listener_with_callback("scroll", closure.as_ref().unchecked_ref())
-                .ok();
+            let _ = window.add_event_listener_with_callback(
+                "scroll",
+                closure.as_ref().unchecked_ref(),
+            );
 
-            // Keep closure alive
-            closure.forget();
+            // ✅ Store вместо forget - правильное управление памятью
+            listener_ref.set_value(Some(closure));
+        }
+    });
+
+    // ✅ Cleanup при unmount компонента
+    on_cleanup(move || {
+        if let Some(closure) = listener_ref.get_value() {
+            // Remove event listener before dropping
+            if let Some(window) = web_sys::window() {
+                let _ = window.remove_event_listener_with_callback(
+                    "scroll",
+                    closure.as_ref().unchecked_ref(),
+                );
+            }
+            drop(closure);
         }
     });
 

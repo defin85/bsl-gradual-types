@@ -4,13 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BSL Type Details</title>
-    <!-- Tailwind CSS -->
     <link data-trunk rel="css" href="style/main.css">
-    <!-- WASM bundle будет добавлен trunk'ом -->
-    <link data-trunk rel="rust" data-wasm-opt="z" />
+    <link data-trunk rel="rust" data-cargo-features="vscode"/>
 </head>
 <body class="bg-white dark:bg-gray-900 text-gray-900 dark:text-white">
-    <!-- Root элемент для Leptos приложения -->
     <div id="root"></div>
+    <script type="module">
+        import init, { start_type_details_app } from './bsl-frontend.js';
+        init().then(() => start_type_details_app());
+    </script>
 </body>
 </html>

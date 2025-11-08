@@ -59,7 +59,7 @@
 #### Backend
 - ⚠️ **Tree-sitter НЕ используется** — BslParser возвращает пустой AST
 - ⚠️ **Парсинг кода не работает** — валидация только по именам типов
-- ⚠️ **Flow-sensitive analysis** — планируется в версии 3.0 (Milestone 3.5)
+- ✅ **Flow-sensitive analysis** — реализован в Milestone 3.5 (2025-11-08)
 - ⚠️ **Union types** — базовая поддержка без нормализации
 
 ---
@@ -740,8 +740,11 @@ async fn test_mcp_prompts() {
 
 ---
 
-### 🔧 Milestone 3.5: Flow-Sensitive Analysis (5-7 дней)
+### 🔧 Milestone 3.5: Flow-Sensitive Analysis ✅
 
+**Статус:** ✅ ЗАВЕРШЁН
+**Дата:** 2025-11-08
+**Время реализации:** 5 дней (architect → coder → reviewer → tester → coder → reviewer)
 **Приоритет:** 🔴 КРИТИЧНЫЙ — исправляет баг с hover на вызовах методов
 
 **Проблема:**

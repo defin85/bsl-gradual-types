@@ -158,6 +158,12 @@ impl HbkRecovery {
         fs::create_dir_all(&output_dir)
             .context(format!("Не удалось создать директорию: {:?}", output_dir))?;
 
+        // Проверяем права на запись в директорию
+        let test_file_path = output_dir.join(".write_test");
+        fs::File::create(&test_file_path)
+            .and_then(|_| fs::remove_file(&test_file_path))
+            .context(format!("Директория недоступна для записи: {:?}", output_dir))?;
+
         // Формируем путь для восстановленного ZIP
         let file_stem = hbk_path.file_stem()
             .ok_or_else(|| anyhow!("Не удалось получить имя файла"))?;
@@ -171,7 +177,8 @@ impl HbkRecovery {
 
         // Распаковываем если требуется
         let extracted_dir = if self.options.auto_extract {
-            let extract_dir = output_dir.join(file_stem);
+            // Добавляем префикс "rebuilt." для совместимости с SyntaxHelperParser
+            let extract_dir = output_dir.join(format!("rebuilt.{}", file_stem.to_string_lossy()));
 
             extractor::unpack_zip(&repaired_zip_path, &extract_dir)
                 .context("Распаковка ZIP архива")?;
@@ -306,6 +313,83 @@ pub fn auto_recover_directory(dir: &Path) -> Result<Vec<RecoveryResult>> {
     Ok(results)
 }
 
+/// Автоматически восстанавливает все .hbk файлы в директории с заданными опциями
+///
+/// # Arguments
+/// * `dir` - Директория для сканирования
+/// * `options` - Опции восстановления
+///
+/// # Returns
+/// Вектор с результатами восстановления для каждого файла
+///
+/// # Example
+/// ```no_run
+/// use bsl_backend::data::loaders::hbk_recovery::{auto_recover_directory_with_options, RecoveryOptions};
+/// use std::path::Path;
+///
+/// let options = RecoveryOptions {
+///     auto_extract: false,
+///     ..Default::default()
+/// };
+/// let results = auto_recover_directory_with_options(Path::new("examples/syntax_helper"), options)?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
+pub fn auto_recover_directory_with_options(
+    dir: &Path,
+    options: RecoveryOptions,
+) -> Result<Vec<RecoveryResult>> {
+    debug!("🔍 Сканируем директорию: {:?}", dir);
+
+    if !dir.exists() {
+        return Err(anyhow!("Директория не существует: {:?}", dir));
+    }
+
+    if !dir.is_dir() {
+        return Err(anyhow!("Путь не является директорией: {:?}", dir));
+    }
+
+    let mut results = Vec::new();
+    let mut recovery = HbkRecovery::with_options(options);
+
+    // Ищем все .hbk файлы
+    let entries = fs::read_dir(dir)
+        .context(format!("Не удалось прочитать директорию: {:?}", dir))?;
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                warn!("⚠️ Ошибка чтения записи в директории: {}", e);
+                continue;
+            }
+        };
+
+        let path = entry.path();
+
+        // Проверяем расширение
+        if path.extension().and_then(|e| e.to_str()) != Some("hbk") {
+            continue;
+        }
+
+        debug!("📁 Найден .hbk файл: {:?}", path);
+
+        // Пытаемся восстановить
+        match recovery.recover(&path, Some(dir)) {
+            Ok(result) => {
+                info!("✅ Успешно восстановлен: {:?}", path);
+                results.push(result);
+            }
+            Err(e) => {
+                warn!("⚠️ Не удалось восстановить {:?}: {}", path, e);
+                // Продолжаем обработку других файлов
+            }
+        }
+    }
+
+    debug!("📊 Итого восстановлено: {} файлов", results.len());
+    Ok(results)
+}
+
 // ============================================================================
 // Приватные модули
 // ============================================================================
@@ -344,9 +428,12 @@ mod signature {
     pub(super) fn find_zip_signature(file: &mut File, max_search_size: usize) -> Result<usize> {
         debug!("🔎 Ищем ZIP signature (максимум: {} байт)", max_search_size);
 
+        const OVERLAP_SIZE: usize = ZIP_SIGNATURE.len() - 1; // 3 байта для signature размером 4
+
         let mut buffer = vec![0u8; CHUNK_SIZE];
         let mut total_read = 0;
         let mut overlap_buffer = Vec::new();
+        let mut chunk_start_offset = 0;  // Отслеживаем начало текущего чанка
 
         // Сбрасываем позицию в начало файла
         file.rewind()?;
@@ -372,9 +459,12 @@ mod signature {
             {
                 // Нашли! Вычисляем абсолютный offset
                 let absolute_offset = if overlap_buffer.is_empty() {
-                    total_read + pos
+                    // Signature в текущем чанке без overlap
+                    chunk_start_offset + pos
                 } else {
-                    total_read - overlap_buffer.len() + bytes_read + pos
+                    // Signature в overlap+chunk области
+                    // Начало overlap = chunk_start_offset - OVERLAP_SIZE
+                    chunk_start_offset - OVERLAP_SIZE + pos
                 };
 
                 debug!("✅ ZIP signature найдена на offset: {}", absolute_offset);
@@ -383,13 +473,16 @@ mod signature {
 
             total_read += bytes_read;
 
-            // Сохраняем последние 3 байта для overlap (signature длиной 4 байта)
+            // Сохраняем последние 3 байта для overlap
             // На случай если signature находится на границе чанков
             overlap_buffer.clear();
-            if bytes_read >= ZIP_SIGNATURE.len() - 1 {
-                let overlap_start = bytes_read - (ZIP_SIGNATURE.len() - 1);
+            if bytes_read >= OVERLAP_SIZE {
+                let overlap_start = bytes_read - OVERLAP_SIZE;
                 overlap_buffer.extend_from_slice(&buffer[overlap_start..bytes_read]);
             }
+
+            // Обновляем начало следующего чанка
+            chunk_start_offset = total_read;
         }
 
         Err(anyhow!("ZIP signature не найдена в первых {} байтах", total_read))

@@ -2,7 +2,7 @@
 //!
 //! Проверяет корректное обрабатывание различных ошибочных ситуаций
 
-use bsl_backend::data::loaders::hbk_recovery::{HbkRecovery, RecoveryOptions};
+use bsl_backend::data::loaders::hbk_recovery::{auto_recover_directory_with_options, HbkRecovery, RecoveryOptions};
 use std::fs::{self, File};
 use std::io::Write;
 use tempfile::tempdir;
@@ -16,7 +16,12 @@ fn test_file_not_found_error() {
     let temp_dir = tempdir().unwrap();
     let nonexistent_path = temp_dir.path().join("nonexistent.hbk");
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&nonexistent_path, Some(temp_dir.path()));
 
     assert!(result.is_err(), "Should fail when file doesn't exist");
@@ -38,7 +43,12 @@ fn test_empty_file_error() {
     // Создаём пустой файл
     File::create(&empty_path).unwrap();
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&empty_path, Some(temp_dir.path()));
 
     assert!(result.is_err(), "Should fail on empty file");
@@ -54,7 +64,12 @@ fn test_file_smaller_than_signature() {
     file.write_all(&[0xFF, 0xFF]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&small_path, Some(temp_dir.path()));
 
     assert!(result.is_err(), "Should fail when file is smaller than signature");
@@ -74,7 +89,12 @@ fn test_file_without_zip_signature() {
     file.write_all(&vec![0xFF; 10000]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&no_sig_path, Some(temp_dir.path()));
 
     assert!(result.is_err(), "Should fail without ZIP signature");
@@ -100,7 +120,12 @@ fn test_file_with_similar_but_wrong_signature() {
     file.write_all(&vec![0x00; 100]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&wrong_sig_path, Some(temp_dir.path()));
 
     assert!(
@@ -162,7 +187,7 @@ fn test_file_size_exactly_at_limit() {
     // Пытаемся с max_file_size = точный размер файла
     let mut recovery = HbkRecovery::with_options(RecoveryOptions {
         cleanup_temp: true,
-        auto_extract: true,
+        auto_extract: false,  // Не распаковываем невалидный ZIP
         max_file_size: file_size,
     });
 
@@ -188,7 +213,7 @@ fn test_file_size_just_below_limit() {
     // Пытаемся с max_file_size = размер + 1 байт
     let mut recovery = HbkRecovery::with_options(RecoveryOptions {
         cleanup_temp: true,
-        auto_extract: true,
+        auto_extract: false,  // Не распаковываем невалидный ZIP
         max_file_size: file_size + 1,
     });
 
@@ -223,7 +248,12 @@ fn test_file_read_error_simulation() {
         let perms = std::fs::Permissions::from_mode(0o000);
         fs::set_permissions(&hbk_path, perms).unwrap();
 
-        let mut recovery = HbkRecovery::new();
+        // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
         let result = recovery.recover(&hbk_path, Some(temp_dir.path()));
 
         // Восстанавливаем permissions для cleanup
@@ -240,7 +270,12 @@ fn test_file_read_error_simulation() {
     #[cfg(windows)]
     {
         // Просто проверяем что файл нормально читается
-        let mut recovery = HbkRecovery::new();
+        // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
         let result = recovery.recover(&hbk_path, Some(temp_dir.path()));
         assert!(result.is_ok());
     }
@@ -262,7 +297,12 @@ fn test_directory_not_found_for_creation() {
     // (HbkRecovery должна создать её, так что это должно работать)
     let nonexistent_output = temp_dir.path().join("nonexistent").join("deep").join("dir");
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&hbk_path, Some(&nonexistent_output));
 
     // Должно успешно создать директории
@@ -286,7 +326,12 @@ fn test_corrupted_data_after_signature() {
     file.write_all(&vec![0xFF; 500]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&corrupted_path, Some(temp_dir.path()));
 
     // Может быть успех (если распаковка не проверяет интегрность)
@@ -308,7 +353,12 @@ fn test_multiple_zip_signatures() {
     file.write_all(&vec![0x00; 500]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&multi_sig_path, Some(temp_dir.path()));
 
     // Должно найти первую signature
@@ -341,8 +391,13 @@ fn test_auto_recover_with_mixed_valid_invalid_files() {
     let mut file = File::create(&invalid_hbk).unwrap();
     file.write_all(&vec![0xFF; 1000]).unwrap();
 
-    // Используем auto_recover_directory
-    let results = bsl_backend::data::loaders::hbk_recovery::auto_recover_directory(temp_dir.path())
+    // Используем auto_recover_directory_with_options с auto_extract = false
+    let options = RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    };
+    let results = auto_recover_directory_with_options(temp_dir.path(), options)
         .unwrap();
 
     // Должен восстановить только валидный файл
@@ -370,7 +425,12 @@ fn test_signature_at_very_large_offset() {
     file.write_all(&vec![0x00; 500]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&large_offset_path, Some(temp_dir.path()));
 
     assert!(result.is_ok(), "Should handle large offsets");
@@ -405,7 +465,12 @@ fn test_signature_search_performance_large_file() {
     let file_size = fs::metadata(&large_path).unwrap().len();
     assert!(file_size > 10_000_000, "File should be large");
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP, увеличиваем лимит для этого теста
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 15 * 1024 * 1024,  // 15MB для файла ~10.5MB
+    });
     let result = recovery.recover(&large_path, Some(temp_dir.path()));
 
     assert!(result.is_ok(), "Should handle large files");

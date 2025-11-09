@@ -3,11 +3,11 @@
 //! Проверяет комплексное восстановление .hbk файлов с различными опциями
 
 use bsl_backend::data::loaders::hbk_recovery::{
-    auto_recover_directory, recover_hbk_file, HbkRecovery, RecoveryOptions, RecoveryResult,
+    auto_recover_directory, HbkRecovery, RecoveryOptions,
 };
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tempfile::tempdir;
 
 // ============================================================================

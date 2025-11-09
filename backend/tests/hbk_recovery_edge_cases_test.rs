@@ -3,7 +3,7 @@
 //! Проверяет поведение на необычных и экстремальных входных данных
 
 use bsl_backend::data::loaders::hbk_recovery::{
-    auto_recover_directory, HbkRecovery, RecoveryOptions,
+    auto_recover_directory, auto_recover_directory_with_options, HbkRecovery, RecoveryOptions,
 };
 use std::fs::{self, File};
 use std::io::Write;
@@ -28,7 +28,12 @@ fn test_signature_at_byte_boundary() {
         file.write_all(&vec![0x00; 100]).unwrap();
         drop(file);
 
-        let mut recovery = HbkRecovery::new();
+        // Не пытаемся распаковывать невалидный ZIP
+        let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+            auto_extract: false,
+            cleanup_temp: false,
+            max_file_size: 10 * 1024 * 1024,
+        });
         let result = recovery
             .recover(&edge_path, Some(temp_dir.path()))
             .unwrap();
@@ -63,7 +68,12 @@ fn test_signature_at_chunk_boundary() {
         file.write_all(&vec![0x00; 100]).unwrap();
         drop(file);
 
-        let mut recovery = HbkRecovery::new();
+        // Не пытаемся распаковывать невалидный ZIP
+        let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+            auto_extract: false,
+            cleanup_temp: false,
+            max_file_size: 10 * 1024 * 1024,
+        });
         let result = recovery
             .recover(&chunk_path, Some(temp_dir.path()))
             .unwrap();
@@ -89,14 +99,20 @@ fn test_minimal_valid_file() {
     file.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&minimal_path, Some(temp_dir.path()));
 
-    // Должно работать (будет восстановлен пустой ZIP)
+    // Должно работать (ZIP восстановлен, но не распакован)
     assert!(
         result.is_ok(),
         "Should handle file with only ZIP signature"
     );
+    assert_eq!(result.unwrap().signature_offset, 0);
 }
 
 #[test]
@@ -108,7 +124,12 @@ fn test_one_byte_file() {
     file.write_all(&[0xFF]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&one_byte_path, Some(temp_dir.path()));
 
     assert!(result.is_err(), "Should fail on 1-byte file");
@@ -123,7 +144,12 @@ fn test_exactly_4_byte_file_without_signature() {
     file.write_all(&[0xFF, 0xFF, 0xFF, 0xFF]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&four_byte_path, Some(temp_dir.path()));
 
     assert!(result.is_err(), "Should fail when 4 bytes don't match signature");
@@ -138,7 +164,12 @@ fn test_exactly_4_byte_file_with_signature() {
     file.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&sig_path, Some(temp_dir.path()));
 
     assert!(result.is_ok(), "Should handle file with only ZIP signature");
@@ -169,7 +200,12 @@ fn test_signature_repeated_pattern() {
     file.write_all(&vec![0x00; 100]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&repeat_path, Some(temp_dir.path()));
 
     assert!(result.is_ok(), "Should find correct signature among patterns");
@@ -201,7 +237,12 @@ fn test_signature_in_sequence_of_bytes() {
     file.write_all(&vec![0x00; 100]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&seq_path, Some(temp_dir.path()));
 
     assert!(result.is_ok(), "Should find correct signature sequence");
@@ -239,7 +280,12 @@ fn test_file_with_special_chars_in_path() {
         file.write_all(&vec![0x00; 500]).unwrap();
         drop(file);
 
-        let mut recovery = HbkRecovery::new();
+        // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
         let result = recovery.recover(&path, Some(temp_dir.path()));
 
         assert!(
@@ -265,7 +311,12 @@ fn test_nested_directory_recovery() {
     file.write_all(&vec![0x00; 500]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&hbk_path, Some(&nested_dir));
 
     assert!(
@@ -289,7 +340,12 @@ fn test_recover_same_file_twice() {
     file.write_all(&vec![0x00; 500]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
 
     // Восстанавливаем первый раз
     let result1 = recovery.recover(&hbk_path, Some(temp_dir.path()));
@@ -322,8 +378,13 @@ fn test_recover_many_files_sequentially() {
         file.write_all(&vec![0x00; 500]).unwrap();
     }
 
-    // Используем auto_recover_directory
-    let results = auto_recover_directory(temp_dir.path()).unwrap();
+    // Используем auto_recover_directory_with_options с auto_extract = false
+    let options = RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    };
+    let results = auto_recover_directory_with_options(temp_dir.path(), options).unwrap();
 
     assert_eq!(
         results.len(),
@@ -331,10 +392,10 @@ fn test_recover_many_files_sequentially() {
         "Should recover all 10 files"
     );
 
-    // Проверяем что все результаты корректны
-    for result in results {
-        assert!(result.extracted_dir.is_some());
-        assert!(result.extracted_dir.unwrap().exists());
+    // Проверяем что все файлы восстановлены (ZIP созданы)
+    for result in &results {
+        assert!(result.repaired_zip_path.exists(), "ZIP файл должен существовать");
+        assert_eq!(result.extracted_dir, None, "Не должно быть распаковки при auto_extract = false");
     }
 }
 
@@ -383,10 +444,10 @@ fn test_large_max_file_size() {
     file.write_all(&vec![0x00; 500]).unwrap();
     drop(file);
 
-    // Устанавливаем очень большой max_file_size (1GB)
+    // Устанавливаем очень большой max_file_size (1GB), но не распаковываем невалидный ZIP
     let mut recovery = HbkRecovery::with_options(RecoveryOptions {
         cleanup_temp: true,
-        auto_extract: true,
+        auto_extract: false,  // Не распаковываем невалидный ZIP
         max_file_size: 1024 * 1024 * 1024,
     });
 
@@ -434,7 +495,12 @@ fn test_zip_with_null_bytes_after_signature() {
     file.write_all(&vec![0x00; 10000]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&null_path, Some(temp_dir.path()));
 
     // Должно завершиться без паники
@@ -452,7 +518,12 @@ fn test_zip_with_only_zeros() {
     file.write_all(&vec![0x00; 5000]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&zeros_path, Some(temp_dir.path()));
 
     // Не должно паниковать
@@ -479,7 +550,12 @@ fn test_signature_offset_accuracy() {
         file.write_all(&vec![0x00; 100]).unwrap();
         drop(file);
 
-        let mut recovery = HbkRecovery::new();
+        // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
         let result = recovery.recover(&path, Some(temp_dir.path())).unwrap();
 
         assert_eq!(
@@ -503,7 +579,12 @@ fn test_recovered_size_calculation() {
     file.write_all(&vec![0x00; zip_content_size]).unwrap();
     drop(file);
 
-    let mut recovery = HbkRecovery::new();
+    // Не пытаемся распаковывать невалидный ZIP
+    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+        auto_extract: false,
+        cleanup_temp: false,
+        max_file_size: 10 * 1024 * 1024,
+    });
     let result = recovery.recover(&hbk_path, Some(temp_dir.path())).unwrap();
 
     // recovered_size должен быть 4 (signature) + zip_content_size

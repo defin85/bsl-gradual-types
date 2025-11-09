@@ -43,25 +43,57 @@ pub struct TreeSitterParser {
 }
 
 impl ParserCoordinator {
-    /// Создать координатор с Tree-sitter (Milestone 2.8: удалён regex fallback)
-    pub fn with_fallback() -> Self {
-        // По умолчанию используем пустой репозиторий
-        use bsl_shared::domain::repository::InMemoryTypeRepository;
-        let empty_repo = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
-        Self {
-            tree_sitter: TreeSitterParser::new(),
-            tree_cache: TreeCache::new(),
-            repository: empty_repo,
-        }
-    }
-
-    /// Создать координатор с указанным TypeRepository
-    pub fn with_repository(repository: Arc<dyn TypeRepository>) -> Self {
+    /// Создаёт координатор с указанным TypeRepository.
+    ///
+    /// Используйте этот метод когда у вас есть готовый TypeRepository
+    /// с загруженными платформенными типами.
+    ///
+    /// # Примеры
+    ///
+    /// ```no_run
+    /// use bsl_backend::system::ParserCoordinator;
+    /// use bsl_shared::domain::repository::InMemoryTypeRepository;
+    /// use std::sync::Arc;
+    ///
+    /// let repo = Arc::new(InMemoryTypeRepository::new());
+    /// // Загрузите типы в repo...
+    /// let parser = ParserCoordinator::new(repo);
+    /// ```
+    pub fn new(repository: Arc<dyn TypeRepository>) -> Self {
         Self {
             tree_sitter: TreeSitterParser::new(),
             tree_cache: TreeCache::new(),
             repository,
         }
+    }
+
+    /// Создаёт координатор с ПУСТЫМ TypeRepository (для обратной совместимости).
+    ///
+    /// **ВНИМАНИЕ:** Этот метод создаёт пустой репозиторий БЕЗ платформенных типов.
+    /// Используйте только для тестов или простых сценариев без необходимости
+    /// разрешения платформенных типов.
+    ///
+    /// Для production кода используйте [`ParserCoordinator::new`] с загруженными типами.
+    ///
+    /// # Milestone 2.8 Note
+    ///
+    /// Название "with_fallback" — исторический артефакт. Regex fallback был удалён
+    /// в Milestone 2.8. Метод просто создаёт ParserCoordinator с пустым
+    /// InMemoryTypeRepository.
+    ///
+    /// # Примеры
+    ///
+    /// ```no_run
+    /// use bsl_backend::system::ParserCoordinator;
+    ///
+    /// // Для простых тестов или парсинга без типов
+    /// let parser = ParserCoordinator::with_fallback();
+    /// let ir = parser.parse_to_ir("Перем x: Число;", "test.bsl");
+    /// ```
+    pub fn with_fallback() -> Self {
+        use bsl_shared::domain::repository::InMemoryTypeRepository;
+        let empty_repo = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+        Self::new(empty_repo)
     }
 
     /// Парсинг через Tree-sitter с поддержкой ParseResult (Milestone 2.7 Task 3)

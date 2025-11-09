@@ -14,8 +14,8 @@ use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
 use bsl_backend::data::loaders::progress::ProgressUpdate;
 use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
-use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
-use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::repository::InMemoryTypeRepository;
+use bsl_shared::TypeResolver;
 use bsl_shared::engine::AnalysisEngine;
 use std::sync::Arc;
 
@@ -31,7 +31,7 @@ fn create_test_service() -> TypeSystemService {
     let parsed_types = convert_syntax_helper_to_raw(&db);
 
     // 2. Создаём репозиторий и загружаем типы
-    let repository = Arc::new(InMemoryTypeRepository::new());
+    let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
     repository
         .load_types(parsed_types)
         .expect("Failed to load types");
@@ -41,7 +41,7 @@ fn create_test_service() -> TypeSystemService {
     let analysis_engine = Arc::new(AnalysisEngine::new(resolver, repository.clone()));
     let cache = Arc::new(AnalysisCache::new(100));
     let ir_cache = Arc::new(IrCache::new(50));
-    let parser = Arc::new(ParserCoordinator::with_fallback());
+    let parser = Arc::new(ParserCoordinator::new(repository.clone()));
 
     let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
     

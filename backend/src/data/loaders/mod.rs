@@ -3,6 +3,7 @@
 //! Infrastructure компоненты для загрузки данных из внешних источников
 
 pub mod config_metadata_parser;
+pub mod hbk_recovery;
 pub mod platform_types;
 pub mod progress;
 pub mod syntax_helper;

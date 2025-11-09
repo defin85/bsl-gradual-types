@@ -11,7 +11,7 @@ use tracing::{info, warn};
 
 use crate::application::type_system_service::TypeSystemService;
 use crate::data::adapters::convert_syntax_helper_to_raw;
-use crate::data::loaders::{progress::ProgressUpdate, SyntaxHelperParser};
+use crate::data::loaders::{hbk_recovery, progress::ProgressUpdate, SyntaxHelperParser};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::RawTypeData;
@@ -187,6 +187,27 @@ impl SystemCoordinator {
 
         // 2. Загружаем синтаксис-помощник если путь указан
         if let Some(syntax_path) = syntax_helper_path {
+            // 🔧 HBK Recovery: Восстанавливаем .hbk файлы перед парсингом
+            info!("🔍 Проверяем наличие .hbk файлов для восстановления...");
+            match hbk_recovery::auto_recover_directory(syntax_path) {
+                Ok(results) if !results.is_empty() => {
+                    info!("✅ Восстановлено {} .hbk файлов", results.len());
+                    for result in &results {
+                        info!(
+                            "   📦 Файл: {:?} → {:?}",
+                            result.repaired_zip_path.file_name().unwrap_or_default(),
+                            result.extracted_dir.as_ref().map(|d| d.file_name().unwrap_or_default())
+                        );
+                    }
+                }
+                Ok(_) => {
+                    info!("📁 .hbk файлы не найдены (возможно уже распакованы)");
+                }
+                Err(e) => {
+                    warn!("⚠️ Ошибка восстановления .hbk файлов: {}. Продолжаем с существующими файлами...", e);
+                }
+            }
+
             info!("📂 Загружаем синтаксис-помощник: {}", syntax_path.display());
 
             // ✅ MILESTONE 2.20.2.3: Парсим с прогрессом если передан callback

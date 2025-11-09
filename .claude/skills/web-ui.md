@@ -7,7 +7,7 @@
 1. Собирает frontend (Rust WASM приложение через Trunk)
 2. Копирует статику в `backend/static/`
 3. Запускает web server с platform types и фронтендом
-4. Открывает браузер на http://127.0.0.1:3002
+4. Открывает браузер на http://127.0.0.1:8080
 
 ## Использование
 
@@ -18,7 +18,7 @@
 # Или вручную:
 cd frontend && trunk build --release && cd ..
 cargo run --release -p bsl-backend --bin bsl-web-server -- \
-  --port 3002 \
+  --port 8080 \
   --enable-cors true \
   --syntax-helper-path examples/syntax_helper/rebuilt.shcntx_ru \
   --static-files-path backend/static
@@ -34,7 +34,7 @@ cargo run --release -p bsl-backend --bin bsl-web-server -- \
 **Backend (Web Server):**
 - Путь: `backend/src/main.rs`
 - Бинарник: `bsl-web-server`
-- Порт: 3002 (по умолчанию)
+- Порт: 8080 (по умолчанию)
 
 ## Endpoints
 
@@ -45,7 +45,7 @@ cargo run --release -p bsl-backend --bin bsl-web-server -- \
 
 ## Параметры
 
-- `--port` — порт веб-сервера (по умолчанию 3002)
+- `--port` — порт веб-сервера (по умолчанию 8080)
 - `--enable-cors` — CORS для API (true/false)
 - `--syntax-helper-path` — путь к platform types
 - `--static-files-path` — путь к фронтенду (по умолчанию backend/static)

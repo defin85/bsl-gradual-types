@@ -76,7 +76,8 @@ tower-lsp = { workspace = true }
 # Configuration
 toml = "0.8"
 
-
+# HBK Recovery (Milestone: .hbk file recovery)
+zip = "2.2"
 
 # Время и даты
 chrono = { workspace = true }
@@ -101,3 +102,6 @@ xxhash-rust = { version = "0.8", features = ["xxh64"] }
 tempfile = { workspace = true }
 reqwest = { version = "0.11", features = ["json"] }
 criterion = "0.5"
+
+# Note: tempfile также используется в основном коде для HBK recovery,
+# но уже доступен через workspace

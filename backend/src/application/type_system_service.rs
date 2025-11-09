@@ -110,6 +110,48 @@ impl TypeSystemService {
         self.inference_service.get_all_platform_globals()
     }
 
+    /// Определяет категорию и источник типа на основе TypeResolution
+    fn determine_category_and_source(res: &TypeResolution) -> (String, String) {
+        use bsl_shared::domain::types::{Certainty, ResolutionResult};
+
+        // 1. Union типы (приоритет выше всего)
+        if matches!(res.result, ResolutionResult::Union(_)) {
+            return ("Union".to_string(), "Flow Analysis".to_string());
+        }
+
+        // 2. Dynamic типы (низкая определённость)
+        if matches!(res.certainty, Certainty::Unknown) {
+            return ("Dynamic".to_string(), "Runtime".to_string());
+        }
+
+        // 3. Стандартные категории
+        match &res.source {
+            bsl_shared::domain::types::ResolutionSource::Static => {
+                ("Platform".to_string(), "Static Analysis".to_string())
+            }
+            _ => ("Configuration".to_string(), "Configuration".to_string()),
+        }
+    }
+
+    /// Определяет нужен ли flow-sensitive анализ для типа
+    fn determine_flow_sensitivity(res: &TypeResolution) -> bool {
+        use bsl_shared::domain::types::{Certainty, ResolutionResult};
+
+        // Flow-sensitive нужен если:
+
+        // 1. Есть union types (требует анализа потока выполнения)
+        if matches!(res.result, ResolutionResult::Union(_)) {
+            return true;
+        }
+
+        // 2. Определённость выведена (не статическая)
+        if matches!(res.certainty, Certainty::Inferred(_)) {
+            return true;
+        }
+
+        false
+    }
+
     /// Phase 5: Получить все типы с преобразованием в DTO (Web API)
     pub fn get_all_types_as_dto(
         &self,
@@ -133,12 +175,7 @@ impl TypeSystemService {
             .iter()
             .map(|(name, res)| {
                 // Определение категории и источника
-                let (category, source) = match &res.source {
-                    bsl_shared::domain::types::ResolutionSource::Static => {
-                        ("Platform".to_string(), "Static Analysis".to_string())
-                    }
-                    _ => ("Configuration".to_string(), "Configuration".to_string()),
-                };
+                let (category, source) = Self::determine_category_and_source(&res);
 
                 // Расчет certainty
                 let certainty_val = match res.certainty {
@@ -235,7 +272,7 @@ impl TypeSystemService {
                         })
                         .unwrap_or_default(),
                     source,
-                    flow_sensitive: false, // TODO: добавить flow-sensitive анализ
+                    flow_sensitive: Self::determine_flow_sensitivity(&res),
                     description,
                     union_types,
                     flow_analysis: None,
@@ -323,6 +360,28 @@ impl TypeSystemService {
                     .iter()
                     .filter(|t| t.category == "Configuration")
                     .count(),
+            },
+        );
+
+        // Подсчитываем Union типы
+        let union_count = type_dtos.iter().filter(|t| t.category == "Union").count();
+        categories.insert(
+            "Union".to_string(),
+            CategoryDto {
+                color: "#9b59b6".to_string(),
+                icon: "🎯".to_string(),
+                count: union_count,
+            },
+        );
+
+        // Подсчитываем Dynamic типы
+        let dynamic_count = type_dtos.iter().filter(|t| t.category == "Dynamic").count();
+        categories.insert(
+            "Dynamic".to_string(),
+            CategoryDto {
+                color: "#f39c12".to_string(),
+                icon: "🔄".to_string(),
+                count: dynamic_count,
             },
         );
 

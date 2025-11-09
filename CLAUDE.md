@@ -69,6 +69,13 @@ AI-ассистент инструкции для BSL Gradual Type System про
 Что делает: grep/Read/cargo test для честной проверки прогресса
 **Файл:** [.claude/skills/roadmap-checker.md](.claude/skills/roadmap-checker.md)
 
+**Web UI** — запуск веб-сервера с UI для просмотра типов
+```bash
+/web-ui
+```
+Что делает: сборка frontend (WASM через Trunk), копирование статики, запуск веб-сервера с platform types, открытие браузера на http://127.0.0.1:8080
+**Файл:** [.claude/skills/web-ui.md](.claude/skills/web-ui.md)
+
 ---
 
 ## 🎯 Ключевые принципы проекта

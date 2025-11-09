@@ -75,10 +75,7 @@ async fn test_load_base_plus_extension() {
         result.base_config_count >= 1,
         "Должна быть хотя бы 1 базовая конфигурация"
     );
-    assert!(
-        result.extensions_count >= 0,
-        "Расширения могут быть или отсутствовать"
-    );
+    // extensions_count >= 0 всегда true для u32, проверка не нужна
     assert!(
         result.total_types > 0,
         "Должны быть загружены типы из конфигураций"

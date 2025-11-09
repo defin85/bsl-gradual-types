@@ -195,9 +195,8 @@ mod api_pagination_tests {
         for (page, limit) in test_cases {
             let validated_page = validate_page(page);
             let validated_limit = validate_limit(limit);
-            let offset = page_to_offset(validated_page, validated_limit);
-
-            assert!(offset >= 0, "offset должен быть >= 0");
+            let _offset = page_to_offset(validated_page, validated_limit);
+            // offset >= 0 всегда true для usize, проверка не нужна
         }
     }
 }

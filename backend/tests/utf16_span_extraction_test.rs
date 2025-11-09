@@ -37,13 +37,7 @@ fn test_cyrillic_text_span_coordinates() {
 
     // Проверяем первый statement (должна быть функция)
     use bsl_backend::parsing::bsl::ast::Statement;
-    if let Statement::FunctionDecl {
-        name,
-        params,
-        body,
-        span,
-    } = &program.statements[0]
-    {
+    if let Statement::FunctionDecl { name, body, span, .. } = &program.statements[0] {
         println!("\n=== ПРОВЕРКА UTF-16 КООРДИНАТ ===");
         println!("Функция: {}", name);
         println!(
@@ -329,12 +323,12 @@ fn test_utf16_conversion_function_directly() {
     // Позиция начала "Перем" (после 4 пробелов):
     // UTF-8 byte offset: 4
     // UTF-16 code units: 4
-    let expected_utf16_offset_perem = 4;
+    let _expected_utf16_offset_perem = 4;
 
     // Позиция начала "Х" (после "    Перем "):
     // UTF-8 byte offset: 4 (пробелы) + 10 (Перем) + 1 (пробел) = 15 bytes
     // UTF-16 code units: 4 + 5 + 1 = 10
-    let expected_utf16_offset_x = 10;
+    let _expected_utf16_offset_x = 10;
 
     println!("\n=== ПРЯМОЙ ТЕСТ byte_offset_to_utf16() ===");
     println!("Строка: '{}'", cyrillic_line);

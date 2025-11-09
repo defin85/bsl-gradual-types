@@ -7,10 +7,9 @@
 
 use bsl_shared::api::dtos::{MethodDto, ParamDto};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
-use bsl_shared::domain::signature_index::{ConstructorSignature, SignatureIndex, SignatureSource};
+use bsl_shared::domain::signature_index::{ConstructorSignature, SignatureSource};
 use bsl_shared::domain::types::{
-    FacetKind, ParameterInfo, RawDataSource, RawMethodData, RawParamData, RawPropertyData,
-    RawTypeData,
+    FacetKind, ParameterInfo, RawDataSource, RawMethodData, RawTypeData,
 };
 
 /// Test 1.1: Repository find_constructor works correctly
@@ -367,9 +366,9 @@ fn test_handle_query_type_no_constructor_graceful() {
     let constructor_opt = repo.find_constructor("Число");
 
     // Should handle gracefully - either constructor exists or it doesn't
-    if let Some(constructor) = constructor_opt {
+    if let Some(_constructor) = constructor_opt {
         // Would create MethodDto here
-        assert!(constructor.is_collection || !constructor.is_collection);
+        // Конструктор найден - это нормально
     } else {
         // No constructor - that's fine, just use regular methods
         assert_eq!(methods.len(), 1);

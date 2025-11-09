@@ -47,7 +47,7 @@ fn test_assignment_declares_variable_in_symbol_table() {
     .unwrap();
 
     // Найти scope процедуры Тест
-    let procedure_scope = ir
+    let _procedure_scope = ir
         .symbols
         .scopes
         .values()

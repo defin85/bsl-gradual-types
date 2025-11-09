@@ -48,10 +48,6 @@ fn test_missing_endif_detected() {
         // Проверяем, что координаты валидные
         assert!(error.span.start_line > 0, "start_line должен быть > 0");
         assert!(
-            error.span.start_column >= 0,
-            "start_column должен быть >= 0"
-        );
-        assert!(
             error.span.end_line >= error.span.start_line,
             "end_line >= start_line"
         );

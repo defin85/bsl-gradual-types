@@ -131,10 +131,6 @@ fn test_multiple_errors_in_file() {
 
         // Каждая ошибка должна иметь валидные координаты
         assert!(error.span.start_line > 0, "start_line должен быть > 0");
-        assert!(
-            error.span.start_column >= 0,
-            "start_column должен быть >= 0"
-        );
     }
 
     println!("✅ Все ошибки обнаружены и имеют корректные координаты");
@@ -221,14 +217,7 @@ fn test_error_on_first_line() {
             println!("⚠️ Ошибка не на первой строке (возможно, tree-sitter восстановил AST)");
         }
 
-        // Все координаты должны быть валидными
-        for error in &parse_result.syntax_errors {
-            assert!(error.span.start_line >= 0, "start_line должен быть >= 0");
-            assert!(
-                error.span.start_column >= 0,
-                "start_column должен быть >= 0"
-            );
-        }
+        // Все координаты должны быть валидными (start_line и start_column уже u32, проверка >= 0 не нужна)
     }
 
     println!("=====================================\n");
@@ -389,7 +378,6 @@ fn test_mixed_line_endings() {
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
             // Координаты должны быть валидными
-            assert!(error.span.start_line >= 0, "start_line должен быть >= 0");
             assert!(
                 error.span.end_line >= error.span.start_line,
                 "end_line >= start_line"
@@ -442,9 +430,7 @@ fn test_error_span_zero_width() {
                 println!("  ⚠️ Zero-width span обнаружен (может быть валидным для MissingToken)");
             }
 
-            // Но координаты всё равно должны быть валидными
-            assert!(error.span.start_line >= 0);
-            assert!(error.span.start_column >= 0);
+            // Координаты должны быть валидными
             assert!(error.span.end_line >= error.span.start_line);
         }
         println!("✅ Zero-width span обработан корректно");

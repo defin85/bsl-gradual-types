@@ -3,9 +3,7 @@
 //! Проверяет обнаружение множественных конфигураций (база + расширения)
 //! и корректность сортировки.
 
-use bsl_backend::data::loaders::config_metadata_parser::{
-    ConfigurationDiscovery, ConfigurationType,
-};
+use bsl_backend::data::loaders::config_metadata_parser::ConfigurationDiscovery;
 use std::path::PathBuf;
 
 /// Тест 1: Обнаружение нескольких конфигураций

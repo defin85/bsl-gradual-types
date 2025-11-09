@@ -150,7 +150,7 @@ async fn test_ir_cache_modified_file() {
     "#;
 
     // Первый hover - cache MISS (v1)
-    let hover1 = service
+    let _hover1 = service
         .get_hover_info(code_v1, 2, 4)
         .await
         .expect("Hover on v1 failed");

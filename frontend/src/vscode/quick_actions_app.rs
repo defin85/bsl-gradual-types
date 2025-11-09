@@ -4,7 +4,6 @@
 //! It communicates with the extension via postMessage API.
 
 use leptos::prelude::*;
-use wasm_bindgen::prelude::*;
 use web_sys::console;
 
 use super::common::{send_to_vscode, setup_vscode_listener, VsCodeMessage};

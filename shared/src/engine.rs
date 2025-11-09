@@ -333,8 +333,6 @@ mod ir_analysis_tests {
         let result = engine.parse_and_analyze(&parser, "", "test.bsl").unwrap();
 
         // Проверяем структуру результата
-        assert!(result.parse_duration_ms >= 0);
-        assert!(result.analysis_duration_ms >= 0);
         assert_eq!(result.ir.source_info.path, "test.bsl");
     }
 

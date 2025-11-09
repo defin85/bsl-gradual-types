@@ -2432,6 +2432,73 @@ impl TypeSystemService {
         // Возвращаем синтаксические ошибки (может быть пустой Vec)
         Ok(parse_result.syntax_errors)
     }
+
+    /// Валидация семантики кода через обход IR
+    ///
+    /// # Milestone 3.7: Semantic Diagnostics MVP
+    ///
+    /// Возвращает список semantic errors (несуществующие методы, свойства, etc.)
+    /// через TypeValidator + SemanticValidationVisitor.
+    ///
+    /// # Логика
+    /// 1. Парсинг кода
+    /// 2. Если есть syntax errors → возвращаем `Ok(Vec::new())` (semantic validation бессмысленна)
+    /// 3. Конвертация AST → IR через AstToIrConverter
+    /// 4. Создание TypeValidator
+    /// 5. Создание SemanticValidationVisitor
+    /// 6. Обход IR через walk_program()
+    /// 7. Возврат накопленных errors
+    ///
+    /// # Примеры
+    /// ```no_run
+    /// let code = r#"
+    /// Функция Тест()
+    ///     МассивДанных = Новый Массив;
+    ///     МассивДанных.НесуществующийМетод();
+    /// КонецФункции
+    /// "#;
+    /// let errors = type_service.validate_semantics(code).await?;
+    /// assert!(!errors.is_empty()); // Должна быть ошибка
+    /// ```
+    pub async fn validate_semantics(
+        &self,
+        code: &str,
+    ) -> Result<Vec<bsl_shared::domain::types::TypeDiagnostic>> {
+        use crate::application::ast_to_ir::AstToIrConverter;
+        use crate::application::semantic_validation_visitor::SemanticValidationVisitor;
+        use bsl_shared::domain::validators::TypeValidator;
+        use bsl_shared::ir::walk_program;
+
+        // 1. Парсинг
+        let parse_result = self.parser.parse(code)
+            .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
+
+        // 2. Если есть syntax errors → semantic validation бессмысленна
+        if !parse_result.syntax_errors.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // 3. Конвертация AST → IR
+        let repository = self.analysis_engine.get_repository();
+        let ir = AstToIrConverter::convert(
+            parse_result.program,
+            code.to_string(),
+            "<semantic_validation>".to_string(),
+            repository,
+        )?;
+
+        // 4. Создание TypeValidator
+        let validator = TypeValidator::new(&self.metadata_lookup);
+
+        // 5. Создание SemanticValidationVisitor
+        let mut visitor = SemanticValidationVisitor::new(&validator, &ir);
+
+        // 6. Обход IR
+        walk_program(&ir, &mut visitor);
+
+        // 7. Возврат errors
+        Ok(visitor.into_errors())
+    }
 }
 
 /// Контекст для автодополнения

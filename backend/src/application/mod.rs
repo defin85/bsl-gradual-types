@@ -2,6 +2,7 @@
 //! Unified TypeSystemService as single entry point for all clients
 
 pub mod ast_to_ir;
+pub mod semantic_validation_visitor; // Milestone 3.7: Semantic Diagnostics MVP
 pub mod type_inference_service;
 pub mod type_system_service; // Milestone 2.8: AST → IR конвертер
 

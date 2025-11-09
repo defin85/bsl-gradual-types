@@ -201,6 +201,31 @@ self.coordinator.type_service()
             .collect()
     }
 
+
+    /// Конвертация TypeDiagnostic → LSP Diagnostic
+    ///
+    /// # Milestone 3.7: Semantic Diagnostics MVP
+    fn semantic_error_to_diagnostic(&self, error: &bsl_shared::domain::types::TypeDiagnostic) -> Diagnostic {
+        use bsl_shared::domain::types::DiagnosticSeverity as SharedSeverity;
+
+        let start_pos = Position::new(error.line, error.column);
+        let end_pos = Position::new(error.line, error.column + 15); // TODO: точная длина из span
+
+        let severity = match error.severity {
+            SharedSeverity::Error => Some(DiagnosticSeverity::ERROR),
+            SharedSeverity::Warning => Some(DiagnosticSeverity::WARNING),
+            SharedSeverity::Info => Some(DiagnosticSeverity::INFORMATION),
+            SharedSeverity::Hint => Some(DiagnosticSeverity::HINT),
+        };
+
+        Diagnostic {
+            range: Range::new(start_pos, end_pos),
+            severity,
+            message: error.message.clone(),
+            source: Some("bsl-semantic".to_string()), // ✅ Отличается от "bsl-syntax"
+            ..Default::default()
+        }
+    }
     /// Применяет текстовое изменение к строке
     fn apply_text_edit(&self, source: &str, range: Range, new_text: &str) -> String {
         let lines: Vec<&str> = source.lines().collect();
@@ -740,6 +765,23 @@ if let Some(service) = self.get_type_service() {            match service.get_ho
             warn!("⚠️ TypeSystemService not yet initialized, skipping syntax validation");
         }
 
+        // PHASE 2: Semantic validation (MILESTONE 3.7)
+        if let Some(type_service) = self.get_type_service() {
+            match type_service.validate_semantics(&text).await {
+                Ok(semantic_errors) => {
+                    if !semantic_errors.is_empty() {
+                        info!("⚠️ Found {} semantic errors in {}", semantic_errors.len(), uri);
+                        for error in semantic_errors {
+                            diagnostics.push(self.semantic_error_to_diagnostic(&error));
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Semantic validation failed for {}: {}", uri, e);
+                }
+            }
+        }
+
         // Отправляем диагностики
         self.client
             .publish_diagnostics(uri.clone(), diagnostics, Some(version))
@@ -863,6 +905,23 @@ if let Some(service) = self.get_type_service() {            if let Err(e) = serv
             } else {
                 warn!("⚠️ TypeSystemService not yet initialized, skipping syntax validation");
             }
+
+        // PHASE 2: Semantic validation (MILESTONE 3.7)
+        if let Some(type_service) = self.get_type_service() {
+            match type_service.validate_semantics(&text).await {
+                Ok(semantic_errors) => {
+                    if !semantic_errors.is_empty() {
+                        info!("⚠️ Found {} semantic errors in {}", semantic_errors.len(), uri);
+                        for error in semantic_errors {
+                            diagnostics.push(self.semantic_error_to_diagnostic(&error));
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Semantic validation failed for {}: {}", uri, e);
+                }
+            }
+        }
         }
 
         // Отправляем обновленные диагностики

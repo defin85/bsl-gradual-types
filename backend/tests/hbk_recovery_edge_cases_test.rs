@@ -2,12 +2,13 @@
 //!
 //! Проверяет поведение на необычных и экстремальных входных данных
 
+#![allow(clippy::useless_vec)]
+
 use bsl_backend::data::loaders::hbk_recovery::{
-    auto_recover_directory, auto_recover_directory_with_options, HbkRecovery, RecoveryOptions,
+    auto_recover_directory_with_options, HbkRecovery, RecoveryOptions,
 };
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::Path;
 use tempfile::tempdir;
 
 // ============================================================================
@@ -17,7 +18,7 @@ use tempfile::tempdir;
 #[test]
 fn test_signature_at_byte_boundary() {
     let temp_dir = tempdir().unwrap();
-    let edge_path = temp_dir.path().join("edge.hbk");
+    let _edge_path = temp_dir.path().join("edge.hbk");
 
     // Создаём файл с signature на различных граничных позициях
     for boundary in &[256, 512, 1024, 4096, 65536] {
@@ -34,13 +35,13 @@ fn test_signature_at_byte_boundary() {
             cleanup_temp: false,
             max_file_size: 10 * 1024 * 1024,
         });
-        let result = recovery
-            .recover(&edge_path, Some(temp_dir.path()))
-            .unwrap();
+        let result = recovery.recover(&edge_path, Some(temp_dir.path())).unwrap();
 
         assert_eq!(
-            result.signature_offset, boundary - 1,
-            "Should find signature at boundary {}", boundary
+            result.signature_offset,
+            boundary - 1,
+            "Should find signature at boundary {}",
+            boundary
         );
     }
 }
@@ -48,7 +49,7 @@ fn test_signature_at_byte_boundary() {
 #[test]
 fn test_signature_at_chunk_boundary() {
     let temp_dir = tempdir().unwrap();
-    let chunk_path = temp_dir.path().join("chunk.hbk");
+    let _chunk_path = temp_dir.path().join("chunk.hbk");
 
     // 64KB chunk size в коде
     let chunk_size = 64 * 1024;
@@ -80,7 +81,8 @@ fn test_signature_at_chunk_boundary() {
 
         assert_eq!(
             result.signature_offset, sig_pos,
-            "Should handle chunk boundary at offset {}", sig_pos
+            "Should handle chunk boundary at offset {}",
+            sig_pos
         );
     }
 }
@@ -108,10 +110,7 @@ fn test_minimal_valid_file() {
     let result = recovery.recover(&minimal_path, Some(temp_dir.path()));
 
     // Должно работать (ZIP восстановлен, но не распакован)
-    assert!(
-        result.is_ok(),
-        "Should handle file with only ZIP signature"
-    );
+    assert!(result.is_ok(), "Should handle file with only ZIP signature");
     assert_eq!(result.unwrap().signature_offset, 0);
 }
 
@@ -152,7 +151,10 @@ fn test_exactly_4_byte_file_without_signature() {
     });
     let result = recovery.recover(&four_byte_path, Some(temp_dir.path()));
 
-    assert!(result.is_err(), "Should fail when 4 bytes don't match signature");
+    assert!(
+        result.is_err(),
+        "Should fail when 4 bytes don't match signature"
+    );
 }
 
 #[test]
@@ -194,8 +196,11 @@ fn test_signature_repeated_pattern() {
 
     // Затем настоящая signature
     let sig_pos = 1000;
-    file.write_all(&vec![0xFF; sig_pos - file.metadata().unwrap().len() as usize])
-        .unwrap();
+    file.write_all(&vec![
+        0xFF;
+        sig_pos - file.metadata().unwrap().len() as usize
+    ])
+    .unwrap();
     file.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap();
     file.write_all(&vec![0x00; 100]).unwrap();
     drop(file);
@@ -208,7 +213,10 @@ fn test_signature_repeated_pattern() {
     });
     let result = recovery.recover(&repeat_path, Some(temp_dir.path()));
 
-    assert!(result.is_ok(), "Should find correct signature among patterns");
+    assert!(
+        result.is_ok(),
+        "Should find correct signature among patterns"
+    );
 
     // Должна быть найдена первая полная signature
     let offset = result.unwrap().signature_offset;
@@ -281,11 +289,11 @@ fn test_file_with_special_chars_in_path() {
         drop(file);
 
         // Не пытаемся распаковывать невалидный ZIP
-    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
-        auto_extract: false,
-        cleanup_temp: false,
-        max_file_size: 10 * 1024 * 1024,
-    });
+        let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+            auto_extract: false,
+            cleanup_temp: false,
+            max_file_size: 10 * 1024 * 1024,
+        });
         let result = recovery.recover(&path, Some(temp_dir.path()));
 
         assert!(
@@ -386,16 +394,18 @@ fn test_recover_many_files_sequentially() {
     };
     let results = auto_recover_directory_with_options(temp_dir.path(), options).unwrap();
 
-    assert_eq!(
-        results.len(),
-        10,
-        "Should recover all 10 files"
-    );
+    assert_eq!(results.len(), 10, "Should recover all 10 files");
 
     // Проверяем что все файлы восстановлены (ZIP созданы)
     for result in &results {
-        assert!(result.repaired_zip_path.exists(), "ZIP файл должен существовать");
-        assert_eq!(result.extracted_dir, None, "Не должно быть распаковки при auto_extract = false");
+        assert!(
+            result.repaired_zip_path.exists(),
+            "ZIP файл должен существовать"
+        );
+        assert_eq!(
+            result.extracted_dir, None,
+            "Не должно быть распаковки при auto_extract = false"
+        );
     }
 }
 
@@ -422,9 +432,7 @@ fn test_cleanup_without_extraction() {
         max_file_size: 10 * 1024 * 1024,
     });
 
-    let result = recovery
-        .recover(&hbk_path, Some(temp_dir.path()))
-        .unwrap();
+    let result = recovery.recover(&hbk_path, Some(temp_dir.path())).unwrap();
 
     // ZIP должен существовать (cleanup относится только к auto_extract)
     assert!(
@@ -447,13 +455,16 @@ fn test_large_max_file_size() {
     // Устанавливаем очень большой max_file_size (1GB), но не распаковываем невалидный ZIP
     let mut recovery = HbkRecovery::with_options(RecoveryOptions {
         cleanup_temp: true,
-        auto_extract: false,  // Не распаковываем невалидный ZIP
+        auto_extract: false, // Не распаковываем невалидный ZIP
         max_file_size: 1024 * 1024 * 1024,
     });
 
     let result = recovery.recover(&hbk_path, Some(temp_dir.path()));
 
-    assert!(result.is_ok(), "Should succeed with very large max_file_size");
+    assert!(
+        result.is_ok(),
+        "Should succeed with very large max_file_size"
+    );
 }
 
 #[test]
@@ -542,7 +553,9 @@ fn test_signature_offset_accuracy() {
     let offsets_to_test = vec![0, 1, 10, 100, 1000, 10000, 65535, 65536, 65537];
 
     for expected_offset in offsets_to_test {
-        let path = temp_dir.path().join(format!("offset_{}.hbk", expected_offset));
+        let path = temp_dir
+            .path()
+            .join(format!("offset_{}.hbk", expected_offset));
 
         let mut file = File::create(&path).unwrap();
         file.write_all(&vec![0xFF; expected_offset]).unwrap();
@@ -551,16 +564,17 @@ fn test_signature_offset_accuracy() {
         drop(file);
 
         // Не пытаемся распаковывать невалидный ZIP
-    let mut recovery = HbkRecovery::with_options(RecoveryOptions {
-        auto_extract: false,
-        cleanup_temp: false,
-        max_file_size: 10 * 1024 * 1024,
-    });
+        let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+            auto_extract: false,
+            cleanup_temp: false,
+            max_file_size: 10 * 1024 * 1024,
+        });
         let result = recovery.recover(&path, Some(temp_dir.path())).unwrap();
 
         assert_eq!(
             result.signature_offset, expected_offset,
-            "Offset should be exact for size {}", expected_offset
+            "Offset should be exact for size {}",
+            expected_offset
         );
     }
 }

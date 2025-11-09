@@ -5,7 +5,7 @@
 pub use bsl_shared::utils::hash::hash_content;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use tree_sitter::Tree;
 
@@ -60,10 +60,10 @@ impl TreeCache {
     }
 
     /// Обновить закешированное дерево после редактирования
-    pub fn update(&self, file_path: &PathBuf, new_tree: Tree, new_source: String, new_hash: u64) {
+    pub fn update(&self, file_path: &Path, new_tree: Tree, new_source: String, new_hash: u64) {
         if let Ok(mut cache) = self.cache.write() {
             cache.insert(
-                file_path.clone(),
+                file_path.to_path_buf(),
                 CachedTree {
                     content_hash: new_hash,
                     tree: Arc::new(new_tree),
@@ -103,7 +103,6 @@ impl Default for TreeCache {
         Self::new()
     }
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -2,6 +2,8 @@
 //!
 //! Проверяет корректность парсинга реальной HTML структуры с div.V8SH_rubric
 
+#![allow(clippy::bool_assert_comparison)]
+
 use bsl_backend::data::loaders::syntax_helper::html_extractors::HtmlExtractor;
 use scraper::Html;
 use std::fs;
@@ -31,8 +33,7 @@ fn test_extract_parameters_from_array_insert() {
         return;
     }
 
-    let html_content = fs::read_to_string(&html_path)
-        .expect("Не удалось прочитать HTML файл");
+    let html_content = fs::read_to_string(&html_path).expect("Не удалось прочитать HTML файл");
 
     let document = Html::parse_document(&html_content);
     let extractor = HtmlExtractor::new();
@@ -62,8 +63,7 @@ fn test_extract_parameters_from_array_find() {
         return;
     }
 
-    let html_content = fs::read_to_string(&html_path)
-        .expect("Не удалось прочитать HTML файл");
+    let html_content = fs::read_to_string(&html_path).expect("Не удалось прочитать HTML файл");
 
     let document = Html::parse_document(&html_content);
     let extractor = HtmlExtractor::new();
@@ -86,8 +86,7 @@ fn test_extract_parameters_from_array_get() {
         return;
     }
 
-    let html_content = fs::read_to_string(&html_path)
-        .expect("Не удалось прочитать HTML файл");
+    let html_content = fs::read_to_string(&html_path).expect("Не удалось прочитать HTML файл");
 
     let document = Html::parse_document(&html_content);
     let extractor = HtmlExtractor::new();
@@ -110,8 +109,7 @@ fn test_extract_parameters_from_array_add() {
         return;
     }
 
-    let html_content = fs::read_to_string(&html_path)
-        .expect("Не удалось прочитать HTML файл");
+    let html_content = fs::read_to_string(&html_path).expect("Не удалось прочитать HTML файл");
 
     let document = Html::parse_document(&html_content);
     let extractor = HtmlExtractor::new();
@@ -122,7 +120,10 @@ fn test_extract_parameters_from_array_add() {
 
     assert_eq!(params[0].name, "Значение");
     assert_eq!(params[0].type_name, Some("Произвольный".to_string()));
-    assert_eq!(params[0].is_optional, true, "Параметр должен быть необязательным");
+    assert_eq!(
+        params[0].is_optional, true,
+        "Параметр должен быть необязательным"
+    );
 }
 
 #[test]
@@ -134,8 +135,7 @@ fn test_extract_parameters_from_array_count() {
         return;
     }
 
-    let html_content = fs::read_to_string(&html_path)
-        .expect("Не удалось прочитать HTML файл");
+    let html_content = fs::read_to_string(&html_path).expect("Не удалось прочитать HTML файл");
 
     let document = Html::parse_document(&html_content);
     let extractor = HtmlExtractor::new();

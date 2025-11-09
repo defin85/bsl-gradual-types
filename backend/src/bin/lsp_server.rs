@@ -1,10 +1,13 @@
 //! LSP Server for BSL Gradual Type System - MIGRATED TO Clean Architecture
 
+#![allow(clippy::needless_borrow)]
+#![allow(clippy::only_used_in_recursion)]
+
 use anyhow::Result;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
@@ -13,9 +16,8 @@ use tracing::{debug, error, info, warn};
 
 // SignatureHelp support
 use tower_lsp::lsp_types::{
-    SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    SignatureInformation, ParameterInformation, ParameterLabel,
-    WorkDoneProgressOptions,
+    ParameterInformation, ParameterLabel, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    SignatureInformation, WorkDoneProgressOptions,
 };
 
 use clap::Parser;
@@ -104,11 +106,7 @@ fn log_progress_to_file(message: &str) {
     let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
     let log_line = format!("[{}] {}\n", timestamp, message);
 
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
-    {
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
         let _ = file.write_all(log_line.as_bytes());
         let _ = file.flush(); // ✅ Принудительно сбрасываем буфер
     }
@@ -139,7 +137,7 @@ impl BslLanguageServer {
 
     /// Получить актуальный TypeSystemService (всегда fresh после reload)
     fn get_type_service(&self) -> Option<Arc<TypeSystemService>> {
-self.coordinator.type_service()
+        self.coordinator.type_service()
     }
 
     /// Получить содержимое документа из кеша
@@ -201,11 +199,13 @@ self.coordinator.type_service()
             .collect()
     }
 
-
     /// Конвертация TypeDiagnostic → LSP Diagnostic
     ///
     /// # Milestone 3.7: Semantic Diagnostics MVP
-    fn semantic_error_to_diagnostic(&self, error: &bsl_shared::domain::types::TypeDiagnostic) -> Diagnostic {
+    fn semantic_error_to_diagnostic(
+        &self,
+        error: &bsl_shared::domain::types::TypeDiagnostic,
+    ) -> Diagnostic {
         use bsl_shared::domain::types::DiagnosticSeverity as SharedSeverity;
 
         let start_pos = Position::new(error.line, error.column);
@@ -282,10 +282,22 @@ impl LanguageServer for BslLanguageServer {
         info!("Initializing BSL Language Server");
 
         // 🔍 DEBUG: Логируем ClientCapabilities
-        debug!("📥 [JSON-RPC] initialize: ClientCapabilities.window.workDoneProgress = {:?}",
-            params.capabilities.window.as_ref().and_then(|w| w.work_done_progress));
-        debug!("📥 [JSON-RPC] initialize: ClientCapabilities.general.regularExpressions = {:?}",
-            params.capabilities.general.as_ref().and_then(|g| g.regular_expressions.as_ref()));
+        debug!(
+            "📥 [JSON-RPC] initialize: ClientCapabilities.window.workDoneProgress = {:?}",
+            params
+                .capabilities
+                .window
+                .as_ref()
+                .and_then(|w| w.work_done_progress)
+        );
+        debug!(
+            "📥 [JSON-RPC] initialize: ClientCapabilities.general.regularExpressions = {:?}",
+            params
+                .capabilities
+                .general
+                .as_ref()
+                .and_then(|g| g.regular_expressions.as_ref())
+        );
 
         // ✅ MILESTONE 2.10: Читаем initializationOptions из Extension
         if let Some(options) = params.initialization_options {
@@ -345,13 +357,8 @@ impl LanguageServer for BslLanguageServer {
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
                 signature_help_provider: Some(SignatureHelpOptions {
-                    trigger_characters: Some(vec![
-                        "(".to_string(),
-                        ",".to_string(),
-                    ]),
-                    retrigger_characters: Some(vec![
-                        ")".to_string(),
-                    ]),
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    retrigger_characters: Some(vec![")".to_string()]),
                     work_done_progress_options: WorkDoneProgressOptions {
                         work_done_progress: Some(false),
                     },
@@ -410,14 +417,17 @@ impl LanguageServer for BslLanguageServer {
                 let _ = self
                     .client
                     .send_notification::<ServerStatus>(ServerStatusParams::loading(
-                        "Загрузка типов..."
+                        "Загрузка типов...",
                     ))
                     .await;
 
                 info!("✅ [LSP→Extension] bsl/serverStatus sent successfully");
 
                 // ✅ НОВОЕ: Отправляем WorkDoneProgressBegin
-                info!("📤 [LSP→Extension] Sending WorkDoneProgressBegin: token={:?}", token);
+                info!(
+                    "📤 [LSP→Extension] Sending WorkDoneProgressBegin: token={:?}",
+                    token
+                );
 
                 // Определяем заголовок в зависимости от наличия конфигурации
                 let title = if cfg.configuration_path.is_some() {
@@ -480,7 +490,8 @@ impl LanguageServer for BslLanguageServer {
                         // ✅ ИСПРАВЛЕНИЕ: Первое событие всегда проходит, затем throttling
                         // Пропускаем если слишком рано (throttling), НО всегда отправляем 100% и первое событие
                         let should_skip = if let Some(last) = last_report {
-                            now.duration_since(last) < throttle_interval && update.percentage < 100.0
+                            now.duration_since(last) < throttle_interval
+                                && update.percentage < 100.0
                         } else {
                             false // Первое событие ВСЕГДА проходит
                         };
@@ -488,7 +499,9 @@ impl LanguageServer for BslLanguageServer {
                         if should_skip {
                             debug!(
                                 "⏭️ [THROTTLED] Skipped (too early, {}ms since last report)",
-                                last_report.map(|l| now.duration_since(l).as_millis()).unwrap_or(0)
+                                last_report
+                                    .map(|l| now.duration_since(l).as_millis())
+                                    .unwrap_or(0)
                             );
                             continue;
                         }
@@ -547,7 +560,10 @@ impl LanguageServer for BslLanguageServer {
                         };
 
                         // ✅ НОВОЕ: Отправляем WorkDoneProgressReport
-                        info!("[LSP→Extension] Sending WorkDoneProgressReport: {}% - {}", update.percentage as u32, message_with_eta);
+                        info!(
+                            "[LSP→Extension] Sending WorkDoneProgressReport: {}% - {}",
+                            update.percentage as u32, message_with_eta
+                        );
 
                         let _ = client_clone
                             .send_notification::<tower_lsp::lsp_types::notification::Progress>(
@@ -567,8 +583,7 @@ impl LanguageServer for BslLanguageServer {
                         debug!("✅ [LSP→Extension] WorkDoneProgressReport sent successfully");
                         log_progress_to_file(&format!(
                             "📤 [LSP→Extension] SEND WorkDoneProgressReport: {}% - {}",
-                            update.percentage as u32,
-                            message_with_eta
+                            update.percentage as u32, message_with_eta
                         ));
                     }
 
@@ -597,7 +612,9 @@ impl LanguageServer for BslLanguageServer {
                                 .await;
 
                             info!("✅ [LSP→Extension] WorkDoneProgressEnd sent successfully");
-                            log_progress_to_file("📤 [LSP→Extension] SEND WorkDoneProgressEnd (SUCCESS)");
+                            log_progress_to_file(
+                                "📤 [LSP→Extension] SEND WorkDoneProgressEnd (SUCCESS)",
+                            );
 
                             // MILESTONE 2.20.3: Отправляем bsl/serverStatus (loading: false) - готово
                             info!("📤 [LSP→Extension] Sending bsl/serverStatus: loading=false");
@@ -610,7 +627,10 @@ impl LanguageServer for BslLanguageServer {
                         }
                         Ok(Err(error_msg)) => {
                             // ❌ ОШИБКА: Отправляем WorkDoneProgressEnd с ошибкой
-                            info!("📤 [LSP→Extension] Sending WorkDoneProgressEnd (ERROR): {}", error_msg);
+                            info!(
+                                "📤 [LSP→Extension] Sending WorkDoneProgressEnd (ERROR): {}",
+                                error_msg
+                            );
 
                             let _ = client_clone
                                 .send_notification::<tower_lsp::lsp_types::notification::Progress>(
@@ -727,7 +747,14 @@ impl LanguageServer for BslLanguageServer {
         // ✅ MILESTONE 2.13: Прогрев IR кеша при didOpen (Eagerly Parse)
         // Вызываем get_hover_info с dummy position (0, 0) для кеширования IR
         // Это делает последующие hover мгновенными (<5ms вместо 50-100ms)
-if let Some(service) = self.get_type_service() {            match service.get_hover_info(&text, 0, 0).await {                Ok(_) => info!("✅ IR cache preheated for {}", uri),                Err(e) => error!("❌ Failed to preheat IR cache for {}: {}", uri, e),            }        } else {            warn!("⚠️ TypeSystemService not yet initialized, skipping IR cache preheat");        }
+        if let Some(service) = self.get_type_service() {
+            match service.get_hover_info(&text, 0, 0).await {
+                Ok(_) => info!("✅ IR cache preheated for {}", uri),
+                Err(e) => error!("❌ Failed to preheat IR cache for {}: {}", uri, e),
+            }
+        } else {
+            warn!("⚠️ TypeSystemService not yet initialized, skipping IR cache preheat");
+        }
 
         // ✅ MILESTONE 2.19: Clean Architecture - TypeSystemService API
         let mut diagnostics = Vec::new();
@@ -737,11 +764,7 @@ if let Some(service) = self.get_type_service() {            match service.get_ho
             match type_service.parse_and_validate(&text) {
                 Ok(errors) => {
                     if !errors.is_empty() {
-                        info!(
-                            "⚠️ Found {} syntax errors in {}",
-                            errors.len(),
-                            uri
-                        );
+                        info!("⚠️ Found {} syntax errors in {}", errors.len(), uri);
 
                         // Конвертируем shared ParseError → LSP Diagnostics
                         diagnostics.extend(self.syntax_errors_to_diagnostics(&errors));
@@ -770,7 +793,11 @@ if let Some(service) = self.get_type_service() {            match service.get_ho
             match type_service.validate_semantics(&text).await {
                 Ok(semantic_errors) => {
                     if !semantic_errors.is_empty() {
-                        info!("⚠️ Found {} semantic errors in {}", semantic_errors.len(), uri);
+                        info!(
+                            "⚠️ Found {} semantic errors in {}",
+                            semantic_errors.len(),
+                            uri
+                        );
                         for error in semantic_errors {
                             diagnostics.push(self.semantic_error_to_diagnostic(&error));
                         }
@@ -832,7 +859,10 @@ if let Some(service) = self.get_type_service() {            match service.get_ho
 
         // ✅ MILESTONE 2.13: Инвалидация IR кеша при изменении файла
         let uri_str = uri.to_string();
-if let Some(service) = self.get_type_service() {            service.invalidate_file_cache(&uri_str, &updated_text).await;            debug!("📝 File changed: {}, cache invalidated", uri_str);        }
+        if let Some(service) = self.get_type_service() {
+            service.invalidate_file_cache(&uri_str, &updated_text).await;
+            debug!("📝 File changed: {}, cache invalidated", uri_str);
+        }
         debug!("📝 File changed: {}, cache invalidated", uri_str);
 
         // ✅ ИНКРЕМЕНТАЛЬНЫЙ ПАРСИНГ: конвертируем LSP edits → ParserCoordinator TextEdit
@@ -862,7 +892,16 @@ if let Some(service) = self.get_type_service() {            service.invalidate_f
         let file_path = PathBuf::from(uri.path());
 
         // Используем инкрементальный парсинг через TypeSystemService
-if let Some(service) = self.get_type_service() {            if let Err(e) = service                .parse_incremental(file_path, updated_text.clone(), text_edits)                .await            {                error!("Incremental parsing failed: {}", e);            } else {                info!("✅ Incremental parsing succeeded for: {}", uri.path());            }        }
+        if let Some(service) = self.get_type_service() {
+            if let Err(e) = service
+                .parse_incremental(file_path, updated_text.clone(), text_edits)
+                .await
+            {
+                error!("Incremental parsing failed: {}", e);
+            } else {
+                info!("✅ Incremental parsing succeeded for: {}", uri.path());
+            }
+        }
 
         // ✅ MILESTONE 2.19: Clean Architecture - TypeSystemService API
         let mut diagnostics = Vec::new();
@@ -877,15 +916,10 @@ if let Some(service) = self.get_type_service() {            if let Err(e) = serv
                 match type_service.parse_and_validate(text) {
                     Ok(errors) => {
                         if !errors.is_empty() {
-                            info!(
-                                "⚠️ Found {} syntax errors in {}",
-                                errors.len(),
-                                uri
-                            );
+                            info!("⚠️ Found {} syntax errors in {}", errors.len(), uri);
 
                             // Конвертируем shared ParseError → LSP Diagnostics
-                            diagnostics
-                                .extend(self.syntax_errors_to_diagnostics(&errors));
+                            diagnostics.extend(self.syntax_errors_to_diagnostics(&errors));
                         } else {
                             info!("✅ No syntax errors in {}", uri);
                         }
@@ -906,22 +940,26 @@ if let Some(service) = self.get_type_service() {            if let Err(e) = serv
                 warn!("⚠️ TypeSystemService not yet initialized, skipping syntax validation");
             }
 
-        // PHASE 2: Semantic validation (MILESTONE 3.7)
-        if let Some(type_service) = self.get_type_service() {
-            match type_service.validate_semantics(&text).await {
-                Ok(semantic_errors) => {
-                    if !semantic_errors.is_empty() {
-                        info!("⚠️ Found {} semantic errors in {}", semantic_errors.len(), uri);
-                        for error in semantic_errors {
-                            diagnostics.push(self.semantic_error_to_diagnostic(&error));
+            // PHASE 2: Semantic validation (MILESTONE 3.7)
+            if let Some(type_service) = self.get_type_service() {
+                match type_service.validate_semantics(&text).await {
+                    Ok(semantic_errors) => {
+                        if !semantic_errors.is_empty() {
+                            info!(
+                                "⚠️ Found {} semantic errors in {}",
+                                semantic_errors.len(),
+                                uri
+                            );
+                            for error in semantic_errors {
+                                diagnostics.push(self.semantic_error_to_diagnostic(&error));
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    warn!("Semantic validation failed for {}: {}", uri, e);
+                    Err(e) => {
+                        warn!("Semantic validation failed for {}: {}", uri, e);
+                    }
                 }
             }
-        }
         }
 
         // Отправляем обновленные диагностики
@@ -970,7 +1008,34 @@ if let Some(service) = self.get_type_service() {            if let Err(e) = serv
         };
 
         // Получаем автодополнение через TypeSystemService
-if let Some(service) = self.get_type_service() {            match service                .get_completion(&file_content, position.line, position.character)                .await            {                Ok(completions) => {                    let lsp_completions: Vec<tower_lsp::lsp_types::CompletionItem> = completions                        .into_iter()                        .map(|item| tower_lsp::lsp_types::CompletionItem {                            label: item.label,                            detail: item.detail,                            insert_text: item.insert_text,                            kind: Some(CompletionItemKind::KEYWORD),                            insert_text_format: Some(InsertTextFormat::SNIPPET),                            ..Default::default()                        })                        .collect();                    info!("Returning {} completions", lsp_completions.len());                    Ok(Some(CompletionResponse::Array(lsp_completions)))                }                Err(e) => {                    error!("Failed to get completions: {}", e);                    Ok(Some(CompletionResponse::Array(vec![])))                }            }        } else {            Ok(Some(CompletionResponse::Array(vec![])))        }
+        if let Some(service) = self.get_type_service() {
+            match service
+                .get_completion(&file_content, position.line, position.character)
+                .await
+            {
+                Ok(completions) => {
+                    let lsp_completions: Vec<tower_lsp::lsp_types::CompletionItem> = completions
+                        .into_iter()
+                        .map(|item| tower_lsp::lsp_types::CompletionItem {
+                            label: item.label,
+                            detail: item.detail,
+                            insert_text: item.insert_text,
+                            kind: Some(CompletionItemKind::KEYWORD),
+                            insert_text_format: Some(InsertTextFormat::SNIPPET),
+                            ..Default::default()
+                        })
+                        .collect();
+                    info!("Returning {} completions", lsp_completions.len());
+                    Ok(Some(CompletionResponse::Array(lsp_completions)))
+                }
+                Err(e) => {
+                    error!("Failed to get completions: {}", e);
+                    Ok(Some(CompletionResponse::Array(vec![])))
+                }
+            }
+        } else {
+            Ok(Some(CompletionResponse::Array(vec![])))
+        }
     }
 
     async fn hover(&self, params: HoverParams) -> JsonRpcResult<Option<Hover>> {
@@ -1008,7 +1073,29 @@ if let Some(service) = self.get_type_service() {            match service       
         };
 
         // Используем get_hover_info() с IR-based анализом
-if let Some(service) = self.get_type_service() {            match service                .get_hover_info(&file_content, position.line, position.character)                .await            {                Ok(hover_info) => {                    if let Some(info) = hover_info {                        Ok(Some(Hover {                            contents: HoverContents::Scalar(MarkedString::String(info)),                            range: None,                        }))                    } else {                        Ok(None)                    }                }                Err(e) => {                    error!("Failed to get hover info: {}", e);                    Ok(None)                }            }        } else {            Ok(None)        }
+        if let Some(service) = self.get_type_service() {
+            match service
+                .get_hover_info(&file_content, position.line, position.character)
+                .await
+            {
+                Ok(hover_info) => {
+                    if let Some(info) = hover_info {
+                        Ok(Some(Hover {
+                            contents: HoverContents::Scalar(MarkedString::String(info)),
+                            range: None,
+                        }))
+                    } else {
+                        Ok(None)
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get hover info: {}", e);
+                    Ok(None)
+                }
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     async fn execute_command(
@@ -1160,7 +1247,11 @@ if let Some(service) = self.get_type_service() {            match service       
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        tracing::info!("SignatureHelp requested at {}:{}", position.line, position.character);
+        tracing::info!(
+            "SignatureHelp requested at {}:{}",
+            position.line,
+            position.character
+        );
 
         // Получаем содержимое документа
         let file_content = match self.get_document_content(&uri).await {
@@ -1180,8 +1271,11 @@ if let Some(service) = self.get_type_service() {            match service       
             }
         };
 
-        tracing::debug!("Found call context: function={}, receiver={:?}",
-            call_context.function_name, call_context.receiver_type);
+        tracing::debug!(
+            "Found call context: function={}, receiver={:?}",
+            call_context.function_name,
+            call_context.receiver_type
+        );
 
         // Получаем сигнатуру через TypeSystemService
         let signature_info = match self.get_signature_for_function(
@@ -1199,7 +1293,10 @@ if let Some(service) = self.get_type_service() {            match service       
         let active_param = self.calculate_active_parameter(&file_content, &call_context, position);
 
         // Формируем ответ
-        Ok(Some(self.build_signature_help_response(signature_info, active_param)))
+        Ok(Some(self.build_signature_help_response(
+            signature_info,
+            active_param,
+        )))
     }
 }
 
@@ -1529,23 +1626,33 @@ impl BslLanguageServer {
                         name: format!("Новый {}", constructor.type_name),
                         english_name: Some(format!("New {}", constructor.type_name)),
                         return_type: Some(constructor.type_name.clone()),
-                        params: constructor.params.iter().map(|p| ParamDto {
-                            name: p.name.clone(),
-                            param_type: p.type_name.clone()
-                                .unwrap_or_else(|| "Произвольный".to_string()),
-                            is_optional: p.is_optional,
-                            default_value: p.default_value.clone(),
-                        }).collect(),
+                        params: constructor
+                            .params
+                            .iter()
+                            .map(|p| ParamDto {
+                                name: p.name.clone(),
+                                param_type: p
+                                    .type_name
+                                    .clone()
+                                    .unwrap_or_else(|| "Произвольный".to_string()),
+                                is_optional: p.is_optional,
+                                default_value: p.default_value.clone(),
+                            })
+                            .collect(),
                         description: Some(format!(
                             "Конструктор типа {}{}{}",
                             constructor.type_name,
                             if constructor.is_collection {
-                                format!(" (коллекция, {} generic параметров)",
-                                        constructor.generic_params_count)
+                                format!(
+                                    " (коллекция, {} generic параметров)",
+                                    constructor.generic_params_count
+                                )
                             } else {
                                 String::new()
                             },
-                            constructor.facet.as_ref()
+                            constructor
+                                .facet
+                                .as_ref()
                                 .map(|f| format!(", facet: {}", f))
                                 .unwrap_or_default()
                         )),
@@ -1789,7 +1896,28 @@ impl BslLanguageServer {
 
         // Используем TypeSystemService для получения SemanticProgram
         // TypeSystemService уже содержит всю логику парсинга и конвертации AST → IR
-if let Some(service) = self.get_type_service() {            match service                .get_semantic_tree(&file_content, &file_path_str)                .await            {                Ok(dto) => {                    info!(                        "✅ Semantic tree generated: {} nodes, {} symbols",                        dto.root_nodes.len(),                        dto.symbol_table.len()                    );                    Ok(dto)                }                Err(e) => {                    error!("Failed to generate semantic tree: {}", e);                    Err(tower_lsp::jsonrpc::Error::internal_error())                }            }        } else {            error!("TypeSystemService not yet initialized");            Err(tower_lsp::jsonrpc::Error::internal_error())        }
+        if let Some(service) = self.get_type_service() {
+            match service
+                .get_semantic_tree(&file_content, &file_path_str)
+                .await
+            {
+                Ok(dto) => {
+                    info!(
+                        "✅ Semantic tree generated: {} nodes, {} symbols",
+                        dto.root_nodes.len(),
+                        dto.symbol_table.len()
+                    );
+                    Ok(dto)
+                }
+                Err(e) => {
+                    error!("Failed to generate semantic tree: {}", e);
+                    Err(tower_lsp::jsonrpc::Error::internal_error())
+                }
+            }
+        } else {
+            error!("TypeSystemService not yet initialized");
+            Err(tower_lsp::jsonrpc::Error::internal_error())
+        }
     }
 
     /// Обработчик custom command: bsl.searchTypes - поиск типов в TypeRepository
@@ -1920,7 +2048,43 @@ if let Some(service) = self.get_type_service() {            match service       
             .to_string();
 
         // Получаем SemanticProgram через TypeSystemService
-if let Some(service) = self.get_type_service() {            match service                .get_semantic_tree(&file_content, &file_path)                .await            {                Ok(semantic_tree_dto) => {                    match find_containing_function_in_dto(                        &semantic_tree_dto,                        params.line,                        params.character,                    ) {                        Some((name, kind, params_list, return_type)) => {                            info!("✅ Found context: {} {}", kind, name);                            Ok(CurrentContextResponse {                                function_name: Some(name),                                function_kind: kind,                                params: Some(params_list),                                return_type,                            })                        }                        None => {                            debug!("No context found - global scope");                            Ok(CurrentContextResponse {                                function_name: None,                                function_kind: "none".to_string(),                                params: None,                                return_type: None,                            })                        }                    }                }                Err(e) => {                    error!("Failed to get semantic tree: {}", e);                    Err(tower_lsp::jsonrpc::Error::internal_error())                }            }        } else {            error!("TypeSystemService not yet initialized");            Err(tower_lsp::jsonrpc::Error::internal_error())        }
+        if let Some(service) = self.get_type_service() {
+            match service.get_semantic_tree(&file_content, &file_path).await {
+                Ok(semantic_tree_dto) => {
+                    match find_containing_function_in_dto(
+                        &semantic_tree_dto,
+                        params.line,
+                        params.character,
+                    ) {
+                        Some((name, kind, params_list, return_type)) => {
+                            info!("✅ Found context: {} {}", kind, name);
+                            Ok(CurrentContextResponse {
+                                function_name: Some(name),
+                                function_kind: kind,
+                                params: Some(params_list),
+                                return_type,
+                            })
+                        }
+                        None => {
+                            debug!("No context found - global scope");
+                            Ok(CurrentContextResponse {
+                                function_name: None,
+                                function_kind: "none".to_string(),
+                                params: None,
+                                return_type: None,
+                            })
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get semantic tree: {}", e);
+                    Err(tower_lsp::jsonrpc::Error::internal_error())
+                }
+            }
+        } else {
+            error!("TypeSystemService not yet initialized");
+            Err(tower_lsp::jsonrpc::Error::internal_error())
+        }
     }
 
     /// Обработчик custom request: bsl/getSemanticHtml - MILESTONE 2.12
@@ -2237,39 +2401,42 @@ if let Some(service) = self.get_type_service() {            match service       
         // Создаём callback для передачи прогресса в LSP клиент
         let client_clone = self.client.clone();
         let token_clone = token.clone();
-        let progress_callback = move |update: bsl_backend::data::loaders::progress::ProgressUpdate| {
-            let client = client_clone.clone();
-            let token = token_clone.clone();
+        let progress_callback =
+            move |update: bsl_backend::data::loaders::progress::ProgressUpdate| {
+                let client = client_clone.clone();
+                let token = token_clone.clone();
 
-            // Конвертируем прогресс парсинга (10-70%) в LSP прогресс
-            let percentage = update.percentage as u32;
-            let message = update.message.unwrap_or_else(|| format!(
-                "{}: {}/{}",
-                update.phase.display_name(),
-                update.current,
-                update.total
-            ));
-
-            // Асинхронная отправка прогресса (fire-and-forget)
-            tokio::spawn(async move {
-                let _ = client
-                    .send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                        tower_lsp::lsp_types::ProgressParams {
-                            token,
-                            value: tower_lsp::lsp_types::ProgressParamsValue::WorkDone(
-                                tower_lsp::lsp_types::WorkDoneProgress::Report(
-                                    tower_lsp::lsp_types::WorkDoneProgressReport {
-                                        message: Some(message),
-                                        percentage: Some(percentage),
-                                        cancellable: Some(false),
-                                    },
-                                ),
-                            ),
-                        },
+                // Конвертируем прогресс парсинга (10-70%) в LSP прогресс
+                let percentage = update.percentage as u32;
+                let message = update.message.unwrap_or_else(|| {
+                    format!(
+                        "{}: {}/{}",
+                        update.phase.display_name(),
+                        update.current,
+                        update.total
                     )
-                    .await;
-            });
-        };
+                });
+
+                // Асинхронная отправка прогресса (fire-and-forget)
+                tokio::spawn(async move {
+                    let _ = client
+                        .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                            tower_lsp::lsp_types::ProgressParams {
+                                token,
+                                value: tower_lsp::lsp_types::ProgressParamsValue::WorkDone(
+                                    tower_lsp::lsp_types::WorkDoneProgress::Report(
+                                        tower_lsp::lsp_types::WorkDoneProgressReport {
+                                            message: Some(message),
+                                            percentage: Some(percentage),
+                                            cancellable: Some(false),
+                                        },
+                                    ),
+                                ),
+                            },
+                        )
+                        .await;
+                });
+            };
 
         // ✅ ИСПРАВЛЕНО: Конвертируем Result<T, Box<dyn Error>> в Result<T, String> ДО match
         // Решает проблему "Result which contains Box<dyn Error> is not Send"
@@ -2443,10 +2610,7 @@ if let Some(service) = self.get_type_service() {            match service       
     ///
     /// Обратная операция: char индекс -> UTF-16 позиция для LSP.
     fn char_to_utf16_index(text: &str, char_index: usize) -> usize {
-        text.chars()
-            .take(char_index)
-            .map(|ch| ch.len_utf16())
-            .sum()
+        text.chars().take(char_index).map(|ch| ch.len_utf16()).sum()
     }
 
     /// Найти контекст вызова функции
@@ -2535,8 +2699,15 @@ if let Some(service) = self.get_type_service() {            match service       
             let after_dot = &trimmed[dot_byte_pos + 1..];
 
             // Извлекаем только валидное имя идентификатора после точки
-            let method_name = after_dot.chars()
-                .take_while(|c| c.is_alphanumeric() || *c == '_' || (*c >= '\u{0410}' && *c <= '\u{044F}') || *c == '\u{0401}' || *c == '\u{0451}')
+            let method_name = after_dot
+                .chars()
+                .take_while(|c| {
+                    c.is_alphanumeric()
+                        || *c == '_'
+                        || (*c >= '\u{0410}' && *c <= '\u{044F}')
+                        || *c == '\u{0401}'
+                        || *c == '\u{0451}'
+                })
                 .collect::<String>();
 
             if !method_name.is_empty() {
@@ -2547,9 +2718,16 @@ if let Some(service) = self.get_type_service() {            match service       
 
         // Глобальная функция: извлекаем последний валидный идентификатор
         // Идём с конца и собираем символы пока они валидны для идентификатора
-        let function_name = trimmed.chars()
+        let function_name = trimmed
+            .chars()
             .rev()
-            .take_while(|c| c.is_alphanumeric() || *c == '_' || (*c >= '\u{0410}' && *c <= '\u{044F}') || *c == '\u{0401}' || *c == '\u{0451}')
+            .take_while(|c| {
+                c.is_alphanumeric()
+                    || *c == '_'
+                    || (*c >= '\u{0410}' && *c <= '\u{044F}')
+                    || *c == '\u{0401}'
+                    || *c == '\u{0451}'
+            })
             .collect::<String>()
             .chars()
             .rev()
@@ -2579,7 +2757,10 @@ if let Some(service) = self.get_type_service() {            match service       
             let line = match lines.get(line_idx as usize) {
                 Some(l) => l,
                 None => {
-                    tracing::warn!("Invalid line_idx {} in calculate_active_parameter", line_idx);
+                    tracing::warn!(
+                        "Invalid line_idx {} in calculate_active_parameter",
+                        line_idx
+                    );
                     break;
                 }
             };
@@ -2594,8 +2775,7 @@ if let Some(service) = self.get_type_service() {            match service       
             };
 
             let end_char_idx = if line_idx == position.line {
-                Self::utf16_to_char_index(line, position.character as usize)
-                    .unwrap_or(chars.len())
+                Self::utf16_to_char_index(line, position.character as usize).unwrap_or(chars.len())
             } else {
                 chars.len()
             };
@@ -2638,7 +2818,9 @@ if let Some(service) = self.get_type_service() {            match service       
         active_param: u32,
     ) -> SignatureHelp {
         // Форматируем label
-        let params_str = signature.params.iter()
+        let params_str = signature
+            .params
+            .iter()
             .map(|p| {
                 let type_str = p.type_name.as_deref().unwrap_or("Произвольный");
                 if p.is_optional {
@@ -2653,7 +2835,9 @@ if let Some(service) = self.get_type_service() {            match service       
         let label = format!("{}({})", signature.name, params_str);
 
         // Создаём ParameterInformation для каждого параметра
-        let parameters = signature.params.iter()
+        let parameters = signature
+            .params
+            .iter()
             .map(|p| {
                 let param_label = format!(
                     "{}: {}",
@@ -2827,8 +3011,16 @@ async fn main() -> Result<()> {
     {
         use std::io::Write;
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-        let _ = writeln!(file, "[{}] === BSL Progress Debug Log - LSP Server Started ===", timestamp);
-        let _ = writeln!(file, "[{}] LSP server initialized, waiting for progress events...", timestamp);
+        let _ = writeln!(
+            file,
+            "[{}] === BSL Progress Debug Log - LSP Server Started ===",
+            timestamp
+        );
+        let _ = writeln!(
+            file,
+            "[{}] LSP server initialized, waiting for progress events...",
+            timestamp
+        );
     }
 
     // Параметры запуска

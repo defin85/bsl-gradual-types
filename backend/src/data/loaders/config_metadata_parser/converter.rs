@@ -1,5 +1,7 @@
 //! Конвертер UniversalMetadataObject -> RawTypeData для TypeRepository
 
+#![allow(clippy::doc_overindented_list_items)]
+
 use super::types::UniversalMetadataObject;
 use bsl_shared::domain::types::{
     RawAttributeData, RawDataSource, RawTabularSectionData, RawTypeData,
@@ -13,8 +15,8 @@ impl UniversalMetadataObject {
     ///
     /// # Параметры
     /// - `prefix` - Опциональный префикс расширения (например, "Тест_")
-    ///              Применяется ТОЛЬКО к имени объекта метаданных.
-    ///              Для основной конфигурации передавайте `None`.
+    ///   Применяется ТОЛЬКО к имени объекта метаданных.
+    ///   Для основной конфигурации передавайте `None`.
     ///
     /// # Примеры
     /// ```ignore

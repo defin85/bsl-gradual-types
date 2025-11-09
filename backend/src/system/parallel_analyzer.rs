@@ -8,6 +8,8 @@
 //!
 //! Цель: Анализ 1000 файлов < 30 секунд
 
+#![allow(clippy::only_used_in_recursion)]
+
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -221,12 +223,12 @@ impl ParallelAnalyzer {
     }
 
     /// Рекурсивно обойти директорию
-    fn walk_directory(&self, dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-        if !dir.is_dir() {
+    fn walk_directory(&self, _dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+        if !_dir.is_dir() {
             return Ok(());
         }
 
-        for entry in fs::read_dir(dir)? {
+        for entry in fs::read_dir(_dir)? {
             let entry = entry?;
             let path = entry.path();
 

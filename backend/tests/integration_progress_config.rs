@@ -1,5 +1,7 @@
 //! Интеграционные тесты для прогресса при парсинге конфигурации (Milestone 2.20)
 
+#![allow(clippy::double_comparisons)]
+
 #[cfg(test)]
 mod progress_config_tests {
     use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressSource, ProgressUpdate};
@@ -49,33 +51,43 @@ mod progress_config_tests {
     #[test]
     fn test_configuration_phases_percentage_calculation() {
         // ConfigurationDiscovery: 0-5%
-        let percent_0 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationDiscovery, 0, 10);
-        let percent_50 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationDiscovery, 5, 10);
-        let percent_100 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationDiscovery, 10, 10);
+        let percent_0 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationDiscovery, 0, 10);
+        let percent_50 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationDiscovery, 5, 10);
+        let percent_100 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationDiscovery, 10, 10);
 
         assert_eq!(percent_0, 0.0);
         assert_eq!(percent_50, 3.0); // Было 2.5, теперь округлено до 3.0
         assert_eq!(percent_100, 5.0);
 
         // ConfigurationParsing: 5-85%
-        let percent_0 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 0, 100);
-        let percent_50 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 50, 100);
-        let percent_100 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 100, 100);
+        let percent_0 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 0, 100);
+        let percent_50 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 50, 100);
+        let percent_100 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 100, 100);
 
         assert_eq!(percent_0, 5.0);
         assert_eq!(percent_50, 45.0);
         assert_eq!(percent_100, 85.0);
 
         // ConfigurationLinking: 85-95%
-        let percent_0 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationLinking, 0, 1);
-        let percent_100 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationLinking, 1, 1);
+        let percent_0 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationLinking, 0, 1);
+        let percent_100 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationLinking, 1, 1);
 
         assert_eq!(percent_0, 85.0);
         assert_eq!(percent_100, 95.0);
 
         // ConfigurationFinalizing: 95-100%
-        let percent_0 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationFinalizing, 0, 1);
-        let percent_100 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationFinalizing, 1, 1);
+        let percent_0 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationFinalizing, 0, 1);
+        let percent_100 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationFinalizing, 1, 1);
 
         assert_eq!(percent_0, 95.0);
         assert_eq!(percent_100, 100.0);
@@ -110,7 +122,8 @@ mod progress_config_tests {
         let percent = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 0, 0);
         assert_eq!(percent, 5.0); // base_percentage для ConfigurationParsing
 
-        let percent = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationDiscovery, 0, 0);
+        let percent =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationDiscovery, 0, 0);
         assert_eq!(percent, 0.0); // base_percentage для ConfigurationDiscovery
     }
 
@@ -118,10 +131,12 @@ mod progress_config_tests {
     #[test]
     fn test_overflow_protection() {
         // Если current > total, должны ограничить максимумом = base + weight
-        let percent = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 1000, 100);
+        let percent =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 1000, 100);
         assert_eq!(percent, 85.0); // 5% (base) + 100% (clamped) * 80% (weight)
 
-        let percent = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationFinalizing, 100, 1);
+        let percent =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationFinalizing, 100, 1);
         assert_eq!(percent, 100.0); // 95% + 100% (clamped) * 5% = 100%
     }
 

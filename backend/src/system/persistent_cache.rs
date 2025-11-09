@@ -8,6 +8,8 @@
 //!
 //! Цель: Загрузка из кеша < 50ms
 
+#![allow(clippy::only_used_in_recursion)]
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -377,13 +379,13 @@ impl PersistentCache {
     }
 
     /// Вычислить размер директории рекурсивно
-    fn calculate_dir_size(&self, dir: &Path) -> Result<u64> {
-        if !dir.exists() {
+    fn calculate_dir_size(&self, _dir: &Path) -> Result<u64> {
+        if !_dir.exists() {
             return Ok(0);
         }
 
         let mut total = 0;
-        for entry in fs::read_dir(dir)? {
+        for entry in fs::read_dir(_dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.is_file() {

@@ -2,6 +2,8 @@
 //!
 //! Leptos-based web frontend for type system visualization and interaction.
 
+#![allow(clippy::unused_unit)]
+
 /// Build version to force WASM cache invalidation
 /// Increment this when WASM structures change (e.g., TypeInfo fields)
 pub const BUILD_VERSION: &str = "1.0.11-modal-closure-fix";

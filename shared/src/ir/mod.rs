@@ -160,10 +160,10 @@ pub enum SemanticNodeKind {
     /// obj.prop1.prop2.Метод();  // object_name=None, object_type="<inferred_type>"
     /// ```
     MemberAccess {
-        object_name: Option<String>,  // ✅ ИСПРАВЛЕНО: Option вместо String
-        object_type: String,          // Тип переменной (результат inference)
+        object_name: Option<String>, // ✅ ИСПРАВЛЕНО: Option вместо String
+        object_type: String,         // Тип переменной (результат inference)
         member_name: String,
-        is_method: bool,              // true = метод, false = свойство
+        is_method: bool, // true = метод, false = свойство
     },
 
     /// Вызов функции или метода: `Функция()` или `объект.Метод(args)`
@@ -520,7 +520,6 @@ impl SemanticProgram {
     ///     }
     /// }
     /// ```
-
     /// Извлечь имя переменной из узла IR (если узел содержит переменную)
     ///
     /// # Returns
@@ -535,19 +534,25 @@ impl SemanticProgram {
             SemanticNodeKind::Assignment { variable, .. } => Some(variable.clone()),
 
             // Доступ к члену: МассивДанных.Добавить
-            SemanticNodeKind::MemberAccess { object_name: Some(obj_name), .. } => {
-                Some(obj_name.clone())
-            }
-            SemanticNodeKind::MemberAccess { object_name: None, .. } => None,
+            SemanticNodeKind::MemberAccess {
+                object_name: Some(obj_name),
+                ..
+            } => Some(obj_name.clone()),
+            SemanticNodeKind::MemberAccess {
+                object_name: None, ..
+            } => None,
 
             // Объявление переменной: Перем МассивДанных
             SemanticNodeKind::VariableDeclaration { name, .. } => Some(name.clone()),
 
             // Вызов функции: может быть вызов метода переменной
-            SemanticNodeKind::FunctionCall { object_name: Some(obj_name), .. } => {
-                Some(obj_name.clone())
-            }
-            SemanticNodeKind::FunctionCall { object_name: None, .. } => None,
+            SemanticNodeKind::FunctionCall {
+                object_name: Some(obj_name),
+                ..
+            } => Some(obj_name.clone()),
+            SemanticNodeKind::FunctionCall {
+                object_name: None, ..
+            } => None,
 
             // Для остальных узлов не поддерживаем
             _ => None,
@@ -1050,11 +1055,7 @@ impl SemanticProgram {
                     .map(|name| format!("{}.{}", name, member_name))
                     .unwrap_or_else(|| format!("<expr>.{}", member_name));
 
-                (
-                    "MemberAccess".to_string(),
-                    Some(description),
-                    attributes,
-                )
+                ("MemberAccess".to_string(), Some(description), attributes)
             }
             SemanticNodeKind::BlockScope { .. } => ("BlockScope".to_string(), None, attributes),
             SemanticNodeKind::NewExpression {
@@ -1082,11 +1083,7 @@ impl SemanticProgram {
                     format!("Новый {}({} args)", type_name, arg_types.len())
                 };
 
-                (
-                    "NewExpression".to_string(),
-                    Some(display_name),
-                    attributes,
-                )
+                ("NewExpression".to_string(), Some(display_name), attributes)
             }
         }
     }
@@ -1263,8 +1260,6 @@ impl SemanticProgram {
 
     /// Извлечь граф вызовов функций
     fn extract_call_graph(&self) -> Vec<CallEdgeDto> {
-        
-
         // TODO: Реализовать извлечение call graph из узлов
         // Для MVP возвращаем пустой граф
 
@@ -1507,12 +1502,8 @@ mod tests {
         );
 
         // Обновляем параметр
-        let success = table.update_generic_param(
-            table.root_scope,
-            "МассивСтрок",
-            0,
-            "Строка".to_string(),
-        );
+        let success =
+            table.update_generic_param(table.root_scope, "МассивСтрок", 0, "Строка".to_string());
 
         assert!(success, "update_generic_param должна вернуть true");
 
@@ -1581,12 +1572,7 @@ mod tests {
         );
 
         // Обновляем только первый параметр
-        table.update_generic_param(
-            table.root_scope,
-            "МойТип",
-            0,
-            "Строка".to_string(),
-        );
+        table.update_generic_param(table.root_scope, "МойТип", 0, "Строка".to_string());
 
         let hint = table.get_variable_type(table.root_scope, "МойТип");
 
@@ -1805,8 +1791,14 @@ mod tests {
         assert!(node_dto.name.is_some());
 
         // Проверяем атрибуты
-        assert_eq!(node_dto.attributes.get("type_name"), Some(&"Массив".to_string()));
+        assert_eq!(
+            node_dto.attributes.get("type_name"),
+            Some(&"Массив".to_string())
+        );
         assert_eq!(node_dto.attributes.get("arg_count"), Some(&"1".to_string()));
-        assert_eq!(node_dto.attributes.get("is_dynamic"), Some(&"false".to_string()));
+        assert_eq!(
+            node_dto.attributes.get("is_dynamic"),
+            Some(&"false".to_string())
+        );
     }
 }

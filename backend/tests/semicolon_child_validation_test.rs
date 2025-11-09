@@ -1,5 +1,5 @@
-/// Интеграционный тест для проверки исправленного semicolon validation
-/// (переход от текстового поиска к проверке дочерних узлов)
+//! Интеграционный тест для проверки исправленного semicolon validation
+//! (переход от текстового поиска к проверке дочерних узлов)
 
 use bsl_backend::system::parser_coordinator::ParserCoordinator;
 
@@ -58,7 +58,10 @@ fn test_semicolon_as_child_node_missing_semicolons() {
         "Должны быть сообщения об отсутствии точек с запятой"
     );
 
-    println!("✅ Найдено {} ошибок про точки с запятой", semicolon_errors.len());
+    println!(
+        "✅ Найдено {} ошибок про точки с запятой",
+        semicolon_errors.len()
+    );
     for error in &semicolon_errors {
         println!("  - {}", error.message);
     }

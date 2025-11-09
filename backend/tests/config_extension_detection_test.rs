@@ -2,6 +2,8 @@
 //!
 //! Проверяет новую функциональность различения Base и Extension конфигураций.
 
+#![allow(clippy::len_zero)]
+
 use bsl_backend::data::loaders::config_metadata_parser::{
     ConfigurationDiscovery, ConfigurationType,
 };
@@ -149,7 +151,10 @@ fn test_discover_metadata_in_specific_configuration() {
     }
 
     let first_config = &configs[0];
-    let metadata_result = discovery.discover_metadata_in_configuration(first_config, None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let metadata_result = discovery.discover_metadata_in_configuration(
+        first_config,
+        None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>,
+    );
 
     // Assert
     assert!(metadata_result.is_ok(), "Должны быть обнаружены метаданные");
@@ -175,7 +180,8 @@ fn test_backward_compatibility_discover_all_metadata() {
     let discovery = ConfigurationDiscovery::new(conf_path);
 
     // Act
-    let result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result = discovery
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     // Assert
     assert!(

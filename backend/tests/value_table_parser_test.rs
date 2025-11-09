@@ -4,6 +4,8 @@
 //! - Параметр Индекс: Число (обязательный)
 //! - Возвращаемое значение: СтрокаТаблицыЗначений
 
+#![allow(clippy::bool_assert_comparison)]
+
 use bsl_backend::data::loaders::syntax_helper::html_extractors::HtmlExtractor;
 use scraper::Html;
 use std::fs;
@@ -29,8 +31,7 @@ fn test_value_table_insert_parameters() {
         return;
     }
 
-    let html_content = fs::read_to_string(&html_path)
-        .expect("Не удалось прочитать HTML файл");
+    let html_content = fs::read_to_string(&html_path).expect("Не удалось прочитать HTML файл");
 
     let document = Html::parse_document(&html_content);
     let extractor = HtmlExtractor::new();
@@ -47,7 +48,11 @@ fn test_value_table_insert_parameters() {
             i,
             param.name,
             param.type_name,
-            if param.is_optional { "необязательный" } else { "обязательный" }
+            if param.is_optional {
+                "необязательный"
+            } else {
+                "обязательный"
+            }
         );
     }
 
@@ -59,7 +64,11 @@ fn test_value_table_insert_parameters() {
     assert_eq!(params[0].type_name, Some("Число".to_string()));
     assert_eq!(params[0].is_optional, false);
     assert!(
-        params[0].description.as_ref().map(|d| d.contains("Индекс вставляемой")).unwrap_or(false),
+        params[0]
+            .description
+            .as_ref()
+            .map(|d| d.contains("Индекс вставляемой"))
+            .unwrap_or(false),
         "Описание должно содержать текст об индексе вставляемой строки"
     );
 
@@ -78,7 +87,10 @@ fn test_value_table_insert_parameters() {
     );
 
     assert!(
-        return_desc.as_ref().map(|d| d.contains("Вставленная строка")).unwrap_or(false),
+        return_desc
+            .as_ref()
+            .map(|d| d.contains("Вставленная строка"))
+            .unwrap_or(false),
         "Описание должно содержать информацию о вставленной строке"
     );
 
@@ -94,9 +106,9 @@ fn extract_return_type_from_html(html: &str) -> Option<String> {
     // Тип: <a href="...">СтрокаТаблицыЗначений</a>
     //
     // ВАЖНО: Используем greedy режим [^<]+ чтобы захватить весь текст до <
-    let return_regex = Regex::new(
-        r#"Возвращаемое значение:[\s\S]{0,200}?Тип:\s*(?:<a[^>]*>)?([^<]+)(?:</a>)?"#
-    ).ok()?;
+    let return_regex =
+        Regex::new(r#"Возвращаемое значение:[\s\S]{0,200}?Тип:\s*(?:<a[^>]*>)?([^<]+)(?:</a>)?"#)
+            .ok()?;
 
     if let Some(cap) = return_regex.captures(html) {
         let mut return_type = cap.get(1)?.as_str().trim().to_string();

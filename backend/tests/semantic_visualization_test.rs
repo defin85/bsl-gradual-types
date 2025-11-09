@@ -12,7 +12,6 @@ use axum::http::StatusCode;
 /// - VSCode Extension команды (Phase 4)
 ///
 /// Полноценное интеграционное тестирование будет выполнено в следующей итерации.
-
 #[cfg(test)]
 mod semantic_visualization_tests {
     use super::*;
@@ -140,7 +139,7 @@ mod semantic_visualization_tests {
 
         // Если компилируется, значит DTO публичны и доступны
         // для использования в semantic_routes
-        assert!(true);
+        // (тест успешен если код компилируется)
     }
 }
 

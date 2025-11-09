@@ -5,12 +5,14 @@
 //!
 //! Задача: Проверить все 10 поддерживаемых комбинаций + edge cases
 
+#![allow(clippy::vec_init_then_push)]
+
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
-use bsl_shared::domain::repository::{TypeRepository, InMemoryTypeRepository};
+use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::types::{
-    TypeResolution, ResolutionResult, ConcreteType, ConfigurationType,
-    MetadataKind, FacetKind, RawTypeData, RawMethodData, RawDataSource,
-    Certainty, ResolutionSource, ResolutionMetadata,
+    Certainty, ConcreteType, ConfigurationType, FacetKind, MetadataKind, RawDataSource,
+    RawMethodData, RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource,
+    TypeResolution,
 };
 use std::sync::Arc;
 
@@ -103,17 +105,15 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         description: "Ссылка на документ".to_string(),
         category: "Документ".to_string(),
         source: RawDataSource::Platform,
-        methods: vec![
-            RawMethodData {
-                name: "ПолучитьОбъект".to_string(),
-                english_name: "GetObject".to_string(),
-                return_type: "ДокументОбъект".to_string(),
-                params: vec![],
-                description: None,
-                is_deprecated: false,
-                is_constructor: false,
-            },
-        ],
+        methods: vec![RawMethodData {
+            name: "ПолучитьОбъект".to_string(),
+            english_name: "GetObject".to_string(),
+            return_type: "ДокументОбъект".to_string(),
+            params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+        }],
         properties: vec![],
         facets: vec![FacetKind::Reference],
         kind: None,
@@ -130,17 +130,15 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         description: "Выборка документов".to_string(),
         category: "Документ".to_string(),
         source: RawDataSource::Platform,
-        methods: vec![
-            RawMethodData {
-                name: "Следующий".to_string(),
-                english_name: "Next".to_string(),
-                return_type: "Булево".to_string(),
-                params: vec![],
-                description: None,
-                is_deprecated: false,
-                is_constructor: false,
-            },
-        ],
+        methods: vec![RawMethodData {
+            name: "Следующий".to_string(),
+            english_name: "Next".to_string(),
+            return_type: "Булево".to_string(),
+            params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+        }],
         properties: vec![],
         facets: vec![FacetKind::Selection],
         kind: None,
@@ -157,17 +155,15 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         description: "Список документов в форме".to_string(),
         category: "Документ".to_string(),
         source: RawDataSource::Platform,
-        methods: vec![
-            RawMethodData {
-                name: "Обновить".to_string(),
-                english_name: "Refresh".to_string(),
-                return_type: "".to_string(),
-                params: vec![],
-                description: None,
-                is_deprecated: false,
-                is_constructor: false,
-            },
-        ],
+        methods: vec![RawMethodData {
+            name: "Обновить".to_string(),
+            english_name: "Refresh".to_string(),
+            return_type: "".to_string(),
+            params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+        }],
         properties: vec![],
         facets: vec![FacetKind::List],
         kind: None,
@@ -222,17 +218,15 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         description: "Объект справочника".to_string(),
         category: "Справочник".to_string(),
         source: RawDataSource::Platform,
-        methods: vec![
-            RawMethodData {
-                name: "Записать".to_string(),
-                english_name: "Write".to_string(),
-                return_type: "".to_string(),
-                params: vec![],
-                description: None,
-                is_deprecated: false,
-                is_constructor: false,
-            },
-        ],
+        methods: vec![RawMethodData {
+            name: "Записать".to_string(),
+            english_name: "Write".to_string(),
+            return_type: "".to_string(),
+            params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+        }],
         properties: vec![],
         facets: vec![FacetKind::Object],
         kind: None,
@@ -285,17 +279,15 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         description: "Выборка справочника".to_string(),
         category: "Справочник".to_string(),
         source: RawDataSource::Platform,
-        methods: vec![
-            RawMethodData {
-                name: "Следующий".to_string(),
-                english_name: "Next".to_string(),
-                return_type: "Булево".to_string(),
-                params: vec![],
-                description: None,
-                is_deprecated: false,
-                is_constructor: false,
-            },
-        ],
+        methods: vec![RawMethodData {
+            name: "Следующий".to_string(),
+            english_name: "Next".to_string(),
+            return_type: "Булево".to_string(),
+            params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+        }],
         properties: vec![],
         facets: vec![FacetKind::Selection],
         kind: None,
@@ -312,17 +304,15 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         description: "Список справочника в форме".to_string(),
         category: "Справочник".to_string(),
         source: RawDataSource::Platform,
-        methods: vec![
-            RawMethodData {
-                name: "Обновить".to_string(),
-                english_name: "Refresh".to_string(),
-                return_type: "".to_string(),
-                params: vec![],
-                description: None,
-                is_deprecated: false,
-                is_constructor: false,
-            },
-        ],
+        methods: vec![RawMethodData {
+            name: "Обновить".to_string(),
+            english_name: "Refresh".to_string(),
+            return_type: "".to_string(),
+            params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+        }],
         properties: vec![],
         facets: vec![FacetKind::List],
         kind: None,
@@ -332,7 +322,8 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         generic_info: None,
     });
 
-    repo.load_types(platform_types).expect("Failed to load platform types");
+    repo.load_types(platform_types)
+        .expect("Failed to load platform types");
     repo
 }
 
@@ -373,7 +364,10 @@ fn test_document_manager_facet_mapping() {
     let methods = lookup.get_methods(&resolution);
 
     // Должны найти методы из ДокументМенеджер
-    assert!(!methods.is_empty(), "Lazy lookup должен найти методы ДокументМенеджер");
+    assert!(
+        !methods.is_empty(),
+        "Lazy lookup должен найти методы ДокументМенеджер"
+    );
     assert_eq!(methods.len(), 2, "Должно быть 2 метода");
 
     assert!(
@@ -391,15 +385,15 @@ fn test_document_object_facet_mapping() {
     let repo = create_test_repository_with_all_platform_facets();
     let lookup = TypeMetadataLookup::new(repo.clone());
 
-    let resolution = create_resolution_for_config_type(
-        MetadataKind::Document,
-        "ЗаказНаряды",
-        FacetKind::Object,
-    );
+    let resolution =
+        create_resolution_for_config_type(MetadataKind::Document, "ЗаказНаряды", FacetKind::Object);
 
     let methods = lookup.get_methods(&resolution);
 
-    assert!(!methods.is_empty(), "Lazy lookup должен найти методы ДокументОбъект");
+    assert!(
+        !methods.is_empty(),
+        "Lazy lookup должен найти методы ДокументОбъект"
+    );
     assert_eq!(methods.len(), 2, "Должно быть 2 метода");
 
     assert!(
@@ -425,7 +419,10 @@ fn test_document_reference_facet_mapping() {
 
     let methods = lookup.get_methods(&resolution);
 
-    assert!(!methods.is_empty(), "Lazy lookup должен найти методы ДокументСсылка");
+    assert!(
+        !methods.is_empty(),
+        "Lazy lookup должен найти методы ДокументСсылка"
+    );
     assert_eq!(methods.len(), 1, "Должен быть 1 метод");
 
     assert!(
@@ -447,7 +444,10 @@ fn test_document_selection_facet_mapping() {
 
     let methods = lookup.get_methods(&resolution);
 
-    assert!(!methods.is_empty(), "Lazy lookup должен найти методы ДокументВыборка");
+    assert!(
+        !methods.is_empty(),
+        "Lazy lookup должен найти методы ДокументВыборка"
+    );
     assert_eq!(methods.len(), 1, "Должен быть 1 метод");
 
     assert!(
@@ -461,15 +461,15 @@ fn test_document_list_facet_mapping() {
     let repo = create_test_repository_with_all_platform_facets();
     let lookup = TypeMetadataLookup::new(repo.clone());
 
-    let resolution = create_resolution_for_config_type(
-        MetadataKind::Document,
-        "ЗаказНаряды",
-        FacetKind::List,
-    );
+    let resolution =
+        create_resolution_for_config_type(MetadataKind::Document, "ЗаказНаряды", FacetKind::List);
 
     let methods = lookup.get_methods(&resolution);
 
-    assert!(!methods.is_empty(), "Lazy lookup должен найти методы ДокументСписок");
+    assert!(
+        !methods.is_empty(),
+        "Lazy lookup должен найти методы ДокументСписок"
+    );
     assert_eq!(methods.len(), 1, "Должен быть 1 метод");
 
     assert!(
@@ -485,15 +485,15 @@ fn test_catalog_manager_facet_mapping() {
     let repo = create_test_repository_with_all_platform_facets();
     let lookup = TypeMetadataLookup::new(repo.clone());
 
-    let resolution = create_resolution_for_config_type(
-        MetadataKind::Catalog,
-        "Контрагенты",
-        FacetKind::Manager,
-    );
+    let resolution =
+        create_resolution_for_config_type(MetadataKind::Catalog, "Контрагенты", FacetKind::Manager);
 
     let methods = lookup.get_methods(&resolution);
 
-    assert!(!methods.is_empty(), "Lazy lookup должен найти методы СправочникМенеджер");
+    assert!(
+        !methods.is_empty(),
+        "Lazy lookup должен найти методы СправочникМенеджер"
+    );
     assert_eq!(methods.len(), 2, "Должно быть 2 метода");
 
     assert!(
@@ -511,15 +511,15 @@ fn test_catalog_object_facet_mapping() {
     let repo = create_test_repository_with_all_platform_facets();
     let lookup = TypeMetadataLookup::new(repo.clone());
 
-    let resolution = create_resolution_for_config_type(
-        MetadataKind::Catalog,
-        "Контрагенты",
-        FacetKind::Object,
-    );
+    let resolution =
+        create_resolution_for_config_type(MetadataKind::Catalog, "Контрагенты", FacetKind::Object);
 
     let methods = lookup.get_methods(&resolution);
 
-    assert!(!methods.is_empty(), "Lazy lookup должен найти методы СправочникОбъект");
+    assert!(
+        !methods.is_empty(),
+        "Lazy lookup должен найти методы СправочникОбъект"
+    );
     assert_eq!(methods.len(), 1, "Должен быть 1 метод");
 
     assert!(
@@ -541,7 +541,10 @@ fn test_catalog_reference_facet_mapping() {
 
     let methods = lookup.get_methods(&resolution);
 
-    assert!(!methods.is_empty(), "Lazy lookup должен найти методы СправочникСсылка");
+    assert!(
+        !methods.is_empty(),
+        "Lazy lookup должен найти методы СправочникСсылка"
+    );
     assert_eq!(methods.len(), 2, "Должно быть 2 метода");
 
     assert!(
@@ -567,7 +570,10 @@ fn test_catalog_selection_facet_mapping() {
 
     let methods = lookup.get_methods(&resolution);
 
-    assert!(!methods.is_empty(), "Lazy lookup должен найти методы СправочникВыборка");
+    assert!(
+        !methods.is_empty(),
+        "Lazy lookup должен найти методы СправочникВыборка"
+    );
     assert_eq!(methods.len(), 1, "Должен быть 1 метод");
 
     assert!(
@@ -581,15 +587,15 @@ fn test_catalog_list_facet_mapping() {
     let repo = create_test_repository_with_all_platform_facets();
     let lookup = TypeMetadataLookup::new(repo.clone());
 
-    let resolution = create_resolution_for_config_type(
-        MetadataKind::Catalog,
-        "Контрагенты",
-        FacetKind::List,
-    );
+    let resolution =
+        create_resolution_for_config_type(MetadataKind::Catalog, "Контрагенты", FacetKind::List);
 
     let methods = lookup.get_methods(&resolution);
 
-    assert!(!methods.is_empty(), "Lazy lookup должен найти методы СправочникСписок");
+    assert!(
+        !methods.is_empty(),
+        "Lazy lookup должен найти методы СправочникСписок"
+    );
     assert_eq!(methods.len(), 1, "Должен быть 1 метод");
 
     assert!(
@@ -615,7 +621,10 @@ fn test_unsupported_enum_metadata_kind() {
     let methods = lookup.get_methods(&resolution);
 
     // Должен использовать fallback логику → вернуть пустой массив
-    assert!(methods.is_empty(), "Enum должен вернуть пустой массив (fallback)");
+    assert!(
+        methods.is_empty(),
+        "Enum должен вернуть пустой массив (fallback)"
+    );
 }
 
 #[test]
@@ -633,7 +642,10 @@ fn test_unsupported_register_metadata_kind() {
     let methods = lookup.get_methods(&resolution);
 
     // Должен использовать fallback логику → вернуть пустой массив
-    assert!(methods.is_empty(), "Register должен вернуть пустой массив (fallback)");
+    assert!(
+        methods.is_empty(),
+        "Register должен вернуть пустой массив (fallback)"
+    );
 }
 
 #[test]
@@ -651,7 +663,10 @@ fn test_unsupported_facet_kind_for_document() {
     let methods = lookup.get_methods(&resolution);
 
     // Должен использовать fallback логику
-    assert!(methods.is_empty(), "Constructor facet должен вернуть пустой массив (fallback)");
+    assert!(
+        methods.is_empty(),
+        "Constructor facet должен вернуть пустой массив (fallback)"
+    );
 }
 
 // === Edge case: Платформенный тип отсутствует в репозитории ===
@@ -672,7 +687,10 @@ fn test_platform_type_not_found_returns_empty() {
 
     // Lazy lookup попытается найти "ДокументМенеджер", но не найдёт
     // Должен использовать fallback логику → вернуть пустой массив
-    assert!(methods.is_empty(), "Если платформенный тип не загружен, должен вернуть пустой массив");
+    assert!(
+        methods.is_empty(),
+        "Если платформенный тип не загружен, должен вернуть пустой массив"
+    );
 }
 
 // === Edge case: active_facet = None ===
@@ -697,5 +715,8 @@ fn test_no_active_facet_uses_fallback() {
     // Должен использовать fallback через extract_type_name()
     // Но для конфигурационного типа "Документы.ЗаказНаряды" RawTypeData не существует
     // → Вернёт пустой массив
-    assert!(methods.is_empty(), "Без active_facet должен использовать fallback (пустой массив)");
+    assert!(
+        methods.is_empty(),
+        "Без active_facet должен использовать fallback (пустой массив)"
+    );
 }

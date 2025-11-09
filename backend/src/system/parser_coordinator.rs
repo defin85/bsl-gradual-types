@@ -2,6 +2,8 @@
 //!
 //! Milestone 2.8 Task 7: Regex fallback удалён, используется только Tree-sitter
 
+#![allow(clippy::explicit_counter_loop)]
+
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -392,22 +394,6 @@ impl TreeSitterParser {
 
 // === COMPARISON WITH COMPLEX PARSING ===
 
-/// Milestone 2.8: Упрощённая архитектура парсера
-///
-/// Previous Complex (UnifiedParserCoordinator):
-/// - Strategy pattern с 3+ парсерами
-/// - TreeSitterStrategy + SyntaxHelperStrategy + RegexFallback
-/// - Parser selection logic
-/// - Configuration-guided discovery
-/// - ~300+ LOC
-///
-/// Current Simple (ParserCoordinator):
-/// - Tree-sitter только (regex legacy удалён)
-/// - Инкрементальный парсинг с кешированием
-/// - Parser trait для инверсии зависимостей
-/// - ~200 LOC
-///
-/// Milestone 2.8: Полный переход на Tree-sitter, regex удалён
 #[cfg(test)]
 mod comparison_notes {
     //! Сравнение архитектур парсинга

@@ -6,6 +6,10 @@
 //! - ETA корректно вычисляется
 //! - Честность в certainty для конфигурационных типов
 
+#![allow(clippy::len_zero)]
+#![allow(clippy::manual_range_contains)]
+#![allow(clippy::useless_vec)]
+
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 use bsl_backend::data::loaders::syntax_helper::types::OptimizationSettings;
 use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;

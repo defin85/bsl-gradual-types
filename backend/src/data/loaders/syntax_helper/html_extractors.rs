@@ -108,7 +108,7 @@ impl HtmlExtractor {
         // [^<\n]+ - захватить тип GREEDY (не содержит < или перевод строки)
         // Точка после типа может быть или опциональна
         let param_regex = match Regex::new(
-            r#"&lt;([^>]+)&gt;\s*\(([^)]+)\)[\s\S]{0,500}?Тип:\s*(?:<a[^>]*>)?([^<\n]+)(?:</a>)?\.?"#
+            r#"&lt;([^>]+)&gt;\s*\(([^)]+)\)[\s\S]{0,500}?Тип:\s*(?:<a[^>]*>)?([^<\n]+)(?:</a>)?\.?"#,
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -120,9 +120,15 @@ impl HtmlExtractor {
         debug!("🔍 Начинаем извлечение параметров с помощью regex");
 
         for cap in param_regex.captures_iter(&html_text) {
-            let name = cap.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+            let name = cap
+                .get(1)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
             let optional_text = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("");
-            let mut param_type = cap.get(3).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+            let mut param_type = cap
+                .get(3)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
 
             // Пропускаем если имя пусто
             if name.is_empty() {
@@ -150,7 +156,10 @@ impl HtmlExtractor {
                     search_start
                 } else {
                     // Если нет, то идём назад до valid boundary
-                    (0..search_start).rev().find(|&i| html_text.is_char_boundary(i)).unwrap_or(0)
+                    (0..search_start)
+                        .rev()
+                        .find(|&i| html_text.is_char_boundary(i))
+                        .unwrap_or(0)
                 };
 
                 let search_end = std::cmp::min(search_start + 500, html_text.len());
@@ -158,7 +167,10 @@ impl HtmlExtractor {
                     search_end
                 } else {
                     // Если нет, то идём назад до valid boundary
-                    (0..=search_end).rev().find(|&i| html_text.is_char_boundary(i)).unwrap_or(0)
+                    (0..=search_end)
+                        .rev()
+                        .find(|&i| html_text.is_char_boundary(i))
+                        .unwrap_or(0)
                 };
 
                 let search_text = &html_text[search_start..search_end];
@@ -208,7 +220,11 @@ impl HtmlExtractor {
                 "✓ Извлечён параметр: {} : {} ({})",
                 name,
                 param_type,
-                if is_optional { "необязательный" } else { "обязательный" }
+                if is_optional {
+                    "необязательный"
+                } else {
+                    "обязательный"
+                }
             );
         }
 
@@ -227,7 +243,8 @@ impl HtmlExtractor {
         let html_text = document.html();
 
         // Проверяем наличие раздела "Возвращаемое значение:"
-        if !html_text.contains("Возвращаемое значение:") && !html_text.contains("Return value:") {
+        if !html_text.contains("Возвращаемое значение:") && !html_text.contains("Return value:")
+        {
             return (None, None);
         }
 
@@ -238,7 +255,7 @@ impl HtmlExtractor {
         //
         // ВАЖНО: Используем greedy режим [^<]+ чтобы захватить весь тип до <
         let return_regex = match Regex::new(
-            r#"Возвращаемое значение:[\s\S]{0,200}?Тип:\s*(?:<a[^>]*>)?([^<]+)(?:</a>)?\.?\s*<br>\s*([^<]*)"#
+            r#"Возвращаемое значение:[\s\S]{0,200}?Тип:\s*(?:<a[^>]*>)?([^<]+)(?:</a>)?\.?\s*<br>\s*([^<]*)"#,
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -248,7 +265,8 @@ impl HtmlExtractor {
         };
 
         if let Some(cap) = return_regex.captures(&html_text) {
-            let mut return_type = cap.get(1)
+            let mut return_type = cap
+                .get(1)
                 .map(|m| m.as_str().trim().to_string())
                 .unwrap_or_default();
 
@@ -258,11 +276,15 @@ impl HtmlExtractor {
             }
             return_type = return_type.trim().to_string();
 
-            let return_desc = cap.get(2)
+            let return_desc = cap
+                .get(2)
                 .map(|m| m.as_str().trim().to_string())
                 .filter(|s| !s.is_empty());
 
-            debug!("✓ Извлечён возвращаемый тип: {} {:?}", return_type, return_desc);
+            debug!(
+                "✓ Извлечён возвращаемый тип: {} {:?}",
+                return_type, return_desc
+            );
 
             return (Some(return_type), return_desc);
         }
@@ -698,16 +720,20 @@ mod tests {
         // Первый параметр: Индекс (обязательный)
         assert_eq!(params[0].name, "Индекс");
         assert_eq!(params[0].type_name, Some("Число".to_string()));
-        assert_eq!(params[0].is_optional, false);
+        assert!(!params[0].is_optional);
         assert!(
-            params[0].description.as_ref().map(|d| d.contains("Индекс вставляемого")).unwrap_or(false),
+            params[0]
+                .description
+                .as_ref()
+                .map(|d| d.contains("Индекс вставляемого"))
+                .unwrap_or(false),
             "Описание должно содержать текст о вставляемом значении"
         );
 
         // Второй параметр: Значение (необязательный)
         assert_eq!(params[1].name, "Значение");
         assert_eq!(params[1].type_name, Some("Произвольный".to_string()));
-        assert_eq!(params[1].is_optional, true);
+        assert!(params[1].is_optional);
     }
 
     #[test]
@@ -730,7 +756,7 @@ mod tests {
         assert_eq!(params.len(), 1, "Должен быть 1 параметр");
         assert_eq!(params[0].name, "Значение");
         assert_eq!(params[0].type_name, Some("Произвольный".to_string()));
-        assert_eq!(params[0].is_optional, false);
+        assert!(!params[0].is_optional);
     }
 
     #[test]
@@ -753,7 +779,7 @@ mod tests {
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "Индекс");
         assert_eq!(params[0].type_name, Some("Число".to_string()));
-        assert_eq!(params[0].is_optional, false);
+        assert!(!params[0].is_optional);
     }
 
     #[test]

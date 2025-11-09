@@ -3,6 +3,8 @@
 //! Проверяет корректность загрузки метаданных из базовой конфигурации и расширений
 //! с автоматическим применением префиксов к типам расширений.
 
+#![allow(clippy::assertions_on_constants)]
+
 use bsl_backend::system::SystemCoordinator;
 use std::path::Path;
 

@@ -113,7 +113,11 @@ impl HbkRecovery {
     /// - Файл слишком большой (> max_file_size)
     /// - ZIP signature не найдена
     /// - Ошибка распаковки
-    pub fn recover(&mut self, hbk_path: &Path, output_dir: Option<&Path>) -> Result<RecoveryResult> {
+    pub fn recover(
+        &mut self,
+        hbk_path: &Path,
+        output_dir: Option<&Path>,
+    ) -> Result<RecoveryResult> {
         info!("🔧 Начинаем восстановление: {:?}", hbk_path);
 
         // Проверяем существование файла
@@ -137,19 +141,20 @@ impl HbkRecovery {
         debug!("📊 Размер файла: {} байт", file_size);
 
         // Открываем файл
-        let mut file = File::open(hbk_path)
-            .context(format!("Не удалось открыть файл: {:?}", hbk_path))?;
+        let mut file =
+            File::open(hbk_path).context(format!("Не удалось открыть файл: {:?}", hbk_path))?;
 
         // Ищем ZIP signature
-        let signature_offset = signature::find_zip_signature(&mut file, file_size)
-            .context("Поиск ZIP signature")?;
+        let signature_offset =
+            signature::find_zip_signature(&mut file, file_size).context("Поиск ZIP signature")?;
 
         info!("✅ ZIP signature найдена на offset: {}", signature_offset);
 
         // Определяем директорию для вывода
         let output_dir = match output_dir {
             Some(dir) => dir.to_path_buf(),
-            None => hbk_path.parent()
+            None => hbk_path
+                .parent()
                 .ok_or_else(|| anyhow!("Не удалось определить родительскую директорию"))?
                 .to_path_buf(),
         };
@@ -162,18 +167,27 @@ impl HbkRecovery {
         let test_file_path = output_dir.join(".write_test");
         fs::File::create(&test_file_path)
             .and_then(|_| fs::remove_file(&test_file_path))
-            .context(format!("Директория недоступна для записи: {:?}", output_dir))?;
+            .context(format!(
+                "Директория недоступна для записи: {:?}",
+                output_dir
+            ))?;
 
         // Формируем путь для восстановленного ZIP
-        let file_stem = hbk_path.file_stem()
+        let file_stem = hbk_path
+            .file_stem()
             .ok_or_else(|| anyhow!("Не удалось получить имя файла"))?;
-        let repaired_zip_path = output_dir.join(format!("{}_recovered.zip", file_stem.to_string_lossy()));
+        let repaired_zip_path =
+            output_dir.join(format!("{}_recovered.zip", file_stem.to_string_lossy()));
 
         // Извлекаем валидный ZIP
-        let recovered_size = extractor::extract_valid_zip(&mut file, signature_offset, &repaired_zip_path)
-            .context("Извлечение ZIP архива")?;
+        let recovered_size =
+            extractor::extract_valid_zip(&mut file, signature_offset, &repaired_zip_path)
+                .context("Извлечение ZIP архива")?;
 
-        info!("✅ ZIP архив восстановлен: {} байт → {:?}", recovered_size, repaired_zip_path);
+        info!(
+            "✅ ZIP архив восстановлен: {} байт → {:?}",
+            recovered_size, repaired_zip_path
+        );
 
         // Распаковываем если требуется
         let extracted_dir = if self.options.auto_extract {
@@ -187,8 +201,7 @@ impl HbkRecovery {
 
             // Удаляем временный ZIP если требуется
             if self.options.cleanup_temp {
-                fs::remove_file(&repaired_zip_path)
-                    .context("Удаление временного ZIP файла")?;
+                fs::remove_file(&repaired_zip_path).context("Удаление временного ZIP файла")?;
                 debug!("🗑️ Временный ZIP удалён");
             }
 
@@ -275,8 +288,8 @@ pub fn auto_recover_directory(dir: &Path) -> Result<Vec<RecoveryResult>> {
     let mut recovery = HbkRecovery::new();
 
     // Ищем все .hbk файлы
-    let entries = fs::read_dir(dir)
-        .context(format!("Не удалось прочитать директорию: {:?}", dir))?;
+    let entries =
+        fs::read_dir(dir).context(format!("Не удалось прочитать директорию: {:?}", dir))?;
 
     for entry in entries {
         let entry = match entry {
@@ -352,8 +365,8 @@ pub fn auto_recover_directory_with_options(
     let mut recovery = HbkRecovery::with_options(options);
 
     // Ищем все .hbk файлы
-    let entries = fs::read_dir(dir)
-        .context(format!("Не удалось прочитать директорию: {:?}", dir))?;
+    let entries =
+        fs::read_dir(dir).context(format!("Не удалось прочитать директорию: {:?}", dir))?;
 
     for entry in entries {
         let entry = match entry {
@@ -433,7 +446,7 @@ mod signature {
         let mut buffer = vec![0u8; CHUNK_SIZE];
         let mut total_read = 0;
         let mut overlap_buffer = Vec::new();
-        let mut chunk_start_offset = 0;  // Отслеживаем начало текущего чанка
+        let mut chunk_start_offset = 0; // Отслеживаем начало текущего чанка
 
         // Сбрасываем позицию в начало файла
         file.rewind()?;
@@ -454,7 +467,8 @@ mod signature {
             };
 
             // Ищем signature через sliding window
-            if let Some(pos) = search_data.windows(ZIP_SIGNATURE.len())
+            if let Some(pos) = search_data
+                .windows(ZIP_SIGNATURE.len())
                 .position(|window| window == ZIP_SIGNATURE)
             {
                 // Нашли! Вычисляем абсолютный offset
@@ -485,7 +499,10 @@ mod signature {
             chunk_start_offset = total_read;
         }
 
-        Err(anyhow!("ZIP signature не найдена в первых {} байтах", total_read))
+        Err(anyhow!(
+            "ZIP signature не найдена в первых {} байтах",
+            total_read
+        ))
     }
 }
 
@@ -518,7 +535,8 @@ mod extractor {
         debug!("📦 Извлекаем ZIP с offset {} в {:?}", offset, output_path);
 
         // Перемещаемся к началу ZIP данных
-        source_file.seek(SeekFrom::Start(offset as u64))
+        source_file
+            .seek(SeekFrom::Start(offset as u64))
             .context("Не удалось переместиться к offset")?;
 
         // Создаём выходной файл
@@ -526,8 +544,8 @@ mod extractor {
             .context(format!("Не удалось создать файл: {:?}", output_path))?;
 
         // Копируем данные
-        let bytes_copied = std::io::copy(source_file, &mut output_file)
-            .context("Ошибка копирования данных")?;
+        let bytes_copied =
+            std::io::copy(source_file, &mut output_file).context("Ошибка копирования данных")?;
 
         debug!("✅ Скопировано {} байт", bytes_copied);
 
@@ -555,23 +573,26 @@ mod extractor {
             .context(format!("Не удалось создать директорию: {:?}", target_dir))?;
 
         // Открываем ZIP архив
-        let file = File::open(zip_path)
-            .context(format!("Не удалось открыть ZIP: {:?}", zip_path))?;
+        let file =
+            File::open(zip_path).context(format!("Не удалось открыть ZIP: {:?}", zip_path))?;
 
-        let mut archive = zip::ZipArchive::new(file)
-            .context("Не удалось прочитать ZIP архив")?;
+        let mut archive = zip::ZipArchive::new(file).context("Не удалось прочитать ZIP архив")?;
 
         info!("📊 Файлов в архиве: {}", archive.len());
 
         // Распаковываем каждый файл
         for i in 0..archive.len() {
-            let mut file = archive.by_index(i)
+            let mut file = archive
+                .by_index(i)
                 .context(format!("Не удалось прочитать файл #{} из архива", i))?;
 
             let file_path = match file.enclosed_name() {
                 Some(path) => target_dir.join(path),
                 None => {
-                    debug!("⚠️ Пропускаем файл с небезопасным именем: {:?}", file.name());
+                    debug!(
+                        "⚠️ Пропускаем файл с небезопасным именем: {:?}",
+                        file.name()
+                    );
                     continue;
                 }
             };
@@ -616,13 +637,13 @@ mod tests {
         let mut file = File::create(&test_file_path).unwrap();
 
         // Пишем 100 байт "мусора"
-        file.write_all(&vec![0xFF; 100]).unwrap();
+        file.write_all(&[0xFF; 100]).unwrap();
 
         // Пишем ZIP signature
         file.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap();
 
         // Пишем ещё немного данных
-        file.write_all(&vec![0x00; 100]).unwrap();
+        file.write_all(&[0x00; 100]).unwrap();
 
         drop(file);
 
@@ -630,7 +651,10 @@ mod tests {
         let mut file = File::open(&test_file_path).unwrap();
         let offset = signature::find_zip_signature(&mut file, 1000).unwrap();
 
-        assert_eq!(offset, 100, "ZIP signature должна быть найдена на offset 100");
+        assert_eq!(
+            offset, 100,
+            "ZIP signature должна быть найдена на offset 100"
+        );
     }
 
     #[test]
@@ -650,7 +674,7 @@ mod tests {
         // Создаём файл с signature в самом начале
         let mut file = File::create(&test_file_path).unwrap();
         file.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap(); // ZIP signature
-        file.write_all(&vec![0x00; 100]).unwrap();
+        file.write_all(&[0x00; 100]).unwrap();
         drop(file);
 
         // Тестируем поиск
@@ -668,16 +692,22 @@ mod tests {
         // Создаём файл с signature на большом offset
         let offset_expected = 10000;
         let mut file = File::create(&test_file_path).unwrap();
-        file.write_all(&vec![0xFF; offset_expected]).unwrap();
+        let junk = vec![0xFF; offset_expected];
+        file.write_all(&junk).unwrap();
         file.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap();
-        file.write_all(&vec![0x00; 500]).unwrap();
+        let padding = vec![0x00; 500];
+        file.write_all(&padding).unwrap();
         drop(file);
 
         // Тестируем поиск
         let mut file = File::open(&test_file_path).unwrap();
         let offset = signature::find_zip_signature(&mut file, 10600).unwrap();
 
-        assert_eq!(offset, offset_expected, "Signature должна быть найдена на offset {}", offset_expected);
+        assert_eq!(
+            offset, offset_expected,
+            "Signature должна быть найдена на offset {}",
+            offset_expected
+        );
     }
 
     #[test]
@@ -686,20 +716,24 @@ mod tests {
         let test_file_path = temp_dir.path().join("test.hbk");
 
         // Создаём файл где signature на границе chunk (64KB - 2)
-        let chunk_size = 64 * 1024;
-        let signature_pos = chunk_size - 2;
+        const CHUNK_SIZE: usize = 64 * 1024;
+        const SIGNATURE_POS: usize = CHUNK_SIZE - 2;
 
         let mut file = File::create(&test_file_path).unwrap();
-        file.write_all(&vec![0xFF; signature_pos]).unwrap();
+        let junk = vec![0xFF; SIGNATURE_POS];
+        file.write_all(&junk).unwrap();
         file.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap();
-        file.write_all(&vec![0x00; 100]).unwrap();
+        file.write_all(&[0x00; 100]).unwrap();
         drop(file);
 
         // Тестируем поиск
         let mut file = File::open(&test_file_path).unwrap();
-        let offset = signature::find_zip_signature(&mut file, signature_pos + 104).unwrap();
+        let offset = signature::find_zip_signature(&mut file, SIGNATURE_POS + 104).unwrap();
 
-        assert_eq!(offset, signature_pos, "Signature должна быть найдена на границе chunk");
+        assert_eq!(
+            offset, SIGNATURE_POS,
+            "Signature должна быть найдена на границе chunk"
+        );
     }
 
     #[test]
@@ -741,7 +775,7 @@ mod tests {
         let output_path = temp_dir.path().join("output.zip");
 
         // Пустой ZIP архив (EOCD = End of Central Directory)
-        let empty_zip = vec![
+        let empty_zip = [
             0x50, 0x4B, 0x05, 0x06, // EOCD signature
             0x00, 0x00, // Number of this disk
             0x00, 0x00, // Number of the disk with the start of the central directory
@@ -754,7 +788,7 @@ mod tests {
 
         // Создаём исходный файл
         let mut file = File::create(&source_path).unwrap();
-        file.write_all(&vec![0xFF; 1000]).unwrap();
+        file.write_all(&[0xFF; 1000]).unwrap();
         file.write_all(&[0x50, 0x4B, 0x05, 0x06]).unwrap();
         file.write_all(&empty_zip[4..]).unwrap();
         drop(file);
@@ -764,7 +798,7 @@ mod tests {
         let size = extractor::extract_valid_zip(&mut source_file, 1000, &output_path).unwrap();
 
         assert!(output_path.exists(), "Output ZIP должен существовать");
-        assert_eq!(size, empty_zip.len() as usize, "Размер должен совпадать с ZIP");
+        assert_eq!(size, empty_zip.len(), "Размер должен совпадать с ZIP");
     }
 
     #[test]
@@ -797,7 +831,11 @@ mod tests {
         let size = extractor::extract_valid_zip(&mut source_file, junk_size, &output_path).unwrap();
 
         assert!(output_path.exists(), "Output ZIP должен существовать");
-        assert_eq!(size, empty_zip.len() as usize, "Размер должен быть размер ZIP");
+        assert_eq!(
+            size,
+            empty_zip.len() as usize,
+            "Размер должен быть размер ZIP"
+        );
     }
 
     #[test]
@@ -821,11 +859,19 @@ mod tests {
         };
 
         let mut recovery = HbkRecovery::with_options(options);
-        let result = recovery.recover(&test_file_path, Some(temp_dir.path())).unwrap();
+        let result = recovery
+            .recover(&test_file_path, Some(temp_dir.path()))
+            .unwrap();
 
         // Проверяем что опции работают
-        assert!(result.repaired_zip_path.exists(), "ZIP должен существовать (cleanup_temp = false)");
-        assert!(result.extracted_dir.is_none(), "Директория не должна быть распакована (auto_extract = false)");
+        assert!(
+            result.repaired_zip_path.exists(),
+            "ZIP должен существовать (cleanup_temp = false)"
+        );
+        assert!(
+            result.extracted_dir.is_none(),
+            "Директория не должна быть распакована (auto_extract = false)"
+        );
     }
 
     #[test]
@@ -848,12 +894,26 @@ mod tests {
             auto_extract: false,
             max_file_size: 10 * 1024 * 1024,
         });
-        let result = recovery.recover(&test_file_path, Some(temp_dir.path())).unwrap();
+        let result = recovery
+            .recover(&test_file_path, Some(temp_dir.path()))
+            .unwrap();
 
         // Проверяем свойства результата
-        assert_eq!(result.signature_offset, junk_offset, "signature_offset должен совпадать");
-        assert_eq!(result.recovered_size, 304, "recovered_size должен быть 4 (signature) + 300");
-        assert!(result.repaired_zip_path.exists(), "repaired_zip_path должен существовать");
-        assert!(result.extracted_dir.is_none(), "extracted_dir должна быть None при auto_extract = false");
+        assert_eq!(
+            result.signature_offset, junk_offset,
+            "signature_offset должен совпадать"
+        );
+        assert_eq!(
+            result.recovered_size, 304,
+            "recovered_size должен быть 4 (signature) + 300"
+        );
+        assert!(
+            result.repaired_zip_path.exists(),
+            "repaired_zip_path должен существовать"
+        );
+        assert!(
+            result.extracted_dir.is_none(),
+            "extracted_dir должна быть None при auto_extract = false"
+        );
     }
 }

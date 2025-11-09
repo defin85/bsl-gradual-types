@@ -185,20 +185,6 @@ impl SimpleCacheStats {
 
 // === COMPARISON WITH COMPLEX CACHE ===
 
-/// Сравнение: Simple vs Complex caching
-///
-/// Complex (AnalysisCacheManager):
-/// - Memory cache + Disk cache  
-/// - CacheStats with hits/misses/invalidations
-/// - Специализированные кеши (TypeLRUCache, etc)
-/// - ~200+ LOC
-///
-/// Simple (AnalysisCache):  
-/// - LRU cache + TTL tracking
-/// - Simple statistics
-/// - ~100 LOC
-///
-/// Экономия: ~50% сложности, сохраняет основную функциональность
 #[cfg(test)]
 mod comparison_notes {
     //! Сравнение: Simple vs Complex caching

@@ -6,6 +6,9 @@
 //! - Символьные ссылки и специальные символы в путях
 //! - Обратная совместимость со старыми путями
 
+#![allow(clippy::len_zero)]
+#![allow(clippy::expect_fun_call)]
+
 use bsl_backend::data::loaders::ConfigurationDiscovery;
 use std::fs;
 use std::path::Path;
@@ -46,7 +49,8 @@ fn test_multiple_configurations_returns_first() {
 
     let discovery = ConfigurationDiscovery::new(parent_path.to_path_buf());
 
-    let result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result = discovery
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     assert!(
         result.is_ok(),
@@ -83,7 +87,8 @@ fn test_backward_compatibility_direct_path() {
 
     let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
 
-    let result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result = discovery
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     assert!(
         result.is_ok(),
@@ -143,7 +148,8 @@ fn test_deeply_nested_configuration() {
     // Запускаем discovery с temp (корневой папки)
     let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
 
-    let result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result = discovery
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     // ВАЖНО: find_configuration_folder() сканирует только ПРЯМЫЕ подпапки,
     // НЕ рекурсивно. Поэтому config в level1/level2/config НЕ будет найден.
@@ -156,7 +162,8 @@ fn test_deeply_nested_configuration() {
 
     // Но если указать путь до level1, то config будет найден
     let discovery_level1 = ConfigurationDiscovery::new(level1.clone());
-    let result_level1 = discovery_level1.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result_level1 = discovery_level1
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     assert!(
         result_level1.is_err(),
@@ -165,7 +172,8 @@ fn test_deeply_nested_configuration() {
 
     // Но если указать путь до level2, то config будет найден
     let discovery_level2 = ConfigurationDiscovery::new(level2);
-    let result_level2 = discovery_level2.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result_level2 = discovery_level2
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     assert!(
         result_level2.is_ok(),
@@ -206,7 +214,8 @@ fn test_empty_subfolders_skip() {
 
     let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
 
-    let result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result = discovery
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     assert!(
         result.is_ok(),
@@ -250,7 +259,8 @@ fn test_files_in_parent_folder_ignored() {
 
     let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
 
-    let result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result = discovery
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     assert!(
         result.is_ok(),
@@ -271,7 +281,8 @@ fn test_error_message_clarity() {
 
     let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
 
-    let result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result = discovery
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     assert!(
         result.is_err(),
@@ -349,7 +360,8 @@ fn test_real_project_structure() {
     // Запускаем discovery с корня проекта
     let discovery_root = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
 
-    let result_root = discovery_root.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result_root = discovery_root
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     // С корня проекта НЕ должна найтись (cf вложен в src)
     assert!(
@@ -360,7 +372,8 @@ fn test_real_project_structure() {
     // Но если указать путь до src, должна найтись
     let discovery_src = ConfigurationDiscovery::new(src_folder);
 
-    let result_src = discovery_src.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result_src = discovery_src
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     assert!(
         result_src.is_ok(),
@@ -395,7 +408,8 @@ fn test_russian_paths() {
 
     let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
 
-    let result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result = discovery
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     assert!(
         result.is_ok(),

@@ -3,6 +3,8 @@
 //! Проверяет обнаружение множественных конфигураций (база + расширения)
 //! и корректность сортировки.
 
+#![allow(clippy::len_zero)]
+
 use bsl_backend::data::loaders::config_metadata_parser::ConfigurationDiscovery;
 use std::path::PathBuf;
 
@@ -174,7 +176,8 @@ fn test_backward_compatibility_discover_all_metadata() {
     let first_config = &configurations[0];
 
     // Act - старый метод (должен возвращать метаданные из первой конфигурации)
-    let old_metadata_result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let old_metadata_result = discovery
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     // Assert
     assert!(

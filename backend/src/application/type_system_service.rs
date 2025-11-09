@@ -175,7 +175,7 @@ impl TypeSystemService {
             .iter()
             .map(|(name, res)| {
                 // Определение категории и источника
-                let (category, source) = Self::determine_category_and_source(&res);
+                let (category, source) = Self::determine_category_and_source(res);
 
                 // Расчет certainty
                 let certainty_val = match res.certainty {
@@ -239,12 +239,16 @@ impl TypeSystemService {
                             name: m.name.clone(),
                             english_name: Some(m.english_name.clone()),
                             return_type: Some(m.return_type.clone()),
-                            params: m.params.iter().map(|p| ParamDto {
-                                name: p.name.clone(),
-                                param_type: p.param_type.clone(),
-                                is_optional: p.is_optional,
-                                default_value: None, // TODO: добавить default_value в RawParamData
-                            }).collect(),
+                            params: m
+                                .params
+                                .iter()
+                                .map(|p| ParamDto {
+                                    name: p.name.clone(),
+                                    param_type: p.param_type.clone(),
+                                    is_optional: p.is_optional,
+                                    default_value: None, // TODO: добавить default_value в RawParamData
+                                })
+                                .collect(),
                             description: None, // RawMethodData не содержит description
                         })
                         .collect(),
@@ -272,7 +276,7 @@ impl TypeSystemService {
                         })
                         .unwrap_or_default(),
                     source,
-                    flow_sensitive: Self::determine_flow_sensitivity(&res),
+                    flow_sensitive: Self::determine_flow_sensitivity(res),
                     description,
                     union_types,
                     flow_analysis: None,
@@ -567,7 +571,6 @@ impl TypeSystemService {
 
     // === HELPER METHODS FOR FILE ANALYSIS ===
 
-
     /// Извлечение имени переменной из объявления
     fn extract_var_name(&self, line: &str) -> Option<String> {
         // Перем ИмяПеременной: Тип
@@ -632,48 +635,47 @@ impl TypeSystemService {
         let content_hash = hash_content(file_content);
 
         // ✅ MILESTONE 2.13: Замер времени парсинга и флаг cache hit
-        let (ir_program, cache_hit, parse_time) = if let Some(cached_ir) =
-            self.ir_cache.get(content_hash).await
-        {
-            let hit_time = start.elapsed();
-            info!(
-                "✅ IR cache HIT in {:?} for hash {}",
-                hit_time, content_hash
-            );
-            (cached_ir, true, std::time::Duration::ZERO)
-        } else {
-            let parse_start = std::time::Instant::now();
-            info!("❌ IR cache MISS for hash {}, parsing...", content_hash);
+        let (ir_program, cache_hit, parse_time) =
+            if let Some(cached_ir) = self.ir_cache.get(content_hash).await {
+                let hit_time = start.elapsed();
+                info!(
+                    "✅ IR cache HIT in {:?} for hash {}",
+                    hit_time, content_hash
+                );
+                (cached_ir, true, std::time::Duration::ZERO)
+            } else {
+                let parse_start = std::time::Instant::now();
+                info!("❌ IR cache MISS for hash {}, parsing...", content_hash);
 
-            // Парсинг BSL кода (только при cache MISS)
-            let parse_result = self
-                .parser
-                .parse(file_content)
-                .map_err(|e| anyhow::anyhow!("Ошибка парсинга для hover: {}", e))?;
+                // Парсинг BSL кода (только при cache MISS)
+                let parse_result = self
+                    .parser
+                    .parse(file_content)
+                    .map_err(|e| anyhow::anyhow!("Ошибка парсинга для hover: {}", e))?;
 
-            // Конвертация AST → IR для Inline Scope Analysis
-            let repository = self.analysis_engine.get_repository();
-            let ir = crate::application::ast_to_ir::AstToIrConverter::convert(
-                parse_result.program.clone(),
-                file_content.to_string(),
-                "hover_request.bsl".to_string(),
-                repository, // ✅ Передаём TypeRepository для Generic inference
-            )?;
+                // Конвертация AST → IR для Inline Scope Analysis
+                let repository = self.analysis_engine.get_repository();
+                let ir = crate::application::ast_to_ir::AstToIrConverter::convert(
+                    parse_result.program.clone(),
+                    file_content.to_string(),
+                    "hover_request.bsl".to_string(),
+                    repository, // ✅ Передаём TypeRepository для Generic inference
+                )?;
 
-            let ir_arc = std::sync::Arc::new(ir);
+                let ir_arc = std::sync::Arc::new(ir);
 
-            let parse_duration = parse_start.elapsed();
-            info!(
-                "❌ IR cache MISS, parsed in {:?} for hash {}",
-                parse_duration, content_hash
-            );
+                let parse_duration = parse_start.elapsed();
+                info!(
+                    "❌ IR cache MISS, parsed in {:?} for hash {}",
+                    parse_duration, content_hash
+                );
 
-            // Сохраняем в кеш
-            self.ir_cache.put(content_hash, ir_arc.clone()).await;
-            debug!("Cached IR for hash {}", content_hash);
+                // Сохраняем в кеш
+                self.ir_cache.put(content_hash, ir_arc.clone()).await;
+                debug!("Cached IR for hash {}", content_hash);
 
-            (ir_arc, false, parse_duration)
-        };
+                (ir_arc, false, parse_duration)
+            };
 
         // ✅ MILESTONE 2.13: Замер lookup time
         let lookup_start = std::time::Instant::now();
@@ -697,9 +699,7 @@ impl TypeSystemService {
                 resolver.resolve_variable_with_context(&var_name, &ir_program.symbols, scope_id);
 
             // Форматируем hover через TypeResolution (вместо TypeHint)
-            Some(
-                self.hover_formatter.format_variable(&var_name, &resolution),
-            )
+            Some(self.hover_formatter.format_variable(&var_name, &resolution))
         } else {
             // Milestone 2.11 Task B1: Логи когда переменная не найдена
             debug!(
@@ -925,12 +925,16 @@ impl TypeSystemService {
                             name: m.name.clone(),
                             english_name: Some(m.english_name.clone()),
                             return_type: Some(m.return_type.clone()),
-                            params: m.params.iter().map(|p| ParamDto {
-                                name: p.name.clone(),
-                                param_type: p.param_type.clone(),
-                                is_optional: p.is_optional,
-                                default_value: None, // TODO: добавить default_value в RawParamData
-                            }).collect(),
+                            params: m
+                                .params
+                                .iter()
+                                .map(|p| ParamDto {
+                                    name: p.name.clone(),
+                                    param_type: p.param_type.clone(),
+                                    is_optional: p.is_optional,
+                                    default_value: None, // TODO: добавить default_value в RawParamData
+                                })
+                                .collect(),
                             description: None, // RawMethodData не содержит description
                         })
                         .collect(),
@@ -1437,6 +1441,7 @@ impl TypeSystemService {
                     Statement::VarDeclaration { name, .. } if name == &word_under_cursor => {
                         return Some(format!("**Переменная:** `{}`\n\n*Тип:* Неопределено (требуется flow-sensitive анализ)", name));
                     }
+                    #[allow(clippy::collapsible_match)]
                     Statement::Assignment { target, value, .. } => {
                         if let Expression::Identifier { name: var_name, .. } = target {
                             if var_name == &word_under_cursor {
@@ -2341,7 +2346,6 @@ impl TypeSystemService {
     ///
     /// # Возвращает
     /// Статистику IR кеша (hits, misses, evictions, hit rate)
-
     /// MILESTONE E2: Parse file content to SemanticProgram for visualization
     ///
     /// # Arguments
@@ -2394,7 +2398,10 @@ impl TypeSystemService {
 
         // Валидация пути (защита от path traversal)
         if !config_path.exists() {
-            anyhow::bail!("Configuration path does not exist: {}", config_path.display());
+            anyhow::bail!(
+                "Configuration path does not exist: {}",
+                config_path.display()
+            );
         }
 
         if !config_path.is_dir() {
@@ -2485,7 +2492,9 @@ impl TypeSystemService {
         source: &str,
     ) -> Result<Vec<bsl_shared::domain::types::ParseError>> {
         // Делегируем ParserCoordinator (System Layer)
-        let parse_result = self.parser.parse(source)
+        let parse_result = self
+            .parser
+            .parse(source)
             .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
 
         // Возвращаем синтаксические ошибки (может быть пустой Vec)
@@ -2529,7 +2538,9 @@ impl TypeSystemService {
         use bsl_shared::ir::walk_program;
 
         // 1. Парсинг
-        let parse_result = self.parser.parse(code)
+        let parse_result = self
+            .parser
+            .parse(code)
             .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
 
         // 2. Если есть syntax errors → semantic validation бессмысленна

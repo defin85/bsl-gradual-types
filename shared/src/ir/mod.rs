@@ -77,6 +77,7 @@ pub enum SemanticNodeKind {
     Assignment {
         variable: String,
         value_type: String,
+        value_node: Option<usize>, // ✅ MILESTONE 3.5: индекс узла value expression (для hover)
     },
 
     /// Объявление функции
@@ -460,9 +461,24 @@ impl SemanticProgram {
     /// }
     /// ```
     pub fn find_node_at_position(&self, line: u32, column: u32) -> Option<&SemanticNode> {
+        // Возвращаем САМЫЙ МАЛЕНЬКИЙ узел, содержащий позицию
+        // (наиболее специфичный, самый вложенный)
+        // Это важно для hover: если есть Assignment и вложенный FunctionCall,
+        // курсор на вызове метода должен показывать FunctionCall, а не Assignment
         self.nodes
             .iter()
-            .find(|node| node.span.contains(line, column))
+            .filter(|node| node.span.contains(line, column))
+            .min_by_key(|node| {
+                // Сортируем по размеру span (площадь покрытия)
+                let lines = node.span.end_line.saturating_sub(node.span.start_line);
+                let cols = if lines == 0 {
+                    node.span.end_column.saturating_sub(node.span.start_column)
+                } else {
+                    // Для многострочных span используем количество строк
+                    lines * 1000
+                };
+                lines * 1000 + cols
+            })
     }
 
     /// Получить scope по ID
@@ -993,9 +1009,13 @@ impl SemanticProgram {
             SemanticNodeKind::Assignment {
                 variable,
                 value_type,
+                value_node,
             } => {
                 attributes.insert("variable".to_string(), variable.clone());
                 attributes.insert("value_type".to_string(), value_type.clone());
+                if let Some(vn) = value_node {
+                    attributes.insert("value_node".to_string(), vn.to_string());
+                }
                 // ✅ Показываем имя переменной в UI
                 (
                     "Assignment".to_string(),
@@ -1434,6 +1454,7 @@ mod tests {
             kind: SemanticNodeKind::Assignment {
                 variable: "x".to_string(),
                 value_type: "Число".to_string(),
+                value_node: None,
             },
             span: Span::new(2, 0, 2, 10),
             scope_id: program.symbols.root_scope,

@@ -1,0 +1,670 @@
+﻿<HTML><HEAD>
+<META content="text/html; charset=utf-8" http-equiv=Content-Type><LINK rel=stylesheet type=text/css href="v8help://service_book/service_style">
+<META name=GENERATOR content="MSHTML 11.00.9600.18894"></HEAD>
+<BODY>
+<H1>Основные приемы работы</H1>
+<BLOCKQUOTE style="MARGIN-RIGHT: 0px" dir=ltr>
+<P><A href="#Common">Общее</A><BR><A href="#WorkaroundType">Способы обхода результата запроса</A><BR><A href="#LinearlWorkaround">Линейный обход результата</A><BR><A href="#HierarchicalWorkaround">Иерархический обход результата</A><BR><A href="#GroupWorkaround">Обход результата по группам</A><BR><A href="#WorkWithSelection">Работа с выборкой</A><BR><A href="#CurRecordTypeMethods">Методы определения типа текущей записи</A></P></BLOCKQUOTE>
+<P><A name=Common>Основные приемы</A> работы с запросами во встроенном языке 1С:Предприятия удобнее всего рассматривать на примерах. Приведем типичный пример использования запроса:</P>
+<P>
+<TABLE width="100%" bgColor=#f7f7f7>
+<TBODY>
+<TR>
+<TD><FONT color=#ff0000><FONT face="Courier New"><FONT color=#0000ff>Запрос&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#ff0000>&nbsp;Новый&nbsp;</FONT><FONT color=#0000ff>Запрос</FONT><FONT color=#ff0000>(</FONT></FONT><FONT face="Courier New"><FONT color=#000000>"ВЫБРАТЬ&nbsp;Товар.Наименование&nbsp;Наименование,<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|Товар.Родитель.Наименование&nbsp;НаименованиеРодителя<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|ИЗ&nbsp;Справочник.Товары&nbsp;Товар"</FONT><FONT color=#ff0000>);</FONT><BR><BR><FONT color=#008000>//&nbsp;Выполним&nbsp;запрос&nbsp;и&nbsp;запишем&nbsp;результат&nbsp;в&nbsp;переменную&nbsp;РезультатЗапроса.</FONT><BR><FONT color=#0000ff>РезультатЗапроса&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;Запрос</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выполнить</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><BR><FONT color=#008000>//&nbsp;Получим&nbsp;выборку&nbsp;из&nbsp;результата&nbsp;запроса.</FONT><BR><FONT color=#0000ff>Выборка&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;РезультатЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выбрать</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><BR><FONT color=#008000>//&nbsp;Пока&nbsp;в&nbsp;выборке&nbsp;есть&nbsp;записи&nbsp;...</FONT><BR><FONT color=#ff0000>Пока&nbsp;</FONT><FONT color=#0000ff>Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Следующий</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>&nbsp;Цикл</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;...&nbsp;выведем&nbsp;в&nbsp;окно&nbsp;сообщений&nbsp;поля&nbsp;из&nbsp;результата.</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;Товар&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Наименование</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;Родитель&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>НаименованиеРодителя</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;Сообщить</FONT><FONT color=#ff0000>(</FONT><FONT color=#000000>"Товар:&nbsp;"</FONT><FONT color=#0000ff>&nbsp;</FONT><FONT color=#ff0000>+</FONT><FONT color=#0000ff>&nbsp;Товар&nbsp;</FONT><FONT color=#ff0000>+</FONT><FONT color=#0000ff>&nbsp;</FONT><FONT color=#000000>"&nbsp;Родитель:&nbsp;"</FONT><FONT color=#0000ff>&nbsp;</FONT><FONT color=#ff0000>+</FONT><FONT color=#0000ff>&nbsp;Родитель</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#ff0000>КонецЦикла</FONT><FONT color=#ff0000>;</FONT></FONT></FONT></FONT></TD></TR></TBODY></TABLE></P>
+<P>Как видно из этого примера, работа с запросом ведется при помощи трех основных объектов: </P>
+<UL>
+<LI>Запрос – объект, выполняющий сам запрос. Представлен в примере переменной с именем Запрос. 
+<LI>РезультатЗапроса – объект, содержащий полученные при выполнении запроса данные. Представлен в примере переменной с именем РезультатЗапроса. 
+<LI><A href="v8help://SyntaxHelperContext/objects/catalog213/catalog393/QueryResultSelection.html">ВыборкаИзРезультатаЗапроса</A> – объект, позволяющий обходить (т.е. перебрать) записи из результата. Представлен в примере переменной с именем Выборка.</LI></UL>
+<P>Рассмотрим подробнее объект <A href="v8help://SyntaxHelperContext/objects/catalog213/catalog393/QueryResultSelection.html">ВыборкаИзРезультатаЗапроса</A>. Для этого нам понадобится следующий текст запроса:</P>
+<BLOCKQUOTE style="MARGIN-RIGHT: 0px" dir=ltr>
+<P><FONT face="Courier New">ВЫБРАТЬ <BR>&nbsp;&nbsp; Товар, Количество <BR>ИЗ <BR>&nbsp;&nbsp; Документ.РасхНакл.Состав <BR>УПОРЯДОЧИТЬ ПО Товар<BR>ИТОГИ Сумма(Количество) ПО Товар Иерархия</FONT></P></BLOCKQUOTE>
+<P>Его результат представлен в таблице:</P>
+<P>
+<TABLE class=SimplyTable style="HEIGHT: 248px; WIDTH: 560px">
+<TBODY>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><STRONG><FONT size=2>N</FONT></STRONG></P></TD>
+<TD class=WideColumn>
+<P class=Usual><STRONG><FONT size=2>Товар</FONT></STRONG></P></TD>
+<TD class=NarrowColumn>
+<P class=Usual><STRONG><FONT size=2>Количество</FONT></STRONG></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><STRONG>1</STRONG></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><STRONG>Сантехника</STRONG></FONT></P></TD>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><STRONG>104</STRONG></FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><EM>2</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>Кран</EM></FONT></P></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1><EM>84</EM></FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>3</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Кран</FONT></P></FONT></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>10</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>4</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Кран</FONT></P></FONT></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>8</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>5</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Кран</FONT></P></FONT></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>44</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>6</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Кран</FONT></P></FONT></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>22</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><EM>7</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>Смеситель</EM></FONT></P></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1><EM>20</EM></FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>8</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Смеситель</FONT></P></FONT></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>5</P></FONT></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>9</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Смеситель</FONT></P></FONT></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>1</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>10</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Смеситель</FONT></P></FONT></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>14</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><STRONG>11</STRONG></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><STRONG>Мебель </STRONG></FONT></P></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1><STRONG>134</STRONG></FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><EM>12</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>Стол </EM></FONT></P></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1><EM>26</EM></FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>13</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стол </FONT></P></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>1</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>14</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стол </FONT></P></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>15</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>15</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стол </FONT></P></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>10</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><EM>16</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>Стул </EM></FONT></P></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1><EM>108</EM></FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>17</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стул </FONT></P></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>55</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>18</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стул </FONT></P></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>5</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>19</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стул </FONT></P></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>32</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>20</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стул </FONT></P></TD>
+<TD class=NarrowColumn>
+<P align=center><FONT size=1>16</FONT></P></TD></TR></TBODY></TABLE></P>
+<P>В эту таблицу добавлена колонка "N", которой нет в результате запроса, но которая будет использоваться нами в дальнейшем для идентификации записи в результате. Итоговые записи в таблице выделены курсивом, итоговые записи для иерархических уровней справочника выделены полужирным шрифтом.</P>
+<H2><A name=WorkaroundType>Способы обхода результата запроса</A></H2>
+<H3><A name=LinearlWorkaround>Линейный обход результата</A></H3>
+<P>Первый, и самый простой способ обхода – линейный. При линейном обходе выборка будет выдавать записи в той последовательности, в которой они располагаются в результате запроса. В нашем примере это будут записи с номерами 1, 2, 3, 4, 5 и так далее до записи с номером 20. </P>
+<P>Для получения линейной выборки из результата необходимо вызвать метод Выбрать объекта РезультатЗапроса без параметров, либо с параметром <A href="v8help://SyntaxHelperContext/objects/catalog2/catalog259/QueryResultIteration.html">ОбходРезультатаЗапроса</A>.<A href="v8help://SyntaxHelperContext/objects/catalog2/catalog259/QueryResultIteration/properties/Linear1013.html">Прямой</A>.</P>
+<P><STRONG>Пример</STRONG>:</P>
+<P>
+<TABLE width="100%" bgColor=#f7f7f7>
+<TBODY>
+<TR>
+<TD><FONT color=#ff0000><FONT face="Courier New"><FONT color=#0000ff>СпособВыборки&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;ОбходРезультатаЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Прямой</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>Выборка1&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;РезультатЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выбрать</FONT><FONT color=#ff0000>(</FONT><FONT color=#0000ff>СпособВыборки</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#008000>//&nbsp;что&nbsp;равнозначно&nbsp;записи</FONT><BR><FONT color=#0000ff>Выборка1&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;РезультатЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выбрать</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT></FONT></FONT></FONT></TD></TR></TBODY></TABLE></P>
+<H3><A name=HierarchicalWorkaround>Иерархический обход результата</A></H3>
+<P>Следующий способ обхода результата – иерархический. При данном обходе обходятся только записи, находящиеся на одном уровне. Для получения иерархической выборки из результата необходимо вызвать метод Выбрать() объекта РезультатЗапроса с параметром <A href="v8help://SyntaxHelperContext/objects/catalog2/catalog259/QueryResultIteration.html">ОбходРезультатаЗапроса</A>.<A href="v8help://SyntaxHelperContext/objects/catalog2/catalog259/QueryResultIteration/properties/ByGroupsWithHierarchy1015.html">ПоГруппировкамСИерархией</A>.</P>
+<P><STRONG>Пример</STRONG>:</P>
+<P>
+<TABLE width="100%" bgColor=#f7f7f7>
+<TBODY>
+<TR>
+<TD><FONT color=#ff0000><FONT face="Courier New"><FONT color=#0000ff>СпособВыборки&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;ОбходРезультатаЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>ПоГруппировкамСИерархией</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>Выборка2&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;РезультатЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выбрать</FONT><FONT color=#ff0000>(</FONT><FONT color=#0000ff>СпособВыборки</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT></FONT></FONT></FONT></TD></TR></TBODY></TABLE></P>
+<P>Выборка из результата с иерархическим обходом в нашем примере обойдет только записи с номерами 1 и 11, так как только эти две записи находятся на самом верхнем уровне. Проиллюстрируем это, представив наш результат в виде дерева, где узлами будут итоговые записи, а листьями дерева будут детальные записи. Вот что у нас получится:</P>
+<P><IMG src="v8help://SyntaxHelperCommonLanguage/HierarchicalResultIterationRU.gif" width=351 height=445></P>
+<P>Из этого рисунка видно, что именно записи с номерами 1 и 11, и только они находятся на первом уровне дерева, в результате чего только они и попадают в первый проход иерархической выборки.</P>
+<P>Возникает вопрос, как получать остальные записи результата запроса. Для этого у объекта <A href="v8help://SyntaxHelperContext/objects/catalog213/catalog393/QueryResultSelection.html">ВыборкаИзРезультатаЗапроса</A>&nbsp;можно получить еще одну выборку, которая будет обходить подчиненные записи текущей записи выборки. В нашем примере в момент, когда объект Выборка2 будет позиционирован на запись с номером 1, мы запросим у него иерархическую выборку. Таким образом, мы получим выборку, которая нам вернет записи с номерами 2, 7. А когда Выборка2 будет спозиционирована на записи с номером 11, то полученная у нее иерархическая выборка вернет записи с номерами 12, 16. Так реализуется иерархический обход результатов запроса. Заметим, что у выборки можно получать вложенные выборки любого типа. Так, если бы мы запросили у Выборки2, спозиционированной на записи 1, линейную выборку, то с ее помощью мы бы получили записи с номерами записей со 2-го по 10-й. Проиллюстрируем описанную методику на примере.</P>
+<P><STRONG>Пример</STRONG>:</P>
+<P>
+<TABLE width="100%" bgColor=#f7f7f7>
+<TBODY>
+<TR>
+<TD><FONT color=#ff0000><FONT face="Courier New">Процедура&nbsp;<FONT color=#0000ff>ВыполнитьЗапрос</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;Создадим&nbsp;запрос.</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;Запрос&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#ff0000>&nbsp;Новый&nbsp;</FONT><FONT color=#0000ff>Запрос</FONT><FONT color=#ff0000>;</FONT><BR><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;Установим&nbsp;текст&nbsp;запроса</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;Запрос</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Текст&nbsp;</FONT><FONT color=#ff0000>=</FONT></FONT><FONT face="Courier New"><FONT color=#000000>&nbsp;"ВЫБРАТЬ<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|Товар,&nbsp;Количество&nbsp;<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|ИЗ&nbsp;<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|Документ.РасхНакл.Состав<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|УПОРЯДОЧИТЬ&nbsp;ПО&nbsp;Товар<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|ИТОГИ&nbsp;Сумма(Количество)&nbsp;ПО&nbsp;Товар,&nbsp;Товар&nbsp;Иерархия"<FONT color=#ff0000>;</FONT><BR><BR>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;Выполним&nbsp;запрос&nbsp;и&nbsp;запишем&nbsp;результат&nbsp;в&nbsp;переменную</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;РезультатЗапроса.</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;РезультатЗапроса&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;Запрос</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выполнить</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;Получим&nbsp;выборку&nbsp;из&nbsp;результата&nbsp;запроса.</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;СпособВыборки&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;ОбходРезультатаЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>ПоГруппировкамСИерархией</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;Выборка&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;РезультатЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выбрать</FONT><FONT color=#ff0000>(</FONT><FONT color=#0000ff>СпособВыборки</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;ВыдатьРекурсивно</FONT><FONT color=#ff0000>(</FONT><FONT color=#0000ff>Выборка</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><BR><FONT color=#ff0000>КонецПроцедуры</FONT><BR><BR><FONT color=#ff0000>Процедура&nbsp;</FONT><FONT color=#0000ff>ВыдатьРекурсивно</FONT><FONT color=#ff0000>(</FONT><FONT color=#0000ff>Выборка</FONT><FONT color=#ff0000>)</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;Пока&nbsp;в&nbsp;выборке&nbsp;есть&nbsp;записи&nbsp;...</FONT><BR><FONT color=#ff0000>&nbsp;&nbsp;&nbsp;&nbsp;Пока&nbsp;</FONT><FONT color=#0000ff>Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Следующий</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>&nbsp;Цикл</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;...&nbsp;выведем&nbsp;в&nbsp;окно&nbsp;сообщений&nbsp;поля&nbsp;из&nbsp;результата</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Товар&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Наименование</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Количество&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Количество</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Сообщить</FONT><FONT color=#ff0000>(</FONT><FONT color=#000000>"Товар:&nbsp;"</FONT><FONT color=#0000ff>&nbsp;</FONT><FONT color=#ff0000>+</FONT><FONT color=#0000ff>&nbsp;Товар&nbsp;</FONT><FONT color=#ff0000>+</FONT><FONT color=#0000ff>&nbsp;</FONT><FONT color=#000000>"&nbsp;Количество:&nbsp;"</FONT><FONT color=#0000ff>&nbsp;</FONT><FONT color=#ff0000>+</FONT><FONT color=#0000ff>&nbsp;Количество</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;Продолжим&nbsp;выборку&nbsp;подчиненных&nbsp;записей</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;СпособВыборки&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;ОбходРезультатаЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>ПоГруппировкамСИерархией</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<FONT color=#ff0000>Если</FONT> Выборка<FONT color=#ff0000>.</FONT>ТипЗаписи<FONT color=#ff0000>()</FONT> <FONT color=#ff0000>=</FONT> ТипЗаписиЗапроса<FONT color=#ff0000>.</FONT>ИтогПоИерархии <FONT color=#ff0000>Тогда</FONT><BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ДочерняяВыборка <FONT color=#ff0000>=</FONT> Выборка.Выбрать<FONT color=#ff0000>(</FONT>СпособВыборки<FONT color=#ff0000>,</FONT> Выборка<FONT color=#ff0000>.</FONT>Группировка<FONT color=#ff0000>());</FONT><BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<FONT color=#ff0000>Иначе</FONT>&nbsp;<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ДочерняяВыборка <FONT color=#ff0000>=</FONT> Выборка<FONT color=#ff0000>.</FONT>Выбрать<FONT color=#ff0000>(</FONT>СпособВыборки<FONT color=#ff0000>);</FONT><BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<FONT color=#ff0000>КонецЕсли;</FONT><BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ВыдатьРекурсивно<FONT color=#ff0000>(</FONT>ДочерняяВыборка<FONT color=#ff0000>);</FONT><BR></FONT><FONT color=#ff0000></FONT><BR><FONT color=#ff0000>&nbsp;&nbsp;&nbsp;&nbsp;КонецЦикла</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#ff0000>КонецПроцедуры</FONT></FONT></FONT></TD></TR></TBODY></TABLE></P>
+<H3><A name=GroupWorkaround>Обход результата по группам</A></H3>
+<P>Третий, и последний способ обхода результата – по группам. Он сходен с иерархическим обходом, но с одним различием: записи с иерархическими итогами при обходе в нем рассматриваются как детальные записи, а не как узловые. Для получения выборки по группам из результата запроса необходимо вызвать метод Выбрать объекта РезультатЗапроса с параметром ОбходРезультатаЗапроса.ПоГруппировкам.</P>
+<P><STRONG>Пример</STRONG>:</P>
+<P>
+<TABLE width="100%" bgColor=#f7f7f7>
+<TBODY>
+<TR>
+<TD><FONT color=#ff0000><FONT face="Courier New"><FONT color=#0000ff>СпособВыборки&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;ОбходРезультатаЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>ПоГруппировкам</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>Выборка2&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;РезультатЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выбрать</FONT><FONT color=#ff0000>(</FONT><FONT color=#0000ff>СпособВыборки</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT></FONT></FONT></TD></TR></TBODY></TABLE></P>
+<P>Перебрав в ней всё, мы получим записи с номерами 1, 2, 7, 11, 12, 16.</P>
+<P><STRONG>Пример</STRONG>:</P>
+<P>
+<TABLE width="100%" bgColor=#f7f7f7>
+<TBODY>
+<TR>
+<TD><FONT color=#ff0000><FONT face="Courier New">Процедура&nbsp;<FONT color=#0000ff>ВыполнитьЗапрос</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;Создадим&nbsp;запрос.</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;Запрос&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#ff0000>&nbsp;Новый&nbsp;</FONT><FONT color=#0000ff>Запрос</FONT><FONT color=#ff0000>;</FONT><BR><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;Установим&nbsp;текст&nbsp;запроса</FONT><BR></FONT><FONT color=#0000ff><FONT face="Courier New">&nbsp;&nbsp;&nbsp;&nbsp;Запрос<FONT color=#ff0000>.</FONT><FONT color=#0000ff>Текст&nbsp;</FONT><FONT color=#ff0000>=</FONT></FONT><FONT color=#000000 face="Courier New">&nbsp;"ВЫБРАТЬ<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|Товар,&nbsp;Количество&nbsp;<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|ИЗ&nbsp;<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|Документ.РасхНакл.Состав<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|УПОРЯДОЧИТЬ ПО Товар<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|ИТОГИ&nbsp;Сумма(Количество)&nbsp;ПО&nbsp;Товар,&nbsp;Товар&nbsp;Иерархия";<BR></FONT></FONT><FONT color=#0000ff><BR><FONT face="Courier New">&nbsp;&nbsp;&nbsp;&nbsp;</FONT></FONT><FONT face="Courier New"><FONT color=#008000>//&nbsp;Выполним&nbsp;запрос&nbsp;и&nbsp;запишем&nbsp;результат&nbsp;в&nbsp;переменную</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;РезультатЗапроса.</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;РезультатЗапроса&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;Запрос</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выполнить</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;Получим&nbsp;выборку&nbsp;из&nbsp;результата&nbsp;запроса</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;СпособВыборки&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;ОбходРезультатаЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>ПоГруппировкам</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;Выборка&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;РезультатЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выбрать</FONT><FONT color=#ff0000>(</FONT><FONT color=#0000ff>СпособВыборки</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;Пока&nbsp;в&nbsp;выборке&nbsp;есть&nbsp;записи&nbsp;...</FONT><BR><FONT color=#ff0000>&nbsp;&nbsp;&nbsp;&nbsp;Пока&nbsp;</FONT><FONT color=#0000ff>Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Следующий</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>&nbsp;Цикл</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;...&nbsp;выведем&nbsp;в&nbsp;окно&nbsp;сообщений&nbsp;поля&nbsp;из&nbsp;результата</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Товар&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Наименование</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Количество&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Количество</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Сообщить</FONT><FONT color=#ff0000>(</FONT><FONT color=#000000>"Товар:&nbsp;"</FONT><FONT color=#ff0000>+</FONT><FONT color=#0000ff>Товар</FONT><FONT color=#ff0000>+</FONT><FONT color=#000000>"&nbsp;Итого&nbsp;по&nbsp;товару:&nbsp;"</FONT><FONT color=#ff0000>+</FONT><FONT color=#0000ff>Количество</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ВыдатьДочерниеЗаписи</FONT><FONT color=#ff0000>(</FONT><FONT color=#0000ff>Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выбрать</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><BR><FONT color=#ff0000>&nbsp;&nbsp;&nbsp;&nbsp;КонецЦикла</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#ff0000>КонецПроцедуры</FONT><BR><BR><FONT color=#ff0000>Процедура&nbsp;</FONT><FONT color=#0000ff>ВыдатьДочерниеЗаписи&nbsp;</FONT><FONT color=#ff0000>(</FONT><FONT color=#0000ff>Выборка</FONT><FONT color=#ff0000>)</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;Пока&nbsp;в&nbsp;выборке&nbsp;есть&nbsp;записи&nbsp;...</FONT><BR><FONT color=#ff0000>&nbsp;&nbsp;&nbsp;&nbsp;Пока&nbsp;</FONT><FONT color=#0000ff>Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Следующий</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>&nbsp;Цикл</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;...&nbsp;выведем&nbsp;в&nbsp;окно&nbsp;сообщений&nbsp;поля&nbsp;из&nbsp;результата</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Товар&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Наименование</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Количество&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Количество</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Сообщить</FONT><FONT color=#ff0000>(</FONT><FONT color=#000000>"Товар:&nbsp;"</FONT><FONT color=#ff0000>+</FONT><FONT color=#0000ff>Товар</FONT><FONT color=#ff0000>+</FONT><FONT color=#000000>"&nbsp;Количество:&nbsp;"</FONT><FONT color=#ff0000>+</FONT><FONT color=#0000ff>Количество</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT></FONT><FONT face="Courier New"><FONT color=#0000ff>&nbsp;<BR></FONT><FONT color=#ff0000>&nbsp;&nbsp;&nbsp;&nbsp;КонецЦикла</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#ff0000>КонецПроцедуры</FONT></FONT></FONT></TD></TR></TBODY></TABLE></P>
+<H2><A name=WorkWithSelection>Работа с выборкой</A></H2>
+<P>Объект <A href="v8help://SyntaxHelperContext/objects/catalog213/catalog393/QueryResultSelection.html">ВыборкаИзРезультатаЗапроса</A>&nbsp;предназначен для обхода записей результата запроса. Можно представить себе выборку как некоторый объект, который содержит указатель на текущую запись в результате и предоставляет программе доступ ко всем полям текущей записи. Для навигации по записям запроса используются три метода: </P>
+<UL>
+<LI><A href="v8help://SyntaxHelperContext/objects/catalog213/catalog393/QueryResultSelection/methods/Next556.html">Следующий()</A>&nbsp;– перейти к следующей записи результата в соответствии с порядком обхода выборки. При первом вызове позиционирует выборку на первую запись. Когда будут выбраны все записи, данный метод просигнализирует об этом, вернув значение <A href="v8help://SyntaxHelperLanguage/def_BooleanFalse">Ложь</A>. 
+<LI><A href="v8help://SyntaxHelperContext/objects/catalog213/catalog393/QueryResultSelection/methods/NextByFieldValue594.html">СледующийПоЗначениюПоля()</A>&nbsp;– получить следующую запись со значением в заданном поле, отличающимся от значения в этом поле текущей записи. 
+<LI><A href="v8help://SyntaxHelperContext/objects/catalog213/catalog393/QueryResultSelection/methods/FindNext595.html">НайтиСледующий ()</A>&nbsp;– найти запись, с заданными значениями некоторых полей.</LI></UL>
+<H3>Использование метода СледующийПоЗначениюПоля</H3>
+<P>Метод позволяет сгруппировать записи результата по значениям полей.</P>
+<P><STRONG>Пример запроса</STRONG>:</P>
+<BLOCKQUOTE style="MARGIN-RIGHT: 0px" dir=ltr>
+<P><FONT face="Courier New">ВЫБРАТЬ<BR>&nbsp;&nbsp; Док.Товар, Док.Получатель, Док.Количество<BR>ИЗ<BR>&nbsp;&nbsp; Документ.РасхНакл.Состав Док<BR>УПОРЯДОЧИТЬ ПО Док.Товар.Наименование, Док.Получатель.Наименование</FONT></P></BLOCKQUOTE>
+<P>Его результат:</P>
+<P>
+<TABLE class=SimplyTable style="HEIGHT: 248px; WIDTH: 560px">
+<TBODY>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><STRONG><FONT size=2>N</FONT></STRONG></P></TD>
+<TD class=WideColumn>
+<P class=Usual><STRONG><FONT size=2>Товар</FONT></STRONG></P></TD>
+<TD class=WideColumn>
+<P class=Usual><STRONG><FONT size=2>Получатель</FONT></STRONG></P></TD>
+<TD class=WideColumn>
+<P class=Usual><STRONG><FONT size=2>Количество</FONT></STRONG></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>1</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Смеситель</FONT></P></FONT></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Маг. "Гигант"</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1>14</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Смеситель</FONT></P></FONT></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Маг. "Хозяин"</FONT></P></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>1</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>3</FONT></P></TD>
+<TD class=WideColumn><FONT size=1><FONT size=1>
+<P class=Usual><FONT size=1>Смеситель</FONT></P></FONT></FONT></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Мосгорторг</FONT></P></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>5</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>4</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Кран</FONT></P></FONT></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Маг. "Гигант"</FONT></P></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>44</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>5</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Кран</FONT></P></FONT></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Маг. "Хозяин"</FONT></P></FONT></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>8</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>6</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Кран</FONT></P></FONT></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Мосгорторг</FONT></P></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>10</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>7</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Кран</FONT></P></FONT></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Мосгорторг</FONT></P></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>22</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>8</FONT></P></TD>
+<TD class=WideColumn><FONT size=1><FONT size=1>
+<P class=Usual><FONT size=1>Стол </FONT></P></FONT></FONT></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Маг. "Гигант"</FONT></P></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>10</P></FONT></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>9</FONT></P></TD>
+<TD class=WideColumn><FONT size=1><FONT size=1>
+<P class=Usual><FONT size=1>Стол </FONT></P></FONT></FONT></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Маг. "Мебель"</FONT></P></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>15</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>10</FONT></P></TD>
+<TD class=WideColumn><FONT size=1><FONT size=1>
+<P class=Usual><FONT size=1>Стол </FONT></P></FONT></FONT></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Мосгорторг</FONT></P></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>1</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>11</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стул</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Маг. "Гигант"</FONT></P></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>32</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>12</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Стул</FONT></P></FONT></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Маг. "Мебель"</FONT></P></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>55</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>13</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Стул</FONT></P></FONT></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Маг. "Хозяин"</FONT></P></FONT></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>5</FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>14</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Стул</FONT></P></FONT></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Мосгорторг</FONT></P></TD>
+<TD class=WideColumn>
+<P align=center><FONT size=1>16</FONT></P></TD></TR></TBODY></TABLE></P>
+<P>Получим линейную выборку из результата запроса и обойдем выборку при помощи метода СледующийПоЗначениюПоля.</P>
+<P><STRONG>Пример</STRONG>:</P>
+<P>
+<TABLE width="100%" bgColor=#f7f7f7>
+<TBODY>
+<TR>
+<TD><FONT color=#ff0000><FONT face="Courier New"><FONT color=#0000ff>Выборка&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;РезультатЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выбрать</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#ff0000>Пока&nbsp;</FONT><FONT color=#0000ff>Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>СледующийПоЗначениюПоля</FONT><FONT color=#ff0000>(</FONT><FONT color=#000000>"Товар"</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>&nbsp;Цикл</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;здесь&nbsp;мы&nbsp;получим&nbsp;записи&nbsp;с&nbsp;номерами&nbsp;1,&nbsp;4,&nbsp;8,&nbsp;11</FONT><BR><FONT color=#ff0000>&nbsp;&nbsp;&nbsp;&nbsp;Пока&nbsp;</FONT><FONT color=#0000ff>Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>СледующийПоЗначениюПоля</FONT><FONT color=#ff0000>(</FONT><FONT color=#000000>"Получатель"</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>&nbsp;Цикл</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;здесь&nbsp;мы&nbsp;сначала&nbsp;получим&nbsp;записи&nbsp;с&nbsp;номерами&nbsp;1,&nbsp;2,&nbsp;3</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;затем&nbsp;4,&nbsp;5,&nbsp;6</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;затем&nbsp;8,&nbsp;9,&nbsp;10</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;затем&nbsp;11,&nbsp;12,&nbsp;13,&nbsp;14</FONT><BR><FONT color=#ff0000>&nbsp;&nbsp;&nbsp;&nbsp;КонецЦикла</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#ff0000>КонецЦикла</FONT><FONT color=#ff0000>;</FONT></FONT></FONT></TD></TR></TBODY></TABLE></P>
+<P>Следует обратить внимание на то, что во внутреннем цикле не была выбрана запись с номером 7, т.к. в ней такое же значение поля "Получатель" как и в предыдущей записи.</P>
+<P>Заметим, что если в цикле получения по значению поля получать записи при помощи метода <A href="v8help://SyntaxHelperContext/objects/catalog213/catalog393/QueryResultSelection/methods/Next556.html">Следующий()</A>, то будут выбраны все записи с равным значением поля, заданного в предыдущем вызове метода <A href="v8help://SyntaxHelperContext/objects/catalog213/catalog393/QueryResultSelection/methods/NextByFieldValue594.html">СледующийПоЗначениюПоля()</A>. </P>
+<P><STRONG>Пример</STRONG>:</P>
+<P>
+<TABLE width="100%" bgColor=#f7f7f7>
+<TBODY>
+<TR>
+<TD><FONT color=#ff0000><FONT face="Courier New"><FONT color=#0000ff>Выборка&nbsp;</FONT><FONT color=#ff0000>=</FONT><FONT color=#0000ff>&nbsp;РезультатЗапроса</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Выбрать</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#ff0000>Пока&nbsp;</FONT><FONT color=#0000ff>Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>СледующийПоЗначениюПоля</FONT><FONT color=#ff0000>(</FONT><FONT color=#000000>"Товар"</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>&nbsp;Цикл</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;здесь&nbsp;мы&nbsp;получим&nbsp;записи&nbsp;с&nbsp;номерами&nbsp;1,&nbsp;4,&nbsp;8,&nbsp;11</FONT><BR><FONT color=#ff0000>&nbsp;&nbsp;&nbsp;&nbsp;Пока&nbsp;</FONT><FONT color=#0000ff>Выборка</FONT><FONT color=#ff0000>.</FONT><FONT color=#0000ff>Следующий</FONT><FONT color=#ff0000>(</FONT><FONT color=#ff0000>)</FONT><FONT color=#ff0000>&nbsp;Цикл</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;здесь&nbsp;мы&nbsp;сначала&nbsp;получим&nbsp;записи&nbsp;с&nbsp;номерами&nbsp;1,&nbsp;2,&nbsp;3</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;затем&nbsp;4,&nbsp;5,&nbsp;6,&nbsp;7</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;затем&nbsp;8,&nbsp;9,&nbsp;10</FONT><BR><FONT color=#0000ff>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</FONT><FONT color=#008000>//&nbsp;затем&nbsp;11,&nbsp;12,&nbsp;13,&nbsp;14</FONT><BR><FONT color=#ff0000>&nbsp;&nbsp;&nbsp;&nbsp;КонецЦикла</FONT><FONT color=#ff0000>;</FONT><BR><FONT color=#ff0000>КонецЦикла</FONT><FONT color=#ff0000>;</FONT></FONT></FONT></TD></TR></TBODY></TABLE></P>
+<H3><A name=CurRecordTypeMethods>Методы определения типа текущей записи</A></H3>
+<P>В тот момент, когда выборка позиционирована на записи, мы можем у выборки узнать характеристики этой записи. Получение характеристик записи осуществляется методами:</P>
+<UL>
+<LI><A href="v8help://SyntaxHelperContext/objects/catalog213/catalog393/QueryResultSelection/methods/Level558.html">Уровень()</A>&nbsp;– определяет уровень записи в результате запроса. 
+<LI><A href="v8help://SyntaxHelperContext/objects/catalog213/catalog393/QueryResultSelection/methods/RecordType559.html">ТипЗаписи()</A>&nbsp;– определяет принадлежность записи к одному из следующих типов: 
+<UL>
+<LI>групповой итог; 
+<LI>итого по иерархии; 
+<LI>детальная запись; 
+<LI>общий итог.</LI></UL>
+<LI><A href="v8help://SyntaxHelperContext/objects/catalog213/catalog393/QueryResultSelection/methods/Group560.html">Группировка()</A>&nbsp;– определяет имя поля, по которому были рассчитаны итоги.</LI></UL>
+<P>Для иллюстрации работы этих методов посмотрим, что они будут возвращать записей для запроса, рассматриваемого в начале главы:</P>
+<BLOCKQUOTE style="MARGIN-RIGHT: 0px" dir=ltr>
+<P><FONT face="Courier New">ВЫБРАТЬ <BR>&nbsp;&nbsp; Товар, Количество Количество<BR>ИЗ <BR>&nbsp;&nbsp; Документ.РасхНакл.Состав <BR>УПОРЯДОЧИТЬ ПО Товар<BR>ИТОГИ Сумма(Количество) ПО Товар, Товар Иерархия</FONT></P></BLOCKQUOTE>
+<P>Результат представлен в таблице:</P>
+<P>
+<TABLE class=SimplyTable style="HEIGHT: 248px; WIDTH: 560px">
+<TBODY>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><STRONG><FONT size=2>N</FONT></STRONG></P></TD>
+<TD class=WideColumn>
+<P class=Usual><STRONG><FONT size=2>Товар</FONT></STRONG></P></TD>
+<TD class=WideColumn>
+<P class=Usual><STRONG><FONT size=2>Количество</FONT></STRONG></P></TD>
+<TD class=WideColumn>
+<P class=Usual><STRONG><FONT size=2>Уровень</FONT></STRONG></P></TD>
+<TD class=WideColumn>
+<P class=Usual><STRONG><FONT size=2>ТипЗаписи</FONT></STRONG></P></TD>
+<TD class=WideColumn>
+<P class=Usual><STRONG><FONT size=2>Группировка</FONT></STRONG></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><STRONG>1</STRONG></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><STRONG>Сантехника</STRONG></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><STRONG>104</STRONG></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><STRONG>0</STRONG></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><STRONG>ИтогПоИерархии</STRONG></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1><STRONG>Товар</STRONG></FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><EM>2</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>Кран</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>84</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>1</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>ИтогПоГруппировке</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1><EM>Товар</EM></FONT></P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>3</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Кран</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>10</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>4</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Кран</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>8</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>5</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Кран</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>44</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>6</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Кран</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>22</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><EM>7</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>Смеситель</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>20</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>1</EM></FONT></P></TD>
+<TD class=WideColumn><FONT size=1><EM>ИтогПоГруппировке</EM></FONT></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual align=center><FONT size=1><EM>Товар</EM></FONT></P></FONT></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>8</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Смеситель</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>5</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>9</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Смеситель</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>1</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>10</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1>Смеситель</FONT></P></FONT></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>14</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><STRONG>11</STRONG></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><STRONG>Мебель</STRONG></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><STRONG>134</STRONG></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><STRONG>0</STRONG></FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual><FONT size=1><STRONG>ИтогПоИерархии</STRONG></FONT></P></FONT></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual align=center><FONT size=1><STRONG>Товар</STRONG></FONT></P></FONT></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><EM>12</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>Стол</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>26</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>1</EM></FONT></P></TD>
+<TD class=WideColumn><FONT size=1><EM>ИтогПоГруппировке</EM></FONT></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual align=center><FONT size=1><EM>Товар</EM></FONT></P></FONT></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>13</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стол</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>1</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>14</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стол</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>15</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn><FONT size=1>ДетальнаяЗапись</FONT></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>15</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стол</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>10</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1><EM>16</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>Стул</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>108</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>1</EM></FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1><EM>ИтогПоГруппировке</EM></FONT></P></TD>
+<TD class=WideColumn><FONT size=1>
+<P class=Usual align=center><FONT size=1><EM>Товар</EM></FONT></P></FONT></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>17</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стул</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>55</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>18</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стул</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>5</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>19</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стул</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>32</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR>
+<TR>
+<TD class=NarrowColumn>
+<P class=Usual align=center><FONT size=1>20</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>Стул</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>16</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>2</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual><FONT size=1>ДетальнаяЗапись</FONT></P></TD>
+<TD class=WideColumn>
+<P class=Usual align=center><FONT size=1></FONT>&nbsp;</P></TD></TR></TBODY></TABLE></P>
+<P>&nbsp;</P></BODY></HTML>

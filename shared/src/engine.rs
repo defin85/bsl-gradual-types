@@ -104,7 +104,10 @@ impl AnalysisEngine {
     /// # Returns
     /// * `Some(ConstructorSignature)` - если конструктор найден
     /// * `None` - если конструктор не найден
-    pub fn find_constructor(&self, type_name: &str) -> Option<crate::domain::signature_index::ConstructorSignature> {
+    pub fn find_constructor(
+        &self,
+        type_name: &str,
+    ) -> Option<crate::domain::signature_index::ConstructorSignature> {
         self.repository.find_constructor(type_name)
     }
 
@@ -261,6 +264,7 @@ impl<'a> IrTypeResolverVisitor<'a> {
             SemanticNodeKind::Assignment {
                 variable,
                 value_type,
+                ..
             } => {
                 // Обновляем тип переменной в контексте
                 context.update_variable_type(variable.clone(), value_type.clone());

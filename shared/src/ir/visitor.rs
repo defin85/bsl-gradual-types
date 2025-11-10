@@ -181,6 +181,7 @@ fn walk_node<V: SemanticVisitor>(
         SemanticNodeKind::Assignment {
             variable,
             value_type,
+            ..
         } => {
             visitor.visit_assignment(variable, value_type, context);
 
@@ -342,6 +343,7 @@ mod tests {
             kind: SemanticNodeKind::Assignment {
                 variable: "x".to_string(),
                 value_type: "Число".to_string(),
+                value_node: None,
             },
             span: Span::stub(),
             scope_id: program.symbols.root_scope,
@@ -392,6 +394,7 @@ mod tests {
             kind: SemanticNodeKind::Assignment {
                 variable: "x".to_string(),
                 value_type: "Строка".to_string(), // Переприсваиваем другой тип
+                value_node: None,
             },
             span: Span::stub(),
             scope_id: program.symbols.root_scope,

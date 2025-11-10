@@ -1612,6 +1612,7 @@ impl TypeSystemService {
             SemanticNodeKind::Assignment {
                 variable,
                 value_type,
+                ..
             } => {
                 use bsl_shared::domain::types::Certainty;
 

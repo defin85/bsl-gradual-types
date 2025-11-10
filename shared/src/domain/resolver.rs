@@ -2,10 +2,10 @@
 //!
 //! Чистая бизнес-логика разрешения типов без Application concerns
 
-use std::sync::Arc;
+use super::signature_index::SignatureIndex;
 use crate::domain::repository::TypeRepository;
 use crate::domain::types::TypeResolution;
-use super::signature_index::SignatureIndex;
+use std::sync::Arc;
 
 /// Результат валидации вызова функции
 #[derive(Debug, Clone, PartialEq)]
@@ -13,14 +13,17 @@ pub enum ValidationResult {
     /// Вызов корректен, возвращает тип (если функция возвращает значение)
     Ok(Option<String>),
     /// Отсутствует обязательный параметр
-    MissingRequiredParam { param_name: String, param_index: usize },
+    MissingRequiredParam {
+        param_name: String,
+        param_index: usize,
+    },
     /// Слишком много аргументов
     TooManyArgs { expected: usize, actual: usize },
     /// Несоответствие типов аргумента
     TypeMismatch {
         param_name: String,
         expected: String,
-        actual: String
+        actual: String,
     },
     /// Функция/метод не найдены
     NotFound,
@@ -46,10 +49,7 @@ pub enum ConstructorResolution {
     },
 
     /// Конструктор не найден
-    NotFound {
-        type_name: String,
-        hint: String,
-    },
+    NotFound { type_name: String, hint: String },
 
     /// Динамический конструктор с неизвестным типом
     Dynamic {
@@ -109,14 +109,15 @@ impl TypeResolver {
     }
 
     /// Преобразование RawTypeData в TypeResolution (чистая логика)
-    fn create_resolution_from_raw(&self, raw_type: &crate::domain::types::RawTypeData) -> TypeResolution {
-        let mut resolution = TypeResolution::known(
-            crate::domain::types::ConcreteType::Platform(
-                crate::domain::types::PlatformType {
-                    name: raw_type.name.clone()
-                }
-            )
-        );
+    fn create_resolution_from_raw(
+        &self,
+        raw_type: &crate::domain::types::RawTypeData,
+    ) -> TypeResolution {
+        let mut resolution = TypeResolution::known(crate::domain::types::ConcreteType::Platform(
+            crate::domain::types::PlatformType {
+                name: raw_type.name.clone(),
+            },
+        ));
         // Копируем фасеты из RawTypeData
         resolution.available_facets = raw_type.facets.clone();
         resolution
@@ -166,7 +167,9 @@ impl TypeResolver {
                 // Проверяем, существует ли такой тип в репозитории
                 if let Some(raw_type) = self.repository.find_type(&potential_type) {
                     // Тип найден — проверяем, не табличная ли часть
-                    if let Some(tabular_section) = raw_type.tabular_sections.iter().find(|ts| ts.name == rest) {
+                    if let Some(tabular_section) =
+                        raw_type.tabular_sections.iter().find(|ts| ts.name == rest)
+                    {
                         return self.resolve_tabular_section_access(
                             potential_type,
                             tabular_section.clone(),
@@ -181,11 +184,13 @@ impl TypeResolver {
         // Проверяем, не является ли base конфигурационным типом с табличными частями
         if let Some(raw_type) = self.repository.find_type(base) {
             // ✅ НОВОЕ: Проверка табличных частей
-            if let Some(tabular_section) = raw_type.tabular_sections.iter().find(|ts| ts.name == member) {
-                return self.resolve_tabular_section_access(
-                    base.to_string(),
-                    tabular_section.clone(),
-                );
+            if let Some(tabular_section) = raw_type
+                .tabular_sections
+                .iter()
+                .find(|ts| ts.name == member)
+            {
+                return self
+                    .resolve_tabular_section_access(base.to_string(), tabular_section.clone());
             }
         }
 
@@ -288,8 +293,8 @@ impl TypeResolver {
         tabular_section: crate::domain::types::RawTabularSectionData,
     ) -> TypeResolution {
         use crate::domain::types::{
-            TabularRowType, GenericType, ConcreteType, Certainty,
-            ResolutionSource, FacetKind, ResolutionResult, ResolutionMetadata,
+            Certainty, ConcreteType, FacetKind, GenericType, ResolutionMetadata, ResolutionResult,
+            ResolutionSource, TabularRowType,
         };
 
         tracing::debug!(
@@ -325,7 +330,7 @@ impl TypeResolver {
         // 3. Возвращаем резолюцию с высокой уверенностью
         TypeResolution {
             result: ResolutionResult::Generic(generic_type),
-            certainty: Certainty::Known,  // 100% - данные из метаданных
+            certainty: Certainty::Known, // 100% - данные из метаданных
             source: ResolutionSource::Static,
             metadata: ResolutionMetadata {
                 file: Some(format!("{}.{}", parent_type, tabular_section.name)),
@@ -337,7 +342,7 @@ impl TypeResolver {
                     tabular_section.attributes.len()
                 )],
             },
-            active_facet: Some(FacetKind::Collection),  // Табличная часть - это коллекция
+            active_facet: Some(FacetKind::Collection), // Табличная часть - это коллекция
             available_facets: vec![FacetKind::Collection],
         }
     }
@@ -386,13 +391,12 @@ impl TypeResolver {
         };
 
         // 2. Проверить количество аргументов
-        let required_count = signature.params.iter()
-            .filter(|p| !p.is_optional)
-            .count();
+        let required_count = signature.params.iter().filter(|p| !p.is_optional).count();
 
         if arg_types.len() < required_count {
             // Найти первый отсутствующий обязательный параметр
-            let missing_param = signature.params
+            let missing_param = signature
+                .params
                 .iter()
                 .enumerate()
                 .find(|(i, p)| !p.is_optional && *i >= arg_types.len())
@@ -422,7 +426,7 @@ impl TypeResolver {
 
     /// Проверить совместимость присваивания типов (Domain логика)
     pub fn is_assignment_compatible(&self, from: &TypeResolution, to: &TypeResolution) -> bool {
-        use crate::domain::types::{ResolutionResult, Certainty};
+        use crate::domain::types::{Certainty, ResolutionResult};
 
         // Если "to" - Unknown, то любое присваивание допустимо (градуальная типизация)
         if matches!(to.certainty, Certainty::Unknown) {
@@ -465,17 +469,28 @@ impl TypeResolver {
 
     /// Сужение типа на основе условия (flow-sensitive анализ)
     /// Например: Если ТипЗнч(x) = Тип("Строка"), то x: Строка
-    pub fn narrow_type(
-        &self,
-        current: &TypeResolution,
-        type_check: &str,
-    ) -> TypeResolution {
-        // TODO: Implement proper type narrowing
-        // Сейчас просто возвращаем новый тип
-        if let Some(raw_type) = self.repository.find_type(type_check) {
-            return self.create_resolution_from_raw(&raw_type);
+    ///
+    /// Milestone 3.7: Интеграция с NarrowingEngine
+    pub fn narrow_type(&self, current: &TypeResolution, type_check: &str) -> TypeResolution {
+        use crate::analysis::type_guards::detect_type_guards;
+
+        // Обнаруживаем type guards в условии
+        let guards = detect_type_guards(type_check);
+
+        if guards.is_empty() {
+            // Fallback: пробуем найти тип напрямую
+            if let Some(raw_type) = self.repository.find_type(type_check) {
+                return self.create_resolution_from_raw(&raw_type);
+            }
+            return current.clone();
         }
-        current.clone()
+
+        // Применяем первый найденный guard
+        if let Some(guard) = guards.first() {
+            guard.apply_narrowing(current)
+        } else {
+            current.clone()
+        }
     }
 
     // ===== Milestone 2.3: Union Types Integration =====
@@ -494,7 +509,7 @@ impl TypeResolver {
     /// // Возвращает: Union(String, Number) с нормализацией
     /// ```
     pub fn resolve_union(&self, union_str: &str) -> TypeResolution {
-        use crate::domain::types::{ResolutionResult, WeightedType, Certainty, ResolutionSource};
+        use crate::domain::types::{Certainty, ResolutionResult, ResolutionSource, WeightedType};
 
         // Парсим Union: "Строка | Число | Null"
         let type_names: Vec<&str> = union_str
@@ -620,7 +635,7 @@ impl TypeResolver {
     /// // Возвращает: Intersection(СправочникОбъект, ИмеетКод)
     /// ```
     pub fn resolve_intersection(&self, intersection_str: &str) -> TypeResolution {
-        use crate::domain::types::{ResolutionResult, Certainty, ResolutionSource};
+        use crate::domain::types::{Certainty, ResolutionResult, ResolutionSource};
 
         // Парсим Intersection: "TypeA & TypeB"
         let type_names: Vec<&str> = intersection_str
@@ -684,7 +699,7 @@ impl TypeResolver {
         type_a: &TypeResolution,
         type_b: &TypeResolution,
     ) -> bool {
-        use crate::domain::types::{ResolutionResult, ConcreteType};
+        use crate::domain::types::{ConcreteType, ResolutionResult};
 
         match (&type_a.result, &type_b.result) {
             // Оба типа должны быть Concrete для проверки
@@ -697,9 +712,7 @@ impl TypeResolver {
                     }
 
                     // Platform типы совместимы, если не одинаковые
-                    (ConcreteType::Platform(pa), ConcreteType::Platform(pb)) => {
-                        pa.name != pb.name
-                    }
+                    (ConcreteType::Platform(pa), ConcreteType::Platform(pb)) => pa.name != pb.name,
 
                     // Configuration типы совместимы, если не одинаковые
                     (ConcreteType::Configuration(ca), ConcreteType::Configuration(cb)) => {
@@ -724,7 +737,9 @@ impl TypeResolver {
     }
 
     /// Форматирование Intersection типа для отображения
-    pub fn format_intersection_type(intersection_types: &[crate::domain::types::ConcreteType]) -> String {
+    pub fn format_intersection_type(
+        intersection_types: &[crate::domain::types::ConcreteType],
+    ) -> String {
         use crate::domain::types::ConcreteType;
 
         intersection_types
@@ -757,7 +772,7 @@ impl TypeResolver {
     /// // Возвращает: Generic(Массив, [Строка])
     /// ```
     pub fn resolve_generic(&self, generic_str: &str) -> TypeResolution {
-        use crate::domain::types::{ResolutionResult, GenericType, Certainty, ResolutionSource};
+        use crate::domain::types::{Certainty, GenericType, ResolutionResult, ResolutionSource};
 
         // Парсим Generic: "Массив<Строка>" или "Соответствие<Строка, Число>"
         if let Some((base_type, params_str)) = self.parse_generic_syntax(generic_str) {
@@ -869,7 +884,7 @@ impl TypeResolver {
     /// // Возвращает: Nullable(Строка)
     /// ```
     pub fn resolve_nullable(&self, nullable_str: &str) -> TypeResolution {
-        use crate::domain::types::{ResolutionResult, Certainty, ResolutionSource};
+        use crate::domain::types::{Certainty, ResolutionResult, ResolutionSource};
 
         // Парсим Nullable: "Строка?"
         if let Some(base_type_str) = nullable_str.strip_suffix('?') {
@@ -917,7 +932,7 @@ impl TypeResolver {
     /// КонецЕсли;
     /// ```
     pub fn narrow_nullable(&self, nullable_resolution: &TypeResolution) -> TypeResolution {
-        use crate::domain::types::{ResolutionResult, Certainty};
+        use crate::domain::types::{Certainty, ResolutionResult};
 
         match &nullable_resolution.result {
             ResolutionResult::Nullable(base_type) => {
@@ -985,7 +1000,8 @@ impl TypeResolver {
         // 1. Проверка на динамический конструктор
         if type_name.is_empty() || type_name == "?" {
             return ConstructorResolution::Dynamic {
-                reason: "Динамический конструктор через строку - тип определяется в runtime".to_string(),
+                reason: "Динамический конструктор через строку - тип определяется в runtime"
+                    .to_string(),
             };
         }
 
@@ -995,24 +1011,20 @@ impl TypeResolver {
             None => {
                 return ConstructorResolution::NotFound {
                     type_name: type_name.to_string(),
-                    hint: format!("Конструктор для типа '{}' не найден в SignatureIndex", type_name),
+                    hint: format!(
+                        "Конструктор для типа '{}' не найден в SignatureIndex",
+                        type_name
+                    ),
                 };
             }
         };
 
         // 3. Валидация параметров
-        let validation_errors = self.validate_constructor_params(
-            &constructor.params,
-            arg_types
-        );
+        let validation_errors = self.validate_constructor_params(&constructor.params, arg_types);
 
         // 4. Generic inference для коллекций
         let generic_params = if constructor.is_collection {
-            self.infer_generic_params(
-                type_name,
-                arg_types,
-                constructor.generic_params_count
-            )
+            self.infer_generic_params(type_name, arg_types, constructor.generic_params_count)
         } else {
             None
         };
@@ -1035,9 +1047,7 @@ impl TypeResolver {
         let mut errors = Vec::new();
 
         // Проверка количества параметров
-        let required_count = expected_params.iter()
-            .filter(|p| !p.is_optional)
-            .count();
+        let required_count = expected_params.iter().filter(|p| !p.is_optional).count();
 
         if actual_arg_types.len() < required_count {
             errors.push(format!(
@@ -1056,7 +1066,8 @@ impl TypeResolver {
         }
 
         // Проверка типов параметров
-        for (i, (param, arg_type)) in expected_params.iter()
+        for (i, (param, arg_type)) in expected_params
+            .iter()
             .zip(actual_arg_types.iter())
             .enumerate()
         {
@@ -1108,7 +1119,8 @@ impl TypeResolver {
                 if !arg_types.is_empty() {
                     // Пытаемся извлечь generic из первого аргумента
                     // Если arg_types[0] = "Массив<Число>", извлекаем "Число"
-                    let generic = self.extract_generic_from_type(&arg_types[0])
+                    let generic = self
+                        .extract_generic_from_type(&arg_types[0])
                         .unwrap_or_else(|| "?".to_string());
                     Some(vec![generic])
                 } else {

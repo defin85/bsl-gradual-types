@@ -19573,8 +19573,12 @@ var BslActionsWebviewProvider = class {
     const fs7 = require("fs");
     const webviewPath = vscode13.Uri.joinPath(this.extensionUri, "media", "webview").fsPath;
     const files = fs7.readdirSync(webviewPath);
+    this.outputChannel?.appendLine(`\u{1F50D} Quick Actions: Looking for WASM files in ${webviewPath}`);
+    this.outputChannel?.appendLine(`   Available files: ${files.join(", ")}`);
     const wasmFile = files.find((f) => f.match(/^bsl-frontend-.*\.wasm$/));
     const jsFile = files.find((f) => f.match(/^bsl-frontend-.*\.js$/));
+    const cssFile = files.find((f) => f.match(/^tailwind-.*\.css$/)) || files.find((f) => f.match(/\.css$/));
+    this.outputChannel?.appendLine(`   Found: WASM=${wasmFile}, JS=${jsFile}, CSS=${cssFile}`);
     if (!wasmFile || !jsFile) {
       throw new Error("WASM bundle not found. Run: npm run build:wasm");
     }
@@ -19584,10 +19588,11 @@ var BslActionsWebviewProvider = class {
     const scriptUri = webview.asWebviewUri(
       vscode13.Uri.joinPath(this.extensionUri, "media", "webview", jsFile)
     );
-    const styleUri = webview.asWebviewUri(
-      vscode13.Uri.joinPath(this.extensionUri, "media", "webview", "tailwind.css")
-    );
+    const styleUri = cssFile ? webview.asWebviewUri(
+      vscode13.Uri.joinPath(this.extensionUri, "media", "webview", cssFile)
+    ) : null;
     const nonce = getNonce();
+    const styleTag = styleUri ? `<link href="${styleUri}" rel="stylesheet">` : "";
     return `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -19595,19 +19600,36 @@ var BslActionsWebviewProvider = class {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'none';
+                   connect-src ${webview.cspSource};
                    style-src ${webview.cspSource};
                    script-src 'nonce-${nonce}' 'wasm-unsafe-eval';
                    img-src ${webview.cspSource} data:;">
-    <link href="${styleUri}" rel="stylesheet">
+    ${styleTag}
     <title>BSL Quick Actions</title>
 </head>
 <body>
     <div id="root"></div>
     <script type="module" nonce="${nonce}">
         import init, { start_quick_actions_app } from '${scriptUri}';
-        init('${wasmUri}').then(() => {
-            start_quick_actions_app();
-        });
+        
+        console.log('[Quick Actions] Initializing WASM...');
+        console.log('[Quick Actions] WASM URI:', '${wasmUri}');
+        console.log('[Quick Actions] Script URI:', '${scriptUri}');
+        
+        init('${wasmUri}')
+            .then(() => {
+                console.log('[Quick Actions] WASM initialized successfully');
+                start_quick_actions_app();
+                console.log('[Quick Actions] App started');
+            })
+            .catch(err => {
+                console.error('[Quick Actions] Failed to initialize:', err);
+                document.getElementById('root').innerHTML = 
+                    '<div style="padding: 20px; color: red;">' +
+                    '<h3>\u274C Failed to load Quick Actions</h3>' +
+                    '<pre>' + err.toString() + '</pre>' +
+                    '</div>';
+            });
     </script>
 </body>
 </html>`;
@@ -20782,8 +20804,27 @@ async function registerCommands(context) {
       vscode18.window.showErrorMessage(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u044F \u0441\u0435\u043C\u0430\u043D\u0442\u0438\u0447\u0435\u0441\u043A\u043E\u0433\u043E \u0434\u0435\u0440\u0435\u0432\u0430: ${errorMessage}`);
     }
   });
+  await safeRegisterCommand("bsl.getCurrentContext", async (params) => {
+    const client3 = getLanguageClient();
+    if (!client3 || !client3.isRunning()) {
+      outputChannel6.appendLine("\u26A0\uFE0F bsl.getCurrentContext: LSP client not running");
+      return null;
+    }
+    try {
+      outputChannel6.appendLine(`\u{1F50D} bsl.getCurrentContext called with params: ${JSON.stringify(params)}`);
+      const result = await client3.sendRequest("workspace/executeCommand", {
+        command: "bsl.getCurrentContext",
+        arguments: [params]
+      });
+      outputChannel6.appendLine(`\u2705 bsl.getCurrentContext result: ${JSON.stringify(result)}`);
+      return result;
+    } catch (error) {
+      outputChannel6.appendLine(`\u274C Error calling bsl.getCurrentContext: ${error}`);
+      return null;
+    }
+  });
   commandsRegistered = true;
-  outputChannel6.appendLine("\u2705 Successfully registered 16 extension commands");
+  outputChannel6.appendLine("\u2705 Successfully registered 17 extension commands");
 }
 
 // src/extension.ts

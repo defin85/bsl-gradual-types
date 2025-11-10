@@ -115,6 +115,8 @@ export default {
   content: [
     "./src/**/*.rs",
     "./index.html",
+    "./type_details.html",
+    "./quick_actions.html",
   ],
   darkMode: 'media', // Respects OS dark mode preference
   theme: {

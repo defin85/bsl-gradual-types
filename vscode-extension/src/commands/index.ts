@@ -40,9 +40,9 @@ export async function registerCommands(context: vscode.ExtensionContext) {
         outputChannel.appendLine('⚠️ Commands already registered, skipping...');
         return;
     }
-    
+
     outputChannel.appendLine('📝 Registering BSL Analyzer commands...');
-    
+
     // Helper function to safely register commands with duplicate check
     const safeRegisterCommand = async (commandId: string, callback: CommandHandler) => {
         try {
@@ -61,14 +61,14 @@ export async function registerCommands(context: vscode.ExtensionContext) {
             return null;
         }
     };
-    
+
     // Analyze current file - команда расширения больше не нужна
     // LSP сервер автоматически анализирует файлы при открытии/изменении
     // Но оставляем для явного вызова анализа
     await safeRegisterCommand('bslAnalyzer.analyzeFile', async () => {
         // ✅ ИСПРАВЛЕНИЕ: Приоритет BSL файлу из visibleTextEditors (activeTextEditor может быть Output)
         const editor = vscode.window.visibleTextEditors.find(e => e.document.languageId === 'bsl') ||
-                       vscode.window.activeTextEditor;
+            vscode.window.activeTextEditor;
 
         if (!editor || editor.document.languageId !== 'bsl') {
             vscode.window.showWarningMessage('Please open a BSL file to analyze');
@@ -178,7 +178,7 @@ export async function registerCommands(context: vscode.ExtensionContext) {
     await safeRegisterCommand('bslAnalyzer.showMetrics', async () => {
         // ✅ ИСПРАВЛЕНИЕ: Приоритет BSL файлу из visibleTextEditors (activeTextEditor может быть Output)
         const editor = vscode.window.visibleTextEditors.find(e => e.document.languageId === 'bsl') ||
-                       vscode.window.activeTextEditor;
+            vscode.window.activeTextEditor;
 
         if (!editor || editor.document.languageId !== 'bsl') {
             vscode.window.showWarningMessage('Please open a BSL file to show metrics');
@@ -215,7 +215,7 @@ export async function registerCommands(context: vscode.ExtensionContext) {
             return;
         }
         const rulesFile = vscode.Uri.joinPath(firstFolder.uri, 'bsl-rules.toml');
-        
+
         try {
             await vscode.workspace.fs.stat(rulesFile);
             const document = await vscode.workspace.openTextDocument(rulesFile);
@@ -347,17 +347,17 @@ export async function registerCommands(context: vscode.ExtensionContext) {
 
                 updateStatusBar('$(sync~spin) BSL: Building unified index...');
                 progress.report({ increment: 35, message: 'Building unified index...' });
-                
+
                 const args = [
                     '--config', configPath,
                     '--platform-version', getPlatformVersion()
                 ];
-                
+
                 const platformDocsArchive = getPlatformDocsArchive();
                 if (platformDocsArchive) {
                     args.push('--platform-docs-archive', platformDocsArchive);
                 }
-                
+
                 // ✅ ЗАМЕНА CLI → LSP: build_unified_index #1
                 const result = await buildIndex({ workspace_path: workspacePath });
 
@@ -446,7 +446,7 @@ export async function registerCommands(context: vscode.ExtensionContext) {
     await safeRegisterCommand('bslAnalyzer.exploreType', async () => {
         // ✅ ИСПРАВЛЕНИЕ: Приоритет BSL файлу из visibleTextEditors (activeTextEditor может быть Output)
         const editor = vscode.window.visibleTextEditors.find(e => e.document.languageId === 'bsl') ||
-                       vscode.window.activeTextEditor;
+            vscode.window.activeTextEditor;
         let typeName = '';
 
         if (editor && editor.selection && !editor.selection.isEmpty) {
@@ -483,7 +483,7 @@ export async function registerCommands(context: vscode.ExtensionContext) {
     await safeRegisterCommand('bslAnalyzer.validateMethodCall', async () => {
         // ✅ ИСПРАВЛЕНИЕ: Приоритет BSL файлу из visibleTextEditors (activeTextEditor может быть Output)
         const editor = vscode.window.visibleTextEditors.find(e => e.document.languageId === 'bsl') ||
-                       vscode.window.activeTextEditor;
+            vscode.window.activeTextEditor;
 
         if (!editor || editor.document.languageId !== 'bsl') {
             vscode.window.showWarningMessage('Please open a BSL file and select a method call');
@@ -560,13 +560,13 @@ export async function registerCommands(context: vscode.ExtensionContext) {
     await safeRegisterCommand('bslAnalyzer.restartServer', async () => {
         updateStatusBar('BSL Analyzer: Restarting...');
         outputChannel.appendLine('🔄 Restarting LSP server...');
-        
+
         try {
             await stopLanguageClient();
 
             outputChannel.appendLine('🚀 Starting new LSP client...');
             await startLanguageClient(context);
-            
+
             vscode.window.showInformationMessage('✅ BSL Analyzer server restarted');
             outputChannel.appendLine('✅ LSP server restart completed');
         } catch (error) {
@@ -677,7 +677,7 @@ export async function registerCommands(context: vscode.ExtensionContext) {
         // ✅ ИСПРАВЛЕНИЕ: Приоритет отдаём BSL файлу из visibleTextEditors, а не activeTextEditor
         // Проблема: activeTextEditor может быть Output панелью с languageId "Log"
         const editor = vscode.window.visibleTextEditors.find(e => e.document.languageId === 'bsl') ||
-                       vscode.window.activeTextEditor;
+            vscode.window.activeTextEditor;
 
         if (!editor || editor.document.languageId !== 'bsl') {
             vscode.window.showWarningMessage('Нет открытого BSL файла');
@@ -788,8 +788,30 @@ export async function registerCommands(context: vscode.ExtensionContext) {
         }
     });
 
+    // MILESTONE 2.20.3: Register bsl.getCurrentContext command (proxy to LSP)
+    await safeRegisterCommand('bsl.getCurrentContext', async (params: unknown) => {
+        const client = getLanguageClient();
+        if (!client || !client.isRunning()) {
+            outputChannel.appendLine('⚠️ bsl.getCurrentContext: LSP client not running');
+            return null;
+        }
+
+        try {
+            outputChannel.appendLine(`🔍 bsl.getCurrentContext called with params: ${JSON.stringify(params)}`);
+            const result = await client.sendRequest('workspace/executeCommand', {
+                command: 'bsl.getCurrentContext',
+                arguments: [params]
+            });
+            outputChannel.appendLine(`✅ bsl.getCurrentContext result: ${JSON.stringify(result)}`);
+            return result;
+        } catch (error) {
+            outputChannel.appendLine(`❌ Error calling bsl.getCurrentContext: ${error}`);
+            return null;
+        }
+    });
+
     // Устанавливаем флаг, что команды зарегистрированы
     commandsRegistered = true;
-    outputChannel.appendLine('✅ Successfully registered 16 extension commands');
+    outputChannel.appendLine('✅ Successfully registered 17 extension commands');
 }
 

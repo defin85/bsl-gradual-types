@@ -197,11 +197,7 @@ impl TreeSitterAdapter {
     ///
     /// В BSL точка с запятой ОБЯЗАТЕЛЬНА между операторами, кроме последнего оператора
     /// перед закрывающим ключевым словом (КонецФункции, КонецПроцедуры).
-    fn check_missing_semicolons(
-        node: &Node,
-        source: &str,
-        lines: &[String],
-    ) -> Vec<ParseError> {
+    fn check_missing_semicolons(node: &Node, source: &str, lines: &[String]) -> Vec<ParseError> {
         let mut errors = Vec::new();
 
         // Проверяем только тела функций и процедур
@@ -234,9 +230,17 @@ impl TreeSitterAdapter {
         for child in func_node.children(&mut cursor) {
             match child.kind() {
                 // Statements, которые должны заканчиваться точкой с запятой (если не последние)
-                "if_statement" | "while_statement" | "for_statement" | "for_each_statement"
-                | "assignment_statement" | "call_statement" | "return_statement"
-                | "break_statement" | "continue_statement" | "var_statement" | "try_statement" => {
+                "if_statement"
+                | "while_statement"
+                | "for_statement"
+                | "for_each_statement"
+                | "assignment_statement"
+                | "call_statement"
+                | "return_statement"
+                | "break_statement"
+                | "continue_statement"
+                | "var_statement"
+                | "try_statement" => {
                     statements.push(child);
                 }
                 // Конец функции/процедуры
@@ -1171,9 +1175,21 @@ impl TreeSitterAdapter {
         let mut function = None;
         let mut args = Vec::new();
 
+        // ✅ MILESTONE 3.5 FIX: Обрабатываем паттерн вызова метода
+        // Tree-sitter создаёт: call_expression { access, ".", method_call }
+        // Нужно собрать PropertyAccess из access + method_call
+        let mut access_node = None;
+        let mut method_call_node = None;
+
         for child in node.children(&mut cursor) {
             match child.kind() {
-                "identifier" | "property_access" | "access" => {
+                "access" => {
+                    access_node = Some(child);
+                }
+                "method_call" => {
+                    method_call_node = Some(child);
+                }
+                "identifier" | "property_access" => {
                     if function.is_none() {
                         function = Self::convert_expression(&child, source)?;
                     }
@@ -1193,6 +1209,55 @@ impl TreeSitterAdapter {
             }
         }
 
+        // ✅ MILESTONE 3.5: Если есть access + method_call → создаём PropertyAccess
+        if let (Some(access), Some(method)) = (access_node, method_call_node) {
+            // Получаем object из access
+            let object = Self::convert_expression(&access, source)?
+                .ok_or_else(|| "Failed to convert access node".to_string())?;
+
+            // Получаем имя метода из method_call И его span
+            let mut method_cursor = method.walk();
+            let mut method_name = String::new();
+            let mut method_args = Vec::new();
+            let mut method_identifier_span = span; // По умолчанию весь span
+
+            for child in method.children(&mut method_cursor) {
+                match child.kind() {
+                    "identifier" => {
+                        method_name = Self::node_text(&child, source);
+                        method_identifier_span = Self::node_to_span(&child, source);
+                        // ✅ Span только имени метода!
+                    }
+                    "arguments" => {
+                        // Парсим аргументы метода
+                        let mut args_cursor = child.walk();
+                        for arg_child in child.children(&mut args_cursor) {
+                            if arg_child.kind() == "expression" {
+                                if let Some(expr) = Self::convert_expression(&arg_child, source)? {
+                                    method_args.push(expr);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Создаём PropertyAccess для объекта.метод с span ТОЛЬКО метода
+            let property_access = Expression::PropertyAccess {
+                object: Box::new(object),
+                property: method_name,
+                span: method_identifier_span, // ✅ ИСПРАВЛЕНИЕ: span только имени метода
+            };
+
+            return Ok(Some(Expression::Call {
+                function: Box::new(property_access),
+                args: method_args,
+                span: method_identifier_span, // ✅ ИСПРАВЛЕНИЕ: span только имени метода для диагностики
+            }));
+        }
+
+        // Стандартный случай: обычная функция
         if let Some(func) = function {
             Ok(Some(Expression::Call {
                 function: Box::new(func),

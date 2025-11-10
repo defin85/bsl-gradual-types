@@ -592,8 +592,8 @@
         "analyze": "node esbuild.js --production --analyze",
         "copy-binaries": "node scripts/copy-binaries.js",
         "copy-binaries:force": "node scripts/copy-binaries.js --force",
-        "build:wasm": "node scripts/build-wasm.js type_details && node scripts/build-wasm.js quick_actions",
-        "build:wasm:release": "node scripts/build-wasm.js type_details --release && node scripts/build-wasm.js quick_actions --release",
+        "build:wasm": "node scripts/build-all-wasm.js",
+        "build:wasm:release": "node scripts/build-all-wasm.js --release",
         "watch:wasm:type-details": "cd ../frontend && trunk watch type_details.html --dist ../vscode-extension/media/webview",
         "watch:wasm:quick-actions": "cd ../frontend && trunk watch quick_actions.html --dist ../vscode-extension/media/webview"
     },

@@ -4,6 +4,7 @@
 //! It communicates with the extension via postMessage API.
 
 use leptos::prelude::*;
+use wasm_bindgen::prelude::wasm_bindgen;
 use web_sys::console;
 
 use super::common::{send_to_vscode, setup_vscode_listener, VsCodeMessage};
@@ -69,4 +70,3 @@ pub fn start_quick_actions_app() {
     console_error_panic_hook::set_once();
     leptos::mount::mount_to_body(VsCodeQuickActionsApp);
 }
-

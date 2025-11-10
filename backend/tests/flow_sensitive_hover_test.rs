@@ -64,7 +64,20 @@ async fn test_hover_on_method_call_shows_variable_type() {
     );
 
     let hover_text = hover_result.unwrap();
-    println!("Hover result (test_hover_on_method_call_shows_variable_type):\n{}", hover_text);
+    println!(
+        "Hover result (test_hover_on_method_call_shows_variable_type):\n{}",
+        hover_text
+    );
+
+    // ✅ НОВОЕ: Проверим диагностику для этого кода
+    let diagnostics = service
+        .get_diagnostics(code)
+        .await
+        .expect("Failed to get diagnostics");
+    println!("\n=== DIAGNOSTICS ===");
+    for diag in &diagnostics {
+        println!("  Line {}: {}", diag.line, diag.message);
+    }
 
     // Проверяем, что hover показывает информацию о переменной (может быть "Кол" или "ТаблицаТип")
     assert!(
@@ -158,13 +171,13 @@ async fn test_hover_on_dictionary_method() {
         .await
         .expect("Failed to get hover info");
 
-    assert!(
-        hover_result.is_some(),
-        "❌ Hover должен вернуть информацию"
-    );
+    assert!(hover_result.is_some(), "❌ Hover должен вернуть информацию");
 
     let hover_text = hover_result.unwrap();
-    println!("Hover result (test_hover_on_dictionary_method):\n{}", hover_text);
+    println!(
+        "Hover result (test_hover_on_dictionary_method):\n{}",
+        hover_text
+    );
 
     // Проверяем, что hover показывает информацию о переменной
     assert!(
@@ -217,7 +230,10 @@ async fn test_hover_multiple_variables_flow_sensitive() {
         .await
         .expect("Failed to get hover info");
 
-    assert!(hover_array.is_some(), "❌ Hover на МассивДанных должен вернуть информацию");
+    assert!(
+        hover_array.is_some(),
+        "❌ Hover на МассивДанных должен вернуть информацию"
+    );
     let hover_array_text = hover_array.unwrap();
     println!("Hover for МассивДанных:\n{}", hover_array_text);
 
@@ -278,13 +294,13 @@ async fn test_hover_nested_method_calls() {
         .await
         .expect("Failed to get hover info");
 
-    assert!(
-        hover_result.is_some(),
-        "❌ Hover должен вернуть информацию"
-    );
+    assert!(hover_result.is_some(), "❌ Hover должен вернуть информацию");
 
     let hover_text = hover_result.unwrap();
-    println!("Hover result (test_hover_nested_method_calls):\n{}", hover_text);
+    println!(
+        "Hover result (test_hover_nested_method_calls):\n{}",
+        hover_text
+    );
 
     println!("✅ PASSED: test_hover_nested_method_calls");
 }
@@ -370,7 +386,10 @@ async fn test_hover_on_method_name() {
         .await
         .expect("Failed to get hover info");
 
-    println!("Hover result (test_hover_on_method_name):\n{:?}", hover_result);
+    println!(
+        "Hover result (test_hover_on_method_name):\n{:?}",
+        hover_result
+    );
 
     println!("✅ PASSED: test_hover_on_method_name");
 }
@@ -395,7 +414,10 @@ async fn test_hover_with_typed_parameters() {
         .await
         .expect("Failed to get hover info");
 
-    println!("Hover result (test_hover_with_typed_parameters):\n{:?}", hover_result);
+    println!(
+        "Hover result (test_hover_with_typed_parameters):\n{:?}",
+        hover_result
+    );
 
     // Основная проверка - что hover работает на параметре функции
     assert!(
@@ -464,10 +486,7 @@ async fn test_hover_edge_case_eof() {
     // Позиция за пределами файла
     let result = service.get_hover_info(code, 100, 0).await;
 
-    assert!(
-        result.is_ok(),
-        "❌ Hover на EOF не должен крашиться"
-    );
+    assert!(result.is_ok(), "❌ Hover на EOF не должен крашиться");
     // Note: hover на EOF может вернуть Some или None - главное не крашится
     let _ = result.unwrap();
 
@@ -503,10 +522,7 @@ async fn test_hover_edge_case_zero_position() {
     // Позиция (0, 0) — начало файла
     let result = service.get_hover_info(code, 0, 0).await;
 
-    assert!(
-        result.is_ok(),
-        "❌ Hover на (0,0) не должен крашиться"
-    );
+    assert!(result.is_ok(), "❌ Hover на (0,0) не должен крашиться");
 
     println!("✅ PASSED: test_hover_edge_case_zero_position");
 }

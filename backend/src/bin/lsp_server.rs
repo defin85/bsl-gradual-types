@@ -2009,19 +2009,24 @@ impl BslLanguageServer {
         params: GetCurrentContextParams,
     ) -> JsonRpcResult<CurrentContextResponse> {
         info!(
-            "Custom command: bsl.getCurrentContext - {}:{}",
-            params.line, params.character
+            "Custom command: bsl.getCurrentContext - {}:{}:{}",
+            params.uri, params.line, params.character
         );
 
         // Парсим URI
         let uri = tower_lsp::lsp_types::Url::parse(&params.uri).map_err(|e| {
+            error!("Failed to parse URI: {}", e);
             tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e))
         })?;
 
         // Получаем содержимое файла (из кеша или с диска)
         let file_content = match self.documents.read().await.get(&uri) {
-            Some(content) => content.clone(),
+            Some(content) => {
+                info!("✅ Found document in cache");
+                content.clone()
+            }
             None => {
+                info!("⚠️ Document not in cache, reading from disk");
                 // Fallback: читаем с диска
                 match uri.to_file_path() {
                     Ok(path) => std::fs::read_to_string(&path).map_err(|e| {
@@ -2049,8 +2054,10 @@ impl BslLanguageServer {
 
         // Получаем SemanticProgram через TypeSystemService
         if let Some(service) = self.get_type_service() {
+            info!("✅ TypeSystemService available");
             match service.get_semantic_tree(&file_content, &file_path).await {
                 Ok(semantic_tree_dto) => {
+                    info!("✅ Got semantic tree");
                     match find_containing_function_in_dto(
                         &semantic_tree_dto,
                         params.line,
@@ -2082,8 +2089,14 @@ impl BslLanguageServer {
                 }
             }
         } else {
-            error!("TypeSystemService not yet initialized");
-            Err(tower_lsp::jsonrpc::Error::internal_error())
+            // ✅ GRACEFUL DEGRADATION: Возвращаем пустой контекст вместо ошибки
+            warn!("⚠️ TypeSystemService not yet initialized - returning empty context");
+            Ok(CurrentContextResponse {
+                function_name: None,
+                function_kind: "none".to_string(),
+                params: None,
+                return_type: None,
+            })
         }
     }
 

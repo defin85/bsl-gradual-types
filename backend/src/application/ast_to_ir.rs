@@ -188,6 +188,19 @@ impl AstToIrConverter {
                 span: ast_span,
             } => {
                 if let Expression::Identifier { name: var_name, .. } = target {
+                    // ✅ ИСПРАВЛЕНИЕ Milestone 3.5: Обрабатываем value expression ПЕРЕД Assignment
+                    // Это создаст промежуточные узлы (FunctionCall, MemberAccess) для hover
+                    let value_node_idx = if let Expression::Call {
+                        function,
+                        args,
+                        span: call_span,
+                    } = &value
+                    {
+                        self.convert_call_expression(*function.clone(), args.clone(), *call_span)?
+                    } else {
+                        None
+                    };
+
                     let value_type = self.infer_expression_type(&value);
                     let span = self.ast_span_to_ir_span(ast_span);
 
@@ -248,6 +261,7 @@ impl AstToIrConverter {
                         kind: SemanticNodeKind::Assignment {
                             variable: var_name.clone(),
                             value_type: value_type.clone(),
+                            value_node: value_node_idx, // ✅ MILESTONE 3.5: сохраняем индекс узла value
                         },
                         span,
                         scope_id: self.current_scope,
@@ -512,8 +526,7 @@ impl AstToIrConverter {
 
                 // Обрабатываем как FunctionCall
                 if let Expression::Call { function, args, .. } = expression {
-                    self.convert_call_expression(*function, args, span)?;
-                    return Ok(Some(self.nodes.len() - 1));
+                    return self.convert_call_expression(*function, args, span); // ✅ Возвращаем индекс
                 } else if let Expression::PropertyAccess {
                     object, property, ..
                 } = expression
@@ -521,7 +534,7 @@ impl AstToIrConverter {
                     // ✅ Извлекаем ИМЯ переменной (только для Identifier)
                     let object_name = match object.as_ref() {
                         Expression::Identifier { name, .. } => Some(name.clone()),
-                        _ => None,  // Для сложных выражений object_name = None
+                        _ => None, // Для сложных выражений object_name = None
                     };
 
                     // Инферим ТИП объекта (всегда)
@@ -529,8 +542,8 @@ impl AstToIrConverter {
 
                     let node = SemanticNode {
                         kind: SemanticNodeKind::MemberAccess {
-                            object_name,    // ✅ Имя переменной
-                            object_type,    // ✅ Тип переменной
+                            object_name, // ✅ Имя переменной
+                            object_type, // ✅ Тип переменной
                             member_name: property,
                             is_method: true,
                         },
@@ -677,7 +690,8 @@ impl AstToIrConverter {
         function: Expression,
         args: Vec<Expression>,
         span: Span,
-    ) -> Result<()> {
+    ) -> Result<Option<usize>> {
+        // ✅ Возвращаем индекс созданного узла
         let function_name = match function {
             Expression::Identifier { name, .. } => name,
             Expression::PropertyAccess {
@@ -703,7 +717,7 @@ impl AstToIrConverter {
                 let node = SemanticNode {
                     kind: SemanticNodeKind::FunctionCall {
                         function_name: property.clone(),
-                        object_name,  // ✅ НОВОЕ: имя объекта для методов
+                        object_name, // ✅ НОВОЕ: имя объекта для методов
                         object_type: Some(object_type),
                         arg_types,
                     },
@@ -712,7 +726,7 @@ impl AstToIrConverter {
                 };
 
                 self.nodes.push(node);
-                return Ok(());
+                return Ok(Some(self.nodes.len() - 1)); // ✅ Возвращаем индекс
             }
             _ => "Unknown".to_string(),
         };
@@ -725,7 +739,7 @@ impl AstToIrConverter {
         let node = SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name,
-                object_name: None,  // ✅ НОВОЕ: обычная функция, не метод
+                object_name: None, // ✅ НОВОЕ: обычная функция, не метод
                 object_type: None,
                 arg_types,
             },
@@ -734,7 +748,7 @@ impl AstToIrConverter {
         };
 
         self.nodes.push(node);
-        Ok(())
+        Ok(Some(self.nodes.len() - 1)) // ✅ Возвращаем индекс
     }
 
     /// Вывод типа выражения (простая эвристика)
@@ -837,7 +851,6 @@ impl AstToIrConverter {
 
         span
     }
-
 
     /// Попытка вывести Generic тип из вызова метода коллекции
     ///

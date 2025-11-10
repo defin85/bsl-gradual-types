@@ -517,6 +517,7 @@ fn render_single_node(
         SemanticNodeKind::Assignment {
             variable,
             value_type,
+            ..
         } => (
             "node-assignment",
             "✏️",

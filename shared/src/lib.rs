@@ -3,6 +3,7 @@
 //! Common types, domain logic, and API contracts shared across all crates.
 //! This crate contains no I/O or heavy dependencies to ensure WASM compatibility.
 
+pub mod analysis; // Milestone 3.7: Type Guards & Narrowing Engine
 pub mod api;
 pub mod domain;
 pub mod engine;

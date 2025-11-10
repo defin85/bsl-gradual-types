@@ -137,8 +137,16 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
         const webviewPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'webview').fsPath;
         const files = fs.readdirSync(webviewPath);
 
+        this.outputChannel?.appendLine(`🔍 Quick Actions: Looking for WASM files in ${webviewPath}`);
+        this.outputChannel?.appendLine(`   Available files: ${files.join(', ')}`);
+
         const wasmFile = files.find((f: string) => f.match(/^bsl-frontend-.*\.wasm$/));
         const jsFile = files.find((f: string) => f.match(/^bsl-frontend-.*\.js$/));
+        // ✅ ИСПРАВЛЕНИЕ: Ищем специфично tailwind CSS для Quick Actions
+        const cssFile = files.find((f: string) => f.match(/^tailwind-.*\.css$/)) ||
+            files.find((f: string) => f.match(/\.css$/));
+
+        this.outputChannel?.appendLine(`   Found: WASM=${wasmFile}, JS=${jsFile}, CSS=${cssFile}`);
 
         if (!wasmFile || !jsFile) {
             throw new Error('WASM bundle not found. Run: npm run build:wasm');
@@ -150,11 +158,13 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', jsFile)
         );
-        const styleUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'tailwind.css')
-        );
+        const styleUri = cssFile ? webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', cssFile)
+        ) : null;
 
         const nonce = getNonce();
+
+        const styleTag = styleUri ? `<link href="${styleUri}" rel="stylesheet">` : '';
 
         return `<!DOCTYPE html>
 <html lang="ru">
@@ -163,19 +173,36 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'none';
+                   connect-src ${webview.cspSource};
                    style-src ${webview.cspSource};
                    script-src 'nonce-${nonce}' 'wasm-unsafe-eval';
                    img-src ${webview.cspSource} data:;">
-    <link href="${styleUri}" rel="stylesheet">
+    ${styleTag}
     <title>BSL Quick Actions</title>
 </head>
 <body>
     <div id="root"></div>
     <script type="module" nonce="${nonce}">
         import init, { start_quick_actions_app } from '${scriptUri}';
-        init('${wasmUri}').then(() => {
-            start_quick_actions_app();
-        });
+        
+        console.log('[Quick Actions] Initializing WASM...');
+        console.log('[Quick Actions] WASM URI:', '${wasmUri}');
+        console.log('[Quick Actions] Script URI:', '${scriptUri}');
+        
+        init('${wasmUri}')
+            .then(() => {
+                console.log('[Quick Actions] WASM initialized successfully');
+                start_quick_actions_app();
+                console.log('[Quick Actions] App started');
+            })
+            .catch(err => {
+                console.error('[Quick Actions] Failed to initialize:', err);
+                document.getElementById('root').innerHTML = 
+                    '<div style="padding: 20px; color: red;">' +
+                    '<h3>❌ Failed to load Quick Actions</h3>' +
+                    '<pre>' + err.toString() + '</pre>' +
+                    '</div>';
+            });
     <\/script>
 </body>
 </html>`;

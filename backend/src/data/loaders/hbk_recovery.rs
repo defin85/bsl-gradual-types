@@ -46,6 +46,9 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
+// Импортируем типы для callback
+use crate::data::loaders::progress::ProgressUpdateType;
+
 /// Компонента для восстановления повреждённых .hbk файлов
 pub struct HbkRecovery {
     options: RecoveryOptions,
@@ -96,12 +99,13 @@ impl HbkRecovery {
         Self { options }
     }
 
-    /// Восстановить .hbk файл
+    /// Восстановить .hbk файл с опциональной callback для отслеживания прогресса
     ///
     /// # Аргументы
     ///
     /// * `hbk_path` - Путь к исходному .hbk файлу
     /// * `output_dir` - Директория для сохранения результатов (по умолчанию: рядом с исходным)
+    /// * `progress_callback` - Опциональная callback функция для отслеживания прогресса
     ///
     /// # Возвращает
     ///
@@ -113,16 +117,72 @@ impl HbkRecovery {
     /// - Файл слишком большой (> max_file_size)
     /// - ZIP signature не найдена
     /// - Ошибка распаковки
-    pub fn recover(
+    pub fn recover_with_progress<F>(
         &mut self,
         hbk_path: &Path,
         output_dir: Option<&Path>,
-    ) -> Result<RecoveryResult> {
+        progress_callback: Option<F>,
+    ) -> Result<RecoveryResult>
+    where
+        F: Fn(ProgressUpdateType) + Clone,
+    {
         info!("🔧 Начинаем восстановление: {:?}", hbk_path);
 
         // Проверяем существование файла
         if !hbk_path.exists() {
             return Err(anyhow!("Файл не существует: {:?}", hbk_path));
+        }
+
+        // Определяем директорию для вывода
+        let output_dir = match output_dir {
+            Some(dir) => dir.to_path_buf(),
+            None => hbk_path
+                .parent()
+                .ok_or_else(|| anyhow!("Не удалось определить родительскую директорию"))?
+                .to_path_buf(),
+        };
+
+        // Получаем имя файла
+        let file_stem = hbk_path
+            .file_stem()
+            .ok_or_else(|| anyhow!("Не удалось получить имя файла"))?;
+
+        // 🆕 Проверяем кеш ПЕРЕД началом обработки
+        let extract_dir_name = format!("rebuilt.{}", file_stem.to_string_lossy());
+        let extract_dir = output_dir.join(&extract_dir_name);
+
+        if extract_dir.exists() && extract_dir.is_dir() {
+            match fs::read_dir(&extract_dir) {
+                Ok(entries) => {
+                    let entry_count = entries.count();
+                    if entry_count > 0 {
+                        info!(
+                            "⚡ Используем кеш: {:?} ({} файлов)",
+                            extract_dir, entry_count
+                        );
+
+                        // Возвращаем результат из кеша (БЕЗ распаковки)
+                        return Ok(RecoveryResult {
+                            repaired_zip_path: output_dir
+                                .join(format!("{}_recovered.zip", file_stem.to_string_lossy())),
+                            extracted_dir: Some(extract_dir),
+                            signature_offset: 0, // Неизвестно из кеша
+                            recovered_size: 0,   // Неизвестно из кеша
+                        });
+                    } else {
+                        warn!(
+                            "⚠️ Кеш {:?} пустой, пересоздаём",
+                            extract_dir
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "⚠️ Ошибка чтения кеша {:?}: {}, пересоздаём",
+                        extract_dir, e
+                    );
+                }
+            }
         }
 
         // Проверяем размер файла
@@ -150,15 +210,6 @@ impl HbkRecovery {
 
         info!("✅ ZIP signature найдена на offset: {}", signature_offset);
 
-        // Определяем директорию для вывода
-        let output_dir = match output_dir {
-            Some(dir) => dir.to_path_buf(),
-            None => hbk_path
-                .parent()
-                .ok_or_else(|| anyhow!("Не удалось определить родительскую директорию"))?
-                .to_path_buf(),
-        };
-
         // Создаём директорию если её нет
         fs::create_dir_all(&output_dir)
             .context(format!("Не удалось создать директорию: {:?}", output_dir))?;
@@ -173,9 +224,6 @@ impl HbkRecovery {
             ))?;
 
         // Формируем путь для восстановленного ZIP
-        let file_stem = hbk_path
-            .file_stem()
-            .ok_or_else(|| anyhow!("Не удалось получить имя файла"))?;
         let repaired_zip_path =
             output_dir.join(format!("{}_recovered.zip", file_stem.to_string_lossy()));
 
@@ -194,7 +242,7 @@ impl HbkRecovery {
             // Добавляем префикс "rebuilt." для совместимости с SyntaxHelperParser
             let extract_dir = output_dir.join(format!("rebuilt.{}", file_stem.to_string_lossy()));
 
-            extractor::unpack_zip(&repaired_zip_path, &extract_dir)
+            extractor::unpack_zip_with_progress(&repaired_zip_path, &extract_dir, progress_callback.clone())
                 .context("Распаковка ZIP архива")?;
 
             info!("✅ Архив распакован в: {:?}", extract_dir);
@@ -216,6 +264,85 @@ impl HbkRecovery {
             signature_offset,
             recovered_size,
         })
+    }
+
+    /// Восстановить .hbk файл (без callback)
+    ///
+    /// # Аргументы
+    ///
+    /// * `hbk_path` - Путь к исходному .hbk файлу
+    /// * `output_dir` - Директория для сохранения результатов (по умолчанию: рядом с исходным)
+    ///
+    /// # Возвращает
+    ///
+    /// `RecoveryResult` с информацией о восстановленных файлах
+    pub fn recover(
+        &mut self,
+        hbk_path: &Path,
+        output_dir: Option<&Path>,
+    ) -> Result<RecoveryResult> {
+        self.recover_with_progress(hbk_path, output_dir, None::<fn(ProgressUpdateType)>)
+    }
+
+    /// Очистить кеш для конкретного .hbk файла
+    ///
+    /// Удаляет распакованную директорию кеша для указанного .hbk файла.
+    ///
+    /// # Аргументы
+    ///
+    /// * `hbk_path` - Путь к исходному .hbk файлу
+    /// * `output_dir` - Директория, где хранится кеш (по умолчанию: рядом с исходным)
+    ///
+    /// # Возвращает
+    ///
+    /// `Ok(())` если кеш был удалён или не существовал
+    ///
+    /// # Ошибки
+    ///
+    /// - Ошибка при удалении директории
+    ///
+    /// # Пример
+    ///
+    /// ```no_run
+    /// use bsl_backend::data::loaders::hbk_recovery::HbkRecovery;
+    /// use std::path::Path;
+    ///
+    /// let mut recovery = HbkRecovery::new();
+    /// recovery.clear_cache(
+    ///     Path::new("shcntx_ru.hbk"),
+    ///     Some(Path::new("output"))
+    /// )?;
+    /// # Ok::<(), anyhow::Error>(())
+    /// ```
+    pub fn clear_cache(
+        hbk_path: &Path,
+        output_dir: Option<&Path>,
+    ) -> Result<()> {
+        // Определяем директорию для вывода
+        let output_dir = match output_dir {
+            Some(dir) => dir.to_path_buf(),
+            None => hbk_path
+                .parent()
+                .ok_or_else(|| anyhow!("Не удалось определить родительскую директорию"))?
+                .to_path_buf(),
+        };
+
+        let file_stem = hbk_path
+            .file_stem()
+            .ok_or_else(|| anyhow!("Не удалось получить имя файла"))?;
+
+        let extract_dir_name = format!("rebuilt.{}", file_stem.to_string_lossy());
+        let extract_dir = output_dir.join(&extract_dir_name);
+
+        if extract_dir.exists() {
+            fs::remove_dir_all(&extract_dir)
+                .context(format!("Не удалось удалить кеш: {:?}", extract_dir))?;
+            info!("🗑️  Кеш удалён: {:?}", extract_dir);
+        } else {
+            debug!("ℹ️  Кеш не найден: {:?}", extract_dir);
+        }
+
+        Ok(())
     }
 }
 
@@ -552,7 +679,7 @@ mod extractor {
         Ok(bytes_copied as usize)
     }
 
-    /// Распаковывает ZIP архив в указанную директорию
+    /// Распаковывает ZIP архив в указанную директорию с опциональным progress callback
     ///
     /// Использует библиотеку `zip` для распаковки.
     ///
@@ -560,12 +687,20 @@ mod extractor {
     ///
     /// * `zip_path` - Путь к ZIP архиву
     /// * `target_dir` - Директория для распаковки
+    /// * `progress_callback` - Опциональная callback функция для отслеживания прогресса
     ///
     /// # Безопасность
     ///
     /// Проверяет, что все файлы в архиве распаковываются внутри target_dir
     /// (защита от zip-slip атак).
-    pub(super) fn unpack_zip(zip_path: &Path, target_dir: &Path) -> Result<()> {
+    pub(super) fn unpack_zip_with_progress<F>(
+        zip_path: &Path,
+        target_dir: &Path,
+        progress_callback: Option<F>,
+    ) -> Result<()>
+    where
+        F: Fn(crate::data::loaders::progress::ProgressUpdateType),
+    {
         debug!("📂 Распаковываем ZIP {:?} → {:?}", zip_path, target_dir);
 
         // Создаём целевую директорию
@@ -581,6 +716,13 @@ mod extractor {
         let total_files = archive.len();
         info!("📊 Файлов в архиве: {}", total_files);
 
+        // Извлекаем имя архива для progress сообщений
+        let file_name = zip_path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
         // Распаковываем каждый файл
         for i in 0..total_files {
             // Логируем прогресс каждые 1000 файлов или в конце
@@ -591,6 +733,17 @@ mod extractor {
                     total_files,
                     (i + 1) * 100 / total_files
                 );
+            }
+
+            // ✅ НОВОЕ: Отправляем UI прогресс каждые 100 файлов
+            if i % 100 == 0 || i == total_files - 1 {
+                if let Some(ref callback) = progress_callback {
+                    callback(crate::data::loaders::progress::ProgressUpdateType::hbk_extraction(
+                        file_name.clone(),
+                        i + 1,
+                        total_files,
+                    ));
+                }
             }
 
             let mut file = archive
@@ -625,6 +778,24 @@ mod extractor {
 
         info!("✅ ZIP распакован успешно: {} файлов", total_files);
         Ok(())
+    }
+
+    /// Распаковывает ZIP архив в указанную директорию (без callback)
+    ///
+    /// Использует библиотеку `zip` для распаковки.
+    ///
+    /// # Аргументы
+    ///
+    /// * `zip_path` - Путь к ZIP архиву
+    /// * `target_dir` - Директория для распаковки
+    ///
+    /// # Безопасность
+    ///
+    /// Проверяет, что все файлы в архиве распаковываются внутри target_dir
+    /// (защита от zip-slip атак).
+    #[allow(dead_code)]
+    pub(super) fn unpack_zip(zip_path: &Path, target_dir: &Path) -> Result<()> {
+        unpack_zip_with_progress(zip_path, target_dir, None::<fn(crate::data::loaders::progress::ProgressUpdateType)>)
     }
 }
 
@@ -920,6 +1091,205 @@ mod tests {
         assert!(
             result.extracted_dir.is_none(),
             "extracted_dir должна быть None при auto_extract = false"
+        );
+    }
+
+    #[test]
+    fn test_recover_with_progress_callback() {
+        let temp_dir = tempdir().unwrap();
+        let test_file_path = temp_dir.path().join("test.hbk");
+
+        let junk_offset = 1500;
+
+        // Используем auto_extract = false чтобы не нужно было распаковывать
+        let mut file = File::create(&test_file_path).unwrap();
+        file.write_all(&vec![0xFF; junk_offset]).unwrap();
+        file.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap(); // ZIP signature
+        file.write_all(&vec![0x00; 500]).unwrap();
+        drop(file);
+
+        // Восстанавливаем с progress callback
+        let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+            cleanup_temp: true,
+            auto_extract: false,
+            max_file_size: 10 * 1024 * 1024,
+        });
+
+        let callback_invocations = std::cell::RefCell::new(0);
+        let result = recovery
+            .recover_with_progress(&test_file_path, Some(temp_dir.path()), Some(|_update| {
+                *callback_invocations.borrow_mut() += 1;
+            }))
+            .unwrap();
+
+        // Проверяем что callback не вызывался (т.к. auto_extract = false)
+        assert_eq!(*callback_invocations.borrow(), 0, "Callback не должен быть вызван при auto_extract = false");
+
+        // Проверяем результат
+        assert_eq!(result.signature_offset, junk_offset);
+        assert!(result.repaired_zip_path.exists());
+    }
+
+    #[test]
+    fn test_progress_update_type_serialization() {
+        use crate::data::loaders::progress::ProgressUpdateType;
+
+        // Тест сериализации HbkExtraction
+        let update = ProgressUpdateType::hbk_extraction("shcntx_ru", 500, 1000);
+
+        if let ProgressUpdateType::HbkExtraction {
+            file_name,
+            extracted_files,
+            total_files,
+            percentage,
+        } = update
+        {
+            assert_eq!(file_name, "shcntx_ru");
+            assert_eq!(extracted_files, 500);
+            assert_eq!(total_files, 1000);
+            assert_eq!(percentage, 50); // 500/1000 = 50%
+        } else {
+            panic!("Expected HbkExtraction variant");
+        }
+
+        // Тест граничного случая: 0 файлов
+        let update_empty = ProgressUpdateType::hbk_extraction("test", 0, 0);
+        if let ProgressUpdateType::HbkExtraction { percentage, .. } = update_empty {
+            assert_eq!(percentage, 0);
+        } else {
+            panic!("Expected HbkExtraction variant");
+        }
+    }
+
+    #[test]
+    fn test_cache_reuse_on_second_recovery() {
+        use std::time::Instant;
+
+        let temp_dir = tempdir().unwrap();
+        let test_file_path = temp_dir.path().join("test.hbk");
+
+        // Создаём тестовый .hbk файл с ZIP signature
+        let junk_offset = 1000;
+        let mut file = File::create(&test_file_path).unwrap();
+        file.write_all(&vec![0xFF; junk_offset]).unwrap();
+        file.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap(); // ZIP signature
+        file.write_all(&vec![0x00; 500]).unwrap();
+        drop(file);
+
+        // Первый вызов - распаковка из .hbk
+        let start1 = Instant::now();
+        let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+            cleanup_temp: false,
+            auto_extract: false, // НЕ распаковываем для упрощения теста
+            max_file_size: 10 * 1024 * 1024,
+        });
+        let result1 = recovery.recover(&test_file_path, Some(temp_dir.path())).unwrap();
+        let duration1 = start1.elapsed();
+
+        assert!(result1.extracted_dir.is_none(), "extract = false -> None");
+
+        // Вручную создаём кеш директорию
+        let extract_dir = temp_dir.path().join("rebuilt.test");
+        fs::create_dir_all(&extract_dir).unwrap();
+
+        // Добавляем несколько файлов в кеш
+        for i in 0..5 {
+            File::create(extract_dir.join(format!("file_{}.txt", i))).unwrap();
+        }
+
+        // Второй вызов - должен использовать кеш
+        let start2 = Instant::now();
+        let mut recovery = HbkRecovery::new();
+        let result2 = recovery.recover(&test_file_path, Some(temp_dir.path())).unwrap();
+        let duration2 = start2.elapsed();
+
+        // Проверяем что второй вызов НАМНОГО БЫСТРЕЕ (т.к. не распаковывал)
+        assert!(
+            duration2 < duration1,
+            "Второй вызов должен быть быстрее (кеш): {:?} vs {:?}",
+            duration2,
+            duration1
+        );
+
+        // Проверяем что та же директория возвращена
+        assert_eq!(
+            result2.extracted_dir.as_ref().map(|p| p.to_string_lossy()),
+            Some(extract_dir.to_string_lossy()),
+            "Должна быть возвращена та же директория кеша"
+        );
+    }
+
+    #[test]
+    fn test_cache_not_used_when_empty() {
+        let temp_dir = tempdir().unwrap();
+        let test_file_path = temp_dir.path().join("test.hbk");
+
+        // Создаём тестовый .hbk файл
+        let junk_offset = 1000;
+        let mut file = File::create(&test_file_path).unwrap();
+        file.write_all(&vec![0xFF; junk_offset]).unwrap();
+        file.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap(); // ZIP signature
+        file.write_all(&vec![0x00; 500]).unwrap();
+        drop(file);
+
+        // Создаём пустую директорию кеша (без файлов)
+        let extract_dir = temp_dir.path().join("rebuilt.test");
+        fs::create_dir_all(&extract_dir).unwrap();
+
+        // Попытка восстановления - должна пропустить пустой кеш
+        let mut recovery = HbkRecovery::with_options(RecoveryOptions {
+            cleanup_temp: false,
+            auto_extract: false,
+            max_file_size: 10 * 1024 * 1024,
+        });
+
+        let result = recovery.recover(&test_file_path, Some(temp_dir.path()));
+
+        // Результат должен быть Ok, т.к. находится ZIP signature
+        assert!(
+            result.is_ok(),
+            "Восстановление должно пройти (кеш пустой, используется обычный путь)"
+        );
+    }
+
+    #[test]
+    fn test_clear_cache() {
+        let temp_dir = tempdir().unwrap();
+        let test_file_path = temp_dir.path().join("test.hbk");
+
+        // Создаём тестовый .hbk файл
+        let mut file = File::create(&test_file_path).unwrap();
+        file.write_all(&vec![0xFF; 100]).unwrap();
+        file.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap();
+        file.write_all(&vec![0x00; 100]).unwrap();
+        drop(file);
+
+        // Создаём директорию кеша
+        let extract_dir = temp_dir.path().join("rebuilt.test");
+        fs::create_dir_all(&extract_dir).unwrap();
+        File::create(extract_dir.join("file.txt")).unwrap();
+
+        assert!(extract_dir.exists(), "Кеш должен существовать");
+
+        // Очищаем кеш
+        let result = HbkRecovery::clear_cache(&test_file_path, Some(temp_dir.path()));
+
+        assert!(result.is_ok(), "clear_cache должен вернуть Ok");
+        assert!(!extract_dir.exists(), "Кеш должен быть удалён");
+    }
+
+    #[test]
+    fn test_clear_cache_nonexistent() {
+        let temp_dir = tempdir().unwrap();
+        let test_file_path = temp_dir.path().join("nonexistent.hbk");
+
+        // Пытаемся очистить кеш для несуществующего файла
+        let result = HbkRecovery::clear_cache(&test_file_path, Some(temp_dir.path()));
+
+        // Должен вернуть Ok, т.к. кеша не было
+        assert!(
+            result.is_ok(),
+            "clear_cache должен успешно обработать несуществующий кеш"
         );
     }
 }

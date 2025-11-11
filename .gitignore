@@ -34,6 +34,10 @@ vscode-extension/bin/*.exe
 vscode-extension/bin/*.dll
 vscode-extension/bin/*.so
 vscode-extension/bin/*.dylib
+vscode-extension/server/*.exe
+vscode-extension/server/*.dll
+vscode-extension/server/*.so
+vscode-extension/server/*.dylib
 
 # Test files
 *.bsl.test

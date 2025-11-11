@@ -25,10 +25,13 @@ fn test_ir_for_method_call_assignment() {
 
     // Конвертация AST → IR
     let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
-    let metadata =
-        Arc::new(bsl_shared::domain::metadata_lookup::TypeMetadataLookup::new(repository.clone()));
-    let ir = AstToIrConverter::convert(&ast_result.program, "test.bsl", repository, metadata)
-        .expect("Failed to convert to IR");
+    let ir = AstToIrConverter::convert(
+        ast_result.program,
+        code.to_string(),
+        "test.bsl".to_string(),
+        repository,
+    )
+    .expect("Failed to convert to IR");
 
     println!("\n=== IR NODES ===");
     for (i, node) in ir.nodes.iter().enumerate() {

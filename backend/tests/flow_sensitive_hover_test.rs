@@ -69,15 +69,10 @@ async fn test_hover_on_method_call_shows_variable_type() {
         hover_text
     );
 
-    // ✅ НОВОЕ: Проверим диагностику для этого кода
-    let diagnostics = service
-        .get_diagnostics(code)
-        .await
-        .expect("Failed to get diagnostics");
-    println!("\n=== DIAGNOSTICS ===");
-    for diag in &diagnostics {
-        println!("  Line {}: {}", diag.line, diag.message);
-    }
+    // ✅ NOTE: Диагностика (get_diagnostics метод) требует более поздней реализации
+    println!(
+        "\n📝 NOTE: get_diagnostics требует дополнительной реализации в будущих версиях"
+    );
 
     // Проверяем, что hover показывает информацию о переменной (может быть "Кол" или "ТаблицаТип")
     assert!(

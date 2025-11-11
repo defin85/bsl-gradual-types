@@ -861,6 +861,220 @@ impl SymbolTable {
 
         false
     }
+
+    /// Поиск переменной в заданной области видимости
+    ///
+    /// Возвращает TypeHint переменной, если она существует в указанном scope.
+    /// Не выполняет поиск в родительских scope (для этого используйте `lookup_variable_in_hierarchy`).
+    ///
+    /// # Примеры
+    ///
+    /// ```
+    /// # use bsl_shared::ir::{SymbolTable, TypeHint, Span};
+    /// let mut table = SymbolTable::new();
+    /// table.register_variable(
+    ///     table.root_scope,
+    ///     "x".to_string(),
+    ///     TypeHint::Explicit("Число".to_string()),
+    ///     Span::stub(),
+    /// );
+    ///
+    /// let hint = table.lookup_variable(table.root_scope, "x");
+    /// assert!(hint.is_some());
+    /// ```
+    pub fn lookup_variable(&self, scope_id: ScopeId, name: &str) -> Option<&TypeHint> {
+        self.scopes
+            .get(&scope_id)?
+            .variables
+            .get(name)
+            .map(|(hint, _)| hint)
+    }
+
+    /// Поиск переменной с подъёмом по цепочке родительских scope
+    ///
+    /// Ищет переменную начиная с указанного scope и поднимаясь вверх по иерархии
+    /// до root scope. Возвращает scope_id где была найдена переменная и её TypeHint.
+    ///
+    /// # Примеры
+    ///
+    /// ```
+    /// # use bsl_shared::ir::{SymbolTable, TypeHint, Span};
+    /// let mut table = SymbolTable::new();
+    /// table.register_variable(
+    ///     table.root_scope,
+    ///     "globalVar".to_string(),
+    ///     TypeHint::Explicit("Число".to_string()),
+    ///     Span::stub(),
+    /// );
+    ///
+    /// let child = table.create_scope(table.root_scope);
+    /// let result = table.lookup_variable_in_hierarchy(child, "globalVar");
+    /// assert!(result.is_some());
+    /// ```
+    pub fn lookup_variable_in_hierarchy(
+        &self,
+        scope_id: ScopeId,
+        name: &str,
+    ) -> Option<(ScopeId, &TypeHint)> {
+        let mut current = Some(scope_id);
+        while let Some(sid) = current {
+            if let Some(scope) = self.scopes.get(&sid) {
+                if let Some((hint, _)) = scope.variables.get(name) {
+                    return Some((sid, hint));
+                }
+                current = scope.parent;
+            } else {
+                break;
+            }
+        }
+        None
+    }
+
+    /// Обновление типа переменной в заданной области видимости с обработкой ошибок
+    ///
+    /// Альтернатива `update_variable_type()`, возвращающая `Result` для более явной обработки ошибок.
+    ///
+    /// # Errors
+    ///
+    /// Возвращает ошибку, если:
+    /// - Scope с указанным ID не существует
+    /// - Переменная с указанным именем не найдена в scope
+    pub fn update_variable_type_checked(
+        &mut self,
+        scope_id: ScopeId,
+        name: &str,
+        hint: TypeHint,
+    ) -> Result<(), String> {
+        let scope = self
+            .scopes
+            .get_mut(&scope_id)
+            .ok_or_else(|| format!("Scope {:?} not found", scope_id))?;
+
+        let (existing_hint, _span) = scope
+            .variables
+            .get_mut(name)
+            .ok_or_else(|| format!("Variable '{}' not found in scope {:?}", name, scope_id))?;
+
+        *existing_hint = hint;
+        Ok(())
+    }
+
+    /// Проверка существования переменной в scope
+    ///
+    /// # Примеры
+    ///
+    /// ```
+    /// # use bsl_shared::ir::{SymbolTable, TypeHint, Span};
+    /// let mut table = SymbolTable::new();
+    /// table.register_variable(
+    ///     table.root_scope,
+    ///     "x".to_string(),
+    ///     TypeHint::Explicit("Число".to_string()),
+    ///     Span::stub(),
+    /// );
+    ///
+    /// assert!(table.has_variable(table.root_scope, "x"));
+    /// assert!(!table.has_variable(table.root_scope, "y"));
+    /// ```
+    pub fn has_variable(&self, scope_id: ScopeId, name: &str) -> bool {
+        self.scopes
+            .get(&scope_id)
+            .map(|s| s.variables.contains_key(name))
+            .unwrap_or(false)
+    }
+
+    /// Поиск функции по имени
+    ///
+    /// # Примеры
+    ///
+    /// ```
+    /// # use bsl_shared::ir::{SymbolTable, FunctionSignature, Parameter};
+    /// let mut table = SymbolTable::new();
+    /// table.register_function(FunctionSignature {
+    ///     name: "МояФункция".to_string(),
+    ///     params: vec![],
+    ///     return_type: Some("Число".to_string()),
+    ///     is_export: false,
+    /// });
+    ///
+    /// assert!(table.find_function("МояФункция").is_some());
+    /// ```
+    pub fn find_function(&self, name: &str) -> Option<&FunctionSignature> {
+        self.global_functions.get(name)
+    }
+
+    /// Поиск процедуры по имени
+    pub fn find_procedure(&self, name: &str) -> Option<&FunctionSignature> {
+        self.global_procedures.get(name)
+    }
+
+    /// Получить родительский scope
+    ///
+    /// # Примеры
+    ///
+    /// ```
+    /// # use bsl_shared::ir::SymbolTable;
+    /// let mut table = SymbolTable::new();
+    /// let child = table.create_scope(table.root_scope);
+    ///
+    /// assert_eq!(table.get_parent_scope(child), Some(table.root_scope));
+    /// assert_eq!(table.get_parent_scope(table.root_scope), None);
+    /// ```
+    pub fn get_parent_scope(&self, scope_id: ScopeId) -> Option<ScopeId> {
+        self.scopes.get(&scope_id)?.parent
+    }
+
+    /// Итератор по всем переменным в scope
+    ///
+    /// Возвращает итератор по парам (имя переменной, TypeHint) для указанного scope.
+    /// Не включает переменные из родительских scope.
+    pub fn variables_in_scope(
+        &self,
+        scope_id: ScopeId,
+    ) -> Option<impl Iterator<Item = (&String, &TypeHint)>> {
+        self.scopes.get(&scope_id).map(|scope| {
+            scope
+                .variables
+                .iter()
+                .map(|(name, (hint, _))| (name, hint))
+        })
+    }
+
+    /// Получить количество глобальных функций
+    pub fn functions_count(&self) -> usize {
+        self.global_functions.len()
+    }
+
+    /// Получить количество глобальных процедур
+    pub fn procedures_count(&self) -> usize {
+        self.global_procedures.len()
+    }
+
+    /// Итератор по всем глобальным функциям
+    ///
+    /// Возвращает итератор по парам (имя функции, FunctionSignature)
+    pub fn iter_functions(&self) -> impl Iterator<Item = (&String, &FunctionSignature)> {
+        self.global_functions.iter()
+    }
+
+    /// Итератор по всем глобальным процедурам
+    ///
+    /// Возвращает итератор по парам (имя процедуры, FunctionSignature)
+    pub fn iter_procedures(&self) -> impl Iterator<Item = (&String, &FunctionSignature)> {
+        self.global_procedures.iter()
+    }
+
+    /// Итератор по всем scopes в таблице символов
+    ///
+    /// Используется для конвертации в DTO и других операций, требующих доступа ко всем scopes.
+    pub fn iter_all_scopes(&self) -> impl Iterator<Item = (&ScopeId, &Scope)> {
+        self.scopes.iter()
+    }
+
+    /// Количество scopes в таблице символов
+    pub fn scopes_count(&self) -> usize {
+        self.scopes.len()
+    }
 }
 
 impl Default for SymbolTable {
@@ -1161,8 +1375,8 @@ impl SemanticProgram {
     fn symbols_to_dto(&self, _include_flow_sensitive: bool) -> HashMap<String, SymbolInfoDto> {
         let mut result = HashMap::new();
 
-        // Обходим все scopes
-        for scope in self.symbols.scopes.values() {
+        // Обходим все scopes используя публичное API
+        for (_scope_id, scope) in self.symbols.iter_all_scopes() {
             for (var_name, (type_hint, span)) in &scope.variables {
                 let symbol = SymbolInfoDto {
                     name: var_name.clone(),
@@ -1182,8 +1396,8 @@ impl SemanticProgram {
             }
         }
 
-        // Добавляем функции
-        for (fn_name, sig) in &self.symbols.global_functions {
+        // Добавляем функции используя публичное API
+        for (fn_name, sig) in self.symbols.iter_functions() {
             let symbol = SymbolInfoDto {
                 name: fn_name.clone(),
                 kind: if sig.return_type.is_some() {
@@ -1821,5 +2035,457 @@ mod tests {
             node_dto.attributes.get("is_dynamic"),
             Some(&"false".to_string())
         );
+    }
+
+    // === НОВЫЕ ТЕСТЫ: Unit тестирование методов инкапсуляции SymbolTable (Milestone 2.19) ===
+
+    #[test]
+    fn test_lookup_variable_found() {
+        let mut table = SymbolTable::new();
+
+        table.register_variable(
+            table.root_scope,
+            "x".to_string(),
+            TypeHint::Explicit("Число".to_string()),
+            Span::stub(),
+        );
+
+        let hint = table.lookup_variable(table.root_scope, "x");
+        assert!(hint.is_some());
+
+        match hint.unwrap() {
+            TypeHint::Explicit(t) => assert_eq!(t, "Число"),
+            _ => panic!("Expected Explicit type hint"),
+        }
+    }
+
+    #[test]
+    fn test_lookup_variable_not_found() {
+        let table = SymbolTable::new();
+
+        let hint = table.lookup_variable(table.root_scope, "nonexistent");
+        assert!(hint.is_none());
+    }
+
+    #[test]
+    fn test_lookup_variable_in_hierarchy_finds_in_current_scope() {
+        let mut table = SymbolTable::new();
+
+        table.register_variable(
+            table.root_scope,
+            "x".to_string(),
+            TypeHint::Explicit("Строка".to_string()),
+            Span::stub(),
+        );
+
+        let result = table.lookup_variable_in_hierarchy(table.root_scope, "x");
+        assert!(result.is_some());
+
+        let (scope_id, hint) = result.unwrap();
+        assert_eq!(scope_id, table.root_scope);
+        match hint {
+            TypeHint::Explicit(t) => assert_eq!(t, "Строка"),
+            _ => panic!("Expected Explicit type hint"),
+        }
+    }
+
+    #[test]
+    fn test_lookup_variable_in_hierarchy_finds_in_parent_scope() {
+        let mut table = SymbolTable::new();
+
+        // Регистрируем в root scope
+        table.register_variable(
+            table.root_scope,
+            "global_var".to_string(),
+            TypeHint::Explicit("Число".to_string()),
+            Span::stub(),
+        );
+
+        // Создаём child scope
+        let child = table.create_scope(table.root_scope);
+
+        // Ищем из child scope
+        let result = table.lookup_variable_in_hierarchy(child, "global_var");
+        assert!(result.is_some());
+
+        let (found_scope, hint) = result.unwrap();
+        assert_eq!(found_scope, table.root_scope);
+        match hint {
+            TypeHint::Explicit(t) => assert_eq!(t, "Число"),
+            _ => panic!("Expected Explicit type hint"),
+        }
+    }
+
+    #[test]
+    fn test_lookup_variable_in_hierarchy_shadow_local_over_parent() {
+        let mut table = SymbolTable::new();
+
+        // Регистрируем в root scope
+        table.register_variable(
+            table.root_scope,
+            "x".to_string(),
+            TypeHint::Explicit("Число".to_string()),
+            Span::stub(),
+        );
+
+        // Создаём child scope
+        let child = table.create_scope(table.root_scope);
+
+        // Регистрируем с тем же именем в child scope
+        table.register_variable(
+            child,
+            "x".to_string(),
+            TypeHint::Explicit("Строка".to_string()),
+            Span::stub(),
+        );
+
+        // Ищем из child scope - должны найти локальную переменную
+        let result = table.lookup_variable_in_hierarchy(child, "x");
+        assert!(result.is_some());
+
+        let (found_scope, hint) = result.unwrap();
+        assert_eq!(found_scope, child);
+        match hint {
+            TypeHint::Explicit(t) => assert_eq!(t, "Строка"),
+            _ => panic!("Expected Explicit type hint"),
+        }
+    }
+
+    #[test]
+    fn test_lookup_variable_in_hierarchy_deeply_nested() {
+        let mut table = SymbolTable::new();
+
+        // Создаём иерархию scope: root -> level1 -> level2 -> level3
+        let level1 = table.create_scope(table.root_scope);
+        let level2 = table.create_scope(level1);
+        let level3 = table.create_scope(level2);
+
+        // Регистрируем переменную в level1
+        table.register_variable(
+            level1,
+            "mid_var".to_string(),
+            TypeHint::Explicit("Булево".to_string()),
+            Span::stub(),
+        );
+
+        // Ищем из level3
+        let result = table.lookup_variable_in_hierarchy(level3, "mid_var");
+        assert!(result.is_some());
+
+        let (found_scope, _) = result.unwrap();
+        assert_eq!(found_scope, level1);
+    }
+
+    #[test]
+    fn test_lookup_variable_in_hierarchy_not_found() {
+        let mut table = SymbolTable::new();
+        let child = table.create_scope(table.root_scope);
+
+        let result = table.lookup_variable_in_hierarchy(child, "nonexistent");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_update_variable_type_checked_success() {
+        let mut table = SymbolTable::new();
+
+        table.register_variable(
+            table.root_scope,
+            "x".to_string(),
+            TypeHint::Explicit("Число".to_string()),
+            Span::stub(),
+        );
+
+        // Обновляем тип
+        let result = table.update_variable_type_checked(
+            table.root_scope,
+            "x",
+            TypeHint::Explicit("Строка".to_string()),
+        );
+
+        assert!(result.is_ok());
+
+        // Проверяем что тип обновлён
+        let hint = table.lookup_variable(table.root_scope, "x");
+        assert!(hint.is_some());
+        match hint.unwrap() {
+            TypeHint::Explicit(t) => assert_eq!(t, "Строка"),
+            _ => panic!("Expected Explicit type hint"),
+        }
+    }
+
+    #[test]
+    fn test_update_variable_type_checked_invalid_scope() {
+        let mut table = SymbolTable::new();
+
+        let invalid_scope = ScopeId(9999);
+
+        let result = table.update_variable_type_checked(
+            invalid_scope,
+            "x",
+            TypeHint::Explicit("Число".to_string()),
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Scope"));
+    }
+
+    #[test]
+    fn test_update_variable_type_checked_nonexistent_variable() {
+        let mut table = SymbolTable::new();
+
+        let result = table.update_variable_type_checked(
+            table.root_scope,
+            "nonexistent",
+            TypeHint::Explicit("Число".to_string()),
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_has_variable_true() {
+        let mut table = SymbolTable::new();
+
+        table.register_variable(
+            table.root_scope,
+            "x".to_string(),
+            TypeHint::Explicit("Число".to_string()),
+            Span::stub(),
+        );
+
+        assert!(table.has_variable(table.root_scope, "x"));
+    }
+
+    #[test]
+    fn test_has_variable_false() {
+        let table = SymbolTable::new();
+
+        assert!(!table.has_variable(table.root_scope, "nonexistent"));
+    }
+
+    #[test]
+    fn test_has_variable_different_scope() {
+        let mut table = SymbolTable::new();
+        let child = table.create_scope(table.root_scope);
+
+        table.register_variable(
+            table.root_scope,
+            "x".to_string(),
+            TypeHint::Explicit("Число".to_string()),
+            Span::stub(),
+        );
+
+        // has_variable проверяет только конкретный scope, не иерархию
+        assert!(table.has_variable(table.root_scope, "x"));
+        assert!(!table.has_variable(child, "x"));
+    }
+
+    #[test]
+    fn test_find_function_found() {
+        let mut table = SymbolTable::new();
+
+        let sig = FunctionSignature {
+            name: "МояФункция".to_string(),
+            params: vec![],
+            return_type: Some("Число".to_string()),
+            is_export: false,
+        };
+
+        table.register_function(sig.clone());
+
+        let found = table.find_function("МояФункция");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "МояФункция");
+        assert_eq!(found.unwrap().return_type, Some("Число".to_string()));
+    }
+
+    #[test]
+    fn test_find_function_not_found() {
+        let table = SymbolTable::new();
+
+        let found = table.find_function("NonExistentFunction");
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn test_find_function_case_insensitive() {
+        let mut table = SymbolTable::new();
+
+        let sig = FunctionSignature {
+            name: "МояФункция".to_string(),
+            params: vec![],
+            return_type: Some("Число".to_string()),
+            is_export: false,
+        };
+
+        table.register_function(sig);
+
+        // Проверяем что функции регистрируются с оригинальным именем
+        let found = table.find_function("МояФункция");
+        assert!(found.is_some());
+    }
+
+    #[test]
+    fn test_find_procedure_found() {
+        let mut table = SymbolTable::new();
+
+        let sig = FunctionSignature {
+            name: "МояПроцедура".to_string(),
+            params: vec![],
+            return_type: None,
+            is_export: false,
+        };
+
+        table.register_procedure(sig.clone());
+
+        let found = table.find_procedure("МояПроцедура");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "МояПроцедура");
+        assert_eq!(found.unwrap().return_type, None);
+    }
+
+    #[test]
+    fn test_find_procedure_not_found() {
+        let table = SymbolTable::new();
+
+        let found = table.find_procedure("NonExistentProcedure");
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn test_get_parent_scope_root() {
+        let table = SymbolTable::new();
+
+        let parent = table.get_parent_scope(table.root_scope);
+        assert_eq!(parent, None);
+    }
+
+    #[test]
+    fn test_get_parent_scope_child() {
+        let mut table = SymbolTable::new();
+        let child = table.create_scope(table.root_scope);
+
+        let parent = table.get_parent_scope(child);
+        assert_eq!(parent, Some(table.root_scope));
+    }
+
+    #[test]
+    fn test_get_parent_scope_grandchild() {
+        let mut table = SymbolTable::new();
+        let child = table.create_scope(table.root_scope);
+        let grandchild = table.create_scope(child);
+
+        let parent = table.get_parent_scope(grandchild);
+        assert_eq!(parent, Some(child));
+    }
+
+    #[test]
+    fn test_get_parent_scope_invalid() {
+        let table = SymbolTable::new();
+
+        let parent = table.get_parent_scope(ScopeId(9999));
+        assert_eq!(parent, None);
+    }
+
+    #[test]
+    fn test_variables_in_scope_empty() {
+        let table = SymbolTable::new();
+
+        let vars = table.variables_in_scope(table.root_scope);
+        assert!(vars.is_some());
+
+        let count: usize = vars.unwrap().count();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_variables_in_scope_single() {
+        let mut table = SymbolTable::new();
+
+        table.register_variable(
+            table.root_scope,
+            "x".to_string(),
+            TypeHint::Explicit("Число".to_string()),
+            Span::stub(),
+        );
+
+        let vars = table.variables_in_scope(table.root_scope);
+        assert!(vars.is_some());
+
+        let collected: Vec<_> = vars.unwrap().collect();
+        assert_eq!(collected.len(), 1);
+        assert_eq!(collected[0].0, "x");
+    }
+
+    #[test]
+    fn test_variables_in_scope_multiple() {
+        let mut table = SymbolTable::new();
+
+        table.register_variable(
+            table.root_scope,
+            "x".to_string(),
+            TypeHint::Explicit("Число".to_string()),
+            Span::stub(),
+        );
+
+        table.register_variable(
+            table.root_scope,
+            "y".to_string(),
+            TypeHint::Explicit("Строка".to_string()),
+            Span::stub(),
+        );
+
+        table.register_variable(
+            table.root_scope,
+            "z".to_string(),
+            TypeHint::Explicit("Булево".to_string()),
+            Span::stub(),
+        );
+
+        let vars = table.variables_in_scope(table.root_scope);
+        assert!(vars.is_some());
+
+        let collected: Vec<_> = vars.unwrap().collect();
+        assert_eq!(collected.len(), 3);
+    }
+
+    #[test]
+    fn test_variables_in_scope_does_not_include_parent_scope() {
+        let mut table = SymbolTable::new();
+
+        // Регистрируем в root scope
+        table.register_variable(
+            table.root_scope,
+            "global".to_string(),
+            TypeHint::Explicit("Число".to_string()),
+            Span::stub(),
+        );
+
+        // Создаём child scope и регистрируем переменную там
+        let child = table.create_scope(table.root_scope);
+        table.register_variable(
+            child,
+            "local".to_string(),
+            TypeHint::Explicit("Строка".to_string()),
+            Span::stub(),
+        );
+
+        // Проверяем что в child scope только одна переменная
+        let vars = table.variables_in_scope(child);
+        assert!(vars.is_some());
+
+        let collected: Vec<_> = vars.unwrap().collect();
+        assert_eq!(collected.len(), 1);
+        assert_eq!(collected[0].0, "local");
+    }
+
+    #[test]
+    fn test_variables_in_scope_invalid_scope() {
+        let table = SymbolTable::new();
+
+        let vars = table.variables_in_scope(ScopeId(9999));
+        assert!(vars.is_none());
     }
 }

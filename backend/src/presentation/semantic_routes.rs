@@ -113,12 +113,12 @@ async fn get_semantic_tree(
         let html = generate_semantic_html(&program, &file_path, options);
         (StatusCode::OK, Html(html)).into_response()
     } else {
-        // JSON response
+        // JSON response - using public API methods for encapsulation
         let json_response = serde_json::json!({
             "file_path": file_path,
             "nodes_count": program.nodes.len(),
-            "functions_count": program.symbols.global_functions.len(),
-            "procedures_count": program.symbols.global_procedures.len(),
+            "functions_count": program.symbols.functions_count(),
+            "procedures_count": program.symbols.procedures_count(),
         });
         (StatusCode::OK, Json(json_response)).into_response()
     }

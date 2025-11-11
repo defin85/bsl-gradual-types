@@ -250,10 +250,17 @@ impl AstToIrConverter {
                         );
                     } else {
                         // Переменная уже существует → обновляем тип (flow-sensitive)
-                        if let Some(scope) = self.symbol_table.scopes.get_mut(&self.current_scope) {
-                            if let Some((hint, _)) = scope.variables.get_mut(&var_name) {
-                                *hint = type_hint;
-                            }
+                        // ✅ Используем публичный API вместо прямого доступа к scopes
+                        if !self.symbol_table.update_variable_type(
+                            self.current_scope,
+                            var_name.clone(),
+                            type_hint,
+                        ) {
+                            tracing::warn!(
+                                "Failed to update variable type for '{}' in scope {:?}",
+                                var_name,
+                                self.current_scope
+                            );
                         }
                     }
 
@@ -776,7 +783,8 @@ impl AstToIrConverter {
                 } = function.as_ref()
                 {
                     // Проверяем глобальные функции
-                    if let Some(sig) = self.symbol_table.global_functions.get(func_name) {
+                    // ✅ Используем публичный API вместо прямого доступа
+                    if let Some(sig) = self.symbol_table.find_function(func_name) {
                         return sig
                             .return_type
                             .clone()
@@ -791,35 +799,25 @@ impl AstToIrConverter {
 
     /// Поиск типа переменной в scope hierarchy
     fn lookup_variable_type(&self, name: &str) -> Option<String> {
-        let mut current_scope_id = Some(self.current_scope);
-
-        while let Some(sid) = current_scope_id {
-            if let Some(scope) = self.symbol_table.scopes.get(&sid) {
-                if let Some((hint, _)) = scope.variables.get(name) {
-                    return Some(match hint {
-                        TypeHint::Explicit(t) | TypeHint::Inferred(t) => t.clone(),
-                        TypeHint::Generic {
-                            base_type,
-                            type_params,
-                            ..
-                        } => {
-                            // ✅ Generic тип: форматируем как "Массив<Строка>" или "Соответствие<Строка, Число>"
-                            if type_params.is_empty() {
-                                base_type.clone()
-                            } else {
-                                format!("{}<{}>", base_type, type_params.join(", "))
-                            }
-                        }
-                        TypeHint::Unknown => "Dynamic".to_string(),
-                    });
+        // ✅ Используем публичный API вместо прямого доступа к scopes
+        self.symbol_table
+            .lookup_variable_in_hierarchy(self.current_scope, name)
+            .map(|(_, hint)| match hint {
+                TypeHint::Explicit(t) | TypeHint::Inferred(t) => t.clone(),
+                TypeHint::Generic {
+                    base_type,
+                    type_params,
+                    ..
+                } => {
+                    // ✅ Generic тип: форматируем как "Массив<Строка>" или "Соответствие<Строка, Число>"
+                    if type_params.is_empty() {
+                        base_type.clone()
+                    } else {
+                        format!("{}<{}>", base_type, type_params.join(", "))
+                    }
                 }
-                current_scope_id = scope.parent;
-            } else {
-                break;
-            }
-        }
-
-        None
+                TypeHint::Unknown => "Dynamic".to_string(),
+            })
     }
 
     /// Построение Control Flow Graph (для flow-sensitive анализа)
@@ -1112,8 +1110,8 @@ mod tests {
         assert!(ir.symbols.scopes.len() >= 2);
 
         // Глобальная переменная должна быть в root scope
-        let root_scope = ir.symbols.scopes.get(&ir.symbols.root_scope).unwrap();
-        assert!(root_scope.variables.contains_key("global"));
+        // ✅ Используем публичный API вместо прямого доступа
+        assert!(ir.symbols.has_variable(ir.symbols.root_scope, "global"));
     }
 
     #[test]

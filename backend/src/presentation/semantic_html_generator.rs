@@ -595,9 +595,9 @@ fn render_single_node(
 
 /// Renders symbol table as HTML table
 fn render_symbol_table(symbols: &bsl_shared::ir::SymbolTable) -> String {
-    // Count total symbols
-    let total_functions = symbols.global_functions.len();
-    let total_procedures = symbols.global_procedures.len();
+    // Count total symbols using public API methods
+    let total_functions = symbols.functions_count();
+    let total_procedures = symbols.procedures_count();
 
     if total_functions == 0 && total_procedures == 0 {
         return "<div class=\"info-block\">No symbols in table</div>".to_string();
@@ -605,8 +605,8 @@ fn render_symbol_table(symbols: &bsl_shared::ir::SymbolTable) -> String {
 
     let mut table_rows = String::new();
 
-    // Add functions
-    for (name, sig) in &symbols.global_functions {
+    // Add functions using public API
+    for (name, sig) in symbols.iter_functions() {
         let return_type = sig
             .return_type
             .as_ref()
@@ -624,8 +624,8 @@ fn render_symbol_table(symbols: &bsl_shared::ir::SymbolTable) -> String {
         ));
     }
 
-    // Add procedures
-    for name in symbols.global_procedures.keys() {
+    // Add procedures using public API
+    for (name, _sig) in symbols.iter_procedures() {
         table_rows.push_str(&format!(
             r#"<tr>
     <td><code>{}</code></td>

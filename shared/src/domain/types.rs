@@ -61,15 +61,13 @@ pub struct RawTypeData {
     pub generic_info: Option<GenericInfo>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RawDataSource {
     #[default]
     Platform,
     Configuration,
     UserDefined,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RawMethodData {
@@ -255,11 +253,9 @@ impl TypeResolution {
 
     /// Создать TypeResolution из RawTypeData с сохранением всех метаданных (в т.ч. фасетов)
     pub fn from_raw_type(raw_type: &RawTypeData) -> Self {
-        let mut resolution = Self::known(
-            ConcreteType::Platform(PlatformType {
-                name: raw_type.name.clone(),
-            })
-        );
+        let mut resolution = Self::known(ConcreteType::Platform(PlatformType {
+            name: raw_type.name.clone(),
+        }));
         // Копируем фасеты из RawTypeData
         resolution.available_facets = raw_type.facets.clone();
         resolution
@@ -361,7 +357,6 @@ pub struct ParameterInfo {
     pub description: Option<String>,
 }
 
-
 /// Тип строки табличной части конфигурационного объекта
 ///
 /// # Примеры
@@ -379,7 +374,11 @@ pub struct TabularRowType {
 
 impl TabularRowType {
     /// Создаёт новый тип строки табличной части
-    pub fn new(parent_type: String, section_name: String, attributes: Vec<RawAttributeData>) -> Self {
+    pub fn new(
+        parent_type: String,
+        section_name: String,
+        attributes: Vec<RawAttributeData>,
+    ) -> Self {
         Self {
             parent_type,
             tabular_section_name: section_name,
@@ -446,17 +445,26 @@ pub struct TabularSection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PrimitiveType {
-    String, Number, Boolean, Date,
+    String,
+    Number,
+    Boolean,
+    Date,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpecialType {
-    Undefined, Null, Type,
+    Undefined,
+    Null,
+    Type,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResolutionSource {
-    Static, Inferred, Annotated, Runtime, Predicted,
+    Static,
+    Inferred,
+    Annotated,
+    Runtime,
+    Predicted,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -497,7 +505,7 @@ pub enum DiagnosticSeverity {
 }
 
 #[derive(Debug, Clone)]
-pub struct FunctionSignature{}
+pub struct FunctionSignature {}
 
 // === PARSE ERROR STRUCTURES (for Milestone 2.18) ===
 
@@ -675,16 +683,21 @@ impl ResolutionResult {
         }
 
         // 1. Check for Dynamic - if present, return Dynamic
-        if types.iter().any(|wt| matches!(wt.type_, ConcreteType::Special(SpecialType::Undefined))) {
+        if types
+            .iter()
+            .any(|wt| matches!(wt.type_, ConcreteType::Special(SpecialType::Undefined)))
+        {
             return ResolutionResult::Dynamic;
         }
 
         // 2. Deduplicate and merge weights
-        let mut type_map: std::collections::HashMap<String, (ConcreteType, f32)> = std::collections::HashMap::new();
+        let mut type_map: std::collections::HashMap<String, (ConcreteType, f32)> =
+            std::collections::HashMap::new();
 
         for weighted in types {
             let key = format!("{:?}", weighted.type_); // Simple key based on Debug representation
-            type_map.entry(key)
+            type_map
+                .entry(key)
                 .and_modify(|(_, w)| *w += weighted.weight)
                 .or_insert((weighted.type_, weighted.weight));
         }
@@ -692,10 +705,17 @@ impl ResolutionResult {
         // 3. Convert back to Vec and sort by weight (descending)
         let mut normalized: Vec<WeightedType> = type_map
             .into_values()
-            .map(|(t, w)| WeightedType { type_: t, weight: w })
+            .map(|(t, w)| WeightedType {
+                type_: t,
+                weight: w,
+            })
             .collect();
 
-        normalized.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+        normalized.sort_by(|a, b| {
+            b.weight
+                .partial_cmp(&a.weight)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // 4. If only one type remains, return Concrete
         if normalized.len() == 1 {
@@ -739,9 +759,9 @@ impl ResolutionResult {
     pub fn is_nullable(&self) -> bool {
         match self {
             ResolutionResult::Nullable(_) => true,
-            ResolutionResult::Union(types) => {
-                types.iter().any(|wt| matches!(wt.type_, ConcreteType::Special(SpecialType::Null)))
-            },
+            ResolutionResult::Union(types) => types
+                .iter()
+                .any(|wt| matches!(wt.type_, ConcreteType::Special(SpecialType::Null))),
             _ => false,
         }
     }
@@ -771,7 +791,8 @@ impl ConcreteType {
     /// Check if this type is compatible with another for intersection
     pub fn is_intersection_compatible(&self, other: &Self) -> bool {
         // Primitive types cannot be intersected
-        if matches!(self, ConcreteType::Primitive(_)) && matches!(other, ConcreteType::Primitive(_)) {
+        if matches!(self, ConcreteType::Primitive(_)) && matches!(other, ConcreteType::Primitive(_))
+        {
             return false;
         }
 
@@ -849,10 +870,16 @@ mod advanced_types_tests {
         if let ResolutionResult::Union(normalized) = result {
             assert_eq!(normalized.len(), 2);
             // First should be String (higher weight)
-            assert!(matches!(normalized[0].type_, ConcreteType::Primitive(PrimitiveType::String)));
+            assert!(matches!(
+                normalized[0].type_,
+                ConcreteType::Primitive(PrimitiveType::String)
+            ));
             assert_eq!(normalized[0].weight, 0.7);
             // Second should be Number (lower weight)
-            assert!(matches!(normalized[1].type_, ConcreteType::Primitive(PrimitiveType::Number)));
+            assert!(matches!(
+                normalized[1].type_,
+                ConcreteType::Primitive(PrimitiveType::Number)
+            ));
             assert_eq!(normalized[1].weight, 0.3);
         } else {
             panic!("Expected Union type, got {:?}", result);
@@ -886,7 +913,8 @@ mod advanced_types_tests {
         if let ResolutionResult::Union(normalized) = result {
             assert_eq!(normalized.len(), 2);
             // String weight should be merged: 0.3 + 0.3 = 0.6
-            let string_type = normalized.iter()
+            let string_type = normalized
+                .iter()
                 .find(|wt| matches!(wt.type_, ConcreteType::Primitive(PrimitiveType::String)))
                 .expect("String type should be present");
             assert_eq!(string_type.weight, 0.6);
@@ -899,10 +927,7 @@ mod advanced_types_tests {
 
     #[test]
     fn test_intersection_deduplicate() {
-        let types = vec![
-            ConcreteType::string(),
-            ConcreteType::string(),
-        ];
+        let types = vec![ConcreteType::string(), ConcreteType::string()];
 
         let result = ResolutionResult::intersection(types);
 
@@ -912,10 +937,7 @@ mod advanced_types_tests {
 
     #[test]
     fn test_intersection_multiple_types() {
-        let types = vec![
-            ConcreteType::string(),
-            ConcreteType::number(),
-        ];
+        let types = vec![ConcreteType::string(), ConcreteType::number()];
 
         let result = ResolutionResult::intersection(types);
 
@@ -943,7 +965,10 @@ mod advanced_types_tests {
 
         assert_eq!(array.base_type, "Массив");
         assert_eq!(array.type_params.len(), 1);
-        assert!(matches!(array.type_params[0], ConcreteType::Primitive(PrimitiveType::String)));
+        assert!(matches!(
+            array.type_params[0],
+            ConcreteType::Primitive(PrimitiveType::String)
+        ));
     }
 
     #[test]
@@ -952,8 +977,14 @@ mod advanced_types_tests {
 
         assert_eq!(map.base_type, "Соответствие");
         assert_eq!(map.type_params.len(), 2);
-        assert!(matches!(map.type_params[0], ConcreteType::Primitive(PrimitiveType::String)));
-        assert!(matches!(map.type_params[1], ConcreteType::Primitive(PrimitiveType::Number)));
+        assert!(matches!(
+            map.type_params[0],
+            ConcreteType::Primitive(PrimitiveType::String)
+        ));
+        assert!(matches!(
+            map.type_params[1],
+            ConcreteType::Primitive(PrimitiveType::Number)
+        ));
     }
 
     #[test]
@@ -962,7 +993,10 @@ mod advanced_types_tests {
 
         let element = array.element_type();
         assert!(element.is_some());
-        assert!(matches!(element.unwrap(), ConcreteType::Primitive(PrimitiveType::String)));
+        assert!(matches!(
+            element.unwrap(),
+            ConcreteType::Primitive(PrimitiveType::String)
+        ));
     }
 
     // === Task 4: Nullable Types Tests ===
@@ -1004,7 +1038,10 @@ mod advanced_types_tests {
 
         let inner = nullable.unwrap_nullable();
         assert!(inner.is_some());
-        assert!(matches!(inner.unwrap(), ConcreteType::Primitive(PrimitiveType::String)));
+        assert!(matches!(
+            inner.unwrap(),
+            ConcreteType::Primitive(PrimitiveType::String)
+        ));
     }
 
     #[test]
@@ -1012,7 +1049,10 @@ mod advanced_types_tests {
         let weighted = WeightedType::new(ConcreteType::string());
 
         assert_eq!(weighted.weight, 1.0);
-        assert!(matches!(weighted.type_, ConcreteType::Primitive(PrimitiveType::String)));
+        assert!(matches!(
+            weighted.type_,
+            ConcreteType::Primitive(PrimitiveType::String)
+        ));
     }
 
     #[test]

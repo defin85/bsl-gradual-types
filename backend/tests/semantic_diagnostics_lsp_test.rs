@@ -15,8 +15,8 @@ use bsl_backend::data::loaders::progress::ProgressUpdate;
 use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
 use bsl_shared::domain::repository::InMemoryTypeRepository;
-use bsl_shared::TypeResolver;
 use bsl_shared::engine::AnalysisEngine;
+use bsl_shared::TypeResolver;
 use std::sync::Arc;
 
 /// Helper: создать TypeSystemService для тестов WITH PLATFORM TYPES LOADED
@@ -31,7 +31,8 @@ fn create_test_service() -> TypeSystemService {
     let parsed_types = convert_syntax_helper_to_raw(&db);
 
     // 2. Создаём репозиторий и загружаем типы
-    let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let repository = Arc::new(InMemoryTypeRepository::new())
+        as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
     repository
         .load_types(parsed_types)
         .expect("Failed to load types");
@@ -44,10 +45,12 @@ fn create_test_service() -> TypeSystemService {
     let parser = Arc::new(ParserCoordinator::new(repository.clone()));
 
     let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
-    
+
     // 4. Инициализируем сервис
-    service.initialize().expect("Failed to initialize TypeSystemService");
-    
+    service
+        .initialize()
+        .expect("Failed to initialize TypeSystemService");
+
     service
 }
 
@@ -63,7 +66,10 @@ async fn test_validate_semantics_returns_result() {
 
     // Просто проверяем, что validate_semantics работает
     let result = service.validate_semantics(code).await;
-    assert!(result.is_ok(), "validate_semantics должна возвращать Result");
+    assert!(
+        result.is_ok(),
+        "validate_semantics должна возвращать Result"
+    );
 }
 
 #[tokio::test]
@@ -86,10 +92,7 @@ async fn test_no_errors_for_valid_simple_code() {
     assert!(
         diagnostics.is_empty(),
         "Для валидного кода не должно быть semantic errors, но получено: {:?}",
-        diagnostics
-            .iter()
-            .map(|d| &d.message)
-            .collect::<Vec<_>>()
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
 
@@ -118,7 +121,7 @@ async fn test_skip_semantic_validation_on_syntax_error() {
 #[tokio::test]
 async fn test_latency_under_50ms() {
     use std::time::Instant;
-    
+
     let service = create_test_service();
 
     let code = r#"
@@ -140,9 +143,9 @@ async fn test_latency_under_50ms() {
     let elapsed = start.elapsed();
 
     assert!(result.is_ok());
-    
+
     println!("\n📊 Performance: validate_semantics took {:?}", elapsed);
-    
+
     // Проверяем что время < 50ms для кода ~100 строк
     if code.len() < 1000 {
         assert!(
@@ -167,7 +170,7 @@ async fn test_with_union_types() {
 
     let result = service.validate_semantics(code).await;
     assert!(result.is_ok());
-    
+
     let diagnostics = result.unwrap();
     // Union типы не должны вызывать ошибки
     println!("Diagnostics for union code: {:?}", diagnostics);
@@ -187,7 +190,7 @@ async fn test_with_dynamic_constructor() {
 
     let result = service.validate_semantics(code).await;
     assert!(result.is_ok());
-    
+
     let _diagnostics = result.unwrap();
     // Динамические конструкторы создают Dynamic типы - их сложно валидировать
     println!("Dynamic constructor test passed");

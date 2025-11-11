@@ -313,7 +313,8 @@ fn test_parse_all_objects_gracefully() {
     }
 
     let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
-    let result = discovery.discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
+    let result = discovery
+        .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
     assert!(result.is_ok(), "Парсинг всей конфигурации не должен падать");
 

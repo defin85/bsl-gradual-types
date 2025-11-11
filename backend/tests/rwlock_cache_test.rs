@@ -6,8 +6,8 @@
 //! 3. Параллельное чтение из кешей
 
 use bsl_backend::system::system_coordinator::SystemCoordinator;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// Тест 1: AnalysisEngine кеширование
 #[test]
@@ -16,7 +16,10 @@ fn test_analysis_engine_caching() {
 
     // Первый вызов - кеш пуст
     let engine1 = coordinator.analysis_engine();
-    assert!(engine1.is_none(), "AnalysisEngine не должен быть инициализирован до start()");
+    assert!(
+        engine1.is_none(),
+        "AnalysisEngine не должен быть инициализирован до start()"
+    );
 
     // Проверяем, что метод работает без паники даже когда кеш пуст
     let engine2 = coordinator.analysis_engine();
@@ -87,7 +90,10 @@ fn test_get_analysis_engine_vs_analysis_engine_method() {
     let engine1 = coordinator.get_analysis_engine();
     let engine2 = coordinator.analysis_engine();
 
-    assert!(engine1.is_none(), "get_analysis_engine() должен вернуть None");
+    assert!(
+        engine1.is_none(),
+        "get_analysis_engine() должен вернуть None"
+    );
     assert!(engine2.is_none(), "analysis_engine() должен вернуть None");
 }
 

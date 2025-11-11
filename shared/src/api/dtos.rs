@@ -42,7 +42,7 @@ pub struct TypeDto {
     /// Табличные части (для документов, справочников)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tabular_sections: Vec<TabularSectionDto>,
-    
+
     pub source: String,
     pub flow_sensitive: bool,
     pub description: String,

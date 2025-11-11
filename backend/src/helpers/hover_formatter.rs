@@ -341,13 +341,20 @@ impl<'a> HoverBuilder<'a> {
 
             for method in methods.iter().take(display_count) {
                 // Форматирование параметров
-                let params_str = method.params.iter()
+                let params_str = method
+                    .params
+                    .iter()
                     .map(|p| {
                         let optional_marker = if p.is_optional { "?" } else { "" };
-                        let default_suffix = p.default_value.as_ref()
+                        let default_suffix = p
+                            .default_value
+                            .as_ref()
                             .map(|v| format!(" = {}", v))
                             .unwrap_or_default();
-                        format!("{}{}: {}{}", p.name, optional_marker, p.param_type, default_suffix)
+                        format!(
+                            "{}{}: {}{}",
+                            p.name, optional_marker, p.param_type, default_suffix
+                        )
                     })
                     .collect::<Vec<_>>()
                     .join(", ");

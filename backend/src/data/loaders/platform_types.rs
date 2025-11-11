@@ -2,11 +2,11 @@
 //!
 //! Создание и загрузка базовых платформенных типов 1С:Предприятие
 
+use bsl_shared::domain::signature_index::{MethodSignature, SignatureIndex, SignatureSource};
 use bsl_shared::domain::types::{
-    FacetKind, GenericInfo, InferenceMethodInfo, RawDataSource, RawMethodData, RawParamData,
-    RawPropertyData, RawTypeData, ParameterInfo,
+    FacetKind, GenericInfo, InferenceMethodInfo, ParameterInfo, RawDataSource, RawMethodData,
+    RawParamData, RawPropertyData, RawTypeData,
 };
-use bsl_shared::domain::signature_index::{SignatureIndex, MethodSignature, SignatureSource};
 
 /// Создаёт тип "ТабличнаяЧасть" с Generic методами
 ///
@@ -133,13 +133,13 @@ pub fn create_tabular_section_type() -> RawTypeData {
                         name: "Значение".to_string(),
                         param_type: "Произвольный".to_string(),
                         is_optional: false,
-                    default_value: None,
+                        default_value: None,
                     },
                     RawParamData {
                         name: "ИмяКолонки".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
-                    default_value: None,
+                        default_value: None,
                     },
                 ],
                 description: None,
@@ -156,13 +156,13 @@ pub fn create_tabular_section_type() -> RawTypeData {
                         name: "Строка".to_string(),
                         param_type: "T".to_string(), // ← Generic!
                         is_optional: false,
-                    default_value: None,
+                        default_value: None,
                     },
                     RawParamData {
                         name: "Смещение".to_string(),
                         param_type: "Число".to_string(),
                         is_optional: false,
-                    default_value: None,
+                        default_value: None,
                     },
                 ],
                 description: None,
@@ -194,13 +194,13 @@ pub fn create_tabular_section_type() -> RawTypeData {
                         name: "Массив".to_string(),
                         param_type: "Массив".to_string(),
                         is_optional: false,
-                    default_value: None,
+                        default_value: None,
                     },
                     RawParamData {
                         name: "ИмяКолонки".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: false,
-                    default_value: None,
+                        default_value: None,
                     },
                 ],
                 description: None,
@@ -217,13 +217,13 @@ pub fn create_tabular_section_type() -> RawTypeData {
                         name: "ИменаКолонокГруппировок".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
-                    default_value: None,
+                        default_value: None,
                     },
                     RawParamData {
                         name: "ИменаКолонокСуммирования".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
-                    default_value: None,
+                        default_value: None,
                     },
                 ],
                 description: None,
@@ -270,13 +270,13 @@ pub fn create_tabular_section_type() -> RawTypeData {
                         name: "Значение".to_string(),
                         param_type: "Произвольный".to_string(),
                         is_optional: false,
-                    default_value: None,
+                        default_value: None,
                     },
                     RawParamData {
                         name: "ИмяКолонки".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
-                    default_value: None,
+                        default_value: None,
                     },
                 ],
                 description: None,
@@ -293,13 +293,13 @@ pub fn create_tabular_section_type() -> RawTypeData {
                         name: "ИменаКолонок".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
-                    default_value: None,
+                        default_value: None,
                     },
                     RawParamData {
                         name: "Направление".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
-                    default_value: None,
+                        default_value: None,
                     },
                 ],
                 description: None,
@@ -405,13 +405,13 @@ pub fn create_array_type() -> RawTypeData {
                         name: "Индекс".to_string(),
                         param_type: "Число".to_string(),
                         is_optional: false,
-                    default_value: None,
+                        default_value: None,
                     },
                     RawParamData {
                         name: "Значение".to_string(),
                         param_type: "T".to_string(), // ← Generic!
                         is_optional: false,
-                    default_value: None,
+                        default_value: None,
                     },
                 ],
                 description: None,
@@ -549,13 +549,13 @@ pub fn create_map_type() -> RawTypeData {
                         name: "Ключ".to_string(),
                         param_type: "K".to_string(), // ← Generic параметр K
                         is_optional: false,
-                    default_value: None,
+                        default_value: None,
                     },
                     RawParamData {
                         name: "Значение".to_string(),
                         param_type: "V".to_string(), // ← Generic параметр V
                         is_optional: false,
-                    default_value: None,
+                        default_value: None,
                     },
                 ],
                 description: None,
@@ -682,13 +682,13 @@ pub fn create_value_list_type() -> RawTypeData {
                         name: "Значение".to_string(),
                         param_type: "T".to_string(), // ← Generic!
                         is_optional: false,
-                    default_value: None,
+                        default_value: None,
                     },
                     RawParamData {
                         name: "Представление".to_string(),
                         param_type: "Строка".to_string(),
                         is_optional: true,
-                    default_value: None,
+                        default_value: None,
                     },
                 ],
                 description: None,
@@ -771,15 +771,9 @@ pub fn populate_signature_index_from_platform_types(
     for platform_type in platform_types {
         // Конвертируем методы в MethodSignature
         for method in &platform_type.methods {
-            let signature = raw_method_to_signature(
-                method,
-                &platform_type.name
-            );
+            let signature = raw_method_to_signature(method, &platform_type.name);
 
-            index.add_platform_method(
-                platform_type.name.clone(),
-                signature,
-            );
+            index.add_platform_method(platform_type.name.clone(), signature);
         }
     }
 }
@@ -789,11 +783,10 @@ pub fn populate_signature_index_from_platform_types(
 /// # Arguments
 /// * `method` - Метод из RawTypeData
 /// * `owner_type` - Имя типа-владельца
-fn raw_method_to_signature(
-    method: &RawMethodData,
-    owner_type: &str,
-) -> MethodSignature {
-    let params = method.params.iter()
+fn raw_method_to_signature(method: &RawMethodData, owner_type: &str) -> MethodSignature {
+    let params = method
+        .params
+        .iter()
         .map(|p| ParameterInfo {
             name: p.name.clone(),
             type_name: Some(p.param_type.clone()),
@@ -1179,7 +1172,10 @@ mod tests {
 
         // Проверяем что методы Массива добавлены
         let add_method = index.find_method("Массив", "Добавить");
-        assert!(add_method.is_some(), "Метод Массив.Добавить должен быть найден");
+        assert!(
+            add_method.is_some(),
+            "Метод Массив.Добавить должен быть найден"
+        );
 
         let signature = add_method.unwrap();
         assert_eq!(signature.name, "Добавить");

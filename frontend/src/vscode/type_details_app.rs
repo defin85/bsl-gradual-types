@@ -56,17 +56,17 @@ fn convert_to_type_dto(vscode_info: VsCodeTypeInfo) -> TypeDto {
     let certainty = vscode_info.certainty;
 
     TypeDto {
-        id: name.clone(),              // ✅ 1 clone (нужен для id и name)
-        name,                          // ✅ Move
-        category: facet.clone(),       // ✅ 1 clone (нужен для category и facets)
+        id: name.clone(),        // ✅ 1 clone (нужен для id и name)
+        name,                    // ✅ Move
+        category: facet.clone(), // ✅ 1 clone (нужен для category и facets)
         certainty: match certainty.as_str() {
             "High" | "Высокая" => 90,
             "Medium" | "Средняя" => 60,
             "Low" | "Низкая" => 30,
             _ => 50,
         },
-        certainty_text: certainty,     // ✅ Move
-        facets: vec![facet],           // ✅ Move
+        certainty_text: certainty, // ✅ Move
+        facets: vec![facet],       // ✅ Move
         methods_count: Some(vscode_info.methods.len()),
         methods: vscode_info
             .methods

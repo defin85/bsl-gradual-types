@@ -1,7 +1,9 @@
 //! Semantic Validation Visitor
 use bsl_shared::domain::types::{Certainty, ConcreteType, ResolutionResult, TypeDiagnostic};
 use bsl_shared::domain::validators::TypeValidator;
-use bsl_shared::ir::{FlowContext, SemanticNode, SemanticNodeKind, SemanticProgram, SemanticVisitor};
+use bsl_shared::ir::{
+    FlowContext, SemanticNode, SemanticNodeKind, SemanticProgram, SemanticVisitor,
+};
 
 pub struct SemanticValidationVisitor<'a> {
     validator: &'a TypeValidator<'a>,
@@ -25,14 +27,22 @@ impl<'a> SemanticValidationVisitor<'a> {
 
     fn simple_resolution(type_name: &str) -> bsl_shared::domain::types::TypeResolution {
         use bsl_shared::domain::types::{
-            ResolutionMetadata, ResolutionSource, TypeResolution, PrimitiveType,
+            PrimitiveType, ResolutionMetadata, ResolutionSource, TypeResolution,
         };
 
         let result = match type_name {
-            "Число" | "Number" => ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Number)),
-            "Строка" | "String" => ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::String)),
-            "Булево" | "Boolean" => ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Boolean)),
-            "Дата" | "Date" => ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Date)),
+            "Число" | "Number" => {
+                ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Number))
+            }
+            "Строка" | "String" => {
+                ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::String))
+            }
+            "Булево" | "Boolean" => {
+                ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Boolean))
+            }
+            "Дата" | "Date" => {
+                ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Date))
+            }
             _ => {
                 use bsl_shared::domain::types::PlatformType;
                 ResolutionResult::Concrete(ConcreteType::Platform(PlatformType {
@@ -61,8 +71,12 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 ..
             } => {
                 let resolution = Self::simple_resolution(obj_type);
-                if let Some(error_kind) = self.validator.validate_method_exists(&resolution, function_name) {
-                    let diagnostic = error_kind.to_diagnostic(node.span.start_line, node.span.start_column);
+                if let Some(error_kind) = self
+                    .validator
+                    .validate_method_exists(&resolution, function_name)
+                {
+                    let diagnostic =
+                        error_kind.to_diagnostic(node.span.start_line, node.span.start_column);
                     self.errors.push(diagnostic);
                 }
             }
@@ -73,8 +87,12 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 ..
             } => {
                 let resolution = Self::simple_resolution(object_type);
-                if let Some(error_kind) = self.validator.validate_property_exists(&resolution, member_name) {
-                    let diagnostic = error_kind.to_diagnostic(node.span.start_line, node.span.start_column);
+                if let Some(error_kind) = self
+                    .validator
+                    .validate_property_exists(&resolution, member_name)
+                {
+                    let diagnostic =
+                        error_kind.to_diagnostic(node.span.start_line, node.span.start_column);
                     self.errors.push(diagnostic);
                 }
             }
@@ -113,7 +131,10 @@ mod tests {
         visitor.visit_node(&program.nodes[0], &mut context);
 
         let errors = visitor.into_errors();
-        assert!(!errors.is_empty(), "Должна быть ошибка для несуществующего метода");
+        assert!(
+            !errors.is_empty(),
+            "Должна быть ошибка для несуществующего метода"
+        );
         assert!(errors[0].message.contains("НесуществующийМетод"));
     }
 
@@ -141,7 +162,10 @@ mod tests {
         visitor.visit_node(&program.nodes[0], &mut context);
 
         let errors = visitor.into_errors();
-        assert!(!errors.is_empty(), "Должна быть ошибка для несуществующего свойства");
+        assert!(
+            !errors.is_empty(),
+            "Должна быть ошибка для несуществующего свойства"
+        );
         assert!(errors[0].message.contains("НесуществующееСвойство"));
     }
 }

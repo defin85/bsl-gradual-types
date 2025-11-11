@@ -1,7 +1,7 @@
 //! Data Layer: Type Repository trait and implementations
 
-use crate::domain::types::{RawDataSource, RawTypeData};
 use crate::domain::signature_index::{SignatureIndex, SignatureValidationResult};
+use crate::domain::types::{RawDataSource, RawTypeData};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use std::sync::RwLock;
@@ -131,7 +131,10 @@ pub trait TypeRepository: Send + Sync {
     /// # Returns
     /// * `Some(ConstructorSignature)` - если конструктор найден
     /// * `None` - если конструктор не найден или произошла ошибка
-    fn find_constructor(&self, type_name: &str) -> Option<crate::domain::signature_index::ConstructorSignature>;
+    fn find_constructor(
+        &self,
+        type_name: &str,
+    ) -> Option<crate::domain::signature_index::ConstructorSignature>;
 }
 
 /// Статистика репозитория
@@ -305,7 +308,10 @@ impl TypeRepository for InMemoryTypeRepository {
         }
     }
 
-    fn find_constructor(&self, type_name: &str) -> Option<crate::domain::signature_index::ConstructorSignature> {
+    fn find_constructor(
+        &self,
+        type_name: &str,
+    ) -> Option<crate::domain::signature_index::ConstructorSignature> {
         match self.signature_index.read() {
             Ok(index) => index.find_constructor(type_name).cloned(),
             Err(poisoned) => {

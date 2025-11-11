@@ -12,7 +12,7 @@
 
 #[cfg(test)]
 mod lsp_signature_help_tests {
-    use bsl_shared::domain::signature_index::{SignatureIndex, MethodSignature, SignatureSource};
+    use bsl_shared::domain::signature_index::{MethodSignature, SignatureIndex, SignatureSource};
     use bsl_shared::domain::types::ParameterInfo;
     use tower_lsp::lsp_types::Position;
 
@@ -50,10 +50,7 @@ mod lsp_signature_help_tests {
 
     /// Конвертировать char index в UTF-16 code unit index
     fn char_to_utf16_index(text: &str, char_index: usize) -> usize {
-        text.chars()
-            .take(char_index)
-            .map(|ch| ch.len_utf16())
-            .sum()
+        text.chars().take(char_index).map(|ch| ch.len_utf16()).sum()
     }
 
     /// Получить UTF-16 длину строки (для тестов)
@@ -145,8 +142,15 @@ mod lsp_signature_help_tests {
             let after_dot = &trimmed[dot_pos + 1..];
 
             // Извлекаем только валидное имя идентификатора после точки
-            let method_name = after_dot.chars()
-                .take_while(|c| c.is_alphanumeric() || *c == '_' || (*c >= '\u{0410}' && *c <= '\u{044F}') || *c == '\u{0401}' || *c == '\u{0451}')
+            let method_name = after_dot
+                .chars()
+                .take_while(|c| {
+                    c.is_alphanumeric()
+                        || *c == '_'
+                        || (*c >= '\u{0410}' && *c <= '\u{044F}')
+                        || *c == '\u{0401}'
+                        || *c == '\u{0451}'
+                })
                 .collect::<String>();
 
             if !method_name.is_empty() {
@@ -156,9 +160,16 @@ mod lsp_signature_help_tests {
 
         // Глобальная функция: извлекаем последний валидный идентификатор
         // Идём с конца и собираем символы пока они валидны для идентификатора
-        let function_name = trimmed.chars()
+        let function_name = trimmed
+            .chars()
             .rev()
-            .take_while(|c| c.is_alphanumeric() || *c == '_' || (*c >= '\u{0410}' && *c <= '\u{044F}') || *c == '\u{0401}' || *c == '\u{0451}')
+            .take_while(|c| {
+                c.is_alphanumeric()
+                    || *c == '_'
+                    || (*c >= '\u{0410}' && *c <= '\u{044F}')
+                    || *c == '\u{0401}'
+                    || *c == '\u{0451}'
+            })
             .collect::<String>()
             .chars()
             .rev()
@@ -172,11 +183,7 @@ mod lsp_signature_help_tests {
     }
 
     /// Определить индекс активного параметра
-    fn calculate_active_parameter(
-        content: &str,
-        context: &CallContext,
-        position: Position,
-    ) -> u32 {
+    fn calculate_active_parameter(content: &str, context: &CallContext, position: Position) -> u32 {
         let lines: Vec<&str> = content.lines().collect();
         let mut param_index = 0;
         let mut paren_depth = 0;
@@ -191,15 +198,13 @@ mod lsp_signature_help_tests {
 
             // ИСПРАВЛЕНИЕ: конвертируем UTF-16 в char indices
             let start_char_idx = if line_idx == context.call_start.line {
-                utf16_to_char_index(line, (context.call_start.character + 1) as usize)
-                    .unwrap_or(0)
+                utf16_to_char_index(line, (context.call_start.character + 1) as usize).unwrap_or(0)
             } else {
                 0
             };
 
             let end_char_idx = if line_idx == position.line {
-                utf16_to_char_index(line, position.character as usize)
-                    .unwrap_or(chars.len())
+                utf16_to_char_index(line, position.character as usize).unwrap_or(chars.len())
             } else {
                 chars.len()
             };

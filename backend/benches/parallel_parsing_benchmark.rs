@@ -40,9 +40,12 @@ fn benchmark_parallel_parsing(c: &mut Criterion) {
     c.bench_function("parallel_parsing_with_callback", |b| {
         b.iter(|| {
             let metadata = discovery
-                .discover_metadata_in_configuration(black_box(config_info), Some(|_: ProgressUpdate| {
-                    // Пустой callback для измерения overhead
-                }))
+                .discover_metadata_in_configuration(
+                    black_box(config_info),
+                    Some(|_: ProgressUpdate| {
+                        // Пустой callback для измерения overhead
+                    }),
+                )
                 .expect("Не удалось распарсить метаданные");
 
             black_box(metadata)
@@ -71,5 +74,9 @@ fn benchmark_configuration_discovery(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, benchmark_parallel_parsing, benchmark_configuration_discovery);
+criterion_group!(
+    benches,
+    benchmark_parallel_parsing,
+    benchmark_configuration_discovery
+);
 criterion_main!(benches);

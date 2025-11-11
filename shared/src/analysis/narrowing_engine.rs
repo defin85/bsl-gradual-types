@@ -231,10 +231,10 @@ impl NarrowingEngine {
                     }
                 }
 
-                CfgNodeKind::Assignment { variable, .. } => {
+                CfgNodeKind::Assignment { .. } => {
                     // При присваивании обновляем тип переменной
                     // (требует интеграции с Type Resolver)
-                    let mut new_ctx = node_ctx.clone();
+                    let new_ctx = node_ctx.clone();
 
                     // Передаём контекст дальше
                     for edge in self.cfg.edges() {

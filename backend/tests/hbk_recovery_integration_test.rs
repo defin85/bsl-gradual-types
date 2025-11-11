@@ -83,7 +83,10 @@ fn test_find_signature_at_beginning() {
         .recover(&test_file_path, Some(temp_dir.path()))
         .unwrap();
 
-    assert_eq!(result.signature_offset, 0, "Signature должна быть найдена в позиции 0");
+    assert_eq!(
+        result.signature_offset, 0,
+        "Signature должна быть найдена в позиции 0"
+    );
 }
 
 #[test]
@@ -194,7 +197,10 @@ fn test_file_too_small() {
     let mut recovery = HbkRecovery::new();
     let result = recovery.recover(&test_file_path, Some(temp_dir.path()));
 
-    assert!(result.is_err(), "Should fail on file smaller than signature");
+    assert!(
+        result.is_err(),
+        "Should fail on file smaller than signature"
+    );
 }
 
 // ============================================================================
@@ -219,9 +225,7 @@ fn test_recovery_with_cleanup_enabled() {
         max_file_size: 10 * 1024 * 1024,
     });
 
-    let result = recovery
-        .recover(&hbk_path, Some(temp_dir.path()))
-        .unwrap();
+    let result = recovery.recover(&hbk_path, Some(temp_dir.path())).unwrap();
 
     // Проверяем что результаты существуют
     assert!(result.extracted_dir.is_some());
@@ -256,9 +260,7 @@ fn test_recovery_without_cleanup() {
         max_file_size: 10 * 1024 * 1024,
     });
 
-    let result = recovery
-        .recover(&hbk_path, Some(temp_dir.path()))
-        .unwrap();
+    let result = recovery.recover(&hbk_path, Some(temp_dir.path())).unwrap();
 
     // Проверяем что временный ZIP НЕ был удалён
     assert!(
@@ -288,9 +290,7 @@ fn test_recovery_without_extraction() {
         max_file_size: 10 * 1024 * 1024,
     });
 
-    let result = recovery
-        .recover(&hbk_path, Some(temp_dir.path()))
-        .unwrap();
+    let result = recovery.recover(&hbk_path, Some(temp_dir.path())).unwrap();
 
     // Проверяем что ZIP существует
     assert!(result.repaired_zip_path.exists());
@@ -318,11 +318,7 @@ fn test_recover_multiple_files_in_directory() {
     let results = auto_recover_directory(temp_dir.path()).unwrap();
 
     // Проверяем что восстановлены все 3 файла
-    assert_eq!(
-        results.len(),
-        3,
-        "Должны быть восстановлены все 3 файла"
-    );
+    assert_eq!(results.len(), 3, "Должны быть восстановлены все 3 файла");
 
     // Проверяем каждый результат
     for result in &results {
@@ -351,7 +347,10 @@ fn test_max_file_size_limit() {
 
     let result = recovery.recover(&hbk_path, Some(temp_dir.path()));
 
-    assert!(result.is_err(), "Should fail when file exceeds max_file_size");
+    assert!(
+        result.is_err(),
+        "Should fail when file exceeds max_file_size"
+    );
     let err_msg = result.unwrap_err().to_string();
     assert!(
         err_msg.contains("слишком большой"),
@@ -398,7 +397,11 @@ fn test_auto_recover_empty_directory() {
     // Директория пуста
     let results = auto_recover_directory(temp_dir.path()).unwrap();
 
-    assert_eq!(results.len(), 0, "Пустая директория должна вернуть пустой результат");
+    assert_eq!(
+        results.len(),
+        0,
+        "Пустая директория должна вернуть пустой результат"
+    );
 }
 
 #[test]
@@ -407,10 +410,7 @@ fn test_auto_recover_nonexistent_directory() {
 
     let result = auto_recover_directory(nonexistent);
 
-    assert!(
-        result.is_err(),
-        "Should fail when directory doesn't exist"
-    );
+    assert!(result.is_err(), "Should fail when directory doesn't exist");
 }
 
 #[test]
@@ -450,7 +450,11 @@ fn test_custom_output_directory() {
 
     // Проверяем что результаты в output_dir, а не в hbk_dir
     assert!(
-        result.extracted_dir.as_ref().unwrap().starts_with(&output_dir),
+        result
+            .extracted_dir
+            .as_ref()
+            .unwrap()
+            .starts_with(&output_dir),
         "Extracted dir должна быть в output_dir"
     );
 }
@@ -473,9 +477,7 @@ fn test_recovery_result_contains_correct_info() {
         auto_extract: false,
         max_file_size: 10 * 1024 * 1024,
     });
-    let result = recovery
-        .recover(&hbk_path, Some(temp_dir.path()))
-        .unwrap();
+    let result = recovery.recover(&hbk_path, Some(temp_dir.path())).unwrap();
 
     // Проверяем информацию в результате
     assert_eq!(
@@ -517,13 +519,17 @@ fn test_relative_paths() {
 fn test_recovery_options_default() {
     let options = RecoveryOptions::default();
 
-    assert!(options.cleanup_temp, "cleanup_temp должен быть true по умолчанию");
+    assert!(
+        options.cleanup_temp,
+        "cleanup_temp должен быть true по умолчанию"
+    );
     assert!(
         options.auto_extract,
         "auto_extract должен быть true по умолчанию"
     );
     assert_eq!(
-        options.max_file_size, 500 * 1024 * 1024,
+        options.max_file_size,
+        500 * 1024 * 1024,
         "max_file_size должен быть 500 MB по умолчанию"
     );
 }

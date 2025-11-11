@@ -17,7 +17,6 @@ pub enum ProgressSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexingPhase {
     // === ФАЗЫ ДЛЯ ПЛАТФОРМЫ (Syntax Helper) ===
-
     /// Сканирование файловой системы (0-10%)
     CollectingFiles,
 
@@ -31,7 +30,6 @@ pub enum IndexingPhase {
     BuildingIndexes,
 
     // === ФАЗЫ ДЛЯ КОНФИГУРАЦИИ (Configuration.xml) ===
-
     /// Сканирование структуры конфигурации (0-5%)
     ConfigurationDiscovery,
 

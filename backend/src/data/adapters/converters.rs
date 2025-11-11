@@ -33,17 +33,21 @@ fn convert_type_info_to_raw(type_info: &TypeInfo, db: &SyntaxHelperDatabase) -> 
             // 3. Fallback: ищем метод нашего типа с совпадающим именем
 
             let method_info = {
-                let type_qualified_key = format!("method_{}.{}", type_info.identity.russian_name, russian);
-                db.methods.get(&type_qualified_key)
+                let type_qualified_key =
+                    format!("method_{}.{}", type_info.identity.russian_name, russian);
+                db.methods
+                    .get(&type_qualified_key)
                     .or_else(|| {
                         let simple_key = format!("method_{}", russian);
                         db.methods.get(&simple_key)
                     })
                     .or_else(|| {
                         db.methods.values().find(|method| {
-                            (method.name.starts_with(&format!("{}.", type_info.identity.russian_name)) &&
-                             method.name.contains(&format!(".{}", russian))) ||
-                            (method.name.as_str() == russian)
+                            (method
+                                .name
+                                .starts_with(&format!("{}.", type_info.identity.russian_name))
+                                && method.name.contains(&format!(".{}", russian)))
+                                || (method.name.as_str() == russian)
                         })
                     })
             };
@@ -51,21 +55,34 @@ fn convert_type_info_to_raw(type_info: &TypeInfo, db: &SyntaxHelperDatabase) -> 
             if let Some(method_info) = method_info {
                 RawMethodData {
                     name: russian.clone(),
-                    english_name: method_info.english_name.clone().unwrap_or_else(|| english.clone()),
+                    english_name: method_info
+                        .english_name
+                        .clone()
+                        .unwrap_or_else(|| english.clone()),
                     return_type: method_info.return_type.clone().unwrap_or_default(),
-                    params: method_info.parameters.iter().map(|p| RawParamData {
-                        name: p.name.clone(),
-                        param_type: p.type_name.clone().unwrap_or_else(|| "Произвольный".to_string()),
-                        is_optional: p.is_optional,
-                        default_value: p.default_value.clone(),
-                    }).collect(),
+                    params: method_info
+                        .parameters
+                        .iter()
+                        .map(|p| RawParamData {
+                            name: p.name.clone(),
+                            param_type: p
+                                .type_name
+                                .clone()
+                                .unwrap_or_else(|| "Произвольный".to_string()),
+                            is_optional: p.is_optional,
+                            default_value: p.default_value.clone(),
+                        })
+                        .collect(),
                     description: method_info.description.clone(),
                     is_deprecated: false,
-                    is_constructor: method_info.name.starts_with("Новый") ||
-                                   method_info.name.starts_with("New"),
+                    is_constructor: method_info.name.starts_with("Новый")
+                        || method_info.name.starts_with("New"),
                 }
             } else {
-                warn!("⚠️ Method {} not found in database for type {}", russian, type_info.identity.russian_name);
+                warn!(
+                    "⚠️ Method {} not found in database for type {}",
+                    russian, type_info.identity.russian_name
+                );
                 RawMethodData {
                     name: russian.clone(),
                     english_name: english.clone(),

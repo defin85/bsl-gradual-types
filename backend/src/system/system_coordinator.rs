@@ -139,7 +139,10 @@ impl SystemCoordinator {
 
         match parser_handle.await {
             Ok(result) => result,
-            Err(e) => Err(StartupError::CacheError(format!("Blocking task panicked: {}", e))),
+            Err(e) => Err(StartupError::CacheError(format!(
+                "Blocking task panicked: {}",
+                e
+            ))),
         }
     }
 
@@ -196,7 +199,10 @@ impl SystemCoordinator {
                         info!(
                             "   📦 Файл: {:?} → {:?}",
                             result.repaired_zip_path.file_name().unwrap_or_default(),
-                            result.extracted_dir.as_ref().map(|d| d.file_name().unwrap_or_default())
+                            result
+                                .extracted_dir
+                                .as_ref()
+                                .map(|d| d.file_name().unwrap_or_default())
                         );
                     }
                 }
@@ -401,7 +407,10 @@ impl SystemCoordinator {
             );
         });
 
-        info!("✅ Базовые типы загружены: {} типов", platform_types_clone.len());
+        info!(
+            "✅ Базовые типы загружены: {} типов",
+            platform_types_clone.len()
+        );
         info!("📇 SignatureIndex заполнен платформенными методами и конструкторами");
         Ok(())
     }
@@ -848,11 +857,26 @@ mod tests {
         index.initialize_builtin_constructors();
 
         // Проверяем что встроенные конструкторы загружены
-        assert!(index.find_constructor("Массив").is_some(), "Конструктор Массив должен быть загружен");
-        assert!(index.find_constructor("Соответствие").is_some(), "Конструктор Соответствие должен быть загружен");
-        assert!(index.find_constructor("ТаблицаЗначений").is_some(), "Конструктор ТаблицаЗначений должен быть загружен");
-        assert!(index.find_constructor("СписокЗначений").is_some(), "Конструктор СписокЗначений должен быть загружен");
-        assert!(index.find_constructor("ФиксированныйМассив").is_some(), "Конструктор ФиксированныйМассив должен быть загружен");
+        assert!(
+            index.find_constructor("Массив").is_some(),
+            "Конструктор Массив должен быть загружен"
+        );
+        assert!(
+            index.find_constructor("Соответствие").is_some(),
+            "Конструктор Соответствие должен быть загружен"
+        );
+        assert!(
+            index.find_constructor("ТаблицаЗначений").is_some(),
+            "Конструктор ТаблицаЗначений должен быть загружен"
+        );
+        assert!(
+            index.find_constructor("СписокЗначений").is_some(),
+            "Конструктор СписокЗначений должен быть загружен"
+        );
+        assert!(
+            index.find_constructor("ФиксированныйМассив").is_some(),
+            "Конструктор ФиксированныйМассив должен быть загружен"
+        );
     }
 
     #[test]
@@ -862,7 +886,10 @@ mod tests {
         // Проверяем что SignatureIndex содержит конструкторы
         repo.populate_signature_index(|index| {
             // Проверяем наличие конструкторов
-            assert!(index.find_constructor("Массив").is_some(), "Конструктор Массив должен быть в индексе");
+            assert!(
+                index.find_constructor("Массив").is_some(),
+                "Конструктор Массив должен быть в индексе"
+            );
         });
 
         // Проверяем что репозиторий успешно инициализирован
@@ -885,6 +912,9 @@ mod tests {
 
         // Пока просто проверяем что репозиторий создан успешно
         // TODO: Добавить полноценный тест с resolve_constructor после интеграции
-        assert!(repo.find_type("Массив").is_some(), "Тип Массив должен существовать в репозитории");
+        assert!(
+            repo.find_type("Массив").is_some(),
+            "Тип Массив должен существовать в репозитории"
+        );
     }
 }

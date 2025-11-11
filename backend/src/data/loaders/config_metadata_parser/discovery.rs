@@ -308,7 +308,10 @@ impl ConfigurationDiscovery {
             IndexingPhase::ConfigurationDiscovery,
             0,
             1,
-            Some(format!("Сканирование структуры конфигурации {}", config_info.name)),
+            Some(format!(
+                "Сканирование структуры конфигурации {}",
+                config_info.name
+            )),
         ));
 
         let child_objects = self.parse_child_objects_list(&config_xml)?;
@@ -444,7 +447,10 @@ impl ConfigurationDiscovery {
             IndexingPhase::ConfigurationFinalizing,
             0,
             1,
-            Some(format!("Финализация загрузки конфигурации {}", config_info.name)),
+            Some(format!(
+                "Финализация загрузки конфигурации {}",
+                config_info.name
+            )),
         ));
 
         tracing::info!(
@@ -457,7 +463,10 @@ impl ConfigurationDiscovery {
             IndexingPhase::ConfigurationFinalizing,
             1,
             1,
-            Some(format!("Загружено {} типов конфигурации", all_metadata.len())),
+            Some(format!(
+                "Загружено {} типов конфигурации",
+                all_metadata.len()
+            )),
         ));
 
         Ok(all_metadata)

@@ -2,8 +2,8 @@
 //!
 //! Milestone 2.20: Function Signature Validation System
 
-use std::collections::HashMap;
 use super::types::ParameterInfo;
+use std::collections::HashMap;
 
 /// Индекс сигнатур функций и методов
 #[derive(Debug, Clone)]
@@ -23,7 +23,7 @@ pub struct SignatureIndex {
 #[derive(Debug, Clone)]
 pub struct MethodSignature {
     pub name: String,
-    pub owner_type: Option<String>,  // None для глобальных функций
+    pub owner_type: Option<String>, // None для глобальных функций
     pub params: Vec<ParameterInfo>,
     pub return_type: Option<String>,
     pub source: SignatureSource,
@@ -58,7 +58,7 @@ pub struct ConstructorSignature {
 pub enum SignatureSource {
     Platform,
     Configuration,
-    UserCode,  // Код пользователя (для валидации)
+    UserCode, // Код пользователя (для валидации)
 }
 
 /// Результат валидации сигнатуры
@@ -129,7 +129,8 @@ impl SignatureIndex {
     pub fn find_constructor(&self, type_name: &str) -> Option<&ConstructorSignature> {
         let type_name_lower = type_name.to_lowercase();
 
-        self.constructors.iter()
+        self.constructors
+            .iter()
             .find(|(k, _)| k.to_lowercase() == type_name_lower)
             .map(|(_, v)| v)
     }
@@ -158,14 +159,20 @@ impl SignatureIndex {
 
         // Поиск в платформенных
         if let Some(methods) = self.platform_methods.get(type_name) {
-            if let Some(m) = methods.iter().find(|m| m.name.to_lowercase() == method_name_lower) {
+            if let Some(m) = methods
+                .iter()
+                .find(|m| m.name.to_lowercase() == method_name_lower)
+            {
                 return Some(m);
             }
         }
 
         // Поиск в конфигурационных
         if let Some(methods) = self.config_methods.get(type_name) {
-            if let Some(m) = methods.iter().find(|m| m.name.to_lowercase() == method_name_lower) {
+            if let Some(m) = methods
+                .iter()
+                .find(|m| m.name.to_lowercase() == method_name_lower)
+            {
                 return Some(m);
             }
         }
@@ -176,7 +183,8 @@ impl SignatureIndex {
     /// Найти глобальную функцию
     pub fn find_global_function(&self, name: &str) -> Option<&MethodSignature> {
         let name_lower = name.to_lowercase();
-        self.global_functions.iter()
+        self.global_functions
+            .iter()
             .find(|(k, _)| k.to_lowercase() == name_lower)
             .map(|(_, v)| v)
     }
@@ -196,13 +204,13 @@ impl SignatureIndex {
                         is_optional: true,
                         default_value: None,
                         description: Some("Начальный размер массива".to_string()),
-                    }
+                    },
                 ],
                 facet: None,
                 source: SignatureSource::Platform,
                 is_collection: true,
                 generic_params_count: 1,
-            }
+            },
         );
 
         // Соответствие (Map) - коллекция с 2 generic параметрами
@@ -214,8 +222,8 @@ impl SignatureIndex {
                 facet: None,
                 source: SignatureSource::Platform,
                 is_collection: true,
-                generic_params_count: 2,  // Key, Value
-            }
+                generic_params_count: 2, // Key, Value
+            },
         );
 
         // ТаблицаЗначений
@@ -228,7 +236,7 @@ impl SignatureIndex {
                 source: SignatureSource::Platform,
                 is_collection: false,
                 generic_params_count: 0,
-            }
+            },
         );
 
         // СписокЗначений - коллекция с 1 generic параметром
@@ -241,7 +249,7 @@ impl SignatureIndex {
                 source: SignatureSource::Platform,
                 is_collection: true,
                 generic_params_count: 1,
-            }
+            },
         );
 
         // ФиксированныйМассив - коллекция с 1 generic параметром
@@ -249,20 +257,20 @@ impl SignatureIndex {
             "ФиксированныйМассив".to_string(),
             ConstructorSignature {
                 type_name: "ФиксированныйМассив".to_string(),
-                params: vec![
-                    ParameterInfo {
-                        name: "Массив".to_string(),
-                        type_name: Some("Массив".to_string()),
-                        is_optional: false,
-                        default_value: None,
-                        description: Some("Исходный массив для преобразования в фиксированный".to_string()),
-                    }
-                ],
+                params: vec![ParameterInfo {
+                    name: "Массив".to_string(),
+                    type_name: Some("Массив".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: Some(
+                        "Исходный массив для преобразования в фиксированный".to_string(),
+                    ),
+                }],
                 facet: None,
                 source: SignatureSource::Platform,
                 is_collection: true,
                 generic_params_count: 1,
-            }
+            },
         );
     }
 
@@ -305,8 +313,14 @@ impl SignatureIndex {
                 mismatches.push(SignatureMismatch::ParameterType {
                     index: i,
                     param_name: expected_param.name.clone(),
-                    expected: expected_param.type_name.clone().unwrap_or_else(|| "Any".to_string()),
-                    actual: actual_param.type_name.clone().unwrap_or_else(|| "Any".to_string()),
+                    expected: expected_param
+                        .type_name
+                        .clone()
+                        .unwrap_or_else(|| "Any".to_string()),
+                    actual: actual_param
+                        .type_name
+                        .clone()
+                        .unwrap_or_else(|| "Any".to_string()),
                 });
             }
         }

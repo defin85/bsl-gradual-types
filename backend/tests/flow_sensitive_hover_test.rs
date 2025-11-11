@@ -70,9 +70,7 @@ async fn test_hover_on_method_call_shows_variable_type() {
     );
 
     // ✅ NOTE: Диагностика (get_diagnostics метод) требует более поздней реализации
-    println!(
-        "\n📝 NOTE: get_diagnostics требует дополнительной реализации в будущих версиях"
-    );
+    println!("\n📝 NOTE: get_diagnostics требует дополнительной реализации в будущих версиях");
 
     // Проверяем, что hover показывает информацию о переменной (может быть "Кол" или "ТаблицаТип")
     assert!(

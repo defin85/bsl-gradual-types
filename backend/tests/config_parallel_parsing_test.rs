@@ -272,12 +272,14 @@ fn test_progress_final_100_percent() {
     let last_update = updates.last().expect("Должно быть хотя бы одно обновление");
 
     assert_eq!(
-        last_update.current, metadata.len(),
+        last_update.current,
+        metadata.len(),
         "Финальный прогресс должен равняться количеству объектов"
     );
 
     assert_eq!(
-        last_update.total, metadata.len(),
+        last_update.total,
+        metadata.len(),
         "Total должен равняться количеству объектов"
     );
 
@@ -515,7 +517,8 @@ fn test_parallel_parsing_no_race_conditions() {
 
     for (idx, result) in results.iter().enumerate().skip(1) {
         assert_eq!(
-            first, result,
+            first,
+            result,
             "Результат итерации {} отличается от первой",
             idx + 1
         );
@@ -561,7 +564,11 @@ fn test_parallel_parsing_multiple_configurations() {
         println!(
             "  {}. {} {} ({})",
             idx + 1,
-            if config_info.is_base() { "📦" } else { "🧩" },
+            if config_info.is_base() {
+                "📦"
+            } else {
+                "🧩"
+            },
             config_info.name,
             config_info.path.display()
         );

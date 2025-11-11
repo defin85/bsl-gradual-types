@@ -32,8 +32,7 @@ pub trait TypeRenderer {
 }
 
 /// Опции темизации
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ThemeMode {
     /// Светлая тема
     Light,
@@ -45,7 +44,6 @@ pub enum ThemeMode {
     #[default]
     Auto,
 }
-
 
 /// Настройки рендеринга
 #[derive(Debug, Clone)]

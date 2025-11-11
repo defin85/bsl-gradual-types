@@ -3,12 +3,12 @@
 //! Этот модуль предоставляет сервис для получения полной документации типа
 //! на основе результата статического анализа (TypeResolution).
 
-use std::sync::Arc;
 use crate::domain::repository::TypeRepository;
 use crate::domain::types::{
-    TypeResolution, RawTypeData, RawMethodData, RawPropertyData,
-    ResolutionResult, ConcreteType, GenericType, MetadataKind, FacetKind,
+    ConcreteType, FacetKind, GenericType, MetadataKind, RawMethodData, RawPropertyData,
+    RawTypeData, ResolutionResult, TypeResolution,
 };
+use std::sync::Arc;
 
 /// Сервис для получения метаданных типа по TypeResolution
 ///
@@ -109,7 +109,7 @@ impl TypeMetadataLookup {
         if let ResolutionResult::Generic(generic_type) = &resolution.result {
             return self.get_methods_for_generic(generic_type);
         }
-        
+
         // ✅ НОВОЕ: Приоритет 1 - Lazy lookup через active_facet
         if let Some(facet) = resolution.active_facet {
             if let Some(facet_methods) = self.get_facet_methods(resolution, facet) {
@@ -118,7 +118,7 @@ impl TypeMetadataLookup {
             }
             // Если lookup не удался, продолжаем с fallback
         }
-        
+
         // Fallback: старая логика для совместимости
         // Используется для:
         // - Примитивных типов (Строка, Число)
@@ -195,7 +195,11 @@ impl TypeMetadataLookup {
         };
 
         // Проверяем методы
-        if raw.methods.iter().any(|m| m.name == member_name || m.english_name == member_name) {
+        if raw
+            .methods
+            .iter()
+            .any(|m| m.name == member_name || m.english_name == member_name)
+        {
             return true;
         }
 
@@ -263,10 +267,7 @@ impl TypeMetadataLookup {
                 ConcreteType::Configuration(config) => {
                     // Для конфигурации формируем полное имя
                     // Например: "Справочники.Контрагенты"
-                    Some(format!("{}.{}",
-                        config.kind.to_prefix(),
-                        config.name
-                    ))
+                    Some(format!("{}.{}", config.kind.to_prefix(), config.name))
                 }
                 // Primitive и Special типы не имеют RawTypeData в repository
                 ConcreteType::Primitive(_) | ConcreteType::Special(_) => None,
@@ -277,21 +278,19 @@ impl TypeMetadataLookup {
             // Union и Dynamic типы не имеют прямого соответствия в RawTypeData
             ResolutionResult::Union(_) | ResolutionResult::Dynamic => None,
             // Intersection - берём первый тип
-            ResolutionResult::Intersection(types) => {
-                types.first().and_then(|t| self.extract_type_name(&TypeResolution {
+            ResolutionResult::Intersection(types) => types.first().and_then(|t| {
+                self.extract_type_name(&TypeResolution {
                     result: ResolutionResult::Concrete(t.clone()),
                     ..resolution.clone()
-                }))
-            },
+                })
+            }),
             // Generic - используем базовый тип
             ResolutionResult::Generic(gen) => Some(gen.base_type.clone()),
             // Nullable - распаковываем внутренний тип
-            ResolutionResult::Nullable(inner) => {
-                self.extract_type_name(&TypeResolution {
-                    result: ResolutionResult::Concrete(inner.as_ref().clone()),
-                    ..resolution.clone()
-                })
-            },
+            ResolutionResult::Nullable(inner) => self.extract_type_name(&TypeResolution {
+                result: ResolutionResult::Concrete(inner.as_ref().clone()),
+                ..resolution.clone()
+            }),
         }
     }
 
@@ -310,15 +309,13 @@ impl TypeMetadataLookup {
         );
 
         // 1. Получаем методы базового типа (например, "ТабличнаяЧасть")
-        let base_methods = self.repository
+        let base_methods = self
+            .repository
             .find_type(&generic_type.base_type)
             .map(|raw| raw.methods.clone())
             .unwrap_or_default();
 
-        tracing::trace!(
-            "  📋 Найдено {} методов базового типа",
-            base_methods.len()
-        );
+        tracing::trace!("  📋 Найдено {} методов базового типа", base_methods.len());
 
         // 2. Если есть типовой параметр (например, СтрокаРаботы)
         if let Some(param_type) = generic_type.type_params.first() {
@@ -381,7 +378,7 @@ impl TypeMetadataLookup {
             ConcreteType::Configuration(ct) => {
                 // Формируем полное имя: "Справочники.Контрагенты"
                 format!("{}.{}", ct.kind.to_prefix(), ct.name)
-            },
+            }
             ConcreteType::Primitive(prim) => format!("{:?}", prim),
             ConcreteType::Special(spec) => format!("{:?}", spec),
             ConcreteType::GlobalFunction(gf) => gf.name.clone(),
@@ -390,9 +387,9 @@ impl TypeMetadataLookup {
     }
 
     /// Определяет имя платформенного типа на основе вида метаданных и активного фасета
-    /// 
+    ///
     /// # Mapping таблица:
-    /// 
+    ///
     /// | MetadataKind | FacetKind  | Platform Type Name     |
     /// |-------------|------------|------------------------|
     /// | Document    | Manager    | ДокументМенеджер       |
@@ -405,111 +402,107 @@ impl TypeMetadataLookup {
     /// | Catalog     | Reference  | СправочникСсылка       |
     /// | Catalog     | Selection  | СправочникВыборка      |
     /// | Catalog     | List       | СправочникСписок       |
-    /// 
+    ///
     /// # Возвращает
-    /// 
+    ///
     /// * `Some(&'static str)` - имя платформенного типа для поддерживаемой комбинации
     /// * `None` - для неподдерживаемых комбинаций (Enums, Registers пока не реализованы)
-    /// 
+    ///
     fn get_platform_facet_type(kind: MetadataKind, facet: FacetKind) -> Option<&'static str> {
-        use MetadataKind::*;
         use FacetKind::*;
-        
+        use MetadataKind::*;
+
         match (kind, facet) {
             // Documents mapping
-            (Document, Manager)   => Some("ДокументМенеджер"),
-            (Document, Object)    => Some("ДокументОбъект"),
+            (Document, Manager) => Some("ДокументМенеджер"),
+            (Document, Object) => Some("ДокументОбъект"),
             (Document, Reference) => Some("ДокументСсылка"),
             (Document, Selection) => Some("ДокументВыборка"),
-            (Document, List)      => Some("ДокументСписок"),
-            
+            (Document, List) => Some("ДокументСписок"),
+
             // Catalogs mapping
-            (Catalog, Manager)    => Some("СправочникМенеджер"),
-            (Catalog, Object)     => Some("СправочникОбъект"),
-            (Catalog, Reference)  => Some("СправочникСсылка"),
-            (Catalog, Selection)  => Some("СправочникВыборка"),
-            (Catalog, List)       => Some("СправочникСписок"),
-            
+            (Catalog, Manager) => Some("СправочникМенеджер"),
+            (Catalog, Object) => Some("СправочникОбъект"),
+            (Catalog, Reference) => Some("СправочникСсылка"),
+            (Catalog, Selection) => Some("СправочникВыборка"),
+            (Catalog, List) => Some("СправочникСписок"),
+
             // TODO: Будущие расширения
             // (Enum, Manager) => Some("ПеречислениеМенеджер"),
             // (InformationRegister, Manager) => Some("РегистрСведенийМенеджер"),
-            
+
             // Неподдерживаемые комбинации
             _ => None,
         }
     }
 
     /// Извлекает MetadataKind из TypeResolution
-    /// 
+    ///
     /// # Возвращает
-    /// 
+    ///
     /// * `Some(MetadataKind)` - для конфигурационных типов (Документы, Справочники)
     /// * `None` - для примитивных и других не-конфигурационных типов
-    /// 
+    ///
     fn extract_metadata_kind(&self, resolution: &TypeResolution) -> Option<MetadataKind> {
         match &resolution.result {
-            ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) => {
-                Some(cfg.kind)
-            },
+            ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) => Some(cfg.kind),
             _ => None,
         }
     }
 
     /// Выполняет lazy lookup методов для конкретного фасета
-    /// 
+    ///
     /// # Алгоритм
-    /// 
+    ///
     /// 1. Извлекает MetadataKind из resolution
     /// 2. Определяет имя платформенного типа через mapping
     /// 3. Ищет платформенный тип в репозитории
     /// 4. Возвращает его методы
-    /// 
+    ///
     /// # Edge cases
-    /// 
+    ///
     /// - Если resolution не содержит ConfigurationType → None
     /// - Если mapping не найден для комбинации → None
     /// - Если платформенный тип не загружен → None
     /// - Если методы пусты → Some(vec![])
-    /// 
+    ///
     /// # Примеры
-    /// 
+    ///
     /// ```ignore
     /// // Документы.ЗаказНаряды + Manager фасет
     /// let methods = lookup.get_facet_methods(&resolution, FacetKind::Manager);
     /// // → Ищет "ДокументМенеджер" → Возвращает 12 методов
     /// ```
-    /// 
+    ///
     fn get_facet_methods(
-        &self, 
-        resolution: &TypeResolution, 
-        facet: FacetKind
+        &self,
+        resolution: &TypeResolution,
+        facet: FacetKind,
     ) -> Option<Vec<RawMethodData>> {
         // 1. Извлекаем MetadataKind
         let metadata_kind = self.extract_metadata_kind(resolution)?;
-        
+
         // 2. Получаем имя платформенного типа через mapping
         let platform_type_name = Self::get_platform_facet_type(metadata_kind, facet)?;
-        
+
         // 3. Ищем платформенный тип в репозитории
         let platform_type = self.repository.find_type(platform_type_name)?;
-        
+
         // 4. Возвращаем клонированные методы
         // Важно: возвращаем Some даже для пустого Vec, чтобы отличать
         // "тип найден, но методов нет" от "тип не найден"
         Some(platform_type.methods.clone())
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::types::{
-        PlatformType, RawDataSource, FacetKind,
-        Certainty, ResolutionSource, ResolutionMetadata,
-        TabularRowType, GenericType, RawParamData,
-    };
     use crate::domain::repository::InMemoryTypeRepository;
+    use crate::domain::types::{
+        Certainty, FacetKind, GenericType, PlatformType, RawDataSource, RawParamData,
+        ResolutionMetadata, ResolutionSource, TabularRowType,
+    };
 
     fn create_test_repository() -> Arc<InMemoryTypeRepository> {
         let repo = Arc::new(InMemoryTypeRepository::new());
@@ -653,7 +646,7 @@ mod tests {
                 RawMethodData {
                     name: "Добавить".to_string(),
                     english_name: "Add".to_string(),
-                    return_type: "T".to_string(),  // ← Generic!
+                    return_type: "T".to_string(), // ← Generic!
                     params: vec![],
                     description: None,
                     is_deprecated: false,
@@ -662,15 +655,13 @@ mod tests {
                 RawMethodData {
                     name: "Получить".to_string(),
                     english_name: "Get".to_string(),
-                    return_type: "T".to_string(),  // ← Generic!
-                    params: vec![
-                        RawParamData {
-                            name: "Индекс".to_string(),
-                            param_type: "Число".to_string(),
-                            is_optional: false,
-                            default_value: None,
-                        },
-                    ],
+                    return_type: "T".to_string(), // ← Generic!
+                    params: vec![RawParamData {
+                        name: "Индекс".to_string(),
+                        param_type: "Число".to_string(),
+                        is_optional: false,
+                        default_value: None,
+                    }],
                     description: None,
                     is_deprecated: false,
                     is_constructor: false,
@@ -678,7 +669,7 @@ mod tests {
                 RawMethodData {
                     name: "Количество".to_string(),
                     english_name: "Count".to_string(),
-                    return_type: "Число".to_string(),  // НЕ Generic
+                    return_type: "Число".to_string(), // НЕ Generic
                     params: vec![],
                     description: None,
                     is_deprecated: false,
@@ -688,14 +679,12 @@ mod tests {
                     name: "Индекс".to_string(),
                     english_name: "IndexOf".to_string(),
                     return_type: "Число".to_string(),
-                    params: vec![
-                        RawParamData {
-                            name: "Строка".to_string(),
-                            param_type: "T".to_string(),  // ← Generic параметр!
-                            is_optional: false,
-                            default_value: None,
-                        },
-                    ],
+                    params: vec![RawParamData {
+                        name: "Строка".to_string(),
+                        param_type: "T".to_string(), // ← Generic параметр!
+                        is_optional: false,
+                        default_value: None,
+                    }],
                     description: None,
                     is_deprecated: false,
                     is_constructor: false,

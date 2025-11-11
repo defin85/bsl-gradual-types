@@ -37,7 +37,10 @@ fn test_cyrillic_text_span_coordinates() {
 
     // Проверяем первый statement (должна быть функция)
     use bsl_backend::parsing::bsl::ast::Statement;
-    if let Statement::FunctionDecl { name, body, span, .. } = &program.statements[0] {
+    if let Statement::FunctionDecl {
+        name, body, span, ..
+    } = &program.statements[0]
+    {
         println!("\n=== ПРОВЕРКА UTF-16 КООРДИНАТ ===");
         println!("Функция: {}", name);
         println!(

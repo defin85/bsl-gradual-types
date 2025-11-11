@@ -84,7 +84,9 @@ async fn test_progress_updates_distributed_in_time() {
         if collected_updates.len() > 1 {
             let mut gaps = Vec::new();
             for i in 1..collected_updates.len() {
-                let gap = collected_updates[i].0.duration_since(collected_updates[i - 1].0);
+                let gap = collected_updates[i]
+                    .0
+                    .duration_since(collected_updates[i - 1].0);
                 gaps.push(gap);
                 println!(
                     "  Update {}: {:?} (phase: {})",
@@ -102,7 +104,10 @@ async fn test_progress_updates_distributed_in_time() {
                 gaps.iter().sum::<Duration>() / gaps.len() as u32
             };
 
-            println!("\n⏱️  Min gap: {:?}, Max gap: {:?}, Avg gap: {:?}", min_gap, max_gap, avg_gap);
+            println!(
+                "\n⏱️  Min gap: {:?}, Max gap: {:?}, Avg gap: {:?}",
+                min_gap, max_gap, avg_gap
+            );
         }
 
         // КРИТЕРИЙ 4: Проверяем последовательность фаз
@@ -113,12 +118,12 @@ async fn test_progress_updates_distributed_in_time() {
 
         println!("\n📋 Фазы парсинга: {:?}", phases);
 
-        assert!(
-            !phases.is_empty(),
-            "Хотя бы одна фаза должна быть пройдена"
-        );
+        assert!(!phases.is_empty(), "Хотя бы одна фаза должна быть пройдена");
     } else {
-        println!("⚠️  Пропуск теста: синтаксис-помощник не найден по пути {}", syntax_path.display());
+        println!(
+            "⚠️  Пропуск теста: синтаксис-помощник не найден по пути {}",
+            syntax_path.display()
+        );
     }
 }
 

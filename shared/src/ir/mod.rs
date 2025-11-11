@@ -1032,12 +1032,9 @@ impl SymbolTable {
         &self,
         scope_id: ScopeId,
     ) -> Option<impl Iterator<Item = (&String, &TypeHint)>> {
-        self.scopes.get(&scope_id).map(|scope| {
-            scope
-                .variables
-                .iter()
-                .map(|(name, (hint, _))| (name, hint))
-        })
+        self.scopes
+            .get(&scope_id)
+            .map(|scope| scope.variables.iter().map(|(name, (hint, _))| (name, hint)))
     }
 
     /// Получить количество глобальных функций

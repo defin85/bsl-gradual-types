@@ -1,8 +1,8 @@
 //! Тесты для резолюции табличных частей через Generic типы
 
 use super::*;
-use crate::domain::types::*;
 use crate::domain::repository::InMemoryTypeRepository;
+use crate::domain::types::*;
 use std::sync::Arc;
 
 /// Вспомогательная функция для создания тестового репозитория с табличными частями
@@ -37,12 +37,10 @@ fn create_test_repository_with_tabular_sections() -> Arc<InMemoryTypeRepository>
             },
             RawTabularSectionData {
                 name: "Материалы".to_string(),
-                attributes: vec![
-                    RawAttributeData {
-                        name: "Номенклатура".to_string(),
-                        attr_type: "СправочникСсылка.Номенклатура".to_string(),
-                    },
-                ],
+                attributes: vec![RawAttributeData {
+                    name: "Номенклатура".to_string(),
+                    attr_type: "СправочникСсылка.Номенклатура".to_string(),
+                }],
             },
         ],
         enum_values: vec![],
@@ -122,7 +120,8 @@ fn test_tabular_section_not_found() {
     let resolver = TypeResolver::new(repo.clone());
 
     // Эмулируем доступ к несуществующей табличной части
-    let resolution = resolver.resolve_expression_sync("Документы.ЗаказНаряды.НесуществующаяТабличнаяЧасть");
+    let resolution =
+        resolver.resolve_expression_sync("Документы.ЗаказНаряды.НесуществующаяТабличнаяЧасть");
 
     // Должен вернуться Inferred (найден тип, но не найдена табличная часть)
     // или Unknown, если считаем это несуществующим членом

@@ -22,9 +22,9 @@ pub use generic_inference::{GenericInference, GenericTypeInfo};
 pub use metadata_lookup::TypeMetadataLookup;
 pub use null_safety::{NullSafetyAnalyzer, NullSafetyResult, NullSafetyWarning, NullWarningKind};
 pub use repository::{CompletionItem, CompletionKind, TypeRepository};
-pub use resolver::{TypeResolver, ValidationResult, ConstructorResolution};
+pub use resolver::{ConstructorResolution, TypeResolver, ValidationResult};
 pub use signature_index::{
-    MethodSignature, SignatureIndex, SignatureSource, SignatureValidationResult, SignatureMismatch,
+    MethodSignature, SignatureIndex, SignatureMismatch, SignatureSource, SignatureValidationResult,
 };
 pub use types::{RawTypeData, TypeResolution};
 pub use validators::{TypeErrorKind, TypeValidator};

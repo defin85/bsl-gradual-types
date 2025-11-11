@@ -1,10 +1,10 @@
 //! Тесты для валидации вызовов функций (Milestone 2.20)
 
 use super::*;
+use crate::domain::repository::InMemoryTypeRepository;
 use crate::domain::signature_index::{MethodSignature, SignatureIndex, SignatureSource};
 use crate::domain::types::ParameterInfo;
 use std::sync::Arc;
-use crate::domain::repository::InMemoryTypeRepository;
 
 #[test]
 fn test_validate_call_success() {
@@ -16,27 +16,21 @@ fn test_validate_call_success() {
     let sig = MethodSignature {
         name: "Добавить".to_string(),
         owner_type: Some("Массив".to_string()),
-        params: vec![
-            ParameterInfo {
-                name: "Значение".to_string(),
-                type_name: Some("Произвольный".to_string()),
-                is_optional: false,
-                default_value: None,
-                description: None,
-            }
-        ],
+        params: vec![ParameterInfo {
+            name: "Значение".to_string(),
+            type_name: Some("Произвольный".to_string()),
+            is_optional: false,
+            default_value: None,
+            description: None,
+        }],
         return_type: None,
         source: SignatureSource::Platform,
     };
 
     index.add_platform_method("Массив".to_string(), sig);
 
-    let result = resolver.validate_call(
-        Some("Массив"),
-        "Добавить",
-        &["Строка".to_string()],
-        &index,
-    );
+    let result =
+        resolver.validate_call(Some("Массив"), "Добавить", &["Строка".to_string()], &index);
 
     assert_eq!(result, ValidationResult::Ok(None));
 }
@@ -50,15 +44,13 @@ fn test_validate_call_missing_param() {
     let sig = MethodSignature {
         name: "Тест".to_string(),
         owner_type: Some("ТестТип".to_string()),
-        params: vec![
-            ParameterInfo {
-                name: "Параметр1".to_string(),
-                type_name: Some("Строка".to_string()),
-                is_optional: false,
-                default_value: None,
-                description: None,
-            }
-        ],
+        params: vec![ParameterInfo {
+            name: "Параметр1".to_string(),
+            type_name: Some("Строка".to_string()),
+            is_optional: false,
+            default_value: None,
+            description: None,
+        }],
         return_type: Some("Число".to_string()),
         source: SignatureSource::Platform,
     };
@@ -68,12 +60,15 @@ fn test_validate_call_missing_param() {
     let result = resolver.validate_call(
         Some("ТестТип"),
         "Тест",
-        &[],  // Нет аргументов
+        &[], // Нет аргументов
         &index,
     );
 
     match result {
-        ValidationResult::MissingRequiredParam { param_name, param_index } => {
+        ValidationResult::MissingRequiredParam {
+            param_name,
+            param_index,
+        } => {
             assert_eq!(param_name, "Параметр1");
             assert_eq!(param_index, 0);
         }
@@ -90,15 +85,13 @@ fn test_validate_call_too_many_args() {
     let sig = MethodSignature {
         name: "Метод".to_string(),
         owner_type: Some("Тип".to_string()),
-        params: vec![
-            ParameterInfo {
-                name: "Параметр1".to_string(),
-                type_name: Some("Строка".to_string()),
-                is_optional: false,
-                default_value: None,
-                description: None,
-            }
-        ],
+        params: vec![ParameterInfo {
+            name: "Параметр1".to_string(),
+            type_name: Some("Строка".to_string()),
+            is_optional: false,
+            default_value: None,
+            description: None,
+        }],
         return_type: None,
         source: SignatureSource::Platform,
     };
@@ -127,12 +120,7 @@ fn test_validate_call_not_found() {
     let resolver = TypeResolver::new(repo);
     let index = SignatureIndex::new();
 
-    let result = resolver.validate_call(
-        Some("Массив"),
-        "НесуществующийМетод",
-        &[],
-        &index,
-    );
+    let result = resolver.validate_call(Some("Массив"), "НесуществующийМетод", &[], &index);
 
     assert_eq!(result, ValidationResult::NotFound);
 }
@@ -160,7 +148,7 @@ fn test_validate_call_optional_params() {
                 is_optional: true,
                 default_value: Some("0".to_string()),
                 description: None,
-            }
+            },
         ],
         return_type: Some("Булево".to_string()),
         source: SignatureSource::Platform,
@@ -169,12 +157,7 @@ fn test_validate_call_optional_params() {
     index.add_platform_method("Тип".to_string(), sig);
 
     // Вызов только с обязательным параметром
-    let result = resolver.validate_call(
-        Some("Тип"),
-        "Метод",
-        &["Строка".to_string()],
-        &index,
-    );
+    let result = resolver.validate_call(Some("Тип"), "Метод", &["Строка".to_string()], &index);
 
     assert_eq!(result, ValidationResult::Ok(Some("Булево".to_string())));
 
@@ -199,15 +182,13 @@ fn test_validate_call_global_function() {
     let sig = MethodSignature {
         name: "Сообщить".to_string(),
         owner_type: None,
-        params: vec![
-            ParameterInfo {
-                name: "Сообщение".to_string(),
-                type_name: Some("Строка".to_string()),
-                is_optional: false,
-                default_value: None,
-                description: None,
-            }
-        ],
+        params: vec![ParameterInfo {
+            name: "Сообщение".to_string(),
+            type_name: Some("Строка".to_string()),
+            is_optional: false,
+            default_value: None,
+            description: None,
+        }],
         return_type: None,
         source: SignatureSource::Platform,
     };
@@ -215,7 +196,7 @@ fn test_validate_call_global_function() {
     index.add_global_function("Сообщить".to_string(), sig);
 
     let result = resolver.validate_call(
-        None,  // None для глобальных функций
+        None, // None для глобальных функций
         "Сообщить",
         &["Строка".to_string()],
         &index,
@@ -241,21 +222,11 @@ fn test_validate_call_case_insensitive() {
     index.add_platform_method("Массив".to_string(), sig);
 
     // Разные регистры должны работать благодаря SignatureIndex
-    let result = resolver.validate_call(
-        Some("Массив"),
-        "добавить",
-        &[],
-        &index,
-    );
+    let result = resolver.validate_call(Some("Массив"), "добавить", &[], &index);
 
     assert_eq!(result, ValidationResult::Ok(None));
 
-    let result = resolver.validate_call(
-        Some("Массив"),
-        "ДОБАВИТЬ",
-        &[],
-        &index,
-    );
+    let result = resolver.validate_call(Some("Массив"), "ДОБАВИТЬ", &[], &index);
 
     assert_eq!(result, ValidationResult::Ok(None));
 }

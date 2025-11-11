@@ -1407,6 +1407,11 @@ impl SemanticProgram {
             }
             BlockScope { statements, .. } => statements.clone(),
 
+            // ✅ MILESTONE 3.5: Assignment может содержать вложенный FunctionCall
+            Assignment { value_node, .. } => {
+                value_node.iter().copied().collect()
+            }
+
             // Листовые узлы (нет детей)
             _ => Vec::new(),
         };

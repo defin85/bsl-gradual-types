@@ -54,6 +54,9 @@ function updateStatusBar(text, progress) {
     }
     if (text) {
         statusBarItem.text = text;
+        // Установить tooltip из text (удаляя иконки VSCode)
+        const cleanText = text.replace(/\$\([^)]+\)/g, '').trim();
+        statusBarItem.tooltip = cleanText;
         statusBarItem.show();
         return;
     }

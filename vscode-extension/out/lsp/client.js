@@ -221,11 +221,18 @@ async function startLanguageClient(context) {
             const value = params.value;
             if (value.kind === 'begin') {
                 outputChannel.appendLine(`📊 [Progress] BEGIN: ${value.title}`);
+                // Завершаем старый прогресс если он ещё активен (из-за crash/restart LSP)
+                if (activeProgressResolve) {
+                    outputChannel.appendLine('🧹 Clearing previous progress before starting new one');
+                    activeProgressResolve();
+                    activeProgressResolve = null;
+                    activeProgressReporter = null;
+                }
                 // Сброс состояния
                 lastReportedPercentage = 0;
-                // Показать Progress Window
+                // Показать Progress в Status Bar (всегда видно)
                 vscode.window.withProgress({
-                    location: vscode.ProgressLocation.Notification,
+                    location: vscode.ProgressLocation.Window,
                     title: value.title,
                     cancellable: false
                 }, async (progress) => {

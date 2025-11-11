@@ -26,6 +26,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.BslActionsWebviewProvider = void 0;
 const vscode = __importStar(require("vscode"));
 const customRequests_1 = require("../lsp/customRequests");
+const logger_1 = require("../lsp/logger");
 /**
  * WebView провайдер для панели быстрых действий
  */
@@ -44,15 +45,31 @@ class BslActionsWebviewProvider {
         };
         webviewView.webview.html = this.getWebviewContent(webviewView.webview);
         webviewView.webview.onDidReceiveMessage(async (message) => {
+            // ✅ Валидация структуры сообщения
+            if (!message || !message.type || typeof message.type !== 'string') {
+                logger_1.logger.warn('Invalid message format received from Quick Actions webview');
+                return;
+            }
+            // ✅ Whitelist допустимых типов сообщений
+            const ALLOWED_MESSAGE_TYPES = ['ready', 'executeAction', 'searchTypes', 'showTypeDetails'];
+            if (!ALLOWED_MESSAGE_TYPES.includes(message.type)) {
+                logger_1.logger.warn(`Unknown message type from Quick Actions webview: ${message.type}`);
+                return;
+            }
             switch (message.type) {
+                case 'ready':
+                    // Quick Actions initialized
+                    logger_1.logger.debug('Quick Actions webview ready');
+                    break;
                 case 'executeAction':
-                    await this.handleAction(message.action);
+                    await this.handleAction(message.data);
                     break;
                 case 'searchTypes':
-                    await this.handleSearchTypes(webviewView, message.query);
+                    await this.handleSearchTypes(webviewView, message.data);
                     break;
                 case 'showTypeDetails':
-                    vscode.commands.executeCommand('bslAnalyzer.showTypeDetails', message.typeName);
+                    vscode.commands.executeCommand('bslAnalyzer.showTypeDetails', message.data // Type name sent in data field from Leptos
+                    );
                     break;
             }
         });
@@ -110,24 +127,64 @@ class BslActionsWebviewProvider {
         }
     }
     getWebviewContent(webview) {
-        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'quickActions.js'));
-        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'tailwind.css'));
+        // 🆕 Find WASM files dynamically (hash changes on rebuild)
+        const fs = require('fs');
+        const webviewPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'webview').fsPath;
+        const files = fs.readdirSync(webviewPath);
+        this.outputChannel?.appendLine(`🔍 Quick Actions: Looking for WASM files in ${webviewPath}`);
+        this.outputChannel?.appendLine(`   Available files: ${files.join(', ')}`);
+        const wasmFile = files.find((f) => f.match(/^bsl-frontend-.*\.wasm$/));
+        const jsFile = files.find((f) => f.match(/^bsl-frontend-.*\.js$/));
+        // ✅ ИСПРАВЛЕНИЕ: Ищем специфично tailwind CSS для Quick Actions
+        const cssFile = files.find((f) => f.match(/^tailwind-.*\.css$/)) ||
+            files.find((f) => f.match(/\.css$/));
+        this.outputChannel?.appendLine(`   Found: WASM=${wasmFile}, JS=${jsFile}, CSS=${cssFile}`);
+        if (!wasmFile || !jsFile) {
+            throw new Error('WASM bundle not found. Run: npm run build:wasm');
+        }
+        const wasmUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', wasmFile));
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', jsFile));
+        const styleUri = cssFile ? webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', cssFile)) : null;
         const nonce = getNonce();
+        const styleTag = styleUri ? `<link href="${styleUri}" rel="stylesheet">` : '';
         return `<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" 
-          content="default-src 'none'; 
-                   style-src ${webview.cspSource} 'unsafe-inline'; 
-                   script-src 'nonce-${nonce}';">
-    <link href="${styleUri}" rel="stylesheet">
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none';
+                   connect-src ${webview.cspSource};
+                   style-src ${webview.cspSource};
+                   script-src 'nonce-${nonce}' 'wasm-unsafe-eval';
+                   img-src ${webview.cspSource} data:;">
+    ${styleTag}
     <title>BSL Quick Actions</title>
 </head>
 <body>
     <div id="root"></div>
-    <script type="module" nonce="${nonce}" src="${scriptUri}"><\/script>
+    <script type="module" nonce="${nonce}">
+        import init, { start_quick_actions_app } from '${scriptUri}';
+        
+        console.log('[Quick Actions] Initializing WASM...');
+        console.log('[Quick Actions] WASM URI:', '${wasmUri}');
+        console.log('[Quick Actions] Script URI:', '${scriptUri}');
+        
+        init('${wasmUri}')
+            .then(() => {
+                console.log('[Quick Actions] WASM initialized successfully');
+                start_quick_actions_app();
+                console.log('[Quick Actions] App started');
+            })
+            .catch(err => {
+                console.error('[Quick Actions] Failed to initialize:', err);
+                document.getElementById('root').innerHTML = 
+                    '<div style="padding: 20px; color: red;">' +
+                    '<h3>❌ Failed to load Quick Actions</h3>' +
+                    '<pre>' + err.toString() + '</pre>' +
+                    '</div>';
+            });
+    <\/script>
 </body>
 </html>`;
     }

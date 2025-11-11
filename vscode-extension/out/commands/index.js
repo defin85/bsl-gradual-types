@@ -681,9 +681,30 @@ async function registerCommands(context) {
             vscode.window.showErrorMessage(`Ошибка получения семантического дерева: ${errorMessage}`);
         }
     });
+    // MILESTONE 2.20.3: Register bsl.getCurrentContext command (proxy to LSP)
+    await safeRegisterCommand('bsl.getCurrentContext', async (params) => {
+        const client = (0, lsp_1.getLanguageClient)();
+        if (!client || !client.isRunning()) {
+            outputChannel.appendLine('⚠️ bsl.getCurrentContext: LSP client not running');
+            return null;
+        }
+        try {
+            outputChannel.appendLine(`🔍 bsl.getCurrentContext called with params: ${JSON.stringify(params)}`);
+            const result = await client.sendRequest('workspace/executeCommand', {
+                command: 'bsl.getCurrentContext',
+                arguments: [params]
+            });
+            outputChannel.appendLine(`✅ bsl.getCurrentContext result: ${JSON.stringify(result)}`);
+            return result;
+        }
+        catch (error) {
+            outputChannel.appendLine(`❌ Error calling bsl.getCurrentContext: ${error}`);
+            return null;
+        }
+    });
     // Устанавливаем флаг, что команды зарегистрированы
     commandsRegistered = true;
-    outputChannel.appendLine('✅ Successfully registered 16 extension commands');
+    outputChannel.appendLine('✅ Successfully registered 17 extension commands');
 }
 exports.registerCommands = registerCommands;
 //# sourceMappingURL=index.js.map

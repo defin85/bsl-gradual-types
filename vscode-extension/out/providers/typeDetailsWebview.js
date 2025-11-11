@@ -54,11 +54,25 @@ class TypeDetailsWebviewProvider {
         }
         const panel = TypeDetailsWebviewProvider.currentPanel;
         panel.webview.onDidReceiveMessage(async (message) => {
-            if (message.type === 'ready') {
-                await this.updateTypeInfo(panel, typeName);
+            // ✅ Валидация структуры сообщения
+            if (!message || !message.type || typeof message.type !== 'string') {
+                logger_1.logger.warn('Invalid message format received from webview');
+                return;
             }
-            else if (message.type === 'close') {
-                panel.dispose();
+            // ✅ Whitelist допустимых типов сообщений
+            const ALLOWED_MESSAGE_TYPES = ['ready', 'close'];
+            if (!ALLOWED_MESSAGE_TYPES.includes(message.type)) {
+                logger_1.logger.warn(`Unknown message type from webview: ${message.type}`);
+                return;
+            }
+            // ✅ Обработка только валидных сообщений
+            switch (message.type) {
+                case 'ready':
+                    await this.updateTypeInfo(panel, typeName);
+                    break;
+                case 'close':
+                    panel.dispose();
+                    break;
             }
         });
         await this.updateTypeInfo(panel, typeName);
@@ -129,7 +143,7 @@ class TypeDetailsWebviewProvider {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}' 'wasm-unsafe-eval'; img-src ${webview.cspSource} data:;">
     <link href="${styleUri}" rel="stylesheet">
     <title>Type Details</title>
 </head>

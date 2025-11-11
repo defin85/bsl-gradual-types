@@ -192,7 +192,29 @@ impl SystemCoordinator {
         if let Some(syntax_path) = syntax_helper_path {
             // 🔧 HBK Recovery: Восстанавливаем .hbk файлы перед парсингом
             info!("🔍 Проверяем наличие .hbk файлов для восстановления...");
-            match hbk_recovery::auto_recover_directory(syntax_path) {
+
+            // ✅ PHASE 2: Интеграция Progress Callback для HBK Recovery
+            let hbk_result = if let Some(ref tx) = progress_tx {
+                let tx_clone = tx.clone();
+                hbk_recovery::auto_recover_directory_with_progress(
+                    syntax_path,
+                    Some(move |update: crate::data::loaders::progress::ProgressUpdateType| {
+                        if let crate::data::loaders::progress::ProgressUpdateType::HbkExtraction { file_name, extracted_files, total_files, percentage } = update {
+                            let _ = tx_clone.send(crate::data::loaders::progress::ProgressUpdate {
+                                phase: crate::data::loaders::progress::IndexingPhase::HbkExtraction,
+                                current: extracted_files,
+                                total: total_files,
+                                percentage: percentage as f32,
+                                message: Some(format!("Извлекаем файлы из {}", file_name)),
+                            });
+                        }
+                    }),
+                )
+            } else {
+                hbk_recovery::auto_recover_directory(syntax_path)
+            };
+
+            match hbk_result {
                 Ok(results) if !results.is_empty() => {
                     info!("✅ Восстановлено {} .hbk файлов", results.len());
                     for result in &results {

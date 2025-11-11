@@ -19,6 +19,10 @@ pub enum ProgressSource {
 /// Этапы парсинга (платформы и конфигурации)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexingPhase {
+    // === ФАЗЫ ДЛЯ HBK RECOVERY ===
+    /// Извлечение файлов из .hbk архивов (0-100%)
+    HbkExtraction,
+
     // === ФАЗЫ ДЛЯ ПЛАТФОРМЫ (Syntax Helper) ===
     /// Сканирование файловой системы (0-10%)
     CollectingFiles,
@@ -50,7 +54,8 @@ impl IndexingPhase {
     /// Возвращает источник прогресса (Platform или Configuration)
     pub fn source(&self) -> ProgressSource {
         match self {
-            Self::CollectingFiles
+            Self::HbkExtraction
+            | Self::CollectingFiles
             | Self::ParsingFiles
             | Self::LinkingCategories
             | Self::BuildingIndexes => ProgressSource::Platform,
@@ -65,6 +70,9 @@ impl IndexingPhase {
     /// Возвращает базовый процент начала фазы (0.0-100.0)
     pub fn base_percentage(&self) -> f32 {
         match self {
+            // HBK Recovery
+            Self::HbkExtraction => 0.0,
+
             // Платформа
             Self::CollectingFiles => 0.0,
             Self::ParsingFiles => 10.0,
@@ -82,6 +90,9 @@ impl IndexingPhase {
     /// Возвращает вклад фазы в общий процент (сумма всех весов = 100.0)
     pub fn weight(&self) -> f32 {
         match self {
+            // HBK Recovery
+            Self::HbkExtraction => 100.0,
+
             // Платформа
             Self::CollectingFiles => 10.0,
             Self::ParsingFiles => 60.0, // Основная фаза (самая долгая)
@@ -99,6 +110,9 @@ impl IndexingPhase {
     /// Человекочитаемое название фазы (для русского интерфейса)
     pub fn display_name(&self) -> &'static str {
         match self {
+            // HBK Recovery
+            Self::HbkExtraction => "Извлечение файлов справки",
+
             // Платформа
             Self::CollectingFiles => "Сканирование файлов",
             Self::ParsingFiles => "Парсинг Syntax Helper",

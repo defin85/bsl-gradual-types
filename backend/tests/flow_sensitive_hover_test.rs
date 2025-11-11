@@ -519,3 +519,64 @@ async fn test_hover_edge_case_zero_position() {
 
     println!("✅ PASSED: test_hover_edge_case_zero_position");
 }
+
+/// Тест для проверки исправления: hover на переменной в вызове метода
+/// должен показывать имя ПЕРЕМЕННОЙ, а не результата присваивания.
+///
+/// БАГ (до исправления):
+/// - Курсор на `ТаблицаЗначенійТип` показывал "Переменная: Кол"
+///
+/// ИСПРАВЛЕНИЕ (Milestone 2.11):
+/// - Приоритизация узлов по типу в `find_node_at_position()`
+/// - FunctionCall/MemberAccess имеют приоритет над Assignment
+///
+/// ОЖИДАЕТСЯ (после исправления):
+/// - Курсор на `ТаблицаЗначенійТип` показывает "Переменная: ТаблицаЗначенійТип"
+#[tokio::test]
+async fn test_hover_prioritizes_function_call_over_assignment() {
+    let service = create_test_service();
+
+    let code = r#"
+Функция ТестПриоритизации()
+    ТаблицаТип = Новый ТаблицаЗначений;
+    Кол = ТаблицаТип.Количество();
+КонецФункции
+    "#;
+
+    // Hover на "ТаблицаТип" (строка 3, колонка 10 - начало переменной после "    Кол = ")
+    // Это переменная в вызове метода (объект FunctionCall node)
+    let hover_result = service
+        .get_hover_info(code, 3, 10) // line 3 (строка "Кол = ..."), column 10 (начало "ТаблицаТип")
+        .await
+        .expect("Failed to get hover info");
+
+    assert!(
+        hover_result.is_some(),
+        "❌ Hover на переменной в вызове метода должен вернуть информацию"
+    );
+
+    let hover_text = hover_result.unwrap();
+    println!(
+        "🔍 Hover result (test_hover_prioritizes_function_call_over_assignment):\n{}",
+        hover_text
+    );
+
+    // ✅ ГЛАВНАЯ ПРОВЕРКА: Должна показываться переменная "ТаблицаТип",
+    // а НЕ "Кол" (результат присваивания)
+    assert!(
+        hover_text.contains("ТаблицаТип"),
+        "❌ Hover должен показывать 'ТаблицаТип' (переменную в вызове метода), \
+         а не 'Кол' (результат присваивания). Получили:\n{}",
+        hover_text
+    );
+
+    assert!(
+        !hover_text.contains("Переменная: Кол") && !hover_text.contains("Переменная:** Кол"),
+        "❌ Hover НЕ должен показывать 'Кол' при наведении на 'ТаблицаТип'. \
+         Это означает, что find_node_at_position() вернул Assignment узел вместо FunctionCall. \
+         Получили:\n{}",
+        hover_text
+    );
+
+    println!("✅ PASSED: test_hover_prioritizes_function_call_over_assignment");
+}

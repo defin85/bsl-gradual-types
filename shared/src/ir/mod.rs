@@ -461,11 +461,35 @@ impl SemanticProgram {
     /// }
     /// ```
     pub fn find_node_at_position(&self, line: u32, column: u32) -> Option<&SemanticNode> {
+        use tracing::debug;
+
         // Возвращаем САМЫЙ МАЛЕНЬКИЙ узел, содержащий позицию
         // (наиболее специфичный, самый вложенный)
         // Это важно для hover: если есть Assignment и вложенный FunctionCall,
         // курсор на вызове метода должен показывать FunctionCall, а не Assignment
-        self.nodes
+
+        debug!("🔍 find_node_at_position: line={}, col={}", line, column);
+
+        let candidates: Vec<_> = self.nodes
+            .iter()
+            .filter(|node| node.span.contains(line, column))
+            .collect();
+
+        debug!("📍 Найдено {} кандидатов для позиции {}:{}", candidates.len(), line, column);
+        for (i, node) in candidates.iter().enumerate() {
+            let type_name = match &node.kind {
+                SemanticNodeKind::Assignment { variable, .. } => format!("Assignment({})", variable),
+                SemanticNodeKind::FunctionCall { function_name, object_name, .. } =>
+                    format!("FunctionCall({}.{})", object_name.as_deref().unwrap_or("?"), function_name),
+                SemanticNodeKind::MemberAccess { object_name, member_name, .. } =>
+                    format!("MemberAccess({}.{})", object_name.as_deref().unwrap_or("?"), member_name),
+                SemanticNodeKind::VariableDeclaration { name, .. } => format!("VarDecl({})", name),
+                _ => format!("{:?}", node.kind),
+            };
+            debug!("  [{}] {} span={:?}", i, type_name, node.span);
+        }
+
+        let result = self.nodes
             .iter()
             .filter(|node| node.span.contains(line, column))
             .min_by_key(|node| {
@@ -477,8 +501,35 @@ impl SemanticProgram {
                     // Для многострочных span используем количество строк
                     lines * 1000
                 };
-                lines * 1000 + cols
-            })
+
+                // ✅ MILESTONE 2.11: Приоритизация по типу узла
+                // Когда несколько узлов имеют одинаковый размер span,
+                // выбираем более специфичный тип (меньшее число = выше приоритет)
+                let type_priority = match &node.kind {
+                    SemanticNodeKind::FunctionCall { .. } => 0,       // Высший приоритет
+                    SemanticNodeKind::MemberAccess { .. } => 1,       // Высокий приоритет
+                    SemanticNodeKind::VariableDeclaration { .. } => 2, // Средний приоритет
+                    SemanticNodeKind::Assignment { .. } => 10,        // Низкий приоритет
+                    _ => 5,                                           // Остальные - средний приоритет
+                };
+
+                // Сортировка: сначала по размеру span, затем по приоритету типа
+                (lines * 1000 + cols, type_priority)
+            });
+
+        if let Some(node) = result {
+            let type_name = match &node.kind {
+                SemanticNodeKind::Assignment { variable, .. } => format!("Assignment({})", variable),
+                SemanticNodeKind::FunctionCall { function_name, object_name, .. } =>
+                    format!("FunctionCall({}.{})", object_name.as_deref().unwrap_or("?"), function_name),
+                _ => format!("{:?}", node.kind),
+            };
+            debug!("✅ Выбран узел: {} span={:?}", type_name, node.span);
+        } else {
+            debug!("❌ Узел не найден для позиции {}:{}", line, column);
+        }
+
+        result
     }
 
     /// Получить scope по ID

@@ -721,6 +721,20 @@ impl AstToIrConverter {
                     None
                 };
 
+                // ✅ MILESTONE 2.11: Расширяем span FunctionCall узла, чтобы включить объект
+                // Это позволит hover правильно работать на объекте в вызове метода
+                let expanded_span = if let Expression::Identifier { span: obj_span, .. } = &*object {
+                    // Объединяем span объекта (ТаблицаТип) и span вызова (Количество())
+                    Span {
+                        start_line: obj_span.start_line,
+                        start_column: obj_span.start_column,
+                        end_line: span.end_line,
+                        end_column: span.end_column,
+                    }
+                } else {
+                    span // Для сложных выражений используем оригинальный span
+                };
+
                 let node = SemanticNode {
                     kind: SemanticNodeKind::FunctionCall {
                         function_name: property.clone(),
@@ -728,7 +742,7 @@ impl AstToIrConverter {
                         object_type: Some(object_type),
                         arg_types,
                     },
-                    span,
+                    span: expanded_span, // ✅ Используем расширенный span
                     scope_id: self.current_scope,
                 };
 

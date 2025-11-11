@@ -1,8 +1,11 @@
-//! Структуры данных для отслеживания прогресса индексации.
+//! Структуры данных для отслеживания прогресса индексации и восстановления.
 //!
 //! Поддерживает парсинг:
 //! - Платформенных типов (Syntax Helper): 4 фазы
 //! - Конфигурации (Configuration.xml): 4 фазы
+//! - Восстановления .hbk файлов: извлечение архивов
+
+use serde::{Deserialize, Serialize};
 
 /// Источник прогресса индексации
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,7 +114,50 @@ impl IndexingPhase {
     }
 }
 
-/// Обновление прогресса парсинга
+/// Обновление прогресса индексации или восстановления
+///
+/// Используется для отправки информации о ходе работы в VSCode UI.
+/// Сериализуется в JSON с использованием тега для типа.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum ProgressUpdateType {
+    /// Прогресс парсинга файлов
+    #[serde(rename = "parsing")]
+    Parsing {
+        /// Текущая фаза индексации
+        phase: IndexingPhaseData,
+        /// Текущий элемент (номер обработанного файла/типа)
+        current: usize,
+        /// Всего элементов в текущей фазе
+        total: usize,
+        /// Общий процент выполнения (0.0-100.0)
+        percentage: f32,
+        /// Человекочитаемое сообщение (например, имя текущего типа)
+        message: Option<String>,
+    },
+
+    /// Прогресс извлечения файлов из .hbk архива
+    #[serde(rename = "hbk_extraction")]
+    HbkExtraction {
+        /// Имя .hbk файла (например, "shcntx_ru")
+        file_name: String,
+        /// Количество уже извлечённых файлов
+        extracted_files: usize,
+        /// Общее количество файлов в архиве
+        total_files: usize,
+        /// Процент выполнения (0-100)
+        percentage: u8,
+    },
+}
+
+/// Сериализуемые данные о фазе индексации
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexingPhaseData {
+    /// Текстовое представление фазы
+    pub name: String,
+}
+
+/// Обновление прогресса парсинга (наследование для обратной совместимости)
 #[derive(Debug, Clone)]
 pub struct ProgressUpdate {
     /// Текущая фаза индексации
@@ -182,6 +228,41 @@ impl ProgressUpdate {
             total,
             percentage,
             message,
+        }
+    }
+
+    /// Конвертирует в сериализуемый enum для отправки в UI
+    pub fn to_update_type(&self) -> ProgressUpdateType {
+        ProgressUpdateType::Parsing {
+            phase: IndexingPhaseData {
+                name: self.phase.display_name().to_string(),
+            },
+            current: self.current,
+            total: self.total,
+            percentage: self.percentage,
+            message: self.message.clone(),
+        }
+    }
+}
+
+impl ProgressUpdateType {
+    /// Создаёт обновление прогресса для извлечения .hbk архива
+    pub fn hbk_extraction(
+        file_name: impl Into<String>,
+        extracted_files: usize,
+        total_files: usize,
+    ) -> Self {
+        let percentage = if total_files == 0 {
+            0
+        } else {
+            ((extracted_files as f32 / total_files as f32) * 100.0).round() as u8
+        };
+
+        Self::HbkExtraction {
+            file_name: file_name.into(),
+            extracted_files,
+            total_files,
+            percentage,
         }
     }
 }

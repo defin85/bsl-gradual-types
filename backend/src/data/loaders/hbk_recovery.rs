@@ -578,10 +578,21 @@ mod extractor {
 
         let mut archive = zip::ZipArchive::new(file).context("Не удалось прочитать ZIP архив")?;
 
-        info!("📊 Файлов в архиве: {}", archive.len());
+        let total_files = archive.len();
+        info!("📊 Файлов в архиве: {}", total_files);
 
         // Распаковываем каждый файл
-        for i in 0..archive.len() {
+        for i in 0..total_files {
+            // Логируем прогресс каждые 1000 файлов или в конце
+            if i % 1000 == 0 || i == total_files - 1 {
+                info!(
+                    "📦 Обработано {}/{} файлов ({}%)",
+                    i + 1,
+                    total_files,
+                    (i + 1) * 100 / total_files
+                );
+            }
+
             let mut file = archive
                 .by_index(i)
                 .context(format!("Не удалось прочитать файл #{} из архива", i))?;
@@ -589,10 +600,7 @@ mod extractor {
             let file_path = match file.enclosed_name() {
                 Some(path) => target_dir.join(path),
                 None => {
-                    debug!(
-                        "⚠️ Пропускаем файл с небезопасным именем: {:?}",
-                        file.name()
-                    );
+                    // Пропускаем файлы с небезопасными именами без логирования
                     continue;
                 }
             };
@@ -604,11 +612,9 @@ mod extractor {
             }
 
             if file.is_dir() {
-                debug!("📁 Создаём директорию: {:?}", file_path);
                 fs::create_dir_all(&file_path)
                     .context(format!("Не удалось создать директорию: {:?}", file_path))?;
             } else {
-                debug!("📄 Извлекаем файл: {:?}", file_path);
                 let mut outfile = File::create(&file_path)
                     .context(format!("Не удалось создать файл: {:?}", file_path))?;
 
@@ -617,7 +623,7 @@ mod extractor {
             }
         }
 
-        info!("✅ ZIP распакован успешно");
+        info!("✅ ZIP распакован успешно: {} файлов", total_files);
         Ok(())
     }
 }

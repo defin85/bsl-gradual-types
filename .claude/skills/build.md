@@ -10,23 +10,51 @@
 - 🔄 Копирование бинарников в расширение
 - ✅ Проверка целостности сборки
 
-## 🔧 Процесс сборки
+## 🚀 Главный скрипт сборки
+
+### Универсальный скрипт (РЕКОМЕНДУЕТСЯ)
+
+```bash
+# Полная сборка (Release mode)
+./build-all.sh
+
+# Быстрая сборка (Debug mode)
+./build-all.sh --debug
+
+# Без тестов (быстрее)
+./build-all.sh --skip-tests
+```
+
+**Что делает `build-all.sh`:**
+1. ✅ Собирает все Rust бинарники (LSP, Web, CLI)
+2. ✅ Копирует бинарники в `vscode-extension/bin/`
+3. ✅ Компилирует TypeScript код расширения
+4. ✅ Собирает WASM bundles для webview
+5. ✅ Запускает quick tests (опционально)
+6. ✅ Показывает итоговый отчёт
+
+**Время выполнения:**
+- Release mode: ~3-4 минуты
+- Debug mode: ~30-40 секунд
+
+---
+
+## 🔧 Ручной процесс сборки (если нужен)
 
 ### 1. Rust бинарники (Release mode)
 
 ```bash
-# LSP Server
+# Все бинарники сразу
+cargo build --release --workspace
+
+# Или по отдельности:
 cargo build --release -p bsl-backend --bin bsl-lsp-server
-
-# Web Server
 cargo build --release -p bsl-backend --bin bsl-web-server
-
-# CLI
 cargo build --release -p bsl-cli
 ```
 
 **Результат:**
-- `target/release/bsl-lsp-server.exe` (~9 MB)
+- `target/release/bsl-lsp-server.exe` (~9-10 MB)
 - `target/release/bsl-web-server.exe` (~14 MB)
 - `target/release/bsl-cli.exe` (~3 MB)
 
@@ -35,7 +63,7 @@ cargo build --release -p bsl-cli
 ```bash
 cd vscode-extension
 
-# Компиляция TypeScript + копирование бинарников + сборка webview
+# Компиляция TypeScript + копирование бинарников + сборка WASM
 npm run compile
 
 cd ..
@@ -44,203 +72,173 @@ cd ..
 **Что происходит:**
 1. `npm run copy-binaries` - копирует Rust бинарники из `target/release/` в `vscode-extension/bin/`
 2. `node esbuild.js` - компилирует TypeScript код расширения
-3. `npm run build:webview` - собирает React webview с Tailwind CSS
+3. `npm run build:wasm:release` - собирает WASM bundles для webview
 
 **Результат:**
 - `vscode-extension/out/extension.js` - код расширения
-- `vscode-extension/bin/lsp_server.exe` - LSP Server для расширения
-- `vscode-extension/media/webview/*.js|css` - webview assets
+- `vscode-extension/bin/lsp-server.exe` - LSP Server для расширения
+- `vscode-extension/media/webview/*.wasm` - WASM assets
 
 ### 3. Проверка целостности
 
 ```bash
 # Проверка существования бинарников
 ls -lh target/release/bsl-*.exe
-ls -lh vscode-extension/bin/lsp_server.exe
+ls -lh vscode-extension/bin/lsp-server.exe
 
 # Проверка расширения
 ls -lh vscode-extension/out/extension.js
 ls -lh vscode-extension/media/webview/
 ```
 
-## 📊 Формат отчёта
+## 📊 Пример вывода `build-all.sh`
 
-```markdown
-# 🏗️ Отчёт о сборке BSL Gradual Types
-
-**Дата:** 2025-11-05
-**Версия:** 0.4.0
-
----
-
-## ✅ Rust бинарники (Release)
-
-**Команда:** `cargo build --release -p bsl-backend --bin bsl-lsp-server`
-
-**Результат:**
-- ✅ bsl-lsp-server: сборка успешна (9.09 MB)
-- ✅ bsl-web-server: сборка успешна (14.23 MB)
-- ✅ bsl-cli: сборка успешна (2.87 MB)
-
-**Время сборки:** 2м 30с
-
----
-
-## ✅ VSCode Extension
-
-**Команда:** `cd vscode-extension && npm run compile`
-
-**Результат:**
-- ✅ TypeScript compilation: успешна
-- ✅ Webview build (Vite + Tailwind): успешна
-- ✅ Бинарники скопированы в vscode-extension/bin/
-
-**Файлы:**
-- `out/extension.js` (245 KB)
-- `bin/lsp_server.exe` (9.09 MB)
-- `media/webview/tailwind.js` (141 KB)
-- `media/webview/typeDetails.js` (6 KB)
-
-**Время сборки:** 15 секунд
-
----
-
-## ✅ Проверка целостности
-
-**Все необходимые файлы на месте:**
-- ✅ target/release/bsl-lsp-server.exe
-- ✅ target/release/bsl-web-server.exe
-- ✅ target/release/bsl-cli.exe
-- ✅ vscode-extension/bin/lsp_server.exe
-- ✅ vscode-extension/out/extension.js
-
----
-
-## 📊 Общий итог
-
-| Компонент | Результат | Размер | Статус |
-|-----------|-----------|--------|--------|
-| LSP Server | Собран | 9.09 MB | ✅ |
-| Web Server | Собран | 14.23 MB | ✅ |
-| CLI | Собран | 2.87 MB | ✅ |
-| VSCode Extension | Собран | 245 KB | ✅ |
-| Webview Assets | Собраны | 148 KB | ✅ |
-
-**Общая оценка:** ✅ **Сборка успешна**
-
-**Время выполнения:** 2м 45с
-**Следующий шаг:** Тестирование (`/test-runner`)
-
----
 ```
+============================================================
+🏗️  BSL Gradual Types - Полная сборка
+============================================================
 
-## ❌ Обработка ошибок сборки
+Режим сборки: release
+Тесты: включены
 
-### Если cargo build провалился
+============================================================
+ЭТАП 1: Сборка Rust бинарников (release)
+============================================================
 
-```markdown
-## ❌ Rust бинарники
+🦀 Компиляция Rust проекта...
+Режим: release
+   Compiling bsl-shared v0.4.2
+   Compiling bsl-backend v0.4.2
+   Compiling bsl-cli v0.4.2
+    Finished `release` profile [optimized] target(s) in 2m 15s
 
-**Команда:** `cargo build --release -p bsl-backend --bin bsl-lsp-server`
+⏱️  Время выполнения: 135s
 
-**Результат:**
-- ❌ Ошибка компиляции
+✅ Rust бинарники собраны
 
-**Ошибка:**
-```
-error[E0425]: cannot find function `resolve_type` in this scope
-  --> backend/src/domain/type_resolver.rs:145:20
-   |
-145 |         let ty = resolve_type(&context)?;
-   |                  ^^^^^^^^^^^^ not found in this scope
-```
+📦 Проверка собранных бинарников:
+  ✅ LSP Server (9.8M)
+  ✅ Web Server (14.2M)
+  ✅ CLI (3.1M)
 
-**Файл:** `backend/src/domain/type_resolver.rs:145`
+============================================================
+ЭТАП 2: Копирование бинарников в VSCode Extension
+============================================================
 
-**Причина:** Отсутствует импорт функции `resolve_type`
+📋 Копирование бинарников:
+Источник: target/release/
+Назначение: vscode-extension/bin/
 
-**Рекомендация:** Добавить `use crate::domain::resolver::resolve_type;`
+🔍 LSP Server:
+  ✅ Скопирован lsp-server.exe (9.8M)
 
----
+✅ Бинарники скопированы успешно
 
-## 🚨 Критический провал: Исправить немедленно!
+============================================================
+ЭТАП 3: Сборка VSCode Extension
+============================================================
 
-**Не запускать расширение** до исправления ошибок сборки.
-```
+📦 Установка зависимостей (если нужно)...
+  ⏭️  node_modules существует, пропускаем npm install
 
-### Если npm run compile провалился
+🔨 Компиляция TypeScript + сборка WASM...
+   ✅ TypeScript compiled
+   ✅ WASM bundles built
+⏱️  Время выполнения: 25s
 
-```markdown
-## ❌ VSCode Extension
+📦 Проверка собранного расширения:
+  ✅ Extension main file (24K)
+  ✅ LSP Server binary (9.8M)
 
-**Команда:** `cd vscode-extension && npm run compile`
+✅ VSCode Extension собрано успешно
 
-**Результат:**
-- ❌ TypeScript compilation failed
+============================================================
+ЭТАП 4: Быстрые проверки
+============================================================
 
-**Ошибка:**
-```
-src/extension.ts(45,12): error TS2345: Argument of type 'string' is not assignable to parameter of type 'Uri'.
-```
+🧪 Запуск быстрых unit тестов...
+running 335 tests
+test result: ok. 335 passed
+⏱️  Время выполнения: 12s
 
-**Файл:** `vscode-extension/src/extension.ts:45`
+✅ Быстрые тесты пройдены
 
-**Причина:** Неверный тип аргумента для Uri
+============================================================
+📊 ИТОГОВЫЙ ОТЧЁТ
+============================================================
 
-**Рекомендация:** Использовать `Uri.file(path)` вместо `path`
+📦 Собранные компоненты:
 
----
+🦀 Rust (release):
+  ✅ LSP Server (9.8M)
+  ✅ Web Server (14.2M)
+  ✅ CLI (3.1M)
+
+📦 VSCode Extension:
+  ✅ TypeScript (24K)
+  ✅ LSP Server binary (9.8M)
+  ✅ WASM bundles (2 files)
+
+✅ Все компоненты собраны успешно!
+
+🚀 Следующие шаги:
+  1. Запустить тесты: ./test-runner.sh или /test-runner
+  2. Запустить VSCode: code vscode-extension/
+  3. Проверить расширение: F5 в VSCode
+
+⏱️  Общее время сборки: 172s
+
+🎉 Сборка завершена успешно!
 ```
 
 ## 🎯 Использование
 
-Запусти этот навык когда:
-- После изменений в Rust коде
-- После изменений в TypeScript коде расширения
-- Перед тестированием (`/test-runner`)
-- Перед созданием VSIX package
-- После обновления зависимостей
+### Через Claude Skill (РЕКОМЕНДУЕТСЯ)
 
-**Команда:**
 ```
 /build
 ```
 
-**Или:**
-```
-Собери все компоненты проекта
-```
+**Что произойдёт:**
+Claude автоматически запустит `./build-all.sh` и предоставит детальный отчёт о сборке.
 
-## ⚙️ Опции сборки
-
-### Быстрая сборка (Debug mode)
+### Через скрипт напрямую
 
 ```bash
-# Для разработки (быстрее, но больше размер)
-cargo build -p bsl-backend --bin bsl-lsp-server
+# Полная сборка (release + тесты)
+./build-all.sh
 
-# Время: ~30 секунд
-# Размер: ~20 MB
+# Быстрая сборка (debug, без тестов)
+./build-all.sh --debug --skip-tests
 ```
 
-### Полная сборка (Release mode с оптимизациями)
+### Когда запускать сборку:
+
+- ✅ После изменений в Rust коде
+- ✅ После изменений в TypeScript коде расширения
+- ✅ Перед тестированием (`/test-runner`)
+- ✅ Перед созданием VSIX package
+- ✅ После обновления зависимостей
+- ✅ После git pull (если изменились бинарники)
+
+## ⚙️ Опции скрипта build-all.sh
+
+### Режимы сборки
+
+| Опция | Описание | Время | Размер бинарника |
+|-------|----------|-------|------------------|
+| `./build-all.sh` | Release + тесты | ~3-4 мин | 9.8 MB |
+| `./build-all.sh --debug` | Debug (быстро) | ~30-40 сек | 20 MB |
+| `./build-all.sh --skip-tests` | Release без тестов | ~3 мин | 9.8 MB |
+| `./build-all.sh --debug --skip-tests` | Самый быстрый | ~30 сек | 20 MB |
+
+### Расширенная сборка с проверками
 
 ```bash
-# Для production (медленнее, но меньше размер)
-cargo build --release -p bsl-backend --bin bsl-lsp-server
-
-# Время: ~2-3 минуты
-# Размер: ~9 MB
-```
-
-### Сборка с проверками
-
-```bash
-# Сборка + clippy + форматирование
-cargo clippy --release -p bsl-backend --bin bsl-lsp-server
+# Сборка + clippy + форматирование (перед коммитом)
+cargo clippy --release --workspace
 cargo fmt --check
-
-# Полезно перед коммитом
+./build-all.sh
 ```
 
 ## 🔄 Автоматическая сборка при изменениях

@@ -2,6 +2,54 @@
 
 AI-ассистент инструкции для BSL Gradual Type System проекта.
 
+## 🤖 Автономное тестирование LSP (ВАЖНО!)
+
+**С 2025-11-12 ты можешь САМОСТОЯТЕЛЬНО тестировать LSP функции!**
+
+### Как тестировать:
+
+1. **Запустить Web API сервер:**
+   ```bash
+   /start-lsp-api
+   # Или вручную:
+   cargo run --release -p bsl-backend --bin bsl-web-server -- \
+     --port 3002 --enable-cors true \
+     --syntax-helper-path examples/syntax_helper
+   ```
+
+2. **Использовать endpoints для тестирования:**
+   ```bash
+   # Тестировать hover
+   curl -X POST http://localhost:3002/api/hover/enhanced \
+     -H "Content-Type: application/json" \
+     -d '{"code":"ТЗ = Новый ТаблицаЗначений;","line":1,"column":0}'
+
+   # Тестировать diagnostics
+   curl -X POST http://localhost:3002/api/diagnostics \
+     -H "Content-Type: application/json" \
+     -d '{"code":"...код BSL..."}'
+
+   # Отладка AST парсинга
+   curl -X POST http://localhost:3002/api/debug/ast \
+     -H "Content-Type: application/json" \
+     -d '{"code":"..."}'
+   ```
+
+3. **Итерировать быстро:**
+   - Изменить код → Пересобрать → Перезапустить сервер → Протестировать через curl
+   - **НЕ нужно** просить пользователя перезапускать VSCode!
+   - **5-10x быстрее** итерации
+
+**Доступные endpoints:**
+- `POST /api/hover/enhanced` - детальная информация hover
+- `POST /api/diagnostics` - синтаксические + семантические ошибки
+- `POST /api/debug/ast` - AST дерево и symbol table
+- `POST /api/validate` - быстрая валидация (legacy)
+
+**См:** [docs/api/web-api-reference.md](docs/api/web-api-reference.md) для полной документации.
+
+---
+
 ## 📚 Навигация по документации
 
 ### 🗺️ Roadmap и прогресс

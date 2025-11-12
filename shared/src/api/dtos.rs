@@ -274,3 +274,155 @@ pub struct PropertyDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
+
+// ============================================================================
+// Enhanced Hover Response (Milestone 2.13)
+// ============================================================================
+
+/// Request for hover information
+#[derive(Debug, Clone, Deserialize)]
+pub struct HoverInfoRequest {
+    /// BSL code fragment
+    pub code: String,
+    /// Line number (0-based)
+    pub line: u32,
+    /// Column number (0-based)
+    pub column: u32,
+}
+
+/// Enhanced hover response with detailed variable information
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnhancedHoverResponse {
+    /// Formatted hover text with type information
+    pub hover_text: String,
+
+    /// Variable/symbol name at position
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variable_name: Option<String>,
+
+    /// Inferred or explicit type name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variable_type: Option<String>,
+
+    /// Type hint certainty level (e.g., "Explicit", "Inferred", "Unknown")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_hint: Option<String>,
+
+    /// Whether variable was found in scope
+    pub found_in_scope: bool,
+
+    /// Requested line number
+    pub line: u32,
+
+    /// Requested column number
+    pub column: u32,
+
+    /// Analysis duration in milliseconds
+    pub duration_ms: u128,
+}
+
+// ============================================================================
+// Diagnostics Response (Milestone 2.18)
+// ============================================================================
+
+/// Syntax error information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntaxErrorDto {
+    /// Error message
+    pub message: String,
+    /// Line number (1-indexed)
+    pub line: u32,
+    /// Column number (1-indexed)
+    pub column: u32,
+}
+
+/// Semantic error information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticErrorDto {
+    /// Error message
+    pub message: String,
+    /// Line number (1-indexed)
+    pub line: u32,
+    /// Column number (1-indexed)
+    pub column: u32,
+    /// Error severity: "error", "warning", "info"
+    pub severity: String,
+}
+
+/// Diagnostics response separating syntax and semantic errors
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsResponseDto {
+    /// Syntax errors found during parsing
+    pub syntax_errors: Vec<SyntaxErrorDto>,
+
+    /// Semantic errors found during analysis
+    pub semantic_errors: Vec<SemanticErrorDto>,
+
+    /// Total count of all errors
+    pub total_errors: usize,
+
+    /// Analysis duration in milliseconds
+    pub duration_ms: u128,
+}
+
+// ============================================================================
+// Debug AST Response (Milestone 2.16)
+// ============================================================================
+
+/// Node information in the AST
+#[derive(Debug, Clone, Serialize)]
+pub struct AstNodeDto {
+    /// Node kind (e.g., "FunctionDecl", "VariableRef", "MethodCall")
+    pub kind: String,
+
+    /// Start line (1-indexed)
+    pub start_line: u32,
+
+    /// Start column (1-indexed)
+    pub start_column: u32,
+
+    /// End line (1-indexed)
+    pub end_line: u32,
+
+    /// End column (1-indexed)
+    pub end_column: u32,
+
+    /// Optional text content for terminals
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+/// Symbol table entry for variables
+#[derive(Debug, Clone, Serialize)]
+pub struct SymbolTableEntryDto {
+    /// Variable name
+    pub name: String,
+
+    /// Inferred or declared type
+    pub type_hint: String,
+
+    /// Line where symbol is declared
+    pub declared_line: u32,
+
+    /// Scope level (0 = global, 1+ = nested)
+    pub scope_level: u32,
+}
+
+/// Debug AST response for code analysis
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugAstResponseDto {
+    /// AST nodes
+    pub nodes: Vec<AstNodeDto>,
+
+    /// Symbol table with variables
+    pub symbol_table: Vec<SymbolTableEntryDto>,
+
+    /// Number of parsing errors
+    pub parse_errors: usize,
+
+    /// Analysis duration in milliseconds
+    pub duration_ms: u128,
+}

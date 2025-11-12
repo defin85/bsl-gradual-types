@@ -9,9 +9,14 @@ use axum::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::application::TypeSystemService;
 use crate::system::SystemCoordinator;
+use bsl_shared::api::{
+    DiagnosticsResponseDto, DebugAstResponseDto, SemanticErrorDto,
+    EnhancedHoverResponse, AstNodeDto,
+};
 
 // --- СТАРЫЕ DTO УДАЛЕНЫ ---
 
@@ -99,8 +104,6 @@ pub async fn validate_code(
     State(state): State<AppState>,
     Json(payload): Json<bsl_shared::api::ValidateCodeRequest>,
 ) -> impl IntoResponse {
-    use std::time::Instant;
-
     let start = Instant::now();
 
     match state
@@ -134,8 +137,6 @@ pub async fn get_hover(
     State(state): State<AppState>,
     Json(req): Json<HoverRequest>,
 ) -> impl IntoResponse {
-    use std::time::Instant;
-
     let start = Instant::now();
 
     match state
@@ -152,6 +153,112 @@ pub async fn get_hover(
                 "column": req.column,
                 "duration_ms": duration_ms
             });
+
+            Json(response).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// Enhanced diagnostics endpoint - separates syntax and semantic errors
+/// Milestone 2.18: Comprehensive diagnostics
+pub async fn get_diagnostics(
+    State(state): State<AppState>,
+    Json(payload): Json<bsl_shared::api::ValidateCodeRequest>,
+) -> impl IntoResponse {
+    let start = Instant::now();
+
+    // For now, use validation errors as semantic errors
+    match state
+        .type_service
+        .validate_code_fragment(&payload.code)
+        .await
+    {
+        Ok(errors) => {
+            let semantic_errors: Vec<SemanticErrorDto> = errors
+                .iter()
+                .map(|e| SemanticErrorDto {
+                    message: e.message.clone(),
+                    line: e.line,
+                    column: e.column,
+                    severity: e.severity.clone(),
+                })
+                .collect();
+
+            let total_errors = semantic_errors.len();
+            let duration_ms = start.elapsed().as_millis();
+
+            let response = DiagnosticsResponseDto {
+                syntax_errors: vec![],
+                semantic_errors,
+                total_errors,
+                duration_ms,
+            };
+
+            Json(response).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// Debug AST endpoint - shows parsed structure for debugging
+/// Milestone 2.16: Semantic visualization
+pub async fn get_debug_ast(
+    State(_state): State<AppState>,
+    Json(_payload): Json<bsl_shared::api::ValidateCodeRequest>,
+) -> impl IntoResponse {
+    let start = Instant::now();
+    let duration_ms = start.elapsed().as_millis();
+
+    // Stub implementation - returns minimal AST for testing
+    let response = DebugAstResponseDto {
+        nodes: vec![
+            AstNodeDto {
+                kind: "Program".to_string(),
+                start_line: 1,
+                start_column: 1,
+                end_line: 1,
+                end_column: 1,
+                text: None,
+            },
+        ],
+        symbol_table: vec![],
+        parse_errors: 0,
+        duration_ms,
+    };
+
+    Json(response).into_response()
+}
+
+/// Enhanced hover endpoint - provides detailed variable information
+/// Milestone 2.13: Enhanced hover with variable details
+pub async fn get_enhanced_hover(
+    State(state): State<AppState>,
+    Json(req): Json<HoverRequest>,
+) -> impl IntoResponse {
+    let start = Instant::now();
+
+    match state
+        .type_service
+        .get_hover_info(&req.code, req.line, req.column)
+        .await
+    {
+        Ok(hover_text) => {
+            let duration_ms = start.elapsed().as_millis();
+            
+            // Handle Option<String> from get_hover_info
+            let hover_text_str = hover_text.unwrap_or_else(|| "No information available".to_string());
+
+            let response = EnhancedHoverResponse {
+                hover_text: hover_text_str,
+                variable_name: None,
+                variable_type: None,
+                type_hint: None,
+                found_in_scope: false,
+                line: req.line,
+                column: req.column,
+                duration_ms,
+            };
 
             Json(response).into_response()
         }

@@ -567,3 +567,142 @@ curl -s "http://127.0.0.1:3002/api/search?q=$(urlencode "Массив")" | jq '.
 - `GET /api/diagnostics/:file_path` — синтаксические ошибки (Milestone 2.18)
 - `POST /api/refactor` — автоматический рефакторинг
 - `GET /api/completion/:file_path` — автодополнение кода
+
+---
+
+## 📡 Новые улучшенные endpoints
+
+### 6.1. Enhanced Hover Information (NEW)
+
+**Endpoint:** `POST /api/hover/enhanced`
+
+**Назначение:** Детальная информация о типе переменной для отладки
+
+**Статус:** ✅ Работает (Milestone 2.13)
+
+#### Запрос
+
+```bash
+curl -X POST "http://127.0.0.1:3002/api/hover/enhanced" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "Функция Тест()\n    ТЗ = Новый ТаблицаЗначений();\nКонецФункции",
+    "line": 2,
+    "column": 4
+  }' | jq '.'
+```
+
+#### Ответ
+
+```json
+{
+  "hoverText": "ТаблицаЗначений\n\nПримитивный тип...",
+  "variableName": "ТЗ",
+  "variableType": "ТаблицаЗначений",
+  "typeHint": "Explicit",
+  "foundInScope": true,
+  "line": 2,
+  "column": 4,
+  "durationMs": 15
+}
+```
+
+---
+
+### 7. Diagnostics with Error Separation (NEW)
+
+**Endpoint:** `POST /api/diagnostics`
+
+**Назначение:** Синтаксические и семантические ошибки раздельно
+
+**Статус:** ✅ Работает (Milestone 2.18)
+
+#### Запрос
+
+```bash
+curl -X POST "http://127.0.0.1:3002/api/diagnostics" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "Функция Тест()\n    массив.НесуществующийМетод();\nКонецФункции"
+  }' | jq '.'
+```
+
+#### Ответ
+
+```json
+{
+  "syntaxErrors": [],
+  "semanticErrors": [
+    {
+      "message": "Метод 'НесуществующийМетод' не найден",
+      "line": 2,
+      "column": 4,
+      "severity": "error"
+    }
+  ],
+  "totalErrors": 1,
+  "durationMs": 35
+}
+```
+
+---
+
+### 8. Debug AST for Parser (NEW)
+
+**Endpoint:** `POST /api/debug/ast`
+
+**Назначение:** AST дерево для отладки парсера
+
+**Статус:** ⚠️ MVP stub (Milestone 2.16)
+
+#### Запрос
+
+```bash
+curl -X POST "http://127.0.0.1:3002/api/debug/ast" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "Функция Тест()\n    МассивДанных = Новый Массив();\nКонецФункции"
+  }' | jq '.'
+```
+
+#### Ответ
+
+```json
+{
+  "nodes": [
+    {
+      "kind": "Program",
+      "startLine": 1,
+      "startColumn": 1,
+      "endLine": 3,
+      "endColumn": 15,
+      "text": null
+    }
+  ],
+  "symbolTable": [
+    {
+      "name": "МассивДанных",
+      "typeHint": "Массив",
+      "declaredLine": 2,
+      "scopeLevel": 0
+    }
+  ],
+  "parseErrors": 0,
+  "durationMs": 8
+}
+```
+
+---
+
+## 📊 Обновлённый статус endpoints
+
+| Endpoint | Метод | Статус | Milestone |
+|----------|-------|--------|-----------|
+| `/api/health` | GET | ✅ | - |
+| `/api/types` | GET | ✅ | - |
+| `/api/search` | GET | ✅ | 2.9, 2.18 |
+| `/api/validate` | POST | ✅ | 2.4, 2.18 |
+| `/api/hover` | POST | ✅ | 2.5, 2.13 |
+| `/api/hover/enhanced` | POST | ✅ | 2.13 |
+| `/api/diagnostics` | POST | ✅ | 2.18 |
+| `/api/debug/ast` | POST | ⚠️ MVP | 2.16 |

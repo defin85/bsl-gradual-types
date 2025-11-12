@@ -27,7 +27,7 @@ impl<'a> SemanticValidationVisitor<'a> {
 
     fn simple_resolution(type_name: &str) -> bsl_shared::domain::types::TypeResolution {
         use bsl_shared::domain::types::{
-            PrimitiveType, ResolutionMetadata, ResolutionSource, TypeResolution,
+            FacetKind, PrimitiveType, ResolutionMetadata, ResolutionSource, TypeResolution,
         };
 
         let result = match type_name {
@@ -51,12 +51,21 @@ impl<'a> SemanticValidationVisitor<'a> {
             }
         };
 
+        // ✅ MILESTONE 3.7 BUGFIX: Устанавливаем default фасет для Platform типов
+        // Для объектов, созданных через `Новый`, используем Object фасет
+        let active_facet = match &result {
+            ResolutionResult::Concrete(ConcreteType::Platform(_)) => {
+                Some(FacetKind::Object)
+            }
+            _ => None,
+        };
+
         TypeResolution {
             certainty: Certainty::Known,
             result,
             source: ResolutionSource::Static,
             metadata: ResolutionMetadata::default(),
-            active_facet: None,
+            active_facet,  // ✅ ИСПРАВЛЕНО!
             available_facets: vec![],
         }
     }

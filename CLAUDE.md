@@ -85,6 +85,14 @@ AI-ассистент инструкции для BSL Gradual Type System про
 **Файл:** [.claude/skills/test-progress.md](.claude/skills/test-progress.md)
 **Требования:** Windows 10/11, права администратора
 
+**Start LSP API** — запуск Web API для автоматизированного тестирования LSP
+```bash
+/start-lsp-api
+```
+Что делает: сборка и запуск bsl-web-server для тестирования LSP функций через HTTP API (POST /api/validate для semantic diagnostics, GET /api/search для типов). Позволяет Claude автоматически тестировать исправления без VSCode
+**Файл:** [.claude/skills/start-lsp-api.md](.claude/skills/start-lsp-api.md)
+**Порт:** http://localhost:3002
+
 ---
 
 ## 🎯 Ключевые принципы проекта

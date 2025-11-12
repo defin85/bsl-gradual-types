@@ -2561,8 +2561,9 @@ impl TypeSystemService {
         // 4. Создание TypeValidator
         let validator = TypeValidator::new(&self.metadata_lookup);
 
-        // 5. Создание SemanticValidationVisitor
-        let mut visitor = SemanticValidationVisitor::new(&validator, &ir);
+        // 5. Создание SemanticValidationVisitor с TypeResolver
+        let resolver = self.analysis_engine.get_resolver();
+        let mut visitor = SemanticValidationVisitor::new(&validator, &resolver, &ir);
 
         // 6. Обход IR
         walk_program(&ir, &mut visitor);

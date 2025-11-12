@@ -1296,12 +1296,18 @@ impl SemanticProgram {
             } => {
                 attributes.insert("function_name".to_string(), function_name.clone());
                 attributes.insert("arg_count".to_string(), arg_types.len().to_string());
-                if let Some(obj_name) = object_name {
+
+                // ✅ MILESTONE 3.5: Показываем полное имя вызова (объект.метод)
+                let display_name = if let Some(obj_name) = object_name {
                     attributes.insert("object_name".to_string(), obj_name.clone());
-                }
+                    format!("{}.{}", obj_name, function_name)
+                } else {
+                    function_name.clone()
+                };
+
                 (
                     "FunctionCall".to_string(),
-                    Some(function_name.clone()),
+                    Some(display_name),
                     attributes,
                 )
             }

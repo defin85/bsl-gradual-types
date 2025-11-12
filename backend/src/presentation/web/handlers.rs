@@ -29,6 +29,13 @@ pub struct PaginationQuery {
     pub flow_sensitive_only: Option<bool>,
 }
 
+#[derive(Deserialize)]
+pub struct HoverRequest {
+    pub code: String,
+    pub line: u32,
+    pub column: u32,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub type_service: Arc<TypeSystemService>,
@@ -114,6 +121,37 @@ pub async fn validate_code(
                     duration_ms,
                 }),
             };
+
+            Json(response).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// Get hover information for code position
+/// Phase 5: LSP Hover integration - returns type information at position
+pub async fn get_hover(
+    State(state): State<AppState>,
+    Json(req): Json<HoverRequest>,
+) -> impl IntoResponse {
+    use std::time::Instant;
+
+    let start = Instant::now();
+
+    match state
+        .type_service
+        .get_hover_info(&req.code, req.line, req.column)
+        .await
+    {
+        Ok(hover_text) => {
+            let duration_ms = start.elapsed().as_millis() as u64;
+
+            let response = serde_json::json!({
+                "hover": hover_text,
+                "line": req.line,
+                "column": req.column,
+                "duration_ms": duration_ms
+            });
 
             Json(response).into_response()
         }

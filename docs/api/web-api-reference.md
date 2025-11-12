@@ -260,7 +260,52 @@ curl -X POST "http://127.0.0.1:3002/api/analyze" \
 
 ---
 
-### 6. Semantic Visualization (Milestone 2.16)
+### 6. Hover Information
+
+**Endpoint:** `POST /api/hover`
+
+**Назначение:** Получить информацию о типе переменной/выражения в указанной позиции кода (аналог LSP hover)
+
+#### Запрос
+
+```bash
+curl -X POST "http://127.0.0.1:3002/api/hover" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "Функция Тест()\n    МассивДанных = Новый Массив();\n    Возврат МассивДанных;\nКонецФункции",
+    "line": 2,
+    "column": 4
+  }' | jq '.'
+```
+
+#### Ответ
+
+```json
+{
+  "hover": "Массив\n\nПримитивный тип для работы с коллекциями элементов.\n\nМетоды:\n- Добавить(Значение) — Добавляет элемент в конец массива\n- Количество() → Число — Возвращает количество элементов",
+  "line": 2,
+  "column": 4,
+  "duration_ms": 42
+}
+```
+
+#### Поля запроса
+
+| Поле | Тип | Обязательно | Описание |
+|------|-----|-------------|----------|
+| `code` | String | ✅ | BSL код для анализа |
+| `line` | Number | ✅ | Строка (0-based) |
+| `column` | Number | ✅ | Колонка (0-based) |
+
+#### Статус коды
+
+- `200 OK` — hover информация получена успешно
+- `400 Bad Request` — некорректный JSON или отсутствуют требуемые поля
+- `500 Internal Server Error` — ошибка парсинга или анализа кода
+
+---
+
+### 7. Semantic Visualization (Milestone 2.16)
 
 **Endpoint:** `GET /api/semantic/:file_path?format=json|html&theme=dark|light&compact=false`
 
@@ -506,7 +551,8 @@ curl -s "http://127.0.0.1:3002/api/search?q=$(urlencode "Массив")" | jq '.
 | `/api/health` | GET | ✅ Работает | - |
 | `/api/types` | GET | ✅ Работает | - |
 | `/api/search` | GET | ✅ Работает | 2.9, 2.18 |
-| `/api/analyze` | POST | ✅ Работает | 2.8, 2.9 |
+| `/api/validate` | POST | ✅ Работает | 2.4, 2.18 |
+| `/api/hover` | POST | ✅ Работает | 2.5, 2.13 |
 | `/api/semantic/:file_path` | GET | ⚠️ MVP stub | 2.16 |
 
 **Легенда:**
@@ -521,4 +567,3 @@ curl -s "http://127.0.0.1:3002/api/search?q=$(urlencode "Массив")" | jq '.
 - `GET /api/diagnostics/:file_path` — синтаксические ошибки (Milestone 2.18)
 - `POST /api/refactor` — автоматический рефакторинг
 - `GET /api/completion/:file_path` — автодополнение кода
-- `GET /api/hover/:file_path` — hover информация (как в LSP)

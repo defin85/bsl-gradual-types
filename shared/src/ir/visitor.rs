@@ -150,8 +150,11 @@ pub trait SemanticVisitor {
 pub fn walk_program<V: SemanticVisitor>(program: &SemanticProgram, visitor: &mut V) {
     let mut context = FlowContext::new(program.symbols.root_scope);
 
+    // Обходим только root-level узлы (избегаем двойного обхода вложенных узлов)
     for node in &program.nodes {
-        walk_node(node, visitor, &mut context, program);
+        if node.scope_id == program.symbols.root_scope {
+            walk_node(node, visitor, &mut context, program);
+        }
     }
 }
 

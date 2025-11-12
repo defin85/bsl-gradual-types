@@ -494,6 +494,8 @@ pub struct TypeDiagnostic {
     pub message: String,
     pub line: u32,
     pub column: u32,
+    pub end_line: u32,
+    pub end_column: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

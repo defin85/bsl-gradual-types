@@ -209,7 +209,7 @@ impl BslLanguageServer {
         use bsl_shared::domain::types::DiagnosticSeverity as SharedSeverity;
 
         let start_pos = Position::new(error.line, error.column);
-        let end_pos = Position::new(error.line, error.column + 15); // TODO: точная длина из span
+        let end_pos = Position::new(error.end_line, error.end_column);
 
         let severity = match error.severity {
             SharedSeverity::Error => Some(DiagnosticSeverity::ERROR),

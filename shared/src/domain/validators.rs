@@ -13,6 +13,7 @@ use crate::domain::metadata_lookup::TypeMetadataLookup;
 use crate::domain::types::{
     ConcreteType, DiagnosticSeverity, SpecialType, TypeDiagnostic, TypeResolution,
 };
+use crate::ir::Span;
 
 /// Категории ошибок типизации из статьи Balyuk & Popova
 #[derive(Debug, Clone, PartialEq)]
@@ -42,7 +43,7 @@ pub enum TypeErrorKind {
 }
 
 impl TypeErrorKind {
-    pub fn to_diagnostic(&self, line: u32, column: u32) -> TypeDiagnostic {
+    pub fn to_diagnostic(&self, span: Span) -> TypeDiagnostic {
         let message = match self {
             TypeErrorKind::IncorrectParameterType {
                 method_name,
@@ -82,8 +83,10 @@ impl TypeErrorKind {
         TypeDiagnostic {
             severity: DiagnosticSeverity::Error,
             message,
-            line,
-            column,
+            line: span.start_line,
+            column: span.start_column,
+            end_line: span.end_line,
+            end_column: span.end_column,
         }
     }
 }

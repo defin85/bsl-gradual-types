@@ -84,8 +84,7 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     .validator
                     .validate_method_exists(&resolution, function_name)
                 {
-                    let diagnostic =
-                        error_kind.to_diagnostic(node.span.start_line, node.span.start_column);
+                    let diagnostic = error_kind.to_diagnostic(node.span);
                     self.errors.push(diagnostic);
                 }
             }
@@ -100,8 +99,7 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     .validator
                     .validate_property_exists(&resolution, member_name)
                 {
-                    let diagnostic =
-                        error_kind.to_diagnostic(node.span.start_line, node.span.start_column);
+                    let diagnostic = error_kind.to_diagnostic(node.span);
                     self.errors.push(diagnostic);
                 }
             }

@@ -181,10 +181,14 @@ pub struct ValidationErrorDto {
     pub message: String,
     /// Error severity: "error", "warning", "info"
     pub severity: String,
-    /// Line number (1-indexed)
+    /// Start line number (1-indexed)
     pub line: u32,
-    /// Column number (1-indexed)
+    /// Start column number (1-indexed)
     pub column: u32,
+    /// End line number (1-indexed)
+    pub end_line: u32,
+    /// End column number (1-indexed)
+    pub end_column: u32,
     /// Type of error: "NonExistentMethod", "NonExistentProperty", etc.
     pub error_type: String,
 }
@@ -342,10 +346,14 @@ pub struct SyntaxErrorDto {
 pub struct SemanticErrorDto {
     /// Error message
     pub message: String,
-    /// Line number (1-indexed)
+    /// Start line number (1-indexed)
     pub line: u32,
-    /// Column number (1-indexed)
+    /// Start column number (1-indexed)
     pub column: u32,
+    /// End line number (1-indexed)
+    pub end_line: u32,
+    /// End column number (1-indexed)
+    pub end_column: u32,
     /// Error severity: "error", "warning", "info"
     pub severity: String,
 }

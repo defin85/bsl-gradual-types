@@ -1368,6 +1368,8 @@ impl TypeSystemService {
                     severity: "error".to_string(),
                     line: 1,
                     column: 1,
+                    end_line: 1,
+                    end_column: 1,
                     error_type: "ParseError".to_string(),
                 });
                 info!("Валидация завершена за {:?}", start.elapsed());
@@ -1405,9 +1407,9 @@ impl TypeSystemService {
                 // 5. Валидируем существование метода
                 let validation_error = validator.validate_method_exists(&resolution, function_name);
 
-                // 6. Если ошибка - используем реальные координаты из span
+                // 6. Если ошибка - используем реальный span для точной подсветки
                 if let Some(error) = validation_error {
-                    let diagnostic = error.to_diagnostic(node.span.start_line, node.span.start_column);
+                    let diagnostic = error.to_diagnostic(node.span);
                     errors.push(bsl_shared::api::ValidationErrorDto {
                         message: diagnostic.message,
                         severity: match diagnostic.severity {
@@ -1419,6 +1421,8 @@ impl TypeSystemService {
                         },
                         line: diagnostic.line,
                         column: diagnostic.column,
+                        end_line: diagnostic.end_line,
+                        end_column: diagnostic.end_column,
                         error_type: "NonExistentMethod".to_string(),
                     });
                 }

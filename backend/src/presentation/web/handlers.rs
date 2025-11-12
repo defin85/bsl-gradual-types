@@ -181,6 +181,8 @@ pub async fn get_diagnostics(
                     message: e.message.clone(),
                     line: e.line,
                     column: e.column,
+                    end_line: e.end_line,
+                    end_column: e.end_column,
                     severity: e.severity.clone(),
                 })
                 .collect();

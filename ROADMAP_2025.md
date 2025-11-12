@@ -2272,6 +2272,85 @@ AST → IR (SemanticProgram)
 
 ---
 
+### 🔄 Milestone 3.9: Return Type Inference для методов (3-4 дня)
+
+**Приоритет:** 🟡 СРЕДНИЙ — важно для точного type inference
+
+**Статус:** 📋 PLANNED
+
+**Проблема:**
+
+Type inference НЕ определяет тип переменной из возвращаемого значения метода.
+
+**Пример проблемы:**
+```bsl
+Перем ТЗ, Кол;
+ТЗ = Новый ТаблицаЗначений;
+Кол = ТЗ.Количество();
+// Hover на Кол: ❌ "Неопределено" (должен быть "Число")
+```
+
+**Текущая реализация** (ast_to_ir.rs:799-815):
+```rust
+Expression::Call { .. } => "Dynamic".to_string()  // ❌ Всегда Dynamic!
+```
+
+**Решение:** Использовать SignatureIndex для получения return type методов.
+
+---
+
+#### Задачи:
+
+**Task 1: Обновить infer_expression_type (1-2 дня)**
+
+`backend/src/application/ast_to_ir.rs`:
+
+```rust
+Expression::Call { function, .. } => {
+    match function.as_ref() {
+        // Метод объекта: object.Method()
+        Expression::PropertyAccess { object, property, .. } => {
+            let object_type = self.infer_expression_type(object);
+            let resolution = self.repository.resolve_type(&object_type);
+
+            if let Some(method) = self.signature_index.get_method(&resolution, property) {
+                return method.return_type.clone().unwrap_or("Dynamic");
+            }
+            "Dynamic".to_string()
+        },
+
+        // Глобальная функция
+        Expression::Identifier { name, .. } => {
+            // существующая логика...
+        },
+
+        _ => "Dynamic".to_string()
+    }
+}
+```
+
+**Task 2: Передать зависимости (1 день)**
+
+Обновить вызовы `AstToIrConverter::convert()` для передачи SignatureIndex.
+
+**Task 3: Edge Cases (1 день)**
+
+- Цепочки вызовов
+- Generic return types
+- void методы
+- Перегруженные методы
+
+---
+
+**Результат:**
+- ✅ `Кол = ТЗ.Количество()` → Кол имеет тип "Число"
+- ✅ Hover показывает правильный тип
+- ✅ Точность inference +20-30%
+
+**Оценка:** 3-4 дня
+
+---
+
 ### 🎯 Результаты Версии 3.0 (через 6 месяцев от старта)
 
 **Технические метрики:**

@@ -2351,6 +2351,209 @@ Expression::Call { function, .. } => {
 
 ---
 
+### ✅ Milestone 3.10: Валидация параметров методов (2-3 дня)
+
+**Приоритет:** 🟢 ВЫСОКИЙ — функциональность готова, нужна только интеграция
+
+**Статус:** 📋 PLANNED
+
+**Проблема:**
+
+Метод `TypeResolver.validate_call()` реализован и протестирован (7/7 тестов pass), но **НЕ интегрирован в LSP semantic diagnostics**.
+
+**Текущее поведение:**
+```bsl
+Перем М;
+М = Новый Массив;
+М.Вставить("строка", элемент);  // ❌ Ошибка НЕ обнаруживается!
+// Param #1: ожидается Число, получено Строка
+```
+
+**Что проверяется сейчас:**
+- ✅ Существование метода (`validate_method_exists`)
+- ✅ Существование свойства (`validate_property_exists`)
+- ❌ **Типы параметров НЕ проверяются**
+
+**Что уже работает:**
+- ✅ `TypeResolver.validate_call()` - реализован в `shared/src/domain/resolver.rs:374`
+- ✅ 7 unit тестов (success, missing param, too many args, optional params, case insensitive)
+- ✅ `IncorrectParameterType` error kind определён
+
+---
+
+#### Задачи:
+
+**Task 1: Интеграция validate_call в SemanticValidationVisitor (1 день)**
+
+**Файл:** `backend/src/application/semantic_validation_visitor.rs`
+
+**Текущая реализация (строки 77-90):**
+```rust
+SemanticNodeKind::FunctionCall { function_name, object_type, .. } => {
+    let resolution = Self::simple_resolution(object_type);
+
+    // ❌ Проверяется ТОЛЬКО существование метода
+    if let Some(error_kind) = self.validator.validate_method_exists(&resolution, function_name) {
+        let diagnostic = error_kind.to_diagnostic(node.span);
+        self.errors.push(diagnostic);
+    }
+}
+```
+
+**Новая реализация:**
+```rust
+SemanticNodeKind::FunctionCall {
+    function_name,
+    object_type,
+    arg_types,  // ← Используем типы аргументов из IR
+    ..
+} => {
+    let resolution = Self::simple_resolution(object_type);
+
+    // 1. Проверяем существование метода (как раньше)
+    if let Some(error_kind) = self.validator.validate_method_exists(&resolution, function_name) {
+        let diagnostic = error_kind.to_diagnostic(node.span);
+        self.errors.push(diagnostic);
+        return;  // Нет смысла проверять параметры если метод не существует
+    }
+
+    // 2. НОВОЕ: Проверяем типы параметров через validate_call
+    let type_name = resolution.get_type_name();
+    let validation_result = self.resolver.validate_call(
+        type_name.as_deref(),
+        function_name,
+        arg_types,
+        &self.signature_index
+    );
+
+    if let ValidationResult::Error(error_kind) = validation_result {
+        let diagnostic = error_kind.to_diagnostic(node.span);
+        self.errors.push(diagnostic);
+    }
+}
+```
+
+**Требуется:**
+- Добавить `signature_index: &SignatureIndex` в `SemanticValidationVisitor`
+- Добавить `resolver: &TypeResolver` в `SemanticValidationVisitor`
+- Передавать зависимости при создании visitor
+
+---
+
+**Task 2: Обновить создание SemanticValidationVisitor (1 день)**
+
+**Файл:** `backend/src/application/type_system_service.rs:2578`
+
+**Текущее:**
+```rust
+let validator = TypeValidator::new(&self.metadata_lookup);
+let mut visitor = SemanticValidationVisitor::new(&validator, &ir);
+```
+
+**Новое:**
+```rust
+let validator = TypeValidator::new(&self.metadata_lookup);
+let resolver = self.analysis_engine.get_resolver();
+let signature_index = self.analysis_engine.get_signature_index();
+
+let mut visitor = SemanticValidationVisitor::new(
+    &validator,
+    &ir,
+    &resolver,           // ← НОВОЕ
+    &signature_index,    // ← НОВОЕ
+);
+```
+
+**Обновить конструктор visitor:**
+```rust
+pub fn new<'b>(
+    validator: &'b TypeValidator<'a>,
+    ir: &'b SemanticProgram,
+    resolver: &'b TypeResolver,           // ← НОВОЕ
+    signature_index: &'b SignatureIndex,  // ← НОВОЕ
+) -> Self {
+    Self {
+        validator,
+        ir_program: ir,
+        resolver,              // ← НОВОЕ
+        signature_index,       // ← НОВОЕ
+        errors: Vec::new(),
+    }
+}
+```
+
+---
+
+**Task 3: Обработка edge cases (1 день)**
+
+**1. Опциональные параметры:**
+```bsl
+М.Вставить(0);  // ✅ OK (второй параметр optional)
+```
+
+**2. Gradual typing (Unknown параметры):**
+```bsl
+М.Добавить(переменнаяНеизвестногоТипа);  // ⚠️ Warning, не error
+```
+
+**3. Несколько ошибок параметров:**
+```bsl
+ТЗ.Метод(строка, строка);  // param#1 и param#2 ошибочны
+// Показывать ВСЕ или только первую?
+```
+
+**4. Имена переменных параметров (для Milestone 3.6 Phase 3):**
+```bsl
+индекс = "строка";
+М.Вставить(индекс, элемент);  // ❌ param#1: переменная 'индекс' типа Строка, ожидается Число
+```
+
+---
+
+**Результат Milestone 3.10:**
+
+- ✅ LSP обнаруживает ошибки типов параметров
+- ✅ Сообщения: `Некорректный параметр #1 для метода 'Вставить': ожидается Число, получено Строка`
+- ✅ Интеграция с существующим `validate_call` (без дублирования кода)
+- ✅ Покрытие всех типов вызовов (методы объектов, глобальные функции)
+- ✅ Готовность к Milestone 3.6 Phase 3 (имена переменных-параметров)
+
+**Зависимости:**
+- ✅ Milestone 2.15 (SignatureIndex) — метаданные методов готовы
+- ✅ Milestone 3.7 (Semantic Diagnostics MVP) — infrastracture готова
+- ✅ Milestone 3.9 (Return Type Inference) — типы параметров известны точнее
+
+**Enables:**
+- 📄 Milestone 3.6 Phase 3 Task 3.3 (подсказки для ошибок параметров)
+- 📄 Milestone 4.x (Advanced type checking)
+
+**Научная база:**
+
+Соответствует категории ошибок из Balyuk & Popova (2021):
+> **Категория 1:** Incorrect parameter passing to methods
+
+Это одна из **трёх основных категорий** ошибок типизации в BSL согласно научному исследованию.
+
+**Оценка времени:** 2-3 дня
+
+**Примеры:**
+
+```bsl
+// Пример 1: Неправильный тип параметра
+Массив.Вставить("строка", элемент);
+// ❌ Некорректный параметр #1 для метода 'Вставить': ожидается Число, получено Строка
+
+// Пример 2: Слишком мало параметров
+ТЗ.НайтиСтроки();
+// ❌ Недостаточно параметров для метода 'НайтиСтроки': ожидается минимум 1, получено 0
+
+// Пример 3: Слишком много параметров
+Массив.Количество(123);
+// ❌ Слишком много параметров для метода 'Количество': ожидается 0, получено 1
+```
+
+---
+
 ### 🎯 Результаты Версии 3.0 (через 6 месяцев от старта)
 
 **Технические метрики:**

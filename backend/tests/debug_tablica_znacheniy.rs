@@ -46,6 +46,7 @@ fn search_line(node: &tree_sitter::Node, source: &str, target_line: usize) {
     }
 }
 
+#[allow(dead_code)]
 fn search_node(node: &tree_sitter::Node, source: &str, pattern: &str) {
     let text = node.utf8_text(source.as_bytes()).unwrap_or("");
 
@@ -77,6 +78,7 @@ fn search_node(node: &tree_sitter::Node, source: &str, pattern: &str) {
     }
 }
 
+#[allow(dead_code)]
 fn print_tree(node: &tree_sitter::Node, source: &str, depth: usize) {
     let indent = "  ".repeat(depth);
     let text = node.utf8_text(source.as_bytes()).unwrap_or("");

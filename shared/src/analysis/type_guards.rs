@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn test_apply_type_check_narrowing() {
-        use crate::domain::types::{ConcreteType, PlatformType, TypeResolution};
+        use crate::domain::types::{ConcreteType, TypeResolution};
 
         let current = TypeResolution::unknown(); // Any
 

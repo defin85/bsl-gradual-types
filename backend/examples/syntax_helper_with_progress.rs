@@ -45,6 +45,7 @@ fn main() {
             IndexingPhase::ConfigurationParsing => "📋",
             IndexingPhase::ConfigurationLinking => "⛓",
             IndexingPhase::ConfigurationFinalizing => "✅",
+            IndexingPhase::HbkExtraction => "📦",
         };
 
         let message = update.message.as_deref().unwrap_or("Обработка...");

@@ -8,7 +8,7 @@ use bsl_shared::api::{MethodDto, ParamDto};
 use bsl_shared::utils::hash::hash_content;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::application::TypeInferenceService;
 use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, OutputFormat};
@@ -1348,28 +1348,66 @@ impl TypeSystemService {
     ) -> Result<Vec<bsl_shared::api::ValidationErrorDto>> {
         use bsl_shared::domain::types::DiagnosticSeverity;
         use bsl_shared::domain::validators::TypeValidator;
+        use bsl_shared::ir::SemanticNodeKind;
         use std::time::Instant;
 
         let start = Instant::now();
         let mut errors = Vec::new();
 
-        // Упрощённая валидация для демонстрации
-        // В реальной реализации нужен парсинг кода и анализ AST
+        // 1. Парсим код через существующий IR pipeline
+        let ir_result = self.parser.parse_to_ir(code, "<validation>");
 
-        // Примитивный парсинг выражений вида "объект.метод()" или "объект.свойство"
-        if let Some((object_expr, member)) = Self::parse_simple_member_access(code) {
-            // Резолвим тип объекта
-            let resolution = self
-                .inference_service
-                .resolve_expression_async(&object_expr)
-                .await;
-            let validator = TypeValidator::new(&self.metadata_lookup);
+        let ir = match ir_result {
+            Ok(ir) => ir,
+            Err(parse_err) => {
+                // Возвращаем ошибки парсинга как ValidationErrors
+                warn!("Ошибка парсинга кода: {}", parse_err);
+                // Для синтаксических ошибок возвращаем общую ошибку
+                errors.push(bsl_shared::api::ValidationErrorDto {
+                    message: format!("Ошибка парсинга кода: {}", parse_err),
+                    severity: "error".to_string(),
+                    line: 1,
+                    column: 1,
+                    error_type: "ParseError".to_string(),
+                });
+                info!("Валидация завершена за {:?}", start.elapsed());
+                return Ok(errors);
+            }
+        };
 
-            // Проверяем методы (если есть скобки)
-            if member.ends_with("()") || code.contains('(') {
-                let method_name = member.trim_end_matches("()").trim();
-                if let Some(error) = validator.validate_method_exists(&resolution, method_name) {
-                    let diagnostic = error.to_diagnostic(1, 1);
+        let validator = TypeValidator::new(&self.metadata_lookup);
+
+        // DEBUG: Логируем количество узлов в IR
+        info!("DEBUG: IR содержит {} узлов", ir.nodes.len());
+        for (i, node) in ir.nodes.iter().enumerate() {
+            info!("DEBUG: Узел {}: {:?}", i, node.kind);
+        }
+
+        // 2. Получаем resolver для корректного определения типов (как в hover)
+        let resolver = self.analysis_engine.get_resolver();
+
+        // 3. Обходим IR и собираем вызовы методов (FunctionCall с object_name)
+        for node in &ir.nodes {
+            // Проверяем FunctionCall узлы - это вызовы методов объектов
+            if let SemanticNodeKind::FunctionCall {
+                function_name,
+                object_name: Some(obj_name),  // Признак метода объекта (не глобальной функции)
+                ..
+            } = &node.kind {
+                // 4. Резолвим тип объекта через symbol table (как в hover API)
+                // Используем resolve_variable_with_context для учёта присваиваний
+                let resolution = resolver.resolve_variable_with_context(
+                    obj_name,
+                    &ir.symbols,
+                    node.scope_id  // Используем scope из узла
+                );
+
+                // 5. Валидируем существование метода
+                let validation_error = validator.validate_method_exists(&resolution, function_name);
+
+                // 6. Если ошибка - используем реальные координаты из span
+                if let Some(error) = validation_error {
+                    let diagnostic = error.to_diagnostic(node.span.start_line, node.span.start_column);
                     errors.push(bsl_shared::api::ValidationErrorDto {
                         message: diagnostic.message,
                         severity: match diagnostic.severity {
@@ -1384,42 +1422,13 @@ impl TypeSystemService {
                         error_type: "NonExistentMethod".to_string(),
                     });
                 }
-            } else {
-                // Проверяем свойства
-                if let Some(error) = validator.validate_property_exists(&resolution, &member) {
-                    let diagnostic = error.to_diagnostic(1, 1);
-                    errors.push(bsl_shared::api::ValidationErrorDto {
-                        message: diagnostic.message,
-                        severity: match diagnostic.severity {
-                            DiagnosticSeverity::Error => "error".to_string(),
-                            DiagnosticSeverity::Warning => "warning".to_string(),
-                            DiagnosticSeverity::Info | DiagnosticSeverity::Hint => {
-                                "info".to_string()
-                            }
-                        },
-                        line: diagnostic.line,
-                        column: diagnostic.column,
-                        error_type: "NonExistentProperty".to_string(),
-                    });
-                }
             }
         }
 
-        info!("Валидация завершена за {:?}", start.elapsed());
+        info!("Валидация завершена за {:?}: {} ошибок найдено", start.elapsed(), errors.len());
         Ok(errors)
     }
 
-    /// Примитивный парсер для выражений вида "объект.метод()" или "объект.свойство"
-    fn parse_simple_member_access(code: &str) -> Option<(String, String)> {
-        let trimmed = code.trim();
-        if let Some(dot_pos) = trimmed.find('.') {
-            let object = trimmed[..dot_pos].trim().to_string();
-            let member = trimmed[dot_pos + 1..].trim().to_string();
-            Some((object, member))
-        } else {
-            None
-        }
-    }
 
     /// Извлечь информацию о символе на указанной позиции из AST
     fn extract_enhanced_symbol_info(

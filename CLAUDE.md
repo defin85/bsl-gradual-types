@@ -45,8 +45,9 @@ AI-ассистент инструкции для BSL Gradual Type System про
 ```bash
 /build
 ```
-Что делает: сборка Rust бинарников (LSP, Web, CLI), VSCode Extension, копирование в bin/
+Что делает: запускает `build-all.sh` скрипт для автоматической сборки Rust бинарников (LSP, Web, CLI), VSCode Extension, копирования в bin/, сборки WASM, проверки целостности
 **Файл:** [.claude/skills/build.md](.claude/skills/build.md)
+**Скрипт:** [build-all.sh](build-all.sh)
 
 **Test Runner** — комплексное тестирование проекта
 ```bash
@@ -75,6 +76,14 @@ AI-ассистент инструкции для BSL Gradual Type System про
 ```
 Что делает: сборка frontend (WASM через Trunk), копирование статики, запуск веб-сервера с platform types, открытие браузера на http://127.0.0.1:8080
 **Файл:** [.claude/skills/web-ui.md](.claude/skills/web-ui.md)
+
+**Test Progress** — тестирование прогресса парсинга (Windows)
+```bash
+/test-progress
+```
+Что делает: очистка Windows File System Cache, сборка LSP, копирование в расширение, инструкции для тестирования прогресса парсинга platform types
+**Файл:** [.claude/skills/test-progress.md](.claude/skills/test-progress.md)
+**Требования:** Windows 10/11, права администратора
 
 ---
 

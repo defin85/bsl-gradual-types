@@ -31,7 +31,7 @@ const BINARIES = [
     {
         name: 'LSP Server',
         source: 'bsl-lsp-server.exe',
-        target: 'lsp_server.exe',
+        target: 'lsp-server.exe',
         description: 'Language Server Protocol server для VSCode'
     }
 ];

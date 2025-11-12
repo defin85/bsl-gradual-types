@@ -1023,18 +1023,25 @@ async fn test_hover_on_nonexistent_method() {
 
 ---
 
-### 🎨 Milestone 3.6: Enhanced Hover Experience (10-12 дней)
+### 🎨 Milestone 3.6: Enhanced UX (Hover + Diagnostics) (15-18 дней)
 
 **Приоритет:** 🟡 СРЕДНИЙ — значительное улучшение UX, но не критично для функциональности
 
 **Проблема:**
 
-Текущий hover недостаточно гибкий и информативный:
+**Hover:** Текущий hover недостаточно гибкий и информативный:
 - ❌ Нет настроек — пользователь не может выбрать уровень детализации
 - ❌ Не показываются фасеты (Manager vs Object vs Reference)
 - ❌ Generic типы не объясняются (`Массив<Строка>` выглядит как обычный тип)
 - ❌ Нет ссылок на platform documentation
 - ❌ Методы с большим количеством параметров плохо читаются
+
+**Diagnostics:** Сообщения об ошибках недостаточно информативны:
+- ❌ Не указывается имя переменной — непонятно где искать проблему
+- ❌ Нет подсказок для исправления ошибки
+- ❌ Нет fuzzy matching для опечаток в именах методов
+- ❌ Ошибки параметров не показывают имя переменной-параметра
+- ❌ Один уровень детализации — нельзя настроить
 
 **Исследование:**
 
@@ -1049,7 +1056,10 @@ async fn test_hover_on_nonexistent_method() {
 
 **Решение:**
 
-Реализовать настраиваемый hover с тремя уровнями детализации, фасетами, Generic типами и ссылками на документацию.
+Реализовать **комплексное улучшение UX** с едиными принципами настраиваемости для hover и diagnostics:
+- **Hover:** три уровня детализации, фасеты, Generic типы, ссылки на документацию
+- **Diagnostics:** контекст переменных, умные подсказки, fuzzy matching, три уровня детализации
+- **Общая инфраструктура:** единый `DetailLevel` enum, консистентные настройки, переиспользование компонентов
 
 #### Задачи:
 
@@ -1305,6 +1315,303 @@ fn add_documentation_links(mut self, resolution: &TypeResolution) -> Self {
 
 ---
 
+**Phase 3: Enhanced Diagnostic Messages (5-6 дней)**
+
+**Task 3.1: Обогащение контекста ошибок (2 дня)**
+
+Добавить имя переменной в сообщения об ошибках для лучшего контекста.
+
+**Обновить `shared/src/domain/validators.rs`:**
+
+```rust
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeErrorKind {
+    NonExistentMethod {
+        object_type: String,
+        method_name: String,
+        variable_name: Option<String>,  // ← НОВОЕ: контекст переменной
+    },
+    IncorrectParameterType {
+        method_name: String,
+        param_index: usize,
+        expected: String,
+        actual: String,
+        variable_name: Option<String>,  // ← НОВОЕ
+        param_variable_name: Option<String>,  // ← Имя переменной-параметра
+    },
+    NonExistentProperty {
+        object_type: String,
+        property_name: String,
+        variable_name: Option<String>,  // ← НОВОЕ
+    },
+    SimpleTypeAsCollection {
+        type_name: String,
+        operation: String,
+        variable_name: Option<String>,  // ← НОВОЕ
+    },
+}
+```
+
+**Обновить вызовы в `type_system_service.rs` и `semantic_validation_visitor.rs`:**
+- Передавать `object_name` из `FunctionCall` узла в `variable_name`
+- Fallback на `None` для edge cases (литералы, прямые вызовы)
+
+---
+
+**Task 3.2: Три уровня детализации diagnostic messages (2 дня)**
+
+Переиспользовать `DetailLevel` enum из hover для консистентности.
+
+**Обновить `shared/src/domain/validators.rs`:**
+
+```rust
+impl TypeErrorKind {
+    pub fn to_diagnostic(&self, span: Span, detail_level: DetailLevel) -> TypeDiagnostic {
+        let message = self.format_message(detail_level);
+
+        TypeDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            message,
+            line: span.start_line,
+            column: span.start_column,
+            end_line: span.end_line,
+            end_column: span.end_column,
+        }
+    }
+
+    fn format_message(&self, detail_level: DetailLevel) -> String {
+        match detail_level {
+            DetailLevel::Brief => self.format_brief(),
+            DetailLevel::Standard => self.format_standard(),
+            DetailLevel::Detailed => self.format_detailed(),
+        }
+    }
+}
+```
+
+**Форматы для NonExistentMethod:**
+
+```rust
+fn format_brief(&self) -> String {
+    // Brief (по умолчанию для inline)
+    format!("Метод '{}' не существует для типа '{}'", method_name, object_type)
+}
+
+fn format_standard(&self) -> String {
+    // Standard (с именем переменной если есть)
+    if let Some(var) = variable_name {
+        format!(
+            "Метод '{}' не существует для переменной '{}' типа '{}'",
+            method_name, var, object_type
+        )
+    } else {
+        self.format_brief()  // Fallback
+    }
+}
+
+fn format_detailed(&self) -> String {
+    // Detailed (+ подсказки, см. Task 3.3)
+    let base = self.format_standard();
+    let hints = self.generate_hints();  // См. Task 3.3
+
+    if !hints.is_empty() {
+        format!("{}\n\n{}", base, hints)
+    } else {
+        base
+    }
+}
+```
+
+**Примеры сообщений:**
+
+| Level | Пример |
+|-------|--------|
+| Brief | `Метод 'Метод' не существует для типа 'ТаблицаЗначений'` |
+| Standard | `Метод 'Метод' не существует для переменной 'ТЗ' типа 'ТаблицаЗначений'` |
+| Detailed | `Метод 'Метод' не существует для переменной 'ТЗ' типа 'ТаблицаЗначений'`<br><br>`Подсказка: Доступные методы: Добавить(), Количество(), Найти()...` |
+
+---
+
+**Task 3.3: Умные подсказки для Detailed level (1-2 дня)**
+
+Генерировать контекстные подсказки для исправления ошибок.
+
+**Реализовать в `shared/src/domain/validators.rs`:**
+
+```rust
+impl TypeErrorKind {
+    fn generate_hints(&self, metadata_lookup: &TypeMetadataLookup) -> String {
+        match self {
+            NonExistentMethod { object_type, method_name, .. } => {
+                let methods = metadata_lookup.get_methods_for_type(object_type);
+
+                // 1. Fuzzy matching - поиск похожих имён
+                let similar = fuzzy_match_methods(method_name, &methods, 0.7);
+
+                if !similar.is_empty() {
+                    let suggestions = similar.iter()
+                        .take(3)
+                        .map(|m| format!("{}()", m.name))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    return format!(
+                        "💡 Подсказка: Возможно, вы имели в виду: {}?",
+                        suggestions
+                    );
+                }
+
+                // 2. Показать популярные методы
+                let top_methods = methods.iter()
+                    .take(5)
+                    .map(|m| format!("• {}()", m.name))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                format!(
+                    "💡 Доступные методы типа '{}':\n{}",
+                    object_type, top_methods
+                )
+            },
+
+            IncorrectParameterType { expected, actual, .. } => {
+                format!(
+                    "💡 Подсказка: Ожидается {}, но передано {}. Преобразуйте тип или используйте другую переменную.",
+                    expected, actual
+                )
+            },
+
+            // ... другие типы ошибок
+        }
+    }
+}
+```
+
+**Примеры hints:**
+
+```markdown
+# Пример 1: Похожее имя найдено
+Метод 'Колво' не существует для переменной 'ТЗ' типа 'ТаблицаЗначений'
+
+💡 Подсказка: Возможно, вы имели в виду: Количество()?
+
+# Пример 2: Нет похожих, показываем доступные
+Метод 'ХХХ' не существует для переменной 'М' типа 'Массив'
+
+💡 Доступные методы типа 'Массив':
+• Добавить()
+• Количество()
+• Получить()
+• Удалить()
+• Очистить()
+
+# Пример 3: Неправильный тип параметра
+Некорректный параметр #1 для метода 'Вставить' переменной 'ТЗ': ожидается Число, получена переменная 'индекс' типа Строка
+
+💡 Подсказка: Преобразуйте строку в число через функцию Число(индекс) или используйте числовую переменную.
+```
+
+---
+
+**Task 3.4: Интеграция настроек diagnostics с settings.json (1 день)**
+
+Переиспользовать общий `DetailLevel` enum для hover и diagnostics.
+
+**Добавить в `vscode-extension/package.json`:**
+
+```json
+"bsl.diagnostics.detailLevel": {
+  "type": "string",
+  "enum": ["brief", "standard", "detailed"],
+  "default": "standard",
+  "enumDescriptions": [
+    "Краткие сообщения (только тип)",
+    "Стандартные (тип + переменная)",
+    "Детальные (тип + переменная + подсказки)"
+  ],
+  "description": "Уровень детализации сообщений об ошибках"
+},
+"bsl.diagnostics.showHints": {
+  "type": "boolean",
+  "default": true,
+  "description": "Показывать умные подсказки для исправления ошибок"
+}
+```
+
+**Обновить LSP Server для передачи настроек в TypeValidator:**
+
+```rust
+// backend/src/bin/lsp_server.rs
+async fn on_did_change_configuration(params: DidChangeConfigurationParams) {
+    let settings = params.settings.get("bsl").unwrap_or_default();
+
+    let diagnostic_detail = settings
+        .get("diagnostics")
+        .and_then(|d| d.get("detailLevel"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("standard");
+
+    // Обновить в state
+    state.diagnostic_settings.update(diagnostic_detail);
+}
+```
+
+---
+
+**Task 3.5: Edge cases обработка (1 день)**
+
+Обработать все сложные случаи:
+
+**1. Литералы:**
+```bsl
+"строка".НесуществующийМетод();
+```
+**Сообщение (Standard):**
+```
+Метод 'НесуществующийМетод' не существует для литерала строки типа 'Строка'
+```
+
+**2. Прямые вызовы:**
+```bsl
+Справочники.Контрагенты.МетодКоторогоНет();
+```
+**Сообщение (Standard):**
+```
+Метод 'МетодКоторогоНет' не существует для выражения типа 'СправочникМенеджер.Контрагенты'
+```
+
+**3. Вложенные цепочки:**
+```bsl
+массив.Получить(0).НесуществующийМетод();
+```
+**Сообщение (Standard):**
+```
+Метод 'НесуществующийМетод' не существует для результата вызова 'массив.Получить(0)' типа 'Произвольный'
+```
+
+**Реализация:**
+
+```rust
+fn get_object_description(object_name: &Option<String>, object_type: &str) -> String {
+    match object_name {
+        Some(name) if is_literal(name) => {
+            format!("литерала {} типа", infer_literal_kind(name))
+        },
+        Some(name) if is_expression(name) => {
+            format!("выражения")
+        },
+        Some(name) => {
+            format!("переменной '{}'", name)
+        },
+        None => {
+            format!("объекта")
+        }
+    }
+}
+```
+
+---
+
 **Результат Milestone 3.6:**
 
 **Phase 1:**
@@ -1320,12 +1627,22 @@ fn add_documentation_links(mut self, resolution: &TypeResolution) -> Self {
 - ✅ Ссылки на локальный syntax_helper и онлайн документацию
 - ✅ Hover информативен и кастомизируем
 
+**Phase 3:**
+- ✅ Diagnostic messages с именами переменных (контекст)
+- ✅ Три уровня детализации (Brief/Standard/Detailed)
+- ✅ Умные подсказки для Detailed level (fuzzy matching, доступные методы)
+- ✅ Обработка edge cases (литералы, выражения, цепочки вызовов)
+- ✅ Настройки через settings.json (консистентность с hover)
+- ✅ Информативные сообщения помогают быстро найти и исправить ошибку
+
 **Зависимости:**
 - ✅ Milestone 2.9 (Inline Scope Analysis) — hover уже работает
 - ✅ Milestone 2.11 (Span Extraction) — координаты корректны
+- ✅ Milestone 3.7 (Semantic Diagnostics MVP) — базовые diagnostics работают
 - 📄 Исследование hover best practices (завершено)
+- 📄 Исследование diagnostic messages индустрии (TypeScript, Rust, Python, C#)
 
-**Оценка времени:** 10-12 дней
+**Оценка времени:** 15-18 дней (5 дней Phase 1 + 7 дней Phase 2 + 5-6 дней Phase 3)
 
 **Пример итогового hover (DetailLevel::Detailed):**
 
@@ -1352,6 +1669,28 @@ fn add_documentation_links(mut self, resolution: &TypeResolution) -> Self {
 📖 **Документация:**
 • [Синтакс Помощник: ТаблицаЗначений](file:///C:/examples/syntax_helper/ValueTable.html)
 • [1С Platform Docs](https://docs.1c.ru/search?q=ТаблицаЗначений)
+```
+
+**Пример итоговых diagnostic messages (Phase 3):**
+
+```markdown
+# Brief (по умолчанию для inline подсветки):
+Метод 'НеСуществует' не существует для типа 'Массив'
+
+# Standard (больше контекста):
+Метод 'НеСуществует' не существует для переменной 'списокИмен' типа 'Массив'
+
+# Detailed (максимум помощи):
+Метод 'НеСуществует' не существует для переменной 'списокИмен' типа 'Массив'
+
+💡 Подсказка: Возможно, вы имели в виду: Найти(), НайтиЗначение()?
+
+Доступные методы типа 'Массив':
+• Добавить(Значение?) → void
+• Количество() → Число
+• Найти(Значение) → void
+• Получить(Индекс: Число) → Произвольный
+• Удалить(Индекс: Число) → void
 ```
 
 ---

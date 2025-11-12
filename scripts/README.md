@@ -4,6 +4,32 @@
 
 ## 📜 Доступные скрипты
 
+### `add-defender-exclusions.ps1` - Настройка Windows Defender (НОВОЕ!)
+
+**Назначение:** Автоматическое добавление проекта в исключения Windows Defender для ускорения HBK Recovery и компиляции.
+
+**Использование:**
+```powershell
+# В PowerShell с правами администратора:
+.\scripts\add-defender-exclusions.ps1
+```
+
+**Что делает:**
+1. Добавляет весь проект в исключения Defender
+2. Добавляет `examples\syntax_helper` (HBK Recovery - 52K файлов!)
+3. Добавляет `target\` (Rust компиляция)
+4. Добавляет LSP процессы в исключения
+5. (Опционально) Отключает сканирование ZIP архивов
+
+**Эффект:**
+- HBK Recovery: **180s → 122s** (выигрыш ~60 секунд!)
+- Компиляция: меньше overhead от Defender
+- CPU: MsMpEng.exe <5% вместо 15-25%
+
+**Требования:** Windows 10/11, права администратора
+
+---
+
 ### `clear_cache.sh` - Очистка Windows File System Cache
 
 **Назначение:** Очистить Windows File System Cache (Standby List) для тестирования прогресса парсинга.

@@ -84,7 +84,7 @@ npm run package
 **Что происходит автоматически:**
 1. ✅ Проверка наличия `target/release/bsl-lsp-server.exe`
 2. ✅ Автоматическая сборка Rust если бинарник отсутствует
-3. ✅ Копирование в `vscode-extension/bin/lsp_server.exe`
+3. ✅ Копирование в `vscode-extension/bin/lsp-server.exe`
 4. ✅ Пропуск копирования если бинарник уже актуален
 
 **Детали:** См. [scripts/README.md](scripts/README.md)

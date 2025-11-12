@@ -1,7 +1,7 @@
 #!/bin/bash
 # Тестовый скрипт для проверки LSP сервера
 
-LSP_SERVER="./bin/lsp_server.exe"
+LSP_SERVER="./bin/lsp-server.exe"
 
 # LSP initialize request (правильный формат с Content-Length)
 REQUEST='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}'

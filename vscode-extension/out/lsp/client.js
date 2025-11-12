@@ -63,7 +63,7 @@ async function startLanguageClient(context) {
     let serverPath;
     try {
         // Всегда используем общую логику выбора бинарников
-        serverPath = (0, binaryPath_1.getBinaryPath)('lsp_server', context);
+        serverPath = (0, binaryPath_1.getBinaryPath)('lsp-server', context);
         outputChannel.appendLine(`🚀 LSP server path resolved: ${serverPath}`);
     }
     catch (error) {

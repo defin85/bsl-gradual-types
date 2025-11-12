@@ -4,7 +4,7 @@
 
 ```bash
 cd c:/1CProject/bsl-gradual-types/vscode-extension/bin
-./lsp_server.exe --help
+./lsp-server.exe --help
 ```
 
 **Ожидаемый результат**: Вывод справки или сообщение об использовании
@@ -17,7 +17,7 @@ cd c:/1CProject/bsl-gradual-types/vscode-extension/bin
 cd c:/1CProject/bsl-gradual-types/vscode-extension
 
 # Отправить LSP initialize запрос (Content-Length ДОЛЖЕН быть 107!)
-printf 'Content-Length: 107\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}' | timeout 5s ./bin/lsp_server.exe 2>&1
+printf 'Content-Length: 107\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}' | timeout 5s ./bin/lsp-server.exe 2>&1
 ```
 
 **Ожидаемый результат**: JSON ответ с capabilities:
@@ -33,7 +33,7 @@ printf 'Content-Length: 107\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"initialize"
 
 ```bash
 cd c:/1CProject/bsl-gradual-types/vscode-extension/bin
-ldd lsp_server.exe | grep "not found"
+ldd lsp-server.exe | grep "not found"
 ```
 
 **Ожидаемый результат**: Пустой вывод (все DLL найдены)
@@ -45,7 +45,7 @@ ldd lsp_server.exe | grep "not found"
 ```bash
 cd c:/1CProject/bsl-gradual-types/vscode-extension/bin
 export RUST_LOG=debug RUST_BACKTRACE=full
-./lsp_server.exe
+./lsp-server.exe
 ```
 
 **Что делать**:
@@ -84,7 +84,7 @@ Response: {"jsonrpc":"2.0",...}
 
 ```bash
 cd c:/1CProject/bsl-gradual-types/vscode-extension
-RUST_LOG=info RUST_BACKTRACE=1 ./bin/lsp_server.exe
+RUST_LOG=info RUST_BACKTRACE=1 ./bin/lsp-server.exe
 ```
 
 **Что проверяем**: Возможно, сервер ожидает запуска из конкретной директории
@@ -120,7 +120,7 @@ RUST_LOG=info RUST_BACKTRACE=1 ./bin/lsp_server.exe
 ```bash
 cd c:/1CProject/bsl-gradual-types/vscode-extension && \
 printf 'Content-Length: 107\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}' | \
-timeout 5s ./bin/lsp_server.exe 2>&1
+timeout 5s ./bin/lsp-server.exe 2>&1
 ```
 
 **Что это делает**: Отправляет LSP initialize и ждет ответ (5 сек таймаут)

@@ -6,7 +6,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 
-const serverPath = path.join(__dirname, 'bin', 'lsp_server.exe');
+const serverPath = path.join(__dirname, 'bin', 'lsp-server.exe');
 
 console.log('🧪 Тестирование LSP сервера (VSCode симуляция)');
 console.log('📍 Путь:', serverPath);

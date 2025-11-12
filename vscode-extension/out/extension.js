@@ -18062,7 +18062,7 @@ async function startLanguageClient(context) {
   const traceLevel = BslAnalyzerConfig.serverTrace;
   let serverPath;
   try {
-    serverPath = getBinaryPath("lsp_server", context);
+    serverPath = getBinaryPath("lsp-server", context);
     outputChannel4.appendLine(`\u{1F680} LSP server path resolved: ${serverPath}`);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);

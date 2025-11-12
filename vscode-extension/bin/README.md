@@ -19,7 +19,7 @@ npm run compile
 
 Скрипт `copy-binaries.js` автоматически:
 1. Проверит наличие Rust бинарников в `../target/release/`
-2. Скопирует `bsl-lsp-server.exe` → `bin/lsp_server.exe`
+2. Скопирует `bsl-lsp-server.exe` → `bin/lsp-server.exe`
 3. Покажет статистику
 
 ### Вариант 2: Ручная сборка
@@ -29,14 +29,14 @@ npm run compile
 cargo build -p bsl-backend --bin bsl-lsp-server --release
 
 # 2. Скопировать в Extension
-cp target/release/bsl-lsp-server.exe vscode-extension/bin/lsp_server.exe
+cp target/release/bsl-lsp-server.exe vscode-extension/bin/lsp-server.exe
 ```
 
 ## 📋 Список бинарников
 
 | Файл | Источник | Размер | Описание |
 |------|----------|--------|----------|
-| `lsp_server.exe` | `bsl-backend` | ~8-9 MB | Language Server Protocol сервер |
+| `lsp-server.exe` | `bsl-backend` | ~8-9 MB | Language Server Protocol сервер |
 | `lsp_server_wrapper.bat` | — | <1 KB | Обёртка для запуска LSP (Windows) |
 
 ## 🔒 Безопасность
@@ -65,11 +65,11 @@ GitHub Actions workflow автоматически собирает и публ�
 **Проблема**: Extension не запускается, ошибка "LSP Server not found"
 
 **Решение**:
-1. Проверьте наличие файла `vscode-extension/bin/lsp_server.exe`
+1. Проверьте наличие файла `vscode-extension/bin/lsp-server.exe`
 2. Пересоберите бинарник: `npm run compile` в `vscode-extension/`
 3. Проверьте логи: VSCode Output → "BSL Gradual Types"
 
 **Проблема**: "Access denied" при запуске LSP
 
 **Решение**: Windows может блокировать скачанные .exe файлы.
-- ПКМ на `lsp_server.exe` → Properties → Unblock → Apply
+- ПКМ на `lsp-server.exe` → Properties → Unblock → Apply

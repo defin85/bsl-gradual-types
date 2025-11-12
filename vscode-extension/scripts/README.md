@@ -41,7 +41,7 @@ const BINARIES = [
     {
         name: 'LSP Server',
         source: 'bsl-lsp-server.exe',  // Имя в target/release/
-        target: 'lsp_server.exe',       // Имя в vscode-extension/bin/
+        target: 'lsp-server.exe',       // Имя в vscode-extension/bin/
         description: 'Language Server Protocol server для VSCode'
     }
 ];
@@ -86,7 +86,7 @@ const BINARIES = [
 
 🔍 LSP Server:
   Источник: bsl-lsp-server.exe
-  Назначение: lsp_server.exe
+  Назначение: lsp-server.exe
   ✅ Скопирован LSP Server (7.56 MB)
 
 ============================================================
@@ -95,7 +95,7 @@ const BINARIES = [
   ⏭️  Пропущено: 0
 
 📂 Содержимое vscode-extension/bin/:
-  📄 lsp_server.exe (7.56 MB, изменён: 06.10.2025, 00:23:34)
+  📄 lsp-server.exe (7.56 MB, изменён: 06.10.2025, 00:23:34)
 
 ============================================================
 ✅ Все бинарники актуальны!

@@ -55,7 +55,7 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
     let serverPath: string;
     try {
         // Всегда используем общую логику выбора бинарников
-        serverPath = getBinaryPath('lsp_server', context);
+        serverPath = getBinaryPath('lsp-server', context);
         outputChannel.appendLine(`🚀 LSP server path resolved: ${serverPath}`);
     } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : String(error);

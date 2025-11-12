@@ -206,8 +206,11 @@ impl AstToIrConverter {
 
                     // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Определяем тип для переменной
                     let type_hint = if let Expression::New { type_name, .. } = value {
+                        // ✅ ОЧИСТКА: Убираем скобки если tree-sitter включил их в type_name
+                        let clean_type_name = type_name.trim().trim_end_matches("()").trim();
+
                         // Для Generic коллекций (Массив, Соответствие, Список)
-                        match type_name.as_str() {
+                        match clean_type_name {
                             "Массив" => TypeHint::Generic {
                                 base_type: "Массив".to_string(),
                                 type_params: vec!["?".to_string()],
@@ -223,7 +226,10 @@ impl AstToIrConverter {
                                 type_params: vec!["?".to_string()],
                                 certainty: 0.0,
                             },
-                            _ => TypeHint::Inferred(value_type.clone()),
+                            _ => {
+                                // ✅ ИСПРАВЛЕНИЕ: ДЛЯ ВСЕХ ОСТАЛЬНЫХ ТИПОВ создаём Explicit!
+                                TypeHint::Explicit(clean_type_name.to_string())
+                            }
                         }
                     } else {
                         TypeHint::Inferred(value_type.clone())

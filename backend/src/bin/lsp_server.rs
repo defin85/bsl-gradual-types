@@ -790,21 +790,29 @@ impl LanguageServer for BslLanguageServer {
 
         // PHASE 2: Semantic validation (MILESTONE 3.7)
         if let Some(type_service) = self.get_type_service() {
-            match type_service.validate_semantics(&text).await {
-                Ok(semantic_errors) => {
-                    if !semantic_errors.is_empty() {
-                        info!(
-                            "⚠️ Found {} semantic errors in {}",
-                            semantic_errors.len(),
-                            uri
-                        );
-                        for error in semantic_errors {
-                            diagnostics.push(self.semantic_error_to_diagnostic(&error));
+            // ✅ GUARD: Проверяем что platform types загружены
+            let metrics = type_service.get_metrics_summary();
+            let total_types = metrics.get("total_types").and_then(|v| v.as_u64()).unwrap_or(0);
+
+            if total_types == 0 {
+                info!("⚠️ Skipping semantic validation for {}: platform types not yet loaded", uri);
+            } else {
+                match type_service.validate_semantics(&text).await {
+                    Ok(semantic_errors) => {
+                        if !semantic_errors.is_empty() {
+                            info!(
+                                "⚠️ Found {} semantic errors in {}",
+                                semantic_errors.len(),
+                                uri
+                            );
+                            for error in semantic_errors {
+                                diagnostics.push(self.semantic_error_to_diagnostic(&error));
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    warn!("Semantic validation failed for {}: {}", uri, e);
+                    Err(e) => {
+                        warn!("Semantic validation failed for {}: {}", uri, e);
+                    }
                 }
             }
         }
@@ -942,21 +950,29 @@ impl LanguageServer for BslLanguageServer {
 
             // PHASE 2: Semantic validation (MILESTONE 3.7)
             if let Some(type_service) = self.get_type_service() {
-                match type_service.validate_semantics(&text).await {
-                    Ok(semantic_errors) => {
-                        if !semantic_errors.is_empty() {
-                            info!(
-                                "⚠️ Found {} semantic errors in {}",
-                                semantic_errors.len(),
-                                uri
-                            );
-                            for error in semantic_errors {
-                                diagnostics.push(self.semantic_error_to_diagnostic(&error));
+                // ✅ GUARD: Проверяем что platform types загружены
+                let metrics = type_service.get_metrics_summary();
+                let total_types = metrics.get("total_types").and_then(|v| v.as_u64()).unwrap_or(0);
+
+                if total_types == 0 {
+                    info!("⚠️ Skipping semantic validation for {}: platform types not yet loaded", uri);
+                } else {
+                    match type_service.validate_semantics(&text).await {
+                        Ok(semantic_errors) => {
+                            if !semantic_errors.is_empty() {
+                                info!(
+                                    "⚠️ Found {} semantic errors in {}",
+                                    semantic_errors.len(),
+                                    uri
+                                );
+                                for error in semantic_errors {
+                                    diagnostics.push(self.semantic_error_to_diagnostic(&error));
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        warn!("Semantic validation failed for {}: {}", uri, e);
+                        Err(e) => {
+                            warn!("Semantic validation failed for {}: {}", uri, e);
+                        }
                     }
                 }
             }

@@ -355,7 +355,6 @@ mod tests {
                 object_name: None,
                 object_type: None,
                 arg_types: vec!["Строка".to_string()],
-                method_span: None,
             },
             span: Span::stub(),
             scope_id: program.symbols.root_scope,

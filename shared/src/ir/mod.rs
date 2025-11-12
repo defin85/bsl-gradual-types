@@ -193,18 +193,11 @@ pub enum SemanticNodeKind {
     /// `object_name` введён для flow-sensitive анализа, чтобы различать:
     /// - **Имя переменной** (для lookup в SymbolTable)
     /// - **Тип объекта** (для резолюции методов)
-    ///
-    /// # Milestone 3.7 Phase 2
-    ///
-    /// `method_span` введён для точного Diagnostic Range:
-    /// - Позиция имени метода (без объекта)
-    /// - `None` для обычных функций (не методов)
     FunctionCall {
         function_name: String,
         object_name: Option<String>,
         object_type: Option<String>,
         arg_types: Vec<String>,
-        method_span: Option<Span>,
     },
 
     // === Scope tracking ===

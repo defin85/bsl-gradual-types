@@ -702,7 +702,7 @@ impl AstToIrConverter {
         let function_name = match function {
             Expression::Identifier { name, .. } => name,
             Expression::PropertyAccess {
-                object, property, span: prop_span, ..
+                object, property, ..
             } => {
                 // Метод объекта: объект.Метод()
                 let object_type = self.infer_expression_type(&object);
@@ -735,30 +735,12 @@ impl AstToIrConverter {
                     span // Для сложных выражений используем оригинальный span
                 };
 
-                // ✅ MILESTONE 3.7: Извлекаем span имени метода для точного Diagnostic Range
-                // Для "ТаблицаТип.Количество()" это позиция "Количество"
-                let method_span = if let Expression::Identifier { span: obj_span, name, .. } = &*object {
-                    // Вычисляем позицию имени метода (property)
-                    // Позиция метода = начало PropertyAccess + длина объекта + 1 (точка)
-                    let object_name_len = name.chars().count() as u32;  // UTF-8 безопасно
-
-                    Some(Span {
-                        start_line: prop_span.start_line,
-                        start_column: obj_span.start_column + object_name_len + 1,
-                        end_line: prop_span.end_line,
-                        end_column: prop_span.end_column,
-                    })
-                } else {
-                    None  // Для сложных выражений не вычисляем method_span
-                };
-
                 let node = SemanticNode {
                     kind: SemanticNodeKind::FunctionCall {
                         function_name: property.clone(),
                         object_name, // ✅ НОВОЕ: имя объекта для методов
                         object_type: Some(object_type),
                         arg_types,
-                        method_span,  // ✅ НОВОЕ: span имени метода
                     },
                     span: expanded_span, // ✅ Используем расширенный span
                     scope_id: self.current_scope,
@@ -781,7 +763,6 @@ impl AstToIrConverter {
                 object_name: None, // ✅ НОВОЕ: обычная функция, не метод
                 object_type: None,
                 arg_types,
-                method_span: None,  // ✅ MILESTONE 3.7: None для обычных функций
             },
             span,
             scope_id: self.current_scope,

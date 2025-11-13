@@ -2703,6 +2703,814 @@ pub fn new<'b>(
 
 ---
 
+### 🐛 Milestone 4.4: MCP Debug Server — AI-Powered Interactive Debugging (2-3 недели)
+
+**Приоритет:** 🟢 ВЫСОКИЙ — революционная возможность для AI-ассистированной разработки
+
+**Статус:** 📋 PLANNED
+
+**Проблема:**
+
+AI-ассистенты (Claude Code, ChatGPT, etc.) **НЕ могут** интерактивно отлаживать программы через debugger:
+- ❌ Нет доступа к GDB/LLDB
+- ❌ Не могут устанавливать breakpoints
+- ❌ Не могут инспектировать переменные step-by-step
+- ❌ Вынуждены использовать print debugging
+
+**Текущий workflow отладки:**
+```
+1. AI добавляет println!() →
+2. Пересборка →
+3. Запуск →
+4. Анализ output →
+5. Повтор
+```
+
+⏱️ **Медленно:** 5-10 минут на итерацию
+
+**Цель:**
+
+Создать **MCP Debug Server** с DAP bridge, чтобы AI мог отлаживать программы **интерактивно** как профессиональный разработчик:
+- ✅ Установка breakpoints
+- ✅ Step-by-step execution
+- ✅ Инспекция переменных
+- ✅ Stack traces
+- ✅ Conditional breakpoints
+- ✅ Watch expressions
+
+⏱️ **Быстро:** <1 минута на итерацию
+
+---
+
+**Архитектура:**
+
+```
+┌────────────────┐   MCP Protocol    ┌──────────────────┐   DAP Protocol   ┌──────────────┐
+│  Claude Code   │ ◄───────────────► │  MCP Debug Server│ ◄───────────────►│  CodeLLDB    │
+│  (AI Agent)    │                    │   (Rust crate)   │                  │  (DAP server)│
+└────────────────┘                    └──────────────────┘                  └──────────────┘
+                                              │                                      │
+                                              │                                      ▼
+                                              ▼                              ┌──────────────┐
+                                       ┌──────────────────┐                  │   LLDB/GDB   │
+                                       │  Session Manager │                  │  (debugger)  │
+                                       │  (state tracking)│                  └──────────────┘
+                                       └──────────────────┘
+```
+
+**Принципы:**
+- **Protocol Layering:** MCP (для AI) → DAP (для debugger)
+- **Language Agnostic:** Работает для Rust, C++, Go, Python (любой язык с DAP support)
+- **Stateful Sessions:** Поддержка нескольких debug сессий одновременно
+- **Right-Sized:** Переиспользуем существующие DAP servers (CodeLLDB, vscode-cpptools)
+
+---
+
+#### Задачи:
+
+**Task 1: Создание MCP Debug Server crate (2 дня)**
+
+Создать новый crate `mcp-debug-server/`:
+
+```toml
+# mcp-debug-server/Cargo.toml
+[package]
+name = "mcp-debug-server"
+version = "0.1.0"
+
+[[bin]]
+name = "mcp-debug"
+path = "src/main.rs"
+
+[dependencies]
+rmcp = { version = "0.8.0", features = ["server", "macros"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+```
+
+Структура модулей:
+```rust
+pub mod server;      // MCP server implementation
+pub mod dap_client;  // DAP protocol client
+pub mod session;     // Debug session management
+pub mod tools;       // MCP Tools для debugging
+pub mod resources;   // MCP Resources для debug info
+```
+
+---
+
+**Task 2: DAP Client Implementation (3-4 дня)**
+
+Реализовать DAP (Debug Adapter Protocol) client для общения с CodeLLDB/vscode-cpptools:
+
+```rust
+// mcp-debug-server/src/dap_client.rs
+use serde_json::{json, Value};
+use tokio::process::{Child, ChildStdin, ChildStdout};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+/// DAP Client для общения с debug adapter (CodeLLDB, etc.)
+pub struct DapClient {
+    process: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    seq_counter: u32,
+}
+
+impl DapClient {
+    /// Запускает DAP server (CodeLLDB)
+    pub async fn spawn(adapter_path: &str) -> Result<Self> {
+        let mut child = tokio::process::Command::new(adapter_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
+
+        Ok(Self {
+            stdin: child.stdin.take().unwrap(),
+            stdout: BufReader::new(child.stdout.take().unwrap()),
+            process: child,
+            seq_counter: 1,
+        })
+    }
+
+    /// Инициализация debug сессии
+    pub async fn initialize(&mut self) -> Result<Value> {
+        self.send_request("initialize", json!({
+            "clientID": "mcp-debug-server",
+            "adapterID": "lldb",
+            "linesStartAt1": true,
+            "columnsStartAt1": true,
+        })).await
+    }
+
+    /// Установить breakpoint
+    pub async fn set_breakpoint(&mut self, file: &str, line: u32) -> Result<Value> {
+        self.send_request("setBreakpoints", json!({
+            "source": { "path": file },
+            "breakpoints": [{ "line": line }]
+        })).await
+    }
+
+    /// Запустить программу
+    pub async fn launch(&mut self, program: &str, args: Vec<String>) -> Result<Value> {
+        self.send_request("launch", json!({
+            "program": program,
+            "args": args,
+            "stopOnEntry": false,
+        })).await
+    }
+
+    /// Step into
+    pub async fn step_in(&mut self, thread_id: u32) -> Result<Value> {
+        self.send_request("stepIn", json!({
+            "threadId": thread_id
+        })).await
+    }
+
+    /// Step over
+    pub async fn next(&mut self, thread_id: u32) -> Result<Value> {
+        self.send_request("next", json!({
+            "threadId": thread_id
+        })).await
+    }
+
+    /// Continue execution
+    pub async fn continue_execution(&mut self, thread_id: u32) -> Result<Value> {
+        self.send_request("continue", json!({
+            "threadId": thread_id
+        })).await
+    }
+
+    /// Получить stack trace
+    pub async fn stack_trace(&mut self, thread_id: u32) -> Result<Value> {
+        self.send_request("stackTrace", json!({
+            "threadId": thread_id
+        })).await
+    }
+
+    /// Получить значение переменной
+    pub async fn evaluate(&mut self, expression: &str, frame_id: u32) -> Result<Value> {
+        self.send_request("evaluate", json!({
+            "expression": expression,
+            "frameId": frame_id,
+            "context": "hover"
+        })).await
+    }
+
+    /// Отправить DAP request и получить response
+    async fn send_request(&mut self, command: &str, args: Value) -> Result<Value> {
+        let seq = self.seq_counter;
+        self.seq_counter += 1;
+
+        let request = json!({
+            "seq": seq,
+            "type": "request",
+            "command": command,
+            "arguments": args
+        });
+
+        // DAP использует Content-Length header
+        let body = serde_json::to_string(&request)?;
+        let header = format!("Content-Length: {}\r\n\r\n", body.len());
+
+        self.stdin.write_all(header.as_bytes()).await?;
+        self.stdin.write_all(body.as_bytes()).await?;
+        self.stdin.flush().await?;
+
+        // Читаем response
+        self.read_response().await
+    }
+
+    /// Читает DAP response
+    async fn read_response(&mut self) -> Result<Value> {
+        // Читаем Content-Length header
+        let mut header = String::new();
+        self.stdout.read_line(&mut header).await?;
+
+        let length: usize = header
+            .trim_start_matches("Content-Length: ")
+            .trim()
+            .parse()?;
+
+        // Пропускаем пустую строку
+        self.stdout.read_line(&mut String::new()).await?;
+
+        // Читаем JSON body
+        let mut buffer = vec![0u8; length];
+        self.stdout.read_exact(&mut buffer).await?;
+
+        let response: Value = serde_json::from_slice(&buffer)?;
+        Ok(response)
+    }
+}
+```
+
+---
+
+**Task 3: Debug Session Manager (2 дня)**
+
+Управление состоянием debug сессий:
+
+```rust
+// mcp-debug-server/src/session.rs
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+/// ID debug сессии
+pub type SessionId = String;
+
+/// Информация о debug сессии
+pub struct DebugSession {
+    pub id: SessionId,
+    pub dap_client: DapClient,
+    pub binary_path: String,
+    pub current_thread_id: Option<u32>,
+    pub breakpoints: HashMap<String, Vec<u32>>,
+    pub state: SessionState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SessionState {
+    Initialized,
+    Running,
+    Stopped,
+    Terminated,
+}
+
+/// Менеджер debug сессий
+pub struct SessionManager {
+    sessions: Arc<RwLock<HashMap<SessionId, DebugSession>>>,
+}
+
+impl SessionManager {
+    pub fn new() -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Создать новую debug сессию
+    pub async fn create_session(
+        &self,
+        binary_path: String,
+        adapter_path: String,
+    ) -> Result<SessionId> {
+        let session_id = uuid::Uuid::new_v4().to_string();
+
+        let mut dap_client = DapClient::spawn(&adapter_path).await?;
+        dap_client.initialize().await?;
+
+        let session = DebugSession {
+            id: session_id.clone(),
+            dap_client,
+            binary_path,
+            current_thread_id: None,
+            breakpoints: HashMap::new(),
+            state: SessionState::Initialized,
+        };
+
+        self.sessions.write().await.insert(session_id.clone(), session);
+        Ok(session_id)
+    }
+
+    /// Выполнить команду в сессии
+    pub async fn with_session<F, R>(&self, session_id: &str, f: F) -> Result<R>
+    where
+        F: FnOnce(&mut DebugSession) -> Result<R>,
+    {
+        let mut sessions = self.sessions.write().await;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| anyhow::anyhow!("Session not found: {}", session_id))?;
+
+        f(session)
+    }
+}
+```
+
+---
+
+**Task 4: MCP Tools для debugging (3 дня)**
+
+Реализовать MCP Tools для управления debug сессией:
+
+```rust
+// mcp-debug-server/src/tools.rs
+use rmcp::macros::tool;
+
+/// Создать новую debug сессию
+#[tool]
+pub async fn create_debug_session(
+    binary_path: String,
+    adapter_path: Option<String>,
+    manager: Arc<SessionManager>,
+) -> Result<String> {
+    let adapter = adapter_path.unwrap_or_else(|| {
+        // Default: CodeLLDB для Rust
+        "codelldb".to_string()
+    });
+
+    let session_id = manager.create_session(binary_path, adapter).await?;
+
+    Ok(format!("Debug session created: {}", session_id))
+}
+
+/// Установить breakpoint
+#[tool]
+pub async fn set_breakpoint(
+    session_id: String,
+    file: String,
+    line: u32,
+    manager: Arc<SessionManager>,
+) -> Result<String> {
+    manager.with_session(&session_id, |session| {
+        session.dap_client.set_breakpoint(&file, line).await?;
+
+        // Сохраняем breakpoint в сессии
+        session.breakpoints
+            .entry(file.clone())
+            .or_insert_with(Vec::new)
+            .push(line);
+
+        Ok(format!("Breakpoint set at {}:{}", file, line))
+    }).await
+}
+
+/// Запустить программу
+#[tool]
+pub async fn debug_run(
+    session_id: String,
+    args: Vec<String>,
+    manager: Arc<SessionManager>,
+) -> Result<String> {
+    manager.with_session(&session_id, |session| {
+        let response = session.dap_client.launch(&session.binary_path, args).await?;
+        session.state = SessionState::Running;
+
+        Ok(format!("Program started: {:?}", response))
+    }).await
+}
+
+/// Step into
+#[tool]
+pub async fn debug_step(
+    session_id: String,
+    manager: Arc<SessionManager>,
+) -> Result<String> {
+    manager.with_session(&session_id, |session| {
+        let thread_id = session.current_thread_id
+            .ok_or_else(|| anyhow::anyhow!("No active thread"))?;
+
+        let response = session.dap_client.step_in(thread_id).await?;
+
+        // Форматируем ответ для AI
+        Ok(format!("Stepped into. Current location: {:?}", response))
+    }).await
+}
+
+/// Step over
+#[tool]
+pub async fn debug_next(
+    session_id: String,
+    manager: Arc<SessionManager>,
+) -> Result<String> {
+    manager.with_session(&session_id, |session| {
+        let thread_id = session.current_thread_id?;
+        session.dap_client.next(thread_id).await?;
+
+        Ok("Stepped over to next line".to_string())
+    }).await
+}
+
+/// Продолжить выполнение
+#[tool]
+pub async fn debug_continue(
+    session_id: String,
+    manager: Arc<SessionManager>,
+) -> Result<String> {
+    manager.with_session(&session_id, |session| {
+        let thread_id = session.current_thread_id?;
+        session.dap_client.continue_execution(thread_id).await?;
+
+        Ok("Continuing execution...".to_string())
+    }).await
+}
+
+/// Показать значение переменной
+#[tool]
+pub async fn debug_print(
+    session_id: String,
+    expression: String,
+    manager: Arc<SessionManager>,
+) -> Result<String> {
+    manager.with_session(&session_id, |session| {
+        let thread_id = session.current_thread_id?;
+
+        // Получаем current frame
+        let stack = session.dap_client.stack_trace(thread_id).await?;
+        let frame_id = stack["stackFrames"][0]["id"].as_u64().unwrap() as u32;
+
+        // Evaluate expression
+        let response = session.dap_client.evaluate(&expression, frame_id).await?;
+
+        let value = response["result"].as_str().unwrap_or("N/A");
+        let type_ = response["type"].as_str().unwrap_or("unknown");
+
+        Ok(format!("{} = {} (type: {})", expression, value, type_))
+    }).await
+}
+
+/// Показать stack trace
+#[tool]
+pub async fn debug_backtrace(
+    session_id: String,
+    manager: Arc<SessionManager>,
+) -> Result<String> {
+    manager.with_session(&session_id, |session| {
+        let thread_id = session.current_thread_id?;
+        let response = session.dap_client.stack_trace(thread_id).await?;
+
+        // Форматируем stack trace для читаемости
+        let frames = response["stackFrames"].as_array().unwrap();
+        let mut result = String::from("Stack trace:\n");
+
+        for (i, frame) in frames.iter().enumerate() {
+            let name = frame["name"].as_str().unwrap_or("??");
+            let file = frame["source"]["path"].as_str().unwrap_or("??");
+            let line = frame["line"].as_u64().unwrap_or(0);
+
+            result.push_str(&format!("  #{} {} at {}:{}\n", i, name, file, line));
+        }
+
+        Ok(result)
+    }).await
+}
+
+/// Установить conditional breakpoint
+#[tool]
+pub async fn set_conditional_breakpoint(
+    session_id: String,
+    file: String,
+    line: u32,
+    condition: String,
+    manager: Arc<SessionManager>,
+) -> Result<String> {
+    manager.with_session(&session_id, |session| {
+        session.dap_client.send_request("setBreakpoints", json!({
+            "source": { "path": file },
+            "breakpoints": [{
+                "line": line,
+                "condition": condition
+            }]
+        })).await?;
+
+        Ok(format!("Conditional breakpoint set: {} if {}", file, condition))
+    }).await
+}
+
+/// Установить watch expression
+#[tool]
+pub async fn debug_watch(
+    session_id: String,
+    expression: String,
+    manager: Arc<SessionManager>,
+) -> Result<String> {
+    manager.with_session(&session_id, |session| {
+        // DAP поддерживает watch через evaluate с контекстом "watch"
+        // Сохраняем в сессии для повторной оценки на каждом stop
+        Ok(format!("Watching: {}", expression))
+    }).await
+}
+```
+
+---
+
+**Task 5: MCP Resources для debug info (1 день)**
+
+Реализовать Resources для доступа к debug информации:
+
+```rust
+// mcp-debug-server/src/resources.rs
+
+Resources:
+- `debug://sessions` — список активных debug сессий
+- `debug://session/{id}/breakpoints` — список breakpoints
+- `debug://session/{id}/threads` — список threads
+- `debug://session/{id}/variables` — текущие переменные в scope
+- `debug://session/{id}/stack` — текущий stack trace
+```
+
+---
+
+**Task 6: Event Handling (2 дня)**
+
+Обработка DAP events (stopped, continued, breakpoint hit):
+
+```rust
+// mcp-debug-server/src/session.rs
+
+impl DebugSession {
+    /// Обработка DAP events в фоне
+    pub async fn handle_events(&mut self) -> Result<()> {
+        loop {
+            let event = self.dap_client.read_event().await?;
+
+            match event["event"].as_str() {
+                Some("stopped") => {
+                    let reason = event["body"]["reason"].as_str().unwrap();
+                    let thread_id = event["body"]["threadId"].as_u64().unwrap() as u32;
+
+                    self.current_thread_id = Some(thread_id);
+                    self.state = SessionState::Stopped;
+
+                    tracing::info!("🛑 Program stopped: {} (thread {})", reason, thread_id);
+
+                    // Отправляем notification через MCP
+                    // self.send_mcp_notification("debug/stopped", ...);
+                }
+                Some("continued") => {
+                    self.state = SessionState::Running;
+                    tracing::info!("▶️ Program continued");
+                }
+                Some("terminated") => {
+                    self.state = SessionState::Terminated;
+                    tracing::info!("🏁 Program terminated");
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+}
+```
+
+---
+
+**Task 7: MCP Server Integration (2 дня)**
+
+Собрать всё в MCP server:
+
+```rust
+// mcp-debug-server/src/main.rs
+use rmcp::server::Server;
+use rmcp::transport::StdioTransport;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+
+    let session_manager = Arc::new(SessionManager::new());
+
+    // Создаём MCP server
+    let server = Server::new("mcp-debug-server", "0.1.0");
+
+    // Регистрируем tools
+    server.add_tool(create_debug_session);
+    server.add_tool(set_breakpoint);
+    server.add_tool(debug_run);
+    server.add_tool(debug_step);
+    server.add_tool(debug_next);
+    server.add_tool(debug_continue);
+    server.add_tool(debug_print);
+    server.add_tool(debug_backtrace);
+    server.add_tool(set_conditional_breakpoint);
+    server.add_tool(debug_watch);
+
+    // Запускаем через stdio transport
+    let transport = StdioTransport::new(
+        tokio::io::stdin(),
+        tokio::io::stdout()
+    );
+
+    server.serve(transport).await?;
+
+    Ok(())
+}
+```
+
+**Конфигурация для Claude Desktop:**
+```json
+// claude_desktop_config.json
+{
+  "mcpServers": {
+    "debugger": {
+      "command": "mcp-debug",
+      "env": {
+        "RUST_LOG": "info"
+      }
+    }
+  }
+}
+```
+
+---
+
+**Task 8: Интеграционные тесты (2 дня)**
+
+```rust
+// mcp-debug-server/tests/integration_test.rs
+
+#[tokio::test]
+async fn test_debug_session_lifecycle() {
+    let manager = SessionManager::new();
+
+    // 1. Создаём сессию
+    let session_id = manager.create_session(
+        "target/debug/bsl-lsp-server".to_string(),
+        "codelldb".to_string(),
+    ).await.unwrap();
+
+    // 2. Устанавливаем breakpoint
+    manager.with_session(&session_id, |session| {
+        session.dap_client.set_breakpoint("src/main.rs", 10).await
+    }).await.unwrap();
+
+    // 3. Запускаем
+    manager.with_session(&session_id, |session| {
+        session.dap_client.launch(&session.binary_path, vec![]).await
+    }).await.unwrap();
+
+    // 4. Ждём остановки на breakpoint
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // 5. Проверяем stack trace
+    let stack = manager.with_session(&session_id, |session| {
+        session.dap_client.stack_trace(session.current_thread_id.unwrap()).await
+    }).await.unwrap();
+
+    assert!(stack["stackFrames"].as_array().unwrap().len() > 0);
+}
+
+#[tokio::test]
+async fn test_variable_inspection() {
+    let manager = SessionManager::new();
+    let session_id = setup_debug_session(&manager).await;
+
+    // Устанавливаем breakpoint после присваивания
+    manager.with_session(&session_id, |session| {
+        session.dap_client.set_breakpoint("test.rs", 15).await
+    }).await.unwrap();
+
+    // Запускаем и ждём остановки
+    run_and_wait(&manager, &session_id).await;
+
+    // Проверяем переменную
+    let value = manager.with_session(&session_id, |session| {
+        let frame_id = get_current_frame(session).await?;
+        session.dap_client.evaluate("my_variable", frame_id).await
+    }).await.unwrap();
+
+    assert_eq!(value["result"].as_str(), Some("42"));
+}
+```
+
+---
+
+**Результат Milestone 4.4:**
+
+**MCP Tools доступные AI:**
+- ✅ `create_debug_session` — создание debug сессии
+- ✅ `set_breakpoint` — установка breakpoint
+- ✅ `debug_run` — запуск программы
+- ✅ `debug_step` — step into
+- ✅ `debug_next` — step over
+- ✅ `debug_continue` — продолжить выполнение
+- ✅ `debug_print` — показать переменную
+- ✅ `debug_backtrace` — stack trace
+- ✅ `set_conditional_breakpoint` — условный breakpoint
+- ✅ `debug_watch` — watch expression
+
+**Поддерживаемые языки:**
+- ✅ Rust (через CodeLLDB)
+- ✅ C/C++ (через vscode-cpptools или CodeLLDB)
+- ✅ Go (через delve DAP adapter)
+- ✅ Python (через debugpy)
+- ✅ Любой язык с DAP support
+
+**Интеграция:**
+- ✅ Claude Desktop (через MCP configuration)
+- ✅ Claude Code (встроенная поддержка MCP)
+- ✅ Cursor / Windsurf (если поддерживают MCP)
+
+**Performance:**
+- ✅ DAP protocol — бинарный, быстрый
+- ✅ Async/await — нет блокировки
+- ✅ Multiple sessions — параллельная отладка
+
+**Зависимости:**
+- ✅ CodeLLDB (уже установлен для Rust development)
+- ✅ DAP protocol specification
+- ✅ rmcp crate (Rust MCP SDK)
+
+**Enables:**
+- 🚀 AI-powered debugging для всех языков
+- 🚀 Автоматическая отладка багов
+- 🚀 Root cause analysis через AI
+
+**Оценка времени:** 2-3 недели (14-21 дней)
+
+**Сложность:** СРЕДНЯЯ
+- DAP protocol хорошо документирован
+- Есть примеры реализаций (vscode-debugadapter-node)
+- MCP SDK упрощает server implementation
+
+---
+
+**Пример использования AI:**
+
+```
+Claude: "Отладим баг с hover на методах"
+
+1. Claude вызывает: create_debug_session(binary="target/debug/bsl-lsp-server")
+   → Session: abc123
+
+2. Claude вызывает: set_breakpoint(session="abc123", file="ast_to_ir.rs", line=123)
+   → Breakpoint 1 set
+
+3. Claude вызывает: debug_run(session="abc123", args=[])
+   → Program started, stopped at breakpoint
+
+4. Claude вызывает: debug_print(session="abc123", expression="object_type")
+   → object_type = "Массив<?>" (type: String)
+
+5. Claude вызывает: debug_step(session="abc123")
+   → Now at line 124
+
+6. Claude вызывает: debug_backtrace(session="abc123")
+   → Stack:
+     #0 infer_expression_type at ast_to_ir.rs:124
+     #1 convert_statement at ast_to_ir.rs:456
+
+7. Claude анализирует и находит баг: "Ага! object_type содержит Generic параметры,
+   нужно их убрать перед поиском в SignatureIndex"
+
+8. Claude исправляет код и повторяет отладку
+```
+
+---
+
+**Научная новизна:**
+
+Это будет **первый** MCP server для interactive debugging! Открывает новые возможности:
+- 🎓 Обучение программированию с AI mentor
+- 🐛 Автоматический bug hunting
+- 🔍 Root cause analysis
+- 📊 Performance profiling через AI
+
+**Применимость:**
+- ✅ BSL Gradual Types (наш проект)
+- ✅ Любые Rust проекты
+- ✅ C/C++ проекты
+- ✅ Любые языки с DAP support
+
+---
+
 ## 📅 Timeline Summary
 
 | Версия | Период | Длительность | Ключевые фичи |

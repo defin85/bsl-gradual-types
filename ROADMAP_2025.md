@@ -338,8 +338,8 @@ impl BatchAnalyzer {
 
 **Справка:**
 - 🔗 Model Context Protocol: https://modelcontextprotocol.io/
-- 🔗 Rust MCP SDK: https://github.com/modelcontextprotocol/rust-sdk
-- 🔗 Примеры MCP серверов: https://github.com/rust-mcp-stack/rust-mcp-filesystem
+- 🔗 Rust MCP SDK (официальный Anthropic): https://github.com/modelcontextprotocol/rust-sdk
+- 🔗 Примеры MCP серверов (community): https://github.com/rust-mcp-stack/rust-mcp-filesystem
 
 **Архитектура:**
 ```
@@ -377,7 +377,7 @@ name = "bsl-mcp"
 path = "src/main.rs"
 
 [dependencies]
-rmcp = { version = "0.8.0", features = ["server", "macros"] }
+rmcp = { version = "0.8.5", features = ["server", "macros"] }  # Официальный Anthropic SDK
 bsl-backend = { path = "../backend" }
 bsl-shared = { workspace = true }
 notify = { workspace = true }
@@ -2783,12 +2783,13 @@ name = "mcp-debug"
 path = "src/main.rs"
 
 [dependencies]
-rmcp = { version = "0.8.0", features = ["server", "macros"] }
+rmcp = { version = "0.8.5", features = ["server", "macros"] }  # Официальный Anthropic SDK
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }  # Для генерации session IDs
 ```
 
 Структура модулей:

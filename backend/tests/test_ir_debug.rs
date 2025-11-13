@@ -2,6 +2,7 @@
 
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::system::tree_sitter_adapter::TreeSitterAdapter;
+use bsl_shared::domain::signature_index::SignatureIndex;
 use std::sync::Arc;
 use tree_sitter::Parser;
 
@@ -27,11 +28,13 @@ fn test_ir_outside_function() {
 
     // IR конвертация
     let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+    let signature_index = SignatureIndex::new();
     let ir = AstToIrConverter::convert(
         ast_result.program,
         code.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     ).unwrap();
 
     println!("\nIR nodes: {}", ir.nodes.len());
@@ -77,11 +80,13 @@ fn test_ir_inside_function() {
 
     // IR конвертация
     let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+    let signature_index = SignatureIndex::new();
     let ir = AstToIrConverter::convert(
         ast_result.program,
         code.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     ).unwrap();
 
     println!("\nIR nodes: {}", ir.nodes.len());

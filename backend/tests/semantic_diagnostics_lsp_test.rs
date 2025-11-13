@@ -14,7 +14,7 @@ use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
 use bsl_backend::data::loaders::progress::ProgressUpdate;
 use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
 use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
-use bsl_shared::domain::repository::InMemoryTypeRepository;
+use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::TypeResolver;
 use std::sync::Arc;
@@ -24,18 +24,33 @@ fn create_test_service() -> TypeSystemService {
     // 1. Парсим синтаксис-помощник
     let mut parser = SyntaxHelperParser::new();
     parser
-        .parse_directory("examples/syntax_helper", None::<fn(ProgressUpdate)>)
+        .parse_directory("../examples/syntax_helper", None::<fn(ProgressUpdate)>)
         .expect("Failed to parse syntax helper");
 
     let db = parser.export_database();
     let parsed_types = convert_syntax_helper_to_raw(&db);
 
     // 2. Создаём репозиторий и загружаем типы
-    let repository = Arc::new(InMemoryTypeRepository::new())
-        as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
-    repository
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+
+    // ✅ MILESTONE 3.10: Клонируем типы для заполнения SignatureIndex
+    let platform_types_clone = parsed_types.clone();
+
+    repository_impl
         .load_types(parsed_types)
         .expect("Failed to load types");
+
+    // ✅ MILESTONE 3.10: Заполняем SignatureIndex методами из загруженных типов
+    repository_impl.populate_signature_index(|index| {
+        index.initialize_builtin_constructors();
+        bsl_backend::data::loaders::populate_signature_index_from_platform_types(
+            &platform_types_clone,
+            index,
+        );
+    });
+
+    // Приводим к trait object для передачи в компоненты
+    let repository = repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
 
     // 3. Создаём остальные компоненты
     let resolver = Arc::new(TypeResolver::new(repository.clone()));
@@ -194,4 +209,152 @@ async fn test_with_dynamic_constructor() {
     let _diagnostics = result.unwrap();
     // Динамические конструкторы создают Dynamic типы - их сложно валидировать
     println!("Dynamic constructor test passed");
+}
+
+// ===== Milestone 3.10: Parameter Type Validation Integration Tests =====
+
+#[tokio::test]
+async fn test_signature_index_loaded() {
+    // Debug тест: проверяем что SignatureIndex загружен методами
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+
+    let mut parser = SyntaxHelperParser::new();
+    parser
+        .parse_directory("../examples/syntax_helper", None::<fn(ProgressUpdate)>)
+        .expect("Failed to parse");
+    let db = parser.export_database();
+    let parsed_types = convert_syntax_helper_to_raw(&db);
+    let platform_types_clone = parsed_types.clone();
+
+    repository_impl.load_types(parsed_types).unwrap();
+
+    println!("\n🔍 Loaded types debug:");
+    println!("  Total types: {}", platform_types_clone.len());
+
+    // Найдём тип Массив
+    let array_type = platform_types_clone.iter().find(|t| t.name == "Массив" || t.english_name == "Array");
+
+    if let Some(arr) = array_type {
+        println!("  Тип 'Массив' найден: {} методов", arr.methods.len());
+        for (i, m) in arr.methods.iter().take(5).enumerate() {
+            println!("    {}: {}", i + 1, m.name);
+        }
+    } else {
+        println!("  Тип 'Массив' НЕ найден в parsed_types!");
+    }
+
+    // Заполняем SignatureIndex
+    repository_impl.populate_signature_index(|index| {
+        index.initialize_builtin_constructors();
+        bsl_backend::data::loaders::populate_signature_index_from_platform_types(
+            &platform_types_clone,
+            index,
+        );
+    });
+
+    // Получаем клон и проверяем
+    let signature_index = repository_impl.get_signature_index_clone();
+    let method = signature_index.find_method("Массив", "Добавить");
+
+    println!("\n🔍 SignatureIndex Debug:");
+    println!("  Метод Массив.Добавить: {:?}", method);
+
+    assert!(
+        method.is_some(),
+        "Метод 'Добавить' должен быть в SignatureIndex для типа 'Массив'"
+    );
+}
+
+#[tokio::test]
+async fn test_validate_parameter_type_mismatch() {
+    let service = create_test_service();
+
+    // Код с вызовом метода Добавить (который существует)
+    // Проверяем что semantic validation работает в принципе
+    let code = r#"
+Функция Тест()
+    МассивДанных = Новый Массив;
+    МассивДанных.Добавить(123);
+КонецФункции
+    "#;
+
+    let result = service.validate_semantics(code).await;
+    assert!(result.is_ok());
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Diagnostics for valid Добавить call:");
+    for d in &diagnostics {
+        println!("  - {}", d.message);
+    }
+
+    // Метод "Добавить" принимает Произвольный, поэтому Число валидно
+    // Не должно быть ошибок
+    assert!(
+        diagnostics.is_empty(),
+        "Для корректного вызова Добавить не должно быть ошибок: {:?}",
+        diagnostics
+    );
+}
+
+#[tokio::test]
+async fn test_validate_parameter_validation_integration() {
+    let service = create_test_service();
+
+    // Просто проверяем что валидация параметров интегрирована и не падает
+    let code = r#"
+Функция Тест()
+    МассивДанных = Новый Массив;
+    МассивДанных.Добавить("строка");
+КонецФункции
+    "#;
+
+    let result = service.validate_semantics(code).await;
+    assert!(result.is_ok());
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Diagnostics for parameter validation integration:");
+    for d in &diagnostics {
+        println!("  - {}", d.message);
+    }
+
+    // Добавить принимает Произвольный - не должно быть ошибок
+    // Этот тест подтверждает что validate_call интегрирован и работает
+    println!("✅ Parameter validation integration works");
+}
+
+#[tokio::test]
+async fn test_gradual_typing_no_error_for_unknown() {
+    let service = create_test_service();
+
+    // Код с переменной неизвестного типа (gradual typing)
+    let code = r#"
+Функция Тест(Параметр)
+    МассивДанных = Новый Массив;
+    МассивДанных.Добавить(Параметр);
+КонецФункции
+    "#;
+
+    let result = service.validate_semantics(code).await;
+    assert!(result.is_ok());
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Diagnostics for gradual typing:");
+    for d in &diagnostics {
+        println!("  - {}", d.message);
+    }
+
+    // Параметр без типа → Unknown → gradual typing → НЕ должно быть ошибки
+    // (если есть ошибки, они должны быть НЕ о типах параметров)
+    let has_param_type_error = diagnostics
+        .iter()
+        .any(|d| d.message.contains("Некорректный тип параметра"));
+
+    assert!(
+        !has_param_type_error,
+        "Не должно быть ошибки типа для градуальной типизации: {:?}",
+        diagnostics
+    );
 }

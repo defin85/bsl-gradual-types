@@ -415,8 +415,20 @@ impl TypeResolver {
             };
         }
 
-        // 3. Проверить типы аргументов (базовая проверка)
-        // TODO: добавить более сложную проверку совместимости типов позже
+        // 3. Проверить типы аргументов
+        for (param, arg_type) in signature.params.iter().zip(arg_types.iter()) {
+            if let Some(expected_type) = &param.type_name {
+                // Проверяем совместимость типов
+                if !Self::is_type_compatible(expected_type, arg_type) {
+                    return ValidationResult::TypeMismatch {
+                        param_name: param.name.clone(),
+                        expected: expected_type.clone(),
+                        actual: arg_type.clone(),
+                    };
+                }
+            }
+            // Если expected_type = None (Произвольный), то любой тип подходит
+        }
 
         // 4. Вернуть тип возврата
         ValidationResult::Ok(signature.return_type.clone())
@@ -1282,6 +1294,47 @@ impl TypeResolver {
             active_facet: Some(crate::domain::types::FacetKind::Collection),
             available_facets: vec![crate::domain::types::FacetKind::Collection],
         }
+    }
+
+    // ===== Milestone 3.10: Parameter Type Validation =====
+
+    /// Проверка совместимости типов для валидации параметров
+    ///
+    /// Поддерживает gradual typing: Unknown, Dynamic, Произвольный совместимы со всем
+    ///
+    /// # Параметры
+    /// - `expected` - ожидаемый тип параметра (из сигнатуры)
+    /// - `actual` - фактический тип аргумента
+    ///
+    /// # Возвращает
+    /// `true` если типы совместимы, `false` иначе
+    fn is_type_compatible(expected: &str, actual: &str) -> bool {
+        // Gradual typing: Unknown, Dynamic, Произвольный совместимы со всем
+        if actual == "Unknown"
+            || actual == "Dynamic"
+            || actual == "Произвольный"
+            || actual == "Неопределено"
+        {
+            return true;
+        }
+
+        // Если ожидается Произвольный - любой тип подходит
+        if expected == "Произвольный" || expected == "Dynamic" {
+            return true;
+        }
+
+        // Case-insensitive сравнение (кириллица + латиница)
+        Self::names_equal_ignore_case(expected, actual)
+    }
+
+    /// Case-insensitive сравнение строк (работает с кириллицей и латиницей)
+    fn names_equal_ignore_case(a: &str, b: &str) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        a.chars()
+            .zip(b.chars())
+            .all(|(ca, cb)| ca.to_lowercase().eq(cb.to_lowercase()))
     }
 }
 // Milestone 2.20: Function Signature Validation tests

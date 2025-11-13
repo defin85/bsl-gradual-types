@@ -2,6 +2,7 @@
 
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::system::tree_sitter_adapter::TreeSitterAdapter;
+use bsl_shared::domain::signature_index::SignatureIndex;
 use std::sync::Arc;
 use tree_sitter::Parser;
 
@@ -17,11 +18,13 @@ fn test_property_access() {
     let ast_result = TreeSitterAdapter::convert_tree(&tree, code).unwrap();
 
     let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+    let signature_index = SignatureIndex::new();
     let ir = AstToIrConverter::convert(
         ast_result.program,
         code.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     ).unwrap();
 
     println!("IR nodes: {}", ir.nodes.len());
@@ -52,11 +55,13 @@ fn test_method_call() {
     let ast_result = TreeSitterAdapter::convert_tree(&tree, code).unwrap();
 
     let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+    let signature_index = SignatureIndex::new();
     let ir = AstToIrConverter::convert(
         ast_result.program,
         code.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     ).unwrap();
 
     println!("IR nodes: {}", ir.nodes.len());
@@ -87,11 +92,13 @@ fn test_statement_property_access() {
     let ast_result = TreeSitterAdapter::convert_tree(&tree, code).unwrap();
 
     let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+    let signature_index = SignatureIndex::new();
     let ir = AstToIrConverter::convert(
         ast_result.program,
         code.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     ).unwrap();
 
     println!("IR nodes: {}", ir.nodes.len());

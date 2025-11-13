@@ -7,6 +7,7 @@
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::system::parser_coordinator::ParserCoordinator;
 use bsl_shared::domain::repository::InMemoryTypeRepository;
+use bsl_shared::domain::signature_index::SignatureIndex;
 use std::sync::Arc;
 
 #[test]
@@ -66,11 +67,13 @@ fn test_span_propagation_ast_to_ir() {
 
     // Act: Конвертация AST → IR
     let repository = Arc::new(InMemoryTypeRepository::new());
+    let signature_index = SignatureIndex::new();
     let ir_program = AstToIrConverter::convert(
         parse_result.program,
         code.to_string(),
         "test_span_propagation.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Конверсия AST → IR должна пройти успешно");
 
@@ -123,11 +126,13 @@ fn test_find_node_at_position() {
     let parse_result = parser.parse(code).expect("Парсинг должен пройти успешно");
 
     let repository = Arc::new(InMemoryTypeRepository::new());
+    let signature_index = SignatureIndex::new();
     let ir_program = AstToIrConverter::convert(
         parse_result.program,
         code.to_string(),
         "test_find_node.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Конверсия AST → IR должна пройти успешно");
 
@@ -201,11 +206,13 @@ fn test_span_for_all_statement_types() {
     let parse_result = parser.parse(code).expect("Парсинг должен пройти успешно");
 
     let repository = Arc::new(InMemoryTypeRepository::new());
+    let signature_index = SignatureIndex::new();
     let ir_program = AstToIrConverter::convert(
         parse_result.program,
         code.to_string(),
         "test_all_statements.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Конверсия AST → IR должна пройти успешно");
 

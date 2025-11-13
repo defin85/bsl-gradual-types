@@ -135,6 +135,11 @@ pub trait TypeRepository: Send + Sync {
         &self,
         type_name: &str,
     ) -> Option<crate::domain::signature_index::ConstructorSignature>;
+
+    /// Получить клон SignatureIndex для валидации (Milestone 3.10)
+    ///
+    /// Возвращает клон индекса сигнатур для использования в валидаторах
+    fn get_signature_index_clone(&self) -> SignatureIndex;
 }
 
 /// Статистика репозитория
@@ -319,5 +324,9 @@ impl TypeRepository for InMemoryTypeRepository {
                 poisoned.into_inner().find_constructor(type_name).cloned()
             }
         }
+    }
+
+    fn get_signature_index_clone(&self) -> SignatureIndex {
+        self.signature_index.read().unwrap().clone()
     }
 }

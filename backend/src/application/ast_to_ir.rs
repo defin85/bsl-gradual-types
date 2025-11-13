@@ -12,6 +12,7 @@
 use crate::parsing::bsl::ast::{Expression, Program, Statement};
 use anyhow::Result;
 use bsl_shared::domain::repository::TypeRepository;
+use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::ir::*;
 use bsl_shared::utils::hash::hash_content;
 use std::sync::Arc;
@@ -37,11 +38,18 @@ pub struct AstToIrConverter {
 
     /// TypeRepository для доступа к Generic метаданным коллекций
     repository: Arc<dyn TypeRepository>,
+
+    /// SignatureIndex для return type inference (Milestone 3.9)
+    signature_index: SignatureIndex,
 }
 
 impl AstToIrConverter {
     /// Создать новый конвертер
-    fn new(source: String, repository: Arc<dyn TypeRepository>) -> Self {
+    fn new(
+        source: String,
+        repository: Arc<dyn TypeRepository>,
+        signature_index: SignatureIndex,
+    ) -> Self {
         let symbol_table = SymbolTable::new();
         let current_scope = symbol_table.root_scope;
 
@@ -51,6 +59,7 @@ impl AstToIrConverter {
             nodes: Vec::new(),
             source,
             repository,
+            signature_index,
         }
     }
 
@@ -62,11 +71,13 @@ impl AstToIrConverter {
     /// use bsl_backend::application::ast_to_ir::AstToIrConverter;
     /// use bsl_backend::parsing::bsl::ast::Program;
     /// use bsl_shared::domain::repository::InMemoryTypeRepository;
+    /// use bsl_shared::domain::signature_index::SignatureIndex;
     /// use std::sync::Arc;
     ///
     /// let ast = Program { statements: vec![] };
     /// let repo = Arc::new(InMemoryTypeRepository::new());
-    /// let ir = AstToIrConverter::convert(ast, "source code".to_string(), "test.bsl".to_string(), repo)?;
+    /// let sig_idx = SignatureIndex::new();
+    /// let ir = AstToIrConverter::convert(ast, "source code".to_string(), "test.bsl".to_string(), repo, sig_idx)?;
     /// # Ok::<(), anyhow::Error>(())
     /// ```
     pub fn convert(
@@ -74,8 +85,9 @@ impl AstToIrConverter {
         source: String,
         file_path: String,
         repository: Arc<dyn TypeRepository>,
+        signature_index: SignatureIndex,
     ) -> Result<SemanticProgram> {
-        let mut converter = Self::new(source.clone(), repository);
+        let mut converter = Self::new(source.clone(), repository, signature_index);
 
         // Проход 1: Сбор глобальных функций/процедур
         for statement in &ast.statements {
@@ -798,20 +810,46 @@ impl AstToIrConverter {
             }
             Expression::Call { function, .. } => {
                 // Тип результата вызова функции
-                if let Expression::Identifier {
-                    name: func_name, ..
-                } = function.as_ref()
-                {
-                    // Проверяем глобальные функции
-                    // ✅ Используем публичный API вместо прямого доступа
-                    if let Some(sig) = self.symbol_table.find_function(func_name) {
-                        return sig
-                            .return_type
-                            .clone()
-                            .unwrap_or_else(|| "Dynamic".to_string());
-                    }
+                match function.as_ref() {
+                    // 1. Метод объекта: object.Method()
+                    Expression::PropertyAccess { object, property, .. } => {
+                        let object_type = self.infer_expression_type(object);
+
+                        // Убираем Generic параметры для поиска: "Массив<Строка>" → "Массив"
+                        let clean_type = if let Some(idx) = object_type.find('<') {
+                            &object_type[..idx]
+                        } else {
+                            &object_type
+                        };
+
+                        // Поиск метода в SignatureIndex (платформенные методы)
+                        if let Some(method) = self.signature_index.find_method(clean_type, property) {
+                            return method.return_type.clone().unwrap_or_else(|| "Неопределено".to_string());
+                        }
+
+                        "Dynamic".to_string()
+                    },
+
+                    // 2. Глобальная функция: ТипЗнч()
+                    Expression::Identifier { name: func_name, .. } => {
+                        // SignatureIndex для платформенных функций
+                        if let Some(sig) = self.signature_index.find_global_function(func_name) {
+                            return sig.return_type.clone().unwrap_or_else(|| "Неопределено".to_string());
+                        }
+
+                        // Fallback: пользовательские функции из SymbolTable
+                        if let Some(sig) = self.symbol_table.find_function(func_name) {
+                            return sig
+                                .return_type
+                                .clone()
+                                .unwrap_or_else(|| "Dynamic".to_string());
+                        }
+
+                        "Dynamic".to_string()
+                    },
+
+                    _ => "Dynamic".to_string()
                 }
-                "Dynamic".to_string()
             }
             _ => "Dynamic".to_string(),
         }
@@ -984,10 +1022,16 @@ mod tests {
     use super::*;
     use crate::parsing::bsl::ast::Span as AstSpan;
     use bsl_shared::domain::repository::InMemoryTypeRepository;
+    use bsl_shared::domain::signature_index::SignatureIndex;
 
     /// Helper функция для тестов - создаёт пустой TypeRepository
     fn create_test_repository() -> Arc<dyn TypeRepository> {
         Arc::new(InMemoryTypeRepository::new())
+    }
+
+    /// Helper функция для тестов - создаёт пустой SignatureIndex
+    fn create_test_signature_index() -> SignatureIndex {
+        SignatureIndex::new()
     }
 
     #[test]
@@ -1005,6 +1049,7 @@ mod tests {
             "Перем x: Число;".to_string(),
             "test.bsl".to_string(),
             create_test_repository(),
+            create_test_signature_index(),
         )
         .unwrap();
 
@@ -1043,6 +1088,7 @@ mod tests {
             "Если Истина Тогда Перем y; КонецЕсли".to_string(),
             "test.bsl".to_string(),
             create_test_repository(),
+            create_test_signature_index(),
         )
         .unwrap();
 
@@ -1077,6 +1123,7 @@ mod tests {
             "Сообщить(\"Привет\");".to_string(),
             "test.bsl".to_string(),
             create_test_repository(),
+            create_test_signature_index(),
         )
         .unwrap();
 
@@ -1123,6 +1170,7 @@ mod tests {
                 .to_string(),
             "test.bsl".to_string(),
             create_test_repository(),
+            create_test_signature_index(),
         )
         .unwrap();
 
@@ -1167,6 +1215,7 @@ mod tests {
             "Функция TestFunc()\n  Перем local: Число;\n  local = 42;\nКонецФункции".to_string(),
             "test.bsl".to_string(),
             create_test_repository(),
+            create_test_signature_index(),
         )
         .unwrap();
 

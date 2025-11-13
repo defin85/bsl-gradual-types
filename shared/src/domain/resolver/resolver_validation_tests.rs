@@ -230,3 +230,209 @@ fn test_validate_call_case_insensitive() {
 
     assert_eq!(result, ValidationResult::Ok(None));
 }
+
+// ===== Milestone 3.10: Parameter Type Validation Tests =====
+
+#[test]
+fn test_validate_call_type_mismatch() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    let resolver = TypeResolver::new(repo);
+    let mut index = SignatureIndex::new();
+
+    // Метод Вставить(Индекс: Число, Значение: Произвольный)
+    let sig = MethodSignature {
+        name: "Вставить".to_string(),
+        owner_type: Some("Массив".to_string()),
+        params: vec![
+            ParameterInfo {
+                name: "Индекс".to_string(),
+                type_name: Some("Число".to_string()),
+                is_optional: false,
+                default_value: None,
+                description: None,
+            },
+            ParameterInfo {
+                name: "Значение".to_string(),
+                type_name: Some("Произвольный".to_string()),
+                is_optional: false,
+                default_value: None,
+                description: None,
+            },
+        ],
+        return_type: None,
+        source: SignatureSource::Platform,
+    };
+
+    index.add_platform_method("Массив".to_string(), sig);
+
+    // ❌ Передаём Строка вместо Число
+    let result = resolver.validate_call(
+        Some("Массив"),
+        "Вставить",
+        &["Строка".to_string(), "Строка".to_string()],
+        &index,
+    );
+
+    match result {
+        ValidationResult::TypeMismatch {
+            param_name,
+            expected,
+            actual,
+        } => {
+            assert_eq!(param_name, "Индекс");
+            assert_eq!(expected, "Число");
+            assert_eq!(actual, "Строка");
+        }
+        _ => panic!("Expected TypeMismatch, got: {:?}", result),
+    }
+}
+
+#[test]
+fn test_validate_call_gradual_typing() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    let resolver = TypeResolver::new(repo);
+    let mut index = SignatureIndex::new();
+
+    let sig = MethodSignature {
+        name: "Метод".to_string(),
+        owner_type: Some("Тип".to_string()),
+        params: vec![ParameterInfo {
+            name: "Параметр".to_string(),
+            type_name: Some("Строка".to_string()),
+            is_optional: false,
+            default_value: None,
+            description: None,
+        }],
+        return_type: None,
+        source: SignatureSource::Platform,
+    };
+
+    index.add_platform_method("Тип".to_string(), sig);
+
+    // ✅ Gradual typing: Unknown совместим со Строка
+    let result = resolver.validate_call(
+        Some("Тип"),
+        "Метод",
+        &["Unknown".to_string()],
+        &index,
+    );
+
+    assert_eq!(result, ValidationResult::Ok(None));
+
+    // ✅ Dynamic совместим со Строка
+    let result = resolver.validate_call(
+        Some("Тип"),
+        "Метод",
+        &["Dynamic".to_string()],
+        &index,
+    );
+
+    assert_eq!(result, ValidationResult::Ok(None));
+
+    // ✅ Произвольный совместим со Строка
+    let result = resolver.validate_call(
+        Some("Тип"),
+        "Метод",
+        &["Произвольный".to_string()],
+        &index,
+    );
+
+    assert_eq!(result, ValidationResult::Ok(None));
+}
+
+#[test]
+fn test_validate_call_proizvol_parameter_accepts_all() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    let resolver = TypeResolver::new(repo);
+    let mut index = SignatureIndex::new();
+
+    // Метод с параметром Произвольный
+    let sig = MethodSignature {
+        name: "Добавить".to_string(),
+        owner_type: Some("Массив".to_string()),
+        params: vec![ParameterInfo {
+            name: "Значение".to_string(),
+            type_name: Some("Произвольный".to_string()),
+            is_optional: false,
+            default_value: None,
+            description: None,
+        }],
+        return_type: None,
+        source: SignatureSource::Platform,
+    };
+
+    index.add_platform_method("Массив".to_string(), sig);
+
+    // ✅ Произвольный принимает Строка
+    let result = resolver.validate_call(
+        Some("Массив"),
+        "Добавить",
+        &["Строка".to_string()],
+        &index,
+    );
+
+    assert_eq!(result, ValidationResult::Ok(None));
+
+    // ✅ Произвольный принимает Число
+    let result = resolver.validate_call(
+        Some("Массив"),
+        "Добавить",
+        &["Число".to_string()],
+        &index,
+    );
+
+    assert_eq!(result, ValidationResult::Ok(None));
+
+    // ✅ Произвольный принимает любой custom тип
+    let result = resolver.validate_call(
+        Some("Массив"),
+        "Добавить",
+        &["МойТип".to_string()],
+        &index,
+    );
+
+    assert_eq!(result, ValidationResult::Ok(None));
+}
+
+#[test]
+fn test_validate_call_case_insensitive_types() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    let resolver = TypeResolver::new(repo);
+    let mut index = SignatureIndex::new();
+
+    let sig = MethodSignature {
+        name: "Метод".to_string(),
+        owner_type: Some("Тип".to_string()),
+        params: vec![ParameterInfo {
+            name: "Строка".to_string(),
+            type_name: Some("Строка".to_string()),
+            is_optional: false,
+            default_value: None,
+            description: None,
+        }],
+        return_type: None,
+        source: SignatureSource::Platform,
+    };
+
+    index.add_platform_method("Тип".to_string(), sig);
+
+    // ✅ Case-insensitive: строка == Строка
+    let result = resolver.validate_call(
+        Some("Тип"),
+        "Метод",
+        &["строка".to_string()],
+        &index,
+    );
+
+    assert_eq!(result, ValidationResult::Ok(None));
+
+    // ✅ Case-insensitive: СТРОКА == Строка
+    let result = resolver.validate_call(
+        Some("Тип"),
+        "Метод",
+        &["СТРОКА".to_string()],
+        &index,
+    );
+
+    assert_eq!(result, ValidationResult::Ok(None));
+}

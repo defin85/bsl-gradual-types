@@ -655,11 +655,13 @@ impl TypeSystemService {
 
                 // Конвертация AST → IR для Inline Scope Analysis
                 let repository = self.analysis_engine.get_repository();
+                let signature_index = repository.get_signature_index_clone(); // Milestone 3.9
                 let ir = crate::application::ast_to_ir::AstToIrConverter::convert(
                     parse_result.program.clone(),
                     file_content.to_string(),
                     "hover_request.bsl".to_string(),
                     repository, // ✅ Передаём TypeRepository для Generic inference
+                    signature_index, // ✅ Milestone 3.9: Передаём SignatureIndex для return type inference
                 )?;
 
                 let ir_arc = std::sync::Arc::new(ir);
@@ -1342,94 +1344,55 @@ impl TypeSystemService {
     /// # Ok(())
     /// # }
     /// ```
+    /// Валидирует код 1С через унифицированную semantic validation
+    ///
+    /// ✅ MILESTONE 3.10: Обновлено для использования validate_semantics()
+    /// вместо старой ручной логики. Теперь проверяются:
+    /// - Несуществующие методы
+    /// - Несуществующие свойства
+    /// - Типы параметров
+    /// - Количество параметров
     pub async fn validate_code_fragment(
         &self,
         code: &str,
     ) -> Result<Vec<bsl_shared::api::ValidationErrorDto>> {
         use bsl_shared::domain::types::DiagnosticSeverity;
-        use bsl_shared::domain::validators::TypeValidator;
-        use bsl_shared::ir::SemanticNodeKind;
         use std::time::Instant;
 
         let start = Instant::now();
-        let mut errors = Vec::new();
 
-        // 1. Парсим код через существующий IR pipeline
-        let ir_result = self.parser.parse_to_ir(code, "<validation>");
+        // ✅ MILESTONE 3.10: Используем validate_semantics вместо старой логики
+        let diagnostics = self.validate_semantics(code).await?;
 
-        let ir = match ir_result {
-            Ok(ir) => ir,
-            Err(parse_err) => {
-                // Возвращаем ошибки парсинга как ValidationErrors
-                warn!("Ошибка парсинга кода: {}", parse_err);
-                // Для синтаксических ошибок возвращаем общую ошибку
-                errors.push(bsl_shared::api::ValidationErrorDto {
-                    message: format!("Ошибка парсинга кода: {}", parse_err),
-                    severity: "error".to_string(),
-                    line: 1,
-                    column: 1,
-                    end_line: 1,
-                    end_column: 1,
-                    error_type: "ParseError".to_string(),
-                });
-                info!("Валидация завершена за {:?}", start.elapsed());
-                return Ok(errors);
-            }
-        };
+        // Конвертируем TypeDiagnostic → ValidationErrorDto
+        let errors: Vec<bsl_shared::api::ValidationErrorDto> = diagnostics
+            .iter()
+            .map(|d| bsl_shared::api::ValidationErrorDto {
+                message: d.message.clone(),
+                severity: match d.severity {
+                    DiagnosticSeverity::Error => "error".to_string(),
+                    DiagnosticSeverity::Warning => "warning".to_string(),
+                    DiagnosticSeverity::Info | DiagnosticSeverity::Hint => "info".to_string(),
+                },
+                line: d.line,
+                column: d.column,
+                end_line: d.end_line,
+                end_column: d.end_column,
+                error_type: if d.message.contains("не существует") {
+                    "NonExistentMethod".to_string()
+                } else if d.message.contains("параметр") {
+                    "ParameterError".to_string()
+                } else {
+                    "SemanticError".to_string()
+                },
+            })
+            .collect();
 
-        let validator = TypeValidator::new(&self.metadata_lookup);
-
-        // DEBUG: Логируем количество узлов в IR
-        info!("DEBUG: IR содержит {} узлов", ir.nodes.len());
-        for (i, node) in ir.nodes.iter().enumerate() {
-            info!("DEBUG: Узел {}: {:?}", i, node.kind);
-        }
-
-        // 2. Получаем resolver для корректного определения типов (как в hover)
-        let resolver = self.analysis_engine.get_resolver();
-
-        // 3. Обходим IR и собираем вызовы методов (FunctionCall с object_name)
-        for node in &ir.nodes {
-            // Проверяем FunctionCall узлы - это вызовы методов объектов
-            if let SemanticNodeKind::FunctionCall {
-                function_name,
-                object_name: Some(obj_name),  // Признак метода объекта (не глобальной функции)
-                ..
-            } = &node.kind {
-                // 4. Резолвим тип объекта через symbol table (как в hover API)
-                // Используем resolve_variable_with_context для учёта присваиваний
-                let resolution = resolver.resolve_variable_with_context(
-                    obj_name,
-                    &ir.symbols,
-                    node.scope_id  // Используем scope из узла
-                );
-
-                // 5. Валидируем существование метода
-                let validation_error = validator.validate_method_exists(&resolution, function_name);
-
-                // 6. Если ошибка - используем реальный span для точной подсветки
-                if let Some(error) = validation_error {
-                    let diagnostic = error.to_diagnostic(node.span);
-                    errors.push(bsl_shared::api::ValidationErrorDto {
-                        message: diagnostic.message,
-                        severity: match diagnostic.severity {
-                            DiagnosticSeverity::Error => "error".to_string(),
-                            DiagnosticSeverity::Warning => "warning".to_string(),
-                            DiagnosticSeverity::Info | DiagnosticSeverity::Hint => {
-                                "info".to_string()
-                            }
-                        },
-                        line: diagnostic.line,
-                        column: diagnostic.column,
-                        end_line: diagnostic.end_line,
-                        end_column: diagnostic.end_column,
-                        error_type: "NonExistentMethod".to_string(),
-                    });
-                }
-            }
-        }
-
-        info!("Валидация завершена за {:?}: {} ошибок найдено", start.elapsed(), errors.len());
+        info!(
+            "Валидация завершена за {:?}: {} ошибок найдено",
+            start.elapsed(),
+            errors.len()
+        );
         Ok(errors)
     }
 
@@ -2562,25 +2525,36 @@ impl TypeSystemService {
             return Ok(Vec::new());
         }
 
-        // 3. Конвертация AST → IR
+        // 3. Получаем repository и SignatureIndex ДО конвертации
         let repository = self.analysis_engine.get_repository();
+
+        // 4. Получаем клон SignatureIndex ДО того как repository будет moved (Milestone 3.10)
+        let signature_index = repository.get_signature_index_clone();
+
+        // 5. Конвертация AST → IR (repository будет moved здесь)
         let ir = AstToIrConverter::convert(
             parse_result.program,
             code.to_string(),
             "<semantic_validation>".to_string(),
             repository,
+            signature_index.clone(), // ✅ Milestone 3.9: Передаём SignatureIndex для return type inference
         )?;
 
-        // 4. Создание TypeValidator
+        // 6. Создание TypeValidator
         let validator = TypeValidator::new(&self.metadata_lookup);
 
-        // 5. Создание SemanticValidationVisitor
-        let mut visitor = SemanticValidationVisitor::new(&validator, &ir);
+        // 7. Получение resolver для Milestone 3.10
+        let resolver_arc = self.analysis_engine.get_resolver();
+        let resolver = resolver_arc.as_ref();
 
-        // 6. Обход IR
+        // 7. Создание SemanticValidationVisitor
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &ir, resolver, &signature_index);
+
+        // 8. Обход IR
         walk_program(&ir, &mut visitor);
 
-        // 7. Возврат errors
+        // 9. Возврат errors
         Ok(visitor.into_errors())
     }
 }

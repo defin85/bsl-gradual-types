@@ -11,12 +11,18 @@
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::parsing::bsl::ast::{Expression, Program, Span as AstSpan, Statement};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::ir::SemanticNodeKind;
 use std::sync::Arc;
 
 /// Helper функция - создаёт TypeRepository с базовыми типами
 fn create_test_repository() -> Arc<dyn TypeRepository> {
     Arc::new(InMemoryTypeRepository::new())
+}
+
+/// Helper функция - создаёт пустой SignatureIndex
+fn create_test_signature_index() -> SignatureIndex {
+    SignatureIndex::new()
 }
 
 #[test]
@@ -50,6 +56,7 @@ fn test_function_call_extracts_object_name_from_identifier() {
         source.to_string(),
         "test.bsl".to_string(),
         create_test_repository(),
+        create_test_signature_index(),
     )
     .unwrap();
 
@@ -107,6 +114,7 @@ fn test_function_call_extracts_object_name() {
         "Словарь.Вставить(\"ключ\");".to_string(),
         "test.bsl".to_string(),
         create_test_repository(),
+        create_test_signature_index(),
     )
     .unwrap();
 
@@ -167,6 +175,7 @@ fn test_function_call_complex_expression_returns_none() {
         "obj.prop1.Метод();".to_string(),
         "test.bsl".to_string(),
         create_test_repository(),
+        create_test_signature_index(),
     )
     .unwrap();
 
@@ -219,6 +228,7 @@ fn test_function_call_with_new_expression_returns_none() {
         "(Новый Массив()).Добавить(\"текст\");".to_string(),
         "test.bsl".to_string(),
         create_test_repository(),
+        create_test_signature_index(),
     )
     .unwrap();
 
@@ -270,6 +280,7 @@ fn test_function_call_with_function_call_returns_none() {
         "ПолучитьОбъект().Метод();".to_string(),
         "test.bsl".to_string(),
         create_test_repository(),
+        create_test_signature_index(),
     )
     .unwrap();
 
@@ -343,6 +354,7 @@ fn test_multiple_function_calls_in_sequence() {
         source.to_string(),
         "test.bsl".to_string(),
         create_test_repository(),
+        create_test_signature_index(),
     )
     .unwrap();
 

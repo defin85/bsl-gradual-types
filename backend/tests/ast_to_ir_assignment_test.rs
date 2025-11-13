@@ -7,12 +7,18 @@
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::parsing::bsl::ast::{Expression, Program, Span as AstSpan, Statement};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::ir::TypeHint;
 use std::sync::Arc;
 
 /// Helper функция - создаёт TypeRepository с базовыми типами
 fn create_test_repository() -> Arc<dyn TypeRepository> {
     Arc::new(InMemoryTypeRepository::new())
+}
+
+/// Helper функция - создаёт пустой SignatureIndex
+fn create_test_signature_index() -> SignatureIndex {
+    SignatureIndex::new()
 }
 
 /// ✅ КРИТИЧЕСКИЙ ТЕСТ: Переменная ДОЛЖНА добавляться в SymbolTable при присваивании
@@ -43,6 +49,7 @@ fn test_assignment_declares_variable_in_symbol_table() {
         "Процедура Тест()\n  МассивСтрок = Новый Массив();\nКонецПроцедуры".to_string(),
         "test.bsl".to_string(),
         create_test_repository(),
+        create_test_signature_index(),
     )
     .unwrap();
 
@@ -116,6 +123,7 @@ fn test_assignment_map_generic_type() {
             .to_string(),
         "test.bsl".to_string(),
         create_test_repository(),
+        create_test_signature_index(),
     )
     .unwrap();
 
@@ -175,6 +183,7 @@ fn test_assignment_explicit_type() {
         "Процедура Тест()\n  Строка1 = \"текст\";\nКонецПроцедуры".to_string(),
         "test.bsl".to_string(),
         create_test_repository(),
+        create_test_signature_index(),
     )
     .unwrap();
 
@@ -234,6 +243,7 @@ fn test_assignment_updates_existing_variable() {
         "Процедура Тест()\n  Перем x: Число;\n  x = \"новый тип\";\nКонецПроцедуры".to_string(),
         "test.bsl".to_string(),
         create_test_repository(),
+        create_test_signature_index(),
     )
     .unwrap();
 
@@ -314,6 +324,7 @@ fn test_multiple_assignments_in_scope() {
             .to_string(),
         "test.bsl".to_string(),
         create_test_repository(),
+        create_test_signature_index(),
     )
     .unwrap();
 

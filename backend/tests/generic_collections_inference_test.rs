@@ -5,8 +5,14 @@
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::parsing::bsl::ast::{Expression, Program, Span as AstSpan, Statement};
 use bsl_shared::domain::repository::InMemoryTypeRepository;
+use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::ir::TypeHint;
 use std::sync::Arc;
+
+/// Helper функция - создаёт пустой SignatureIndex
+fn create_test_signature_index() -> SignatureIndex {
+    SignatureIndex::new()
+}
 
 #[test]
 fn test_array_initialization_as_generic() {
@@ -28,8 +34,9 @@ fn test_array_initialization_as_generic() {
     };
 
     let repository = Arc::new(InMemoryTypeRepository::new());
+        let signature_index = SignatureIndex::new();
     let program =
-        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
+        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository, signature_index)
             .expect("Failed to convert AST to IR");
 
     // Ищем root scope и проверяем переменную МассивСтрок
@@ -76,8 +83,9 @@ fn test_map_initialization_as_generic() {
     };
 
     let repository = Arc::new(InMemoryTypeRepository::new());
+        let signature_index = SignatureIndex::new();
     let program =
-        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
+        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository, signature_index)
             .expect("Failed to convert AST to IR");
 
     let root_scope = program.symbols.root_scope;
@@ -130,8 +138,9 @@ fn test_list_initialization_as_generic() {
     };
 
     let repository = Arc::new(InMemoryTypeRepository::new());
+        let signature_index = SignatureIndex::new();
     let program =
-        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
+        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository, signature_index)
             .expect("Failed to convert AST to IR");
 
     let root_scope = program.symbols.root_scope;
@@ -172,8 +181,9 @@ fn test_non_generic_types_not_converted() {
     };
 
     let repository = Arc::new(InMemoryTypeRepository::new());
+        let signature_index = SignatureIndex::new();
     let program =
-        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
+        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository, signature_index)
             .expect("Failed to convert AST to IR");
 
     let root_scope = program.symbols.root_scope;
@@ -226,8 +236,9 @@ fn test_multiple_arrays_have_independent_types() {
     };
 
     let repository = Arc::new(InMemoryTypeRepository::new());
+        let signature_index = SignatureIndex::new();
     let program =
-        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository)
+        AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository, signature_index)
             .expect("Failed to convert AST to IR");
 
     let root_scope = program.symbols.root_scope;

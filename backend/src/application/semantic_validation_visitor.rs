@@ -1,5 +1,7 @@
 //! Semantic Validation Visitor
-use bsl_shared::domain::types::{Certainty, ConcreteType, ResolutionResult, TypeDiagnostic};
+use bsl_shared::domain::resolver::{TypeResolver, ValidationResult};
+use bsl_shared::domain::signature_index::SignatureIndex;
+use bsl_shared::domain::types::{Certainty, ConcreteType, DiagnosticSeverity, ResolutionResult, TypeDiagnostic};
 use bsl_shared::domain::validators::TypeValidator;
 use bsl_shared::ir::{
     FlowContext, SemanticNode, SemanticNodeKind, SemanticProgram, SemanticVisitor,
@@ -7,15 +9,24 @@ use bsl_shared::ir::{
 
 pub struct SemanticValidationVisitor<'a> {
     validator: &'a TypeValidator<'a>,
+    resolver: &'a TypeResolver,
+    signature_index: &'a SignatureIndex,
     errors: Vec<TypeDiagnostic>,
     #[allow(dead_code)]
     program: &'a SemanticProgram,
 }
 
 impl<'a> SemanticValidationVisitor<'a> {
-    pub fn new(validator: &'a TypeValidator<'a>, program: &'a SemanticProgram) -> Self {
+    pub fn new(
+        validator: &'a TypeValidator<'a>,
+        program: &'a SemanticProgram,
+        resolver: &'a TypeResolver,
+        signature_index: &'a SignatureIndex,
+    ) -> Self {
         Self {
             validator,
+            resolver,
+            signature_index,
             errors: Vec::new(),
             program,
         }
@@ -25,12 +36,72 @@ impl<'a> SemanticValidationVisitor<'a> {
         self.errors
     }
 
+    /// Конвертирует ValidationResult в TypeDiagnostic (Milestone 3.10)
+    fn validation_result_to_diagnostic(
+        result: &ValidationResult,
+        span: bsl_shared::ir::Span,
+    ) -> Option<TypeDiagnostic> {
+        match result {
+            ValidationResult::Ok(_) => None,
+            ValidationResult::NotFound => None, // Уже обработано в validate_method_exists
+            ValidationResult::MissingRequiredParam {
+                param_name,
+                param_index,
+            } => Some(TypeDiagnostic {
+                severity: DiagnosticSeverity::Error,
+                message: format!(
+                    "Недостаточно параметров: отсутствует обязательный параметр #{} '{}'",
+                    param_index + 1,
+                    param_name
+                ),
+                line: span.start_line,
+                column: span.start_column,
+                end_line: span.end_line,
+                end_column: span.end_column,
+            }),
+            ValidationResult::TooManyArgs { expected, actual } => Some(TypeDiagnostic {
+                severity: DiagnosticSeverity::Error,
+                message: format!(
+                    "Слишком много параметров: ожидается {}, получено {}",
+                    expected, actual
+                ),
+                line: span.start_line,
+                column: span.start_column,
+                end_line: span.end_line,
+                end_column: span.end_column,
+            }),
+            ValidationResult::TypeMismatch {
+                param_name,
+                expected,
+                actual,
+            } => Some(TypeDiagnostic {
+                severity: DiagnosticSeverity::Error,
+                message: format!(
+                    "Некорректный тип параметра '{}': ожидается {}, получено {}",
+                    param_name, expected, actual
+                ),
+                line: span.start_line,
+                column: span.start_column,
+                end_line: span.end_line,
+                end_column: span.end_column,
+            }),
+        }
+    }
+
     fn simple_resolution(type_name: &str) -> bsl_shared::domain::types::TypeResolution {
         use bsl_shared::domain::types::{
             FacetKind, PrimitiveType, ResolutionMetadata, ResolutionSource, TypeResolution,
         };
 
-        let result = match type_name {
+        // ✅ MILESTONE 3.10: Убираем Generic параметры для поиска методов
+        // "Массив<?>" → "Массив"
+        let clean_type_name = if let Some(idx) = type_name.find('<') {
+            &type_name[..idx]
+        } else {
+            type_name
+        };
+
+        let result = match clean_type_name {
             "Число" | "Number" => {
                 ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Number))
             }
@@ -46,7 +117,7 @@ impl<'a> SemanticValidationVisitor<'a> {
             _ => {
                 use bsl_shared::domain::types::PlatformType;
                 ResolutionResult::Concrete(ConcreteType::Platform(PlatformType {
-                    name: type_name.to_string(),
+                    name: clean_type_name.to_string(),
                 }))
             }
         };
@@ -77,14 +148,31 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
             SemanticNodeKind::FunctionCall {
                 function_name,
                 object_type: Some(obj_type),
+                arg_types,
                 ..
             } => {
                 let resolution = Self::simple_resolution(obj_type);
+
+                // 1. Проверяем существование метода
                 if let Some(error_kind) = self
                     .validator
                     .validate_method_exists(&resolution, function_name)
                 {
                     let diagnostic = error_kind.to_diagnostic(node.span);
+                    self.errors.push(diagnostic);
+                    return; // Нет смысла проверять параметры если метод не существует
+                }
+
+                // 2. ✅ MILESTONE 3.10: Проверяем типы параметров
+                let validation_result = self.resolver.validate_call(
+                    Some(obj_type),
+                    function_name,
+                    arg_types,
+                    self.signature_index,
+                );
+
+                // Конвертируем ValidationResult в TypeDiagnostic
+                if let Some(diagnostic) = Self::validation_result_to_diagnostic(&validation_result, node.span) {
                     self.errors.push(diagnostic);
                 }
             }
@@ -118,8 +206,10 @@ mod tests {
     fn test_visitor_detects_nonexistent_method() {
         use std::sync::Arc;
         let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
-        let metadata = TypeMetadataLookup::new(repository);
+        let metadata = TypeMetadataLookup::new(repository.clone());
         let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
         program.nodes.push(SemanticNode {
@@ -133,7 +223,7 @@ mod tests {
             scope_id: program.symbols.root_scope,
         });
 
-        let mut visitor = SemanticValidationVisitor::new(&validator, &program);
+        let mut visitor = SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 
@@ -149,8 +239,10 @@ mod tests {
     fn test_visitor_detects_nonexistent_property() {
         use std::sync::Arc;
         let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
-        let metadata = TypeMetadataLookup::new(repository);
+        let metadata = TypeMetadataLookup::new(repository.clone());
         let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
         program.nodes.push(SemanticNode {
@@ -164,7 +256,7 @@ mod tests {
             scope_id: program.symbols.root_scope,
         });
 
-        let mut visitor = SemanticValidationVisitor::new(&validator, &program);
+        let mut visitor = SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 

@@ -215,11 +215,13 @@ impl ParserCoordinator {
         }
 
         // 2. Конвертация AST → IR (извлекаем program из ParseResult)
+        let signature_index = self.repository.get_signature_index_clone(); // Milestone 3.9
         AstToIrConverter::convert(
             parse_result.program,
             content.to_string(),
             file_path.to_string(),
             self.repository.clone(), // ✅ Передаём TypeRepository для Generic inference
+            signature_index, // ✅ Milestone 3.9: Передаём SignatureIndex для return type inference
         )
         .map_err(|e| format!("AST to IR conversion failed: {}", e))
     }

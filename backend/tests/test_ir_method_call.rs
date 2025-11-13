@@ -2,6 +2,7 @@
 
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::system::tree_sitter_adapter::TreeSitterAdapter;
+use bsl_shared::domain::signature_index::SignatureIndex;
 use std::sync::Arc;
 use tree_sitter::Parser;
 
@@ -25,11 +26,13 @@ fn test_ir_for_method_call_assignment() {
 
     // Конвертация AST → IR
     let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+    let signature_index = SignatureIndex::new();
     let ir = AstToIrConverter::convert(
         ast_result.program,
         code.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Failed to convert to IR");
 

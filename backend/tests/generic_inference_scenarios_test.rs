@@ -8,12 +8,18 @@
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::system::parser_coordinator::ParserCoordinator;
 use bsl_shared::domain::repository::InMemoryTypeRepository;
+use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::ir::TypeHint;
 use std::sync::Arc;
 
 /// Создаём минимальный TypeRepository для тестирования
 fn create_test_repository() -> Arc<InMemoryTypeRepository> {
     Arc::new(InMemoryTypeRepository::new())
+}
+
+/// Helper функция - создаёт пустой SignatureIndex
+fn create_test_signature_index() -> SignatureIndex {
+    SignatureIndex::new()
 }
 
 /// Helper: найти переменную во всех scope (для упрощения тестов)
@@ -44,11 +50,13 @@ fn test_array_empty_initialization() {
 
     // Act: Конвертация AST → IR
     let repository = create_test_repository();
+    let signature_index = create_test_signature_index();
     let ir = AstToIrConverter::convert(
         parse_result.program,
         source.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Конверсия должна пройти");
 
@@ -88,11 +96,13 @@ fn test_array_with_string_inference() {
     let parse_result = parser.parse(source).expect("Парсинг должен пройти");
 
     let repository = create_test_repository();
+    let signature_index = create_test_signature_index();
     let ir = AstToIrConverter::convert(
         parse_result.program,
         source.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Конверсия должна пройти");
 
@@ -138,11 +148,13 @@ fn test_array_with_number_inference() {
     let parse_result = parser.parse(source).expect("Парсинг должен пройти");
 
     let repository = create_test_repository();
+    let signature_index = create_test_signature_index();
     let ir = AstToIrConverter::convert(
         parse_result.program,
         source.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Конверсия должна пройти");
 
@@ -179,11 +191,13 @@ fn test_map_initialization() {
     let parse_result = parser.parse(source).expect("Парсинг должен пройти");
 
     let repository = create_test_repository();
+    let signature_index = create_test_signature_index();
     let ir = AstToIrConverter::convert(
         parse_result.program,
         source.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Конверсия должна пройти");
 
@@ -226,11 +240,13 @@ fn test_map_with_insert_inference() {
     let parse_result = parser.parse(source).expect("Парсинг должен пройти");
 
     let repository = create_test_repository();
+    let signature_index = create_test_signature_index();
     let ir = AstToIrConverter::convert(
         parse_result.program,
         source.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Конверсия должна пройти");
 
@@ -272,11 +288,13 @@ fn test_non_generic_type_stays_inferred() {
     let parse_result = parser.parse(source).expect("Парсинг должен пройти");
 
     let repository = create_test_repository();
+    let signature_index = create_test_signature_index();
     let ir = AstToIrConverter::convert(
         parse_result.program,
         source.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Конверсия должна пройти");
 
@@ -311,11 +329,13 @@ fn test_multiple_arrays_independent() {
     let parse_result = parser.parse(source).expect("Парсинг должен пройти");
 
     let repository = create_test_repository();
+    let signature_index = create_test_signature_index();
     let ir = AstToIrConverter::convert(
         parse_result.program,
         source.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Конверсия должна пройти");
 
@@ -367,11 +387,13 @@ fn test_empty_collections_scenario() {
     let parse_result = parser.parse(source).expect("Парсинг должен пройти");
 
     let repository = create_test_repository();
+    let signature_index = create_test_signature_index();
     let ir = AstToIrConverter::convert(
         parse_result.program,
         source.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Конверсия должна пройти");
 
@@ -405,11 +427,13 @@ fn test_mixed_types_in_array() {
     let parse_result = parser.parse(source).expect("Парсинг должен пройти");
 
     let repository = create_test_repository();
+    let signature_index = create_test_signature_index();
     let ir = AstToIrConverter::convert(
         parse_result.program,
         source.to_string(),
         "test.bsl".to_string(),
         repository,
+        signature_index,
     )
     .expect("Конверсия должна пройти");
 

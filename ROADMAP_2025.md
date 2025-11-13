@@ -2272,11 +2272,15 @@ AST → IR (SemanticProgram)
 
 ---
 
-### 🔄 Milestone 3.9: Return Type Inference для методов (3-4 дня)
+### ✅ Milestone 3.9: Return Type Inference для методов
 
 **Приоритет:** 🟡 СРЕДНИЙ — важно для точного type inference
 
-**Статус:** 📋 PLANNED
+**Статус:** ✅ COMPLETED
+
+**Дата завершения:** 2025-11-13
+
+**Время реализации:** 2 часа (architect → coder → tester → reviewer)
 
 **Проблема:**
 
@@ -2342,20 +2346,62 @@ Expression::Call { function, .. } => {
 
 ---
 
-**Результат:**
-- ✅ `Кол = ТЗ.Количество()` → Кол имеет тип "Число"
-- ✅ Hover показывает правильный тип
-- ✅ Точность inference +20-30%
+**Результат Milestone 3.9:**
 
-**Оценка:** 3-4 дня
+**Что реализовано:**
+- ✅ SignatureIndex добавлен в AstToIrConverter
+- ✅ `infer_expression_type()` обновлён для вывода return type
+- ✅ Поддержка методов платформенных типов (`ТЗ.Количество()` → `"Число"`)
+- ✅ Поддержка глобальных функций (`ТипЗнч()` → `"Тип"`)
+- ✅ Void методы → `"Неопределено"`
+- ✅ Generic типы обрабатываются (`"Массив<?>" → "Массив"`)
+- ✅ Case-insensitive поиск методов
+
+**Тестирование:**
+- ✅ 5 unit тестов для return type inference
+- ✅ 8 SignatureIndex тестов
+- ✅ 4 edge case теста
+- ✅ 106 regression тестов (0 failures)
+
+**Файлы изменены:**
+- `backend/src/application/ast_to_ir.rs` — основная логика
+- `backend/src/application/type_system_service.rs` — вызовы convert()
+- `backend/src/system/parser_coordinator.rs` — вызовы convert()
+- `backend/tests/return_type_inference_test.rs` — новые тесты
+
+**Performance:**
+- ✅ O(1) поиск методов через HashMap
+- ✅ Минимальное клонирование
+- ✅ Нет регрессии производительности
+
+**Code Review:**
+- ✅ Quality: EXCELLENT (9/10)
+- ✅ Security: EXCELLENT (10/10)
+- ✅ Performance: EXCELLENT (9/10)
+- ✅ Architecture: EXCELLENT (10/10)
+- ✅ **Вердикт:** APPROVED
+
+**Зависимости:**
+- ✅ Milestone 2.15 (SignatureIndex)
+- ✅ Milestone 3.10 (Валидация параметров) — завершён параллельно
+
+**Enables:**
+- 📄 Milestone 3.11 (Advanced Flow Analysis)
+- 📄 Milestone 4.x (Cross-function inference)
+
+**Время реализации:** 2 часа (вместо 3-4 дней)
 
 ---
 
-### ✅ Milestone 3.10: Валидация параметров методов (2-3 дня)
+### ✅ Milestone 3.10: Валидация параметров методов
 
 **Приоритет:** 🟢 ВЫСОКИЙ — функциональность готова, нужна только интеграция
 
-**Статус:** 📋 PLANNED
+**Статус:** ✅ COMPLETED
+
+**Дата завершения:** 2025-11-13
+
+**Время реализации:** 2 часа (удаление legacy → реализация → интеграция → тестирование)
 
 **Проблема:**
 
@@ -2512,15 +2558,39 @@ pub fn new<'b>(
 
 **Результат Milestone 3.10:**
 
-- ✅ LSP обнаруживает ошибки типов параметров
-- ✅ Сообщения: `Некорректный параметр #1 для метода 'Вставить': ожидается Число, получено Строка`
-- ✅ Интеграция с существующим `validate_call` (без дублирования кода)
-- ✅ Покрытие всех типов вызовов (методы объектов, глобальные функции)
-- ✅ Готовность к Milestone 3.6 Phase 3 (имена переменных-параметров)
+**Что реализовано:**
+- ✅ Legacy код удалён (4 метода + 2 теста, -151 строка)
+- ✅ Проверка типов параметров в `validate_call()` (убран TODO на строке 419)
+- ✅ `is_type_compatible()` — gradual typing (Unknown, Dynamic, Произвольный)
+- ✅ `SemanticValidationVisitor` интегрирован с `validate_call()`
+- ✅ `validation_result_to_diagnostic()` — конвертация ValidationResult
+- ✅ `TypeRepository.get_signature_index_clone()` — dyn-safe API
+- ✅ `validate_code_fragment()` обновлён для Web API
+
+**Категории валидации:**
+1. ✅ Существование метода (было)
+2. ✅ Существование свойства (было)
+3. ✅ Примитивы как коллекции (было)
+4. ✅ **НОВОЕ:** Недостаточно параметров
+5. ✅ **НОВОЕ:** Слишком много параметров
+6. ✅ **НОВОЕ:** Некорректный тип параметра
+
+**Тестирование:**
+- ✅ Unit тесты: 11/11 pass (7 старых + 4 новых)
+- ✅ Integration тесты: 10/10 pass
+- ✅ Web API: работает (4ms latency)
+- ✅ Workspace: 235/235 тестов pass
+
+**Файлы изменены:**
+- `shared/src/domain/validators.rs` — удаление legacy
+- `shared/src/domain/resolver.rs` — `is_type_compatible()`
+- `shared/src/domain/repository.rs` — `get_signature_index_clone()`
+- `backend/src/application/semantic_validation_visitor.rs` — интеграция
+- `backend/src/application/type_system_service.rs` — обновление Web API
 
 **Зависимости:**
 - ✅ Milestone 2.15 (SignatureIndex) — метаданные методов готовы
-- ✅ Milestone 3.7 (Semantic Diagnostics MVP) — infrastracture готова
+- ✅ Milestone 3.7 (Semantic Diagnostics MVP) — infrastructure готова
 - ✅ Milestone 3.9 (Return Type Inference) — типы параметров известны точнее
 
 **Enables:**

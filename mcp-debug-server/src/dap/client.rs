@@ -9,6 +9,7 @@ use crate::types::{DapResult, DapError};
 use super::transport::{DapTransport, DapWriter};
 use super::protocol::{DapRequest, DapResponse};
 use super::router::EventRouter;
+use super::events::{EventProcessor, EventBuffer};
 
 pub struct DapClient {
     process: Child,
@@ -18,9 +19,19 @@ pub struct DapClient {
 }
 
 impl DapClient {
-    /// Запустить DAP adapter (например, CodeLLDB) и вернуть (DapClient, event_rx)
+    /// Запустить DAP adapter и EventProcessor в background tasks
+    ///
+    /// Изменено для нового event processing:
+    /// - Принимает EventBuffer и current_thread_id (shared ownership)
+    /// - Запускает EventRouter → EventProcessor pipeline
+    /// - EventProcessor обрабатывает события и обновляет state
     #[tracing::instrument]
-    pub async fn spawn(adapter_command: &str) -> DapResult<(Self, mpsc::Receiver<Value>)> {
+    pub async fn spawn(
+        adapter_command: &str,
+        event_buffer: EventBuffer,
+        session_id: String,
+        current_thread_id: Arc<Mutex<Option<u32>>>,
+    ) -> DapResult<Self> {
         tracing::info!("Spawning DAP adapter process");
         tracing::debug!("Adapter command: {}", adapter_command);
 
@@ -59,17 +70,26 @@ impl DapClient {
         let router = EventRouter::new(reader, event_tx, response_map.clone());
         tokio::spawn(router.run());
 
-        tracing::info!("DAP adapter process spawned successfully");
-
-        Ok((
-            Self {
-                process: child,
-                writer,
-                seq_counter: 1,
-                response_map,
-            },
+        // Запустить EventProcessor в background task
+        let processor = EventProcessor::new(
             event_rx,
-        ))
+            event_buffer,
+            session_id.clone(),
+            current_thread_id,
+        );
+        tokio::spawn(processor.run());
+
+        tracing::info!(
+            session_id = %session_id,
+            "DAP adapter process spawned successfully with EventProcessor"
+        );
+
+        Ok(Self {
+            process: child,
+            writer,
+            seq_counter: 1,
+            response_map,
+        })
     }
 
     /// Отправить DAP initialize request

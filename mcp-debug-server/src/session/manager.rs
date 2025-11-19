@@ -18,8 +18,8 @@ pub struct DebugSession {
     /// Путь к бинарному файлу под отладкой
     pub binary_path: String,
 
-    /// Текущий thread ID (если известен)
-    pub current_thread_id: Option<u32>,
+    /// Текущий thread ID (shared ownership с EventProcessor)
+    pub current_thread_id: Arc<tokio::sync::Mutex<Option<u32>>>,
 
     /// Установленные breakpoints: file_path -> [line_numbers]
     pub breakpoints: HashMap<String, Vec<u32>>,
@@ -34,12 +34,13 @@ impl DebugSession {
         id: SessionId,
         dap_client: DapClient,
         binary_path: String,
+        current_thread_id: Arc<tokio::sync::Mutex<Option<u32>>>,
     ) -> Self {
         Self {
             id,
             dap_client,
             binary_path,
-            current_thread_id: None,
+            current_thread_id,
             breakpoints: HashMap::new(),
             state: SessionState::Initialized,
         }
@@ -64,6 +65,8 @@ pub struct SessionManager {
     /// Хранилище сессий: SessionId -> DebugSession
     /// Arc<RwLock<...>> для concurrent access
     sessions: Arc<RwLock<HashMap<String, DebugSession>>>,
+    /// Shared буфер для polling событий
+    event_buffer: crate::dap::EventBuffer,
 }
 
 impl SessionManager {
@@ -71,6 +74,7 @@ impl SessionManager {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            event_buffer: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -83,8 +87,16 @@ impl SessionManager {
         // Создать уникальный session ID
         let session_id = SessionId::new();
 
-        // Запустить DAP client
-        let mut dap_client = DapClient::spawn(&adapter_command).await?;
+        // Создать shared current_thread_id для EventProcessor
+        let current_thread_id = Arc::new(tokio::sync::Mutex::new(None));
+
+        // Запустить DAP client с EventProcessor
+        let mut dap_client = DapClient::spawn(
+            &adapter_command,
+            self.event_buffer.clone(),
+            session_id.as_str().to_string(),
+            current_thread_id.clone(),
+        ).await?;
 
         // Инициализировать DAP сессию
         dap_client.initialize().await?;
@@ -94,6 +106,7 @@ impl SessionManager {
             session_id.clone(),
             dap_client,
             binary_path,
+            current_thread_id,
         );
 
         // Сохранить в HashMap (с write lock)
@@ -157,6 +170,16 @@ impl SessionManager {
     /// Проверить существование сессии
     pub async fn session_exists(&self, session_id: &SessionId) -> bool {
         self.sessions.read().await.contains_key(session_id.as_str())
+    }
+
+    /// Получить и очистить все события для сессии (для polling через MCP tools)
+    pub async fn poll_events(&self, session_id: &SessionId) -> Vec<serde_json::Value> {
+        let mut buffer = self.event_buffer.lock().await;
+
+        buffer
+            .get_mut(session_id.as_str())
+            .map(|queue| queue.drain(..).collect())
+            .unwrap_or_default()
     }
 }
 

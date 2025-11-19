@@ -6,6 +6,6 @@ mod router;
 
 pub use client::DapClient;
 pub use protocol::{DapRequest, DapResponse, DapEvent};
-pub use events::{EventHandler, EventStats, EventProcessor, EventBuffer};
+pub use events::{EventProcessor, EventBuffer, EventStats, EventCounters};
 pub use router::EventRouter;
 pub use transport::{DapWriter, DapReader};

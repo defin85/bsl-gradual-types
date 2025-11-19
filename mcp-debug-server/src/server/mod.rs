@@ -73,6 +73,12 @@ pub struct TerminateParams {
     pub session_id: String,
 }
 
+/// Параметры для debug_poll_events
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PollEventsParams {
+    pub session_id: String,
+}
+
 /// Главная структура MCP Debug Server
 #[derive(Clone)]
 pub struct DebugServerHandler {
@@ -152,38 +158,93 @@ impl DebugServerHandler {
     }
 
     /// Tool 3: Запустить программу под отладкой
+    ///
+    /// ВАЖНО: Использует правильную DAP последовательность:
+    /// 1. launch_no_wait() - отправить launch request без ожидания response
+    /// 2. Активное ожидание initialized event через polling (max 5 секунд)
+    /// 3. configuration_done() - сигнал адаптеру для завершения launch
     #[tool(description = "Launch the program in the debug session")]
     async fn debug_launch(&self, Parameters(params): Parameters<LaunchParams>) -> String {
         use crate::types::SessionId;
         use crate::session::SessionState;
+        use tokio::time::{sleep, Duration};
 
         let sid = SessionId::from_string(params.session_id.clone());
 
-        match self.session_manager
+        // Шаг 1: Отправить launch request (без ожидания response)
+        let launch_result = self.session_manager
             .with_session(&sid, |session| {
                 let args = params.args.clone();
                 Box::pin(async move {
                     let binary = session.binary_path.clone();
 
-                    // Вызвать DAP launch
-                    session.dap_client.launch(&binary, args).await
+                    // Вызвать DAP launch_no_wait
+                    session.dap_client.launch_no_wait(&binary, args).await
                         .map_err(|e| anyhow::anyhow!("DAP launch error: {}", e))?;
-
-                    // Обновить состояние на Running
-                    session.set_state(SessionState::Running)?;
 
                     Ok(binary)
                 })
             })
-            .await
-        {
+            .await;
+
+        if let Err(e) = launch_result {
+            return format!("Failed to launch: {}", e);
+        }
+
+        // Шаг 2: Активное ожидание initialized event (max 5 секунд)
+        let max_retries = 50; // 50 * 100ms = 5 секунд
+        let mut initialized_received = false;
+
+        for _ in 0..max_retries {
+            let events = self.session_manager.poll_events(&sid).await;
+
+            for event in events {
+                if let Some(event_type) = event.get("event").and_then(|v| v.as_str()) {
+                    if event_type == "initialized" {
+                        initialized_received = true;
+                        break;
+                    }
+                }
+            }
+
+            if initialized_received {
+                break;
+            }
+
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        if !initialized_received {
+            return format!(
+                "Failed to launch: timeout waiting for 'initialized' event (5 seconds)\n\
+                 - Session: {}",
+                params.session_id
+            );
+        }
+
+        // Шаг 3: Отправить configurationDone
+        let config_result = self.session_manager
+            .with_session(&sid, |session| Box::pin(async move {
+                session.dap_client.configuration_done().await
+                    .map_err(|e| anyhow::anyhow!("DAP configurationDone error: {}", e))?;
+
+                // Обновить состояние на Running
+                session.set_state(SessionState::Running)?;
+
+                Ok(())
+            }))
+            .await;
+
+        match config_result {
             Ok(_) => format!(
                 "Program launched successfully:\n\
                  - Session: {}\n\
-                 - State: Running",
+                 - State: Running\n\
+                 - Received 'initialized' event\n\
+                 - Sent 'configurationDone'",
                 params.session_id
             ),
-            Err(e) => format!("Failed to launch: {}", e),
+            Err(e) => format!("Failed to complete launch: {}", e),
         }
     }
 
@@ -197,8 +258,10 @@ impl DebugServerHandler {
 
         match self.session_manager
             .with_session(&sid, |session| Box::pin(async move {
-                let thread_id = session.current_thread_id
-                    .ok_or_else(|| anyhow::anyhow!("No active thread"))?;
+                let thread_id = {
+                    let guard = session.current_thread_id.lock().await;
+                    *guard
+                }.ok_or_else(|| anyhow::anyhow!("No active thread"))?;
 
                 // Вызвать DAP next
                 session.dap_client.next(thread_id).await
@@ -231,8 +294,10 @@ impl DebugServerHandler {
 
         match self.session_manager
             .with_session(&sid, |session| Box::pin(async move {
-                let thread_id = session.current_thread_id
-                    .ok_or_else(|| anyhow::anyhow!("No active thread"))?;
+                let thread_id = {
+                    let guard = session.current_thread_id.lock().await;
+                    *guard
+                }.ok_or_else(|| anyhow::anyhow!("No active thread"))?;
 
                 // Вызвать DAP stepIn
                 session.dap_client.step_in(thread_id).await
@@ -265,8 +330,10 @@ impl DebugServerHandler {
 
         match self.session_manager
             .with_session(&sid, |session| Box::pin(async move {
-                let thread_id = session.current_thread_id
-                    .ok_or_else(|| anyhow::anyhow!("No active thread"))?;
+                let thread_id = {
+                    let guard = session.current_thread_id.lock().await;
+                    *guard
+                }.ok_or_else(|| anyhow::anyhow!("No active thread"))?;
 
                 // Вызвать DAP continue
                 session.dap_client.continue_execution(thread_id).await
@@ -361,8 +428,10 @@ impl DebugServerHandler {
 
         match self.session_manager
             .with_session(&sid, |session| Box::pin(async move {
-                let thread_id = session.current_thread_id
-                    .ok_or_else(|| anyhow::anyhow!("No active thread"))?;
+                let thread_id = {
+                    let guard = session.current_thread_id.lock().await;
+                    *guard
+                }.ok_or_else(|| anyhow::anyhow!("No active thread"))?;
 
                 // Вызвать DAP stackTrace
                 let result = session.dap_client
@@ -474,7 +543,90 @@ impl DebugServerHandler {
         }
     }
 
-    /// Tool 12: Выйти из текущей функции (step out)
+    /// Tool 12: Получить события DAP для сессии (polling API для AI)
+    #[tool(description = "Poll DAP events for a debug session (stopped, output, terminated, etc.)")]
+    async fn debug_poll_events(&self, Parameters(params): Parameters<PollEventsParams>) -> String {
+        use crate::types::SessionId;
+
+        let sid = SessionId::from_string(params.session_id.clone());
+
+        // Получить все накопленные события
+        let events = self.session_manager.poll_events(&sid).await;
+
+        if events.is_empty() {
+            return format!(
+                "No new events for session {}.\n\
+                 Use this tool periodically to monitor program state.",
+                params.session_id
+            );
+        }
+
+        // Форматировать события human-readable
+        let mut output = format!("Debug events for session {} ({} events):\n\n", params.session_id, events.len());
+
+        for (i, event) in events.iter().enumerate() {
+            let event_type = event
+                .get("event")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+
+            output.push_str(&format!("{}. Event: {}\n", i + 1, event_type));
+
+            // Форматировать body по типу события
+            match event_type {
+                "stopped" => {
+                    let reason = event
+                        .get("body")
+                        .and_then(|b| b.get("reason"))
+                        .and_then(|r| r.as_str())
+                        .unwrap_or("unknown");
+                    let thread_id = event
+                        .get("body")
+                        .and_then(|b| b.get("threadId"))
+                        .and_then(|t| t.as_u64())
+                        .unwrap_or(0);
+
+                    output.push_str(&format!(
+                        "   Reason: {}\n   Thread ID: {}\n",
+                        reason, thread_id
+                    ));
+                }
+                "output" => {
+                    let text = event
+                        .get("body")
+                        .and_then(|b| b.get("output"))
+                        .and_then(|o| o.as_str())
+                        .unwrap_or("");
+                    let category = event
+                        .get("body")
+                        .and_then(|b| b.get("category"))
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("console");
+
+                    output.push_str(&format!(
+                        "   Category: {}\n   Output: {}\n",
+                        category, text.trim()
+                    ));
+                }
+                "terminated" | "exited" => {
+                    output.push_str("   Program has exited\n");
+                }
+                "initialized" => {
+                    output.push_str("   Debug adapter initialized\n");
+                }
+                _ => {
+                    // Для неизвестных событий - показать полный JSON
+                    output.push_str(&format!("   Body: {}\n", serde_json::to_string_pretty(event).unwrap_or_default()));
+                }
+            }
+
+            output.push('\n');
+        }
+
+        output
+    }
+
+    /// Tool 13: Выйти из текущей функции (step out)
     #[tool(description = "Step out of the current function")]
     async fn debug_step_out(&self, Parameters(params): Parameters<StepParams>) -> String {
         use crate::types::SessionId;
@@ -484,8 +636,10 @@ impl DebugServerHandler {
 
         match self.session_manager
             .with_session(&sid, |session| Box::pin(async move {
-                let thread_id = session.current_thread_id
-                    .ok_or_else(|| anyhow::anyhow!("No active thread"))?;
+                let thread_id = {
+                    let guard = session.current_thread_id.lock().await;
+                    *guard
+                }.ok_or_else(|| anyhow::anyhow!("No active thread"))?;
 
                 // Вызвать DAP stepOut
                 session.dap_client.step_out(thread_id).await

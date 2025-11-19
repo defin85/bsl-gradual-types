@@ -123,6 +123,28 @@ impl DapClient {
         .await
     }
 
+    /// Установить условный breakpoint (с condition)
+    pub async fn set_conditional_breakpoint(
+        &mut self,
+        file: &str,
+        line: u32,
+        condition: &str,
+    ) -> DapResult<Value> {
+        let breakpoints = vec![json!({
+            "line": line,
+            "condition": condition,
+        })];
+
+        self.send_request(
+            "setBreakpoints",
+            Some(json!({
+                "source": { "path": file },
+                "breakpoints": breakpoints,
+            })),
+        )
+        .await
+    }
+
     /// Запустить программу (с ожиданием ответа)
     ///
     /// ВАЖНО: По DAP спецификации, launch response приходит ТОЛЬКО ПОСЛЕ:

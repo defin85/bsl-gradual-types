@@ -534,16 +534,12 @@ impl DebugServerHandler {
             .with_session(&sid, |session| {
                 let file = params.file.clone();
                 let line = params.line;
-                // Note: condition будет использоваться после расширения DapClient
+                let condition = params.condition.clone();
                 Box::pin(async move {
-                    // DAP поддерживает условные breakpoints через поле "condition"
-                    // TODO: Расширить DapClient.set_breakpoints для поддержки условных BP
-                    // Временно используем обычный setBreakpoints
-
                     // Отправляем DAP request с условным breakpoint
                     let result = session
                         .dap_client
-                        .set_breakpoints(&file, &[line])
+                        .set_conditional_breakpoint(&file, line, &condition)
                         .await
                         .map_err(|e| anyhow::anyhow!("DAP error: {}", e))?;
 

@@ -116,12 +116,12 @@ pub fn find_lldb_dap() -> Option<PathBuf> {
 pub fn resolve_adapter(adapter_type: &str) -> String {
     match adapter_type {
         "lldb" => {
-            // Приоритет 1: lldb-dap из официального LLVM
-            if let Some(path) = find_lldb_dap() {
+            // Приоритет 1: CodeLLDB из VS Code extensions (проверен и стабилен)
+            if let Some(path) = find_codelldb() {
                 return path.to_string_lossy().to_string();
             }
-            // Приоритет 2: CodeLLDB из VS Code extensions
-            if let Some(path) = find_codelldb() {
+            // Приоритет 2: lldb-dap из официального LLVM
+            if let Some(path) = find_lldb_dap() {
                 return path.to_string_lossy().to_string();
             }
             // Fallback: попробовать найти в PATH

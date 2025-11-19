@@ -135,6 +135,9 @@ impl SessionManager {
         binary_path: String,
         adapter_command: String,
     ) -> Result<SessionId> {
+        // Резолвить adapter command через auto-discovery
+        let resolved_adapter = crate::config::resolve_adapter(&adapter_command);
+
         // Создать уникальный session ID
         let session_id = SessionId::new();
 
@@ -143,7 +146,7 @@ impl SessionManager {
 
         // Запустить DAP client с EventProcessor
         let mut dap_client = DapClient::spawn(
-            &adapter_command,
+            &resolved_adapter,
             self.event_buffer.clone(),
             session_id.as_str().to_string(),
             current_thread_id.clone(),

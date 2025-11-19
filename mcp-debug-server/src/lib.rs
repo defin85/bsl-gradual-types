@@ -76,8 +76,8 @@
 //! - [`types`]: Shared types (SessionId, errors)
 //! - [`config`]: Adapter configuration
 
+pub mod config;
+pub mod dap;
 pub mod server;
 pub mod session;
-pub mod dap;
 pub mod types;
-pub mod config;

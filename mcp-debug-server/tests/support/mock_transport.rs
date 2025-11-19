@@ -2,8 +2,8 @@
 //!
 //! Предоставляет in-memory каналы для эмуляции stdin/stdout
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use serde_json::Value;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
 /// Mock stdin/stdout пара для тестирования
 pub struct MockTransport {
@@ -70,7 +70,8 @@ impl MockTransport {
         let mut body = vec![0u8; content_length];
         stream.read_exact(&mut body).await?;
 
-        serde_json::from_slice(&body).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        serde_json::from_slice(&body)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 }
 

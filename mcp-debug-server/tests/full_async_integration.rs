@@ -258,10 +258,7 @@ async fn test_concurrent_polling_different_sessions() {
         let mut buffer = event_buffer.lock().await;
         for i in 0..5 {
             let session_id = format!("session-{}", i);
-            buffer.insert(
-                session_id,
-                vec![json!({"event": "stopped", "id": i})],
-            );
+            buffer.insert(session_id, vec![json!({"event": "stopped", "id": i})]);
         }
     }
 
@@ -365,12 +362,12 @@ async fn test_event_processor_graceful_shutdown() {
         .with_max_level(tracing::Level::DEBUG)
         .try_init();
 
-    use tokio::sync::mpsc;
-    use tokio::time::{timeout, Duration};
+    use mcp_debug_server::dap::EventProcessor;
     use std::collections::HashMap;
     use std::sync::Arc;
+    use tokio::sync::mpsc;
     use tokio::sync::Mutex;
-    use mcp_debug_server::dap::EventProcessor;
+    use tokio::time::{timeout, Duration};
 
     // Создать EventProcessor
     let (event_tx, event_rx) = mpsc::channel(100);
@@ -390,7 +387,8 @@ async fn test_event_processor_graceful_shutdown() {
 
     // Отправить несколько событий
     for i in 0..10 {
-        let event = serde_json::json!({"event": "output", "body": {"output": format!("test {}", i)}});
+        let event =
+            serde_json::json!({"event": "output", "body": {"output": format!("test {}", i)}});
         let _ = event_tx.send(event).await;
     }
 

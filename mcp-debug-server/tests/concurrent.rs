@@ -102,9 +102,8 @@ async fn test_race_conditions() {
                     tracing::debug!("Task {} read {} sessions", i, sessions.len());
                 } else {
                     // Нечетные задачи: пытаются завершить fake сессию
-                    let fake_id = mcp_debug_server::types::SessionId::from_string(
-                        format!("fake-{}", i)
-                    );
+                    let fake_id =
+                        mcp_debug_server::types::SessionId::from_string(format!("fake-{}", i));
                     let result = manager_clone.terminate_session(&fake_id).await;
                     assert!(result.is_err());
                     tracing::debug!("Task {} tried to terminate fake session", i);
@@ -183,8 +182,8 @@ async fn test_session_manager_stress() {
 async fn test_concurrent_event_processing_single_session() {
     use serde_json::json;
     use std::collections::{HashMap, VecDeque};
-    use tokio::sync::{mpsc, Mutex};
     use std::sync::Arc;
+    use tokio::sync::{mpsc, Mutex};
 
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
@@ -205,7 +204,8 @@ async fn test_concurrent_event_processing_single_session() {
     // Запустить EventProcessor
     let processor_task = tokio::spawn(async move {
         use mcp_debug_server::dap::EventProcessor;
-        let processor = EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
+        let processor =
+            EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
         processor.run().await;
     });
 
@@ -251,15 +251,17 @@ async fn test_concurrent_event_processing_single_session() {
 async fn test_concurrent_requests_same_session() {
     use serde_json::json;
     use std::collections::HashMap;
-    use tokio::sync::{mpsc, oneshot, Mutex};
     use std::sync::Arc;
+    use tokio::sync::{mpsc, oneshot, Mutex};
 
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .try_init();
 
     let (event_tx, _event_rx) = mpsc::channel::<serde_json::Value>(10);
-    let response_map = Arc::new(Mutex::new(HashMap::<u32, oneshot::Sender<serde_json::Value>>::new()));
+    let response_map = Arc::new(Mutex::new(
+        HashMap::<u32, oneshot::Sender<serde_json::Value>>::new(),
+    ));
 
     // Зарегистрировать 10 ожиданий responses
     let mut receivers = vec![];
@@ -314,8 +316,8 @@ async fn test_concurrent_requests_same_session() {
 async fn test_concurrent_polling_and_processing() {
     use serde_json::json;
     use std::collections::HashMap;
-    use tokio::sync::Mutex;
     use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
@@ -382,10 +384,10 @@ async fn test_event_buffer_stress() {
         .with_max_level(tracing::Level::INFO)
         .try_init();
 
+    use serde_json::json;
     use std::collections::{HashMap, VecDeque};
     use std::sync::Arc;
     use tokio::sync::Mutex;
-    use serde_json::json;
 
     let buffer = Arc::new(Mutex::new(HashMap::new()));
     let session_id = "stress-test".to_string();
@@ -397,9 +399,7 @@ async fn test_event_buffer_stress() {
         let event = json!({"event": "output", "body": {"output": format!("Event {}", i)}});
 
         let mut buf = buffer.lock().await;
-        let events = buf
-            .entry(session_id.clone())
-            .or_insert_with(VecDeque::new);
+        let events = buf.entry(session_id.clone()).or_insert_with(VecDeque::new);
 
         const MAX_EVENTS_PER_SESSION: usize = 1000;
         if events.len() >= MAX_EVENTS_PER_SESSION {
@@ -450,5 +450,8 @@ async fn test_concurrent_thread_id_updates() {
     assert!(final_tid.is_some(), "thread_id should be set");
     assert!(final_tid.unwrap() < 100, "thread_id should be < 100");
 
-    tracing::info!("Concurrent thread_id updates passed: final_tid = {:?}", final_tid);
+    tracing::info!(
+        "Concurrent thread_id updates passed: final_tid = {:?}",
+        final_tid
+    );
 }

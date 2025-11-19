@@ -75,5 +75,8 @@ fn test_resolve_adapter_custom_path() {
     let custom_path = "/custom/path/to/my-debugger";
     let resolved = resolve_adapter(custom_path);
 
-    assert_eq!(resolved, custom_path, "Custom path should be returned as-is");
+    assert_eq!(
+        resolved, custom_path,
+        "Custom path should be returned as-is"
+    );
 }

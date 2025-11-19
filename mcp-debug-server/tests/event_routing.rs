@@ -40,7 +40,9 @@ async fn test_event_router_events() {
 
     // Создать каналы
     let (event_tx, mut event_rx) = mpsc::channel(10);
-    let response_map = Arc::new(Mutex::new(HashMap::<u32, oneshot::Sender<serde_json::Value>>::new()));
+    let response_map = Arc::new(Mutex::new(
+        HashMap::<u32, oneshot::Sender<serde_json::Value>>::new(),
+    ));
 
     // Создать mock transport
     let mut transport = MockTransport::new();
@@ -54,7 +56,8 @@ async fn test_event_router_events() {
         loop {
             match reader.receive().await {
                 Ok(message) => {
-                    let msg_type = message.get("type")
+                    let msg_type = message
+                        .get("type")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
 
@@ -85,13 +88,10 @@ async fn test_event_router_events() {
         .unwrap();
 
     // Проверить, что событие получено через event_rx
-    let received = tokio::time::timeout(
-        tokio::time::Duration::from_millis(500),
-        event_rx.recv()
-    )
-    .await
-    .expect("Timeout waiting for event")
-    .expect("Channel closed");
+    let received = tokio::time::timeout(tokio::time::Duration::from_millis(500), event_rx.recv())
+        .await
+        .expect("Timeout waiting for event")
+        .expect("Channel closed");
 
     assert_eq!(received["type"], "event");
     assert_eq!(received["event"], "stopped");
@@ -113,7 +113,9 @@ async fn test_event_router_responses() {
 
     // Создать каналы
     let (event_tx, _event_rx) = mpsc::channel(10);
-    let response_map = Arc::new(Mutex::new(HashMap::<u32, oneshot::Sender<serde_json::Value>>::new()));
+    let response_map = Arc::new(Mutex::new(
+        HashMap::<u32, oneshot::Sender<serde_json::Value>>::new(),
+    ));
 
     // Зарегистрировать ожидание response с seq=1
     let (tx, rx) = oneshot::channel();
@@ -130,7 +132,8 @@ async fn test_event_router_responses() {
         loop {
             match reader.receive().await {
                 Ok(message) => {
-                    let msg_type = message.get("type")
+                    let msg_type = message
+                        .get("type")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
 
@@ -165,13 +168,10 @@ async fn test_event_router_responses() {
         .unwrap();
 
     // Проверить, что response получен через oneshot
-    let received = tokio::time::timeout(
-        tokio::time::Duration::from_millis(500),
-        rx
-    )
-    .await
-    .expect("Timeout waiting for response")
-    .expect("Oneshot channel closed");
+    let received = tokio::time::timeout(tokio::time::Duration::from_millis(500), rx)
+        .await
+        .expect("Timeout waiting for response")
+        .expect("Oneshot channel closed");
 
     assert_eq!(received["type"], "response");
     assert_eq!(received["request_seq"], 1);
@@ -192,7 +192,9 @@ async fn test_event_router_mixed_messages() {
         .try_init();
 
     let (event_tx, mut event_rx) = mpsc::channel(10);
-    let response_map = Arc::new(Mutex::new(HashMap::<u32, oneshot::Sender<serde_json::Value>>::new()));
+    let response_map = Arc::new(Mutex::new(
+        HashMap::<u32, oneshot::Sender<serde_json::Value>>::new(),
+    ));
 
     // Зарегистрировать ожидание двух responses
     let (tx1, rx1) = oneshot::channel();
@@ -208,7 +210,8 @@ async fn test_event_router_mixed_messages() {
         loop {
             match reader.receive().await {
                 Ok(message) => {
-                    let msg_type = message.get("type")
+                    let msg_type = message
+                        .get("type")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
 
@@ -278,7 +281,9 @@ async fn test_event_router_invalid_messages() {
         .try_init();
 
     let (event_tx, mut event_rx) = mpsc::channel(10);
-    let response_map = Arc::new(Mutex::new(HashMap::<u32, oneshot::Sender<serde_json::Value>>::new()));
+    let response_map = Arc::new(Mutex::new(
+        HashMap::<u32, oneshot::Sender<serde_json::Value>>::new(),
+    ));
 
     let mut transport = MockTransport::new();
     let mut reader = MockDapReader::new(transport.client_stdout);
@@ -288,7 +293,8 @@ async fn test_event_router_invalid_messages() {
         loop {
             match reader.receive().await {
                 Ok(message) => {
-                    let msg_type = message.get("type")
+                    let msg_type = message
+                        .get("type")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
 
@@ -331,13 +337,10 @@ async fn test_event_router_invalid_messages() {
         .unwrap();
 
     // Проверить, что валидное событие получено
-    let received = tokio::time::timeout(
-        tokio::time::Duration::from_millis(500),
-        event_rx.recv()
-    )
-    .await
-    .expect("Timeout")
-    .expect("Channel closed");
+    let received = tokio::time::timeout(tokio::time::Duration::from_millis(500), event_rx.recv())
+        .await
+        .expect("Timeout")
+        .expect("Channel closed");
 
     assert_eq!(received["event"], "output");
 
@@ -356,7 +359,9 @@ async fn test_event_router_orphaned_response() {
         .try_init();
 
     let (event_tx, _event_rx) = mpsc::channel(10);
-    let response_map = Arc::new(Mutex::new(HashMap::<u32, oneshot::Sender<serde_json::Value>>::new()));
+    let response_map = Arc::new(Mutex::new(
+        HashMap::<u32, oneshot::Sender<serde_json::Value>>::new(),
+    ));
 
     let mut transport = MockTransport::new();
     let mut reader = MockDapReader::new(transport.client_stdout);
@@ -366,7 +371,8 @@ async fn test_event_router_orphaned_response() {
         loop {
             match reader.receive().await {
                 Ok(message) => {
-                    let msg_type = message.get("type")
+                    let msg_type = message
+                        .get("type")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
 

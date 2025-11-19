@@ -4,11 +4,7 @@
 // Этот модуль содержит только helper функции для форматирования вывода
 
 /// Helper: Форматировать информацию о debug сессии
-pub fn format_session_info(
-    session_id: &str,
-    state: &str,
-    binary: &str,
-) -> String {
+pub fn format_session_info(session_id: &str, state: &str, binary: &str) -> String {
     format!(
         "Session Info:\n\
          - ID: {}\n\

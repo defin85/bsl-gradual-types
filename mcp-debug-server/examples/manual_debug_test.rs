@@ -2,8 +2,8 @@
 //!
 //! Тестирует полный цикл отладки напрямую через SessionManager
 
-use mcp_debug_server::session::SessionManager;
 use mcp_debug_server::dap::EventBuffer;
+use mcp_debug_server::session::SessionManager;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -21,11 +21,14 @@ async fn main() -> anyhow::Result<()> {
 
     // 2. Создать debug сессию
     println!("📍 Creating debug session...");
-    let session_id = manager.create_session(
-        r"C:\1CProject\bsl-gradual-types-milestone-4.4\target\debug\examples\test_program.exe".to_string(),
-        "codelldb".to_string(),
-        event_buffer.clone(),
-    ).await?;
+    let session_id = manager
+        .create_session(
+            r"C:\1CProject\bsl-gradual-types-milestone-4.4\target\debug\examples\test_program.exe"
+                .to_string(),
+            "codelldb".to_string(),
+            event_buffer.clone(),
+        )
+        .await?;
     println!("✅ Session created: {}\n", session_id);
 
     // 3. Установить breakpoint
@@ -43,21 +46,23 @@ async fn main() -> anyhow::Result<()> {
 
     // 4. Launch программы
     println!("🚀 Launching program...");
-    manager.with_session(&session_id, |session| {
-        Box::pin(async move {
-            let binary = session.binary_path.clone();
+    manager
+        .with_session(&session_id, |session| {
+            Box::pin(async move {
+                let binary = session.binary_path.clone();
 
-            println!("  ▶ Sending launch request...");
-            session.dap_client.launch(&binary, None).await?;
-            println!("  ✅ Launch response received");
+                println!("  ▶ Sending launch request...");
+                session.dap_client.launch(&binary, None).await?;
+                println!("  ✅ Launch response received");
 
-            println!("  ▶ Sending configurationDone...");
-            session.dap_client.configuration_done().await?;
-            println!("  ✅ ConfigurationDone response received\n");
+                println!("  ▶ Sending configurationDone...");
+                session.dap_client.configuration_done().await?;
+                println!("  ✅ ConfigurationDone response received\n");
 
-            Ok(())
+                Ok(())
+            })
         })
-    }).await?;
+        .await?;
 
     // 5. Подождать немного для событий
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;

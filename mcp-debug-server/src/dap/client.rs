@@ -1,15 +1,15 @@
-use tokio::process::{Child, Command};
-use tokio::time::{timeout, Duration};
+use super::events::{EventBuffer, EventProcessor};
+use super::protocol::{DapRequest, DapResponse};
+use super::router::EventRouter;
+use super::transport::{DapTransport, DapWriter};
+use crate::types::{DapError, DapResult};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
+use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
-use serde_json::{json, Value};
-use crate::types::{DapResult, DapError};
-use super::transport::{DapTransport, DapWriter};
-use super::protocol::{DapRequest, DapResponse};
-use super::router::EventRouter;
-use super::events::{EventProcessor, EventBuffer};
+use tokio::time::{timeout, Duration};
 
 pub struct DapClient {
     process: Child,
@@ -96,23 +96,31 @@ impl DapClient {
     #[tracing::instrument(skip(self))]
     pub async fn initialize(&mut self) -> DapResult<Value> {
         tracing::debug!("Initializing DAP session");
-        self.send_request("initialize", Some(json!({
-            "clientID": "mcp-debug-server",
-            "adapterID": "lldb",
-            "linesStartAt1": true,
-            "columnsStartAt1": true,
-            "pathFormat": "path",
-        }))).await
+        self.send_request(
+            "initialize",
+            Some(json!({
+                "clientID": "mcp-debug-server",
+                "adapterID": "lldb",
+                "linesStartAt1": true,
+                "columnsStartAt1": true,
+                "pathFormat": "path",
+            })),
+        )
+        .await
     }
 
     /// Установить breakpoint
     pub async fn set_breakpoints(&mut self, file: &str, lines: &[u32]) -> DapResult<Value> {
         let breakpoints: Vec<_> = lines.iter().map(|line| json!({"line": line})).collect();
-        
-        self.send_request("setBreakpoints", Some(json!({
-            "source": { "path": file },
-            "breakpoints": breakpoints,
-        }))).await
+
+        self.send_request(
+            "setBreakpoints",
+            Some(json!({
+                "source": { "path": file },
+                "breakpoints": breakpoints,
+            })),
+        )
+        .await
     }
 
     /// Запустить программу (с ожиданием ответа)
@@ -123,11 +131,15 @@ impl DapClient {
     ///
     /// Используйте launch_and_configure() для правильной последовательности!
     pub async fn launch(&mut self, program: &str, args: Option<Vec<String>>) -> DapResult<Value> {
-        self.send_request("launch", Some(json!({
-            "program": program,
-            "args": args.unwrap_or_default(),
-            "stopOnEntry": true,
-        }))).await
+        self.send_request(
+            "launch",
+            Some(json!({
+                "program": program,
+                "args": args.unwrap_or_default(),
+                "stopOnEntry": true,
+            })),
+        )
+        .await
     }
 
     /// Запустить программу БЕЗ ожидания ответа
@@ -136,7 +148,11 @@ impl DapClient {
     /// 1. launch_no_wait()
     /// 2. Дождаться initialized event (через EventBuffer)
     /// 3. configuration_done()
-    pub async fn launch_no_wait(&mut self, program: &str, args: Option<Vec<String>>) -> DapResult<()> {
+    pub async fn launch_no_wait(
+        &mut self,
+        program: &str,
+        args: Option<Vec<String>>,
+    ) -> DapResult<()> {
         let seq = self.seq_counter;
         self.seq_counter += 1;
 
@@ -160,37 +176,57 @@ impl DapClient {
 
     /// Продолжить выполнение
     pub async fn continue_execution(&mut self, thread_id: u32) -> DapResult<Value> {
-        self.send_request("continue", Some(json!({
-            "threadId": thread_id,
-        }))).await
+        self.send_request(
+            "continue",
+            Some(json!({
+                "threadId": thread_id,
+            })),
+        )
+        .await
     }
 
     /// Step over (next line)
     pub async fn next(&mut self, thread_id: u32) -> DapResult<Value> {
-        self.send_request("next", Some(json!({
-            "threadId": thread_id,
-        }))).await
+        self.send_request(
+            "next",
+            Some(json!({
+                "threadId": thread_id,
+            })),
+        )
+        .await
     }
 
     /// Step into
     pub async fn step_in(&mut self, thread_id: u32) -> DapResult<Value> {
-        self.send_request("stepIn", Some(json!({
-            "threadId": thread_id,
-        }))).await
+        self.send_request(
+            "stepIn",
+            Some(json!({
+                "threadId": thread_id,
+            })),
+        )
+        .await
     }
 
     /// Step out of current function
     pub async fn step_out(&mut self, thread_id: u32) -> DapResult<Value> {
-        self.send_request("stepOut", Some(json!({
-            "threadId": thread_id,
-        }))).await
+        self.send_request(
+            "stepOut",
+            Some(json!({
+                "threadId": thread_id,
+            })),
+        )
+        .await
     }
 
     /// Получить stack trace
     pub async fn stack_trace(&mut self, thread_id: u32) -> DapResult<Value> {
-        self.send_request("stackTrace", Some(json!({
-            "threadId": thread_id,
-        }))).await
+        self.send_request(
+            "stackTrace",
+            Some(json!({
+                "threadId": thread_id,
+            })),
+        )
+        .await
     }
 
     /// Завершить debug сессию
@@ -247,7 +283,9 @@ impl DapClient {
                 let response: DapResponse = serde_json::from_value(message)?;
 
                 if !response.success {
-                    let error_msg = response.message.unwrap_or_else(|| "Unknown error".to_string());
+                    let error_msg = response
+                        .message
+                        .unwrap_or_else(|| "Unknown error".to_string());
                     tracing::error!(command = %command, error = %error_msg, "DAP request failed");
                     return Err(DapError::Protocol(error_msg));
                 }

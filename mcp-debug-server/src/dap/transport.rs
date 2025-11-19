@@ -1,9 +1,9 @@
+use crate::types::DapResult;
+use serde_json::Value;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, ChildStdout};
 use tokio::sync::Mutex;
-use std::sync::Arc;
-use crate::types::DapResult;
-use serde_json::Value;
 
 /// DAP Transport Writer - отвечает за отправку сообщений
 pub struct DapWriter {
@@ -38,16 +38,19 @@ impl DapReader {
         self.stdout.read_line(&mut header_line).await?;
 
         if !header_line.starts_with("Content-Length:") {
-            return Err(crate::types::DapError::Protocol(
-                format!("Expected Content-Length header, got: {}", header_line)
-            ));
+            return Err(crate::types::DapError::Protocol(format!(
+                "Expected Content-Length header, got: {}",
+                header_line
+            )));
         }
 
         let length: usize = header_line
             .trim_start_matches("Content-Length:")
             .trim()
             .parse()
-            .map_err(|e| crate::types::DapError::Protocol(format!("Invalid Content-Length: {}", e)))?;
+            .map_err(|e| {
+                crate::types::DapError::Protocol(format!("Invalid Content-Length: {}", e))
+            })?;
 
         // Пропускаем пустую строку после headers
         let mut empty_line = String::new();
@@ -84,9 +87,7 @@ impl DapTransport {
             stdin: Arc::new(Mutex::new(stdin)),
         };
 
-        let reader = DapReader {
-            stdout,
-        };
+        let reader = DapReader { stdout };
 
         (writer, reader)
     }
@@ -116,16 +117,19 @@ impl DapTransport {
         self.stdout.read_line(&mut header_line).await?;
 
         if !header_line.starts_with("Content-Length:") {
-            return Err(crate::types::DapError::Protocol(
-                format!("Expected Content-Length header, got: {}", header_line)
-            ));
+            return Err(crate::types::DapError::Protocol(format!(
+                "Expected Content-Length header, got: {}",
+                header_line
+            )));
         }
 
         let length: usize = header_line
             .trim_start_matches("Content-Length:")
             .trim()
             .parse()
-            .map_err(|e| crate::types::DapError::Protocol(format!("Invalid Content-Length: {}", e)))?;
+            .map_err(|e| {
+                crate::types::DapError::Protocol(format!("Invalid Content-Length: {}", e))
+            })?;
 
         // Пропускаем пустую строку после headers
         let mut empty_line = String::new();

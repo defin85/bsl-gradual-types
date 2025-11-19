@@ -1,11 +1,11 @@
-mod transport;
-mod protocol;
 mod client;
 mod events;
+mod protocol;
 mod router;
+mod transport;
 
 pub use client::DapClient;
-pub use protocol::{DapRequest, DapResponse, DapEvent};
-pub use events::{EventProcessor, EventBuffer, EventStats, EventCounters};
+pub use events::{EventBuffer, EventCounters, EventProcessor, EventStats};
+pub use protocol::{DapEvent, DapRequest, DapResponse};
 pub use router::EventRouter;
-pub use transport::{DapWriter, DapReader};
+pub use transport::{DapReader, DapWriter};

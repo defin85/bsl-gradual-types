@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
         .with(
             tracing_subscriber::fmt::layer()
                 .with_writer(std::io::stderr)
-                .with_ansi(false)
+                .with_ansi(false),
         )
         .init();
 

@@ -2,9 +2,9 @@
 //!
 //! This example tests lldb-dap at the lowest level to see what it outputs.
 
+use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use std::process::Stdio;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -95,8 +95,10 @@ async fn main() -> anyhow::Result<()> {
 
         match tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            stdout_reader.read_line(&mut line)
-        ).await {
+            stdout_reader.read_line(&mut line),
+        )
+        .await
+        {
             Ok(Ok(0)) => {
                 println!("EOF reached");
                 break;
@@ -131,7 +133,10 @@ async fn main() -> anyhow::Result<()> {
     // Собрать stderr messages
     let stderr_messages = stderr_handle.await?;
     if !stderr_messages.is_empty() {
-        println!("\n📋 All stderr messages ({} total):", stderr_messages.len());
+        println!(
+            "\n📋 All stderr messages ({} total):",
+            stderr_messages.len()
+        );
         for msg in stderr_messages {
             println!("  - {}", msg);
         }

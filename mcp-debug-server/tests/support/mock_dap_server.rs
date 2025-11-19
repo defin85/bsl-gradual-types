@@ -1,7 +1,7 @@
-use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use serde_json::{json, Value};
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 
 /// Mock DAP Server для интеграционного тестирования
@@ -93,8 +93,7 @@ impl MockDapServer {
                 header_buf.push(buffer[0]);
 
                 // Проверяем конец заголовков (\r\n\r\n)
-                if header_buf.len() >= 4
-                    && &header_buf[header_buf.len()-4..] == b"\r\n\r\n" {
+                if header_buf.len() >= 4 && &header_buf[header_buf.len() - 4..] == b"\r\n\r\n" {
                     break;
                 }
             }
@@ -137,10 +136,7 @@ impl MockDapServer {
     }
 
     /// Обработка DAP request
-    async fn handle_request(
-        request: Value,
-        state: &Arc<RwLock<ServerState>>,
-    ) -> Value {
+    async fn handle_request(request: Value, state: &Arc<RwLock<ServerState>>) -> Value {
         let command = request["command"].as_str().unwrap_or("unknown");
         let request_seq = request["seq"].as_u64().unwrap_or(0);
 
@@ -182,7 +178,9 @@ impl MockDapServer {
                     .unwrap_or_default();
 
                 // Сохраняем breakpoints
-                state_lock.breakpoints.insert(source.to_string(), breakpoints.clone());
+                state_lock
+                    .breakpoints
+                    .insert(source.to_string(), breakpoints.clone());
 
                 // Формируем response с verified breakpoints
                 let verified_bps: Vec<_> = breakpoints
@@ -258,9 +256,7 @@ impl MockDapServer {
             }
 
             "evaluate" => {
-                let expression = request["arguments"]["expression"]
-                    .as_str()
-                    .unwrap_or("");
+                let expression = request["arguments"]["expression"].as_str().unwrap_or("");
 
                 json!({
                     "seq": response_seq,

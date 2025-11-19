@@ -92,9 +92,8 @@ async fn test_concurrent_error_handling() {
         .map(|i| {
             let manager_clone = Arc::clone(&manager);
             tokio::spawn(async move {
-                let fake_id = mcp_debug_server::types::SessionId::from_string(
-                    format!("fake-{}", i)
-                );
+                let fake_id =
+                    mcp_debug_server::types::SessionId::from_string(format!("fake-{}", i));
 
                 let result = manager_clone.terminate_session(&fake_id).await;
                 assert!(result.is_err());
@@ -121,15 +120,12 @@ async fn test_session_id_edge_cases() {
     assert!(!manager.session_exists(&empty_id).await);
 
     // Граничный случай 2: очень длинный ID
-    let long_id = mcp_debug_server::types::SessionId::from_string(
-        "a".repeat(10000)
-    );
+    let long_id = mcp_debug_server::types::SessionId::from_string("a".repeat(10000));
     assert!(!manager.session_exists(&long_id).await);
 
     // Граничный случай 3: ID с спецсимволами
-    let special_id = mcp_debug_server::types::SessionId::from_string(
-        "session-!@#$%^&*()".to_string()
-    );
+    let special_id =
+        mcp_debug_server::types::SessionId::from_string("session-!@#$%^&*()".to_string());
     assert!(!manager.session_exists(&special_id).await);
 
     tracing::info!("Test session ID edge cases completed");
@@ -186,9 +182,7 @@ async fn test_with_session_error_handling() {
     // Попытка выполнить операцию с несуществующей сессией
     let result = manager
         .with_session(&fake_id, |_session| {
-            Box::pin(async move {
-                Ok::<(), anyhow::Error>(())
-            })
+            Box::pin(async move { Ok::<(), anyhow::Error>(()) })
         })
         .await;
 
@@ -295,7 +289,10 @@ async fn test_event_router_graceful_shutdown() {
 
     // Отправить несколько событий
     for i in 0..5 {
-        event_tx.send(serde_json::json!({"event": "test", "id": i})).await.unwrap();
+        event_tx
+            .send(serde_json::json!({"event": "test", "id": i}))
+            .await
+            .unwrap();
     }
 
     // Закрыть канал (симуляция broken pipe)
@@ -312,15 +309,17 @@ async fn test_event_router_graceful_shutdown() {
 #[tokio::test]
 async fn test_response_map_cleanup_on_timeout() {
     use std::collections::HashMap;
-    use tokio::sync::{oneshot, Mutex};
     use std::sync::Arc;
+    use tokio::sync::{oneshot, Mutex};
     use tokio::time::{timeout, Duration};
 
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .try_init();
 
-    let response_map = Arc::new(Mutex::new(HashMap::<u32, oneshot::Sender<serde_json::Value>>::new()));
+    let response_map = Arc::new(Mutex::new(
+        HashMap::<u32, oneshot::Sender<serde_json::Value>>::new(),
+    ));
 
     let seq = 42;
     let (tx, rx) = oneshot::channel();
@@ -365,9 +364,8 @@ async fn test_concurrent_error_handling_stress() {
         .map(|i| {
             let manager_clone = Arc::clone(&manager);
             tokio::spawn(async move {
-                let fake_id = mcp_debug_server::types::SessionId::from_string(
-                    format!("stress-fake-{}", i)
-                );
+                let fake_id =
+                    mcp_debug_server::types::SessionId::from_string(format!("stress-fake-{}", i));
 
                 // Все вызовы должны вернуть ошибку
                 for _ in 0..5 {

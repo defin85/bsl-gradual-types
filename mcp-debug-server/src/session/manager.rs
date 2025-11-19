@@ -1,11 +1,11 @@
+use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use anyhow::Result;
 
+use super::state::SessionState;
 use crate::dap::DapClient;
 use crate::types::SessionId;
-use super::state::SessionState;
 
 /// Информация о debug сессии
 pub struct DebugSession {
@@ -58,6 +58,57 @@ impl DebugSession {
         self.state = new_state;
         Ok(())
     }
+
+    /// Получить frameId топового stack frame для текущего потока
+    ///
+    /// Возвращает реальный frameId из текущего приостановленного состояния.
+    /// Требуется для DAP операций: evaluate, setVariable, etc.
+    ///
+    /// # Errors
+    ///
+    /// - Если нет активного потока (процесс не остановлен)
+    /// - Если stackTrace пустой или недоступен
+    ///
+    /// # Note
+    ///
+    /// Проверка stopped состояния основана на current_thread_id (обновляется EventProcessor),
+    /// а НЕ на session.state (может быть устаревшим).
+    pub async fn get_current_frame_id(&mut self) -> anyhow::Result<u32> {
+        // Получить thread_id из shared state (обновляется EventProcessor при stopped event)
+        let thread_id = {
+            let guard = self.current_thread_id.lock().await;
+            *guard
+        }
+        .ok_or_else(|| anyhow::anyhow!("No active thread. Process is not stopped or session not started."))?;
+
+        // Шаг 3: Вызвать DAP stackTrace для получения frames
+        let stack_result = self
+            .dap_client
+            .stack_trace(thread_id)
+            .await
+            .map_err(|e| anyhow::anyhow!("DAP stackTrace error: {}", e))?;
+
+        // Шаг 4: Извлечь frameId из stackFrames[0] (topmost frame)
+        let frame_id = stack_result
+            .get("stackFrames")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|frame| frame.get("id"))
+            .and_then(|id| id.as_u64())
+            .map(|id| id as u32)
+            .ok_or_else(|| {
+                anyhow::anyhow!("No stack frames available. Process may have terminated.")
+            })?;
+
+        tracing::debug!(
+            session_id = %self.id,
+            thread_id = %thread_id,
+            frame_id = %frame_id,
+            "Retrieved current frame ID"
+        );
+
+        Ok(frame_id)
+    }
 }
 
 /// Менеджер debug сессий (thread-safe)
@@ -96,7 +147,8 @@ impl SessionManager {
             self.event_buffer.clone(),
             session_id.as_str().to_string(),
             current_thread_id.clone(),
-        ).await?;
+        )
+        .await?;
 
         // Инициализировать DAP сессию
         dap_client.initialize().await?;
@@ -110,10 +162,10 @@ impl SessionManager {
         );
 
         // Сохранить в HashMap (с write lock)
-        self.sessions.write().await.insert(
-            session_id.as_str().to_string(),
-            session,
-        );
+        self.sessions
+            .write()
+            .await
+            .insert(session_id.as_str().to_string(), session);
 
         Ok(session_id)
     }
@@ -150,13 +202,13 @@ impl SessionManager {
     ///     session.dap_client.next(thread_id).await
     /// }).await?;
     /// ```
-    pub async fn with_session<'a, F, R>(
-        &'a self,
-        session_id: &SessionId,
-        f: F,
-    ) -> Result<R>
+    pub async fn with_session<'a, F, R>(&'a self, session_id: &SessionId, f: F) -> Result<R>
     where
-        F: for<'b> FnOnce(&'b mut DebugSession) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<R>> + Send + 'b>>,
+        F: for<'b> FnOnce(
+            &'b mut DebugSession,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<R>> + Send + 'b>,
+        >,
     {
         let mut sessions = self.sessions.write().await;
 
@@ -204,17 +256,17 @@ mod tests {
     fn test_session_state_validation() {
         // Тестируем валидацию state transitions через SessionState API
         // (без создания DebugSession, так как требуется реальный DapClient)
-        
+
         use SessionState::*;
-        
+
         // Тест 1: Valid transition Initialized → Running
         let current_state = Initialized;
         assert!(current_state.can_transition_to(Running));
-        
+
         // Тест 2: Invalid transition Running → Initialized
         let current_state = Running;
         assert!(!current_state.can_transition_to(Initialized));
-        
+
         // Тест 3: Valid transition to Terminated
         assert!(Running.can_transition_to(Terminated));
         assert!(Stopped.can_transition_to(Terminated));

@@ -33,7 +33,8 @@ async fn test_event_processor_stopped_event() {
     let processor_task = tokio::spawn(async move {
         // Создать EventProcessor (упрощённая версия)
         use mcp_debug_server::dap::EventProcessor;
-        let processor = EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
+        let processor =
+            EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
         processor.run().await;
     });
 
@@ -56,7 +57,9 @@ async fn test_event_processor_stopped_event() {
 
     // Проверить, что событие добавлено в EventBuffer
     let buffer = event_buffer.lock().await;
-    let events = buffer.get(&session_id).expect("Events not found for session");
+    let events = buffer
+        .get(&session_id)
+        .expect("Events not found for session");
     assert_eq!(events.len(), 1);
     assert_eq!(events[0]["event"], "stopped");
     assert_eq!(events[0]["body"]["threadId"], 42);
@@ -86,7 +89,8 @@ async fn test_event_processor_multiple_events() {
 
     let processor_task = tokio::spawn(async move {
         use mcp_debug_server::dap::EventProcessor;
-        let processor = EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
+        let processor =
+            EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
         processor.run().await;
     });
 
@@ -218,7 +222,8 @@ async fn test_event_processor_terminated_event() {
 
     let processor_task = tokio::spawn(async move {
         use mcp_debug_server::dap::EventProcessor;
-        let processor = EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
+        let processor =
+            EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
         processor.run().await;
     });
 
@@ -265,7 +270,8 @@ async fn test_event_processor_output_event() {
 
     let processor_task = tokio::spawn(async move {
         use mcp_debug_server::dap::EventProcessor;
-        let processor = EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
+        let processor =
+            EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
         processor.run().await;
     });
 
@@ -318,7 +324,8 @@ async fn test_event_processor_malformed_event() {
 
     let processor_task = tokio::spawn(async move {
         use mcp_debug_server::dap::EventProcessor;
-        let processor = EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
+        let processor =
+            EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
         processor.run().await;
     });
 
@@ -378,7 +385,8 @@ async fn test_event_buffer_size_limit() {
 
     let processor_task = tokio::spawn(async move {
         use mcp_debug_server::dap::EventProcessor;
-        let processor = EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
+        let processor =
+            EventProcessor::new(event_rx, buffer_clone, session_id_clone, current_thread_id);
         processor.run().await;
     });
 
@@ -401,7 +409,9 @@ async fn test_event_buffer_size_limit() {
     let events = buffer.get(&session_id).expect("Events not found");
     assert_eq!(events.len(), 1000);
 
-    tracing::info!("test_event_buffer_size_limit passed (no limit enforced, all 1000 events stored)");
+    tracing::info!(
+        "test_event_buffer_size_limit passed (no limit enforced, all 1000 events stored)"
+    );
 
     // Cleanup
     drop(event_tx);
@@ -421,10 +431,13 @@ async fn test_poll_after_session_terminated() {
     // Добавить события
     {
         let mut buffer = event_buffer.lock().await;
-        buffer.insert(session_id.clone(), VecDeque::from(vec![
-            json!({"event": "stopped"}),
-            json!({"event": "terminated"}),
-        ]));
+        buffer.insert(
+            session_id.clone(),
+            VecDeque::from(vec![
+                json!({"event": "stopped"}),
+                json!({"event": "terminated"}),
+            ]),
+        );
     }
 
     // Polling
@@ -467,9 +480,7 @@ async fn test_event_buffer_overflow_protection() {
         let event = json!({"event": "output", "body": {"output": format!("Event {}", i)}});
 
         let mut buf = buffer.lock().await;
-        let events = buf
-            .entry(session_id.clone())
-            .or_insert_with(VecDeque::new);
+        let events = buf.entry(session_id.clone()).or_insert_with(VecDeque::new);
 
         // Эмуляция add_to_buffer с overflow protection
         const MAX_EVENTS_PER_SESSION: usize = 1000;
@@ -482,7 +493,11 @@ async fn test_event_buffer_overflow_protection() {
     // Проверить что размер буфера = 1000 (не 1500)
     let buf = buffer.lock().await;
     let events = buf.get(&session_id).unwrap();
-    assert_eq!(events.len(), 1000, "Buffer should be limited to 1000 events");
+    assert_eq!(
+        events.len(),
+        1000,
+        "Buffer should be limited to 1000 events"
+    );
 
     // Проверить что oldest события удалены (первые 500)
     let first_event = &events[0];
@@ -538,7 +553,11 @@ async fn test_current_thread_id_update() {
 
     // Проверить что current_thread_id обновлён
     let tid = *thread_id_clone.lock().await;
-    assert_eq!(tid, Some(12345), "current_thread_id should be updated to 12345");
+    assert_eq!(
+        tid,
+        Some(12345),
+        "current_thread_id should be updated to 12345"
+    );
 
     tracing::info!("test_current_thread_id_update passed");
 

@@ -3,8 +3,8 @@
 //! This module provides automatic discovery of installed DAP adapters
 //! in standard locations (VS Code extensions, system PATH, etc.).
 
-use std::path::PathBuf;
 use std::env;
+use std::path::PathBuf;
 
 /// Tries to find CodeLLDB adapter in standard VS Code extension locations.
 ///
@@ -17,9 +17,7 @@ use std::env;
 /// Returns full path to `codelldb` executable if found, otherwise `None`.
 pub fn find_codelldb() -> Option<PathBuf> {
     // Получить home directory
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .ok()?;
+    let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).ok()?;
 
     let extensions_dir = PathBuf::from(home).join(".vscode").join("extensions");
 

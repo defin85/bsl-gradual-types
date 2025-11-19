@@ -8,10 +8,13 @@
 //! ВАЖНО: Избегание deadlock через правильную иерархию блокировок:
 //! SessionManager → EventBuffer → current_thread_id
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
-use tokio::sync::{mpsc, Mutex};
 use serde_json::Value;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
+use tokio::sync::{mpsc, Mutex};
 
 /// Maximum количество событий в буфере для одного session_id (overflow protection)
 const MAX_EVENT_BUFFER_SIZE: usize = 1000;
@@ -210,7 +213,9 @@ impl EventProcessor {
 
     /// Обработать continued event (обновить current_thread_id)
     async fn handle_continued_event(&mut self, event: &Value) -> anyhow::Result<()> {
-        self.counters.continued_events.fetch_add(1, Ordering::Relaxed);
+        self.counters
+            .continued_events
+            .fetch_add(1, Ordering::Relaxed);
 
         tracing::info!(
             session_id = %self.session_id,
@@ -228,7 +233,9 @@ impl EventProcessor {
 
     /// Обработать terminated/exited event
     async fn handle_terminated_event(&mut self, event: &Value) -> anyhow::Result<()> {
-        self.counters.terminated_events.fetch_add(1, Ordering::Relaxed);
+        self.counters
+            .terminated_events
+            .fetch_add(1, Ordering::Relaxed);
 
         tracing::info!(
             session_id = %self.session_id,

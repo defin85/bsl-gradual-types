@@ -13,7 +13,9 @@ pub fn get_resource_list() -> Vec<Annotated<RawResource>> {
                 uri: "debug://sessions".to_string(),
                 name: "Active Debug Sessions".to_string(),
                 title: None,
-                description: Some("List of all active debug sessions with their states".to_string()),
+                description: Some(
+                    "List of all active debug sessions with their states".to_string(),
+                ),
                 mime_type: Some("application/json".to_string()),
                 size: None,
                 icons: None,
@@ -37,7 +39,10 @@ pub async fn read_resource(
 
     // Парсинг динамических URIs: debug://session/{id}/...
     if uri.starts_with("debug://session/") {
-        let parts: Vec<&str> = uri.trim_start_matches("debug://session/").split('/').collect();
+        let parts: Vec<&str> = uri
+            .trim_start_matches("debug://session/")
+            .split('/')
+            .collect();
         if parts.len() < 2 {
             return Err("Invalid session URI format".to_string());
         }
@@ -199,14 +204,20 @@ mod tests {
     fn test_uri_parsing() {
         // Валидный URI для state
         let uri = "debug://session/12345/state";
-        let parts: Vec<&str> = uri.trim_start_matches("debug://session/").split('/').collect();
+        let parts: Vec<&str> = uri
+            .trim_start_matches("debug://session/")
+            .split('/')
+            .collect();
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0], "12345");
         assert_eq!(parts[1], "state");
 
         // Валидный URI для breakpoints
         let uri = "debug://session/67890/breakpoints";
-        let parts: Vec<&str> = uri.trim_start_matches("debug://session/").split('/').collect();
+        let parts: Vec<&str> = uri
+            .trim_start_matches("debug://session/")
+            .split('/')
+            .collect();
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0], "67890");
         assert_eq!(parts[1], "breakpoints");

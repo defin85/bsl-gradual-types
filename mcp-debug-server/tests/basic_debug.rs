@@ -102,9 +102,9 @@ async fn test_state_transitions() {
 /// Этот тест проверяет, что mock server корректно обрабатывает DAP requests
 #[tokio::test]
 async fn test_mock_dap_protocol() {
-    use tokio::net::TcpStream;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use serde_json::json;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
 
     // Запустить mock server
     let mock_server = MockDapServer::new().await.unwrap();
@@ -146,8 +146,7 @@ async fn test_mock_dap_protocol() {
         stream.read_exact(&mut byte).await.unwrap();
         header_buf.push(byte[0]);
 
-        if header_buf.len() >= 4
-            && &header_buf[header_buf.len()-4..] == b"\r\n\r\n" {
+        if header_buf.len() >= 4 && &header_buf[header_buf.len() - 4..] == b"\r\n\r\n" {
             break;
         }
     }

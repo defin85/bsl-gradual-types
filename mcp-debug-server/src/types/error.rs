@@ -98,9 +98,7 @@ impl From<anyhow::Error> for McpDebugError {
         // Попытка downcast в известные типы
         if let Some(dap_err) = err.downcast_ref::<DapError>() {
             return match dap_err {
-                DapError::Io(_) => McpDebugError::Io(std::io::Error::other(
-                    err.to_string()
-                )),
+                DapError::Io(_) => McpDebugError::Io(std::io::Error::other(err.to_string())),
                 DapError::Timeout => McpDebugError::Timeout,
                 _ => McpDebugError::DapProtocol(err.to_string()),
             };
@@ -138,12 +136,8 @@ impl From<McpDebugError> for rmcp::ErrorData {
             }
             McpDebugError::DapProtocol(_)
             | McpDebugError::AdapterCrashed
-            | McpDebugError::Timeout => {
-                ErrorData::internal_error(err.to_string(), None)
-            }
-            McpDebugError::InvalidState { .. } => {
-                ErrorData::invalid_params(err.to_string(), None)
-            }
+            | McpDebugError::Timeout => ErrorData::internal_error(err.to_string(), None),
+            McpDebugError::InvalidState { .. } => ErrorData::invalid_params(err.to_string(), None),
             McpDebugError::Io(_) | McpDebugError::Json(_) | McpDebugError::Other(_) => {
                 ErrorData::internal_error(err.to_string(), None)
             }

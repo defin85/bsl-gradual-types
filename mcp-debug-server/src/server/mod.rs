@@ -1,14 +1,11 @@
-use std::sync::Arc;
 use rmcp::{
-    handler::server::{
-        router::tool::ToolRouter,
-        wrapper::Parameters,
-    },
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{Implementation, ProtocolVersion, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router, ServerHandler,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::session::SessionManager;
 
@@ -100,10 +97,14 @@ impl DebugServerHandler {
 
     /// Tool 1: Создать новую debug сессию
     #[tool(description = "Create a new debug session for a binary program")]
-    async fn debug_create_session(&self, Parameters(params): Parameters<CreateSessionParams>) -> String {
+    async fn debug_create_session(
+        &self,
+        Parameters(params): Parameters<CreateSessionParams>,
+    ) -> String {
         let adapter = params.adapter_type.unwrap_or_else(|| "lldb".to_string());
 
-        match self.session_manager
+        match self
+            .session_manager
             .create_session(params.binary_path.clone(), adapter.clone())
             .await
         {
@@ -120,23 +121,31 @@ impl DebugServerHandler {
 
     /// Tool 2: Установить breakpoint
     #[tool(description = "Set a breakpoint at file:line in the debug session")]
-    async fn debug_set_breakpoint(&self, Parameters(params): Parameters<SetBreakpointParams>) -> String {
+    async fn debug_set_breakpoint(
+        &self,
+        Parameters(params): Parameters<SetBreakpointParams>,
+    ) -> String {
         use crate::types::SessionId;
 
         let sid = SessionId::from_string(params.session_id.clone());
         let file = params.file.clone();
         let line = params.line;
 
-        match self.session_manager
+        match self
+            .session_manager
             .with_session(&sid, |session| {
                 let file = file.clone();
                 Box::pin(async move {
                     // Вызвать DAP client для установки breakpoint
-                    session.dap_client.set_breakpoints(&file, &[line]).await
+                    session
+                        .dap_client
+                        .set_breakpoints(&file, &[line])
+                        .await
                         .map_err(|e| anyhow::anyhow!("DAP error: {}", e))?;
 
                     // Сохранить в session.breakpoints
-                    session.breakpoints
+                    session
+                        .breakpoints
                         .entry(file)
                         .or_insert_with(Vec::new)
                         .push(line);
@@ -165,21 +174,25 @@ impl DebugServerHandler {
     /// 3. configuration_done() - сигнал адаптеру для завершения launch
     #[tool(description = "Launch the program in the debug session")]
     async fn debug_launch(&self, Parameters(params): Parameters<LaunchParams>) -> String {
-        use crate::types::SessionId;
         use crate::session::SessionState;
+        use crate::types::SessionId;
         use tokio::time::{sleep, Duration};
 
         let sid = SessionId::from_string(params.session_id.clone());
 
         // Шаг 1: Отправить launch request (без ожидания response)
-        let launch_result = self.session_manager
+        let launch_result = self
+            .session_manager
             .with_session(&sid, |session| {
                 let args = params.args.clone();
                 Box::pin(async move {
                     let binary = session.binary_path.clone();
 
                     // Вызвать DAP launch_no_wait
-                    session.dap_client.launch_no_wait(&binary, args).await
+                    session
+                        .dap_client
+                        .launch_no_wait(&binary, args)
+                        .await
                         .map_err(|e| anyhow::anyhow!("DAP launch error: {}", e))?;
 
                     Ok(binary)
@@ -223,16 +236,22 @@ impl DebugServerHandler {
         }
 
         // Шаг 3: Отправить configurationDone
-        let config_result = self.session_manager
-            .with_session(&sid, |session| Box::pin(async move {
-                session.dap_client.configuration_done().await
-                    .map_err(|e| anyhow::anyhow!("DAP configurationDone error: {}", e))?;
+        let config_result = self
+            .session_manager
+            .with_session(&sid, |session| {
+                Box::pin(async move {
+                    session
+                        .dap_client
+                        .configuration_done()
+                        .await
+                        .map_err(|e| anyhow::anyhow!("DAP configurationDone error: {}", e))?;
 
-                // Обновить состояние на Running
-                session.set_state(SessionState::Running)?;
+                    // Обновить состояние на Running
+                    session.set_state(SessionState::Running)?;
 
-                Ok(())
-            }))
+                    Ok(())
+                })
+            })
             .await;
 
         match config_result {
@@ -251,27 +270,34 @@ impl DebugServerHandler {
     /// Tool 4: Step over (next line)
     #[tool(description = "Step over to the next line (step over functions)")]
     async fn debug_next(&self, Parameters(params): Parameters<StepParams>) -> String {
-        use crate::types::SessionId;
         use crate::session::SessionState;
+        use crate::types::SessionId;
 
         let sid = SessionId::from_string(params.session_id.clone());
 
-        match self.session_manager
-            .with_session(&sid, |session| Box::pin(async move {
-                let thread_id = {
-                    let guard = session.current_thread_id.lock().await;
-                    *guard
-                }.ok_or_else(|| anyhow::anyhow!("No active thread"))?;
+        match self
+            .session_manager
+            .with_session(&sid, |session| {
+                Box::pin(async move {
+                    let thread_id = {
+                        let guard = session.current_thread_id.lock().await;
+                        *guard
+                    }
+                    .ok_or_else(|| anyhow::anyhow!("No active thread"))?;
 
-                // Вызвать DAP next
-                session.dap_client.next(thread_id).await
-                    .map_err(|e| anyhow::anyhow!("DAP next error: {}", e))?;
+                    // Вызвать DAP next
+                    session
+                        .dap_client
+                        .next(thread_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("DAP next error: {}", e))?;
 
-                // Обновить состояние на Stopped (после step)
-                session.set_state(SessionState::Stopped)?;
+                    // Обновить состояние на Stopped (после step)
+                    session.set_state(SessionState::Stopped)?;
 
-                Ok(thread_id)
-            }))
+                    Ok(thread_id)
+                })
+            })
             .await
         {
             Ok(_) => format!(
@@ -287,27 +313,34 @@ impl DebugServerHandler {
     /// Tool 5: Step into function
     #[tool(description = "Step into the current function call")]
     async fn debug_step_in(&self, Parameters(params): Parameters<StepParams>) -> String {
-        use crate::types::SessionId;
         use crate::session::SessionState;
+        use crate::types::SessionId;
 
         let sid = SessionId::from_string(params.session_id.clone());
 
-        match self.session_manager
-            .with_session(&sid, |session| Box::pin(async move {
-                let thread_id = {
-                    let guard = session.current_thread_id.lock().await;
-                    *guard
-                }.ok_or_else(|| anyhow::anyhow!("No active thread"))?;
+        match self
+            .session_manager
+            .with_session(&sid, |session| {
+                Box::pin(async move {
+                    let thread_id = {
+                        let guard = session.current_thread_id.lock().await;
+                        *guard
+                    }
+                    .ok_or_else(|| anyhow::anyhow!("No active thread"))?;
 
-                // Вызвать DAP stepIn
-                session.dap_client.step_in(thread_id).await
-                    .map_err(|e| anyhow::anyhow!("DAP stepIn error: {}", e))?;
+                    // Вызвать DAP stepIn
+                    session
+                        .dap_client
+                        .step_in(thread_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("DAP stepIn error: {}", e))?;
 
-                // Обновить состояние на Stopped
-                session.set_state(SessionState::Stopped)?;
+                    // Обновить состояние на Stopped
+                    session.set_state(SessionState::Stopped)?;
 
-                Ok(thread_id)
-            }))
+                    Ok(thread_id)
+                })
+            })
             .await
         {
             Ok(_) => format!(
@@ -323,27 +356,34 @@ impl DebugServerHandler {
     /// Tool 6: Continue execution until next breakpoint
     #[tool(description = "Continue execution until hitting a breakpoint")]
     async fn debug_continue(&self, Parameters(params): Parameters<StepParams>) -> String {
-        use crate::types::SessionId;
         use crate::session::SessionState;
+        use crate::types::SessionId;
 
         let sid = SessionId::from_string(params.session_id.clone());
 
-        match self.session_manager
-            .with_session(&sid, |session| Box::pin(async move {
-                let thread_id = {
-                    let guard = session.current_thread_id.lock().await;
-                    *guard
-                }.ok_or_else(|| anyhow::anyhow!("No active thread"))?;
+        match self
+            .session_manager
+            .with_session(&sid, |session| {
+                Box::pin(async move {
+                    let thread_id = {
+                        let guard = session.current_thread_id.lock().await;
+                        *guard
+                    }
+                    .ok_or_else(|| anyhow::anyhow!("No active thread"))?;
 
-                // Вызвать DAP continue
-                session.dap_client.continue_execution(thread_id).await
-                    .map_err(|e| anyhow::anyhow!("DAP continue error: {}", e))?;
+                    // Вызвать DAP continue
+                    session
+                        .dap_client
+                        .continue_execution(thread_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("DAP continue error: {}", e))?;
 
-                // Обновить состояние на Running
-                session.set_state(SessionState::Running)?;
+                    // Обновить состояние на Running
+                    session.set_state(SessionState::Running)?;
 
-                Ok(thread_id)
-            }))
+                    Ok(thread_id)
+                })
+            })
             .await
         {
             Ok(_) => format!(
@@ -383,16 +423,19 @@ impl DebugServerHandler {
 
         let sid = SessionId::from_string(params.session_id.clone());
 
-        match self.session_manager
+        match self
+            .session_manager
             .with_session(&sid, |session| {
                 let expression = params.expression.clone();
                 Box::pin(async move {
-                    // Получить текущий frame_id (используем 0 для topmost frame)
-                    let frame_id = Some(0);
+                    // Получить реальный frameId через helper метод
+                    // (включает проверку state и thread_id)
+                    let frame_id = session.get_current_frame_id().await?;
 
-                    // Вызвать DAP evaluate
-                    let result = session.dap_client
-                        .evaluate(&expression, frame_id)
+                    // Вызвать DAP evaluate с реальным frameId
+                    let result = session
+                        .dap_client
+                        .evaluate(&expression, Some(frame_id))
                         .await
                         .map_err(|e| anyhow::anyhow!("DAP evaluate error: {}", e))?;
 
@@ -426,53 +469,52 @@ impl DebugServerHandler {
 
         let sid = SessionId::from_string(params.session_id.clone());
 
-        match self.session_manager
-            .with_session(&sid, |session| Box::pin(async move {
-                let thread_id = {
-                    let guard = session.current_thread_id.lock().await;
-                    *guard
-                }.ok_or_else(|| anyhow::anyhow!("No active thread"))?;
+        match self
+            .session_manager
+            .with_session(&sid, |session| {
+                Box::pin(async move {
+                    let thread_id = {
+                        let guard = session.current_thread_id.lock().await;
+                        *guard
+                    }
+                    .ok_or_else(|| anyhow::anyhow!("No active thread"))?;
 
-                // Вызвать DAP stackTrace
-                let result = session.dap_client
-                    .stack_trace(thread_id)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("DAP stackTrace error: {}", e))?;
+                    // Вызвать DAP stackTrace
+                    let result = session
+                        .dap_client
+                        .stack_trace(thread_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("DAP stackTrace error: {}", e))?;
 
-                // Извлечь stackFrames из result
-                let frames = result
-                    .get("stackFrames")
-                    .and_then(|v| v.as_array())
-                    .ok_or_else(|| anyhow::anyhow!("No stackFrames in response"))?;
+                    // Извлечь stackFrames из result
+                    let frames = result
+                        .get("stackFrames")
+                        .and_then(|v| v.as_array())
+                        .ok_or_else(|| anyhow::anyhow!("No stackFrames in response"))?;
 
-                // Форматировать stack trace
-                let mut trace = String::from("Stack trace:\n");
-                for (i, frame) in frames.iter().enumerate() {
-                    let name = frame.get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("(unknown)");
-                    let line = frame.get("line")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    let source = frame.get("source")
-                        .and_then(|s| s.get("path"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("(unknown)");
+                    // Форматировать stack trace
+                    let mut trace = String::from("Stack trace:\n");
+                    for (i, frame) in frames.iter().enumerate() {
+                        let name = frame
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("(unknown)");
+                        let line = frame.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let source = frame
+                            .get("source")
+                            .and_then(|s| s.get("path"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("(unknown)");
 
-                    trace.push_str(&format!(
-                        "  #{}: {} at {}:{}\n",
-                        i, name, source, line
-                    ));
-                }
+                        trace.push_str(&format!("  #{}: {} at {}:{}\n", i, name, source, line));
+                    }
 
-                Ok(trace)
-            }))
+                    Ok(trace)
+                })
+            })
             .await
         {
-            Ok(trace) => format!(
-                "Backtrace for session {}:\n{}",
-                params.session_id, trace
-            ),
+            Ok(trace) => format!("Backtrace for session {}:\n{}", params.session_id, trace),
             Err(e) => format!("Failed to get backtrace: {}", e),
         }
     }
@@ -487,7 +529,8 @@ impl DebugServerHandler {
 
         let sid = SessionId::from_string(params.session_id.clone());
 
-        match self.session_manager
+        match self
+            .session_manager
             .with_session(&sid, |session| {
                 let file = params.file.clone();
                 let line = params.line;
@@ -498,13 +541,15 @@ impl DebugServerHandler {
                     // Временно используем обычный setBreakpoints
 
                     // Отправляем DAP request с условным breakpoint
-                    let result = session.dap_client
+                    let result = session
+                        .dap_client
                         .set_breakpoints(&file, &[line])
                         .await
                         .map_err(|e| anyhow::anyhow!("DAP error: {}", e))?;
 
                     // Сохранить в session.breakpoints
-                    session.breakpoints
+                    session
+                        .breakpoints
                         .entry(file.clone())
                         .or_insert_with(Vec::new)
                         .push(line);
@@ -562,7 +607,11 @@ impl DebugServerHandler {
         }
 
         // Форматировать события human-readable
-        let mut output = format!("Debug events for session {} ({} events):\n\n", params.session_id, events.len());
+        let mut output = format!(
+            "Debug events for session {} ({} events):\n\n",
+            params.session_id,
+            events.len()
+        );
 
         for (i, event) in events.iter().enumerate() {
             let event_type = event
@@ -605,7 +654,8 @@ impl DebugServerHandler {
 
                     output.push_str(&format!(
                         "   Category: {}\n   Output: {}\n",
-                        category, text.trim()
+                        category,
+                        text.trim()
                     ));
                 }
                 "terminated" | "exited" => {
@@ -616,7 +666,10 @@ impl DebugServerHandler {
                 }
                 _ => {
                     // Для неизвестных событий - показать полный JSON
-                    output.push_str(&format!("   Body: {}\n", serde_json::to_string_pretty(event).unwrap_or_default()));
+                    output.push_str(&format!(
+                        "   Body: {}\n",
+                        serde_json::to_string_pretty(event).unwrap_or_default()
+                    ));
                 }
             }
 
@@ -629,27 +682,34 @@ impl DebugServerHandler {
     /// Tool 13: Выйти из текущей функции (step out)
     #[tool(description = "Step out of the current function")]
     async fn debug_step_out(&self, Parameters(params): Parameters<StepParams>) -> String {
-        use crate::types::SessionId;
         use crate::session::SessionState;
+        use crate::types::SessionId;
 
         let sid = SessionId::from_string(params.session_id.clone());
 
-        match self.session_manager
-            .with_session(&sid, |session| Box::pin(async move {
-                let thread_id = {
-                    let guard = session.current_thread_id.lock().await;
-                    *guard
-                }.ok_or_else(|| anyhow::anyhow!("No active thread"))?;
+        match self
+            .session_manager
+            .with_session(&sid, |session| {
+                Box::pin(async move {
+                    let thread_id = {
+                        let guard = session.current_thread_id.lock().await;
+                        *guard
+                    }
+                    .ok_or_else(|| anyhow::anyhow!("No active thread"))?;
 
-                // Вызвать DAP stepOut
-                session.dap_client.step_out(thread_id).await
-                    .map_err(|e| anyhow::anyhow!("DAP stepOut error: {}", e))?;
+                    // Вызвать DAP stepOut
+                    session
+                        .dap_client
+                        .step_out(thread_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("DAP stepOut error: {}", e))?;
 
-                // Обновить состояние на Stopped
-                session.set_state(SessionState::Stopped)?;
+                    // Обновить состояние на Stopped
+                    session.set_state(SessionState::Stopped)?;
 
-                Ok(thread_id)
-            }))
+                    Ok(thread_id)
+                })
+            })
             .await
         {
             Ok(_) => format!(
@@ -669,13 +729,10 @@ impl ServerHandler for DebugServerHandler {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder()
-                .enable_tools()
-                .build(),
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
             server_info: Implementation::from_build_env(),
             instructions: Some(
-                "MCP Debug Server - AI-assisted debugging through DAP protocol"
-                    .to_string(),
+                "MCP Debug Server - AI-assisted debugging through DAP protocol".to_string(),
             ),
         }
     }

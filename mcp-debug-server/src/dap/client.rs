@@ -159,7 +159,7 @@ impl DapClient {
                 "program": program,
                 "args": args.unwrap_or_default(),
                 "stopOnEntry": true,
-                "expressions": "python",  // Use python expressions for conditional breakpoints
+                "expressions": "native",  // Native LLDB expressions - required for debug_eval
             })),
         )
         .await
@@ -187,7 +187,7 @@ impl DapClient {
                 "program": program,
                 "args": args.unwrap_or_default(),
                 "stopOnEntry": true,
-                "expressions": "python",  // Use python expressions for conditional breakpoints
+                "expressions": "native",  // Native LLDB expressions - required for debug_eval
             })),
         };
 

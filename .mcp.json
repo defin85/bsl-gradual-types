@@ -20,6 +20,12 @@
         "SOURCEBOT_HOST": "http://localhost:3000",
         "SOURCEBOT_API_KEY": "sourcebot-996ada359457b1e8e28e4ee23c723c13e0b410225c212d213db89d8cb6c316dc"
       }
+    },
+	"mcp-debug": {
+        "command": "C:\\1CProject\\bsl-gradual-types-milestone-4.4\\target\\release\\mcp-debug.exe",
+        "env": {
+          "RUST_LOG": "mcp_debug_server=info"
+        }
     }
   }
 }

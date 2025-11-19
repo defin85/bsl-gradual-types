@@ -417,7 +417,11 @@ impl DebugServerHandler {
     }
 
     /// Tool 8: Вычислить expression в текущем фрейме
-    #[tool(description = "Evaluate an expression in the current stack frame")]
+    ///
+    /// Ограничения:
+    /// - Переменные могут быть недоступны после их lifetime (Rust DWARF behavior)
+    /// - Используйте переменные до того, как они выйдут из области видимости
+    #[tool(description = "Evaluate an expression in the current stack frame. Note: Variables may be unavailable after their lifetime ends (Rust DWARF behavior)")]
     async fn debug_eval(&self, Parameters(params): Parameters<EvalParams>) -> String {
         use crate::types::SessionId;
 
@@ -520,7 +524,12 @@ impl DebugServerHandler {
     }
 
     /// Tool 10: Установить условный breakpoint
-    #[tool(description = "Set a conditional breakpoint (stops only if condition is true)")]
+    ///
+    /// Ограничения:
+    /// - Условные breakpoints могут НЕ работать для Rust в CodeLLDB (известная проблема)
+    /// - Для отладки Rust рекомендуется использовать обычные breakpoints + debug_eval
+    /// - См. https://github.com/vadimcn/codelldb/issues/253
+    #[tool(description = "Set a conditional breakpoint (stops only if condition is true). WARNING: May not work for Rust programs in CodeLLDB. Use regular breakpoints + debug_eval as workaround")]
     async fn debug_set_conditional_breakpoint(
         &self,
         Parameters(params): Parameters<ConditionalBreakpointParams>,
@@ -676,7 +685,11 @@ impl DebugServerHandler {
     }
 
     /// Tool 13: Выйти из текущей функции (step out)
-    #[tool(description = "Step out of the current function")]
+    ///
+    /// Ограничения:
+    /// - Может давать timeout при compiler inlining (функции оптимизированы в release mode)
+    /// - Для надежной отладки используйте debug build или step over вместо step out
+    #[tool(description = "Step out of the current function. Note: May timeout with compiler-inlined functions (release builds). Use debug builds for reliable stepping")]
     async fn debug_step_out(&self, Parameters(params): Parameters<StepParams>) -> String {
         use crate::session::SessionState;
         use crate::types::SessionId;

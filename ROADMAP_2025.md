@@ -13,8 +13,9 @@
 2. [✅ Завершённые Milestones](#-завершённые-milestones-компактный-формат) — **Детали:** [ROADMAP_ARCHIVE_2025.md](ROADMAP_ARCHIVE_2025.md)
 3. [🎯 Планируемые Milestones (Версия 2.0)](#-планируемые-milestones-версия-20)
 4. [🚀 Версия 3.0 — Advanced Features](#-версия-30--advanced-features-q2-2025-3-месяца)
-5. [🌐 Версия 4.0 — Collaboration & Ecosystem](#-версия-40--collaboration--ecosystem-q3-q4-2025-6-месяцев)
-6. [📅 Timeline Summary](#-timeline-summary)
+5. [🔬 Версия 3.5 — LLVM-inspired Static Analysis](#-версия-35--llvm-inspired-static-analysis-q2-2025-4-6-недель)
+6. [🌐 Версия 4.0 — Collaboration & Ecosystem](#-версия-40--collaboration--ecosystem-q3-q4-2025-6-месяцев)
+7. [📅 Timeline Summary](#-timeline-summary)
 
 ---
 
@@ -2655,6 +2656,624 @@ pub fn new<'b>(
 
 ---
 
+## 🔬 Версия 3.5 — "LLVM-inspired Static Analysis" (Q2 2025: 4-6 недель)
+
+**Цель:** Внедрить продвинутый статический анализ кода BSL по мотивам LLVM/Clang Static Analyzer
+
+**Философия:** Использовать проверенные подходы из LLVM экосистемы для создания мощного статического анализатора 1С кода без использования самого LLVM IR (который слишком низкоуровневый для динамического языка 1С).
+
+**Контекст:**
+LLVM (Low Level Virtual Machine) — это компиляторная инфраструктура, которая включает:
+- LLVM Core — backend для оптимизации и генерации кода
+- Clang — C/C++ компилятор с мощным статическим анализатором
+- LLDB — debugger (используется в Milestone 4.4 через CodeLLDB)
+
+Rust компилятор (rustc) использует LLVM backend для генерации машинного кода. Многие идеи из Clang Static Analyzer можно адаптировать для BSL.
+
+---
+
+### 📊 Milestone 5.0: Advanced Static Analysis (по мотивам LLVM)
+
+**Приоритет:** 🟡 СРЕДНИЙ — значительное улучшение качества статического анализа
+
+**Проблема:**
+Текущий TypeResolver проверяет только типы. Нужны более глубокие анализы:
+- Null Safety — обнаружение обращений к `Неопределено` до runtime
+- Dead Code Detection — неиспользуемые переменные/функции/недостижимый код
+- Control Flow Analysis — анализ путей выполнения
+- Data Flow Analysis — отслеживание изменений переменных
+
+**Вдохновение:** Clang Static Analyzer использует Analysis Passes — независимые проходы по AST/IR для различных видов анализа.
+
+#### Архитектура: Analysis Pipeline
+
+**Концепция:**
+```
+BSL код → Tree-sitter AST → Semantic IR → Analysis Passes → Diagnostics
+                                              ↓
+                                    [Pass 1: Type Safety]
+                                    [Pass 2: Null Safety]
+                                    [Pass 3: Dead Code]
+                                    [Pass 4: Control Flow]
+                                    [Pass 5: Data Flow]
+```
+
+**Преимущества подхода:**
+- ✅ Модульность — каждый pass независим (как в LLVM)
+- ✅ Масштабируемость — легко добавлять новые passes
+- ✅ Переиспользование — passes работают с единым Semantic IR
+- ✅ Производительность — можно распараллелить (rayon)
+
+#### Задачи:
+
+**Task 1: Архитектура Analysis Pipeline (3-4 дня)**
+
+Создать базовую инфраструктуру для analysis passes:
+
+```rust
+// backend/src/analysis/mod.rs
+pub mod pass;           // Trait для analysis passes
+pub mod pipeline;       // Pipeline для выполнения passes
+pub mod null_safety;    // Pass для null safety
+pub mod dead_code;      // Pass для dead code
+pub mod control_flow;   // Pass для control flow
+pub mod data_flow;      // Pass для data flow
+
+// backend/src/analysis/pass.rs
+use crate::semantic_ir::SemanticProgram;
+use crate::types::Diagnostic;
+
+/// Trait для analysis pass (аналог LLVM Pass)
+pub trait AnalysisPass: Send + Sync {
+    /// Имя pass (для логирования/отладки)
+    fn name(&self) -> &str;
+
+    /// Запуск анализа на Semantic IR
+    fn run(&self, program: &SemanticProgram) -> Vec<Diagnostic>;
+
+    /// Приоритет (порядок выполнения в pipeline)
+    /// Lower number = higher priority
+    fn priority(&self) -> u32 {
+        100
+    }
+}
+
+// backend/src/analysis/pipeline.rs
+pub struct AnalysisPipeline {
+    passes: Vec<Box<dyn AnalysisPass>>,
+}
+
+impl AnalysisPipeline {
+    pub fn new() -> Self {
+        Self {
+            passes: vec![
+                Box::new(TypeSafetyPass),      // Priority 10
+                Box::new(NullSafetyPass),      // Priority 20
+                Box::new(DeadCodePass),        // Priority 30
+                Box::new(ControlFlowPass),     // Priority 40
+                Box::new(DataFlowPass),        // Priority 50
+            ],
+        }
+    }
+
+    /// Запуск всех passes с сортировкой по priority
+    pub fn run(&self, program: &SemanticProgram) -> Vec<Diagnostic> {
+        let mut sorted_passes = self.passes.clone();
+        sorted_passes.sort_by_key(|p| p.priority());
+
+        let mut all_diagnostics = vec![];
+        for pass in sorted_passes {
+            tracing::debug!("Running analysis pass: {}", pass.name());
+            let diagnostics = pass.run(program);
+            all_diagnostics.extend(diagnostics);
+        }
+
+        all_diagnostics
+    }
+
+    /// Параллельный запуск passes (для больших проектов)
+    pub fn run_parallel(&self, program: &SemanticProgram) -> Vec<Diagnostic> {
+        use rayon::prelude::*;
+
+        self.passes.par_iter()
+            .flat_map(|pass| pass.run(program))
+            .collect()
+    }
+}
+```
+
+**Интеграция с TypeSystemService:**
+```rust
+// backend/src/application/type_system_service.rs
+impl TypeSystemService {
+    pub fn analyze_with_advanced_passes(&self, code: &str) -> Result<AnalysisReport> {
+        // 1. Парсинг в Semantic IR (уже есть)
+        let program = self.parse(code)?;
+
+        // 2. Запуск Type Safety (уже есть в TypeResolver)
+        let type_diagnostics = self.type_resolver.validate(&program)?;
+
+        // 3. Запуск Advanced Analysis Pipeline (новое!)
+        let pipeline = AnalysisPipeline::new();
+        let advanced_diagnostics = pipeline.run(&program);
+
+        // 4. Объединение результатов
+        Ok(AnalysisReport {
+            type_diagnostics,
+            advanced_diagnostics,
+            summary: self.generate_summary(),
+        })
+    }
+}
+```
+
+---
+
+**Task 2: Null Safety Analysis Pass (4-5 дней)**
+
+**Цель:** Обнаружить потенциальные NullPointerException на этапе анализа
+
+**Примеры проблем:**
+```bsl
+// Пример 1: Прямое использование Неопределено
+Переменная = Неопределено;
+Переменная.Метод();  // ❌ Runtime ошибка!
+
+// Пример 2: Необработанный результат функции
+Результат = НайтиПоИдентификатору(ИД);  // может вернуть Неопределено
+Результат.Удалить();  // ❌ Потенциальная ошибка
+
+// Пример 3: Условный null
+Если УсловиеВыполнено Тогда
+    Переменная = НовыйОбъект();
+КонецЕсли;
+Переменная.Сохранить();  // ❌ Переменная может быть Неопределено
+```
+
+**Реализация:**
+```rust
+// backend/src/analysis/null_safety.rs
+pub struct NullSafetyPass;
+
+impl AnalysisPass for NullSafetyPass {
+    fn name(&self) -> &str {
+        "Null Safety Analysis"
+    }
+
+    fn priority(&self) -> u32 {
+        20  // После Type Safety (10)
+    }
+
+    fn run(&self, program: &SemanticProgram) -> Vec<Diagnostic> {
+        let mut diagnostics = vec![];
+        let null_tracker = NullTracker::new();
+
+        // Проходим по всем statements
+        for stmt in &program.statements {
+            match stmt {
+                Statement::Assignment { target, value, span } => {
+                    // Отслеживаем присвоения Неопределено
+                    if self.is_undefined(value) {
+                        null_tracker.mark_as_nullable(target);
+                    }
+                }
+                Statement::MethodCall { receiver, method, span } => {
+                    // Проверяем, может ли receiver быть null
+                    if null_tracker.is_potentially_null(receiver) {
+                        diagnostics.push(Diagnostic::warning(
+                            format!("Потенциальное обращение к Неопределено: {}.{}()",
+                                   receiver, method),
+                            *span,
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        diagnostics
+    }
+}
+
+/// Трекер для отслеживания nullable переменных
+struct NullTracker {
+    nullable_vars: HashSet<String>,
+}
+
+impl NullTracker {
+    fn mark_as_nullable(&mut self, var: &str) {
+        self.nullable_vars.insert(var.to_string());
+    }
+
+    fn is_potentially_null(&self, var: &str) -> bool {
+        self.nullable_vars.contains(var)
+    }
+}
+```
+
+**Тесты:**
+```rust
+#[test]
+fn test_null_safety_direct_undefined() {
+    let code = r#"
+        Переменная = Неопределено;
+        Переменная.Метод();
+    "#;
+
+    let diagnostics = run_null_safety_pass(code);
+    assert_eq!(diagnostics.len(), 1);
+    assert!(diagnostics[0].message.contains("Потенциальное обращение к Неопределено"));
+}
+
+#[test]
+fn test_null_safety_function_result() {
+    let code = r#"
+        Результат = ПолучитьДанные();  // может вернуть Неопределено
+        Результат.Обработать();
+    "#;
+
+    let diagnostics = run_null_safety_pass(code);
+    // Должно быть предупреждение о потенциальном null
+}
+```
+
+**Результат:**
+- ✅ Обнаружение ~80% потенциальных NullPointerException
+- ✅ Предупреждения в LSP Diagnostics
+- ✅ Quick Fix: "Add null check" (генерация `Если Переменная <> Неопределено Тогда`)
+
+---
+
+**Task 3: Dead Code Detection Pass (3-4 дня)**
+
+**Цель:** Найти неиспользуемый код (переменные, функции, недостижимые блоки)
+
+**Примеры проблем:**
+```bsl
+// Пример 1: Неиспользуемая переменная
+Переменная = 10;
+// Переменная нигде не используется
+
+// Пример 2: Недостижимый код после Возврат
+Функция Пример()
+    Возврат Истина;
+    Сообщить("Этот код никогда не выполнится");  // ❌ Dead code
+КонецФункции
+
+// Пример 3: Неиспользуемая функция
+Функция НеиспользуемаяФункция()  // ❌ Никто не вызывает
+    Возврат 42;
+КонецФункции
+```
+
+**Реализация:**
+```rust
+// backend/src/analysis/dead_code.rs
+pub struct DeadCodePass;
+
+impl AnalysisPass for DeadCodePass {
+    fn name(&self) -> &str {
+        "Dead Code Detection"
+    }
+
+    fn priority(&self) -> u32 {
+        30
+    }
+
+    fn run(&self, program: &SemanticProgram) -> Vec<Diagnostic> {
+        let mut diagnostics = vec![];
+
+        // 1. Найти неиспользуемые переменные
+        diagnostics.extend(self.find_unused_variables(program));
+
+        // 2. Найти недостижимый код
+        diagnostics.extend(self.find_unreachable_code(program));
+
+        // 3. Найти неиспользуемые функции
+        diagnostics.extend(self.find_unused_functions(program));
+
+        diagnostics
+    }
+}
+
+impl DeadCodePass {
+    fn find_unused_variables(&self, program: &SemanticProgram) -> Vec<Diagnostic> {
+        let mut diagnostics = vec![];
+        let usage_tracker = VariableUsageTracker::new();
+
+        // Собираем все объявления и использования
+        for stmt in &program.statements {
+            usage_tracker.visit(stmt);
+        }
+
+        // Находим переменные, которые объявлены но не используются
+        for (var_name, declaration_span) in usage_tracker.declarations() {
+            if !usage_tracker.is_used(var_name) {
+                diagnostics.push(Diagnostic::warning(
+                    format!("Неиспользуемая переменная: {}", var_name),
+                    declaration_span,
+                ));
+            }
+        }
+
+        diagnostics
+    }
+
+    fn find_unreachable_code(&self, program: &SemanticProgram) -> Vec<Diagnostic> {
+        let mut diagnostics = vec![];
+
+        for func in &program.functions {
+            let mut found_return = false;
+
+            for stmt in &func.body {
+                if found_return {
+                    diagnostics.push(Diagnostic::warning(
+                        "Недостижимый код после Возврат".to_string(),
+                        stmt.span(),
+                    ));
+                }
+
+                if matches!(stmt, Statement::Return { .. }) {
+                    found_return = true;
+                }
+            }
+        }
+
+        diagnostics
+    }
+
+    fn find_unused_functions(&self, program: &SemanticProgram) -> Vec<Diagnostic> {
+        // Найти функции, на которые нет ссылок
+        // (сложнее - требует call graph analysis)
+        vec![]
+    }
+}
+```
+
+**Результат:**
+- ✅ Обнаружение неиспользуемых переменных
+- ✅ Обнаружение недостижимого кода
+- ✅ Quick Fix: "Remove unused variable/code"
+- ✅ Улучшение качества кода на ~15-20%
+
+---
+
+**Task 4: Control Flow Analysis Pass (5-6 дней)**
+
+**Цель:** Анализ путей выполнения программы
+
+**Примеры проблем:**
+```bsl
+// Пример 1: Неинициализированная переменная на одном из путей
+Если Условие Тогда
+    Переменная = 10;
+КонецЕсли;
+// Если Условие = Ложь, Переменная не инициализирована
+Результат = Переменная + 5;  // ❌ Потенциальная ошибка
+
+// Пример 2: Функция не всегда возвращает значение
+Функция ПолучитьЗначение(Параметр)
+    Если Параметр > 0 Тогда
+        Возврат Параметр * 2;
+    КонецЕсли;
+    // ❌ Нет возврата при Параметр <= 0
+КонецФункции
+
+// Пример 3: Бесконечный цикл
+Пока Истина Цикл
+    Сообщить("Бесконечный цикл");
+    // Нет break или return
+КонецЦикла;
+Сообщить("Этот код недостижим");
+```
+
+**Реализация:**
+```rust
+// backend/src/analysis/control_flow.rs
+pub struct ControlFlowPass;
+
+impl AnalysisPass for ControlFlowPass {
+    fn name(&self) -> &str {
+        "Control Flow Analysis"
+    }
+
+    fn priority(&self) -> u32 {
+        40
+    }
+
+    fn run(&self, program: &SemanticProgram) -> Vec<Diagnostic> {
+        let mut diagnostics = vec![];
+
+        // 1. Построить Control Flow Graph (CFG)
+        let cfg = ControlFlowGraph::build(program);
+
+        // 2. Анализ путей выполнения
+        diagnostics.extend(self.analyze_uninitialized_variables(&cfg));
+        diagnostics.extend(self.analyze_missing_returns(&cfg));
+        diagnostics.extend(self.analyze_infinite_loops(&cfg));
+
+        diagnostics
+    }
+}
+
+/// Control Flow Graph
+struct ControlFlowGraph {
+    nodes: Vec<CfgNode>,
+    edges: Vec<(usize, usize)>,  // (from, to)
+}
+
+enum CfgNode {
+    Entry,
+    Statement(Statement),
+    Branch { condition: Expression, true_branch: usize, false_branch: usize },
+    Loop { body: usize, exit: usize },
+    Exit,
+}
+
+impl ControlFlowGraph {
+    fn build(program: &SemanticProgram) -> Self {
+        // Построение CFG из statements
+        // Аналогично LLVM BasicBlock и PHI nodes (но проще)
+        todo!("Implement CFG construction")
+    }
+}
+```
+
+**Алгоритмы:**
+- **Reaching Definitions** — какие переменные определены на каждом пути
+- **Live Variables** — какие переменные используются после текущей точки
+- **Dominators** — какие узлы обязательно выполняются
+
+**Результат:**
+- ✅ Обнаружение неинициализированных переменных на ~90% путей
+- ✅ Проверка полноты return в функциях
+- ✅ Предупреждения о потенциально бесконечных циклах
+
+---
+
+**Task 5: Data Flow Analysis Pass (опционально, 4-5 дней)**
+
+**Цель:** Отслеживание изменений значений переменных
+
+**Примеры проблем:**
+```bsl
+// Пример 1: Перезапись без использования
+Переменная = ПолучитьДанные();  // Дорогая операция
+Переменная = 10;  // ❌ Предыдущее значение не использовалось
+
+// Пример 2: Use after free (для объектных переменных)
+Объект = НовыйОбъект();
+Объект.Удалить();
+Объект.Метод();  // ❌ Использование после удаления
+```
+
+**Результат:**
+- ✅ Обнаружение неэффективных перезаписей
+- ✅ Обнаружение use-after-free для объектных переменных
+- ✅ Оптимизация производительности кода
+
+---
+
+**Task 6: Интеграция с LSP и VSCode Extension (2-3 дня)**
+
+**Цель:** Показывать результаты анализа в редакторе
+
+**LSP Integration:**
+```rust
+// lsp-server/src/handlers/diagnostics.rs
+impl LspServer {
+    pub async fn send_advanced_diagnostics(&self, uri: &Url, code: &str) {
+        let analysis_report = self.type_service.analyze_with_advanced_passes(code)?;
+
+        let lsp_diagnostics: Vec<LspDiagnostic> = analysis_report
+            .advanced_diagnostics
+            .into_iter()
+            .map(|d| LspDiagnostic {
+                range: d.span.to_lsp_range(),
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: Some(d.code.into()),
+                source: Some("bsl-advanced-analysis".to_string()),
+                message: d.message,
+                ..Default::default()
+            })
+            .collect();
+
+        self.client.publish_diagnostics(uri.clone(), lsp_diagnostics, None).await;
+    }
+}
+```
+
+**VSCode Extension:**
+```typescript
+// extension/src/features/advancedAnalysis.ts
+export class AdvancedAnalysisProvider {
+    async analyzeDocument(document: vscode.TextDocument): Promise<void> {
+        // Запрос к LSP для advanced analysis
+        const diagnostics = await this.client.sendRequest(
+            'bsl/analyzeAdvanced',
+            { uri: document.uri.toString() }
+        );
+
+        // Отображение в Problems panel
+        this.diagnosticCollection.set(document.uri, diagnostics);
+    }
+}
+```
+
+**Результат:**
+- ✅ Все advanced diagnostics в Problems panel
+- ✅ Цветовая кодировка по severity (error/warning/info)
+- ✅ Quick Fixes для распространённых проблем
+- ✅ Настройка через VSCode Settings: `bsl.analysis.enableAdvanced`
+
+---
+
+#### Тестирование:
+
+**Unit-тесты:**
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_null_safety_pass() {
+        let code = "Переменная = Неопределено; Переменная.Метод();";
+        let diagnostics = run_analysis_pass::<NullSafetyPass>(code);
+        assert_eq!(diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn test_dead_code_pass() {
+        let code = "Функция F() Возврат 1; Сообщить('dead'); КонецФункции";
+        let diagnostics = run_analysis_pass::<DeadCodePass>(code);
+        assert!(diagnostics.iter().any(|d| d.message.contains("Недостижимый")));
+    }
+
+    #[test]
+    fn test_control_flow_pass() {
+        let code = "Функция F(X) Если X > 0 Тогда Возврат X; КонецЕсли; КонецФункции";
+        let diagnostics = run_analysis_pass::<ControlFlowPass>(code);
+        // Должно быть предупреждение о missing return
+    }
+}
+```
+
+**Integration тесты:**
+```bash
+cargo test -p bsl-backend --test advanced_analysis_integration
+```
+
+---
+
+#### Результаты Milestone 5.0:
+
+**Технические метрики:**
+- ✅ 5 новых analysis passes (Null Safety, Dead Code, Control Flow, Data Flow, Type Safety)
+- ✅ Analysis Pipeline архитектура (модульная, расширяемая)
+- ✅ 50+ unit-тестов для каждого pass
+- ✅ Интеграция с LSP (real-time diagnostics)
+- ✅ Quick Fixes для 80% найденных проблем
+
+**Пользовательские метрики:**
+- ✅ Обнаружение ~80% потенциальных NullPointerException до runtime
+- ✅ Обнаружение ~90% dead code и неиспользуемых переменных
+- ✅ Обнаружение ~85% проблем с control flow (неинициализированные переменные, missing returns)
+- ✅ Улучшение качества кода на 20-30% (по метрикам code quality)
+- ✅ Сокращение runtime ошибок на 40-50%
+
+**Производительность:**
+- ⚡ Анализ файла < 50ms (для файлов ~500 строк)
+- ⚡ Параллельный анализ workspace (1000 файлов) < 2 минуты
+- ⚡ Real-time diagnostics с latency < 100ms
+
+**Документация:**
+- 📚 Руководство: "LLVM-inspired Analysis для BSL" (15-20 страниц)
+- 📚 API документация для создания custom passes
+- 📚 Примеры: 10 кейсов использования advanced analysis
+
+---
+
 ## 🌐 Версия 4.0 — "Collaboration & Ecosystem" (Q3-Q4 2025: 6 месяцев)
 
 **Цель:** Создать экосистему для совместной разработки на 1С
@@ -3519,6 +4138,7 @@ Claude: "Отладим баг с hover на методах"
 | **1.0** (текущая) | Завершена | - | MVP: LSP, Валидация, VSCode Extension |
 | **2.0** | Q1 2025 | 3 месяца | Tree-sitter, Flow-sensitive, Union/Generic Types |
 | **3.0** | Q2 2025 | 3 месяца | Code Intelligence, Refactorings, Static Analysis |
+| **3.5** | Q2 2025 | 4-6 недель | LLVM-inspired Analysis Pipeline, Null Safety, Dead Code, Control Flow |
 | **4.0** | Q3-Q4 2025 | 6 месяцев | Web Platform, Team Features, AI Assistant |
 
 ---
@@ -3536,6 +4156,12 @@ Claude: "Отладим баг с hover на методах"
 - ✅ 200+ GitHub stars
 - ✅ 90% positive reviews
 - ✅ Топ-3 в VS Code Marketplace для 1С
+
+### Версия 3.5 — LLVM-inspired Static Analysis
+- ✅ Обнаружение 80% потенциальных NullPointerException
+- ✅ Сокращение runtime ошибок на 40-50%
+- ✅ Улучшение качества кода на 20-30%
+- ✅ Положительные отзывы от enterprise пользователей
 
 ### Версия 4.0 — Collaboration & Ecosystem
 - ✅ 20000+ активных пользователей

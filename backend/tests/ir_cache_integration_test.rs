@@ -40,7 +40,7 @@ async fn test_ir_cache_hit_vs_miss() {
     // Первый hover - cache MISS (должен парсить файл)
     let start1 = Instant::now();
     let hover1 = service
-        .get_hover_info(code, 2, 4)
+        .get_hover_info(code, 2, 4, None)
         .await
         .expect("First hover failed");
     let duration1 = start1.elapsed();
@@ -51,7 +51,7 @@ async fn test_ir_cache_hit_vs_miss() {
     // Второй hover - cache HIT (должен быть мгновенным)
     let start2 = Instant::now();
     let hover2 = service
-        .get_hover_info(code, 2, 4)
+        .get_hover_info(code, 2, 4, None)
         .await
         .expect("Second hover failed");
     let duration2 = start2.elapsed();
@@ -110,13 +110,13 @@ async fn test_ir_cache_different_files() {
 
     // Hover на первом файле
     let _hover1 = service
-        .get_hover_info(code1, 2, 4)
+        .get_hover_info(code1, 2, 4, None)
         .await
         .expect("Hover on code1 failed");
 
     // Hover на втором файле (другой content hash)
     let _hover2 = service
-        .get_hover_info(code2, 2, 4)
+        .get_hover_info(code2, 2, 4, None)
         .await
         .expect("Hover on code2 failed");
 
@@ -151,7 +151,7 @@ async fn test_ir_cache_modified_file() {
 
     // Первый hover - cache MISS (v1)
     let _hover1 = service
-        .get_hover_info(code_v1, 2, 4)
+        .get_hover_info(code_v1, 2, 4, None)
         .await
         .expect("Hover on v1 failed");
 
@@ -162,7 +162,7 @@ async fn test_ir_cache_modified_file() {
 
     // Второй hover - должен быть cache MISS (файл изменился)
     let hover2 = service
-        .get_hover_info(code_v2, 2, 4)
+        .get_hover_info(code_v2, 2, 4, None)
         .await
         .expect("Hover on v2 failed");
 
@@ -171,7 +171,7 @@ async fn test_ir_cache_modified_file() {
 
     // Третий hover на том же файле (code_v2) - должен быть cache HIT
     let hover3 = service
-        .get_hover_info(code_v2, 2, 4)
+        .get_hover_info(code_v2, 2, 4, None)
         .await
         .expect("Hover on v2 (repeated) failed");
 
@@ -207,12 +207,12 @@ async fn test_ir_cache_performance_target() {
 
     // Первый hover - cache MISS
     let start1 = Instant::now();
-    let _hover1 = service.get_hover_info(code, 2, 4).await.unwrap();
+    let _hover1 = service.get_hover_info(code, 2, 4, None).await.unwrap();
     let duration1 = start1.elapsed();
 
     // Второй hover - cache HIT
     let start2 = Instant::now();
-    let _hover2 = service.get_hover_info(code, 2, 4).await.unwrap();
+    let _hover2 = service.get_hover_info(code, 2, 4, None).await.unwrap();
     let duration2 = start2.elapsed();
 
     println!("Performance test:");

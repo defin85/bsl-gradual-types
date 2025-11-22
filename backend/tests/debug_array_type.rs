@@ -27,7 +27,7 @@ async fn debug_array_type_resolution() {
 
     println!("=== Testing hover for Array type ===");
     let hover_result = type_service
-        .get_hover_info(source, 3, 10)
+        .get_hover_info(source, 3, 10, None)
         .await
         .expect("get_hover_info failed");
 

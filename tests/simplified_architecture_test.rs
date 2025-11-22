@@ -177,7 +177,7 @@ async fn test_simplified_architecture_flow() {
     // 3. Тестируем unified API для всех Presentation Layer компонентов
 
     // LSP functionality
-    let hover_result = type_service.get_hover_info("test.bsl", 1, 5).await;
+    let hover_result = type_service.get_hover_info("test.bsl", 1, 5, None).await;
     assert!(hover_result.is_ok(), "LSP hover should work");
 
     // Web functionality

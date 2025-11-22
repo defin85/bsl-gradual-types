@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
 КонецФункции
 "#;
 
-    match type_service.get_hover_info(bsl_code, 2, 5).await {
+    match type_service.get_hover_info(bsl_code, 2, 5, None).await {
         Ok(Some(info)) => println!("  ✅ Hover: {}", info),
         Ok(None) => println!("  ❌ Hover: информация не найдена"),
         Err(e) => println!("  ❌ Hover error: {}", e),

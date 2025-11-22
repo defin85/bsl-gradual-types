@@ -141,7 +141,7 @@ pub async fn get_hover(
 
     match state
         .type_service
-        .get_hover_info(&req.code, req.line, req.column)
+        .get_hover_info(&req.code, req.line, req.column, None)
         .await
     {
         Ok(hover_text) => {
@@ -242,7 +242,7 @@ pub async fn get_enhanced_hover(
 
     match state
         .type_service
-        .get_hover_info(&req.code, req.line, req.column)
+        .get_hover_info(&req.code, req.line, req.column, None)
         .await
     {
         Ok(hover_text) => {

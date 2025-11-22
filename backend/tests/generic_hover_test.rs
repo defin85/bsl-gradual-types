@@ -41,7 +41,7 @@ async fn test_generic_tabular_section_hover() {
 
     // Hover на переменной "ТабличнаяЧасть" (строка 2)
     let hover = service
-        .get_hover_info(code, 2, 5)
+        .get_hover_info(code, 2, 5, None)
         .await
         .expect("get_hover_info should succeed");
 
@@ -81,7 +81,7 @@ async fn test_generic_array_hover() {
 
     // Hover на переменной "МойМассив" (строка 2)
     let hover = service
-        .get_hover_info(code, 2, 5)
+        .get_hover_info(code, 2, 5, None)
         .await
         .expect("get_hover_info should succeed");
 
@@ -123,7 +123,7 @@ async fn test_generic_method_return_type() {
 
     // Hover на переменной "Элемент" (строка 6)
     let hover = service
-        .get_hover_info(code, 6, 5)
+        .get_hover_info(code, 6, 5, None)
         .await
         .expect("get_hover_info should succeed");
 
@@ -154,7 +154,7 @@ async fn test_format_generic_hover_directly() {
     "#;
 
     let service = setup_type_system_service().await;
-    let hover = service.get_hover_info(code, 2, 5).await.unwrap();
+    let hover = service.get_hover_info(code, 2, 5, None).await.unwrap();
 
     if let Some(hover_text) = hover {
         // Проверяем структуру hover:

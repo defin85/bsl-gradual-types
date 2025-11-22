@@ -98,7 +98,7 @@ async fn main() -> Result<()> {
 "#;
     
     let start = Instant::now();
-    match type_service.get_hover_info(test_code, 2, 5).await {
+    match type_service.get_hover_info(test_code, 2, 5, None).await {
         Ok(Some(info)) => {
             let hover_time = start.elapsed();
             println!("      ✅ Hover работает за {:?}: {}", hover_time, info);

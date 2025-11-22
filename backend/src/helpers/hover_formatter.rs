@@ -38,6 +38,7 @@
 
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::types::{Certainty, ResolutionResult, TypeResolution};
+use bsl_shared::formatting::DetailLevel; // MILESTONE 3.6 Phase 1
 
 /// Формат вывода hover информации
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +69,12 @@ pub struct HoverFormatConfig {
     pub max_methods: usize,
     /// Максимальное количество свойств для отображения
     pub max_properties: usize,
+    /// MILESTONE 3.6 Phase 1: Уровень детализации (compact/full/detailed)
+    pub detail_level: DetailLevel,
+    /// MILESTONE 3.6 Phase 1: Показывать ли уверенность в типе (🟢🟡⚪)
+    pub show_certainty: bool,
+    /// MILESTONE 3.6 Phase 2 - Task 2.3: Путь к Syntax Helper для документации
+    pub syntax_helper_path: Option<std::path::PathBuf>,
     /// Формат вывода
     pub output_format: OutputFormat,
     /// Тема оформления
@@ -81,6 +88,9 @@ impl Default for HoverFormatConfig {
         Self {
             max_methods: 10,
             max_properties: 5,
+            detail_level: DetailLevel::Full,
+            show_certainty: true,
+            syntax_helper_path: None, // По умолчанию нет
             output_format: OutputFormat::Markdown,
             theme: Theme::Dark,
             locale: Locale::Ru,
@@ -104,6 +114,7 @@ impl Default for HoverFormatConfig {
 ///
 /// let formatter = HoverFormatter::new(config, metadata_lookup);
 /// ```
+#[derive(Clone)] // MILESTONE 3.6 Phase 1: Нужен Clone для fallback
 pub struct HoverFormatter {
     config: HoverFormatConfig,
     metadata_lookup: TypeMetadataLookup,
@@ -208,8 +219,11 @@ impl HoverFormatter {
                 .build();
         }
 
-        // Если нет метаданных — показываем предупреждение
-        if !has_metadata {
+        // MILESTONE 3.6 Phase 2: Generic типы могут показывать информацию даже без метаданных
+        let is_generic = matches!(resolution.result, ResolutionResult::Generic(_));
+
+        // Если нет метаданных И это НЕ Generic тип — показываем предупреждение
+        if !has_metadata && !is_generic {
             return HoverBuilder::new(&self.config)
                 .add_header("Переменная", name)
                 .add_type_info(resolution)
@@ -219,14 +233,39 @@ impl HoverFormatter {
                 .build();
         }
 
-        // Полный hover с методами и свойствами
-        HoverBuilder::new(&self.config)
-            .add_header("Переменная", name)
-            .add_type_info(resolution)
-            .add_certainty(&resolution.certainty)
-            .add_methods(resolution, &self.metadata_lookup)
-            .add_properties(resolution, &self.metadata_lookup)
-            .build()
+        // MILESTONE 3.6 Phase 1: Выбор формата в зависимости от detail_level
+        match self.config.detail_level {
+            DetailLevel::Compact => {
+                // Только тип + certainty (если включено)
+                HoverBuilder::new(&self.config)
+                    .add_header("Переменная", name)
+                    .add_type_info(resolution)
+                    .add_certainty(&resolution.certainty)
+                    .build()
+            }
+            DetailLevel::Full => {
+                // Тип + методы (до max_methods)
+                HoverBuilder::new(&self.config)
+                    .add_header("Переменная", name)
+                    .add_type_info(resolution)
+                    .add_certainty(&resolution.certainty)
+                    .add_methods(resolution, &self.metadata_lookup)
+                    .build()
+            }
+            DetailLevel::Detailed => {
+                // Полный hover с методами, свойствами, фасетами и документацией (Phase 2)
+                HoverBuilder::new(&self.config)
+                    .add_header("Переменная", name)
+                    .add_type_info(resolution)
+                    .add_certainty(&resolution.certainty)
+                    .add_facet_info(resolution)              // ← MILESTONE 3.6 Phase 2: Task 2.1
+                    .add_generic_info(resolution)            // ← MILESTONE 3.6 Phase 2: Task 2.2
+                    .add_methods(resolution, &self.metadata_lookup)
+                    .add_properties(resolution, &self.metadata_lookup)
+                    .add_documentation_links(resolution)    // ← MILESTONE 3.6 Phase 2: Task 2.4
+                    .build()
+            }
+        }
     }
 
     /// Форматировать hover для функции (stub для будущего)
@@ -311,6 +350,11 @@ impl<'a> HoverBuilder<'a> {
     }
 
     fn add_certainty(self, certainty: &Certainty) -> Self {
+        // MILESTONE 3.6 Phase 1: Показывать certainty только если включено
+        if !self.config.show_certainty {
+            return self;
+        }
+
         let certainty_str = match certainty {
             Certainty::Known => "🟢 Known (100%)".to_string(),
             Certainty::Inferred(conf) => {
@@ -340,40 +384,68 @@ impl<'a> HoverBuilder<'a> {
             )];
 
             for method in methods.iter().take(display_count) {
-                // Форматирование параметров
-                let params_str = method
-                    .params
-                    .iter()
-                    .map(|p| {
-                        let optional_marker = if p.is_optional { "?" } else { "" };
-                        let default_suffix = p
-                            .default_value
-                            .as_ref()
-                            .map(|v| format!(" = {}", v))
-                            .unwrap_or_default();
-                        format!(
-                            "{}{}: {}{}",
-                            p.name, optional_marker, p.param_type, default_suffix
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-
-                // Форматирование возвращаемого типа
+                // MILESTONE 3.6 Phase 1: Multiline formatting для методов с 4+ параметров
+                let param_count = method.params.len();
                 let return_str = if method.return_type.is_empty() {
                     "void".to_string()
                 } else {
                     method.return_type.clone()
                 };
 
-                let line = match self.config.output_format {
-                    OutputFormat::Markdown => {
-                        format!("• **{}({})** → {}", method.name, params_str, return_str)
+                let line = if param_count >= 4 {
+                    // Multiline формат для методов с 4+ параметров
+                    let mut result = match self.config.output_format {
+                        OutputFormat::Markdown => format!("• **{}**(\n", method.name),
+                        OutputFormat::PlainText => format!("  - {}(\n", method.name),
+                    };
+
+                    for (i, param) in method.params.iter().enumerate() {
+                        let optional_marker = if param.is_optional { "?" } else { "" };
+                        let default_suffix = param
+                            .default_value
+                            .as_ref()
+                            .map(|v| format!(" = {}", v))
+                            .unwrap_or_default();
+                        let comma = if i < param_count - 1 { "," } else { "" };
+
+                        result.push_str(&format!(
+                            "    {}{}: {}{}{}\n",
+                            param.name, optional_marker, param.param_type, default_suffix, comma
+                        ));
                     }
-                    OutputFormat::PlainText => {
-                        format!("  - {}({}) → {}", method.name, params_str, return_str)
+
+                    result.push_str(&format!("  ) → {}", return_str));
+                    result
+                } else {
+                    // Inline формат для методов с < 4 параметров
+                    let params_str = method
+                        .params
+                        .iter()
+                        .map(|p| {
+                            let optional_marker = if p.is_optional { "?" } else { "" };
+                            let default_suffix = p
+                                .default_value
+                                .as_ref()
+                                .map(|v| format!(" = {}", v))
+                                .unwrap_or_default();
+                            format!(
+                                "{}{}: {}{}",
+                                p.name, optional_marker, p.param_type, default_suffix
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    match self.config.output_format {
+                        OutputFormat::Markdown => {
+                            format!("• **{}({})** → {}", method.name, params_str, return_str)
+                        }
+                        OutputFormat::PlainText => {
+                            format!("  - {}({}) → {}", method.name, params_str, return_str)
+                        }
                     }
                 };
+
                 method_lines.push(line);
             }
 
@@ -429,6 +501,174 @@ impl<'a> HoverBuilder<'a> {
         }
 
         self
+    }
+
+    /// MILESTONE 3.6 Phase 2 - Task 2.1: Добавить информацию о фасете (только для Detailed level)
+    fn add_facet_info(mut self, resolution: &TypeResolution) -> Self {
+        // Только для Detailed уровня
+        if !matches!(self.config.detail_level, DetailLevel::Detailed) {
+            return self;
+        }
+
+        // Получить активный фасет
+        if let Some(active_facet) = &resolution.active_facet {
+            let facet_description = match active_facet {
+                bsl_shared::domain::types::FacetKind::Manager => "менеджер объекта",
+                bsl_shared::domain::types::FacetKind::Object => "объект с данными",
+                bsl_shared::domain::types::FacetKind::Reference => "ссылка на элемент",
+                bsl_shared::domain::types::FacetKind::Selection => "выборка элементов",
+                bsl_shared::domain::types::FacetKind::List => "список значений",
+                bsl_shared::domain::types::FacetKind::Metadata => "метаданные объекта",
+                bsl_shared::domain::types::FacetKind::Constructor => "конструктор",
+                bsl_shared::domain::types::FacetKind::Collection => "коллекция",
+                bsl_shared::domain::types::FacetKind::Singleton => "одиночный объект",
+            };
+
+            let facet_info = format!("**Фасет:** {:?} ({})", active_facet, facet_description);
+            self.sections.push(facet_info);
+
+            // Показать доступные фасеты для данного типа
+            if !resolution.available_facets.is_empty() {
+                let facets_str = resolution
+                    .available_facets
+                    .iter()
+                    .map(|f| format!("{:?}", f))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                self.sections.push(format!("💡 **Доступные фасеты:** {}", facets_str));
+            }
+        }
+
+        self
+    }
+
+    /// MILESTONE 3.6 Phase 2 - Task 2.2: Добавить пояснение для Generic типов (только для Detailed level)
+    fn add_generic_info(mut self, resolution: &TypeResolution) -> Self {
+        // Только для Detailed уровня
+        if !matches!(self.config.detail_level, DetailLevel::Detailed) {
+            return self;
+        }
+
+        // Проверить что это Generic тип
+        if let ResolutionResult::Generic(generic) = &resolution.result {
+            let params_str = generic
+                .type_params
+                .iter()
+                .map(|p| format!("{}", p))
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let generic_explanation = format!(
+                "💡 **Generic тип:**\n• Базовый тип: {}\n• Параметры типа: {}",
+                generic.base_type, params_str
+            );
+
+            self.sections.push(generic_explanation);
+
+            // Добавить пояснение что означает Generic тип
+            let explanation = match generic.base_type.as_str() {
+                "Массив" | "Array" => {
+                    "Generic тип означает, что массив содержит элементы определённого типа"
+                }
+                "Соответствие" | "Map" => {
+                    "Generic тип означает, что соответствие хранит пары ключ-значение определённых типов"
+                }
+                "ТаблицаЗначений" | "ValueTable" => {
+                    "Generic тип означает, что строки таблицы содержат данные определённого типа"
+                }
+                "Список" | "List" => {
+                    "Generic тип означает, что список содержит элементы определённого типа"
+                }
+                "Структура" | "Structure" => {
+                    "Generic тип означает, что структура содержит поля определённых типов"
+                }
+                _ => "Generic тип параметризован одним или несколькими типами",
+            };
+
+            self.sections.push(format!("ℹ️ {}", explanation));
+        }
+
+        self
+    }
+
+    /// MILESTONE 3.6 Phase 2 - Task 2.4: Добавить ссылки на документацию (только для Detailed level)
+    fn add_documentation_links(mut self, resolution: &TypeResolution) -> Self {
+        // Только для Detailed уровня
+        if !matches!(self.config.detail_level, DetailLevel::Detailed) {
+            return self;
+        }
+
+        // Получить имя типа для документации
+        let type_name = match self.get_platform_type_name(resolution) {
+            Some(name) => name,
+            None => return self, // Нет типа платформы
+        };
+
+        let mut links = Vec::new();
+
+        // 1. Ссылка на локальный Syntax Helper (если доступен)
+        if let Some(path) = &self.config.syntax_helper_path {
+            let html_path = path.join(format!("{}.html", type_name));
+
+            if html_path.exists() {
+                let file_url = format!("file:///{}", html_path.display());
+                links.push(format!(
+                    "[Синтакс Помощник: {}]({})",
+                    type_name,
+                    file_url.replace("\\", "/") // Windows path fix
+                ));
+            }
+        }
+
+        // 2. Ссылка на онлайн документацию 1С
+        let online_url = format!("https://docs.1c.ru/search?q={}", type_name);
+        links.push(format!("[1С Platform Docs]({})", online_url));
+
+        // Добавить секцию с ссылками
+        if !links.is_empty() {
+            let links_section = format!(
+                "📖 **Документация:**\n{}",
+                links
+                    .iter()
+                    .map(|l| format!("• {}", l))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+
+            self.sections.push(links_section);
+        }
+
+        self
+    }
+
+    /// Получить имя типа платформы для документации
+    fn get_platform_type_name(&self, resolution: &TypeResolution) -> Option<String> {
+        match &resolution.result {
+            ResolutionResult::Concrete(concrete_type) => {
+                use bsl_shared::domain::types::ConcreteType;
+                // Извлечь базовое имя типа
+                match concrete_type {
+                    ConcreteType::Platform(platform) => {
+                        // Для платформенных типов с фасетами извлекаем базовое имя
+                        // Например: "СправочникСсылка" → "СправочникСсылка"
+                        //           "Массив" → "Массив"
+                        Some(platform.name.clone())
+                    }
+                    ConcreteType::Configuration(config) => {
+                        // Для конфигурационных типов используем kind.to_prefix()
+                        // Например: "Справочники.Контрагенты" → "Справочник"
+                        Some(config.kind.to_prefix().trim_end_matches('ы').to_string())
+                    }
+                    _ => None,
+                }
+            }
+            ResolutionResult::Generic(generic) => {
+                // Для Generic типов используем базовый тип
+                Some(generic.base_type.clone())
+            }
+            _ => None,
+        }
     }
 
     fn build(self) -> String {

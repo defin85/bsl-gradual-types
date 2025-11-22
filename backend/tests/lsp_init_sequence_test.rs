@@ -36,7 +36,7 @@ async fn test_lsp_server_init_sequence_with_double_start() {
 "#;
 
     let hover_v1 = type_service_v1
-        .get_hover_info(source_basic, 3, 10)
+        .get_hover_info(source_basic, 3, 10, None)
         .await
         .expect("get_hover_info failed");
 
@@ -126,7 +126,7 @@ async fn test_lsp_server_init_sequence_with_double_start() {
 "#;
 
     let hover_v2 = type_service_v2
-        .get_hover_info(source_reloaded, 3, 10)
+        .get_hover_info(source_reloaded, 3, 10, None)
         .await
         .expect("get_hover_info failed after reload");
 

@@ -54,7 +54,7 @@ async fn test_hover_on_method_call_shows_variable_type() {
 
     // Hover на "ТаблицаТип" в строке 3, позиция 10 (после "    Кол = ")
     let hover_result = service
-        .get_hover_info(code, 3, 10)
+        .get_hover_info(code, 3, 10, None)
         .await
         .expect("Failed to get hover info");
 
@@ -111,7 +111,7 @@ async fn test_hover_on_array_method() {
 
     // Hover на "МассивДанных" в вызове метода (строка 3, позиция 4)
     let hover_result = service
-        .get_hover_info(code, 3, 4)
+        .get_hover_info(code, 3, 4, None)
         .await
         .expect("Failed to get hover info");
 
@@ -160,7 +160,7 @@ async fn test_hover_on_dictionary_method() {
 
     // Hover на "ДанныеСловарь" в вызове метода (строка 3, позиция 4)
     let hover_result = service
-        .get_hover_info(code, 3, 4)
+        .get_hover_info(code, 3, 4, None)
         .await
         .expect("Failed to get hover info");
 
@@ -219,7 +219,7 @@ async fn test_hover_multiple_variables_flow_sensitive() {
 
     // Hover на "МассивДанных" в вызове (строка 6, позиция 4)
     let hover_array = service
-        .get_hover_info(code, 6, 4)
+        .get_hover_info(code, 6, 4, None)
         .await
         .expect("Failed to get hover info");
 
@@ -232,7 +232,7 @@ async fn test_hover_multiple_variables_flow_sensitive() {
 
     // Hover на "СтруктураДанных" в вызове (строка 7, позиция 4)
     let hover_struct = service
-        .get_hover_info(code, 7, 4)
+        .get_hover_info(code, 7, 4, None)
         .await
         .expect("Failed to get hover info");
 
@@ -245,7 +245,7 @@ async fn test_hover_multiple_variables_flow_sensitive() {
 
     // Hover на "ТаблицаЗначений" в вызове (строка 8, позиция 4)
     let hover_table = service
-        .get_hover_info(code, 8, 4)
+        .get_hover_info(code, 8, 4, None)
         .await
         .expect("Failed to get hover info");
 
@@ -283,7 +283,7 @@ async fn test_hover_nested_method_calls() {
 
     // Hover на "МассивДанные" в строке 3, позиция 4
     let hover_result = service
-        .get_hover_info(code, 3, 4)
+        .get_hover_info(code, 3, 4, None)
         .await
         .expect("Failed to get hover info");
 
@@ -329,7 +329,7 @@ async fn test_hover_variable_reassignment() {
 
     // Hover на "Данные" в первом вызове (строка 3, позиция 4)
     let hover_first = service
-        .get_hover_info(code, 3, 4)
+        .get_hover_info(code, 3, 4, None)
         .await
         .expect("Failed to get hover info");
 
@@ -343,7 +343,7 @@ async fn test_hover_variable_reassignment() {
 
     // Hover на "Данные" во втором вызове (строка 6, позиция 4)
     let hover_second = service
-        .get_hover_info(code, 6, 4)
+        .get_hover_info(code, 6, 4, None)
         .await
         .expect("Failed to get hover info");
 
@@ -375,7 +375,7 @@ async fn test_hover_on_method_name() {
 
     // Hover на "Добавить" - имени метода (строка 3, позиция 18)
     let hover_result = service
-        .get_hover_info(code, 3, 18)
+        .get_hover_info(code, 3, 18, None)
         .await
         .expect("Failed to get hover info");
 
@@ -403,7 +403,7 @@ async fn test_hover_with_typed_parameters() {
 
     // Hover на "входДанные" в вызове метода (строка 2, позиция 4)
     let hover_result = service
-        .get_hover_info(code, 2, 4)
+        .get_hover_info(code, 2, 4, None)
         .await
         .expect("Failed to get hover info");
 
@@ -445,14 +445,14 @@ async fn test_hover_performance_meets_milestone_2_13_requirement() {
     "#;
 
     // Первый вызов - парсинг + создание IR (может быть медленнее)
-    let _ = service.get_hover_info(code, 10, 20).await;
+    let _ = service.get_hover_info(code, 10, 20, None).await;
 
     // Последующие вызовы должны использовать IR Cache
     let mut durations = Vec::new();
 
     for _ in 0..50 {
         let start = std::time::Instant::now();
-        let _ = service.get_hover_info(code, 10, 20).await;
+        let _ = service.get_hover_info(code, 10, 20, None).await;
         durations.push(start.elapsed());
     }
 
@@ -477,7 +477,7 @@ async fn test_hover_edge_case_eof() {
     let code = "Процедура Тест()\nКонецПроцедуры";
 
     // Позиция за пределами файла
-    let result = service.get_hover_info(code, 100, 0).await;
+    let result = service.get_hover_info(code, 100, 0, None).await;
 
     assert!(result.is_ok(), "❌ Hover на EOF не должен крашиться");
     // Note: hover на EOF может вернуть Some или None - главное не крашится
@@ -497,7 +497,7 @@ async fn test_hover_edge_case_empty_line() {
     "#;
 
     // Позиция на пустой строке (строка 2)
-    let result = service.get_hover_info(code, 2, 0).await;
+    let result = service.get_hover_info(code, 2, 0, None).await;
 
     assert!(
         result.is_ok(),
@@ -513,7 +513,7 @@ async fn test_hover_edge_case_zero_position() {
     let code = "Процедура Тест()\nКонецПроцедуры";
 
     // Позиция (0, 0) — начало файла
-    let result = service.get_hover_info(code, 0, 0).await;
+    let result = service.get_hover_info(code, 0, 0, None).await;
 
     assert!(result.is_ok(), "❌ Hover на (0,0) не должен крашиться");
 
@@ -546,7 +546,7 @@ async fn test_hover_prioritizes_function_call_over_assignment() {
     // Hover на "ТаблицаТип" (строка 3, колонка 10 - начало переменной после "    Кол = ")
     // Это переменная в вызове метода (объект FunctionCall node)
     let hover_result = service
-        .get_hover_info(code, 3, 10) // line 3 (строка "Кол = ..."), column 10 (начало "ТаблицаТип")
+        .get_hover_info(code, 3, 10, None) // line 3 (строка "Кол = ..."), column 10 (начало "ТаблицаТип")
         .await
         .expect("Failed to get hover info");
 

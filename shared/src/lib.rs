@@ -7,6 +7,7 @@ pub mod analysis; // Milestone 3.7: Type Guards & Narrowing Engine
 pub mod api;
 pub mod domain;
 pub mod engine;
+pub mod formatting; // Milestone 3.6 Phase 1: DetailLevel enum для hover
 pub mod ir; // Milestone 2.8: Intermediate Representation (IR)
 pub mod parsing;
 pub mod types; // Milestone 2.8: Parser trait для инверсии зависимостей

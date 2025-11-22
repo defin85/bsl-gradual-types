@@ -246,6 +246,50 @@
                         "order": 7
                     }
                 }
+            },
+            {
+                "title": "Hover (Milestone 3.6)",
+                "order": 11,
+                "properties": {
+                    "bsl.hover.detailLevel": {
+                        "type": "string",
+                        "enum": [
+                            "compact",
+                            "full",
+                            "detailed"
+                        ],
+                        "default": "full",
+                        "enumDescriptions": [
+                            "Только тип переменной",
+                            "Тип + методы (до maxMethods)",
+                            "Тип + методы + свойства + фасеты + документация"
+                        ],
+                        "description": "Уровень детализации информации при наведении курсора",
+                        "order": 0
+                    },
+                    "bsl.hover.maxMethods": {
+                        "type": "number",
+                        "default": 10,
+                        "minimum": 1,
+                        "maximum": 50,
+                        "description": "Максимальное количество методов в hover",
+                        "order": 1
+                    },
+                    "bsl.hover.maxProperties": {
+                        "type": "number",
+                        "default": 5,
+                        "minimum": 1,
+                        "maximum": 50,
+                        "description": "Максимальное количество свойств в hover",
+                        "order": 2
+                    },
+                    "bsl.hover.showCertainty": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Показывать уверенность в типе (🟢🟡⚪)",
+                        "order": 3
+                    }
+                }
             }
         ],
         "commands": [

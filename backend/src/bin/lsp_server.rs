@@ -91,6 +91,47 @@ struct LspConfig {
     platform_version: Option<String>,
 }
 
+/// MILESTONE 3.6 Phase 1: BSL Settings (настройки из workspace/didChangeConfiguration)
+#[derive(Debug, Clone, Deserialize)]
+struct BslSettings {
+    hover: HoverSettings,
+}
+
+/// MILESTONE 3.6 Phase 1: Hover Settings
+#[derive(Debug, Clone, Deserialize)]
+struct HoverSettings {
+    #[serde(rename = "detailLevel")]
+    detail_level: String, // "compact" | "full" | "detailed"
+
+    #[serde(rename = "maxMethods")]
+    max_methods: usize,
+
+    #[serde(rename = "maxProperties")]
+    max_properties: usize,
+
+    #[serde(rename = "showCertainty")]
+    show_certainty: bool,
+}
+
+impl Default for HoverSettings {
+    fn default() -> Self {
+        Self {
+            detail_level: "full".to_string(),
+            max_methods: 10,
+            max_properties: 5,
+            show_certainty: true,
+        }
+    }
+}
+
+impl Default for BslSettings {
+    fn default() -> Self {
+        Self {
+            hover: HoverSettings::default(),
+        }
+    }
+}
+
 /// Структура для контекста вызова функции (SignatureHelp)
 #[derive(Debug)]
 struct CallContext {
@@ -118,6 +159,8 @@ struct BslLanguageServer {
     documents: Arc<RwLock<HashMap<Url, String>>>,
     // ✅ MILESTONE 2.10: храним LSP конфигурацию из initializationOptions
     config: Arc<RwLock<Option<LspConfig>>>,
+    // ✅ MILESTONE 3.6 Phase 1: настройки hover из workspace/didChangeConfiguration
+    settings: Arc<RwLock<BslSettings>>,
     // ✅ MILESTONE 2.10: храним SystemCoordinator для перезагрузки типов
     coordinator: Arc<SystemCoordinator>,
     // ❌ УДАЛЕНО: НЕ храним Arc<TypeSystemService>, потому что он может устареть после reload!
@@ -131,6 +174,8 @@ impl BslLanguageServer {
             documents: Arc::new(RwLock::new(HashMap::new())),
             // ✅ MILESTONE 2.10: инициализируем пустой конфигурацией
             config: Arc::new(RwLock::new(None)),
+            // ✅ MILESTONE 3.6 Phase 1: инициализируем настройки по умолчанию
+            settings: Arc::new(RwLock::new(BslSettings::default())),
             coordinator,
         }
     }
@@ -733,6 +778,40 @@ impl LanguageServer for BslLanguageServer {
         Ok(())
     }
 
+    /// MILESTONE 3.6 Phase 1: Handle workspace/didChangeConfiguration
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        info!("📥 Received didChangeConfiguration");
+
+        // Пытаемся извлечь BslSettings из params.settings
+        if let Some(settings_value) = params.settings.as_object() {
+            if let Some(bsl_value) = settings_value.get("bsl") {
+                match serde_json::from_value::<BslSettings>(bsl_value.clone()) {
+                    Ok(new_settings) => {
+                        info!("✅ Parsed BslSettings: detailLevel={}, maxMethods={}, maxProperties={}, showCertainty={}",
+                            new_settings.hover.detail_level,
+                            new_settings.hover.max_methods,
+                            new_settings.hover.max_properties,
+                            new_settings.hover.show_certainty
+                        );
+
+                        // Обновляем настройки через write lock
+                        *self.settings.write().await = new_settings;
+
+                        info!("✅ Settings updated successfully");
+                    }
+                    Err(e) => {
+                        warn!("⚠️ Failed to parse BslSettings: {}", e);
+                        warn!("   Raw value: {:?}", bsl_value);
+                    }
+                }
+            } else {
+                debug!("No 'bsl' key found in settings");
+            }
+        } else {
+            debug!("Settings is not an object");
+        }
+    }
+
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text.clone();
@@ -748,7 +827,7 @@ impl LanguageServer for BslLanguageServer {
         // Вызываем get_hover_info с dummy position (0, 0) для кеширования IR
         // Это делает последующие hover мгновенными (<5ms вместо 50-100ms)
         if let Some(service) = self.get_type_service() {
-            match service.get_hover_info(&text, 0, 0).await {
+            match service.get_hover_info(&text, 0, 0, None).await {
                 Ok(_) => info!("✅ IR cache preheated for {}", uri),
                 Err(e) => error!("❌ Failed to preheat IR cache for {}: {}", uri, e),
             }
@@ -1088,10 +1167,42 @@ impl LanguageServer for BslLanguageServer {
             Err(_) => "untitled".to_string(),
         };
 
+        // MILESTONE 3.6 Phase 1: Получаем настройки hover из конфигурации
+        use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, OutputFormat};
+        use bsl_shared::formatting::DetailLevel;
+
+        let settings = self.settings.read().await;
+
+        // MILESTONE 3.6 Phase 2 - Task 2.5: Получить путь к syntax_helper из environment или стандартных мест
+        let syntax_helper_path = std::env::var("BSL_SYNTAX_HELPER_PATH")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                // Fallback: попробовать найти в стандартных местах
+                let candidates = vec![
+                    std::path::PathBuf::from("examples/syntax_helper"),
+                    std::path::PathBuf::from("../examples/syntax_helper"),
+                    std::path::PathBuf::from("C:/examples/syntax_helper"),
+                ];
+
+                candidates.into_iter().find(|p| p.exists())
+            });
+
+        let hover_config = HoverFormatConfig {
+            max_methods: settings.hover.max_methods,
+            max_properties: settings.hover.max_properties,
+            detail_level: DetailLevel::from_str(&settings.hover.detail_level),
+            show_certainty: settings.hover.show_certainty,
+            syntax_helper_path, // ← MILESTONE 3.6 Phase 2: Передаём путь к документации
+            output_format: OutputFormat::Markdown,
+            ..Default::default()
+        };
+        drop(settings); // Освобождаем lock
+
         // Используем get_hover_info() с IR-based анализом
         if let Some(service) = self.get_type_service() {
             match service
-                .get_hover_info(&file_content, position.line, position.character)
+                .get_hover_info(&file_content, position.line, position.character, Some(hover_config))
                 .await
             {
                 Ok(hover_info) => {

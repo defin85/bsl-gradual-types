@@ -617,11 +617,15 @@ impl TypeSystemService {
     }
 
     /// LSP операции - получить информацию о символе в позиции (hover)
+    ///
+    /// MILESTONE 3.6 Phase 1: Добавлен опциональный параметр hover_config
+    /// для настраиваемых уровней детализации
     pub async fn get_hover_info(
         &self,
         file_content: &str,
         line: u32,
         column: u32,
+        hover_config: Option<HoverFormatConfig>,
     ) -> Result<Option<String>> {
         use std::sync::atomic::Ordering;
         use tracing::{debug, info, warn};
@@ -700,8 +704,15 @@ impl TypeSystemService {
             let resolution =
                 resolver.resolve_variable_with_context(&var_name, &ir_program.symbols, scope_id);
 
+            // MILESTONE 3.6 Phase 1: Используем переданную конфигурацию или default
+            let formatter = if let Some(config) = hover_config {
+                HoverFormatter::new(config, self.metadata_lookup.clone())
+            } else {
+                self.hover_formatter.clone()
+            };
+
             // Форматируем hover через TypeResolution (вместо TypeHint)
-            Some(self.hover_formatter.format_variable(&var_name, &resolution))
+            Some(formatter.format_variable(&var_name, &resolution))
         } else {
             // Milestone 2.11 Task B1: Логи когда переменная не найдена
             debug!(

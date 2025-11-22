@@ -41,7 +41,7 @@ async fn test_hover_on_variable_declaration() {
 
     // Hover на "МойМассив" в строке 2 (declaration)
     // Координаты (line=2, column=5) должны попасть в span переменной "МойМассив"
-    let hover1 = service.get_hover_info(code, 2, 5).await.unwrap();
+    let hover1 = service.get_hover_info(code, 2, 5, None).await.unwrap();
 
     assert!(
         hover1.is_some(),
@@ -68,7 +68,7 @@ async fn test_hover_on_variable_usage() {
     let service = setup_type_system_service().await;
 
     // Hover на "МойМассив" в строке 3 (method call)
-    let hover2 = service.get_hover_info(code, 3, 5).await.unwrap();
+    let hover2 = service.get_hover_info(code, 3, 5, None).await.unwrap();
 
     assert!(
         hover2.is_some(),
@@ -101,21 +101,21 @@ async fn test_hover_shows_different_info_for_different_variables() {
 
     // Hover на "МойМассив" в строке 2
     let hover1 = service
-        .get_hover_info(code, 2, 5)
+        .get_hover_info(code, 2, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();
 
     // Hover на "МояСтрока" в строке 3
     let hover2 = service
-        .get_hover_info(code, 3, 5)
+        .get_hover_info(code, 3, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();
 
     // Hover на "МоеЧисло" в строке 4
     let hover3 = service
-        .get_hover_info(code, 4, 5)
+        .get_hover_info(code, 4, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();
@@ -166,7 +166,7 @@ async fn test_hover_on_function_parameter() {
     let service = setup_type_system_service().await;
 
     // Hover на "Число1" в строке 2 (usage in assignment)
-    let hover = service.get_hover_info(code, 2, 16).await.unwrap();
+    let hover = service.get_hover_info(code, 2, 16, None).await.unwrap();
 
     assert!(
         hover.is_some(),
@@ -196,7 +196,7 @@ async fn test_hover_on_method_name() {
 
     // Hover на "Добавить" в строке 3
     // Координаты (line=3, column=12) должны попасть в span метода "Добавить"
-    let hover = service.get_hover_info(code, 3, 12).await.unwrap();
+    let hover = service.get_hover_info(code, 3, 12, None).await.unwrap();
 
     assert!(
         hover.is_some(),

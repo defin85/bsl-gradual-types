@@ -37,7 +37,7 @@ async fn test_config_types_without_metadata_show_inferred_50() {
     // Строка 1 (Справочник1 = ...), колонка 5 (начало имени переменной после 4 пробелов отступа)
     println!("\n--- Тест 1: Справочники.Контрагенты ---");
     let hover_справочник = service
-        .get_hover_info(source, 1, 5)
+        .get_hover_info(source, 1, 5, None)
         .await
         .expect("Hover failed");
 
@@ -66,7 +66,7 @@ async fn test_config_types_without_metadata_show_inferred_50() {
     // Тест 2: Документы.РеализацияТоваровУслуг
     println!("\n--- Тест 2: Документы.РеализацияТоваровУслуг ---");
     let hover_документ = service
-        .get_hover_info(source, 2, 5)
+        .get_hover_info(source, 2, 5, None)
         .await
         .expect("Hover failed");
 
@@ -91,7 +91,7 @@ async fn test_config_types_without_metadata_show_inferred_50() {
     // Тест 3: Перечисления.СтавкиНДС
     println!("\n--- Тест 3: Перечисления.СтавкиНДС ---");
     let hover_перечисление = service
-        .get_hover_info(source, 3, 5)
+        .get_hover_info(source, 3, 5, None)
         .await
         .expect("Hover failed");
 
@@ -116,7 +116,7 @@ async fn test_config_types_without_metadata_show_inferred_50() {
     // Тест 4: РегистрыСведений.КурсыВалют
     println!("\n--- Тест 4: РегистрыСведений.КурсыВалют ---");
     let hover_регистр = service
-        .get_hover_info(source, 4, 5)
+        .get_hover_info(source, 4, 5, None)
         .await
         .expect("Hover failed");
 
@@ -158,7 +158,7 @@ async fn test_platform_types_still_show_known() {
     // Тест 1: Строка
     println!("\n--- Тест 1: Строка ---");
     let hover_строка = service
-        .get_hover_info(source, 1, 5)
+        .get_hover_info(source, 1, 5, None)
         .await
         .expect("Hover failed");
 
@@ -177,7 +177,7 @@ async fn test_platform_types_still_show_known() {
     // Тест 2: Число
     println!("\n--- Тест 2: Число ---");
     let hover_число = service
-        .get_hover_info(source, 2, 5)
+        .get_hover_info(source, 2, 5, None)
         .await
         .expect("Hover failed");
 
@@ -196,7 +196,7 @@ async fn test_platform_types_still_show_known() {
     // Тест 3: Булево
     println!("\n--- Тест 3: Булево ---");
     let hover_булево = service
-        .get_hover_info(source, 3, 5)
+        .get_hover_info(source, 3, 5, None)
         .await
         .expect("Hover failed");
 
@@ -230,7 +230,7 @@ async fn test_resolver_direct_certainty_check() {
 КонецПроцедуры"#;
 
     let hover = service
-        .get_hover_info(source, 1, 5)
+        .get_hover_info(source, 1, 5, None)
         .await
         .expect("Hover failed")
         .unwrap();

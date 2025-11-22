@@ -18,7 +18,7 @@ async fn test_lsp_hover_functionality() {
 "#;
 
     // Act - запрашиваем hover для строки с переменной (строка 2, позиция 10)
-    let hover_result = type_service.get_hover_info(bsl_content, 2, 10).await;
+    let hover_result = type_service.get_hover_info(bsl_content, 2, 10, None).await;
 
     // Assert
     assert!(hover_result.is_ok(), "Hover должен работать без ошибок");

@@ -29,7 +29,7 @@ async fn test_hover_shows_unknown_type_warning_for_configuration_types() {
 
     // Hover на переменной "СправочникКонтрагенты" в строке 3 (присваивание)
     let hover_result = type_system_service
-        .get_hover_info(source, 3, 10) // колонка 10 = внутри "СправочникКонтрагенты"
+        .get_hover_info(source, 3, 10, None) // колонка 10 = внутри "СправочникКонтрагенты"
         .await
         .expect("get_hover_info failed");
 
@@ -102,7 +102,7 @@ async fn test_hover_shows_correct_info_for_platform_types() {
 
     // Hover на переменной "МассивДанных" в строке 3
     let hover_result = type_system_service
-        .get_hover_info(source, 3, 10) // колонка 10 = внутри "МассивДанных"
+        .get_hover_info(source, 3, 10, None) // колонка 10 = внутри "МассивДанных"
         .await
         .expect("get_hover_info failed");
 
@@ -165,7 +165,7 @@ async fn test_hover_differentiates_platform_and_configuration_types() {
 
     // 1. Hover на Platform Type (Массив)
     let hover_platform = type_system_service
-        .get_hover_info(source, 5, 10)
+        .get_hover_info(source, 5, 10, None)
         .await
         .expect("get_hover_info failed for platform type");
 
@@ -174,7 +174,7 @@ async fn test_hover_differentiates_platform_and_configuration_types() {
 
     // 2. Hover на Configuration Type (Документы)
     let hover_config = type_system_service
-        .get_hover_info(source, 6, 10)
+        .get_hover_info(source, 6, 10, None)
         .await
         .expect("get_hover_info failed for config type");
 

@@ -194,7 +194,7 @@ async fn test_load_configuration_types_integration_with_hover() {
 КонецПроцедуры
 "#;
 
-    let hover_result = type_service.get_hover_info(test_code, 2, 30).await;
+    let hover_result = type_service.get_hover_info(test_code, 2, 30, None).await;
 
     // Assert: Hover должен найти информацию о типе Справочники.Контрагенты
     assert!(

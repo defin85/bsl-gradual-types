@@ -32,7 +32,7 @@ async fn test_certainty_shown_for_platform_types() {
 
     // Hover на "МойМассив"
     let hover1 = service
-        .get_hover_info(code, 2, 5)
+        .get_hover_info(code, 2, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();
@@ -54,7 +54,7 @@ async fn test_certainty_shown_for_platform_types() {
 
     // Hover на "МояСтруктура"
     let hover2 = service
-        .get_hover_info(code, 3, 5)
+        .get_hover_info(code, 3, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();
@@ -89,7 +89,7 @@ async fn test_certainty_shown_for_primitive_types() {
 
     // Hover на "МояСтрока"
     let hover1 = service
-        .get_hover_info(code, 2, 5)
+        .get_hover_info(code, 2, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();
@@ -103,7 +103,7 @@ async fn test_certainty_shown_for_primitive_types() {
 
     // Hover на "МоеЧисло"
     let hover2 = service
-        .get_hover_info(code, 3, 5)
+        .get_hover_info(code, 3, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();
@@ -117,7 +117,7 @@ async fn test_certainty_shown_for_primitive_types() {
 
     // Hover на "МоеБулево"
     let hover3 = service
-        .get_hover_info(code, 4, 5)
+        .get_hover_info(code, 4, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();
@@ -150,7 +150,7 @@ async fn test_certainty_levels() {
 
     // Hover на "Массив1"
     let hover1 = service
-        .get_hover_info(code, 3, 5)
+        .get_hover_info(code, 3, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();
@@ -165,7 +165,7 @@ async fn test_certainty_levels() {
 
     // Hover на "Строка1"
     let hover2 = service
-        .get_hover_info(code, 6, 5)
+        .get_hover_info(code, 6, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();
@@ -182,7 +182,7 @@ async fn test_certainty_levels() {
 
     // Hover на "НеопределеннаяПеременная"
     let hover3 = service
-        .get_hover_info(code, 9, 5)
+        .get_hover_info(code, 9, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();
@@ -213,7 +213,7 @@ async fn test_certainty_before_raw_type_check() {
     let service = setup_type_system_service().await;
 
     let hover = service
-        .get_hover_info(code, 3, 5)
+        .get_hover_info(code, 3, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();
@@ -262,7 +262,7 @@ async fn test_regression_hover_still_shows_methods() {
     let service = setup_type_system_service().await;
 
     let hover = service
-        .get_hover_info(code, 2, 5)
+        .get_hover_info(code, 2, 5, None)
         .await
         .unwrap()
         .unwrap_or_default();

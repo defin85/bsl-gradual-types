@@ -7,6 +7,9 @@
 
 use mcp_debug_server::config::{find_codelldb, resolve_adapter};
 use mcp_debug_server::dap::DapClient;
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[tokio::test]
 async fn test_codelldb_autodiscovery() {
@@ -22,8 +25,13 @@ async fn test_codelldb_autodiscovery() {
             let path_str = path.to_string_lossy().to_string();
             println!("  Attempting to spawn DapClient with: {}", path_str);
 
-            match DapClient::spawn(&path_str).await {
-                Ok((mut client, _event_rx)) => {
+            // Создать EventBuffer и current_thread_id для DapClient::spawn
+            let event_buffer = Arc::new(Mutex::new(HashMap::<String, VecDeque<_>>::new()));
+            let current_thread_id = Arc::new(Mutex::new(None));
+            let session_id = "test_autodiscovery".to_string();
+
+            match DapClient::spawn(&path_str, event_buffer, session_id, current_thread_id).await {
+                Ok(mut client) => {
                     println!("✓ Successfully spawned DapClient");
 
                     // Шаг 3: Попробовать инициализировать DAP сессию

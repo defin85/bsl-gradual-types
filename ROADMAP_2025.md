@@ -96,8 +96,9 @@
 | 2.19 Architectural Improvements | ✅ | 2025-11-07 | Unified ParseError (SSOT), TypeSystemService::parse_and_validate() API, Clean Architecture восстановлена, ~97 строк удалено | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-219-architectural-improvements--2025-11-07) |
 | 2.20 Enhanced Status Bar | ✅ | 2025-11-07 | Расширенная строка статуса с прогрессом LSP/индексации, контекстом редактора, статистикой TypeRepository | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-220-enhanced-status-bar--2025-11-07) |
 | 2.21 WASM Webviews Migration | ✅ | 2025-11-08 | Полная миграция VSCode Extension webviews на Leptos/WASM, устранение дублирования кода (100% DRY), Security +50%, 10 unit тестов | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-221-wasm-webviews-migration--2025-11-08) |
+| 3.6 Enhanced UX (Hover + Diagnostics) | ✅ | 2025-11-22 | 3 фазы (Settings/Facets/Diagnostics), DetailLevel enum, 79 тестов Milestone + 332 regression, 4.8/5 code review | [Детали](#-milestone-36-enhanced-ux-hover--diagnostics--завершён-2025-11-22) |
 
-**Итого завершено:** 19 Milestones
+**Итого завершено:** 20 Milestones
 **Прогресс Версии 2.0:** ~95% завершено (19/20 Milestones)
 
 ---
@@ -1024,7 +1025,9 @@ async fn test_hover_on_nonexistent_method() {
 
 ---
 
-### 🎨 Milestone 3.6: Enhanced UX (Hover + Diagnostics) (15-18 дней)
+### 🎨 Milestone 3.6: Enhanced UX (Hover + Diagnostics) ✅ ЗАВЕРШЁН (2025-11-22)
+
+**Статус:** ✅ **ЗАВЕРШЁН**
 
 **Приоритет:** 🟡 СРЕДНИЙ — значительное улучшение UX, но не критично для функциональности
 

@@ -91,10 +91,12 @@ struct LspConfig {
     platform_version: Option<String>,
 }
 
-/// MILESTONE 3.6 Phase 1: BSL Settings (настройки из workspace/didChangeConfiguration)
+/// MILESTONE 3.6 Phase 1+3: BSL Settings (настройки из workspace/didChangeConfiguration)
 #[derive(Debug, Clone, Deserialize)]
 struct BslSettings {
     hover: HoverSettings,
+    #[serde(default)]
+    diagnostics: DiagnosticsSettings,  // MILESTONE 3.6 Phase 3
 }
 
 /// MILESTONE 3.6 Phase 1: Hover Settings
@@ -124,10 +126,30 @@ impl Default for HoverSettings {
     }
 }
 
+/// MILESTONE 3.6 Phase 3: Diagnostics Settings
+#[derive(Debug, Clone, Deserialize)]
+struct DiagnosticsSettings {
+    #[serde(rename = "detailLevel")]
+    detail_level: String,  // "brief" | "standard" | "detailed"
+
+    #[serde(rename = "showHints")]
+    show_hints: bool,
+}
+
+impl Default for DiagnosticsSettings {
+    fn default() -> Self {
+        Self {
+            detail_level: "standard".to_string(),
+            show_hints: true,
+        }
+    }
+}
+
 impl Default for BslSettings {
     fn default() -> Self {
         Self {
             hover: HoverSettings::default(),
+            diagnostics: DiagnosticsSettings::default(),
         }
     }
 }
@@ -778,7 +800,7 @@ impl LanguageServer for BslLanguageServer {
         Ok(())
     }
 
-    /// MILESTONE 3.6 Phase 1: Handle workspace/didChangeConfiguration
+    /// MILESTONE 3.6 Phase 1+3: Handle workspace/didChangeConfiguration
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         info!("📥 Received didChangeConfiguration");
 
@@ -787,11 +809,16 @@ impl LanguageServer for BslLanguageServer {
             if let Some(bsl_value) = settings_value.get("bsl") {
                 match serde_json::from_value::<BslSettings>(bsl_value.clone()) {
                     Ok(new_settings) => {
-                        info!("✅ Parsed BslSettings: detailLevel={}, maxMethods={}, maxProperties={}, showCertainty={}",
+                        info!(
+                            "✅ Parsed BslSettings:\n  \
+                            hover.detailLevel={}, hover.maxMethods={}, hover.maxProperties={}, hover.showCertainty={}\n  \
+                            diagnostics.detailLevel={}, diagnostics.showHints={}",
                             new_settings.hover.detail_level,
                             new_settings.hover.max_methods,
                             new_settings.hover.max_properties,
-                            new_settings.hover.show_certainty
+                            new_settings.hover.show_certainty,
+                            new_settings.diagnostics.detail_level,
+                            new_settings.diagnostics.show_hints
                         );
 
                         // Обновляем настройки через write lock
@@ -867,7 +894,7 @@ impl LanguageServer for BslLanguageServer {
             warn!("⚠️ TypeSystemService not yet initialized, skipping syntax validation");
         }
 
-        // PHASE 2: Semantic validation (MILESTONE 3.7)
+        // PHASE 2: Semantic validation (MILESTONE 3.7 + 3.6 Phase 3)
         if let Some(type_service) = self.get_type_service() {
             // ✅ GUARD: Проверяем что platform types загружены
             let metrics = type_service.get_metrics_summary();
@@ -876,13 +903,18 @@ impl LanguageServer for BslLanguageServer {
             if total_types == 0 {
                 info!("⚠️ Skipping semantic validation for {}: platform types not yet loaded", uri);
             } else {
-                match type_service.validate_semantics(&text).await {
+                // ✅ MILESTONE 3.6 Phase 3: Получаем detail_level из settings
+                let settings = self.settings.read().await;
+                let detail_level = bsl_shared::formatting::DetailLevel::from_str(&settings.diagnostics.detail_level);
+
+                match type_service.validate_semantics(&text, Some(detail_level)).await {
                     Ok(semantic_errors) => {
                         if !semantic_errors.is_empty() {
                             info!(
-                                "⚠️ Found {} semantic errors in {}",
+                                "⚠️ Found {} semantic errors in {} (detail_level: {})",
                                 semantic_errors.len(),
-                                uri
+                                uri,
+                                settings.diagnostics.detail_level
                             );
                             for error in semantic_errors {
                                 diagnostics.push(self.semantic_error_to_diagnostic(&error));
@@ -1036,7 +1068,11 @@ impl LanguageServer for BslLanguageServer {
                 if total_types == 0 {
                     info!("⚠️ Skipping semantic validation for {}: platform types not yet loaded", uri);
                 } else {
-                    match type_service.validate_semantics(&text).await {
+                    // ✅ MILESTONE 3.6 Phase 3: Получаем detail_level из settings
+                    let settings = self.settings.read().await;
+                    let detail_level = bsl_shared::formatting::DetailLevel::from_str(&settings.diagnostics.detail_level);
+
+                    match type_service.validate_semantics(&text, Some(detail_level)).await {
                         Ok(semantic_errors) => {
                             if !semantic_errors.is_empty() {
                                 info!(

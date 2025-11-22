@@ -290,6 +290,34 @@
                         "order": 3
                     }
                 }
+            },
+            {
+                "title": "Diagnostics (Milestone 3.6 Phase 3)",
+                "order": 12,
+                "properties": {
+                    "bsl.diagnostics.detailLevel": {
+                        "type": "string",
+                        "enum": [
+                            "brief",
+                            "standard",
+                            "detailed"
+                        ],
+                        "default": "standard",
+                        "enumDescriptions": [
+                            "Краткие сообщения (только тип ошибки)",
+                            "Стандартные (тип + имя переменной)",
+                            "Детальные (тип + переменная + умные подсказки)"
+                        ],
+                        "description": "Уровень детализации сообщений об ошибках",
+                        "order": 0
+                    },
+                    "bsl.diagnostics.showHints": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Показывать умные подсказки для исправления ошибок (только для detailed level)",
+                        "order": 1
+                    }
+                }
             }
         ],
         "commands": [

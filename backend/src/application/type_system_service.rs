@@ -1372,8 +1372,8 @@ impl TypeSystemService {
 
         let start = Instant::now();
 
-        // ✅ MILESTONE 3.10: Используем validate_semantics вместо старой логики
-        let diagnostics = self.validate_semantics(code).await?;
+        // ✅ MILESTONE 3.10 + 3.6 Phase 3: Используем validate_semantics с default detail_level
+        let diagnostics = self.validate_semantics(code, None).await?;
 
         // Конвертируем TypeDiagnostic → ValidationErrorDto
         let errors: Vec<bsl_shared::api::ValidationErrorDto> = diagnostics
@@ -2516,9 +2516,11 @@ impl TypeSystemService {
     /// let errors = type_service.validate_semantics(code).await?;
     /// assert!(!errors.is_empty()); // Должна быть ошибка
     /// ```
+    /// MILESTONE 3.6 Phase 3: Добавлен optional detail_level для диагностик
     pub async fn validate_semantics(
         &self,
         code: &str,
+        detail_level: Option<bsl_shared::formatting::DetailLevel>,
     ) -> Result<Vec<bsl_shared::domain::types::TypeDiagnostic>> {
         use crate::application::ast_to_ir::AstToIrConverter;
         use crate::application::semantic_validation_visitor::SemanticValidationVisitor;
@@ -2558,11 +2560,14 @@ impl TypeSystemService {
         let resolver_arc = self.analysis_engine.get_resolver();
         let resolver = resolver_arc.as_ref();
 
-        // 7. Создание SemanticValidationVisitor
-        let mut visitor =
-            SemanticValidationVisitor::new(&validator, &ir, resolver, &signature_index);
+        // 8. Создание SemanticValidationVisitor с настраиваемым detail_level (Milestone 3.6 Phase 3)
+        let mut visitor = if let Some(level) = detail_level {
+            SemanticValidationVisitor::with_detail_level(&validator, &ir, resolver, &signature_index, level)
+        } else {
+            SemanticValidationVisitor::new(&validator, &ir, resolver, &signature_index)
+        };
 
-        // 8. Обход IR
+        // 9. Обход IR
         walk_program(&ir, &mut visitor);
 
         // 9. Возврат errors

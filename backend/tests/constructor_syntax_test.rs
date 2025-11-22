@@ -71,7 +71,7 @@ async fn test_constructor_without_parentheses() {
     );
 
     // Проверяем что semantic validation НЕ выдаёт ошибку
-    let semantic_errors = service.validate_semantics(code).await.unwrap();
+    let semantic_errors = service.validate_semantics(code, None).await.unwrap();
 
     // DEBUG: выводим ошибки если есть
     if !semantic_errors.is_empty() {
@@ -106,7 +106,7 @@ async fn test_constructor_with_parentheses() {
     );
 
     // Проверяем что semantic validation НЕ выдаёт ошибку
-    let semantic_errors = service.validate_semantics(code).await.unwrap();
+    let semantic_errors = service.validate_semantics(code, None).await.unwrap();
 
     // DEBUG: выводим ошибки если есть
     if !semantic_errors.is_empty() {
@@ -142,7 +142,7 @@ async fn test_both_constructors_in_one_function() {
     let parse_result = service.parse_and_validate(code).unwrap();
     assert!(parse_result.is_empty(), "Не должно быть syntax errors");
 
-    let semantic_errors = service.validate_semantics(code).await.unwrap();
+    let semantic_errors = service.validate_semantics(code, None).await.unwrap();
 
     // DEBUG: выводим ошибки если есть
     if !semantic_errors.is_empty() {

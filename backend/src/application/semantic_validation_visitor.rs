@@ -3,6 +3,7 @@ use bsl_shared::domain::resolver::{TypeResolver, ValidationResult};
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::{Certainty, ConcreteType, DiagnosticSeverity, ResolutionResult, TypeDiagnostic};
 use bsl_shared::domain::validators::TypeValidator;
+use bsl_shared::formatting::DetailLevel;  // MILESTONE 3.6 Phase 3
 use bsl_shared::ir::{
     FlowContext, SemanticNode, SemanticNodeKind, SemanticProgram, SemanticVisitor,
 };
@@ -14,6 +15,7 @@ pub struct SemanticValidationVisitor<'a> {
     errors: Vec<TypeDiagnostic>,
     #[allow(dead_code)]
     program: &'a SemanticProgram,
+    detail_level: DetailLevel,  // MILESTONE 3.6 Phase 3
 }
 
 impl<'a> SemanticValidationVisitor<'a> {
@@ -29,6 +31,25 @@ impl<'a> SemanticValidationVisitor<'a> {
             signature_index,
             errors: Vec::new(),
             program,
+            detail_level: DetailLevel::Full,  // Default для backward compatibility
+        }
+    }
+
+    /// MILESTONE 3.6 Phase 3: Создать visitor с настраиваемым уровнем детализации
+    pub fn with_detail_level(
+        validator: &'a TypeValidator<'a>,
+        program: &'a SemanticProgram,
+        resolver: &'a TypeResolver,
+        signature_index: &'a SignatureIndex,
+        detail_level: DetailLevel,
+    ) -> Self {
+        Self {
+            validator,
+            resolver,
+            signature_index,
+            errors: Vec::new(),
+            program,
+            detail_level,
         }
     }
 
@@ -147,18 +168,23 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
         match &node.kind {
             SemanticNodeKind::FunctionCall {
                 function_name,
+                object_name,
                 object_type: Some(obj_type),
                 arg_types,
                 ..
             } => {
                 let resolution = Self::simple_resolution(obj_type);
 
-                // 1. Проверяем существование метода
+                // 1. ✅ MILESTONE 3.6 Phase 3: Проверяем существование метода с передачей variable_name
                 if let Some(error_kind) = self
                     .validator
-                    .validate_method_exists(&resolution, function_name)
+                    .validate_method_exists_with_variable(
+                        &resolution,
+                        function_name,
+                        object_name.clone(),  // Передаём имя переменной
+                    )
                 {
-                    let diagnostic = error_kind.to_diagnostic(node.span);
+                    let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                     self.errors.push(diagnostic);
                     return; // Нет смысла проверять параметры если метод не существует
                 }
@@ -177,17 +203,23 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 }
             }
             SemanticNodeKind::MemberAccess {
+                object_name,
                 object_type,
                 member_name,
                 is_method: false,
                 ..
             } => {
                 let resolution = Self::simple_resolution(object_type);
+                // ✅ MILESTONE 3.6 Phase 3: Передаём имя переменной
                 if let Some(error_kind) = self
                     .validator
-                    .validate_property_exists(&resolution, member_name)
+                    .validate_property_exists_with_variable(
+                        &resolution,
+                        member_name,
+                        object_name.clone(),  // Передаём имя переменной
+                    )
                 {
-                    let diagnostic = error_kind.to_diagnostic(node.span);
+                    let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                     self.errors.push(diagnostic);
                 }
             }

@@ -80,7 +80,7 @@ async fn test_validate_semantics_returns_result() {
     "#;
 
     // Просто проверяем, что validate_semantics работает
-    let result = service.validate_semantics(code).await;
+    let result = service.validate_semantics(code, None).await;
     assert!(
         result.is_ok(),
         "validate_semantics должна возвращать Result"
@@ -98,7 +98,7 @@ async fn test_no_errors_for_valid_simple_code() {
 КонецФункции
     "#;
 
-    let result = service.validate_semantics(code).await;
+    let result = service.validate_semantics(code, None).await;
     assert!(result.is_ok());
 
     let diagnostics = result.unwrap();
@@ -121,7 +121,7 @@ async fn test_skip_semantic_validation_on_syntax_error() {
     Х = 5;
     "#;
 
-    let result = service.validate_semantics(code).await;
+    let result = service.validate_semantics(code, None).await;
     assert!(result.is_ok());
 
     let diagnostics = result.unwrap();
@@ -154,7 +154,7 @@ async fn test_latency_under_50ms() {
     "#;
 
     let start = Instant::now();
-    let result = service.validate_semantics(code).await;
+    let result = service.validate_semantics(code, None).await;
     let elapsed = start.elapsed();
 
     assert!(result.is_ok());
@@ -183,7 +183,7 @@ async fn test_with_union_types() {
 КонецФункции
     "#;
 
-    let result = service.validate_semantics(code).await;
+    let result = service.validate_semantics(code, None).await;
     assert!(result.is_ok());
 
     let diagnostics = result.unwrap();
@@ -203,7 +203,7 @@ async fn test_with_dynamic_constructor() {
 КонецФункции
     "#;
 
-    let result = service.validate_semantics(code).await;
+    let result = service.validate_semantics(code, None).await;
     assert!(result.is_ok());
 
     let _diagnostics = result.unwrap();
@@ -278,7 +278,7 @@ async fn test_validate_parameter_type_mismatch() {
 КонецФункции
     "#;
 
-    let result = service.validate_semantics(code).await;
+    let result = service.validate_semantics(code, None).await;
     assert!(result.is_ok());
 
     let diagnostics = result.unwrap();
@@ -309,7 +309,7 @@ async fn test_validate_parameter_validation_integration() {
 КонецФункции
     "#;
 
-    let result = service.validate_semantics(code).await;
+    let result = service.validate_semantics(code, None).await;
     assert!(result.is_ok());
 
     let diagnostics = result.unwrap();
@@ -336,7 +336,7 @@ async fn test_gradual_typing_no_error_for_unknown() {
 КонецФункции
     "#;
 
-    let result = service.validate_semantics(code).await;
+    let result = service.validate_semantics(code, None).await;
     assert!(result.is_ok());
 
     let diagnostics = result.unwrap();

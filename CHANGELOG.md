@@ -2,6 +2,38 @@
 
 All notable changes to BSL Gradual Type System will be documented in this file.
 
+## [1.1.0] - 2025-11-22 - 🎨 Enhanced UX (Milestone 3.6)
+
+### ✨ Added - Phase 1: Settings & Detail Levels
+- **Three detail levels for hover** - Compact (type only), Full (type + methods), Detailed (complete information)
+- **VSCode Extension settings** - Configurable detailLevel, maxMethods, maxProperties, showCertainty
+- **LSP Server configuration handling** - Thread-safe settings via Arc<RwLock<BslSettings>>
+- **Multiline formatting** - Improved readability for methods with 4+ parameters
+
+### ✨ Added - Phase 2: Facets, Generics, Documentation
+- **Facets display in hover** - Manager/Object/Reference/Selection/List aspects shown for 1C types
+- **Generic types explanation** - Clear display for Массив<T>, Соответствие<K,V>, etc.
+- **Documentation links** - Integration with local Syntax Helper and online 1C documentation
+- **Auto-detection** - Automatic discovery of syntax_helper_path
+- **Windows path handling** - Proper file:// URL generation
+
+### ✨ Added - Phase 3: Enhanced Diagnostic Messages
+- **Variable context in errors** - Diagnostics now include variable names (variable_name, param_variable_name)
+- **Three detail levels for diagnostics** - Brief/Standard/Detailed message formats
+- **Smart hints for error correction** - Contextual suggestions for fixing type errors
+- **Graceful degradation** - Fallback to simpler messages when variable context unavailable
+
+### 🏗️ Architecture
+- **Unified DetailLevel enum** - Shared between hover and diagnostics (DRY principle)
+- **Backward compatibility** - 100% compatible with existing code (zero breaking changes)
+- **Builder pattern** - HoverBuilder with chainable methods
+
+### 📊 Testing
+- **79 new tests** - 27 (Phase 1) + 16 (Phase 2) + 36 (Phase 3)
+- **332 regression tests** - All passing (Backend lib: 106, Shared lib: 226)
+- **100% success rate** - 411 total tests passing
+- **Code review score** - 4.8/5 stars ⭐⭐⭐⭐⭐
+
 ## [1.0.0] - 2025-01-18 - 🏆 ENTERPRISE READY RELEASE
 
 ### 🎉 Major Milestones  

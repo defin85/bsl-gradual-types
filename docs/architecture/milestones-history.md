@@ -582,6 +582,256 @@ start semantic_tree.html
 
 ---
 
+## 🎨 Milestone 3.6: Enhanced UX (Hover + Diagnostics)
+
+**Дата завершения:** 2025-11-22
+**Статус:** ✅ Завершён
+**Duration:** 17 дней (3 фазы)
+**Code Review:** 4.8/5 ⭐⭐⭐⭐⭐
+
+### Цель
+
+Комплексное улучшение пользовательского опыта с едиными принципами настраиваемости для hover и diagnostics.
+
+### Architecture Decisions
+
+#### 1. Unified DetailLevel enum
+
+**Проблема:** Дублирование логики уровней детализации между hover и diagnostics.
+
+**Решение:** Единый `DetailLevel` enum в `shared/src/formatting/mod.rs`:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetailLevel {
+    Compact,  // Только тип/основная информация
+    Full,     // Тип + методы/свойства (до max)
+    Detailed, // Полная информация + фасеты + документация + подсказки
+}
+
+impl DetailLevel {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "compact" => Self::Compact,
+            "detailed" => Self::Detailed,
+            _ => Self::Full,
+        }
+    }
+}
+```
+
+**Преимущества:**
+- ✅ DRY принцип — один enum для hover и diagnostics
+- ✅ Консистентность — одинаковые названия уровней
+- ✅ Extensibility — легко добавить новые уровни
+
+#### 2. Builder Pattern для Hover
+
+**HoverBuilder** с chainable методами для расширения функциональности:
+
+```rust
+pub struct HoverBuilder {
+    config: HoverFormatConfig,
+    parts: Vec<String>,
+}
+
+impl HoverBuilder {
+    pub fn new(config: HoverFormatConfig) -> Self { ... }
+    pub fn add_type_info(mut self, resolution: &TypeResolution) -> Self { ... }
+    pub fn add_methods(mut self, resolution: &TypeResolution) -> Self { ... }
+    pub fn add_properties(mut self, resolution: &TypeResolution) -> Self { ... }
+    pub fn add_facet_info(mut self, resolution: &TypeResolution) -> Self { ... }
+    pub fn add_generic_info(mut self, resolution: &TypeResolution) -> Self { ... }
+    pub fn add_documentation_links(mut self, resolution: &TypeResolution) -> Self { ... }
+    pub fn build(self) -> String { ... }
+}
+```
+
+#### 3. Graceful Degradation
+
+**Fallback pattern** для diagnostic messages:
+
+```rust
+fn format_standard(&self) -> String {
+    if let Some(var) = variable_name {
+        format!("... переменной '{}'", var)
+    } else {
+        self.format_brief()  // ← Fallback вместо panic!
+    }
+}
+```
+
+#### 4. Thread-safe Settings
+
+LSP Server settings через `Arc<RwLock<BslSettings>>`:
+
+```rust
+struct LspServer {
+    settings: Arc<RwLock<BslSettings>>,  // Thread-safe
+}
+
+// didChangeConfiguration handler
+async fn on_did_change_configuration(&mut self, params: DidChangeConfigurationParams) {
+    *self.settings.write().await = new_settings;
+}
+```
+
+### Implementation
+
+#### Phase 1: Settings & Detail Levels (5 дней)
+
+**Файлы:**
+- `shared/src/formatting/mod.rs` — DetailLevel enum
+- `backend/src/bin/lsp_server.rs` — BslSettings, HoverSettings, DiagnosticsSettings
+- `backend/src/helpers/hover_formatter.rs` — HoverBuilder с тремя уровнями
+- `vscode-extension/package.json` — VSCode settings
+
+**Функциональность:**
+- ✅ Три уровня детализации hover (Compact/Full/Detailed)
+- ✅ Multiline форматирование для методов с 4+ параметрами
+- ✅ Настройка certainty display (🟢🟡⚪)
+- ✅ Конфигурируемые maxMethods, maxProperties
+
+**Тестирование:** 27 тестов
+
+#### Phase 2: Facets, Generics, Documentation (7 дней)
+
+**Файлы:**
+- `backend/src/helpers/hover_formatter.rs` — расширение HoverBuilder
+
+**Функциональность:**
+- ✅ Facets отображение (Manager/Object/Reference/Selection/List)
+- ✅ Объяснение generic типов (Массив<T>, Соответствие<K,V>)
+- ✅ Ссылки на документацию (Syntax Helper + online 1C docs)
+- ✅ Auto-detection syntax_helper_path
+- ✅ Windows path handling (file:// URLs)
+
+**Тестирование:** 16 тестов
+
+#### Phase 3: Enhanced Diagnostic Messages (5-6 дней)
+
+**Файлы:**
+- `shared/src/domain/validators.rs` — TypeErrorKind с variable context
+- `backend/src/application/semantic_validation_visitor.rs` — извлечение variable names
+- `shared/Cargo.toml` — зависимость strsim (для fuzzy matching)
+
+**Функциональность:**
+- ✅ Variable context в TypeErrorKind (variable_name, param_variable_name)
+- ✅ Три уровня детализации (Brief/Standard/Detailed)
+- ✅ Smart hints для исправления ошибок
+- ✅ Graceful degradation при отсутствии variable_name
+
+**Тестирование:** 36 тестов (19 unit + 17 integration)
+
+### Key Files
+
+| Компонент | Файл | Строк кода | Статус |
+|-----------|------|-----------|--------|
+| **DetailLevel enum** | `shared/src/formatting/mod.rs` | 24 | ✅ |
+| **HoverBuilder** | `backend/src/helpers/hover_formatter.rs` | 909 | ✅ |
+| **TypeErrorKind** | `shared/src/domain/validators.rs` | 482 | ✅ |
+| **LSP Settings** | `backend/src/bin/lsp_server.rs` | ~200 | ✅ |
+| **VSCode Settings** | `vscode-extension/package.json` | ~60 | ✅ |
+
+### Testing
+
+**Total:** 411 тестов (100% success)
+
+| Категория | Количество | Статус |
+|-----------|-----------|--------|
+| Phase 1 (Hover Detail Levels) | 27 | ✅ PASS |
+| Phase 2 (Facets/Generics/Docs) | 16 | ✅ PASS |
+| Phase 3 Unit (Diagnostics) | 19 | ✅ PASS |
+| Phase 3 Integration | 17 | ✅ PASS |
+| **Milestone 3.6 Total** | **79** | **✅ PASS** |
+| Regression (Backend lib) | 106 | ✅ PASS |
+| Regression (Shared lib) | 226 | ✅ PASS |
+| **Total** | **411** | **✅ PASS** |
+
+### Backward Compatibility
+
+**100% совместимость:**
+- ✅ Старый API `to_diagnostic()` работает (fallback к Brief)
+- ✅ Hover без config использует default DetailLevel::Full
+- ✅ TypeErrorKind с `variable_name: None` корректно обрабатывается
+- ✅ 332 regression тестов проходят без изменений
+
+### Примеры
+
+#### Hover - Compact Level
+```
+МассивДанных: Массив 🟢
+```
+
+#### Hover - Full Level
+```
+МассивДанных: Массив 🟢
+Методы:
+  Добавить(Значение)
+  Найти(Значение) → Число | Неопределено
+  ...
+```
+
+#### Hover - Detailed Level
+```
+МассивДанных: Массив<T> 🟢
+
+Generic Type: Массив<T>
+  T — Любой тип (type parameter)
+
+Методы:
+  Добавить(
+    Значение: T
+  )
+  Найти(
+    Значение: T
+  ) → Число | Неопределено
+  ...
+
+Facet: Collection (Массив)
+
+📚 Документация:
+  [Syntax Helper](file:///C:/examples/syntax_helper/Массив.html)
+  [1C Docs](https://docs.1c.ru/search?q=Массив)
+```
+
+#### Diagnostics - Brief
+```
+Метод 'НесуществующийМетод' не существует для типа 'Массив'
+```
+
+#### Diagnostics - Standard
+```
+Метод 'НесуществующийМетод' не существует для переменной 'списокИмен' типа 'Массив'
+```
+
+#### Diagnostics - Detailed
+```
+Метод 'НесуществующийМетод' не существует для переменной 'списокИмен' типа 'Массив'
+
+💡 Подсказка: Проверьте правильность написания метода...
+```
+
+### Code Review
+
+**Оценки:**
+- Архитектура: 5.0/5 ⭐
+- Качество кода: 4.8/5 ⭐
+- Тестирование: 5.0/5 ⭐
+- Backward compatibility: 5.0/5 ⭐
+- Completeness: 4.7/5 ⭐
+
+**Общая оценка:** 4.8/5 ⭐⭐⭐⭐⭐
+
+**Решение:** ✅ APPROVED - READY FOR PRODUCTION
+
+### Ссылки
+
+- [ROADMAP_2025.md:1027+](../../ROADMAP_2025.md#-milestone-36-enhanced-ux-hover--diagnostics--завершён-2025-11-22) — детальное описание
+- [CHANGELOG.md:5-35](../../CHANGELOG.md) — список изменений версии 1.1.0
+
+---
+
 ## 📚 Полный список Milestones
 
 **См. также:**

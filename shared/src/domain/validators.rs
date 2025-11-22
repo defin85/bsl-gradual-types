@@ -13,6 +13,7 @@ use crate::domain::metadata_lookup::TypeMetadataLookup;
 use crate::domain::types::{
     ConcreteType, DiagnosticSeverity, SpecialType, TypeDiagnostic, TypeResolution,
 };
+use crate::formatting::DetailLevel;  // MILESTONE 3.6 Phase 3
 use crate::ir::Span;
 
 /// Категории ошибок типизации из статьи Balyuk & Popova
@@ -24,32 +25,71 @@ pub enum TypeErrorKind {
         param_index: usize,
         expected: String,
         actual: String,
+        variable_name: Option<String>,      // MILESTONE 3.6 Phase 3: переменная объекта
+        param_variable_name: Option<String>, // MILESTONE 3.6 Phase 3: переменная параметра
     },
     /// Обращение к несуществующему свойству объекта
     NonExistentProperty {
         object_type: String,
         property_name: String,
+        variable_name: Option<String>,  // MILESTONE 3.6 Phase 3: имя переменной
     },
     /// Обращение к несуществующему методу объекта
     NonExistentMethod {
         object_type: String,
         method_name: String,
+        variable_name: Option<String>,  // MILESTONE 3.6 Phase 3: имя переменной
     },
     /// Обработка простого типа как коллекции
     SimpleTypeAsCollection {
         type_name: String,
         operation: String,
+        variable_name: Option<String>,  // MILESTONE 3.6 Phase 3: имя переменной
     },
 }
 
 impl TypeErrorKind {
+    /// MILESTONE 3.6 Phase 3: to_diagnostic теперь использует Brief формат по умолчанию (backward compatibility)
     pub fn to_diagnostic(&self, span: Span) -> TypeDiagnostic {
-        let message = match self {
+        let message = self.format_brief();
+
+        TypeDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            message,
+            line: span.start_line,
+            column: span.start_column,
+            end_line: span.end_line,
+            end_column: span.end_column,
+        }
+    }
+
+    /// MILESTONE 3.6 Phase 3: to_diagnostic с настраиваемым уровнем детализации
+    pub fn to_diagnostic_with_detail(&self, span: Span, detail_level: DetailLevel) -> TypeDiagnostic {
+        let message = match detail_level {
+            DetailLevel::Compact => self.format_brief(),
+            DetailLevel::Full => self.format_standard(),
+            DetailLevel::Detailed => self.format_detailed(),
+        };
+
+        TypeDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            message,
+            line: span.start_line,
+            column: span.start_column,
+            end_line: span.end_line,
+            end_column: span.end_column,
+        }
+    }
+
+    /// MILESTONE 3.6 Phase 3: Brief формат - только тип ошибки (без имени переменной)
+    fn format_brief(&self) -> String {
+        match self {
             TypeErrorKind::IncorrectParameterType {
                 method_name,
                 param_index,
                 expected,
                 actual,
+                ..
             } => format!(
                 "Некорректный параметр #{} для метода '{}': ожидается {}, получено {}",
                 param_index + 1,
@@ -60,6 +100,7 @@ impl TypeErrorKind {
             TypeErrorKind::NonExistentProperty {
                 object_type,
                 property_name,
+                ..
             } => format!(
                 "Свойство '{}' не существует для типа '{}'",
                 property_name, object_type
@@ -67,6 +108,7 @@ impl TypeErrorKind {
             TypeErrorKind::NonExistentMethod {
                 object_type,
                 method_name,
+                ..
             } => format!(
                 "Метод '{}' не существует для типа '{}'",
                 method_name, object_type
@@ -74,19 +116,150 @@ impl TypeErrorKind {
             TypeErrorKind::SimpleTypeAsCollection {
                 type_name,
                 operation,
+                ..
             } => format!(
                 "Тип '{}' является примитивным и не поддерживает операцию '{}'",
                 type_name, operation
             ),
-        };
+        }
+    }
 
-        TypeDiagnostic {
-            severity: DiagnosticSeverity::Error,
-            message,
-            line: span.start_line,
-            column: span.start_column,
-            end_line: span.end_line,
-            end_column: span.end_column,
+    /// MILESTONE 3.6 Phase 3: Standard формат - тип + имя переменной
+    fn format_standard(&self) -> String {
+        match self {
+            TypeErrorKind::NonExistentMethod {
+                object_type,
+                method_name,
+                variable_name,
+            } => {
+                if let Some(var) = variable_name {
+                    format!(
+                        "Метод '{}' не существует для переменной '{}' типа '{}'",
+                        method_name, var, object_type
+                    )
+                } else {
+                    self.format_brief() // Fallback если variable_name отсутствует
+                }
+            }
+            TypeErrorKind::IncorrectParameterType {
+                method_name,
+                param_index,
+                expected,
+                actual,
+                variable_name,
+                param_variable_name,
+            } => {
+                let mut msg = format!(
+                    "Некорректный параметр #{} для метода '{}'",
+                    param_index + 1,
+                    method_name
+                );
+
+                if let Some(var) = variable_name {
+                    msg.push_str(&format!(" переменной '{}'", var));
+                }
+
+                msg.push_str(&format!(": ожидается {}, получено", expected));
+
+                if let Some(param_var) = param_variable_name {
+                    msg.push_str(&format!(" переменная '{}' типа {}", param_var, actual));
+                } else {
+                    msg.push_str(&format!(" {}", actual));
+                }
+
+                msg
+            }
+            TypeErrorKind::NonExistentProperty {
+                object_type,
+                property_name,
+                variable_name,
+            } => {
+                if let Some(var) = variable_name {
+                    format!(
+                        "Свойство '{}' не существует для переменной '{}' типа '{}'",
+                        property_name, var, object_type
+                    )
+                } else {
+                    self.format_brief()
+                }
+            }
+            TypeErrorKind::SimpleTypeAsCollection {
+                type_name,
+                operation,
+                variable_name,
+            } => {
+                if let Some(var) = variable_name {
+                    format!(
+                        "Переменная '{}' типа '{}' не является коллекцией, операция '{}' недоступна",
+                        var, type_name, operation
+                    )
+                } else {
+                    self.format_brief()
+                }
+            }
+        }
+    }
+
+    /// MILESTONE 3.6 Phase 3: Detailed формат - Standard + умные подсказки
+    fn format_detailed(&self) -> String {
+        let base = self.format_standard();
+        let hint = self.generate_hint();
+
+        if !hint.is_empty() {
+            format!("{}\n\n{}", base, hint)
+        } else {
+            base
+        }
+    }
+
+    /// MILESTONE 3.6 Phase 3: Генерация умных подсказок
+    fn generate_hint(&self) -> String {
+        match self {
+            TypeErrorKind::NonExistentMethod {
+                object_type,
+                method_name,
+                ..
+            } => {
+                // Простая подсказка без fuzzy matching
+                format!(
+                    "💡 Подсказка: Проверьте правильность написания метода '{}' для типа '{}'. \
+                    Возможно, метод называется по-другому или недоступен для текущего фасета.",
+                    method_name, object_type
+                )
+            }
+            TypeErrorKind::IncorrectParameterType {
+                expected,
+                actual,
+                ..
+            } => {
+                format!(
+                    "💡 Подсказка: Ожидается {}, но передано {}. \
+                    Преобразуйте тип явно или используйте переменную правильного типа.",
+                    expected, actual
+                )
+            }
+            TypeErrorKind::NonExistentProperty {
+                object_type,
+                property_name,
+                ..
+            } => {
+                format!(
+                    "💡 Подсказка: Свойство '{}' не найдено для типа '{}'. \
+                    Проверьте правильность имени свойства или используйте доступное свойство.",
+                    property_name, object_type
+                )
+            }
+            TypeErrorKind::SimpleTypeAsCollection {
+                type_name,
+                operation,
+                ..
+            } => {
+                format!(
+                    "💡 Подсказка: Тип '{}' не поддерживает операцию '{}'. \
+                    Используйте коллекцию (Массив, Список, Соответствие) для этой операции.",
+                    type_name, operation
+                )
+            }
         }
     }
 }
@@ -122,6 +295,33 @@ impl<'a> TypeValidator<'a> {
             Some(TypeErrorKind::NonExistentMethod {
                 object_type: type_name,
                 method_name: method_name.to_string(),
+                variable_name: None,  // MILESTONE 3.6 Phase 3: будет передаваться из visitor
+            })
+        } else {
+            None
+        }
+    }
+
+    /// MILESTONE 3.6 Phase 3: версия с передачей variable_name
+    pub fn validate_method_exists_with_variable(
+        &self,
+        object_resolution: &TypeResolution,
+        method_name: &str,
+        variable_name: Option<String>,
+    ) -> Option<TypeErrorKind> {
+        let methods = self.metadata_lookup.get_methods(object_resolution);
+
+        let method_exists = methods.iter().any(|m| {
+            Self::names_equal_ignore_case(&m.name, method_name)
+                || Self::names_equal_ignore_case(&m.english_name, method_name)
+        });
+
+        if !method_exists {
+            let type_name = Self::resolution_to_string(object_resolution);
+            Some(TypeErrorKind::NonExistentMethod {
+                object_type: type_name,
+                method_name: method_name.to_string(),
+                variable_name,
             })
         } else {
             None
@@ -146,6 +346,32 @@ impl<'a> TypeValidator<'a> {
             Some(TypeErrorKind::NonExistentProperty {
                 object_type: type_name,
                 property_name: property_name.to_string(),
+                variable_name: None,  // MILESTONE 3.6 Phase 3: будет передаваться из visitor
+            })
+        } else {
+            None
+        }
+    }
+
+    /// MILESTONE 3.6 Phase 3: версия с передачей variable_name
+    pub fn validate_property_exists_with_variable(
+        &self,
+        object_resolution: &TypeResolution,
+        property_name: &str,
+        variable_name: Option<String>,
+    ) -> Option<TypeErrorKind> {
+        let properties = self.metadata_lookup.get_properties(object_resolution);
+
+        let property_exists = properties
+            .iter()
+            .any(|p| Self::names_equal_ignore_case(&p.name, property_name));
+
+        if !property_exists {
+            let type_name = Self::resolution_to_string(object_resolution);
+            Some(TypeErrorKind::NonExistentProperty {
+                object_type: type_name,
+                property_name: property_name.to_string(),
+                variable_name,
             })
         } else {
             None
@@ -176,6 +402,7 @@ impl<'a> TypeValidator<'a> {
                 Some(TypeErrorKind::SimpleTypeAsCollection {
                     type_name: prim.display_name().to_string(),
                     operation: operation.to_string(),
+                    variable_name: None,  // MILESTONE 3.6 Phase 3: будет передаваться из visitor
                 })
             }
             ResolutionResult::Concrete(ConcreteType::Special(SpecialType::Undefined))
@@ -183,6 +410,7 @@ impl<'a> TypeValidator<'a> {
                 Some(TypeErrorKind::SimpleTypeAsCollection {
                     type_name: "Неопределено".to_string(),
                     operation: operation.to_string(),
+                    variable_name: None,  // MILESTONE 3.6 Phase 3: будет передаваться из visitor
                 })
             }
             _ => None,

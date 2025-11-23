@@ -254,14 +254,15 @@ impl HoverFormatter {
             }
             DetailLevel::Detailed => {
                 // Полный hover с методами, свойствами, фасетами и документацией (Phase 2)
+                // Порядок: тип → фасеты → свойства (state) → методы (behavior) → документация
                 HoverBuilder::new(&self.config)
                     .add_header("Переменная", name)
                     .add_type_info(resolution)
                     .add_certainty(&resolution.certainty)
                     .add_facet_info(resolution)              // ← MILESTONE 3.6 Phase 2: Task 2.1
                     .add_generic_info(resolution)            // ← MILESTONE 3.6 Phase 2: Task 2.2
+                    .add_properties(resolution, &self.metadata_lookup) // ← Свойства ПЕРЕД методами (best practice)
                     .add_methods(resolution, &self.metadata_lookup)
-                    .add_properties(resolution, &self.metadata_lookup)
                     .add_documentation_links(resolution)    // ← MILESTONE 3.6 Phase 2: Task 2.4
                     .build()
             }
@@ -376,7 +377,12 @@ impl<'a> HoverBuilder<'a> {
 
         if !methods.is_empty() {
             let total_count = methods.len();
-            let display_count = self.config.max_methods.min(total_count);
+            // ИСПРАВЛЕНИЕ: Для DetailLevel::Detailed показываем ВСЕ методы без ограничений
+            let display_count = if matches!(self.config.detail_level, DetailLevel::Detailed) {
+                total_count
+            } else {
+                self.config.max_methods.min(total_count)
+            };
 
             let mut method_lines = vec![format!(
                 "Методы (показано {} из {}):",
@@ -456,7 +462,8 @@ impl<'a> HoverBuilder<'a> {
                 ));
             }
 
-            self.sections.push(method_lines.join("\n"));
+            // ИСПРАВЛЕНИЕ: Используем "  \n" (два пробела + \n) для Markdown hard break в VSCode hover
+            self.sections.push(method_lines.join("  \n"));
         }
 
         self
@@ -471,7 +478,12 @@ impl<'a> HoverBuilder<'a> {
 
         if !properties.is_empty() {
             let total_count = properties.len();
-            let display_count = self.config.max_properties.min(total_count);
+            // ИСПРАВЛЕНИЕ: Для DetailLevel::Detailed показываем ВСЕ свойства без ограничений
+            let display_count = if matches!(self.config.detail_level, DetailLevel::Detailed) {
+                total_count
+            } else {
+                self.config.max_properties.min(total_count)
+            };
 
             let mut property_lines = vec![format!(
                 "Свойства (показано {} из {}):",
@@ -497,7 +509,8 @@ impl<'a> HoverBuilder<'a> {
                 ));
             }
 
-            self.sections.push(property_lines.join("\n"));
+            // ИСПРАВЛЕНИЕ: Используем "  \n" (два пробела + \n) для Markdown hard break в VSCode hover
+            self.sections.push(property_lines.join("  \n"));
         }
 
         self
@@ -633,7 +646,7 @@ impl<'a> HoverBuilder<'a> {
                     .iter()
                     .map(|l| format!("• {}", l))
                     .collect::<Vec<_>>()
-                    .join("\n")
+                    .join("  \n")  // ИСПРАВЛЕНИЕ: Markdown hard break
             );
 
             self.sections.push(links_section);
@@ -672,7 +685,8 @@ impl<'a> HoverBuilder<'a> {
     }
 
     fn build(self) -> String {
-        self.sections.join("\n")
+        // ИСПРАВЛЕНИЕ: Используем двойной перенос для разделения секций (параграфы в Markdown)
+        self.sections.join("\n\n")
     }
 }
 

@@ -105,3 +105,6 @@ criterion = "0.5"
 
 # Note: tempfile также используется в основном коде для HBK recovery,
 # но уже доступен через workspace
+
+[build-dependencies]
+chrono = { workspace = true }

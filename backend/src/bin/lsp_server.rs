@@ -1224,10 +1224,22 @@ impl LanguageServer for BslLanguageServer {
                 candidates.into_iter().find(|p| p.exists())
             });
 
+        let detail_level = DetailLevel::from_str(&settings.hover.detail_level);
+
+        // ДИАГНОСТИКА: Логируем настройки hover при каждом запросе
+        debug!(
+            "🔍 Hover request: detailLevel={:?}, maxMethods={}, maxProperties={}, showCertainty={}, syntax_helper={:?}",
+            detail_level,
+            settings.hover.max_methods,
+            settings.hover.max_properties,
+            settings.hover.show_certainty,
+            syntax_helper_path.as_ref().map(|p| p.display().to_string())
+        );
+
         let hover_config = HoverFormatConfig {
             max_methods: settings.hover.max_methods,
             max_properties: settings.hover.max_properties,
-            detail_level: DetailLevel::from_str(&settings.hover.detail_level),
+            detail_level,
             show_certainty: settings.hover.show_certainty,
             syntax_helper_path, // ← MILESTONE 3.6 Phase 2: Передаём путь к документации
             output_format: OutputFormat::Markdown,
@@ -3176,7 +3188,14 @@ async fn main() -> Result<()> {
         .with_writer(std::sync::Mutex::new(log_file))
         .init();
 
-    info!("Starting BSL Language Server - Clean Architecture");
+    // ДИАГНОСТИКА: Версия и build timestamp для проверки актуальности LSP server
+    const VERSION: &str = env!("CARGO_PKG_VERSION");
+    const BUILD_TIMESTAMP: &str = env!("BUILD_TIMESTAMP");
+    info!("╔════════════════════════════════════════════════════════════════╗");
+    info!("║ BSL Language Server - Clean Architecture                      ║");
+    info!("║ Version: {:<52} ║", VERSION);
+    info!("║ Build: {:<54} ║", BUILD_TIMESTAMP);
+    info!("╚════════════════════════════════════════════════════════════════╝");
 
     // ✅ НОВОЕ: Очищаем progress_debug.log при каждом запуске (как rust_lsp_server.log)
     if let Ok(mut file) = std::fs::OpenOptions::new()

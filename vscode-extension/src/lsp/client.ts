@@ -147,7 +147,8 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
                 vscode.workspace.createFileSystemWatcher('**/*.os'),
                 vscode.workspace.createFileSystemWatcher('**/Configuration.xml')
             ],
-            configurationSection: 'bslAnalyzer'
+            // MILESTONE 3.6: Синхронизируем ОБЕ секции настроек (bslAnalyzer + bsl)
+            configurationSection: ['bslAnalyzer', 'bsl']
         },
         // ✅ MILESTONE 2.10: Передаём initializationOptions в LSP
         initializationOptions: initializationOptions,

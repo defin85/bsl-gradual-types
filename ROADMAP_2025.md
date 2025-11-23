@@ -748,6 +748,526 @@ async fn test_mcp_prompts() {
 
 ---
 
+### 🎭 Milestone 3.11: Context-Aware Facet Selection (2-3 недели)
+
+**Приоритет:** 🔴 КРИТИЧЕСКИЙ — без этого фасетная система типов не работает правильно
+
+**Статус:** 📝 ПЛАНИРУЕТСЯ
+
+**Проблема:**
+
+Текущая реализация не поддерживает context-aware выбор фасетов для типов 1С:
+
+1. **PropertyAccess всегда возвращает строку без фасета:**
+   ```bsl
+   СправочникКонтрагенты = Справочники.Контрагенты;
+   // Ожидается: СправочникМенеджер.Контрагенты (Manager facet)
+   // Сейчас: Справочники.Контрагенты (без указания фасета)
+   ```
+
+2. **Методы не переключают фасеты:**
+   ```bsl
+   Объект = Справочники.Контрагенты.СоздатьЭлемент();
+   // Ожидается: СправочникОбъект.Контрагенты (Object facet)
+   // Сейчас: Неопределено (метод не резолвится)
+
+   Ссылка = Справочники.Контрагенты.НайтиПоКоду("001");
+   // Ожидается: СправочникСсылка.Контрагенты (Reference facet)
+   // Сейчас: Неопределено
+   ```
+
+3. **Отсутствует контроль серверного/клиентского контекста:**
+   ```bsl
+   &НаКлиенте
+   Процедура КлиентскийМетод()
+       // ❌ Не должно работать на клиенте (нет прямого доступа к БД)
+       Ссылка = Справочники.Контрагенты.НайтиПоКоду("001");
+   КонецПроцедуры
+   ```
+
+**Исследование:**
+
+**Фасетная система типов** (из статьи Balyuk & Popova, 2021):
+
+Один метаданный объект 1С имеет множественные представления (фасеты):
+
+| Фасет | Название | Назначение | Пример |
+|-------|----------|------------|--------|
+| **Manager** | СправочникМенеджер | Создание, поиск элементов | `Справочники.Контрагенты.НайтиПоКоду()` |
+| **Object** | СправочникОбъект | Изменяемый объект | `Объект = Справочники.Контрагенты.СоздатьЭлемент()` |
+| **Reference** | СправочникСсылка | Ссылка на элемент | `Ссылка.Наименование` |
+| **Selection** | СправочникВыборка | Обход элементов | `Выборка = Справочники.Контрагенты.Выбрать()` |
+| **List** | СправочникСписок | UI представление | Для форм |
+
+**Серверный/Клиентский контекст:**
+
+В 1С код делится на контексты выполнения (директивы компиляции):
+
+- `&НаСервере` — выполняется на сервере, есть доступ к БД
+- `&НаСервереБезКонтекста` — на сервере без контекста формы
+- `&НаКлиенте` — выполняется на клиенте, НЕТ прямого доступа к БД
+- `&НаКлиентеНаСервереБезКонтекста` — универсальный код (без доступа к контексту)
+
+**Доступность методов:**
+
+| Метод | &НаСервере | &НаКлиенте | Return Facet |
+|-------|------------|------------|--------------|
+| `Справочники.X` | ✅ | ✅ | Manager |
+| `.СоздатьЭлемент()` | ✅ | ❌ | Object |
+| `.НайтиПоКоду()` | ✅ | ❌ | Reference |
+| `.ПолучитьОбъект()` | ✅ | ❌ | Object |
+| `.Выбрать()` | ✅ | ❌ | Selection |
+| `.СоздатьСписокЗначений()` | ✅ | ✅ | List |
+
+**Решение:**
+
+Реализовать трёхуровневую архитектуру:
+
+1. **Method Signature Registry** — хранение информации о return facet для каждого метода
+2. **Context Tracker** — отслеживание текущего контекста выполнения (&НаСервере/&НаКлиенте)
+3. **Facet Selection Engine** — выбор правильного фасета на основе контекста и вызываемого метода
+
+#### Задачи:
+
+**Phase 1: Method Signature Enhancement (3-4 дня)**
+
+**Task 1.1: Расширить SignatureIndex (1 день)**
+
+Добавить поля в `MethodSignature`:
+
+```rust
+// shared/src/domain/signature_index.rs
+pub struct MethodSignature {
+    pub name: String,
+    pub owner_type: Option<String>,
+    pub params: Vec<ParameterInfo>,
+    pub return_type: Option<String>,
+    pub source: SignatureSource,
+
+    // ✅ NEW: Информация о фасетах
+    pub return_facet: Option<FacetKind>,  // Какой фасет возвращает метод
+    pub context_requirements: ContextRequirements,  // Где доступен
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ContextRequirements {
+    ServerOnly,      // Только &НаСервере
+    ClientOnly,      // Только &НаКлиенте
+    Universal,       // Везде
+    ServerPreferred, // Работает везде, но лучше на сервере
+}
+```
+
+**Task 1.2: Populate return_facet для платформенных методов (1-2 дня)**
+
+Обновить `backend/src/data/loaders/platform_types.rs`:
+
+```rust
+fn populate_catalog_manager_methods(index: &mut SignatureIndex, catalog_name: &str) {
+    // СоздатьЭлемент() → Object facet
+    index.add_platform_method(
+        catalog_name.clone(),
+        MethodSignature {
+            name: "СоздатьЭлемент".to_string(),
+            return_type: Some(format!("СправочникОбъект.{}", catalog_name)),
+            return_facet: Some(FacetKind::Object),  // ✅
+            context_requirements: ContextRequirements::ServerOnly,  // ✅
+            // ...
+        },
+    );
+
+    // НайтиПоКоду() → Reference facet
+    index.add_platform_method(
+        catalog_name.clone(),
+        MethodSignature {
+            name: "НайтиПоКоду".to_string(),
+            return_type: Some(format!("СправочникСсылка.{}", catalog_name)),
+            return_facet: Some(FacetKind::Reference),  // ✅
+            context_requirements: ContextRequirements::ServerOnly,  // ✅
+            // ...
+        },
+    );
+
+    // Аналогично для других методов: НайтиПоНаименованию, ПолучитьОбъект, Выбрать...
+}
+```
+
+**Task 1.3: Unit тесты для SignatureIndex (1 день)**
+
+```rust
+#[test]
+fn test_method_signature_with_facet() {
+    let mut index = SignatureIndex::new();
+
+    let signature = MethodSignature {
+        name: "СоздатьЭлемент".to_string(),
+        return_facet: Some(FacetKind::Object),
+        context_requirements: ContextRequirements::ServerOnly,
+        // ...
+    };
+
+    index.add_platform_method("Справочники.Контрагенты", signature);
+
+    let found = index.find_method("Справочники.Контрагенты", "СоздатьЭлемент");
+    assert_eq!(found.unwrap().return_facet, Some(FacetKind::Object));
+}
+```
+
+---
+
+**Phase 2: Context-Aware Resolution (4-5 дней)**
+
+**Task 2.1: ExecutionContext tracking (2 дня)**
+
+Создать новый модуль для отслеживания контекста выполнения:
+
+```rust
+// shared/src/domain/execution_context.rs
+pub struct ExecutionContext {
+    pub current_directive: CompilerDirective,
+    pub in_function: Option<String>,
+    pub warnings: Vec<ContextWarning>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CompilerDirective {
+    OnServer,                    // &НаСервере
+    OnServerNoContext,           // &НаСервереБезКонтекста
+    OnClient,                    // &НаКлиенте
+    OnClientOnServerNoContext,   // &НаКлиентеНаСервереБезКонтекста
+    Unknown,                     // Нет директивы
+}
+
+impl ExecutionContext {
+    pub fn can_call_method(&self, requirements: &ContextRequirements) -> bool {
+        match (&self.current_directive, requirements) {
+            (CompilerDirective::OnServer, _) => true,
+            (CompilerDirective::OnClient, ContextRequirements::ServerOnly) => false,
+            (CompilerDirective::OnClient, ContextRequirements::ClientOnly) => true,
+            (CompilerDirective::OnClient, ContextRequirements::Universal) => true,
+            // ... другие комбинации
+        }
+    }
+}
+```
+
+**Task 2.2: Парсинг директив в AstToIrConverter (1 день)**
+
+Добавить в `backend/src/application/ast_to_ir.rs`:
+
+```rust
+// При обработке Function/Procedure
+fn convert_function(&mut self, func: &Function) -> Result<usize> {
+    // Извлечь директиву из комментария перед функцией
+    let directive = self.extract_compiler_directive(&func.comments);
+
+    // Установить контекст для scope
+    let context = ExecutionContext {
+        current_directive: directive,
+        in_function: Some(func.name.clone()),
+        warnings: vec![],
+    };
+
+    self.symbol_table.set_context_for_scope(scope_id, context);
+
+    // ...
+}
+```
+
+**Task 2.3: Обновить resolve_member_access() (1 день)**
+
+Обновить `shared/src/domain/resolver.rs`:
+
+```rust
+fn resolve_member_access(&self, base: &str, member: &str, context: Option<&ExecutionContext>) -> TypeResolution {
+    // Для PropertyAccess на глобальные коллекции
+    let (kind, prefix) = match base {
+        "Справочники" | "Catalogs" => (MetadataKind::Catalog, "Справочники"),
+        "Документы" | "Documents" => (MetadataKind::Document, "Документы"),
+        _ => return self.resolve_unknown_member(base, member),
+    };
+
+    let type_name = format!("{}.{}", prefix, member);
+
+    // ✅ Всегда возвращаем Manager facet для PropertyAccess
+    TypeResolution {
+        type_name: format!("{}Менеджер.{}",
+            kind_to_prefix(kind),  // Справочники → Справочник
+            member
+        ),
+        active_facet: Some(FacetKind::Manager),
+        // ...
+    }
+}
+```
+
+**Task 2.4: Facet switching в infer_expression_type() (1 день)**
+
+Обновить обработку `Expression::Call`:
+
+```rust
+// backend/src/application/ast_to_ir.rs
+Expression::Call { function, .. } => {
+    match function.as_ref() {
+        Expression::PropertyAccess { object, property, .. } => {
+            let receiver_type = self.infer_expression_type(object);
+
+            // ✅ NEW: Ищем метод в SignatureIndex
+            if let Some(signature) = self.signature_index.find_method(&receiver_type, property) {
+                // ✅ Используем return_facet если указан
+                if let Some(facet) = signature.return_facet {
+                    return format!("{}{}. {}",
+                        extract_kind_from_type(&receiver_type),  // Справочник
+                        facet_to_suffix(facet),  // Object → Объект
+                        extract_name_from_type(&receiver_type)   // Контрагенты
+                    );
+                }
+
+                // Fallback на return_type
+                signature.return_type.unwrap_or_else(|| "Dynamic".to_string())
+            } else {
+                "Dynamic".to_string()
+            }
+        }
+        // ...
+    }
+}
+```
+
+---
+
+**Phase 3: Diagnostics для контекстных ошибок (3-4 дня)**
+
+**Task 3.1: Context validation в SemanticValidator (2 дня)**
+
+Добавить проверку доступности методов в контексте:
+
+```rust
+// backend/src/application/semantic_validation_visitor.rs
+fn visit_function_call(&mut self, call: &FunctionCall) {
+    // Получаем текущий контекст из scope
+    let context = self.ir.get_context_for_scope(self.current_scope);
+
+    // Проверяем метод
+    if let Some(signature) = self.signature_index.find_method(&receiver_type, &method_name) {
+        // ✅ NEW: Валидация контекста
+        if !context.can_call_method(&signature.context_requirements) {
+            self.errors.push(TypeDiagnostic {
+                kind: DiagnosticKind::MethodNotAvailableInContext,
+                message: format!(
+                    "Метод '{}' недоступен в контексте {:?}. Требуется {:?}",
+                    method_name,
+                    context.current_directive,
+                    signature.context_requirements
+                ),
+                severity: Severity::Warning,
+                // ...
+            });
+        }
+    }
+}
+```
+
+**Task 3.2: LSP Diagnostics integration (1 день)**
+
+Обновить `backend/src/bin/lsp_server.rs`:
+- Конвертировать `MethodNotAvailableInContext` → LSP Diagnostic
+- Severity = Warning (не Error, т.к. может работать)
+
+**Task 3.3: Integration тесты (1 день)**
+
+Создать `backend/tests/context_aware_facets_test.rs`:
+
+```rust
+#[test]
+fn test_property_access_returns_manager_facet() {
+    let code = r#"
+        СправочникКонтрагенты = Справочники.Контрагенты;
+    "#;
+
+    let type_name = infer_variable_type(code, "СправочникКонтрагенты");
+    assert_eq!(type_name, "СправочникМенеджер.Контрагенты");
+}
+
+#[test]
+fn test_create_element_returns_object_facet() {
+    let code = r#"
+        Объект = Справочники.Контрагенты.СоздатьЭлемент();
+    "#;
+
+    let type_name = infer_variable_type(code, "Объект");
+    assert_eq!(type_name, "СправочникОбъект.Контрагенты");
+}
+
+#[test]
+fn test_find_by_code_returns_reference_facet() {
+    let code = r#"
+        Ссылка = Справочники.Контрагенты.НайтиПоКоду("001");
+    "#;
+
+    let type_name = infer_variable_type(code, "Ссылка");
+    assert_eq!(type_name, "СправочникСсылка.Контрагенты");
+}
+
+#[test]
+fn test_server_only_method_in_client_context() {
+    let code = r#"
+        &НаКлиенте
+        Процедура Test()
+            Ссылка = Справочники.Контрагенты.НайтиПоКоду("001");
+        КонецПроцедуры
+    "#;
+
+    let diagnostics = validate_semantics(code);
+    assert!(diagnostics.iter().any(|d|
+        d.kind == DiagnosticKind::MethodNotAvailableInContext &&
+        d.message.contains("НайтиПоКоду")
+    ));
+}
+```
+
+---
+
+**Phase 4: VSCode UX improvements (2-3 дня)**
+
+**Task 4.1: Hover enhancement (1 день)**
+
+Обновить `backend/src/helpers/hover_formatter.rs`:
+
+```rust
+// Показывать активный фасет
+if let Some(facet) = type_resolution.active_facet {
+    content.push_str(&format!("\n**Фасет:** {}", facet_to_russian(facet)));
+}
+
+// Показывать доступные методы для текущего фасета
+content.push_str("\n\n**Доступные методы:");
+for method in type_info.methods.iter().filter(|m| m.facet == active_facet) {
+    content.push_str(&format!("\n- `{}`", method.name));
+}
+```
+
+**Task 4.2: Code completion filtering (1 день)**
+
+Обновить completion provider:
+- Фильтровать методы по текущему контексту
+- Группировать по фасетам
+- Показывать warning для недоступных методов
+
+**Task 4.3: Documentation (1 день)**
+
+Создать `docs/features/facet-system.md`:
+- Объяснение фасетной системы типов
+- Примеры использования
+- Таблица методов с фасетами
+- Серверный/клиентский контекст
+
+#### Критерии успеха:
+
+1. ✅ **PropertyAccess → Manager facet:**
+   ```bsl
+   М = Справочники.Контрагенты;  // Тип: СправочникМенеджер.Контрагенты
+   ```
+
+2. ✅ **Method calls переключают фасеты:**
+   ```bsl
+   Объект = М.СоздатьЭлемент();      // Тип: СправочникОбъект.Контрагенты
+   Ссылка = М.НайтиПоКоду("001");   // Тип: СправочникСсылка.Контрагенты
+   Выборка = М.Выбрать();            // Тип: СправочникВыборка.Контрагенты
+   ```
+
+3. ✅ **Context validation работает:**
+   ```bsl
+   &НаКлиенте
+   Процедура Test()
+       // Warning: НайтиПоКоду недоступен в клиентском контексте
+       Ссылка = Справочники.Контрагенты.НайтиПоКоду("001");
+   КонецПроцедуры
+   ```
+
+4. ✅ **Hover показывает фасет и контекст:**
+   ```
+   Переменная: СправочникКонтрагенты
+   Тип: СправочникМенеджер.Контрагенты
+   Фасет: Manager
+   Контекст: Universal
+
+   Доступные методы (Manager):
+   - СоздатьЭлемент() → Object (ServerOnly)
+   - НайтиПоКоду(Код: Строка) → Reference (ServerOnly)
+   - Выбрать() → Selection (ServerOnly)
+   ```
+
+5. ✅ **50+ тестов проходят:**
+   - 15 unit тестов SignatureIndex (return_facet, context_requirements)
+   - 20 integration тестов (facet switching, context validation)
+   - 15 LSP diagnostics тестов (warnings для клиентского контекста)
+
+#### Архитектура:
+
+**Новые компоненты:**
+
+1. **`shared/src/domain/execution_context.rs`** (NEW)
+   - ExecutionContext struct
+   - CompilerDirective enum
+   - ContextRequirements enum
+   - Логика проверки доступности
+
+2. **`shared/src/domain/facet_selector.rs`** (NEW)
+   - FacetSelector trait
+   - Логика выбора фасета по методу
+
+**Изменяемые компоненты:**
+
+1. **`shared/src/domain/signature_index.rs`**
+   - Добавить return_facet и context_requirements в MethodSignature
+
+2. **`backend/src/application/ast_to_ir.rs`**
+   - Парсинг директив компиляции (&НаСервере, &НаКлиенте)
+   - Хранение ExecutionContext в scope
+   - Facet-aware type inference для PropertyAccess и Call
+
+3. **`backend/src/data/loaders/platform_types.rs`**
+   - Заполнение return_facet для всех методов Manager
+   - Установка context_requirements
+
+4. **`backend/src/application/semantic_validation_visitor.rs`**
+   - Валидация доступности методов в контексте
+
+#### Зависимости:
+
+**Используют этот Milestone:**
+- ✅ Milestone 3.9 (Return Type Inference) — интегрируется с SignatureIndex
+- ✅ Milestone 3.10 (Parameter Validation) — использует обновлённый SignatureIndex
+- ✅ Milestone 3.6 (Enhanced UX) — показывает фасеты в hover
+
+**Этот Milestone использует:**
+- ✅ Milestone 2.8 (Semantic IR Layer) — SemanticProgram, SymbolTable
+- ✅ Milestone 2.17 (Configuration Metadata Parser) — типы конфигурации
+- ✅ Milestone 3.7 (Semantic Diagnostics) — инфраструктура для warnings
+
+#### Риски и митигация:
+
+| Риск | Вероятность | Влияние | Митигация |
+|------|-------------|---------|-----------|
+| Регрессии в hover/diagnostics | Средняя | Высокое | 50+ интеграционных тестов перед merge |
+| Сложность парсинга директив | Низкая | Среднее | Простой regex для `&НаСервере` из комментариев |
+| Производительность | Низкая | Среднее | Кеширование facet resolution в IR |
+| Неполнота методов с фасетами | Высокая | Низкое | Инкрементальное добавление (начнём с 10-15 ключевых методов) |
+
+#### Оценка времени:
+
+- **Phase 1:** 3-4 дня (SignatureIndex enhancement)
+- **Phase 2:** 4-5 дней (Context-aware resolution)
+- **Phase 3:** 3-4 дня (Diagnostics)
+- **Phase 4:** 2-3 дня (VSCode UX)
+- **Итого:** 12-16 дней (2-3 недели)
+
+**Буфер:** +3-5 дней для тестирования и отладки
+**Всего:** 3-4 недели
+
+---
+
 ### 🎯 Результаты Версии 3.0 (через 6 месяцев от старта)
 
 **Технические метрики:**

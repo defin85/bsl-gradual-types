@@ -176,6 +176,7 @@ fn log_progress_to_file(message: &str) {
 }
 
 /// BSL Language Server backend - CLEAN ARCHITECTURE
+#[derive(Clone)] // Для передачи в tokio::spawn (ревалидация после загрузки типов)
 struct BslLanguageServer {
     client: Client,
     documents: Arc<RwLock<HashMap<Url, String>>>,
@@ -293,6 +294,55 @@ impl BslLanguageServer {
             ..Default::default()
         }
     }
+
+    /// Ревалидация документа (используется после загрузки типов платформы)
+    /// Повторяет логику валидации из did_open/did_change
+    async fn revalidate_document(&self, uri: &Url, text: &str) -> Result<(), String> {
+        let mut diagnostics = Vec::new();
+
+        // PHASE 1: Syntax validation
+        if let Some(type_service) = self.get_type_service() {
+            match type_service.parse_and_validate(&text) {
+                Ok(errors) => {
+                    if !errors.is_empty() {
+                        info!("⚠️ Found {} syntax errors in {} (revalidation)", errors.len(), uri);
+                        diagnostics.extend(self.syntax_errors_to_diagnostics(&errors));
+                    }
+                }
+                Err(e) => {
+                    warn!("Syntax validation failed for {} (revalidation): {}", uri, e);
+                }
+            }
+        }
+
+        // PHASE 2: Semantic validation
+        if let Some(type_service) = self.get_type_service() {
+            let settings = self.settings.read().await;
+            let detail_level = bsl_shared::formatting::DetailLevel::from_str(&settings.diagnostics.detail_level);
+
+            match type_service.validate_semantics(&text, Some(detail_level)).await {
+                Ok(semantic_errors) => {
+                    if !semantic_errors.is_empty() {
+                        info!("⚠️ Found {} semantic errors in {} (revalidation)", semantic_errors.len(), uri);
+                        for error in semantic_errors {
+                            diagnostics.push(self.semantic_error_to_diagnostic(&error));
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Semantic validation failed for {} (revalidation): {}", uri, e);
+                }
+            }
+        }
+
+        // Отправляем обновлённые diagnostics
+        self.client
+            .publish_diagnostics(uri.clone(), diagnostics, None)
+            .await;
+
+        Ok(())
+    }
+
     /// Применяет текстовое изменение к строке
     fn apply_text_edit(&self, source: &str, range: Range, new_text: &str) -> String {
         let lines: Vec<&str> = source.lines().collect();
@@ -526,6 +576,7 @@ impl LanguageServer for BslLanguageServer {
                 let client_clone = self.client.clone();
                 let token_clone = token.clone();
                 let start_time = std::time::Instant::now();
+                let self_clone = self.clone(); // Для ревалидации документов
 
                 tokio::spawn(async move {
                     // Оптимальный баланс: достаточно быстрые обновления без overhead
@@ -691,6 +742,29 @@ impl LanguageServer for BslLanguageServer {
                                 .await;
 
                             info!("✅ [LSP→Extension] bsl/serverStatus (ready) sent successfully");
+
+                            // ИСПРАВЛЕНИЕ: Ревалидируем все открытые документы с полными типами платформы
+                            // Это исправляет race condition когда did_open запускался до загрузки типов
+                            info!("🔄 Revalidating all open documents with full platform types...");
+
+                            // Получаем список всех открытых документов
+                            let documents_to_revalidate: Vec<_> = {
+                                let docs = self_clone.documents.read().await;
+                                docs.iter().map(|(uri, text)| (uri.clone(), text.clone())).collect()
+                            };
+
+                            info!("📋 Found {} open documents to revalidate", documents_to_revalidate.len());
+
+                            // Ревалидируем каждый документ
+                            for (uri, text) in documents_to_revalidate {
+                                info!("🔄 Revalidating: {}", uri);
+
+                                if let Err(e) = self_clone.revalidate_document(&uri, &text).await {
+                                    warn!("⚠️ Failed to revalidate {}: {}", uri, e);
+                                }
+                            }
+
+                            info!("✅ Revalidation of all open documents completed");
                         }
                         Ok(Err(error_msg)) => {
                             // ❌ ОШИБКА: Отправляем WorkDoneProgressEnd с ошибкой
@@ -1102,6 +1176,11 @@ impl LanguageServer for BslLanguageServer {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         self.documents.write().await.remove(&uri);
+
+        // ИСПРАВЛЕНИЕ: Очищаем diagnostics при закрытии файла (отправляем пустой массив)
+        self.client
+            .publish_diagnostics(uri.clone(), vec![], None)
+            .await;
 
         self.client
             .log_message(MessageType::INFO, format!("Closed document: {}", uri))

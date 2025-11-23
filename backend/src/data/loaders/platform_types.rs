@@ -771,6 +771,11 @@ pub fn populate_signature_index_from_platform_types(
     for platform_type in platform_types {
         // Конвертируем методы в MethodSignature
         for method in &platform_type.methods {
+            // Пропускаем конструкторы - они уже в constructors хеш-мапе
+            if method.is_constructor {
+                continue;
+            }
+
             let signature = raw_method_to_signature(method, &platform_type.name);
 
             index.add_platform_method(platform_type.name.clone(), signature);
@@ -800,7 +805,11 @@ fn raw_method_to_signature(method: &RawMethodData, owner_type: &str) -> MethodSi
         name: method.name.clone(),
         owner_type: Some(owner_type.to_string()),
         params,
-        return_type: Some(method.return_type.clone()),
+        return_type: if method.return_type.is_empty() {
+            None
+        } else {
+            Some(method.return_type.clone())
+        },
         source: SignatureSource::Platform,
     }
 }

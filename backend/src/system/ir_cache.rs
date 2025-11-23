@@ -187,13 +187,15 @@ impl IrCache {
     /// Очистить весь кеш (используется при загрузке platform types)
     ///
     /// # Примечание
-    /// Сбрасывает статистику hits/misses/evictions.
+    /// НЕ сбрасывает статистику - считает очистку как принудительное вытеснение.
     pub async fn clear(&self) {
         let mut storage = self.storage.write().await;
+        let evicted_count = storage.len();
         storage.clear();
 
+        // НЕ сбрасываем статистику - считаем очистку как evictions
         let mut stats = self.stats.write().await;
-        *stats = IrCacheStats::default();
+        stats.evictions += evicted_count;
 
         debug!("🗑️ IrCache cleared");
     }
@@ -377,7 +379,8 @@ mod tests {
         assert!(cache.is_empty().await);
 
         let stats = cache.get_stats().await;
-        assert_eq!(stats.hits, 0);
-        assert_eq!(stats.misses, 0);
+        // Статистика НЕ сбрасывается: 1 hit + 1 eviction при очистке
+        assert_eq!(stats.hits, 1);
+        assert_eq!(stats.evictions, 1);
     }
 }

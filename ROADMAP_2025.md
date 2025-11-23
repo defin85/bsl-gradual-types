@@ -1837,9 +1837,20 @@ for method in type_info.methods.iter().filter(|m| m.facet == active_facet) {
 - ✅ Milestone 3.6 (Enhanced UX) — показывает фасеты в hover
 
 **Этот Milestone использует:**
+- 🔴 **Milestone 3.12 (Enhanced Config Parser)** — **КРИТИЧЕСКАЯ ЗАВИСИМОСТЬ:** CodeLocation, ModuleContextProperties, FormMetadata
 - ✅ Milestone 2.8 (Semantic IR Layer) — SemanticProgram, SymbolTable
-- ✅ Milestone 2.17 (Configuration Metadata Parser) — типы конфигурации
+- ✅ Milestone 2.17 (Configuration Metadata Parser) — базовая инфраструктура (расширяется в 3.12)
 - ✅ Milestone 3.7 (Semantic Diagnostics) — инфраструктура для warnings
+
+**⚠️ ВАЖНО:** Milestone 3.12 должен быть реализован ПЕРВЫМ, так как предоставляет:
+- CodeLocation для определения контекста по месту кода (тип модуля)
+- ModuleContextProperties для общих модулей (Server/Client/ServerCall)
+- FormMetadata для работы с формами и их реквизитами
+
+**Последовательность реализации:**
+```
+3.12 Enhanced Config Parser → 3.11 Context-Aware Facets
+```
 
 #### Риски и митигация:
 

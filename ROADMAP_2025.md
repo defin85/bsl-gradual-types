@@ -748,6 +748,601 @@ async fn test_mcp_prompts() {
 
 ---
 
+### 📦 Milestone 3.12: Enhanced Configuration Parser — Forms, Modules & Contexts (2-3 недели)
+
+**Приоритет:** 🔴 КРИТИЧЕСКИЙ — необходим для Milestone 3.11 (Context-Aware Facets)
+
+**Статус:** 📝 ПЛАНИРУЕТСЯ
+
+**Проблема:**
+
+Текущий Configuration Parser (Milestone 2.17) имеет ограниченную функциональность:
+
+1. **Не парсит контекстные свойства общих модулей:**
+   ```xml
+   <CommonModule>
+     <Server>true</Server>      <!-- ❌ НЕ парсится -->
+     <Client>false</Client>     <!-- ❌ НЕ парсится -->
+     <ServerCall>true</ServerCall>
+   </CommonModule>
+   ```
+
+2. **Не парсит формы и их модули:**
+   - Формы элементов (ItemForm)
+   - Формы списков (ListForm)
+   - Реквизиты форм
+   - Модули форм с директивами &НаСервере/&НаКлиенте
+
+3. **Не определяет контекст выполнения по месту кода:**
+   ```bsl
+   // Модуль объекта Справочника - ВСЕГДА серверный
+   // Модуль формы - зависит от директивы
+   // Общий модуль - зависит от свойств модуля
+   ```
+
+4. **Не парсит модули объектов:**
+   - Модуль менеджера (ManagerModule)
+   - Модуль объекта (ObjectModule)
+   - Модуль набора записей (RecordSetModule)
+
+**Исследование:**
+
+**Типы модулей в 1С и их контексты:**
+
+| Тип модуля | Контекст по умолчанию | Переопределяется директивой? | Доступ к БД |
+|-----------|----------------------|------------------------------|------------|
+| **Общий (Server=true, Client=false)** | Серверный | ❌ Нет | ✅ Полный |
+| **Общий (Server=false, Client=true)** | Клиентский | ❌ Нет | ❌ Нет |
+| **Общий (Server=true, Client=true)** | Оба | ✅ Да (&НаСервере/&НаКлиенте) | Зависит |
+| **Модуль объекта** | Серверный | ❌ Нет | ✅ Полный |
+| **Модуль менеджера** | Серверный | ❌ Нет | ✅ Полный |
+| **Модуль формы** | Оба | ✅ Да (&НаСервере/&НаКлиенте) | Зависит |
+| **Модуль команды** | Зависит от настроек | Зависит | Зависит |
+
+**Свойства общих модулей (из Configuration.xml):**
+
+```xml
+<CommonModule>
+  <Properties>
+    <Name>ИмяМодуля</Name>
+    <Server>true|false</Server>                    <!-- Выполняется на сервере -->
+    <Client>true|false</Client>                    <!-- Выполняется на клиенте -->
+    <ServerCall>true|false</ServerCall>            <!-- Вызов с клиента -->
+    <Privileged>true|false</Privileged>            <!-- Привилегированный режим -->
+    <Global>true|false</Global>                    <!-- Глобальный контекст -->
+    <ClientManagedApplication>true|false</ClientManagedApplication>
+    <ExternalConnection>true|false</ExternalConnection>
+    <ReturnValuesReuse>DontUse|DuringRequest|DuringSession</ReturnValuesReuse>
+  </Properties>
+</CommonModule>
+```
+
+**Структура форм в конфигурации:**
+
+```xml
+<Catalog>
+  <Name>Контрагенты</Name>
+  <Forms>
+    <Form uuid="...">
+      <Properties>
+        <Name>ФормаЭлемента</Name>
+        <FormType>Managed</FormType>  <!-- Управляемая форма -->
+      </Properties>
+      <!-- Реквизиты формы хранятся в отдельном Form.xml -->
+    </Form>
+  </Forms>
+  <ObjectModule>...</ObjectModule>
+  <ManagerModule>...</ManagerModule>
+</Catalog>
+```
+
+**Файл формы (Form.xml):**
+
+```xml
+<Form>
+  <Attributes>
+    <Attribute>
+      <Name>Объект</Name>
+      <Type>
+        <Type>CatalogRef.Контрагенты</Type>  <!-- Тип реквизита -->
+      </Type>
+    </Attribute>
+    <Attribute>
+      <Name>ДополнительноеПоле</Name>
+      <Type>
+        <Type>String</Type>
+        <StringQualifiers><Length>50</Length></StringQualifiers>
+      </Type>
+    </Attribute>
+  </Attributes>
+</Form>
+```
+
+**Решение:**
+
+Расширить Configuration Parser для извлечения:
+1. Контекстных свойств общих модулей (Server/Client/ServerCall)
+2. Информации о формах (структура, реквизиты, типы)
+3. Модулей объектов (ObjectModule, ManagerModule)
+4. ExecutionContext mapping для определения доступных методов
+
+#### Задачи:
+
+**Phase 1: CommonModule Properties Parsing (3-4 дня)**
+
+**Task 1.1: Расширить UniversalMetadataObject (1 день)**
+
+Добавить поля для контекстных свойств:
+
+```rust
+// backend/src/data/loaders/config_metadata_parser/types.rs
+pub struct UniversalMetadataObject {
+    // ...existing fields...
+
+    // ✅ NEW: Контекстные свойства для общих модулей
+    pub context_properties: Option<ModuleContextProperties>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModuleContextProperties {
+    pub server: bool,
+    pub client: bool,
+    pub server_call: bool,
+    pub privileged: bool,
+    pub global: bool,
+    pub client_managed_application: bool,
+    pub external_connection: bool,
+    pub return_values_reuse: ReturnValuesReuse,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ReturnValuesReuse {
+    DontUse,
+    DuringRequest,
+    DuringSession,
+}
+```
+
+**Task 1.2: Парсинг свойств из Configuration.xml (1 день)**
+
+Обновить `backend/src/data/loaders/config_metadata_parser/xml_parser.rs`:
+
+```rust
+fn parse_common_module(element: &Element) -> Result<UniversalMetadataObject> {
+    let name = extract_text(element, "Properties/Name")?;
+
+    // ✅ NEW: Парсинг контекстных свойств
+    let context_properties = ModuleContextProperties {
+        server: extract_bool(element, "Properties/Server").unwrap_or(false),
+        client: extract_bool(element, "Properties/Client").unwrap_or(false),
+        server_call: extract_bool(element, "Properties/ServerCall").unwrap_or(false),
+        privileged: extract_bool(element, "Properties/Privileged").unwrap_or(false),
+        global: extract_bool(element, "Properties/Global").unwrap_or(false),
+        // ...
+    };
+
+    Ok(UniversalMetadataObject {
+        name,
+        kind: MetadataKind::CommonModule,
+        context_properties: Some(context_properties),
+        // ...
+    })
+}
+```
+
+**Task 1.3: ExecutionContext mapping (1 день)**
+
+Создать логику определения контекста:
+
+```rust
+// shared/src/domain/execution_context.rs
+impl ModuleContextProperties {
+    pub fn get_execution_context(&self) -> ExecutionContext {
+        match (self.server, self.client) {
+            (true, false) => ExecutionContext::ServerOnly,
+            (false, true) => ExecutionContext::ClientOnly,
+            (true, true) => ExecutionContext::Both,  // Клиент-Сервер
+            (false, false) => ExecutionContext::Unknown,
+        }
+    }
+
+    pub fn can_call_database_methods(&self, current_directive: Option<&CompilerDirective>) -> bool {
+        match self.get_execution_context() {
+            ExecutionContext::ServerOnly => true,
+            ExecutionContext::ClientOnly => false,
+            ExecutionContext::Both => {
+                // Зависит от директивы
+                matches!(current_directive, Some(CompilerDirective::OnServer))
+            }
+            ExecutionContext::Unknown => false,
+        }
+    }
+}
+```
+
+**Task 1.4: Unit тесты (1 день)**
+- Тесты парсинга всех комбинаций Server/Client
+- Тесты ExecutionContext mapping
+- 15-20 тестов покрытия
+
+---
+
+**Phase 2: Forms Parsing (4-5 дней)**
+
+**Task 2.1: Структуры для форм (1 день)**
+
+Создать новые типы данных:
+
+```rust
+// backend/src/data/loaders/config_metadata_parser/form_types.rs
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FormMetadata {
+    pub name: String,
+    pub uuid: String,
+    pub form_type: FormType,
+    pub attributes: Vec<FormAttribute>,
+    pub module_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FormType {
+    Managed,     // Управляемая
+    Ordinary,    // Обычная
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FormAttribute {
+    pub name: String,
+    pub type_name: String,  // "CatalogRef.Контрагенты", "String", "Number"
+    pub is_main_attribute: bool,  // Основной реквизит (обычно "Объект")
+}
+```
+
+**Task 2.2: Парсинг форм из Configuration.xml (2 дня)**
+
+Добавить обработку Forms для всех объектов метаданных:
+
+```rust
+fn parse_catalog_forms(catalog_element: &Element, catalog_name: &str) -> Result<Vec<FormMetadata>> {
+    let forms = catalog_element.find_all("ChildObjects/Form");
+
+    let mut result = Vec::new();
+    for form_elem in forms {
+        let form_name = extract_text(form_elem, "Properties/Name")?;
+        let uuid = extract_text(form_elem, "@uuid")?;
+
+        // Путь к Form.xml (нужно читать отдельно)
+        let form_path = format!("Catalogs/{}/Forms/{}/Ext/Form.xml", catalog_name, form_name);
+
+        let form = FormMetadata {
+            name: form_name,
+            uuid,
+            form_type: FormType::Managed,  // Определяется из Form.xml
+            attributes: vec![],  // Парсятся из Form.xml (Task 2.3)
+            module_path: Some(PathBuf::from(form_path)),
+        };
+
+        result.push(form);
+    }
+
+    Ok(result)
+}
+```
+
+**Task 2.3: Парсинг Form.xml (реквизиты форм) (1 день)**
+
+Реализовать парсер отдельных файлов Form.xml:
+
+```rust
+// backend/src/data/loaders/config_metadata_parser/form_parser.rs
+pub fn parse_form_xml(path: &Path) -> Result<FormDetails> {
+    let xml_content = std::fs::read_to_string(path)?;
+    let doc = roxmltree::Document::parse(&xml_content)?;
+
+    // Парсинг реквизитов
+    let attributes = doc.root()
+        .descendants()
+        .filter(|n| n.tag_name().name() == "Attribute")
+        .map(|attr_node| {
+            FormAttribute {
+                name: extract_text(&attr_node, "Name")?,
+                type_name: extract_text(&attr_node, "Type/Type")?,  // "CatalogRef.X"
+                is_main_attribute: extract_text(&attr_node, "Name")? == "Объект",
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(FormDetails {
+        form_type: determine_form_type(&doc)?,
+        attributes,
+        commands: parse_form_commands(&doc)?,
+    })
+}
+```
+
+**Task 2.4: Integration тесты (1 день)**
+- Тесты парсинга форм из реальной конфигурации
+- Тесты извлечения реквизитов
+- 10-15 тестов
+
+---
+
+**Phase 3: Object/Manager Modules Parsing (2-3 дня)**
+
+**Task 3.1: Парсинг модулей объектов (1 день)**
+
+Добавить извлечение путей к модулям:
+
+```rust
+pub struct ObjectModulesInfo {
+    pub manager_module: Option<PathBuf>,  // ManagerModule.bsl
+    pub object_module: Option<PathBuf>,   // ObjectModule.bsl
+    pub record_set_module: Option<PathBuf>,  // Для регистров
+}
+
+fn parse_catalog_modules(catalog_element: &Element, catalog_name: &str) -> Result<ObjectModulesInfo> {
+    Ok(ObjectModulesInfo {
+        manager_module: if has_node(catalog_element, "ManagerModule") {
+            Some(PathBuf::from(format!("Catalogs/{}/Ext/ManagerModule.bsl", catalog_name)))
+        } else {
+            None
+        },
+        object_module: if has_node(catalog_element, "ObjectModule") {
+            Some(PathBuf::from(format!("Catalogs/{}/Ext/ObjectModule.bsl", catalog_name)))
+        } else {
+            None
+        },
+        record_set_module: None,
+    })
+}
+```
+
+**Task 3.2: Хранение информации о модулях (1 день)**
+
+Расширить `RawTypeData`:
+
+```rust
+pub struct RawTypeData {
+    // ...existing fields...
+
+    // ✅ NEW: Информация о модулях
+    pub modules: Option<ObjectModulesInfo>,
+    pub context_properties: Option<ModuleContextProperties>,
+}
+```
+
+**Task 3.3: Integration тесты (1 день)**
+- Тесты определения контекста по типу модуля
+- 10 тестов
+
+---
+
+**Phase 4: Context Resolution System (3-4 дня)**
+
+**Task 4.1: CodeLocation определение (1 день)**
+
+Создать систему определения места кода:
+
+```rust
+// shared/src/domain/code_location.rs
+pub struct CodeLocation {
+    pub file_path: PathBuf,
+    pub module_type: ModuleType,
+    pub execution_context: ExecutionContext,
+}
+
+pub enum ModuleType {
+    CommonModule { properties: ModuleContextProperties },
+    ObjectModule,
+    ManagerModule,
+    FormModule,
+    RecordSetModule,
+    CommandModule,
+}
+
+impl CodeLocation {
+    pub fn determine_from_path(path: &Path, config: &Configuration) -> Result<Self> {
+        // Логика определения типа модуля по пути:
+        // "CommonModules/ОбщийМодуль1/Ext/Module.bsl" → CommonModule
+        // "Catalogs/Контрагенты/Ext/ObjectModule.bsl" → ObjectModule
+        // "Catalogs/Контрагенты/Forms/ФормаЭлемента/Ext/Module.bsl" → FormModule
+    }
+
+    pub fn can_call_database_methods(&self, directive: Option<&CompilerDirective>) -> bool {
+        match &self.module_type {
+            ModuleType::CommonModule { properties } => {
+                properties.can_call_database_methods(directive)
+            }
+            ModuleType::ObjectModule | ModuleType::ManagerModule => true,
+            ModuleType::FormModule => {
+                matches!(directive, Some(CompilerDirective::OnServer))
+            }
+            _ => false,
+        }
+    }
+}
+```
+
+**Task 4.2: LSP Integration (1 день)**
+
+Передавать CodeLocation в TypeSystemService:
+
+```rust
+// backend/src/bin/lsp_server.rs
+async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+    let uri = params.text_document_position_params.text_document.uri;
+    let file_path = uri.to_file_path().ok()?;
+
+    // ✅ NEW: Определяем CodeLocation
+    let code_location = CodeLocation::determine_from_path(&file_path, &self.configuration)?;
+
+    // Передаём в get_hover_info
+    let hover_text = self.type_service
+        .get_hover_info_with_context(code, line, column, Some(&code_location))
+        .await?;
+
+    // ...
+}
+```
+
+**Task 4.3: TypeResolver с контекстом (1 день)**
+
+Обновить резолвинг с учётом CodeLocation:
+
+```rust
+impl TypeResolver {
+    pub fn resolve_expression_with_context(
+        &self,
+        expr: &str,
+        code_location: Option<&CodeLocation>,
+        directive: Option<&CompilerDirective>,
+    ) -> TypeResolution {
+        // Проверяем доступность метода в текущем контексте
+        if let Some(location) = code_location {
+            if !location.can_call_database_methods(directive) {
+                // Возвращаем TypeResolution с warning
+                return TypeResolution {
+                    certainty: Certainty::Unknown,
+                    warnings: vec!["База данных недоступна в текущем контексте".to_string()],
+                    // ...
+                };
+            }
+        }
+
+        // Обычная резолюция
+        self.resolve_expression_sync(expr)
+    }
+}
+```
+
+**Task 4.4: Integration тесты (1 день)**
+- 15-20 тестов для различных CodeLocation
+- Проверка доступности методов в контекстах
+
+#### Критерии успеха:
+
+1. ✅ **Общие модули парсятся с контекстом:**
+   ```rust
+   CommonModule {
+       name: "ОбщийМодуль1",
+       context: ModuleContextProperties {
+           server: true,
+           client: false,
+           server_call: true,
+       }
+   }
+   ```
+
+2. ✅ **Формы парсятся с реквизитами:**
+   ```rust
+   Form {
+       name: "ФормаЭлемента",
+       attributes: vec![
+           FormAttribute {
+               name: "Объект",
+               type_name: "СправочникСсылка.Контрагенты",
+           }
+       ]
+   }
+   ```
+
+3. ✅ **CodeLocation определяется автоматически:**
+   ```rust
+   // Путь: "Catalogs/Контрагенты/Ext/ObjectModule.bsl"
+   CodeLocation {
+       module_type: ModuleType::ObjectModule,
+       execution_context: ExecutionContext::ServerOnly,
+   }
+   ```
+
+4. ✅ **Context-aware резолвинг работает:**
+   ```bsl
+   // В клиентском общем модуле
+   Ссылка = Справочники.Контрагенты.НайтиПоКоду("001");
+   // Warning: Метод недоступен в клиентском контексте
+   ```
+
+5. ✅ **50+ тестов проходят:**
+   - 20 тестов парсинга CommonModule properties
+   - 15 тестов парсинга Form metadata
+   - 15 тестов CodeLocation resolution
+   - 10 integration тестов
+
+#### Архитектура:
+
+**Новые модули:**
+
+1. **`backend/src/data/loaders/config_metadata_parser/form_parser.rs`** (NEW)
+   - Парсинг Form.xml
+   - Извлечение реквизитов
+   - Определение типов реквизитов
+
+2. **`backend/src/data/loaders/config_metadata_parser/module_context.rs`** (NEW)
+   - ModuleContextProperties
+   - ExecutionContext mapping
+   - Логика определения доступности
+
+3. **`shared/src/domain/code_location.rs`** (NEW)
+   - CodeLocation struct
+   - ModuleType enum
+   - Определение контекста по пути файла
+
+**Изменяемые компоненты:**
+
+1. **`backend/src/data/loaders/config_metadata_parser/types.rs`**
+   - Расширить UniversalMetadataObject
+   - Добавить FormMetadata
+
+2. **`backend/src/data/loaders/config_metadata_parser/xml_parser.rs`**
+   - Парсинг новых свойств
+   - Обработка Forms
+
+3. **`shared/src/domain/types.rs`**
+   - Расширить RawTypeData полем modules
+
+4. **`backend/src/bin/lsp_server.rs`**
+   - Передача CodeLocation в hover/diagnostics
+
+#### Зависимости:
+
+**Этот Milestone требует:**
+- ✅ Milestone 2.17 (Configuration Metadata Parser) — базовая инфраструктура
+
+**Этот Milestone нужен для:**
+- ⚠️ Milestone 3.11 (Context-Aware Facets) — **КРИТИЧЕСКАЯ ЗАВИСИМОСТЬ**
+- ⚠️ Milestone 3.13 (Advanced Autocomplete) — контекстная фильтрация
+
+**Последовательность реализации:**
+```
+3.12 Enhanced Config Parser (формы + контексты)
+  ↓
+3.11 Context-Aware Facets (использует CodeLocation)
+  ↓
+3.13+ Остальные Milestones
+```
+
+#### Риски и митигация:
+
+| Риск | Вероятность | Влияние | Митигация |
+|------|-------------|---------|-----------|
+| Сложность XML структуры форм | Высокая | Среднее | Инкрементальный парсинг (сначала базовые реквизиты) |
+| Различия между версиями платформы | Средняя | Высокое | Поддержка нескольких форматов XML |
+| Производительность парсинга | Низкая | Среднее | Кеширование результатов |
+| Неполнота метаданных | Высокая | Низкое | Graceful degradation (пропуск несущественных свойств) |
+
+#### Оценка времени:
+
+- **Phase 1:** 3-4 дня (CommonModule properties)
+- **Phase 2:** 4-5 дней (Forms parsing)
+- **Phase 3:** 2-3 дня (Object/Manager modules)
+- **Phase 4:** 3-4 дня (Context resolution)
+- **Итого:** 12-16 дней (2-3 недели)
+
+**Буфер:** +4-6 дней для тестирования и отладки
+**Всего:** 3-4 недели
+
+---
+
 ### 🎭 Milestone 3.11: Context-Aware Facet Selection (2-3 недели)
 
 **Приоритет:** 🔴 КРИТИЧЕСКИЙ — без этого фасетная система типов не работает правильно

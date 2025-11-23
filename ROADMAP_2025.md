@@ -752,7 +752,7 @@ async fn test_mcp_prompts() {
 
 **Приоритет:** 🔴 КРИТИЧЕСКИЙ — необходим для Milestone 3.11 (Context-Aware Facets)
 
-**Статус:** 🚧 В ПРОЦЕССЕ — Phase 1 завершена ✅ (2025-11-23)
+**Статус:** 🚧 В ПРОЦЕССЕ — Phase 1-2 завершены ✅ (2025-11-23)
 
 **Прогресс:**
 - ✅ **Phase 1: CommonModule Properties** (3-4 дня) — ЗАВЕРШЕНА
@@ -761,7 +761,13 @@ async fn test_mcp_prompts() {
   - Парсинг Server/Client/Global/ServerCall свойств
   - 12 unit тестов (100% pass)
   - Коммит: a7b7a1d
-- 📝 **Phase 2: Forms Parsing** (4-5 дней) — ПЛАНИРУЕТСЯ
+- ✅ **Phase 2: Forms Parsing** (4-5 дней) — ЗАВЕРШЕНА
+  - FormMetadata, FormAttribute structures
+  - FormParser для парсинга Form.xml
+  - Извлечение реквизитов с типами (включая композитные)
+  - Парсинг событий и ExecutionContext из Module.bsl
+  - 9 integration тестов (100% pass)
+  - Коммит: 10b6397
 - 📝 **Phase 3: Object/Manager Modules** (2-3 дня) — ПЛАНИРУЕТСЯ
 - 📝 **Phase 4: Context Resolution** (3-4 дня) — ПЛАНИРУЕТСЯ
 

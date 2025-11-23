@@ -1,6 +1,9 @@
 //! Универсальный парсер XML объектов метаданных
 
-use super::types::{AttributeInfo, TabularSectionInfo, UniversalMetadataObject};
+use super::types::{
+    AttributeInfo, CommonModuleProperties, ReturnValuesReuse, TabularSectionInfo,
+    UniversalMetadataObject,
+};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::fs;
@@ -187,10 +190,38 @@ impl UniversalMetadataParser {
         }
 
         // Создаём объект метаданных
-        let mut metadata = UniversalMetadataObject::new(object_type_raw, name, uuid);
+        let mut metadata = UniversalMetadataObject::new(object_type_raw.clone(), name, uuid);
         metadata.synonym = synonym;
         metadata.attributes = attributes;
         metadata.tabular_sections = tabular_sections;
+
+        // Парсим дополнительные свойства для CommonModule
+        if object_type_raw == "CommonModule" {
+            tracing::debug!("🔧 Обнаружен CommonModule, парсинг контекстных свойств...");
+            match Self::parse_common_module_properties(&content) {
+                Ok(props) => {
+                    metadata.execution_contexts = props.get_execution_contexts();
+                    metadata.common_module_properties = Some(props);
+                    tracing::info!(
+                        "✅ CommonModule '{}': контекстов={}, global={}",
+                        metadata.name,
+                        metadata.execution_contexts.len(),
+                        metadata
+                            .common_module_properties
+                            .as_ref()
+                            .map(|p| p.global)
+                            .unwrap_or(false)
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "⚠️ Не удалось распарсить свойства CommonModule '{}': {}",
+                        metadata.name,
+                        e
+                    );
+                }
+            }
+        }
 
         tracing::debug!(
             "✅ Объект распарсен: {} (UUID: {}, атрибутов: {}, табличных частей: {})",
@@ -201,5 +232,127 @@ impl UniversalMetadataParser {
         );
 
         Ok(metadata)
+    }
+
+    /// Парсит свойства общего модуля из XML контента
+    ///
+    /// Извлекает контекстные свойства CommonModule:
+    /// - Server, Client, ExternalConnection - контексты выполнения
+    /// - Global, Privileged, ServerCall - специальные свойства
+    /// - ReturnValuesReuse - режим повторного использования
+    ///
+    /// # Errors
+    ///
+    /// Возвращает ошибку, если XML некорректен или обязательные теги отсутствуют
+    pub fn parse_common_module_properties(content: &str) -> Result<CommonModuleProperties> {
+        tracing::debug!("🔍 Парсинг свойств CommonModule");
+
+        let mut reader = Reader::from_str(content);
+        reader.trim_text(true);
+
+        let mut buf = Vec::new();
+        let mut props = CommonModuleProperties::default();
+
+        let mut current_element = String::new();
+        let mut in_properties = false;
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    if tag_name == "Properties" {
+                        in_properties = true;
+                        tracing::trace!("📋 Вход в секцию Properties");
+                    } else {
+                        current_element = tag_name;
+                    }
+                }
+                Ok(Event::Text(e)) => {
+                    if !in_properties {
+                        continue;
+                    }
+
+                    let text = e.unescape()?.trim().to_string();
+                    if text.is_empty() {
+                        continue;
+                    }
+
+                    // Парсим boolean свойства
+                    match current_element.as_str() {
+                        "Server" => {
+                            props.server = text == "true";
+                            tracing::trace!("  Server: {}", props.server);
+                        }
+                        "ClientManagedApplication" => {
+                            props.client_managed_application = text == "true";
+                            tracing::trace!(
+                                "  ClientManagedApplication: {}",
+                                props.client_managed_application
+                            );
+                        }
+                        "ClientOrdinaryApplication" => {
+                            props.client_ordinary_application = text == "true";
+                            tracing::trace!(
+                                "  ClientOrdinaryApplication: {}",
+                                props.client_ordinary_application
+                            );
+                        }
+                        "ExternalConnection" => {
+                            props.external_connection = text == "true";
+                            tracing::trace!("  ExternalConnection: {}", props.external_connection);
+                        }
+                        "ServerCall" => {
+                            props.server_call = text == "true";
+                            tracing::trace!("  ServerCall: {}", props.server_call);
+                        }
+                        "Global" => {
+                            props.global = text == "true";
+                            tracing::trace!("  Global: {}", props.global);
+                        }
+                        "Privileged" => {
+                            props.privileged = text == "true";
+                            tracing::trace!("  Privileged: {}", props.privileged);
+                        }
+                        "ReturnValuesReuse" => {
+                            props.return_values_reuse = match text.as_str() {
+                                "DontUse" => ReturnValuesReuse::DontUse,
+                                "DuringRequest" => ReturnValuesReuse::DuringRequest,
+                                "DuringSession" => ReturnValuesReuse::DuringSession,
+                                _ => {
+                                    tracing::warn!("⚠️ Неизвестное значение ReturnValuesReuse: {}", text);
+                                    ReturnValuesReuse::DontUse
+                                }
+                            };
+                            tracing::trace!("  ReturnValuesReuse: {:?}", props.return_values_reuse);
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    if tag_name == "Properties" {
+                        in_properties = false;
+                        tracing::trace!("📋 Выход из секции Properties");
+                    }
+                    current_element.clear();
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    tracing::error!("❌ Ошибка парсинга XML свойств CommonModule: {:?}", e);
+                    return Err(Box::new(e));
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        tracing::debug!(
+            "✅ Свойства CommonModule распарсены: Server={}, Client={}, Global={}",
+            props.server,
+            props.client_managed_application || props.client_ordinary_application,
+            props.global
+        );
+
+        Ok(props)
     }
 }

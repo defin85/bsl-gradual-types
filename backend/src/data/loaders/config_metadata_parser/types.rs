@@ -56,6 +56,12 @@ pub struct UniversalMetadataObject {
 
     /// Дополнительные свойства объекта, извлечённые из XML
     pub properties: HashMap<String, String>,
+
+    /// Контексты выполнения (для общих модулей)
+    pub execution_contexts: Vec<ExecutionContext>,
+
+    /// Свойства общего модуля (если объект - CommonModule)
+    pub common_module_properties: Option<CommonModuleProperties>,
 }
 
 impl UniversalMetadataObject {
@@ -74,6 +80,8 @@ impl UniversalMetadataObject {
             attributes: Vec::new(),
             tabular_sections: Vec::new(),
             properties: HashMap::new(),
+            execution_contexts: Vec::new(),
+            common_module_properties: None,
         }
     }
 
@@ -124,6 +132,98 @@ impl UniversalMetadataObject {
             Some(MetadataKind::Register) => vec![FacetKind::Manager, FacetKind::Object],
             None => vec![], // Неизвестный тип - пустой список фасетов
         }
+    }
+}
+
+/// Контекст выполнения кода в 1С
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExecutionContext {
+    /// Серверный контекст (выполняется на сервере)
+    Server,
+    /// Контекст управляемого клиентского приложения
+    ClientManaged,
+    /// Контекст обычного клиентского приложения
+    ClientOrdinary,
+    /// Контекст внешнего соединения
+    ExternalConnection,
+}
+
+/// Режим повторного использования возвращаемых значений
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReturnValuesReuse {
+    /// Не использовать повторно
+    DontUse,
+    /// Повторно использовать в течение запроса
+    DuringRequest,
+    /// Повторно использовать в течение сеанса
+    DuringSession,
+}
+
+/// Свойства общего модуля (CommonModule)
+///
+/// Определяет контекстные свойства общего модуля:
+/// - В каких контекстах доступен модуль (Server, Client, External Connection)
+/// - Является ли модуль глобальным (процедуры/функции доступны без префикса)
+/// - Является ли модуль привилегированным
+/// - Режим повторного использования возвращаемых значений
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommonModuleProperties {
+    /// Выполняется на сервере
+    pub server: bool,
+    /// Доступен в управляемом клиентском приложении
+    pub client_managed_application: bool,
+    /// Доступен в обычном клиентском приложении
+    pub client_ordinary_application: bool,
+    /// Доступен во внешнем соединении
+    pub external_connection: bool,
+    /// Серверный вызов с клиента (ServerCall)
+    pub server_call: bool,
+    /// Глобальный модуль (процедуры/функции доступны без префикса)
+    pub global: bool,
+    /// Привилегированный модуль
+    pub privileged: bool,
+    /// Режим компиляции (Compile)
+    pub compile: bool,
+    /// Режим повторного использования возвращаемых значений
+    pub return_values_reuse: ReturnValuesReuse,
+}
+
+impl CommonModuleProperties {
+    /// Создать свойства общего модуля по умолчанию
+    pub fn default() -> Self {
+        Self {
+            server: false,
+            client_managed_application: false,
+            client_ordinary_application: false,
+            external_connection: false,
+            server_call: false,
+            global: false,
+            privileged: false,
+            compile: true,
+            return_values_reuse: ReturnValuesReuse::DontUse,
+        }
+    }
+
+    /// Получить список контекстов выполнения на основе свойств модуля
+    ///
+    /// Возвращает вектор контекстов, в которых доступен данный модуль
+    pub fn get_execution_contexts(&self) -> Vec<ExecutionContext> {
+        let mut contexts = Vec::new();
+
+        if self.server {
+            contexts.push(ExecutionContext::Server);
+        }
+        if self.client_managed_application {
+            contexts.push(ExecutionContext::ClientManaged);
+        }
+        if self.client_ordinary_application {
+            contexts.push(ExecutionContext::ClientOrdinary);
+        }
+        if self.external_connection {
+            contexts.push(ExecutionContext::ExternalConnection);
+        }
+
+        contexts
     }
 }
 

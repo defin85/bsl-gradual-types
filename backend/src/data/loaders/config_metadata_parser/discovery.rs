@@ -2,6 +2,8 @@
 
 use super::parser::UniversalMetadataParser;
 use super::types::{ConfigurationInfo, ConfigurationType, UniversalMetadataObject};
+use super::form_parser::FormParser;
+use super::form_types::FormMetadata;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use rayon::prelude::*;
@@ -10,6 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use tracing::warn;
 
 // Импорт структур прогресса
 use crate::data::loaders::progress::{IndexingPhase, ProgressUpdate};
@@ -390,7 +393,7 @@ impl ConfigurationDiscovery {
 
                 // Парсинг объекта
                 match UniversalMetadataParser::parse_any_object(&xml_file) {
-                    Ok(metadata) => {
+                    Ok(mut metadata) => {
                         // Увеличиваем счётчик обработанных объектов
                         let count = processed.fetch_add(1, Ordering::Relaxed) + 1;
 
@@ -400,6 +403,24 @@ impl ConfigurationDiscovery {
                             count,
                             total_objects
                         );
+
+                        // Парсим формы для Document и Catalog
+                        if matches!(object_type.as_str(), "Document" | "Catalog") {
+                            // Создаём временный discovery для поиска форм (с корректным base_path)
+                            let forms_discovery = ConfigurationDiscovery::new(config_info.path.clone());
+
+                            if let Ok(forms) = forms_discovery.discover_forms(&folder_name, object_name) {
+                                metadata.forms = forms;
+                                if !metadata.forms.is_empty() {
+                                    tracing::trace!(
+                                        "      📋 Обнаружено {} форм для {}.{}",
+                                        metadata.forms.len(),
+                                        object_type,
+                                        object_name
+                                    );
+                                }
+                            }
+                        }
 
                         // Throttling: отправляем прогресс каждые 5 объектов или на последнем
                         if count % 5 == 0 || count == total_objects {
@@ -653,5 +674,71 @@ impl ConfigurationDiscovery {
         tracing::info!("  → Загружаем метаданные из {}", first_config.name);
 
         self.discover_metadata_in_configuration(first_config, progress_callback)
+    }
+
+    /// Обнаруживает формы для объекта метаданных
+    ///
+    /// Сканирует папку Forms внутри объекта и парсит все найденные Form.xml файлы.
+    ///
+    /// # Параметры
+    ///
+    /// - `object_type` - тип объекта в множественном числе ("Documents", "Catalogs")
+    /// - `object_name` - имя объекта ("ЗаказНаряды", "Контрагенты")
+    ///
+    /// # Возвращает
+    ///
+    /// Вектор `FormMetadata` с информацией о найденных формах
+    ///
+    /// # Errors
+    ///
+    /// Возвращает ошибку при проблемах с чтением файловой системы
+    pub fn discover_forms(
+        &self,
+        object_type: &str,  // "Documents", "Catalogs"
+        object_name: &str,  // "ЗаказНаряды", "Контрагенты"
+    ) -> Result<Vec<FormMetadata>> {
+        let forms_dir = self.base_path
+            .join(object_type)
+            .join(object_name)
+            .join("Forms");
+
+        if !forms_dir.exists() {
+            tracing::trace!("  ℹ️ Forms directory not found: {:?}", forms_dir);
+            return Ok(Vec::new());
+        }
+
+        let mut forms = Vec::new();
+
+        for entry in fs::read_dir(&forms_dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+
+            let form_name = entry.file_name().to_string_lossy().to_string();
+            let form_xml = entry.path().join("Ext").join("Form.xml");
+
+            if form_xml.exists() {
+                // Преобразуем тип объекта: Documents -> Document
+                let owner_type_singular = object_type.trim_end_matches('s');
+                let owner_type = format!("{}.{}", owner_type_singular, object_name);
+
+                match FormParser::parse_form_xml(&form_xml, &owner_type, &form_name) {
+                    Ok(form) => {
+                        tracing::trace!("    ✅ Parsed form: {}", form_name);
+                        forms.push(form);
+                    }
+                    Err(e) => {
+                        warn!("⚠️ Failed to parse form {}: {}", form_name, e);
+                    }
+                }
+            }
+        }
+
+        if !forms.is_empty() {
+            tracing::debug!("📋 Discovered {} forms for {}.{}", forms.len(), object_type, object_name);
+        }
+
+        Ok(forms)
     }
 }

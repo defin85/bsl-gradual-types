@@ -3,6 +3,7 @@
 use bsl_shared::domain::types::{FacetKind, MetadataKind};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use super::form_types::FormMetadata;
 
 /// Информация об атрибуте объекта метаданных
 #[derive(Debug, Clone)]
@@ -62,6 +63,9 @@ pub struct UniversalMetadataObject {
 
     /// Свойства общего модуля (если объект - CommonModule)
     pub common_module_properties: Option<CommonModuleProperties>,
+
+    /// Формы объекта метаданных (для справочников, документов и т.д.)
+    pub forms: Vec<FormMetadata>,
 }
 
 impl UniversalMetadataObject {
@@ -82,6 +86,7 @@ impl UniversalMetadataObject {
             properties: HashMap::new(),
             execution_contexts: Vec::new(),
             common_module_properties: None,
+            forms: Vec::new(),
         }
     }
 
@@ -136,7 +141,7 @@ impl UniversalMetadataObject {
 }
 
 /// Контекст выполнения кода в 1С
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ExecutionContext {
     /// Серверный контекст (выполняется на сервере)
     Server,

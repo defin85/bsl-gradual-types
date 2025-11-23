@@ -765,6 +765,13 @@ impl LanguageServer for BslLanguageServer {
                             }
 
                             info!("✅ Revalidation of all open documents completed");
+
+                            // ИСПРАВЛЕНИЕ race condition: Очищаем IR Cache после загрузки platform types
+                            // IR мог быть закеширован с пустым SignatureIndex при did_open
+                            info!("🗑️ Clearing IR cache after platform types load...");
+                            let ir_cache = self_clone.coordinator.ir_cache();
+                            ir_cache.clear().await;
+                            info!("✅ IR cache cleared - next hover will use full SignatureIndex");
                         }
                         Ok(Err(error_msg)) => {
                             // ❌ ОШИБКА: Отправляем WorkDoneProgressEnd с ошибкой

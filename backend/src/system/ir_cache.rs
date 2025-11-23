@@ -184,11 +184,10 @@ impl IrCache {
         (stats.hits as f64 / total as f64) * 100.0
     }
 
-    /// Очистить весь кеш (используется в тестах)
+    /// Очистить весь кеш (используется при загрузке platform types)
     ///
     /// # Примечание
     /// Сбрасывает статистику hits/misses/evictions.
-    #[allow(dead_code)]
     pub async fn clear(&self) {
         let mut storage = self.storage.write().await;
         storage.clear();

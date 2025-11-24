@@ -39,7 +39,7 @@ pub enum ExecutionContext {
 }
 
 /// Директива компилятора для управления контекстом выполнения
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CompilerDirective {
     /// &НаСервере - выполняется на сервере
     OnServer,

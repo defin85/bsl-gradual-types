@@ -23,6 +23,8 @@ fn create_test_repository_with_n_methods(method_count: usize) -> Arc<InMemoryTyp
             description: None,
             is_deprecated: false,
             is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
         })
         .collect();
 

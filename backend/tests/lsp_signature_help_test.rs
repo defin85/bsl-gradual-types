@@ -12,7 +12,9 @@
 
 #[cfg(test)]
 mod lsp_signature_help_tests {
-    use bsl_shared::domain::signature_index::{MethodSignature, SignatureIndex, SignatureSource};
+    use bsl_shared::domain::signature_index::{
+        ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
+    };
     use bsl_shared::domain::types::ParameterInfo;
     use tower_lsp::lsp_types::Position;
 
@@ -459,6 +461,8 @@ mod lsp_signature_help_tests {
             }],
             return_type: None,
             source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
         };
 
         index.add_platform_method("Массив".to_string(), sig);
@@ -478,6 +482,8 @@ mod lsp_signature_help_tests {
             params: vec![],
             return_type: None,
             source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
         };
 
         index.add_platform_method("Массив".to_string(), sig);
@@ -503,6 +509,8 @@ mod lsp_signature_help_tests {
             }],
             return_type: None,
             source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
         };
 
         index.add_global_function("Сообщить".to_string(), sig);
@@ -522,6 +530,8 @@ mod lsp_signature_help_tests {
             params: vec![],
             return_type: None,
             source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
         };
 
         index.add_global_function("Сообщить".to_string(), sig);

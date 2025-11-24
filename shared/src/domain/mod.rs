@@ -9,6 +9,7 @@ pub mod null_safety; // Null safety analysis via CFG (Milestone 2.3)
 pub mod repository;
 pub mod resolver;
 pub mod signature_index; // Function signature validation system (Milestone 2.20)
+pub mod runtime_context; // Runtime execution context tracking (Milestone 3.11 Phase 2)
 pub mod types;
 pub mod validators; // Type validation rules from Balyuk & Popova (2021)
 
@@ -32,3 +33,4 @@ pub use signature_index::{
 };
 pub use types::{RawTypeData, TypeResolution};
 pub use validators::{TypeErrorKind, TypeValidator};
+pub use runtime_context::{ContextRequirements, RuntimeExecutionContext};

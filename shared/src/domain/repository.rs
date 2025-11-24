@@ -291,6 +291,8 @@ impl TypeRepository for InMemoryTypeRepository {
             params: actual_params.to_vec(),
             return_type: actual_return_type.map(|s| s.to_string()),
             source: SignatureSource::UserCode,
+            return_facet: None,
+            context_requirements: crate::domain::signature_index::ContextRequirements::default(),
         };
 
         // Валидируем

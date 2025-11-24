@@ -81,6 +81,12 @@ pub struct RawMethodData {
     pub is_deprecated: bool,
     #[serde(default)]
     pub is_constructor: bool,
+    /// MILESTONE 3.11 Phase 4: Требования к контексту выполнения
+    #[serde(default)]
+    pub context_requirements: Option<crate::domain::runtime_context::ContextRequirements>,
+    /// MILESTONE 3.11 Phase 4: Фасет возвращаемого типа
+    #[serde(default)]
+    pub return_facet: Option<FacetKind>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

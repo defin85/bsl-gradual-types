@@ -9,7 +9,9 @@
 //! 2. Access to non-existent properties of objects
 //! 3. Treating simple types as collections
 
+use crate::domain::code_location::CompilerDirective;  // MILESTONE 3.11 Phase 3
 use crate::domain::metadata_lookup::TypeMetadataLookup;
+use crate::domain::runtime_context::ContextRequirements;  // MILESTONE 3.11 Phase 3
 use crate::domain::types::{
     ConcreteType, DiagnosticSeverity, SpecialType, TypeDiagnostic, TypeResolution,
 };
@@ -46,6 +48,14 @@ pub enum TypeErrorKind {
         operation: String,
         variable_name: Option<String>,  // MILESTONE 3.6 Phase 3: имя переменной
     },
+    /// Метод недоступен в текущем контексте выполнения (MILESTONE 3.11 Phase 3)
+    MethodNotAvailableInContext {
+        method_name: String,
+        object_type: String,
+        variable_name: Option<String>,
+        current_context: CompilerDirective,      // ✅ Type-safe context (OnClient, OnServer, etc.)
+        required_context: ContextRequirements,   // ✅ Type-safe requirements (ServerOnly, Universal, etc.)
+    },
 }
 
 impl TypeErrorKind {
@@ -73,6 +83,25 @@ impl TypeErrorKind {
 
         TypeDiagnostic {
             severity: DiagnosticSeverity::Error,
+            message,
+            line: span.start_line,
+            column: span.start_column,
+            end_line: span.end_line,
+            end_column: span.end_column,
+        }
+    }
+
+    /// MILESTONE 3.11 Phase 3: Создать diagnostic с кастомной severity
+    /// Используется для context warnings (Warning вместо Error)
+    pub fn to_diagnostic_with_severity(&self, span: Span, detail_level: DetailLevel, severity: DiagnosticSeverity) -> TypeDiagnostic {
+        let message = match detail_level {
+            DetailLevel::Compact => self.format_brief(),
+            DetailLevel::Full => self.format_standard(),
+            DetailLevel::Detailed => self.format_detailed(),
+        };
+
+        TypeDiagnostic {
+            severity,
             message,
             line: span.start_line,
             column: span.start_column,
@@ -120,6 +149,15 @@ impl TypeErrorKind {
             } => format!(
                 "Тип '{}' является примитивным и не поддерживает операцию '{}'",
                 type_name, operation
+            ),
+            TypeErrorKind::MethodNotAvailableInContext {
+                method_name,
+                current_context,
+                required_context,
+                ..
+            } => format!(
+                "Метод '{}' недоступен в контексте {:?}. Требуется: {:?}",
+                method_name, current_context, required_context
             ),
         }
     }
@@ -197,6 +235,25 @@ impl TypeErrorKind {
                     self.format_brief()
                 }
             }
+            TypeErrorKind::MethodNotAvailableInContext {
+                method_name,
+                object_type,
+                variable_name,
+                current_context,
+                required_context,
+            } => {
+                if let Some(var) = variable_name {
+                    format!(
+                        "Метод '{}' переменной '{}' типа '{}' недоступен в контексте {:?}. Требуется: {:?}",
+                        method_name, var, object_type, current_context, required_context
+                    )
+                } else {
+                    format!(
+                        "Метод '{}' типа '{}' недоступен в контексте {:?}. Требуется: {:?}",
+                        method_name, object_type, current_context, required_context
+                    )
+                }
+            }
         }
     }
 
@@ -259,6 +316,35 @@ impl TypeErrorKind {
                     Используйте коллекцию (Массив, Список, Соответствие) для этой операции.",
                     type_name, operation
                 )
+            }
+            TypeErrorKind::MethodNotAvailableInContext {
+                method_name,
+                current_context,
+                required_context,
+                ..
+            } => {
+                use crate::domain::runtime_context::ContextRequirements;
+
+                if required_context == &ContextRequirements::ServerOnly {
+                    format!(
+                        "💡 Подсказка: Метод '{}' доступен только в серверном контексте. \
+                        Используйте директиву &НаСервере или &НаСервереБезКонтекста, \
+                        либо вызовите метод через серверную процедуру.",
+                        method_name
+                    )
+                } else if matches!(current_context, CompilerDirective::OnClient) {
+                    format!(
+                        "💡 Подсказка: Метод '{}' недоступен в клиентском контексте. \
+                        Переместите вызов в серверную процедуру или используйте альтернативный метод.",
+                        method_name
+                    )
+                } else {
+                    format!(
+                        "💡 Подсказка: Метод '{}' требует контекст {:?}. Текущий контекст: {:?}. \
+                        Измените директиву компиляции функции/процедуры.",
+                        method_name, required_context, current_context
+                    )
+                }
             }
         }
     }

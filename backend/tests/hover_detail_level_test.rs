@@ -82,6 +82,8 @@ mod detail_level_tests {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             })
             .collect();
 
@@ -120,6 +122,8 @@ mod detail_level_tests {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             })
             .collect();
 
@@ -303,6 +307,8 @@ mod detail_level_tests {
             description: None,
             is_deprecated: false,
             is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
         };
 
         // Метод с 4 параметрами (multiline)
@@ -339,6 +345,8 @@ mod detail_level_tests {
             description: None,
             is_deprecated: false,
             is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
         };
 
         let test_type = RawTypeData {
@@ -668,11 +676,11 @@ mod detail_level_tests {
             "Detailed должен показывать фасет"
         );
         assert!(
-            hover.contains("Object"),
-            "Должен показывать активный фасет Object"
+            hover.contains("Объект"),
+            "Должен показывать активный фасет Объект"
         );
         assert!(
-            hover.contains("объект с данными"),
+            hover.contains("изменяемый объект"),
             "Должен показывать описание фасета"
         );
 
@@ -682,8 +690,8 @@ mod detail_level_tests {
             "Должен показывать доступные фасеты"
         );
         assert!(
-            hover.contains("Manager") && hover.contains("Reference"),
-            "Должен показывать все доступные фасеты"
+            hover.contains("Менеджер") && hover.contains("Ссылка"),
+            "Должен показывать все доступные фасеты на русском"
         );
     }
 

@@ -5,7 +5,9 @@
 use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::parsing::bsl::ast::{Expression, Program, Span as AstSpan, Statement};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
-use bsl_shared::domain::signature_index::{MethodSignature, SignatureIndex, SignatureSource};
+use bsl_shared::domain::signature_index::{
+    ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
+};
 use bsl_shared::ir::TypeHint;
 use std::sync::Arc;
 
@@ -25,6 +27,8 @@ fn create_test_signature_index() -> SignatureIndex {
             params: vec![],
             return_type: Some("Число".to_string()),
             source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
         },
     );
 
@@ -37,6 +41,8 @@ fn create_test_signature_index() -> SignatureIndex {
             params: vec![],
             return_type: Some("Число".to_string()),
             source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
         },
     );
 
@@ -49,6 +55,8 @@ fn create_test_signature_index() -> SignatureIndex {
             params: vec![],
             return_type: Some("Число".to_string()),
             source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
         },
     );
 

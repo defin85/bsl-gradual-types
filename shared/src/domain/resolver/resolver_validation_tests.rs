@@ -2,7 +2,9 @@
 
 use super::*;
 use crate::domain::repository::InMemoryTypeRepository;
-use crate::domain::signature_index::{MethodSignature, SignatureIndex, SignatureSource};
+use crate::domain::signature_index::{
+    ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
+};
 use crate::domain::types::ParameterInfo;
 use std::sync::Arc;
 
@@ -25,6 +27,8 @@ fn test_validate_call_success() {
         }],
         return_type: None,
         source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
     };
 
     index.add_platform_method("Массив".to_string(), sig);
@@ -53,6 +57,8 @@ fn test_validate_call_missing_param() {
         }],
         return_type: Some("Число".to_string()),
         source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
     };
 
     index.add_platform_method("ТестТип".to_string(), sig);
@@ -94,6 +100,8 @@ fn test_validate_call_too_many_args() {
         }],
         return_type: None,
         source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
     };
 
     index.add_platform_method("Тип".to_string(), sig);
@@ -152,6 +160,8 @@ fn test_validate_call_optional_params() {
         ],
         return_type: Some("Булево".to_string()),
         source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
     };
 
     index.add_platform_method("Тип".to_string(), sig);
@@ -191,6 +201,8 @@ fn test_validate_call_global_function() {
         }],
         return_type: None,
         source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
     };
 
     index.add_global_function("Сообщить".to_string(), sig);
@@ -217,6 +229,8 @@ fn test_validate_call_case_insensitive() {
         params: vec![],
         return_type: None,
         source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
     };
 
     index.add_platform_method("Массив".to_string(), sig);
@@ -261,6 +275,8 @@ fn test_validate_call_type_mismatch() {
         ],
         return_type: None,
         source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
     };
 
     index.add_platform_method("Массив".to_string(), sig);
@@ -305,6 +321,8 @@ fn test_validate_call_gradual_typing() {
         }],
         return_type: None,
         source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
     };
 
     index.add_platform_method("Тип".to_string(), sig);
@@ -359,6 +377,8 @@ fn test_validate_call_proizvol_parameter_accepts_all() {
         }],
         return_type: None,
         source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
     };
 
     index.add_platform_method("Массив".to_string(), sig);
@@ -412,6 +432,8 @@ fn test_validate_call_case_insensitive_types() {
         }],
         return_type: None,
         source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
     };
 
     index.add_platform_method("Тип".to_string(), sig);

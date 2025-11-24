@@ -3,6 +3,7 @@ use bsl_shared::domain::resolver::{TypeResolver, ValidationResult};
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::{Certainty, ConcreteType, DiagnosticSeverity, ResolutionResult, TypeDiagnostic};
 use bsl_shared::domain::validators::TypeValidator;
+use bsl_shared::domain::RuntimeExecutionContext;  // MILESTONE 3.11 Phase 3
 use bsl_shared::formatting::DetailLevel;  // MILESTONE 3.6 Phase 3
 use bsl_shared::ir::{
     FlowContext, SemanticNode, SemanticNodeKind, SemanticProgram, SemanticVisitor,
@@ -16,6 +17,7 @@ pub struct SemanticValidationVisitor<'a> {
     #[allow(dead_code)]
     program: &'a SemanticProgram,
     detail_level: DetailLevel,  // MILESTONE 3.6 Phase 3
+    current_execution_context: RuntimeExecutionContext,  // MILESTONE 3.11 Phase 3
 }
 
 impl<'a> SemanticValidationVisitor<'a> {
@@ -32,6 +34,7 @@ impl<'a> SemanticValidationVisitor<'a> {
             errors: Vec::new(),
             program,
             detail_level: DetailLevel::Full,  // Default для backward compatibility
+            current_execution_context: RuntimeExecutionContext::new(),  // MILESTONE 3.11 Phase 3
         }
     }
 
@@ -50,11 +53,39 @@ impl<'a> SemanticValidationVisitor<'a> {
             errors: Vec::new(),
             program,
             detail_level,
+            current_execution_context: RuntimeExecutionContext::new(),  // MILESTONE 3.11 Phase 3
         }
     }
 
     pub fn into_errors(self) -> Vec<TypeDiagnostic> {
         self.errors
+    }
+
+    /// MILESTONE 3.11 Phase 3: Валидация доступности метода в текущем контексте
+    /// Возвращает Some(TypeErrorKind) если метод недоступен в текущем контексте
+    fn validate_method_call_context(
+        &self,
+        receiver_type: &str,
+        method_name: &str,
+        variable_name: Option<String>,
+        _span: bsl_shared::ir::Span,
+    ) -> Option<bsl_shared::domain::validators::TypeErrorKind> {
+        use bsl_shared::domain::validators::TypeErrorKind;
+
+        // Найти метод в SignatureIndex
+        if let Some(signature) = self.signature_index.find_method(receiver_type, method_name) {
+            // Проверить доступность метода в текущем контексте
+            if !self.current_execution_context.can_call_method(&signature.context_requirements) {
+                return Some(TypeErrorKind::MethodNotAvailableInContext {
+                    method_name: method_name.to_string(),
+                    object_type: receiver_type.to_string(),
+                    variable_name,
+                    current_context: self.current_execution_context.current_directive,  // ✅ Type-safe
+                    required_context: signature.context_requirements,                   // ✅ Type-safe
+                });
+            }
+        }
+        None
     }
 
     /// Конвертирует ValidationResult в TypeDiagnostic (Milestone 3.10)
@@ -187,6 +218,23 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                     self.errors.push(diagnostic);
                     return; // Нет смысла проверять параметры если метод не существует
+                }
+
+                // 1.5. ✅ MILESTONE 3.11 Phase 3: Проверяем доступность метода в текущем контексте
+                if let Some(error_kind) = self.validate_method_call_context(
+                    obj_type,
+                    function_name,
+                    object_name.clone(),
+                    node.span,
+                ) {
+                    // Context warnings используют WARNING severity, а не Error
+                    let diagnostic = error_kind.to_diagnostic_with_severity(
+                        node.span,
+                        self.detail_level,
+                        DiagnosticSeverity::Warning
+                    );
+                    self.errors.push(diagnostic);
+                    // НЕ return - продолжаем проверку параметров
                 }
 
                 // 2. ✅ MILESTONE 3.10: Проверяем типы параметров

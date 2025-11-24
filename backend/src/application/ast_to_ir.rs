@@ -13,6 +13,7 @@ use crate::parsing::bsl::ast::{Expression, Program, Statement};
 use anyhow::Result;
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::signature_index::SignatureIndex;
+use bsl_shared::domain::types::FacetKind; // Milestone 3.11 Phase 2
 use bsl_shared::ir::*;
 use bsl_shared::utils::hash::hash_content;
 use std::sync::Arc;
@@ -806,7 +807,23 @@ impl AstToIrConverter {
             Expression::PropertyAccess {
                 object, property, ..
             } => {
-                format!("{}.{}", self.infer_expression_type(object), property)
+                let base_type = self.infer_expression_type(object);
+                
+                // MILESTONE 3.11 Phase 2: PropertyAccess для глобальных коллекций → Manager facet
+                match base_type.as_str() {
+                    "Справочники" | "Catalogs" => format!("СправочникМенеджер.{}", property),
+                    "Документы" | "Documents" => format!("ДокументМенеджер.{}", property),
+                    "ПланыВидовХарактеристик" | "ChartsOfCharacteristicTypes" => format!("ПланВидовХарактеристикМенеджер.{}", property),
+                    "ПланыСчетов" | "ChartsOfAccounts" => format!("ПланСчетовМенеджер.{}", property),
+                    "ПланыВидовРасчета" | "ChartsOfCalculationTypes" => format!("ПланВидовРасчетаМенеджер.{}", property),
+                    "БизнесПроцессы" | "BusinessProcesses" => format!("БизнесПроцессМенеджер.{}", property),
+                    "Задачи" | "Tasks" => format!("ЗадачаМенеджер.{}", property),
+                    "РегистрыСведений" | "InformationRegisters" => format!("РегистрСведенийМенеджер.{}", property),
+                    "РегистрыНакопления" | "AccumulationRegisters" => format!("РегистрНакопленияМенеджер.{}", property),
+                    "РегистрыБухгалтерии" | "AccountingRegisters" => format!("РегистрБухгалтерииМенеджер.{}", property),
+                    "РегистрыРасчета" | "CalculationRegisters" => format!("РегистрРасчетаМенеджер.{}", property),
+                    _ => format!("{}.{}", base_type, property),
+                }
             }
             Expression::Call { function, .. } => {
                 // Тип результата вызова функции
@@ -822,8 +839,30 @@ impl AstToIrConverter {
                             &object_type
                         };
 
-                        // Поиск метода в SignatureIndex (платформенные методы)
+                                                // Поиск метода в SignatureIndex (платформенные методы)
+                        // MILESTONE 3.11 Phase 2: Facet switching через return_facet
                         if let Some(method) = self.signature_index.find_method(clean_type, property) {
+                            // Если метод указывает return_facet, переключаем фасет
+                            if let Some(facet) = &method.return_facet {
+                                let type_name = self.extract_type_name(&object_type);
+                                
+                                // Определяем префикс фасета на основе базовой категории типа
+                                if let Some(category) = self.get_base_category(&object_type) {
+                                    return match facet {
+                                        FacetKind::Object => format!("{}Объект.{}", category, type_name),
+                                        FacetKind::Reference => format!("{}Ссылка.{}", category, type_name),
+                                        FacetKind::Selection => format!("{}Выборка.{}", category, type_name),
+                                        FacetKind::Manager => format!("{}Менеджер.{}", category, type_name),
+                                        FacetKind::List => format!("{}Список.{}", category, type_name),
+                                        // Эти фасеты не используются для конфигурационных типов
+                                        FacetKind::Metadata | FacetKind::Constructor | FacetKind::Collection | FacetKind::Singleton => {
+                                            method.return_type.clone().unwrap_or_else(|| "Dynamic".to_string())
+                                        }
+                                    };
+                                }
+                            }
+                            
+                            // Fallback: используем return_type если указан
                             return method.return_type.clone().unwrap_or_else(|| "Неопределено".to_string());
                         }
 
@@ -877,6 +916,54 @@ impl AstToIrConverter {
                 TypeHint::Unknown => "Dynamic".to_string(),
             })
     }
+
+
+
+    /// Извлечь имя типа метаданных из полного типа (Milestone 3.11 Phase 2)
+    ///
+    /// # Примеры
+    /// - "СправочникМенеджер.Контрагенты" → "Контрагенты"
+    /// - "ДокументОбъект.ЗаказКлиента" → "ЗаказКлиента"
+    /// - "Массив" → "Массив"
+    fn extract_type_name(&self, full_type: &str) -> String {
+        if let Some(pos) = full_type.rfind('.') {
+            full_type[pos + 1..].to_string()
+        } else {
+            full_type.to_string()
+        }
+    }
+
+    /// Определить базовую категорию типа по facet (Milestone 3.11 Phase 2)
+    ///
+    /// # Примеры
+    /// - "СправочникМенеджер.Контрагенты" → "Справочник"
+    /// - "ДокументОбъект.ЗаказКлиента" → "Документ"
+    fn get_base_category(&self, full_type: &str) -> Option<&str> {
+        if full_type.starts_with("СправочникМенеджер") || full_type.starts_with("СправочникОбъект")
+            || full_type.starts_with("СправочникСсылка") || full_type.starts_with("СправочникВыборка") {
+            Some("Справочник")
+        } else if full_type.starts_with("ДокументМенеджер") || full_type.starts_with("ДокументОбъект")
+            || full_type.starts_with("ДокументСсылка") || full_type.starts_with("ДокументВыборка") {
+            Some("Документ")
+        } else if full_type.starts_with("ПланВидовХарактеристикМенеджер") || full_type.starts_with("ПланВидовХарактеристикОбъект")
+            || full_type.starts_with("ПланВидовХарактеристикСсылка") || full_type.starts_with("ПланВидовХарактеристикВыборка") {
+            Some("ПланВидовХарактеристик")
+        } else {
+            None
+        }
+    }
+    // TODO: Интеграция parse_compiler_directive() для context tracking (Milestone 3.11 Phase 2)
+    // Функция была удалена по результатам code review.
+    // Будет переинтегрирована когда:
+    // - Реализуем парсинг директив при создании SemanticProgram
+    // - Передадим текущую директиву в RuntimeExecutionContext
+    // - Реализуем context warnings в реальных сценариях
+    //
+    // Исходная реализация парсила директивы вида:
+    // - &НаСервере / &AtServer → OnServer
+    // - &НаСервереБезКонтекста / &AtServerNoContext → OnServerNoContext
+    // - &НаКлиенте / &AtClient → OnClient
+    // - &НаКлиентеНаСервереБезКонтекста / &AtClientAtServerNoContext → OnClientOnServerNoContext
 
     /// Построение Control Flow Graph (для flow-sensitive анализа)
     fn build_cfg(&self) -> Option<ControlFlowGraph> {
@@ -1230,5 +1317,76 @@ mod tests {
         } else {
             panic!("Expected FunctionDeclaration at nodes[2]");
         }
+    }
+}
+
+#[cfg(test)]
+mod directive_tests {
+    use super::*;
+    use bsl_shared::domain::code_location::CompilerDirective;
+
+    /// Test helper: Парсит директиву компиляции из текста
+    /// TODO: Будет переинтегрирована в основной код при полной реализации context tracking
+    fn parse_compiler_directive_test(text: &str) -> CompilerDirective {
+        let text_lower = text.to_lowercase();
+
+        // Порядок проверки важен: сначала более длинные директивы
+        if text_lower.contains("&наклиентенасерверебезконтекста")
+            || text_lower.contains("&atclientatservernocontext") {
+            CompilerDirective::OnClientOnServerNoContext
+        } else if text_lower.contains("&насерверебезконтекста")
+            || text_lower.contains("&atservernocontext") {
+            CompilerDirective::OnServerNoContext
+        } else if text_lower.contains("&насервере")
+            || text_lower.contains("&atserver") {
+            CompilerDirective::OnServer
+        } else if text_lower.contains("&наклиенте")
+            || text_lower.contains("&atclient") {
+            CompilerDirective::OnClient
+        } else {
+            CompilerDirective::Unknown
+        }
+    }
+
+    #[test]
+    fn test_parse_server_directive() {
+        let text = "&НаСервере\nПроцедура Тест()\nКонецПроцедуры";
+        let directive = parse_compiler_directive_test(text);
+        assert_eq!(directive, CompilerDirective::OnServer);
+    }
+
+    #[test]
+    fn test_parse_client_directive() {
+        let text = "&НаКлиенте\nПроцедура Тест()\nКонецПроцедуры";
+        let directive = parse_compiler_directive_test(text);
+        assert_eq!(directive, CompilerDirective::OnClient);
+    }
+
+    #[test]
+    fn test_parse_server_no_context_directive() {
+        let text = "&НаСервереБезКонтекста\nПроцедура Тест()\nКонецПроцедуры";
+        let directive = parse_compiler_directive_test(text);
+        assert_eq!(directive, CompilerDirective::OnServerNoContext);
+    }
+
+    #[test]
+    fn test_parse_universal_directive() {
+        let text = "&НаКлиентеНаСервереБезКонтекста\nПроцедура Тест()\nКонецПроцедуры";
+        let directive = parse_compiler_directive_test(text);
+        assert_eq!(directive, CompilerDirective::OnClientOnServerNoContext);
+    }
+
+    #[test]
+    fn test_parse_no_directive() {
+        let text = "Процедура Тест()\nКонецПроцедуры";
+        let directive = parse_compiler_directive_test(text);
+        assert_eq!(directive, CompilerDirective::Unknown);
+    }
+
+    #[test]
+    fn test_parse_english_directive() {
+        let text = "&AtServer\nProcedure Test()\nEndProcedure";
+        let directive = parse_compiler_directive_test(text);
+        assert_eq!(directive, CompilerDirective::OnServer);
     }
 }

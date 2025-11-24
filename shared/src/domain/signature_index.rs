@@ -1,9 +1,14 @@
 //! Signature Index - индекс сигнатур функций и методов
 //!
 //! Milestone 2.20: Function Signature Validation System
+//! Milestone 3.11: Method Signature Enhancement with Facets and Context
 
-use super::types::ParameterInfo;
+use super::types::{FacetKind, ParameterInfo};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+// MILESTONE 3.11 Phase 3: Re-export ContextRequirements для обратной совместимости
+pub use super::runtime_context::ContextRequirements;
 
 /// Индекс сигнатур функций и методов
 #[derive(Debug, Clone)]
@@ -20,13 +25,50 @@ pub struct SignatureIndex {
 }
 
 /// Сигнатура метода
-#[derive(Debug, Clone)]
+///
+/// Расширенная информация о методе/функции включая:
+/// - Базовые параметры (имя, тип владельца, параметры)
+/// - Facet информацию для методов конфигурационных объектов
+/// - Требования к контексту выполнения
+///
+/// # Примеры
+/// ```
+/// use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource, ContextRequirements};
+/// use bsl_shared::domain::types::{ParameterInfo, FacetKind};
+///
+/// // Метод Справочник.СоздатьЭлемент() → Object, ServerOnly
+/// let signature = MethodSignature {
+///     name: "СоздатьЭлемент".to_string(),
+///     owner_type: Some("СправочникМенеджер.Номенклатура".to_string()),
+///     params: vec![],
+///     return_type: Some("СправочникОбъект.Номенклатура".to_string()),
+///     source: SignatureSource::Platform,
+///     return_facet: Some(FacetKind::Object),
+///     context_requirements: ContextRequirements::ServerOnly,
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MethodSignature {
     pub name: String,
     pub owner_type: Option<String>, // None для глобальных функций
     pub params: Vec<ParameterInfo>,
     pub return_type: Option<String>,
     pub source: SignatureSource,
+
+    /// Facet возвращаемого типа (для методов конфигурационных объектов)
+    ///
+    /// # Примеры
+    /// - `СоздатьЭлемент()` → Object
+    /// - `НайтиПоКоду()` → Reference
+    /// - `Выбрать()` → Selection
+    #[serde(default)]
+    pub return_facet: Option<FacetKind>,
+
+    /// Требования к контексту выполнения
+    ///
+    /// Определяет где может быть вызван метод (сервер/клиент/везде)
+    #[serde(default)]
+    pub context_requirements: ContextRequirements,
 }
 
 /// Сигнатура конструктора
@@ -54,7 +96,7 @@ pub struct ConstructorSignature {
 }
 
 /// Источник сигнатуры
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignatureSource {
     Platform,
     Configuration,
@@ -361,6 +403,8 @@ mod tests {
             params: vec![],
             return_type: None,
             source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
         };
 
         index.add_platform_method("Массив".to_string(), sig);
@@ -380,6 +424,8 @@ mod tests {
             params: vec![],
             return_type: None,
             source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
         };
 
         index.add_platform_method("Массив".to_string(), sig);

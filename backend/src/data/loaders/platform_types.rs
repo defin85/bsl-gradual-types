@@ -2,7 +2,9 @@
 //!
 //! Создание и загрузка базовых платформенных типов 1С:Предприятие
 
-use bsl_shared::domain::signature_index::{MethodSignature, SignatureIndex, SignatureSource};
+use bsl_shared::domain::signature_index::{
+    ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
+};
 use bsl_shared::domain::types::{
     FacetKind, GenericInfo, InferenceMethodInfo, ParameterInfo, RawDataSource, RawMethodData,
     RawParamData, RawPropertyData, RawTypeData,
@@ -42,6 +44,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 2. Вставить(индекс: Число) - вставляет строку в указанную позицию
             RawMethodData {
@@ -57,6 +61,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 3. Получить(индекс: Число): T - возвращает строку по индексу
             RawMethodData {
@@ -72,6 +78,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 4. Удалить(индекс: Число) - удаляет строку по индексу
             RawMethodData {
@@ -87,6 +95,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 5. Количество(): Число - возвращает количество строк
             RawMethodData {
@@ -97,6 +107,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 6. Очистить() - удаляет все строки
             RawMethodData {
@@ -107,6 +119,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 7. Индекс(строка: T): Число - возвращает индекс строки
             RawMethodData {
@@ -122,6 +136,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 8. Найти(значение: Произвольный, имяКолонки: Строка): T
             RawMethodData {
@@ -145,6 +161,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 9. Сдвинуть(строка: T, смещение: Число)
             RawMethodData {
@@ -168,6 +186,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 10. ВыгрузитьКолонку(имяКолонки: Строка): Массив
             RawMethodData {
@@ -183,6 +203,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 11. ЗагрузитьКолонку(массив: Массив, имяКолонки: Строка)
             RawMethodData {
@@ -206,6 +228,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 12. Свернуть(имяКолонокГруппировок: Строка, имяКолонокСуммирования: Строка)
             RawMethodData {
@@ -229,6 +253,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 13. Скопировать(параметры: Структура): ТабличнаяЧасть<T>
             RawMethodData {
@@ -244,6 +270,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 14. Итог(имяКолонки: Строка): Число
             RawMethodData {
@@ -259,6 +287,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 15. Заполнить(значение: Произвольный, имяКолонки: Строка)
             RawMethodData {
@@ -282,6 +312,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             // 16. Сортировать(имяКолонок: Строка, направление: Строка)
             RawMethodData {
@@ -305,6 +337,8 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
         ],
 
@@ -395,6 +429,8 @@ pub fn create_array_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             RawMethodData {
                 name: "Вставить".to_string(),
@@ -417,6 +453,8 @@ pub fn create_array_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             RawMethodData {
                 name: "Получить".to_string(),
@@ -431,6 +469,8 @@ pub fn create_array_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             RawMethodData {
                 name: "Удалить".to_string(),
@@ -445,6 +485,8 @@ pub fn create_array_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             RawMethodData {
                 name: "Количество".to_string(),
@@ -454,6 +496,8 @@ pub fn create_array_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             RawMethodData {
                 name: "Очистить".to_string(),
@@ -463,6 +507,8 @@ pub fn create_array_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             RawMethodData {
                 name: "Найти".to_string(),
@@ -477,6 +523,8 @@ pub fn create_array_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
         ],
 
@@ -561,6 +609,8 @@ pub fn create_map_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             RawMethodData {
                 name: "Получить".to_string(),
@@ -575,6 +625,8 @@ pub fn create_map_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             RawMethodData {
                 name: "Количество".to_string(),
@@ -584,6 +636,8 @@ pub fn create_map_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             RawMethodData {
                 name: "Удалить".to_string(),
@@ -598,6 +652,8 @@ pub fn create_map_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             RawMethodData {
                 name: "Очистить".to_string(),
@@ -607,6 +663,8 @@ pub fn create_map_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
         ],
 
@@ -694,6 +752,8 @@ pub fn create_value_list_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
             RawMethodData {
                 name: "Количество".to_string(),
@@ -703,6 +763,8 @@ pub fn create_value_list_type() -> RawTypeData {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             },
         ],
 
@@ -732,6 +794,423 @@ pub fn create_value_list_type() -> RawTypeData {
     }
 }
 
+/// Создаёт базовый тип "СправочникМенеджер" с ключевыми методами
+///
+/// Методы Manager facet (управление справочниками):
+/// - `СоздатьЭлемент()` → Object, ServerOnly
+/// - `НайтиПоКоду(Код)` → Reference, ServerOnly
+/// - `НайтиПоНаименованию(Наименование)` → Reference, ServerOnly
+/// - `Выбрать()` → Selection, ServerOnly
+/// - `СоздатьГруппу()` → Object, ServerOnly
+/// - `ПустаяСсылка()` → Reference, Universal
+pub fn create_catalog_manager_type() -> RawTypeData {
+    RawTypeData {
+        name: "СправочникМенеджер".to_string(),
+        english_name: "CatalogManager".to_string(),
+        description: "Менеджер справочников - создание, поиск, выборка элементов".to_string(),
+        category: "PlatformType".to_string(),
+        source: RawDataSource::Platform,
+
+        methods: vec![
+            // СоздатьЭлемент() → Object, ServerOnly
+            RawMethodData {
+                name: "СоздатьЭлемент".to_string(),
+                english_name: "CreateItem".to_string(),
+                return_type: "СправочникОбъект".to_string(),
+                params: vec![],
+                description: Some("Создаёт новый элемент справочника".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // НайтиПоКоду(Код: Строка) → Reference, ServerOnly
+            RawMethodData {
+                name: "НайтиПоКоду".to_string(),
+                english_name: "FindByCode".to_string(),
+                return_type: "СправочникСсылка".to_string(),
+                params: vec![RawParamData {
+                    name: "Код".to_string(),
+                    param_type: "Строка".to_string(),
+                    is_optional: false,
+                    default_value: None,
+                }],
+                description: Some("Ищет элемент справочника по коду".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // НайтиПоНаименованию(Наименование: Строка) → Reference, ServerOnly
+            RawMethodData {
+                name: "НайтиПоНаименованию".to_string(),
+                english_name: "FindByDescription".to_string(),
+                return_type: "СправочникСсылка".to_string(),
+                params: vec![RawParamData {
+                    name: "Наименование".to_string(),
+                    param_type: "Строка".to_string(),
+                    is_optional: false,
+                    default_value: None,
+                }],
+                description: Some("Ищет элемент справочника по наименованию".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // Выбрать() → Selection, ServerOnly
+            RawMethodData {
+                name: "Выбрать".to_string(),
+                english_name: "Select".to_string(),
+                return_type: "СправочникВыборка".to_string(),
+                params: vec![],
+                description: Some("Создаёт выборку элементов справочника".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // СоздатьГруппу() → Object, ServerOnly
+            RawMethodData {
+                name: "СоздатьГруппу".to_string(),
+                english_name: "CreateFolder".to_string(),
+                return_type: "СправочникОбъект".to_string(),
+                params: vec![],
+                description: Some("Создаёт новую группу справочника".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // ПустаяСсылка() → Reference, Universal
+            RawMethodData {
+                name: "ПустаяСсылка".to_string(),
+                english_name: "EmptyRef".to_string(),
+                return_type: "СправочникСсылка".to_string(),
+                params: vec![],
+                description: Some("Возвращает пустую ссылку справочника".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+        ],
+
+        properties: vec![],
+        facets: vec![FacetKind::Manager],
+        kind: None,
+        attributes: vec![],
+        tabular_sections: vec![],
+        enum_values: vec![],
+        generic_info: None,
+    }
+}
+
+/// Создаёт базовый тип "СправочникОбъект" с ключевыми методами
+///
+/// Методы Object facet (работа с объектом):
+/// - `Записать()` → void, ServerOnly
+/// - `УстановитьСсылкуНового(Ссылка)` → void, ServerOnly
+/// - `Скопировать()` → Object, ServerOnly
+pub fn create_catalog_object_type() -> RawTypeData {
+    RawTypeData {
+        name: "СправочникОбъект".to_string(),
+        english_name: "CatalogObject".to_string(),
+        description: "Объект справочника - изменяемый элемент".to_string(),
+        category: "PlatformType".to_string(),
+        source: RawDataSource::Platform,
+
+        methods: vec![
+            // Записать() → void, ServerOnly
+            RawMethodData {
+                name: "Записать".to_string(),
+                english_name: "Write".to_string(),
+                return_type: "Неопределено".to_string(),
+                params: vec![],
+                description: Some("Записывает изменения объекта в базу данных".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // УстановитьСсылкуНового(Ссылка: СправочникСсылка) → void, ServerOnly
+            RawMethodData {
+                name: "УстановитьСсылкуНового".to_string(),
+                english_name: "SetNewObjectRef".to_string(),
+                return_type: "Неопределено".to_string(),
+                params: vec![RawParamData {
+                    name: "Ссылка".to_string(),
+                    param_type: "СправочникСсылка".to_string(),
+                    is_optional: false,
+                    default_value: None,
+                }],
+                description: Some(
+                    "Устанавливает ссылку для нового объекта перед записью".to_string(),
+                ),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // Скопировать() → Object, ServerOnly
+            RawMethodData {
+                name: "Скопировать".to_string(),
+                english_name: "Copy".to_string(),
+                return_type: "СправочникОбъект".to_string(),
+                params: vec![],
+                description: Some("Создаёт копию объекта".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+        ],
+
+        properties: vec![
+            RawPropertyData {
+                name: "Код".to_string(),
+                prop_type: "Строка".to_string(),
+                is_readonly: false,
+            },
+            RawPropertyData {
+                name: "Наименование".to_string(),
+                prop_type: "Строка".to_string(),
+                is_readonly: false,
+            },
+        ],
+        facets: vec![FacetKind::Object],
+        kind: None,
+        attributes: vec![],
+        tabular_sections: vec![],
+        enum_values: vec![],
+        generic_info: None,
+    }
+}
+
+/// Создаёт базовый тип "СправочникСсылка" с ключевыми методами
+///
+/// Методы Reference facet (работа со ссылкой):
+/// - `ПолучитьОбъект()` → Object, ServerOnly
+/// - `Пустая()` → Boolean, Universal
+pub fn create_catalog_reference_type() -> RawTypeData {
+    RawTypeData {
+        name: "СправочникСсылка".to_string(),
+        english_name: "CatalogRef".to_string(),
+        description: "Ссылка на элемент справочника".to_string(),
+        category: "PlatformType".to_string(),
+        source: RawDataSource::Platform,
+
+        methods: vec![
+            // ПолучитьОбъект() → Object, ServerOnly
+            RawMethodData {
+                name: "ПолучитьОбъект".to_string(),
+                english_name: "GetObject".to_string(),
+                return_type: "СправочникОбъект".to_string(),
+                params: vec![],
+                description: Some("Получает объект по ссылке для изменения".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // Пустая() → Boolean, Universal
+            RawMethodData {
+                name: "Пустая".to_string(),
+                english_name: "IsEmpty".to_string(),
+                return_type: "Булево".to_string(),
+                params: vec![],
+                description: Some("Проверяет, является ли ссылка пустой".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+        ],
+
+        properties: vec![
+            RawPropertyData {
+                name: "Код".to_string(),
+                prop_type: "Строка".to_string(),
+                is_readonly: true,
+            },
+            RawPropertyData {
+                name: "Наименование".to_string(),
+                prop_type: "Строка".to_string(),
+                is_readonly: true,
+            },
+        ],
+        facets: vec![FacetKind::Reference],
+        kind: None,
+        attributes: vec![],
+        tabular_sections: vec![],
+        enum_values: vec![],
+        generic_info: None,
+    }
+}
+
+/// Создаёт базовый тип "ДокументМенеджер" с ключевыми методами
+///
+/// Методы Manager facet для документов:
+/// - `СоздатьДокумент()` → Object, ServerOnly
+/// - `НайтиПоНомеру(Номер, Дата)` → Reference, ServerOnly
+/// - `Выбрать()` → Selection, ServerOnly
+/// - `ПустаяСсылка()` → Reference, Universal
+pub fn create_document_manager_type() -> RawTypeData {
+    RawTypeData {
+        name: "ДокументМенеджер".to_string(),
+        english_name: "DocumentManager".to_string(),
+        description: "Менеджер документов - создание, поиск, выборка документов".to_string(),
+        category: "PlatformType".to_string(),
+        source: RawDataSource::Platform,
+
+        methods: vec![
+            // СоздатьДокумент() → Object, ServerOnly
+            RawMethodData {
+                name: "СоздатьДокумент".to_string(),
+                english_name: "CreateDocument".to_string(),
+                return_type: "ДокументОбъект".to_string(),
+                params: vec![],
+                description: Some("Создаёт новый документ".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // НайтиПоНомеру(Номер: Строка, Дата?: Дата) → Reference, ServerOnly
+            RawMethodData {
+                name: "НайтиПоНомеру".to_string(),
+                english_name: "FindByNumber".to_string(),
+                return_type: "ДокументСсылка".to_string(),
+                params: vec![
+                    RawParamData {
+                        name: "Номер".to_string(),
+                        param_type: "Строка".to_string(),
+                        is_optional: false,
+                        default_value: None,
+                    },
+                    RawParamData {
+                        name: "Дата".to_string(),
+                        param_type: "Дата".to_string(),
+                        is_optional: true,
+                        default_value: None,
+                    },
+                ],
+                description: Some("Ищет документ по номеру и дате".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // Выбрать() → Selection, ServerOnly
+            RawMethodData {
+                name: "Выбрать".to_string(),
+                english_name: "Select".to_string(),
+                return_type: "ДокументВыборка".to_string(),
+                params: vec![],
+                description: Some("Создаёт выборку документов".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // ПустаяСсылка() → Reference, Universal
+            RawMethodData {
+                name: "ПустаяСсылка".to_string(),
+                english_name: "EmptyRef".to_string(),
+                return_type: "ДокументСсылка".to_string(),
+                params: vec![],
+                description: Some("Возвращает пустую ссылку документа".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+        ],
+
+        properties: vec![],
+        facets: vec![FacetKind::Manager],
+        kind: None,
+        attributes: vec![],
+        tabular_sections: vec![],
+        enum_values: vec![],
+        generic_info: None,
+    }
+}
+
+/// Создаёт базовый тип "ДокументОбъект" с ключевыми методами
+///
+/// Методы Object facet для документов:
+/// - `Записать()` → void, ServerOnly
+/// - `Провести()` → void, ServerOnly
+/// - `ОтменитьПроведение()` → void, ServerOnly
+pub fn create_document_object_type() -> RawTypeData {
+    RawTypeData {
+        name: "ДокументОбъект".to_string(),
+        english_name: "DocumentObject".to_string(),
+        description: "Объект документа - изменяемый документ".to_string(),
+        category: "PlatformType".to_string(),
+        source: RawDataSource::Platform,
+
+        methods: vec![
+            // Записать() → void, ServerOnly
+            RawMethodData {
+                name: "Записать".to_string(),
+                english_name: "Write".to_string(),
+                return_type: "Неопределено".to_string(),
+                params: vec![],
+                description: Some("Записывает изменения документа в базу данных".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // Провести() → void, ServerOnly
+            RawMethodData {
+                name: "Провести".to_string(),
+                english_name: "Post".to_string(),
+                return_type: "Неопределено".to_string(),
+                params: vec![],
+                description: Some("Проводит документ".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+            // ОтменитьПроведение() → void, ServerOnly
+            RawMethodData {
+                name: "ОтменитьПроведение".to_string(),
+                english_name: "UndoPosting".to_string(),
+                return_type: "Неопределено".to_string(),
+                params: vec![],
+                description: Some("Отменяет проведение документа".to_string()),
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            },
+        ],
+
+        properties: vec![
+            RawPropertyData {
+                name: "Номер".to_string(),
+                prop_type: "Строка".to_string(),
+                is_readonly: false,
+            },
+            RawPropertyData {
+                name: "Дата".to_string(),
+                prop_type: "Дата".to_string(),
+                is_readonly: false,
+            },
+        ],
+        facets: vec![FacetKind::Object],
+        kind: None,
+        attributes: vec![],
+        tabular_sections: vec![],
+        enum_values: vec![],
+        generic_info: None,
+    }
+}
+
 /// Загружает все платформенные типы в репозиторий
 pub fn load_all_platform_types() -> Vec<RawTypeData> {
     vec![
@@ -739,6 +1218,13 @@ pub fn load_all_platform_types() -> Vec<RawTypeData> {
         create_array_type(),
         create_map_type(),
         create_value_list_type(),
+        // Справочники (Catalogs) - facets
+        create_catalog_manager_type(),
+        create_catalog_object_type(),
+        create_catalog_reference_type(),
+        // Документы (Documents) - facets
+        create_document_manager_type(),
+        create_document_object_type(),
         // Здесь будут добавлены другие платформенные типы:
         // create_string_type(),
         // create_number_type(),
@@ -783,7 +1269,7 @@ pub fn populate_signature_index_from_platform_types(
     }
 }
 
-/// Конвертирует RawMethodData в MethodSignature
+/// Конвертирует RawMethodData в MethodSignature с поддержкой facets
 ///
 /// # Arguments
 /// * `method` - Метод из RawTypeData
@@ -801,6 +1287,9 @@ fn raw_method_to_signature(method: &RawMethodData, owner_type: &str) -> MethodSi
         })
         .collect();
 
+    // Определяем facet и context requirements на основе имени метода и возвращаемого типа
+    let (return_facet, context_requirements) = infer_method_metadata(method);
+
     MethodSignature {
         name: method.name.clone(),
         owner_type: Some(owner_type.to_string()),
@@ -811,7 +1300,77 @@ fn raw_method_to_signature(method: &RawMethodData, owner_type: &str) -> MethodSi
             Some(method.return_type.clone())
         },
         source: SignatureSource::Platform,
+        return_facet,
+        context_requirements,
     }
+}
+
+/// Выводит метаданные метода (facet и context) на основе его сигнатуры
+///
+/// # Правила inference
+/// - Методы создания (СоздатьЭлемент, СоздатьДокумент, СоздатьГруппу) → Object, ServerOnly
+/// - Методы поиска (НайтиПо*, Выбрать) → Reference/Selection, ServerOnly
+/// - Методы записи (Записать, Провести, ОтменитьПроведение) → void, ServerOnly
+/// - Методы конвертации (ПолучитьОбъект) → Object, ServerOnly
+/// - Методы проверки (Пустая, ПустаяСсылка) → Reference/Boolean, Universal
+///
+/// # Arguments
+/// * `method` - Метод для анализа
+///
+/// # Returns
+/// Кортеж (return_facet, context_requirements)
+fn infer_method_metadata(method: &RawMethodData) -> (Option<FacetKind>, ContextRequirements) {
+    let method_name = method.name.to_lowercase();
+    let return_type = method.return_type.to_lowercase();
+
+    // Определяем facet по возвращаемому типу
+    let return_facet = if return_type.contains("объект") || return_type.contains("object") {
+        Some(FacetKind::Object)
+    } else if return_type.contains("ссылка") || return_type.contains("ref") {
+        Some(FacetKind::Reference)
+    } else if return_type.contains("выборка") || return_type.contains("selection") {
+        Some(FacetKind::Selection)
+    } else if return_type.contains("список") || return_type.contains("list") {
+        Some(FacetKind::List)
+    } else {
+        None
+    };
+
+    // Определяем context requirements
+    let context_requirements = if method_name.contains("пустая")
+        || method_name.contains("пустаяссылка")
+        || method_name.contains("isempty")
+        || method_name.contains("emptyref")
+    {
+        // Проверки пустоты - универсальны
+        ContextRequirements::Universal
+    } else if method_name.contains("создать")
+        || method_name.contains("найти")
+        || method_name.contains("выбрать")
+        || method_name.contains("записать")
+        || method_name.contains("провести")
+        || method_name.contains("получитьобъект")
+        || method_name.contains("установить")
+        || method_name.contains("скопировать")
+        || method_name.contains("отменить")
+        || method_name.contains("create")
+        || method_name.contains("find")
+        || method_name.contains("select")
+        || method_name.contains("write")
+        || method_name.contains("post")
+        || method_name.contains("getobject")
+        || method_name.contains("set")
+        || method_name.contains("copy")
+        || method_name.contains("undo")
+    {
+        // Операции с базой данных - только на сервере
+        ContextRequirements::ServerOnly
+    } else {
+        // По умолчанию - универсальный
+        ContextRequirements::Universal
+    };
+
+    (return_facet, context_requirements)
 }
 
 #[cfg(test)]

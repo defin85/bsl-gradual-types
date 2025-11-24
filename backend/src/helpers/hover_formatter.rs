@@ -398,6 +398,21 @@ impl<'a> HoverBuilder<'a> {
                     method.return_type.clone()
                 };
 
+                // MILESTONE 3.11 Phase 4: Context badge для методов
+                let context_badge = if matches!(self.config.detail_level, DetailLevel::Detailed) {
+                    method.context_requirements.as_ref().map(|req| {
+                        use bsl_shared::domain::runtime_context::ContextRequirements;
+                        match req {
+                            ContextRequirements::ServerOnly => " (🖥️ Server)",
+                            ContextRequirements::ClientOnly => " (💻 Client)",
+                            ContextRequirements::Universal => " (🌐 Universal)",
+                            ContextRequirements::ServerPreferred => " (⚡ Server Preferred)",
+                        }
+                    }).unwrap_or("")
+                } else {
+                    ""
+                };
+
                 let line = if param_count >= 4 {
                     // Multiline формат для методов с 4+ параметров
                     let mut result = match self.config.output_format {
@@ -420,7 +435,7 @@ impl<'a> HoverBuilder<'a> {
                         ));
                     }
 
-                    result.push_str(&format!("  ) → {}", return_str));
+                    result.push_str(&format!("  ) → {}{}", return_str, context_badge));
                     result
                 } else {
                     // Inline формат для методов с < 4 параметров
@@ -444,10 +459,10 @@ impl<'a> HoverBuilder<'a> {
 
                     match self.config.output_format {
                         OutputFormat::Markdown => {
-                            format!("• **{}({})** → {}", method.name, params_str, return_str)
+                            format!("• **{}({})** → {}{}", method.name, params_str, return_str, context_badge)
                         }
                         OutputFormat::PlainText => {
-                            format!("  - {}({}) → {}", method.name, params_str, return_str)
+                            format!("  - {}({}) → {}{}", method.name, params_str, return_str, context_badge)
                         }
                     }
                 };
@@ -516,7 +531,7 @@ impl<'a> HoverBuilder<'a> {
         self
     }
 
-    /// MILESTONE 3.6 Phase 2 - Task 2.1: Добавить информацию о фасете (только для Detailed level)
+    /// MILESTONE 3.11 Phase 4: Добавить информацию о фасете (для Detailed level)
     fn add_facet_info(mut self, resolution: &TypeResolution) -> Self {
         // Только для Detailed уровня
         if !matches!(self.config.detail_level, DetailLevel::Detailed) {
@@ -525,31 +540,41 @@ impl<'a> HoverBuilder<'a> {
 
         // Получить активный фасет
         if let Some(active_facet) = &resolution.active_facet {
-            let facet_description = match active_facet {
-                bsl_shared::domain::types::FacetKind::Manager => "менеджер объекта",
-                bsl_shared::domain::types::FacetKind::Object => "объект с данными",
-                bsl_shared::domain::types::FacetKind::Reference => "ссылка на элемент",
-                bsl_shared::domain::types::FacetKind::Selection => "выборка элементов",
-                bsl_shared::domain::types::FacetKind::List => "список значений",
-                bsl_shared::domain::types::FacetKind::Metadata => "метаданные объекта",
-                bsl_shared::domain::types::FacetKind::Constructor => "конструктор",
-                bsl_shared::domain::types::FacetKind::Collection => "коллекция",
-                bsl_shared::domain::types::FacetKind::Singleton => "одиночный объект",
+            let (facet_russian, facet_description) = match active_facet {
+                bsl_shared::domain::types::FacetKind::Manager => ("Менеджер", "создание, поиск элементов"),
+                bsl_shared::domain::types::FacetKind::Object => ("Объект", "изменяемый объект"),
+                bsl_shared::domain::types::FacetKind::Reference => ("Ссылка", "ссылка на элемент"),
+                bsl_shared::domain::types::FacetKind::Selection => ("Выборка", "обход элементов"),
+                bsl_shared::domain::types::FacetKind::List => ("Список", "UI представление"),
+                bsl_shared::domain::types::FacetKind::Metadata => ("Метаданные", "метаданные объекта"),
+                bsl_shared::domain::types::FacetKind::Constructor => ("Конструктор", "создание объектов"),
+                bsl_shared::domain::types::FacetKind::Collection => ("Коллекция", "набор элементов"),
+                bsl_shared::domain::types::FacetKind::Singleton => ("Одиночный", "одиночный объект"),
             };
 
-            let facet_info = format!("**Фасет:** {:?} ({})", active_facet, facet_description);
+            let facet_info = format!("**Фасет:** {} ({})", facet_russian, facet_description);
             self.sections.push(facet_info);
 
             // Показать доступные фасеты для данного типа
             if !resolution.available_facets.is_empty() {
-                let facets_str = resolution
+                let facets_list = resolution
                     .available_facets
                     .iter()
-                    .map(|f| format!("{:?}", f))
+                    .map(|f| match f {
+                        bsl_shared::domain::types::FacetKind::Manager => "Менеджер",
+                        bsl_shared::domain::types::FacetKind::Object => "Объект",
+                        bsl_shared::domain::types::FacetKind::Reference => "Ссылка",
+                        bsl_shared::domain::types::FacetKind::Selection => "Выборка",
+                        bsl_shared::domain::types::FacetKind::List => "Список",
+                        bsl_shared::domain::types::FacetKind::Metadata => "Метаданные",
+                        bsl_shared::domain::types::FacetKind::Constructor => "Конструктор",
+                        bsl_shared::domain::types::FacetKind::Collection => "Коллекция",
+                        bsl_shared::domain::types::FacetKind::Singleton => "Одиночный",
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
 
-                self.sections.push(format!("💡 **Доступные фасеты:** {}", facets_str));
+                self.sections.push(format!("💡 **Доступные фасеты:** {}", facets_list));
             }
         }
 
@@ -804,6 +829,8 @@ mod tests {
                 description: None,
                 is_deprecated: false,
                 is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
             })
             .collect();
 

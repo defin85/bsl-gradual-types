@@ -77,6 +77,8 @@ fn convert_type_info_to_raw(type_info: &TypeInfo, db: &SyntaxHelperDatabase) -> 
                     is_deprecated: false,
                     is_constructor: method_info.name.starts_with("Новый")
                         || method_info.name.starts_with("New"),
+                    context_requirements: None, // TODO: Извлечь из Syntax Helper
+                    return_facet: None, // TODO: Извлечь из Syntax Helper
                 }
             } else {
                 warn!(

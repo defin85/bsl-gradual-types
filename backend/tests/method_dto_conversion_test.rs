@@ -54,6 +54,8 @@ fn test_method_with_params_conversion() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -79,6 +81,8 @@ fn test_method_with_return_type() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -99,6 +103,8 @@ fn test_constructor_detection_russian() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -120,6 +126,8 @@ fn test_constructor_detection_english() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -140,6 +148,8 @@ fn test_empty_english_name_becomes_none() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -163,6 +173,8 @@ fn test_optional_param_without_default() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -195,6 +207,8 @@ fn test_method_with_multiple_params() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -217,6 +231,8 @@ fn test_method_without_params_and_return_type() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -242,6 +258,8 @@ fn test_method_with_complex_type_names() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -265,6 +283,8 @@ fn test_method_with_cyrillic_only() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -366,6 +386,8 @@ fn test_method_name_edge_cases() {
             description: None,
             is_deprecated: false,
             is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
         };
 
         let dto = convert_to_method_dto(&raw_method);
@@ -398,6 +420,8 @@ fn test_method_with_many_params() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -426,6 +450,8 @@ fn test_param_with_special_characters() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -444,6 +470,8 @@ fn test_empty_method_name() {
         description: None,
         is_deprecated: false,
         is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
     };
 
     let dto = convert_to_method_dto(&raw_method);
@@ -475,6 +503,8 @@ fn test_return_type_edge_cases() {
             description: None,
             is_deprecated: false,
             is_constructor: false,
+        context_requirements: None,
+        return_facet: None,
         };
 
         let dto = convert_to_method_dto(&raw_method);

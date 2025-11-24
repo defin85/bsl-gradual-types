@@ -523,6 +523,8 @@ mod tests {
                     description: None,
                     is_deprecated: false,
                     is_constructor: false,
+                    context_requirements: None,
+                    return_facet: None,
                 },
                 RawMethodData {
                     name: "Количество".to_string(),
@@ -532,6 +534,8 @@ mod tests {
                     description: None,
                     is_deprecated: false,
                     is_constructor: false,
+                    context_requirements: None,
+                    return_facet: None,
                 },
             ],
             properties: vec![],
@@ -651,6 +655,8 @@ mod tests {
                     description: None,
                     is_deprecated: false,
                     is_constructor: false,
+                    context_requirements: None,
+                    return_facet: None,
                 },
                 RawMethodData {
                     name: "Получить".to_string(),
@@ -665,6 +671,8 @@ mod tests {
                     description: None,
                     is_deprecated: false,
                     is_constructor: false,
+                    context_requirements: None,
+                    return_facet: None,
                 },
                 RawMethodData {
                     name: "Количество".to_string(),
@@ -674,6 +682,8 @@ mod tests {
                     description: None,
                     is_deprecated: false,
                     is_constructor: false,
+                    context_requirements: None,
+                    return_facet: None,
                 },
                 RawMethodData {
                     name: "Индекс".to_string(),
@@ -688,6 +698,8 @@ mod tests {
                     description: None,
                     is_deprecated: false,
                     is_constructor: false,
+                    context_requirements: None,
+                    return_facet: None,
                 },
             ],
             properties: vec![],

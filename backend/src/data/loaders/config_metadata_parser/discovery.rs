@@ -420,6 +420,28 @@ impl ConfigurationDiscovery {
                                     );
                                 }
                             }
+
+                            // Парсим модули объекта (ObjectModule, ManagerModule)
+                            let (object_mod, manager_mod, record_set_mod) =
+                                forms_discovery.discover_object_modules(&folder_name, object_name);
+
+                            metadata.object_module_path = object_mod;
+                            metadata.manager_module_path = manager_mod;
+                            metadata.record_set_module_path = record_set_mod;
+
+                            if metadata.object_module_path.is_some()
+                                || metadata.manager_module_path.is_some()
+                                || metadata.record_set_module_path.is_some()
+                            {
+                                tracing::trace!(
+                                    "      📦 Обнаружены модули для {}.{} (object: {}, manager: {}, record_set: {})",
+                                    object_type,
+                                    object_name,
+                                    metadata.object_module_path.is_some(),
+                                    metadata.manager_module_path.is_some(),
+                                    metadata.record_set_module_path.is_some()
+                                );
+                            }
                         }
 
                         // Throttling: отправляем прогресс каждые 5 объектов или на последнем
@@ -674,6 +696,72 @@ impl ConfigurationDiscovery {
         tracing::info!("  → Загружаем метаданные из {}", first_config.name);
 
         self.discover_metadata_in_configuration(first_config, progress_callback)
+    }
+
+    /// Обнаруживает модули объекта (ObjectModule, ManagerModule, RecordSetModule)
+    ///
+    /// Проверяет наличие модулей в папке Ext объекта метаданных.
+    ///
+    /// # Параметры
+    ///
+    /// - `object_type` - тип объекта в множественном числе ("Documents", "Catalogs")
+    /// - `object_name` - имя объекта ("ЗаказНаряды", "Контрагенты")
+    ///
+    /// # Возвращает
+    ///
+    /// Кортеж из трёх опциональных PathBuf:
+    /// - ObjectModule.bsl
+    /// - ManagerModule.bsl
+    /// - RecordSetModule.bsl
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let (object_mod, manager_mod, record_set_mod) =
+    ///     discovery.discover_object_modules("Catalogs", "Контрагенты");
+    /// assert!(object_mod.is_some());
+    /// ```
+    pub fn discover_object_modules(
+        &self,
+        object_type: &str,  // "Documents", "Catalogs"
+        object_name: &str,  // "ЗаказНаряды", "Контрагенты"
+    ) -> (Option<PathBuf>, Option<PathBuf>, Option<PathBuf>) {
+        let base_dir = self.base_path
+            .join(object_type)
+            .join(object_name)
+            .join("Ext");
+
+        let object_module = base_dir.join("ObjectModule.bsl");
+        let manager_module = base_dir.join("ManagerModule.bsl");
+        let record_set_module = base_dir.join("RecordSetModule.bsl");
+
+        tracing::trace!(
+            "🔍 Scanning for modules in {:?} (object_type: {}, object_name: {})",
+            base_dir,
+            object_type,
+            object_name
+        );
+
+        (
+            if object_module.exists() {
+                tracing::trace!("  ✅ Found ObjectModule.bsl");
+                Some(object_module)
+            } else {
+                None
+            },
+            if manager_module.exists() {
+                tracing::trace!("  ✅ Found ManagerModule.bsl");
+                Some(manager_module)
+            } else {
+                None
+            },
+            if record_set_module.exists() {
+                tracing::trace!("  ✅ Found RecordSetModule.bsl");
+                Some(record_set_module)
+            } else {
+                None
+            },
+        )
     }
 
     /// Обнаруживает формы для объекта метаданных

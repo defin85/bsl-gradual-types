@@ -1,8 +1,8 @@
 //! Типы данных для парсинга форм конфигурации 1С
 
+use super::types::ExecutionContext;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use super::types::ExecutionContext;
 
 /// Реквизит формы
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -66,6 +66,11 @@ pub struct UniversalMetadataObject {
 
     /// Формы объекта метаданных (для справочников, документов и т.д.)
     pub forms: Vec<FormMetadata>,
+
+    /// Пути к модулям объекта (ObjectModule, ManagerModule, RecordSetModule)
+    pub object_module_path: Option<PathBuf>,
+    pub manager_module_path: Option<PathBuf>,
+    pub record_set_module_path: Option<PathBuf>,
 }
 
 impl UniversalMetadataObject {
@@ -87,6 +92,9 @@ impl UniversalMetadataObject {
             execution_contexts: Vec::new(),
             common_module_properties: None,
             forms: Vec::new(),
+            object_module_path: None,
+            manager_module_path: None,
+            record_set_module_path: None,
         }
     }
 

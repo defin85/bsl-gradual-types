@@ -13,7 +13,7 @@ use crate::parsing::bsl::ast::{Expression, Program, Statement};
 use anyhow::Result;
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::FacetKind; // Milestone 3.11 Phase 2
+// Note: FacetKind removed in Phase 2 refactoring - using SignatureIndex methods instead
 use bsl_shared::ir::*;
 use bsl_shared::utils::hash::hash_content;
 use std::sync::Arc;
@@ -799,6 +799,33 @@ impl AstToIrConverter {
             Expression::Boolean { .. } => "Булево".to_string(),
             Expression::Date { .. } => "Дата".to_string(),
             Expression::Identifier { name, .. } => {
+                // MILESTONE 3.11 Phase 2: tree-sitter может парсить "Справочники.X" как один Identifier
+                // Проверяем и трансформируем в Manager facet
+                if let Some(dot_pos) = name.find('.') {
+                    let collection = &name[..dot_pos];
+                    let object_name = &name[dot_pos + 1..];
+
+                    let result = match collection {
+                        "Справочники" | "Catalogs" => format!("СправочникМенеджер.{}", object_name),
+                        "Документы" | "Documents" => format!("ДокументМенеджер.{}", object_name),
+                        "ПланыВидовХарактеристик" | "ChartsOfCharacteristicTypes" => format!("ПланВидовХарактеристикМенеджер.{}", object_name),
+                        "ПланыСчетов" | "ChartsOfAccounts" => format!("ПланСчетовМенеджер.{}", object_name),
+                        "ПланыВидовРасчета" | "ChartsOfCalculationTypes" => format!("ПланВидовРасчетаМенеджер.{}", object_name),
+                        "БизнесПроцессы" | "BusinessProcesses" => format!("БизнесПроцессМенеджер.{}", object_name),
+                        "Задачи" | "Tasks" => format!("ЗадачаМенеджер.{}", object_name),
+                        "РегистрыСведений" | "InformationRegisters" => format!("РегистрСведенийМенеджер.{}", object_name),
+                        "РегистрыНакопления" | "AccumulationRegisters" => format!("РегистрНакопленияМенеджер.{}", object_name),
+                        "РегистрыБухгалтерии" | "AccountingRegisters" => format!("РегистрБухгалтерииМенеджер.{}", object_name),
+                        "РегистрыРасчета" | "CalculationRegisters" => format!("РегистрРасчетаМенеджер.{}", object_name),
+                        _ => {
+                            // Не глобальная коллекция - поиск переменной
+                            self.lookup_variable_type(name)
+                                .unwrap_or_else(|| name.clone())
+                        }
+                    };
+                    return result;
+                }
+
                 // Поиск переменной в текущем scope
                 self.lookup_variable_type(name)
                     .unwrap_or_else(|| name.clone())
@@ -808,7 +835,7 @@ impl AstToIrConverter {
                 object, property, ..
             } => {
                 let base_type = self.infer_expression_type(object);
-                
+
                 // MILESTONE 3.11 Phase 2: PropertyAccess для глобальных коллекций → Manager facet
                 match base_type.as_str() {
                     "Справочники" | "Catalogs" => format!("СправочникМенеджер.{}", property),
@@ -839,31 +866,24 @@ impl AstToIrConverter {
                             &object_type
                         };
 
-                                                // Поиск метода в SignatureIndex (платформенные методы)
-                        // MILESTONE 3.11 Phase 2: Facet switching через return_facet
+                        // Поиск метода в SignatureIndex (платформенные методы)
+                        // MILESTONE 3.11 Phase 2: Facet switching с подстановкой имени объекта
                         if let Some(method) = self.signature_index.find_method(clean_type, property) {
-                            // Если метод указывает return_facet, переключаем фасет
-                            if let Some(facet) = &method.return_facet {
-                                let type_name = self.extract_type_name(&object_type);
-                                
-                                // Определяем префикс фасета на основе базовой категории типа
-                                if let Some(category) = self.get_base_category(&object_type) {
-                                    return match facet {
-                                        FacetKind::Object => format!("{}Объект.{}", category, type_name),
-                                        FacetKind::Reference => format!("{}Ссылка.{}", category, type_name),
-                                        FacetKind::Selection => format!("{}Выборка.{}", category, type_name),
-                                        FacetKind::Manager => format!("{}Менеджер.{}", category, type_name),
-                                        FacetKind::List => format!("{}Список.{}", category, type_name),
-                                        // Эти фасеты не используются для конфигурационных типов
-                                        FacetKind::Metadata | FacetKind::Constructor | FacetKind::Collection | FacetKind::Singleton => {
-                                            method.return_type.clone().unwrap_or_else(|| "Dynamic".to_string())
-                                        }
-                                    };
+                            // Получаем return_type метода
+                            if let Some(return_type) = &method.return_type {
+                                // Извлекаем имя объекта из исходного типа
+                                // "СправочникМенеджер.Контрагенты" → "Контрагенты"
+                                if let Some(metadata_name) = SignatureIndex::extract_metadata_name(&object_type) {
+                                    // Подставляем имя в return_type
+                                    // "СправочникОбъект" + "Контрагенты" → "СправочникОбъект.Контрагенты"
+                                    return SignatureIndex::substitute_type_name(return_type, metadata_name);
                                 }
+
+                                // Fallback: возвращаем return_type как есть
+                                return return_type.clone();
                             }
-                            
-                            // Fallback: используем return_type если указан
-                            return method.return_type.clone().unwrap_or_else(|| "Неопределено".to_string());
+
+                            return "Неопределено".to_string();
                         }
 
                         "Dynamic".to_string()
@@ -919,39 +939,6 @@ impl AstToIrConverter {
 
 
 
-    /// Извлечь имя типа метаданных из полного типа (Milestone 3.11 Phase 2)
-    ///
-    /// # Примеры
-    /// - "СправочникМенеджер.Контрагенты" → "Контрагенты"
-    /// - "ДокументОбъект.ЗаказКлиента" → "ЗаказКлиента"
-    /// - "Массив" → "Массив"
-    fn extract_type_name(&self, full_type: &str) -> String {
-        if let Some(pos) = full_type.rfind('.') {
-            full_type[pos + 1..].to_string()
-        } else {
-            full_type.to_string()
-        }
-    }
-
-    /// Определить базовую категорию типа по facet (Milestone 3.11 Phase 2)
-    ///
-    /// # Примеры
-    /// - "СправочникМенеджер.Контрагенты" → "Справочник"
-    /// - "ДокументОбъект.ЗаказКлиента" → "Документ"
-    fn get_base_category(&self, full_type: &str) -> Option<&str> {
-        if full_type.starts_with("СправочникМенеджер") || full_type.starts_with("СправочникОбъект")
-            || full_type.starts_with("СправочникСсылка") || full_type.starts_with("СправочникВыборка") {
-            Some("Справочник")
-        } else if full_type.starts_with("ДокументМенеджер") || full_type.starts_with("ДокументОбъект")
-            || full_type.starts_with("ДокументСсылка") || full_type.starts_with("ДокументВыборка") {
-            Some("Документ")
-        } else if full_type.starts_with("ПланВидовХарактеристикМенеджер") || full_type.starts_with("ПланВидовХарактеристикОбъект")
-            || full_type.starts_with("ПланВидовХарактеристикСсылка") || full_type.starts_with("ПланВидовХарактеристикВыборка") {
-            Some("ПланВидовХарактеристик")
-        } else {
-            None
-        }
-    }
     // TODO: Интеграция parse_compiler_directive() для context tracking (Milestone 3.11 Phase 2)
     // Функция была удалена по результатам code review.
     // Будет переинтегрирована когда:

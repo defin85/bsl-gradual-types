@@ -368,6 +368,7 @@ fn create_resolution_for_config_type(
         result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
             kind,
             name: name.to_string(),
+            facet: Some(facet),
             attributes: vec![],
             tabular_sections: vec![],
         })),
@@ -599,6 +600,7 @@ fn test_nullable_configuration_type_with_facet() {
             ConfigurationType {
                 kind: MetadataKind::Document,
                 name: "ЗаказНаряды".to_string(),
+                facet: Some(FacetKind::Manager),
                 attributes: vec![],
                 tabular_sections: vec![],
             },
@@ -720,14 +722,15 @@ fn test_active_facet_determines_lazy_lookup_not_available_facets() {
         result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
             kind: MetadataKind::Document,
             name: "ЗаказНаряды".to_string(),
+            facet: Some(FacetKind::Manager),
             attributes: vec![],
             tabular_sections: vec![],
         })),
-        active_facet: Some(FacetKind::Manager), // ← определяет lookup
+        active_facet: Some(FacetKind::Manager), // <- определяет lookup
         certainty: Certainty::Known,
         source: ResolutionSource::Static,
         metadata: ResolutionMetadata::default(),
-        available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference], // ← не используются для lazy lookup
+        available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference], // <- не используются для lazy lookup
     };
 
     let methods = lookup.get_methods(&resolution);

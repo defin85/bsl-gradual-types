@@ -194,13 +194,69 @@ impl TypeResolver {
             }
         }
 
-        let (kind, prefix) = match base {
-            "Справочники" | "Catalogs" => (MetadataKind::Catalog, "Справочники"),
-            "Документы" | "Documents" => (MetadataKind::Document, "Документы"),
-            "Перечисления" | "Enums" => (MetadataKind::Enum, "Перечисления"),
-            "РегистрыСведений" | "InformationRegisters" => {
-                (MetadataKind::Register, "РегистрыСведений")
-            }
+        // MILESTONE 3.11: Распознаём как коллекции, так и фасетные типы
+        // Коллекции: Справочники.X → Manager facet
+        // Фасетные: СправочникМенеджер.X, СправочникОбъект.X, etc.
+        let (kind, facet) = match base {
+            // Коллекции → Manager facet
+            "Справочники" | "Catalogs" => (MetadataKind::Catalog, crate::domain::types::FacetKind::Manager),
+            "Документы" | "Documents" => (MetadataKind::Document, crate::domain::types::FacetKind::Manager),
+            "Перечисления" | "Enums" => (MetadataKind::Enum, crate::domain::types::FacetKind::Manager),
+            "РегистрыСведений" | "InformationRegisters" => (MetadataKind::InformationRegister, crate::domain::types::FacetKind::Manager),
+            "РегистрыНакопления" | "AccumulationRegisters" => (MetadataKind::AccumulationRegister, crate::domain::types::FacetKind::Manager),
+            "РегистрыБухгалтерии" | "AccountingRegisters" => (MetadataKind::AccountingRegister, crate::domain::types::FacetKind::Manager),
+            "РегистрыРасчета" | "CalculationRegisters" => (MetadataKind::CalculationRegister, crate::domain::types::FacetKind::Manager),
+            "ПланыВидовХарактеристик" | "ChartsOfCharacteristicTypes" => (MetadataKind::ChartOfCharacteristicTypes, crate::domain::types::FacetKind::Manager),
+            "ПланыСчетов" | "ChartsOfAccounts" => (MetadataKind::ChartOfAccounts, crate::domain::types::FacetKind::Manager),
+            "ПланыВидовРасчета" | "ChartsOfCalculationTypes" => (MetadataKind::ChartOfCalculationTypes, crate::domain::types::FacetKind::Manager),
+            "БизнесПроцессы" | "BusinessProcesses" => (MetadataKind::BusinessProcess, crate::domain::types::FacetKind::Manager),
+            "Задачи" | "Tasks" => (MetadataKind::Task, crate::domain::types::FacetKind::Manager),
+            "ПланыОбмена" | "ExchangePlans" => (MetadataKind::ExchangePlan, crate::domain::types::FacetKind::Manager),
+
+            // Фасетные типы - Справочники
+            "СправочникМенеджер" | "CatalogManager" => (MetadataKind::Catalog, crate::domain::types::FacetKind::Manager),
+            "СправочникОбъект" | "CatalogObject" => (MetadataKind::Catalog, crate::domain::types::FacetKind::Object),
+            "СправочникСсылка" | "CatalogRef" => (MetadataKind::Catalog, crate::domain::types::FacetKind::Reference),
+            "СправочникВыборка" | "CatalogSelection" => (MetadataKind::Catalog, crate::domain::types::FacetKind::Selection),
+            "СправочникСписок" | "CatalogList" => (MetadataKind::Catalog, crate::domain::types::FacetKind::List),
+
+            // Фасетные типы - Документы
+            "ДокументМенеджер" | "DocumentManager" => (MetadataKind::Document, crate::domain::types::FacetKind::Manager),
+            "ДокументОбъект" | "DocumentObject" => (MetadataKind::Document, crate::domain::types::FacetKind::Object),
+            "ДокументСсылка" | "DocumentRef" => (MetadataKind::Document, crate::domain::types::FacetKind::Reference),
+            "ДокументВыборка" | "DocumentSelection" => (MetadataKind::Document, crate::domain::types::FacetKind::Selection),
+            "ДокументСписок" | "DocumentList" => (MetadataKind::Document, crate::domain::types::FacetKind::List),
+
+            // Фасетные типы - Регистры сведений
+            "РегистрСведенийМенеджер" | "InformationRegisterManager" => (MetadataKind::InformationRegister, crate::domain::types::FacetKind::Manager),
+            "РегистрСведенийНаборЗаписей" | "InformationRegisterRecordSet" => (MetadataKind::InformationRegister, crate::domain::types::FacetKind::Object),
+            "РегистрСведенийВыборка" | "InformationRegisterSelection" => (MetadataKind::InformationRegister, crate::domain::types::FacetKind::Selection),
+
+            // Фасетные типы - Регистры накопления
+            "РегистрНакопленияМенеджер" | "AccumulationRegisterManager" => (MetadataKind::AccumulationRegister, crate::domain::types::FacetKind::Manager),
+            "РегистрНакопленияНаборЗаписей" | "AccumulationRegisterRecordSet" => (MetadataKind::AccumulationRegister, crate::domain::types::FacetKind::Object),
+            "РегистрНакопленияВыборка" | "AccumulationRegisterSelection" => (MetadataKind::AccumulationRegister, crate::domain::types::FacetKind::Selection),
+
+            // Фасетные типы - Планы видов характеристик
+            "ПланВидовХарактеристикМенеджер" | "ChartOfCharacteristicTypesManager" => (MetadataKind::ChartOfCharacteristicTypes, crate::domain::types::FacetKind::Manager),
+            "ПланВидовХарактеристикОбъект" | "ChartOfCharacteristicTypesObject" => (MetadataKind::ChartOfCharacteristicTypes, crate::domain::types::FacetKind::Object),
+            "ПланВидовХарактеристикСсылка" | "ChartOfCharacteristicTypesRef" => (MetadataKind::ChartOfCharacteristicTypes, crate::domain::types::FacetKind::Reference),
+
+            // Фасетные типы - Планы счетов
+            "ПланСчетовМенеджер" | "ChartOfAccountsManager" => (MetadataKind::ChartOfAccounts, crate::domain::types::FacetKind::Manager),
+            "ПланСчетовОбъект" | "ChartOfAccountsObject" => (MetadataKind::ChartOfAccounts, crate::domain::types::FacetKind::Object),
+            "ПланСчетовСсылка" | "ChartOfAccountsRef" => (MetadataKind::ChartOfAccounts, crate::domain::types::FacetKind::Reference),
+
+            // Фасетные типы - Бизнес-процессы
+            "БизнесПроцессМенеджер" | "BusinessProcessManager" => (MetadataKind::BusinessProcess, crate::domain::types::FacetKind::Manager),
+            "БизнесПроцессОбъект" | "BusinessProcessObject" => (MetadataKind::BusinessProcess, crate::domain::types::FacetKind::Object),
+            "БизнесПроцессСсылка" | "BusinessProcessRef" => (MetadataKind::BusinessProcess, crate::domain::types::FacetKind::Reference),
+
+            // Фасетные типы - Задачи
+            "ЗадачаМенеджер" | "TaskManager" => (MetadataKind::Task, crate::domain::types::FacetKind::Manager),
+            "ЗадачаОбъект" | "TaskObject" => (MetadataKind::Task, crate::domain::types::FacetKind::Object),
+            "ЗадачаСсылка" | "TaskRef" => (MetadataKind::Task, crate::domain::types::FacetKind::Reference),
+
             _ => {
                 let mut resolution = TypeResolution::unknown();
                 resolution
@@ -211,9 +267,12 @@ impl TypeResolver {
             }
         };
 
+        // Получаем префикс коллекции для поиска в repository
+        let collection_prefix = kind.to_prefix();
+
         // ✅ ИСПРАВЛЕНИЕ: Проверяем наличие метаданных для честного certainty
         // Формируем имя типа для поиска в repository
-        let type_name = format!("{}.{}", prefix, member);
+        let type_name = format!("{}.{}", collection_prefix, member);
         let has_metadata = self.repository.find_type(&type_name).is_some();
 
         // Определяем уровень уверенности:
@@ -230,12 +289,13 @@ impl TypeResolver {
             result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
                 kind,
                 name: member.to_string(),
+                facet: Some(facet.clone()), // Используем определённый facet
                 attributes: vec![],
                 tabular_sections: vec![],
             })),
             source,
             metadata: ResolutionMetadata {
-                file: Some(format!("{}:{}", prefix, member)),
+                file: Some(format!("{}:{}", collection_prefix, member)),
                 line: None,
                 column: None,
                 notes: vec![if has_metadata {
@@ -245,7 +305,8 @@ impl TypeResolver {
                             MetadataKind::Catalog => "catalog",
                             MetadataKind::Document => "document",
                             MetadataKind::Enum => "enum",
-                            MetadataKind::Register => "information register",
+                            MetadataKind::InformationRegister => "information register",
+                            MetadataKind::AccumulationRegister => "accumulation register",
                             _ => "configuration object",
                         },
                         base,
@@ -258,7 +319,8 @@ impl TypeResolver {
                             MetadataKind::Catalog => "catalog",
                             MetadataKind::Document => "document",
                             MetadataKind::Enum => "enum",
-                            MetadataKind::Register => "information register",
+                            MetadataKind::InformationRegister => "information register",
+                            MetadataKind::AccumulationRegister => "accumulation register",
                             _ => "configuration object",
                         },
                         base,
@@ -266,7 +328,7 @@ impl TypeResolver {
                     )
                 }],
             },
-            active_facet: Some(crate::domain::types::FacetKind::Manager),
+            active_facet: Some(facet),
             available_facets: vec![
                 crate::domain::types::FacetKind::Manager,
                 crate::domain::types::FacetKind::Object,
@@ -1195,9 +1257,16 @@ impl TypeResolver {
         scope_id: crate::ir::ScopeId,
     ) -> TypeResolution {
         use crate::ir::TypeHint;
+        use tracing::{debug, info};
 
         // Ищем переменную в scope hierarchy
         if let Some(hint) = symbol_table.get_variable_type(scope_id, var_name) {
+            // 🔍 DEBUG MILESTONE 3.11: Логируем TypeHint из SymbolTable
+            info!(
+                "🔍 resolve_variable_with_context('{}', scope={:?}): TypeHint = {:?}",
+                var_name, scope_id, hint
+            );
+
             match hint {
                 TypeHint::Generic {
                     base_type,
@@ -1205,20 +1274,29 @@ impl TypeResolver {
                     certainty,
                 } => {
                     // Резолвим Generic тип из hint
+                    debug!("  → Generic: base={}, params={:?}", base_type, type_params);
                     return self.resolve_generic_from_hint(&base_type, &type_params, certainty);
                 }
                 TypeHint::Explicit(type_name) | TypeHint::Inferred(type_name) => {
                     // Обычная резолюция по имени типа
-                    return self.resolve_expression_sync(&type_name);
+                    info!("  → Resolving type_name: '{}'", type_name);
+                    let resolution = self.resolve_expression_sync(&type_name);
+                    info!("  → Resolution result: {:?}", resolution.result);
+                    return resolution;
                 }
                 TypeHint::Unknown => {
                     // Тип неизвестен
+                    debug!("  → TypeHint::Unknown");
                     return TypeResolution::unknown();
                 }
             }
         }
 
         // Переменная не найдена в SymbolTable
+        info!(
+            "🔍 resolve_variable_with_context('{}', scope={:?}): NOT FOUND in SymbolTable",
+            var_name, scope_id
+        );
         TypeResolution::unknown()
     }
 

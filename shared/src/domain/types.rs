@@ -430,6 +430,9 @@ pub struct PlatformType {
 pub struct ConfigurationType {
     pub kind: MetadataKind,
     pub name: String,
+    /// Фасет типа (Manager, Object, Reference, Selection, List)
+    /// Определяет, какое представление типа активно
+    pub facet: Option<FacetKind>,
     pub attributes: Vec<Attribute>,
     pub tabular_sections: Vec<TabularSection>,
 }
@@ -588,7 +591,13 @@ impl fmt::Display for ConcreteType {
         match self {
             ConcreteType::Platform(platform) => write!(f, "{}", platform.name),
             ConcreteType::Configuration(config) => {
-                write!(f, "{}.{}", config.kind.display_name(), config.name)
+                // Если facet указан - используем фасетный префикс (СправочникМенеджер.Контрагенты)
+                // Иначе используем стандартный display_name (Справочники.Контрагенты)
+                if let Some(facet) = &config.facet {
+                    write!(f, "{}.{}", config.kind.faceted_type_prefix(facet), config.name)
+                } else {
+                    write!(f, "{}.{}", config.kind.display_name(), config.name)
+                }
             }
             ConcreteType::Primitive(primitive) => write!(f, "{}", primitive.display_name()),
             ConcreteType::Special(special) => write!(f, "{}", special.display_name()),
@@ -644,6 +653,38 @@ impl MetadataKind {
             MetadataKind::Subsystem => "Подсистемы",
             MetadataKind::Language => "Языки",
         }
+    }
+
+    /// Возвращает префикс типа с учётом фасета
+    ///
+    /// # Примеры
+    /// - Catalog + Manager -> "СправочникМенеджер"
+    /// - Catalog + Object -> "СправочникОбъект"
+    /// - Document + Reference -> "ДокументСсылка"
+    pub fn faceted_type_prefix(&self, facet: &FacetKind) -> String {
+        let base = match self {
+            MetadataKind::Catalog => "Справочник",
+            MetadataKind::Document => "Документ",
+            MetadataKind::Enum => "Перечисление",
+            MetadataKind::Report => "Отчет",
+            MetadataKind::DataProcessor => "Обработка",
+            MetadataKind::ChartOfAccounts => "ПланСчетов",
+            MetadataKind::ChartOfCharacteristicTypes => "ПланВидовХарактеристик",
+            MetadataKind::ChartOfCalculationTypes => "ПланВидовРасчета",
+            MetadataKind::InformationRegister => "РегистрСведений",
+            MetadataKind::AccumulationRegister => "РегистрНакопления",
+            MetadataKind::AccountingRegister => "РегистрБухгалтерии",
+            MetadataKind::CalculationRegister => "РегистрРасчета",
+            MetadataKind::BusinessProcess => "БизнесПроцесс",
+            MetadataKind::Task => "Задача",
+            MetadataKind::ExchangePlan => "ПланОбмена",
+            MetadataKind::Constant => "Константа",
+            // Для типов без фасетов возвращаем display_name
+            _ => return self.display_name().to_string(),
+        };
+
+        let suffix = facet.platform_suffix();
+        format!("{}{}", base, suffix)
     }
 }
 

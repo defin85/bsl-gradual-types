@@ -365,6 +365,7 @@ fn create_resolution_for_config_type(
         result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
             kind,
             name: name.to_string(),
+            facet: Some(facet),
             attributes: vec![],
             tabular_sections: vec![],
         })),

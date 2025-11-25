@@ -196,14 +196,47 @@ impl SignatureIndex {
     }
 
     /// Найти метод по имени типа и имени метода
+    ///
+    /// Поддерживает фасетные типы (Milestone 3.11 Phase 2):
+    /// - Сначала ищет по точному имени типа
+    /// - Если не найдено, извлекает базовый фасетный тип и ищет по нему
+    ///
+    /// # Примеры
+    /// ```ignore
+    /// // Точный поиск
+    /// find_method("Массив", "Добавить") // → найдёт "Массив.Добавить"
+    ///
+    /// // Фасетный поиск
+    /// find_method("СправочникМенеджер.Контрагенты", "СоздатьЭлемент")
+    /// // → не найдёт по точному ключу
+    /// // → извлечёт базовый тип "СправочникМенеджер"
+    /// // → найдёт "СправочникМенеджер.СоздатьЭлемент"
+    /// ```
     pub fn find_method(&self, type_name: &str, method_name: &str) -> Option<&MethodSignature> {
         let method_name_lower = method_name.to_lowercase();
 
+        // 1. Сначала ищем по точному имени типа
+        if let Some(method) = self.find_method_in_maps(type_name, &method_name_lower) {
+            return Some(method);
+        }
+
+        // 2. Если не найдено и это фасетный тип, ищем по базовому типу
+        if let Some(base_type) = Self::extract_base_facet_type(type_name) {
+            if let Some(method) = self.find_method_in_maps(base_type, &method_name_lower) {
+                return Some(method);
+            }
+        }
+
+        None
+    }
+
+    /// Внутренний поиск метода в HashMap'ах (без fallback)
+    fn find_method_in_maps(&self, type_name: &str, method_name_lower: &str) -> Option<&MethodSignature> {
         // Поиск в платформенных
         if let Some(methods) = self.platform_methods.get(type_name) {
             if let Some(m) = methods
                 .iter()
-                .find(|m| m.name.to_lowercase() == method_name_lower)
+                .find(|m| m.name.to_lowercase() == *method_name_lower)
             {
                 return Some(m);
             }
@@ -213,13 +246,120 @@ impl SignatureIndex {
         if let Some(methods) = self.config_methods.get(type_name) {
             if let Some(m) = methods
                 .iter()
-                .find(|m| m.name.to_lowercase() == method_name_lower)
+                .find(|m| m.name.to_lowercase() == *method_name_lower)
             {
                 return Some(m);
             }
         }
 
         None
+    }
+
+    /// Извлечь базовый фасетный тип из полного имени типа
+    ///
+    /// # Примеры
+    /// - "СправочникМенеджер.Контрагенты" → Some("СправочникМенеджер")
+    /// - "ДокументОбъект.ЗаказКлиента" → Some("ДокументОбъект")
+    /// - "Массив" → None (не фасетный тип)
+    /// - "СправочникМенеджер" → None (уже базовый тип)
+    pub fn extract_base_facet_type(type_name: &str) -> Option<&str> {
+        // Проверяем наличие точки (признак конкретизированного типа)
+        let dot_pos = type_name.find('.')?;
+
+        let prefix = &type_name[..dot_pos];
+
+        // Проверяем что префикс - известный фасетный тип
+        if Self::is_known_facet_prefix(prefix) {
+            Some(prefix)
+        } else {
+            None
+        }
+    }
+
+    /// Проверить является ли строка известным фасетным префиксом
+    fn is_known_facet_prefix(prefix: &str) -> bool {
+        matches!(
+            prefix,
+            // Справочники
+            "СправочникМенеджер" | "СправочникОбъект" | "СправочникСсылка" |
+            "СправочникВыборка" | "СправочникСписок" |
+            // Документы
+            "ДокументМенеджер" | "ДокументОбъект" | "ДокументСсылка" |
+            "ДокументВыборка" | "ДокументСписок" |
+            // Планы видов характеристик
+            "ПланВидовХарактеристикМенеджер" | "ПланВидовХарактеристикОбъект" |
+            "ПланВидовХарактеристикСсылка" | "ПланВидовХарактеристикВыборка" |
+            // Планы счетов
+            "ПланСчетовМенеджер" | "ПланСчетовОбъект" | "ПланСчетовСсылка" |
+            "ПланСчетовВыборка" |
+            // Планы видов расчета
+            "ПланВидовРасчетаМенеджер" | "ПланВидовРасчетаОбъект" |
+            "ПланВидовРасчетаСсылка" | "ПланВидовРасчетаВыборка" |
+            // Бизнес-процессы
+            "БизнесПроцессМенеджер" | "БизнесПроцессОбъект" | "БизнесПроцессСсылка" |
+            "БизнесПроцессВыборка" | "БизнесПроцессТочкаМаршрутаБизнесПроцесса" |
+            // Задачи
+            "ЗадачаМенеджер" | "ЗадачаОбъект" | "ЗадачаСсылка" | "ЗадачаВыборка" |
+            // Перечисления
+            "ПеречислениеМенеджер" | "ПеречислениеСсылка" |
+            // Регистры сведений
+            "РегистрСведенийМенеджер" | "РегистрСведенийНаборЗаписей" |
+            "РегистрСведенийВыборка" | "РегистрСведенийЗапись" |
+            "РегистрСведенийМенеджерЗаписи" |
+            // Регистры накопления
+            "РегистрНакопленияМенеджер" | "РегистрНакопленияНаборЗаписей" |
+            "РегистрНакопленияВыборка" | "РегистрНакопленияЗапись" |
+            // Регистры бухгалтерии
+            "РегистрБухгалтерииМенеджер" | "РегистрБухгалтерииНаборЗаписей" |
+            "РегистрБухгалтерииВыборка" | "РегистрБухгалтерииЗапись" |
+            // Регистры расчета
+            "РегистрРасчетаМенеджер" | "РегистрРасчетаНаборЗаписей" |
+            "РегистрРасчетаВыборка" | "РегистрРасчетаЗапись"
+        )
+    }
+
+    /// Подставить реальное имя объекта в return type вместо placeholder
+    ///
+    /// # Примеры
+    /// - ("СправочникОбъект", "Контрагенты") → "СправочникОбъект.Контрагенты"
+    /// - ("СправочникОбъект.<Имя справочника>", "Контрагенты") → "СправочникОбъект.Контрагенты"
+    /// - ("СправочникСсылка", "Номенклатура") → "СправочникСсылка.Номенклатура"
+    /// - ("Неопределено", "Контрагенты") → "Неопределено" (не фасетный тип)
+    pub fn substitute_type_name(return_type: &str, actual_name: &str) -> String {
+        // 1. Если return_type содержит placeholder с точкой (FacetPrefix.<placeholder>)
+        //    Примеры: "СправочникОбъект.<Имя справочника>", "ДокументОбъект.&lt;Имя документа&gt;"
+        if let Some(dot_pos) = return_type.find('.') {
+            let prefix = &return_type[..dot_pos];
+            if Self::is_known_facet_prefix(prefix) {
+                // Заменяем placeholder на actual_name
+                return format!("{}.{}", prefix, actual_name);
+            }
+        }
+
+        // 2. Если return_type - базовый фасетный тип (без точки), добавляем имя
+        if Self::is_known_facet_prefix(return_type) {
+            format!("{}.{}", return_type, actual_name)
+        } else {
+            // Не фасетный тип - возвращаем как есть
+            return_type.to_string()
+        }
+    }
+
+    /// Извлечь имя объекта метаданных из фасетного типа
+    ///
+    /// # Примеры
+    /// - "СправочникМенеджер.Контрагенты" → Some("Контрагенты")
+    /// - "ДокументОбъект.ЗаказКлиента" → Some("ЗаказКлиента")
+    /// - "Массив" → None
+    pub fn extract_metadata_name(type_name: &str) -> Option<&str> {
+        let dot_pos = type_name.find('.')?;
+        let prefix = &type_name[..dot_pos];
+
+        if Self::is_known_facet_prefix(prefix) {
+            Some(&type_name[dot_pos + 1..])
+        } else {
+            None
+        }
     }
 
     /// Найти глобальную функцию
@@ -508,5 +648,192 @@ mod tests {
         assert!(index.find_constructor("ТаблицаЗначений").is_some());
         assert!(index.find_constructor("СписокЗначений").is_some());
         assert!(index.find_constructor("ФиксированныйМассив").is_some());
+    }
+
+    // ================= Milestone 3.11 Phase 2: Faceted Type Support =================
+
+    #[test]
+    fn test_extract_base_facet_type_catalog() {
+        // Справочники
+        assert_eq!(
+            SignatureIndex::extract_base_facet_type("СправочникМенеджер.Контрагенты"),
+            Some("СправочникМенеджер")
+        );
+        assert_eq!(
+            SignatureIndex::extract_base_facet_type("СправочникОбъект.Номенклатура"),
+            Some("СправочникОбъект")
+        );
+        assert_eq!(
+            SignatureIndex::extract_base_facet_type("СправочникСсылка.Валюты"),
+            Some("СправочникСсылка")
+        );
+        assert_eq!(
+            SignatureIndex::extract_base_facet_type("СправочникВыборка.Контрагенты"),
+            Some("СправочникВыборка")
+        );
+    }
+
+    #[test]
+    fn test_extract_base_facet_type_document() {
+        // Документы
+        assert_eq!(
+            SignatureIndex::extract_base_facet_type("ДокументМенеджер.ЗаказКлиента"),
+            Some("ДокументМенеджер")
+        );
+        assert_eq!(
+            SignatureIndex::extract_base_facet_type("ДокументОбъект.РасходнаяНакладная"),
+            Some("ДокументОбъект")
+        );
+    }
+
+    #[test]
+    fn test_extract_base_facet_type_registers() {
+        // Регистры сведений
+        assert_eq!(
+            SignatureIndex::extract_base_facet_type("РегистрСведенийМенеджер.КурсыВалют"),
+            Some("РегистрСведенийМенеджер")
+        );
+        // Регистры накопления
+        assert_eq!(
+            SignatureIndex::extract_base_facet_type("РегистрНакопленияМенеджер.ОстаткиТоваров"),
+            Some("РегистрНакопленияМенеджер")
+        );
+    }
+
+    #[test]
+    fn test_extract_base_facet_type_non_faceted() {
+        // Не-фасетные типы должны возвращать None
+        assert_eq!(SignatureIndex::extract_base_facet_type("Массив"), None);
+        assert_eq!(SignatureIndex::extract_base_facet_type("Строка"), None);
+        assert_eq!(
+            SignatureIndex::extract_base_facet_type("ТаблицаЗначений"),
+            None
+        );
+        // Базовые фасетные типы без имени тоже None
+        assert_eq!(
+            SignatureIndex::extract_base_facet_type("СправочникМенеджер"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_substitute_type_name() {
+        // Базовые фасетные типы
+        assert_eq!(
+            SignatureIndex::substitute_type_name("СправочникОбъект", "Контрагенты"),
+            "СправочникОбъект.Контрагенты"
+        );
+        assert_eq!(
+            SignatureIndex::substitute_type_name("СправочникСсылка", "Номенклатура"),
+            "СправочникСсылка.Номенклатура"
+        );
+        assert_eq!(
+            SignatureIndex::substitute_type_name("ДокументОбъект", "ЗаказКлиента"),
+            "ДокументОбъект.ЗаказКлиента"
+        );
+
+        // Не-фасетные типы остаются как есть
+        assert_eq!(
+            SignatureIndex::substitute_type_name("Неопределено", "Контрагенты"),
+            "Неопределено"
+        );
+        assert_eq!(
+            SignatureIndex::substitute_type_name("Строка", "Контрагенты"),
+            "Строка"
+        );
+    }
+
+    #[test]
+    fn test_extract_metadata_name() {
+        assert_eq!(
+            SignatureIndex::extract_metadata_name("СправочникМенеджер.Контрагенты"),
+            Some("Контрагенты")
+        );
+        assert_eq!(
+            SignatureIndex::extract_metadata_name("ДокументОбъект.ЗаказКлиента"),
+            Some("ЗаказКлиента")
+        );
+        // Не-фасетные типы
+        assert_eq!(SignatureIndex::extract_metadata_name("Массив"), None);
+        assert_eq!(
+            SignatureIndex::extract_metadata_name("Файл.Существует"),
+            None
+        ); // Файл - не фасетный тип
+    }
+
+    #[test]
+    fn test_find_method_faceted_fallback() {
+        let mut index = SignatureIndex::new();
+
+        // Добавляем метод под базовым типом (как в platform_types.rs)
+        let sig = MethodSignature {
+            name: "СоздатьЭлемент".to_string(),
+            owner_type: Some("СправочникМенеджер".to_string()),
+            params: vec![],
+            return_type: Some("СправочникОбъект".to_string()),
+            source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
+        };
+
+        index.add_platform_method("СправочникМенеджер".to_string(), sig);
+
+        // Поиск по точному имени (базовый тип) - должен найти
+        let found_exact = index.find_method("СправочникМенеджер", "СоздатьЭлемент");
+        assert!(found_exact.is_some());
+
+        // Поиск по конкретизированному типу (fallback к базовому) - тоже должен найти
+        let found_fallback =
+            index.find_method("СправочникМенеджер.Контрагенты", "СоздатьЭлемент");
+        assert!(found_fallback.is_some());
+        assert_eq!(found_fallback.unwrap().name, "СоздатьЭлемент");
+        assert_eq!(
+            found_fallback.unwrap().return_type,
+            Some("СправочникОбъект".to_string())
+        );
+    }
+
+    #[test]
+    fn test_find_method_document_faceted() {
+        let mut index = SignatureIndex::new();
+
+        let sig = MethodSignature {
+            name: "Провести".to_string(),
+            owner_type: Some("ДокументОбъект".to_string()),
+            params: vec![],
+            return_type: Some("Неопределено".to_string()),
+            source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
+        };
+
+        index.add_platform_method("ДокументОбъект".to_string(), sig);
+
+        // Поиск через конкретизированный тип
+        let found = index.find_method("ДокументОбъект.ЗаказКлиента", "Провести");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "Провести");
+    }
+
+    #[test]
+    fn test_find_method_non_faceted_still_works() {
+        let mut index = SignatureIndex::new();
+
+        let sig = MethodSignature {
+            name: "Добавить".to_string(),
+            owner_type: Some("Массив".to_string()),
+            params: vec![],
+            return_type: None,
+            source: SignatureSource::Platform,
+            return_facet: None,
+            context_requirements: ContextRequirements::default(),
+        };
+
+        index.add_platform_method("Массив".to_string(), sig);
+
+        // Обычный поиск по не-фасетному типу должен работать как раньше
+        let found = index.find_method("Массив", "Добавить");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "Добавить");
     }
 }

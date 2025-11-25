@@ -1,3 +1,8 @@
+---
+name: web-ui
+description: Запускает веб-сервер с фронтендом для просмотра типов в браузере
+---
+
 # Web UI Launcher
 
 Запускает BSL Gradual Types веб-сервер с фронтендом для просмотра типов в браузере.
@@ -47,8 +52,19 @@ cargo run --release -p bsl-backend --bin bsl-web-server -- \
 
 - `--port` — порт веб-сервера (по умолчанию 8080)
 - `--enable-cors` — CORS для API (true/false)
-- `--syntax-helper-path` — путь к platform types
+- `--syntax-helper-path` — путь к platform types (обязательно)
+- `--project-path` — путь к конфигурации 1С (для типов справочников/документов)
 - `--static-files-path` — путь к фронтенду (по умолчанию backend/static)
+
+**С конфигурацией 1С (полный режим):**
+```bash
+cargo run --release -p bsl-backend --bin bsl-web-server -- \
+  --port 8080 \
+  --enable-cors true \
+  --syntax-helper-path examples/syntax_helper \
+  --project-path /c/1CProject/conf \
+  --static-files-path backend/static
+```
 
 ## Troubleshooting
 

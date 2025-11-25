@@ -89,6 +89,9 @@ impl HtmlExtractor {
     /// ```
     ///
     /// Используется более надёжный парсер на основе regex с учётом реальной структуры HTML
+    ///
+    /// ВАЖНО: Парсер извлекает параметры ТОЛЬКО из секции "Параметры:" до "Возвращаемое значение:"
+    /// чтобы избежать захвата placeholder'ов из заголовков типа "СправочникМенеджер.<Имя справочника>"
     pub fn extract_parameters(&self, document: &Html) -> Vec<ParameterInfo> {
         use regex::Regex;
 
@@ -101,14 +104,22 @@ impl HtmlExtractor {
             return parameters;
         }
 
-        // Парсер параметров - ищет паттерн:
-        // &lt;ИМЯ&gt; (обязательный) ... Тип: ТИП
-        //
-        // [\s\S]{0,500}? - матчит любые символы в non-greedy режиме до "Тип:"
-        // [^<\n]+ - захватить тип GREEDY (не содержит < или перевод строки)
-        // Точка после типа может быть или опциональна
+        // ШАГ 1: Извлекаем ТОЛЬКО секцию "Параметры:" (до следующей секции)
+        // Это предотвращает захват placeholder'ов из заголовков типов
+        let params_section = Self::extract_parameters_section(&html_text);
+        if params_section.is_empty() {
+            debug!("⚠️  Секция 'Параметры' пуста");
+            return parameters;
+        }
+
+        debug!("🔍 Начинаем извлечение параметров из секции ({} символов)", params_section.len());
+
+        // ШАГ 2: Парсер параметров внутри секции
+        // Ищем паттерн: <div class="V8SH_rubric">...<p...>&lt;ИМЯ&gt; (обязательный|необязательный)</p>?</div>
+        // ВАЖНО: scraper добавляет </p> при парсинге, поэтому используем (?:</p>)?
+        // После div идёт: Тип: <a>ТИП1</a>, <a>ТИП2</a>.
         let param_regex = match Regex::new(
-            r#"&lt;([^>]+)&gt;\s*\(([^)]+)\)[\s\S]{0,500}?Тип:\s*(?:<a[^>]*>)?([^<\n]+)(?:</a>)?\.?"#,
+            r#"<div class="V8SH_rubric">[^<]*<p[^>]*>&lt;([^>]+)&gt;\s*\(([^)]+)\)(?:</p>)?</div>"#,
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -117,22 +128,77 @@ impl HtmlExtractor {
             }
         };
 
-        debug!("🔍 Начинаем извлечение параметров с помощью regex");
+        // Regex для извлечения union типов из <a> тегов
+        let type_link_regex = match Regex::new(r#"<a[^>]*>([^<]+)</a>"#) {
+            Ok(r) => r,
+            Err(e) => {
+                debug!("❌ Ошибка компиляции regex для типов: {}", e);
+                return parameters;
+            }
+        };
 
-        for cap in param_regex.captures_iter(&html_text) {
+        for cap in param_regex.captures_iter(&params_section) {
             let name = cap
                 .get(1)
                 .map(|m| m.as_str().trim().to_string())
                 .unwrap_or_default();
             let optional_text = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("");
-            let mut param_type = cap
-                .get(3)
-                .map(|m| m.as_str().trim().to_string())
-                .unwrap_or_default();
 
             // Пропускаем если имя пусто
             if name.is_empty() {
                 continue;
+            }
+
+            // ШАГ 3: Найти "Тип:" после этого параметра и извлечь union типы
+            let match_end = cap.get(0).map(|m| m.end()).unwrap_or(0);
+            let remaining = if match_end < params_section.len() {
+                &params_section[match_end..]
+            } else {
+                ""
+            };
+
+            // Находим "Тип:" и извлекаем типы до "<br>" или следующего "<div"
+            // ВАЖНО: Используем .len() для корректной работы с UTF-8
+            const RU_TYPE: &str = "Тип:";
+            const EN_TYPE: &str = "Type:";
+            let mut param_type = String::new();
+            let (type_pos, type_marker_len) = remaining
+                .find(RU_TYPE)
+                .map(|p| (p, RU_TYPE.len()))
+                .or_else(|| remaining.find(EN_TYPE).map(|p| (p, EN_TYPE.len())))
+                .unwrap_or((0, 0));
+
+            if type_marker_len > 0 {
+                let type_section_start = type_pos + type_marker_len;
+                let type_section_end = remaining[type_section_start..]
+                    .find("<br")
+                    .or_else(|| remaining[type_section_start..].find("<div"))
+                    .map(|p| type_section_start + p)
+                    .unwrap_or_else(|| std::cmp::min(type_section_start + 500, remaining.len()));
+
+                let type_section = &remaining[type_section_start..type_section_end];
+
+                // Извлекаем все типы из <a> тегов
+                let types: Vec<String> = type_link_regex
+                    .captures_iter(type_section)
+                    .filter_map(|c| c.get(1).map(|m| m.as_str().trim().to_string()))
+                    .filter(|t| !t.is_empty())
+                    .collect();
+
+                if !types.is_empty() {
+                    // Объединяем union типы через " | "
+                    param_type = types.join(" | ");
+                } else {
+                    // Fallback: если нет <a> тегов, берём текст напрямую
+                    let clean_text = type_section
+                        .replace("&nbsp;", " ")
+                        .trim()
+                        .trim_end_matches('.')
+                        .to_string();
+                    if !clean_text.is_empty() {
+                        param_type = clean_text;
+                    }
+                }
             }
 
             // Удаляем точку в конце типа если она есть
@@ -146,66 +212,43 @@ impl HtmlExtractor {
                 || optional_text.contains("optional")
                 || optional_text.to_lowercase().contains("optional");
 
-            // Извлекаем описание параметра
-            // Ищем текст после "<br>" до "<div" или следующего параметра
+            // Извлекаем описание параметра из remaining (после "Тип: ...")
+            // Ищем текст после первого "<br>" до следующего "<div" или конца секции
             let description = {
-                // Берём текст начиная с конца типа параметра
-                let search_start = cap.get(3).map(|m| m.end()).unwrap_or(0);
-                // Убедимся что search_start - это valid char boundary
-                let search_start = if html_text.is_char_boundary(search_start) {
-                    search_start
-                } else {
-                    // Если нет, то идём назад до valid boundary
-                    (0..search_start)
-                        .rev()
-                        .find(|&i| html_text.is_char_boundary(i))
-                        .unwrap_or(0)
-                };
-
-                let search_end = std::cmp::min(search_start + 500, html_text.len());
-                let search_end = if html_text.is_char_boundary(search_end) {
-                    search_end
-                } else {
-                    // Если нет, то идём назад до valid boundary
-                    (0..=search_end)
-                        .rev()
-                        .find(|&i| html_text.is_char_boundary(i))
-                        .unwrap_or(0)
-                };
-
-                let search_text = &html_text[search_start..search_end];
-
                 // Ищем текст после <br>
-                if let Some(br_pos) = search_text.find("<br>") {
-                    let text_after_br = &search_text[br_pos + 4..];
+                if let Some(br_pos) = remaining.find("<br>") {
+                    let text_after_br = &remaining[br_pos + 4..];
                     // Берём текст до следующего <div или конца
-                    if let Some(next_div) = text_after_br.find("<div") {
-                        text_after_br[..next_div].trim().to_string()
+                    let desc_text = if let Some(next_div) = text_after_br.find("<div") {
+                        text_after_br[..next_div].trim()
                     } else {
-                        text_after_br.trim().to_string()
-                    }
-                } else if let Some(br_pos) = search_text.find("<br") {
+                        text_after_br.trim()
+                    };
+                    // Убираем HTML теги и лишние переводы строк
+                    let clean_desc = desc_text
+                        .replace("<br>", " ")
+                        .replace("&nbsp;", " ")
+                        .trim()
+                        .to_string();
+                    if clean_desc.is_empty() { None } else { Some(clean_desc) }
+                } else if let Some(br_pos) = remaining.find("<br") {
                     // Некорректный <br без закрытия
-                    let text_after_br = &search_text[br_pos..];
+                    let text_after_br = &remaining[br_pos..];
                     if let Some(gt_pos) = text_after_br.find('>') {
                         let desc = &text_after_br[gt_pos + 1..];
-                        if let Some(next_div) = desc.find("<div") {
-                            desc[..next_div].trim().to_string()
+                        let desc_text = if let Some(next_div) = desc.find("<div") {
+                            desc[..next_div].trim()
                         } else {
-                            desc.trim().to_string()
-                        }
+                            desc.trim()
+                        };
+                        let clean_desc = desc_text.replace("&nbsp;", " ").trim().to_string();
+                        if clean_desc.is_empty() { None } else { Some(clean_desc) }
                     } else {
-                        String::new()
+                        None
                     }
                 } else {
-                    String::new()
+                    None
                 }
-            };
-
-            let description = if description.is_empty() {
-                None
-            } else {
-                Some(description.replace("&nbsp;", " "))
             };
 
             parameters.push(ParameterInfo {
@@ -235,6 +278,40 @@ impl HtmlExtractor {
         }
 
         parameters
+    }
+
+    /// Извлечь секцию "Параметры:" из HTML до следующей секции
+    ///
+    /// Это предотвращает захват placeholder'ов из заголовков типа
+    /// "СправочникМенеджер.<Имя справочника>" при парсинге параметров
+    fn extract_parameters_section(html_text: &str) -> String {
+        // Находим начало секции "Параметры:"
+        // ВАЖНО: Используем .len() строки поиска, т.к. UTF-8 кириллица = 2 байта/символ
+        const RU_PARAMS: &str = "Параметры:</p>";
+        const EN_PARAMS: &str = "Parameters:</p>";
+
+        let params_start = html_text
+            .find(RU_PARAMS)
+            .map(|p| p + RU_PARAMS.len())
+            .or_else(|| html_text.find(EN_PARAMS).map(|p| p + EN_PARAMS.len()))
+            .unwrap_or(0);
+
+        if params_start == 0 {
+            return String::new();
+        }
+
+        // Находим конец секции (начало следующей секции)
+        let remaining = &html_text[params_start..];
+        let section_end = remaining
+            .find("Возвращаемое значение:")
+            .or_else(|| remaining.find("Return value:"))
+            .or_else(|| remaining.find("Описание:</p>"))
+            .or_else(|| remaining.find("Description:</p>"))
+            .or_else(|| remaining.find("Доступность:</p>"))
+            .or_else(|| remaining.find("Availability:</p>"))
+            .unwrap_or(remaining.len());
+
+        remaining[..section_end].to_string()
     }
 
     pub fn extract_return_info(&self, document: &Html) -> (Option<String>, Option<String>) {
@@ -858,5 +935,77 @@ mod tests {
 
         assert_eq!(return_type, None, "Не должно быть возвращаемого типа");
         assert_eq!(return_desc, None, "Не должно быть описания");
+    }
+
+    /// Тест для бага: placeholder из заголовка типа "СправочникМенеджер.<Имя справочника>"
+    /// НЕ должен попадать в имена параметров
+    #[test]
+    fn test_extract_parameters_find_by_code_with_header_placeholder() {
+        // Реальная HTML структура из FindByCode250.html
+        // Важно: в заголовке есть "&lt;Имя справочника&gt;" - это НЕ параметр!
+        let html_content = r#"
+        <html>
+            <h1 class="V8SH_pagetitle">СправочникМенеджер.&lt;Имя справочника&gt;.НайтиПоКоду</h1>
+            <p class="V8SH_title">СправочникМенеджер.&lt;Имя справочника&gt;</p>
+            <p class="V8SH_chapter">Параметры:</p>
+            <div class="V8SH_rubric">
+                <p style="margin-top: 2px; margin-bottom: 1px">&lt;Код&gt; (обязательный)</div>
+            Тип: <a href="v8help://SyntaxHelperLanguage/def_Number">Число</a>, <a href="v8help://SyntaxHelperLanguage/def_String">Строка</a>. <br>
+            Искомый код.
+            <div class="V8SH_rubric">
+                <p style="margin-top: 2px; margin-bottom: 1px">&lt;ПоискПоПолномуКоду&gt; (необязательный)</div>
+            Тип: <a href="v8help://SyntaxHelperLanguage/def_Boolean">Булево</a>. <br>
+            Определяет режим поиска.
+            <p class="V8SH_chapter">Возвращаемое значение:</p>
+            Тип: СправочникСсылка.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let params = extractor.extract_parameters(&document);
+
+        // Должно быть 2 параметра (Код, ПоискПоПолномуКоду), а НЕ 3 или больше
+        assert_eq!(params.len(), 2, "Должно быть 2 параметра, placeholder 'Имя справочника' не должен парситься как параметр");
+
+        // Первый параметр: Код (обязательный) с union типом
+        assert_eq!(params[0].name, "Код", "Первый параметр должен быть 'Код', а не 'Имя справочника'");
+        assert_eq!(
+            params[0].type_name,
+            Some("Число | Строка".to_string()),
+            "Тип должен быть union 'Число | Строка'"
+        );
+        assert!(!params[0].is_optional, "Параметр 'Код' должен быть обязательным");
+
+        // Второй параметр: ПоискПоПолномуКоду (необязательный)
+        assert_eq!(params[1].name, "ПоискПоПолномуКоду");
+        assert_eq!(params[1].type_name, Some("Булево".to_string()));
+        assert!(params[1].is_optional, "Параметр 'ПоискПоПолномуКоду' должен быть необязательным");
+    }
+
+    /// Тест для проверки парсинга union типов
+    #[test]
+    fn test_extract_parameters_union_types() {
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Параметры:</p>
+            <div class="V8SH_rubric">
+                <p style="margin-top: 2px; margin-bottom: 1px">&lt;Значение&gt; (обязательный)</div>
+            Тип: <a href="type">Число</a>, <a href="type">Строка</a>, <a href="type">Дата</a>. <br>
+            Описание.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let params = extractor.extract_parameters(&document);
+
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "Значение");
+        assert_eq!(
+            params[0].type_name,
+            Some("Число | Строка | Дата".to_string()),
+            "Должны быть три типа через ' | '"
+        );
     }
 }

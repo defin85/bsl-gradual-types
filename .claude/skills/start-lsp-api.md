@@ -1,3 +1,8 @@
+---
+name: start-lsp-api
+description: Запускает BSL Web Server для тестирования LSP функций через HTTP API
+---
+
 # Start LSP Web API Skill
 
 Запускает BSL Web Server для автоматизированного тестирования LSP функций через HTTP API.
@@ -23,24 +28,37 @@ cargo build --release --bin bsl-web-server
 
 ### 2. Запуск сервера
 
+**Базовый режим (только platform types):**
 ```bash
-# Запуск в фоне
 ./target/release/bsl-web-server.exe \
   --port 3002 \
   --enable-cors true \
   --syntax-helper-path examples/syntax_helper &
+```
 
+**С конфигурацией 1С (полный режим - рекомендуется):**
+```bash
+./target/release/bsl-web-server.exe \
+  --port 3002 \
+  --enable-cors true \
+  --syntax-helper-path examples/syntax_helper \
+  --project-path /c/1CProject/conf &
+```
+
+**Важно:** `--project-path` загружает типы из конфигурации 1С (справочники, документы и т.д.), что даёт 100% confidence в hover и полную информацию о свойствах/методах.
+
+```bash
 # Сохранить PID для остановки
 echo $! > .web-server.pid
 ```
 
 **Альтернатива (без фона):**
 ```bash
-# В отдельном терминале
 cargo run --release --bin bsl-web-server -- \
   --port 3002 \
   --enable-cors true \
-  --syntax-helper-path examples/syntax_helper
+  --syntax-helper-path examples/syntax_helper \
+  --project-path /c/1CProject/conf
 ```
 
 ### 3. Проверка health
@@ -149,14 +167,27 @@ curl -s "http://localhost:3002/api/search?q=$QUERY" | jq
 ./target/release/bsl-web-server.exe --port 8080 ...
 ```
 
-### Platform Types
+### Platform Types (обязательно)
 
-**Обязательно** указать `--syntax-helper-path`:
 ```bash
 --syntax-helper-path examples/syntax_helper
 ```
 
-Без этого TypeRepository будет пустым и semantic diagnostics не будут работать.
+Загружает базовые типы платформы 1С (ТаблицаЗначений, Массив и т.д.). Без этого TypeRepository будет пустым.
+
+### Project Configuration (рекомендуется)
+
+```bash
+--project-path /c/1CProject/conf
+```
+
+Загружает типы из конфигурации 1С:
+- Справочники (СправочникМенеджер, СправочникОбъект, СправочникСсылка)
+- Документы (ДокументМенеджер, ДокументОбъект, ДокументСсылка)
+- Регистры и другие прикладные объекты
+
+**Без `--project-path`:** hover показывает только platform types с 50% confidence.
+**С `--project-path`:** hover показывает полную информацию с 100% confidence.
 
 ### CORS
 

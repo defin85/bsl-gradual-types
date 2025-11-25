@@ -1,3 +1,8 @@
+---
+name: test-runner
+description: Комплексное тестирование всего BSL Gradual Types проекта
+---
+
 # Test Runner Skill
 
 Комплексное тестирование всего BSL Gradual Types проекта с детальной отчётностью.

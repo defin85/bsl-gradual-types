@@ -1,3 +1,8 @@
+---
+name: build
+description: Комплексная сборка всех компонентов BSL Gradual Types проекта
+---
+
 # Build Skill
 
 Комплексная сборка всех компонентов BSL Gradual Types проекта.

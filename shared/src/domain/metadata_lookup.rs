@@ -412,24 +412,36 @@ impl TypeMetadataLookup {
         use FacetKind::*;
         use MetadataKind::*;
 
+        // ВАЖНО: имена типов должны содержать placeholder как в Syntax Helper
+        // Например: "СправочникМенеджер.<Имя справочника>" вместо "СправочникМенеджер"
         match (kind, facet) {
             // Documents mapping
-            (Document, Manager) => Some("ДокументМенеджер"),
-            (Document, Object) => Some("ДокументОбъект"),
-            (Document, Reference) => Some("ДокументСсылка"),
-            (Document, Selection) => Some("ДокументВыборка"),
-            (Document, List) => Some("ДокументСписок"),
+            (Document, Manager) => Some("ДокументМенеджер.<Имя документа>"),
+            (Document, Object) => Some("ДокументОбъект.<Имя документа>"),
+            (Document, Reference) => Some("ДокументСсылка.<Имя документа>"),
+            (Document, Selection) => Some("ДокументВыборка.<Имя документа>"),
+            (Document, List) => Some("ДокументСписок.<Имя документа>"),
 
             // Catalogs mapping
-            (Catalog, Manager) => Some("СправочникМенеджер"),
-            (Catalog, Object) => Some("СправочникОбъект"),
-            (Catalog, Reference) => Some("СправочникСсылка"),
-            (Catalog, Selection) => Some("СправочникВыборка"),
-            (Catalog, List) => Some("СправочникСписок"),
+            (Catalog, Manager) => Some("СправочникМенеджер.<Имя справочника>"),
+            (Catalog, Object) => Some("СправочникОбъект.<Имя справочника>"),
+            (Catalog, Reference) => Some("СправочникСсылка.<Имя справочника>"),
+            (Catalog, Selection) => Some("СправочникВыборка.<Имя справочника>"),
+            (Catalog, List) => Some("СправочникСписок.<Имя справочника>"),
 
-            // TODO: Будущие расширения
-            // (Enum, Manager) => Some("ПеречислениеМенеджер"),
-            // (InformationRegister, Manager) => Some("РегистрСведенийМенеджер"),
+            // Enums mapping
+            (Enum, Manager) => Some("ПеречислениеМенеджер.<Имя перечисления>"),
+            (Enum, Reference) => Some("ПеречислениеСсылка.<Имя перечисления>"),
+
+            // Information Registers mapping
+            (InformationRegister, Manager) => Some("РегистрСведенийМенеджер.<Имя регистра сведений>"),
+            (InformationRegister, Collection) => Some("РегистрСведенийНаборЗаписей.<Имя регистра сведений>"),
+            (InformationRegister, Selection) => Some("РегистрСведенийВыборка.<Имя регистра сведений>"),
+
+            // Accumulation Registers mapping
+            (AccumulationRegister, Manager) => Some("РегистрНакопленияМенеджер.<Имя регистра накопления>"),
+            (AccumulationRegister, Collection) => Some("РегистрНакопленияНаборЗаписей.<Имя регистра накопления>"),
+            (AccumulationRegister, Selection) => Some("РегистрНакопленияВыборка.<Имя регистра накопления>"),
 
             // Неподдерживаемые комбинации
             _ => None,

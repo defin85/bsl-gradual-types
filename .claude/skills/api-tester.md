@@ -1,3 +1,8 @@
+---
+name: api-tester
+description: Тестирование BSL Web API с поддержкой URL-encoding для кириллицы
+---
+
 # API Tester Skill
 
 Автоматическое тестирование BSL Web API с поддержкой URL-encoding для кириллицы.

@@ -772,6 +772,103 @@ impl TypeSystemService {
         Ok(result)
     }
 
+    /// Получить TypeResolution для символа в указанной позиции
+    ///
+    /// Используется для Go To Definition (Milestone 3.14)
+    /// Возвращает TypeResolution который содержит информацию о типе и location определения
+    pub async fn get_type_at_position(
+        &self,
+        file_content: &str,
+        line: u32,
+        column: u32,
+    ) -> Result<Option<TypeResolution>> {
+        use tracing::{debug, info};
+
+        info!("🎯 Get type at position: строка {}, колонка {}", line, column);
+
+        // MILESTONE 2.13: IR Caching - проверяем кеш перед парсингом
+        let content_hash = hash_content(file_content);
+
+        let ir_program = if let Some(cached_ir) = self.ir_cache.get(content_hash).await {
+            debug!("✅ IR cache HIT for get_type_at_position");
+            cached_ir
+        } else {
+            debug!("❌ IR cache MISS for get_type_at_position, parsing...");
+
+            // Парсинг BSL кода
+            let parse_result = self
+                .parser
+                .parse(file_content)
+                .map_err(|e| anyhow::anyhow!("Ошибка парсинга для get_type_at_position: {}", e))?;
+
+            // Конвертация AST → IR
+            let repository = self.analysis_engine.get_repository();
+            let signature_index = repository.get_signature_index_clone();
+            let ir = crate::application::ast_to_ir::AstToIrConverter::convert(
+                parse_result.program.clone(),
+                file_content.to_string(),
+                "definition_request.bsl".to_string(),
+                repository,
+                signature_index,
+            )?;
+
+            let ir_arc = std::sync::Arc::new(ir);
+            self.ir_cache.put(content_hash, ir_arc.clone()).await;
+            ir_arc
+        };
+
+        // Ищем переменную в позиции через SymbolTable
+        if let Some((var_name, _type_hint, scope_id)) =
+            ir_program.find_variable_with_scope(line, column)
+        {
+            info!(
+                "✅ Found variable '{}' in scope {:?} at {}:{}",
+                var_name, scope_id, line, column
+            );
+
+            // Резолвим переменную через TypeResolver с учётом SymbolTable
+            let resolver = self.analysis_engine.get_resolver();
+            let resolution =
+                resolver.resolve_variable_with_context(&var_name, &ir_program.symbols, scope_id);
+
+            return Ok(Some(resolution));
+        }
+
+        // Fallback: пробуем find_node_at_position для других узлов
+        if let Some(node) = ir_program.find_node_at_position(line, column) {
+            debug!("Found node at position: {:?}", node.kind);
+
+            // Извлекаем тип из узла в зависимости от его kind
+            match &node.kind {
+                bsl_shared::ir::SemanticNodeKind::VariableDeclaration { type_hint, .. } => {
+                    if let Some(type_name) = type_hint {
+                        let resolver = self.analysis_engine.get_resolver();
+                        return Ok(Some(resolver.resolve_expression_sync(type_name)));
+                    }
+                }
+                bsl_shared::ir::SemanticNodeKind::FunctionCall { object_type, .. } => {
+                    if let Some(type_name) = object_type {
+                        let resolver = self.analysis_engine.get_resolver();
+                        return Ok(Some(resolver.resolve_expression_sync(type_name)));
+                    }
+                }
+                bsl_shared::ir::SemanticNodeKind::MemberAccess { object_type, .. } => {
+                    // object_type is String, not Option
+                    let resolver = self.analysis_engine.get_resolver();
+                    return Ok(Some(resolver.resolve_expression_sync(object_type)));
+                }
+                bsl_shared::ir::SemanticNodeKind::NewExpression { type_name, .. } => {
+                    let resolver = self.analysis_engine.get_resolver();
+                    return Ok(Some(resolver.resolve_expression_sync(type_name)));
+                }
+                _ => {}
+            }
+        }
+
+        debug!("No type found at position {}:{}", line, column);
+        Ok(None)
+    }
+
     /// Инвалидировать кеш для изменённого файла (MILESTONE 2.13)
     ///
     /// Вызывается из LSP при получении `didChange` notification.
@@ -2572,6 +2669,27 @@ impl TypeSystemService {
 
         // 9. Возврат errors
         Ok(visitor.into_errors())
+    }
+
+    /// Получить пути к модулям для конфигурационного типа (Milestone 3.14)
+    ///
+    /// Используется для Go To Definition навигации к ObjectModule.bsl, ManagerModule.bsl и т.д.
+    ///
+    /// # Аргументы
+    /// * `type_name` - имя конфигурационного типа (например, "Справочники.Партнеры")
+    ///
+    /// # Возвращает
+    /// * `Some(ModulePaths)` - пути к модулям если тип конфигурационный
+    /// * `None` - если тип платформенный или не найден в репозитории
+    pub fn get_module_paths_for_type(
+        &self,
+        type_name: &str,
+    ) -> Option<bsl_shared::domain::type_definition_location::ModulePaths> {
+        // Получаем raw type данные из репозитория
+        let repository = self.analysis_engine.get_repository();
+        repository
+            .find_type(type_name)
+            .and_then(|raw| raw.module_paths.clone())
     }
 }
 

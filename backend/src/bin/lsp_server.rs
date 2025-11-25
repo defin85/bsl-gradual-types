@@ -450,6 +450,7 @@ impl LanguageServer for BslLanguageServer {
                     },
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec![".".to_string(), " ".to_string()]),
                     ..Default::default()
@@ -1356,6 +1357,157 @@ impl LanguageServer for BslLanguageServer {
             }
         } else {
             Ok(None)
+        }
+    }
+
+    /// Go To Definition handler
+    /// Milestone 3.14: Navigates to type definitions (configuration types, platform types)
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> JsonRpcResult<Option<GotoDefinitionResponse>> {
+        use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
+
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        info!(
+            "Go to definition requested at {}:{}",
+            position.line, position.character
+        );
+
+        // Получаем содержимое документа
+        let file_content = match self.documents.read().await.get(&uri) {
+            Some(content) => content.clone(),
+            None => {
+                match uri.to_file_path() {
+                    Ok(path) => match std::fs::read_to_string(&path) {
+                        Ok(content) => content,
+                        Err(e) => {
+                            error!("Failed to read file for definition: {}", e);
+                            return Ok(None);
+                        }
+                    },
+                    Err(_) => return Ok(None),
+                }
+            }
+        };
+
+        // Получаем TypeSystemService
+        let service = match self.get_type_service() {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        // Используем get_type_at_position для получения TypeResolution
+        let type_resolution = match service
+            .get_type_at_position(&file_content, position.line, position.character)
+            .await
+        {
+            Ok(Some(resolution)) => resolution,
+            Ok(None) => {
+                debug!("No type resolution at position {}:{}", position.line, position.character);
+                return Ok(None);
+            }
+            Err(e) => {
+                error!("Failed to get type at position: {}", e);
+                return Ok(None);
+            }
+        };
+
+        // Получаем пути к модулям для конфигурационных типов (Milestone 3.14)
+        let module_paths = if let bsl_shared::domain::types::ResolutionResult::Concrete(
+            bsl_shared::domain::types::ConcreteType::Configuration(cfg)
+        ) = &type_resolution.result {
+            let type_key = format!("{}.{}", cfg.kind.to_prefix(), cfg.name);
+            service.get_module_paths_for_type(&type_key)
+        } else {
+            None
+        };
+
+        // Получаем location определения с module_paths
+        let definition_location = match type_resolution.get_definition_location_with_modules(module_paths.as_ref()) {
+            Some(loc) => loc,
+            None => {
+                debug!("Type has no definition location");
+                return Ok(None);
+            }
+        };
+
+        // Конвертируем TypeDefinitionLocation в LSP GotoDefinitionResponse
+        match definition_location {
+            TypeDefinitionLocation::Configuration {
+                metadata_path,
+                module_paths,
+            } => {
+                // Приоритет: object_module > manager_module > metadata_path
+                let target_path = module_paths
+                    .object_module
+                    .or(module_paths.manager_module)
+                    .unwrap_or(metadata_path);
+
+                match Url::from_file_path(&target_path) {
+                    Ok(target_uri) => {
+                        info!("Navigating to configuration type: {:?}", target_path);
+                        Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                            uri: target_uri,
+                            range: Range::default(), // Начало файла
+                        })))
+                    }
+                    Err(_) => {
+                        warn!("Invalid file path for definition: {:?}", target_path);
+                        Ok(None)
+                    }
+                }
+            }
+
+            TypeDefinitionLocation::UserDefined {
+                file_path,
+                start_line,
+                start_column,
+                end_line,
+                end_column,
+            } => match Url::from_file_path(&file_path) {
+                Ok(target_uri) => {
+                    info!(
+                        "Navigating to user-defined type: {:?} at {}:{}",
+                        file_path, start_line, start_column
+                    );
+                    Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                        uri: target_uri,
+                        range: Range {
+                            start: Position {
+                                line: start_line,
+                                character: start_column,
+                            },
+                            end: Position {
+                                line: end_line,
+                                character: end_column,
+                            },
+                        },
+                    })))
+                }
+                Err(_) => {
+                    warn!("Invalid file path for definition: {:?}", file_path);
+                    Ok(None)
+                }
+            },
+
+            TypeDefinitionLocation::Platform { type_name, docs_uri } => {
+                // Для платформенных типов можем показать документацию
+                // или просто вернуть None (нет файла для навигации)
+                info!(
+                    "Platform type '{}' has no navigable definition, docs: {:?}",
+                    type_name, docs_uri
+                );
+                Ok(None)
+            }
+
+            TypeDefinitionLocation::Primitive => {
+                // Примитивы не имеют определения
+                debug!("Primitive type has no definition location");
+                Ok(None)
+            }
         }
     }
 

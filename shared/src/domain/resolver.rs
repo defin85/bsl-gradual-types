@@ -58,6 +58,28 @@ pub enum ConstructorResolution {
     },
 }
 
+/// Результат валидации вызова v2 (с объектным сравнением типов)
+/// Milestone 3.13: Object-Based Type Comparison
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValidationResultV2 {
+    /// Вызов корректен, возвращает тип (если функция возвращает значение)
+    Ok(Option<String>),
+    /// Функция/метод не найдены
+    NotFound,
+    /// Отсутствует обязательный параметр
+    MissingRequiredParam { param_name: String, param_index: usize },
+    /// Слишком много аргументов
+    TooManyArgs { expected: usize, actual: usize },
+    /// Несоответствие типов аргумента (с детальной причиной)
+    TypeMismatch {
+        param_name: String,
+        param_index: usize,
+        expected: String,
+        actual: String,
+        reason: String,
+    },
+}
+
 /// Чистый Domain resolver - только бизнес-логика типизации
 pub struct TypeResolver {
     repository: Arc<dyn TypeRepository>,
@@ -1401,6 +1423,15 @@ impl TypeResolver {
             return true;
         }
 
+        // ✅ BUGFIX: Поддержка union типов в expected
+        // "Число | Строка" должен принимать "Строка" или "Число"
+        if expected.contains(" | ") {
+            // Разбиваем union на части и проверяем что actual входит в одну из них
+            return expected
+                .split(" | ")
+                .any(|variant| Self::names_equal_ignore_case(variant.trim(), actual));
+        }
+
         // Case-insensitive сравнение (кириллица + латиница)
         Self::names_equal_ignore_case(expected, actual)
     }
@@ -1413,6 +1444,100 @@ impl TypeResolver {
         a.chars()
             .zip(b.chars())
             .all(|(ca, cb)| ca.to_lowercase().eq(cb.to_lowercase()))
+    }
+
+    // ===== Milestone 3.13: Object-Based Type Comparison =====
+
+    /// Объектное сравнение типов (v2 версия)
+    ///
+    /// Резолвит оба типа и использует TypeResolution::is_compatible_with()
+    /// для объектного сравнения с учётом семантики типов.
+    ///
+    /// # Параметры
+    /// - `expected` - ожидаемый тип (из сигнатуры параметра)
+    /// - `actual` - фактический тип аргумента
+    ///
+    /// # Возвращает
+    /// `TypeCompatibility` - результат сравнения с причиной несовместимости
+    pub fn is_type_compatible_v2(
+        &self,
+        expected: &str,
+        actual: &str,
+    ) -> crate::domain::types::TypeCompatibility {
+        let expected_resolution = self.resolve_expression_sync(expected);
+        let actual_resolution = self.resolve_expression_sync(actual);
+
+        actual_resolution.is_compatible_with(&expected_resolution)
+    }
+
+    /// Валидация вызова с объектным сравнением типов (v2 версия)
+    ///
+    /// Использует TypeResolution::is_compatible_with() вместо строкового сравнения.
+    /// Возвращает детальную причину несовместимости типов.
+    ///
+    /// # Параметры
+    /// - `type_name` - имя типа для методов (None для глобальных функций)
+    /// - `method_name` - имя метода или функции
+    /// - `arg_types` - список типов аргументов в вызове
+    /// - `signature_index` - индекс с сигнатурами методов и функций
+    ///
+    /// # Возвращает
+    /// `ValidationResultV2` - результат валидации с детальной причиной
+    pub fn validate_call_v2(
+        &self,
+        type_name: Option<&str>,
+        method_name: &str,
+        arg_types: &[String],
+        signature_index: &SignatureIndex,
+    ) -> ValidationResultV2 {
+        // 1. Найти сигнатуру
+        let signature = if let Some(type_name) = type_name {
+            signature_index.find_method(type_name, method_name)
+        } else {
+            signature_index.find_global_function(method_name)
+        };
+
+        let signature = match signature {
+            Some(sig) => sig,
+            None => return ValidationResultV2::NotFound,
+        };
+
+        // 2. Проверка количества параметров
+        let required_count = signature.params.iter().filter(|p| !p.is_optional).count();
+
+        if arg_types.len() < required_count {
+            return ValidationResultV2::MissingRequiredParam {
+                param_name: signature.params[arg_types.len()].name.clone(),
+                param_index: arg_types.len(),
+            };
+        }
+
+        if arg_types.len() > signature.params.len() {
+            return ValidationResultV2::TooManyArgs {
+                expected: signature.params.len(),
+                actual: arg_types.len(),
+            };
+        }
+
+        // 3. Проверяем типы параметров с объектным сравнением
+        for (i, (param, arg_type)) in signature.params.iter().zip(arg_types.iter()).enumerate() {
+            if let Some(expected_type) = &param.type_name {
+                let compat = self.is_type_compatible_v2(expected_type, arg_type);
+                if !compat.is_compatible() {
+                    return ValidationResultV2::TypeMismatch {
+                        param_name: param.name.clone(),
+                        param_index: i,
+                        expected: expected_type.clone(),
+                        actual: arg_type.clone(),
+                        reason: compat.reason(),
+                    };
+                }
+            }
+            // Если expected_type = None (Произвольный), то любой тип подходит
+        }
+
+        // 4. Вернуть тип возврата
+        ValidationResultV2::Ok(signature.return_type.clone())
     }
 }
 // Milestone 2.20: Function Signature Validation tests

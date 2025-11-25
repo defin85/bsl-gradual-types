@@ -1,12 +1,12 @@
 //! Semantic Validation Visitor
-use bsl_shared::domain::resolver::{TypeResolver, ValidationResult};
+use bsl_shared::domain::resolver::{TypeResolver, ValidationResult, ValidationResultV2};
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::{Certainty, ConcreteType, DiagnosticSeverity, ResolutionResult, TypeDiagnostic};
+use bsl_shared::domain::types::{Certainty, ConcreteType, ConfigurationType, DiagnosticSeverity, FacetKind, MetadataKind, ResolutionResult, TypeDiagnostic};
 use bsl_shared::domain::validators::TypeValidator;
 use bsl_shared::domain::RuntimeExecutionContext;  // MILESTONE 3.11 Phase 3
 use bsl_shared::formatting::DetailLevel;  // MILESTONE 3.6 Phase 3
 use bsl_shared::ir::{
-    FlowContext, SemanticNode, SemanticNodeKind, SemanticProgram, SemanticVisitor,
+    FlowContext, SemanticNode, SemanticNodeKind, SemanticProgram, SemanticVisitor, Span,
 };
 
 pub struct SemanticValidationVisitor<'a> {
@@ -140,9 +140,68 @@ impl<'a> SemanticValidationVisitor<'a> {
         }
     }
 
+    /// Конвертирует ValidationResultV2 в TypeDiagnostic (Milestone 3.13)
+    /// Использует объектное сравнение типов с детальными причинами несовместимости
+    fn validation_result_v2_to_diagnostic(
+        result: &ValidationResultV2,
+        span: Span,
+    ) -> Option<TypeDiagnostic> {
+        match result {
+            ValidationResultV2::Ok(_) => None,
+            ValidationResultV2::NotFound => None, // Обрабатывается отдельно в validate_method_exists
+            ValidationResultV2::MissingRequiredParam { param_name, param_index } => {
+                Some(TypeDiagnostic {
+                    severity: DiagnosticSeverity::Error,
+                    message: format!(
+                        "Отсутствует обязательный параметр '{}' (позиция {})",
+                        param_name, param_index + 1
+                    ),
+                    line: span.start_line,
+                    column: span.start_column,
+                    end_line: span.end_line,
+                    end_column: span.end_column,
+                })
+            }
+            ValidationResultV2::TooManyArgs { expected, actual } => {
+                Some(TypeDiagnostic {
+                    severity: DiagnosticSeverity::Error,
+                    message: format!(
+                        "Слишком много аргументов: ожидается {}, передано {}",
+                        expected, actual
+                    ),
+                    line: span.start_line,
+                    column: span.start_column,
+                    end_line: span.end_line,
+                    end_column: span.end_column,
+                })
+            }
+            ValidationResultV2::TypeMismatch { param_name, param_index, expected, actual, reason } => {
+                let msg = if reason.is_empty() {
+                    format!(
+                        "Параметр '{}' (позиция {}): ожидается {}, получено {}",
+                        param_name, param_index + 1, expected, actual
+                    )
+                } else {
+                    format!(
+                        "Параметр '{}' (позиция {}): ожидается {}, получено {} ({})",
+                        param_name, param_index + 1, expected, actual, reason
+                    )
+                };
+                Some(TypeDiagnostic {
+                    severity: DiagnosticSeverity::Error,
+                    message: msg,
+                    line: span.start_line,
+                    column: span.start_column,
+                    end_line: span.end_line,
+                    end_column: span.end_column,
+                })
+            }
+        }
+    }
+
     fn simple_resolution(type_name: &str) -> bsl_shared::domain::types::TypeResolution {
         use bsl_shared::domain::types::{
-            FacetKind, PrimitiveType, ResolutionMetadata, ResolutionSource, TypeResolution,
+            PrimitiveType, ResolutionMetadata, ResolutionSource, TypeResolution,
         };
 
         // ✅ MILESTONE 3.10: Убираем Generic параметры для поиска методов
@@ -153,6 +212,25 @@ impl<'a> SemanticValidationVisitor<'a> {
             type_name
         };
 
+        // ✅ MILESTONE 3.11: Попытка распарсить фасетный тип конфигурации
+        if let Some((facet_kind, metadata_kind, object_name)) = Self::try_parse_faceted_type(clean_type_name) {
+            return TypeResolution {
+                certainty: Certainty::Known,
+                result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+                    name: object_name,
+                    kind: metadata_kind,
+                    facet: Some(facet_kind),
+                    attributes: vec![],
+                    tabular_sections: vec![],
+                })),
+                source: ResolutionSource::Static,
+                metadata: ResolutionMetadata::default(),
+                active_facet: Some(facet_kind),
+                available_facets: vec![],
+            };
+        }
+
+        // Примитивные типы
         let result = match clean_type_name {
             "Число" | "Number" => {
                 ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Number))
@@ -188,9 +266,29 @@ impl<'a> SemanticValidationVisitor<'a> {
             result,
             source: ResolutionSource::Static,
             metadata: ResolutionMetadata::default(),
-            active_facet,  // ✅ ИСПРАВЛЕНО!
+            active_facet,
             available_facets: vec![],
         }
+    }
+
+    /// Попытка распарсить фасетный тип конфигурации
+    ///
+    /// # Примеры
+    /// - "СправочникМенеджер.Контрагенты" -> Some((Manager, Catalog, "Контрагенты"))
+    /// - "ДокументОбъект.ЗаказКлиента" -> Some((Object, Document, "ЗаказКлиента"))
+    /// - "Массив" -> None
+    fn try_parse_faceted_type(type_name: &str) -> Option<(FacetKind, MetadataKind, String)> {
+        // Проверяем наличие точки (признак конкретизированного типа)
+        let dot_pos = type_name.find('.')?;
+
+        let prefix = &type_name[..dot_pos];
+        let object_name = &type_name[dot_pos + 1..];
+
+        // Используем pattern-matching функции из SignatureIndex
+        let facet_kind = SignatureIndex::get_facet_kind_from_prefix(prefix)?;
+        let metadata_kind = SignatureIndex::get_metadata_kind_from_prefix(prefix)?;
+
+        Some((facet_kind, metadata_kind, object_name.to_string()))
     }
 }
 
@@ -237,16 +335,16 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     // НЕ return - продолжаем проверку параметров
                 }
 
-                // 2. ✅ MILESTONE 3.10: Проверяем типы параметров
-                let validation_result = self.resolver.validate_call(
+                // 2. ✅ MILESTONE 3.13: Проверяем типы параметров с объектным сравнением (v2)
+                let validation_result = self.resolver.validate_call_v2(
                     Some(obj_type),
                     function_name,
                     arg_types,
                     self.signature_index,
                 );
 
-                // Конвертируем ValidationResult в TypeDiagnostic
-                if let Some(diagnostic) = Self::validation_result_to_diagnostic(&validation_result, node.span) {
+                // Конвертируем ValidationResultV2 в TypeDiagnostic
+                if let Some(diagnostic) = Self::validation_result_v2_to_diagnostic(&validation_result, node.span) {
                     self.errors.push(diagnostic);
                 }
             }

@@ -72,6 +72,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let log_level = config.log_level.parse().unwrap_or(tracing::Level::INFO);
     tracing_subscriber::fmt().with_max_level(log_level).init();
 
+    // 🏷️ Вывод версии и времени сборки для идентификации сборки
+    let version = env!("CARGO_PKG_VERSION");
+    let build_time = env!("BUILD_TIMESTAMP");
+    let git_hash = env!("GIT_HASH");
+    tracing::info!(
+        "🚀 BSL Web Server v{} (build: {}, git: {})",
+        version,
+        build_time,
+        git_hash
+    );
+
     let system_coord = Arc::new(SystemCoordinator::new());
 
     // 🚀 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: запускаем полную инициализацию с парсингом синтаксис-помощника

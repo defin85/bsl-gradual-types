@@ -1264,9 +1264,36 @@ pub fn populate_signature_index_from_platform_types(
 
             let signature = raw_method_to_signature(method, &platform_type.name);
 
-            index.add_platform_method(platform_type.name.clone(), signature);
+            // Добавляем под полным именем типа
+            index.add_platform_method(platform_type.name.clone(), signature.clone());
+
+            // MILESTONE 3.11: Также добавляем под базовым именем для фасетных типов
+            // Например: "СправочникМенеджер.<Имя справочника>" → также под "СправочникМенеджер"
+            if let Some(base_type) = extract_base_facet_type_name(&platform_type.name) {
+                index.add_platform_method(base_type.to_string(), signature);
+            }
         }
     }
+}
+
+/// Извлекает базовое имя фасетного типа из полного имени с template параметром
+///
+/// # Примеры
+/// - "СправочникМенеджер.<Имя справочника>" → Some("СправочникМенеджер")
+/// - "ДокументОбъект.<Имя документа>" → Some("ДокументОбъект")
+/// - "Массив" → None
+fn extract_base_facet_type_name(type_name: &str) -> Option<&str> {
+    // Ищем паттерн ".<Имя" который указывает на template параметр
+    if let Some(pos) = type_name.find(".<Имя") {
+        return Some(&type_name[..pos]);
+    }
+    // Английский вариант
+    if let Some(pos) = type_name.find(".<") {
+        if type_name[pos..].contains(" name>") {
+            return Some(&type_name[..pos]);
+        }
+    }
+    None
 }
 
 /// Конвертирует RawMethodData в MethodSignature с поддержкой facets

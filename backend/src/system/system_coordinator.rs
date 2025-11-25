@@ -290,9 +290,19 @@ impl SystemCoordinator {
                 // Сначала инициализируем встроенные конструкторы
                 index.initialize_builtin_constructors();
 
-                // Затем заполняем методами из загруженных типов
+                // Затем заполняем методами из загруженных типов (syntax_helper)
                 crate::data::loaders::populate_signature_index_from_platform_types(
                     &platform_types_clone,
+                    index,
+                );
+
+                // MILESTONE 3.11 Phase 2: Добавляем методы базовых фасетных типов
+                // (СправочникМенеджер, СправочникОбъект, ДокументМенеджер и т.д.)
+                // Эти типы определены в platform_types.rs и содержат методы типа
+                // СоздатьЭлемент(), НайтиПоКоду(), Записать() и т.д.
+                let facet_types = crate::data::loaders::load_all_platform_types();
+                crate::data::loaders::populate_signature_index_from_platform_types(
+                    &facet_types,
                     index,
                 );
             });

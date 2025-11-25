@@ -152,8 +152,6 @@ fn test_constructor_to_method_dto_conversion() {
         )),
         is_deprecated: false,
         is_constructor: true,
-        context_requirements: None,
-        return_facet: None,
     };
 
     // Verify conversion
@@ -363,8 +361,6 @@ fn test_handle_query_type_no_constructor_graceful() {
             description: None,
             is_deprecated: false,
             is_constructor: false,
-            context_requirements: None,
-            return_facet: None,
         })
         .collect();
 
@@ -393,8 +389,6 @@ fn test_frontend_filtering_constructors_vs_methods() {
             description: None,
             is_deprecated: false,
             is_constructor: true,
-            context_requirements: None,
-            return_facet: None,
         },
         MethodDto {
             name: "Добавить".to_string(),
@@ -404,8 +398,6 @@ fn test_frontend_filtering_constructors_vs_methods() {
             description: None,
             is_deprecated: false,
             is_constructor: false,
-            context_requirements: None,
-            return_facet: None,
         },
         MethodDto {
             name: "Найти".to_string(),
@@ -415,8 +407,6 @@ fn test_frontend_filtering_constructors_vs_methods() {
             description: None,
             is_deprecated: false,
             is_constructor: false,
-            context_requirements: None,
-            return_facet: None,
         },
     ];
 
@@ -448,8 +438,6 @@ fn test_backward_compatibility_optional_is_constructor() {
         description: None,
         is_deprecated: false,
         is_constructor: true,
-        context_requirements: None,
-        return_facet: None,
     };
 
     // Serialization should include the field
@@ -492,8 +480,6 @@ fn test_constructor_with_no_parameters() {
         description: Some(format!("Конструктор типа {}", constructor.type_name)),
         is_deprecated: false,
         is_constructor: true,
-        context_requirements: None,
-        return_facet: None,
     };
 
     assert_eq!(method_dto.params.len(), 0);
@@ -555,8 +541,6 @@ fn test_constructor_with_optional_parameters() {
         description: Some("Конструктор таблицы значений".to_string()),
         is_deprecated: false,
         is_constructor: true,
-        context_requirements: None,
-        return_facet: None,
     };
 
     assert_eq!(method_dto.params.len(), 2);

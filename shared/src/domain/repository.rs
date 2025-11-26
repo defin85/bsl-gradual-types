@@ -1,7 +1,7 @@
 //! Data Layer: Type Repository trait and implementations
 
 use crate::domain::signature_index::{SignatureIndex, SignatureValidationResult};
-use crate::domain::types::{RawDataSource, RawTypeData};
+use crate::domain::types::{MetadataKind, RawDataSource, RawTypeData};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use std::sync::RwLock;
@@ -140,6 +140,26 @@ pub trait TypeRepository: Send + Sync {
     ///
     /// Возвращает клон индекса сигнатур для использования в валидаторах
     fn get_signature_index_clone(&self) -> SignatureIndex;
+
+    /// Получить все объекты метаданных указанного вида (Milestone 3.16)
+    ///
+    /// Возвращает имена объектов без префикса (например, "Контрагенты" вместо "Справочники.Контрагенты")
+    ///
+    /// # Параметры
+    ///
+    /// * `kind` - вид метаданных (Catalog, Document, etc.)
+    ///
+    /// # Возвращает
+    ///
+    /// Вектор имён объектов метаданных
+    ///
+    /// # Примеры
+    ///
+    /// ```ignore
+    /// let catalogs = repository.get_metadata_objects_by_kind(MetadataKind::Catalog);
+    /// // → ["Контрагенты", "Номенклатура", "Склады", ...]
+    /// ```
+    fn get_metadata_objects_by_kind(&self, kind: MetadataKind) -> Vec<String>;
 }
 
 /// Статистика репозитория
@@ -285,15 +305,15 @@ impl TypeRepository for InMemoryTypeRepository {
         let expected_signature = index.find_method(owner_type, method_name);
 
         // Создаём актуальную сигнатуру
-        let actual_signature = MethodSignature {
-            name: method_name.to_string(),
-            owner_type: Some(owner_type.to_string()),
-            params: actual_params.to_vec(),
-            return_type: actual_return_type.map(|s| s.to_string()),
-            source: SignatureSource::UserCode,
-            return_facet: None,
-            context_requirements: crate::domain::signature_index::ContextRequirements::default(),
-        };
+        let actual_signature = MethodSignature::new(
+            method_name.to_string(),
+            Some(owner_type.to_string()),
+            actual_params.to_vec(),
+            actual_return_type.map(|s| s.to_string()),
+            SignatureSource::UserCode,
+            None,
+            crate::domain::signature_index::ContextRequirements::default(),
+        );
 
         // Валидируем
         index.validate_signature(expected_signature, &actual_signature)
@@ -330,5 +350,24 @@ impl TypeRepository for InMemoryTypeRepository {
 
     fn get_signature_index_clone(&self) -> SignatureIndex {
         self.signature_index.read().unwrap().clone()
+    }
+
+    fn get_metadata_objects_by_kind(&self, kind: MetadataKind) -> Vec<String> {
+        let types = self.types.read().unwrap();
+        let prefix = kind.to_prefix();
+
+        types
+            .iter()
+            .filter_map(|t| {
+                // Фильтруем только типы с нужным kind
+                if t.kind != Some(kind) {
+                    return None;
+                }
+                // Убираем префикс из имени: "Справочники.Контрагенты" -> "Контрагенты"
+                t.name
+                    .strip_prefix(&format!("{}.", prefix))
+                    .map(|s| s.to_string())
+            })
+            .collect()
     }
 }

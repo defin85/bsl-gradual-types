@@ -44,6 +44,7 @@ mod phase2_features_tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            module_paths: None,
         };
 
         repo.load_types(vec![test_type]).unwrap();

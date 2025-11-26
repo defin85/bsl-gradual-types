@@ -318,7 +318,7 @@ impl BslLanguageServer {
         // PHASE 2: Semantic validation
         if let Some(type_service) = self.get_type_service() {
             let settings = self.settings.read().await;
-            let detail_level = bsl_shared::formatting::DetailLevel::from_str(&settings.diagnostics.detail_level);
+            let detail_level = bsl_shared::formatting::DetailLevel::parse(&settings.diagnostics.detail_level);
 
             match type_service.validate_semantics(&text, Some(detail_level)).await {
                 Ok(semantic_errors) => {
@@ -987,7 +987,7 @@ impl LanguageServer for BslLanguageServer {
             } else {
                 // ✅ MILESTONE 3.6 Phase 3: Получаем detail_level из settings
                 let settings = self.settings.read().await;
-                let detail_level = bsl_shared::formatting::DetailLevel::from_str(&settings.diagnostics.detail_level);
+                let detail_level = bsl_shared::formatting::DetailLevel::parse(&settings.diagnostics.detail_level);
 
                 match type_service.validate_semantics(&text, Some(detail_level)).await {
                     Ok(semantic_errors) => {
@@ -1152,7 +1152,7 @@ impl LanguageServer for BslLanguageServer {
                 } else {
                     // ✅ MILESTONE 3.6 Phase 3: Получаем detail_level из settings
                     let settings = self.settings.read().await;
-                    let detail_level = bsl_shared::formatting::DetailLevel::from_str(&settings.diagnostics.detail_level);
+                    let detail_level = bsl_shared::formatting::DetailLevel::parse(&settings.diagnostics.detail_level);
 
                     match type_service.validate_semantics(&text, Some(detail_level)).await {
                         Ok(semantic_errors) => {
@@ -1311,7 +1311,7 @@ impl LanguageServer for BslLanguageServer {
                 candidates.into_iter().find(|p| p.exists())
             });
 
-        let detail_level = DetailLevel::from_str(&settings.hover.detail_level);
+        let detail_level = DetailLevel::parse(&settings.hover.detail_level);
 
         // ДИАГНОСТИКА: Логируем настройки hover при каждом запросе
         debug!(

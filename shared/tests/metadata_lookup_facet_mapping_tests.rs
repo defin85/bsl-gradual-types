@@ -64,6 +64,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     });
 
     // ДокументОбъект
@@ -104,6 +105,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     });
 
     // ДокументСсылка
@@ -131,6 +133,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     });
 
     // ДокументВыборка
@@ -158,6 +161,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     });
 
     // ДокументСписок
@@ -185,6 +189,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     });
 
     // === Справочники (5 фасетов) ===
@@ -227,6 +232,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     });
 
     // СправочникОбъект
@@ -254,6 +260,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     });
 
     // СправочникСсылка
@@ -294,6 +301,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     });
 
     // СправочникВыборка
@@ -321,6 +329,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     });
 
     // СправочникСписок
@@ -348,6 +357,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     });
 
     repo.load_types(platform_types)

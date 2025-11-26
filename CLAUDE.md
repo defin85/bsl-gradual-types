@@ -11,11 +11,19 @@ AI-ассистент инструкции для BSL Gradual Type System про
 1. **Запустить Web API сервер:**
    ```bash
    /start-lsp-api
-   # Или вручную:
+   # Или вручную (только платформенные типы):
    cargo run --release -p bsl-backend --bin bsl-web-server -- \
      --port 3002 --enable-cors true \
      --syntax-helper-path examples/syntax_helper
+
+   # С тестовой конфигурацией (платформенные + конфигурационные типы):
+   cargo run --release -p bsl-backend --bin bsl-web-server -- \
+     --port 3002 --enable-cors true \
+     --syntax-helper-path examples/syntax_helper \
+     --project-path C:/1CProject/conf
    ```
+
+   **Тестовая конфигурация:** `C:\1CProject\conf` — содержит документы, справочники и другие объекты метаданных для тестирования конфигурационных типов.
 
 2. **Использовать endpoints для тестирования:**
    ```bash

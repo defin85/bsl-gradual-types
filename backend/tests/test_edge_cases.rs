@@ -21,43 +21,43 @@ fn create_test_signature_index() -> SignatureIndex {
     // Массив.Количество() -> Число
     sig_idx.add_platform_method(
         "Массив".to_string(),
-        MethodSignature {
-            name: "Количество".to_string(),
-            owner_type: Some("Массив".to_string()),
-            params: vec![],
-            return_type: Some("Число".to_string()),
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        },
+        MethodSignature::new(
+            "Количество".to_string(),
+            Some("Массив".to_string()),
+            vec![],
+            Some("Число".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        ),
     );
 
     // ТаблицаЗначений.Количество() -> Число
     sig_idx.add_platform_method(
         "ТаблицаЗначений".to_string(),
-        MethodSignature {
-            name: "Количество".to_string(),
-            owner_type: Some("ТаблицаЗначений".to_string()),
-            params: vec![],
-            return_type: Some("Число".to_string()),
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        },
+        MethodSignature::new(
+            "Количество".to_string(),
+            Some("ТаблицаЗначений".to_string()),
+            vec![],
+            Some("Число".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        ),
     );
 
     // Строка.Длина() -> Число
     sig_idx.add_platform_method(
         "Строка".to_string(),
-        MethodSignature {
-            name: "Длина".to_string(),
-            owner_type: Some("Строка".to_string()),
-            params: vec![],
-            return_type: Some("Число".to_string()),
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        },
+        MethodSignature::new(
+            "Длина".to_string(),
+            Some("Строка".to_string()),
+            vec![],
+            Some("Число".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        ),
     );
 
     sig_idx

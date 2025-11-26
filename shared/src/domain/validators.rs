@@ -13,7 +13,7 @@ use crate::domain::code_location::CompilerDirective;  // MILESTONE 3.11 Phase 3
 use crate::domain::metadata_lookup::TypeMetadataLookup;
 use crate::domain::runtime_context::ContextRequirements;  // MILESTONE 3.11 Phase 3
 use crate::domain::types::{
-    ConcreteType, DiagnosticSeverity, SpecialType, TypeDiagnostic, TypeResolution,
+    ConcreteType, DiagnosticSeverity, MetadataKind, SpecialType, TypeDiagnostic, TypeResolution,
 };
 use crate::formatting::DetailLevel;  // MILESTONE 3.6 Phase 3
 use crate::ir::Span;
@@ -56,7 +56,19 @@ pub enum TypeErrorKind {
         current_context: CompilerDirective,      // ✅ Type-safe context (OnClient, OnServer, etc.)
         required_context: ContextRequirements,   // ✅ Type-safe requirements (ServerOnly, Universal, etc.)
     },
+    /// Обращение к несуществующему объекту метаданных (MILESTONE 3.16)
+    UnknownMetadataObject {
+        /// Вид метаданных (Document, Catalog, InformationRegister, etc.)
+        kind: MetadataKind,
+        /// Имя объекта, который не найден
+        name: String,
+        /// Список похожих имён (подсказки)
+        suggestions: Vec<String>,
+        /// Имя переменной (если доступно)
+        variable_name: Option<String>,
+    },
 }
+
 
 impl TypeErrorKind {
     /// MILESTONE 3.6 Phase 3: to_diagnostic теперь использует Brief формат по умолчанию (backward compatibility)
@@ -159,6 +171,14 @@ impl TypeErrorKind {
                 "Метод '{}' недоступен в контексте {:?}. Требуется: {:?}",
                 method_name, current_context, required_context
             ),
+            TypeErrorKind::UnknownMetadataObject {
+                kind,
+                name,
+                ..
+            } => format!(
+                "{} \"{}\" не найден в конфигурации",
+                kind.to_russian_name(), name
+            ),
         }
     }
 
@@ -254,6 +274,25 @@ impl TypeErrorKind {
                     )
                 }
             }
+            TypeErrorKind::UnknownMetadataObject {
+                kind,
+                name,
+                suggestions,
+                variable_name,
+            } => {
+                let kind_name = kind.to_russian_name();
+                let mut msg = format!("{} \"{}\" не найден в конфигурации", kind_name, name);
+
+                if let Some(var) = variable_name {
+                    msg = format!("Переменная '{}': {}", var, msg);
+                }
+
+                if !suggestions.is_empty() {
+                    msg.push_str(&format!(". Возможно, вы имели в виду: {}", suggestions.join(", ")));
+                }
+
+                msg
+            }
         }
     }
 
@@ -344,6 +383,24 @@ impl TypeErrorKind {
                         Измените директиву компиляции функции/процедуры.",
                         method_name, required_context, current_context
                     )
+                }
+            }
+            TypeErrorKind::UnknownMetadataObject {
+                kind,
+                suggestions,
+                ..
+            } => {
+                let kind_name = kind.to_russian_name();
+                if suggestions.is_empty() {
+                    format!(
+                        "💡 Подсказка: {} не найден в загруженной конфигурации. \
+                        Проверьте, что конфигурация загружена: BSL: Parse Configuration. \
+                        Или исправьте имя объекта метаданных.",
+                        kind_name
+                    )
+                } else {
+                    "💡 Подсказка: Проверьте правильность написания имени. \
+                        Используйте команду VSCode: BSL: Parse Configuration для загрузки метаданных.".to_string()
                 }
             }
         }
@@ -474,6 +531,57 @@ impl<'a> TypeValidator<'a> {
             .all(|(ca, cb)| ca.to_lowercase().eq(cb.to_lowercase()))
     }
 
+    /// MILESTONE 3.16: Валидация существования объекта метаданных
+    ///
+    /// # Параметры
+    ///
+    /// * `kind` - вид метаданных (Catalog, Document, etc.)
+    /// * `name` - имя объекта (например, "Контрагенты")
+    /// * `variable_name` - имя переменной (для диагностического сообщения)
+    ///
+    /// # Возвращает
+    ///
+    /// `Some(TypeErrorKind::UnknownMetadataObject)` если объект не найден,
+    /// `None` если объект существует или конфигурация не загружена
+    ///
+    /// # Пример
+    ///
+    /// ```ignore
+    /// // Валидация: Справочники.Контрогенты (опечатка)
+    /// if let Some(error) = validator.validate_metadata_object_exists(
+    ///     MetadataKind::Catalog,
+    ///     "Контрогенты",
+    ///     Some("спр".to_string()),
+    /// ) {
+    ///     // error = UnknownMetadataObject { kind: Catalog, name: "Контрогенты", suggestions: ["Контрагенты"], ... }
+    /// }
+    /// ```
+    pub fn validate_metadata_object_exists(
+        &self,
+        kind: MetadataKind,
+        name: &str,
+        variable_name: Option<String>,
+    ) -> Option<TypeErrorKind> {
+        // Graceful degradation: если конфигурация не загружена, не показываем ошибку
+        if !self.metadata_lookup.is_configuration_loaded() {
+            return None;
+        }
+
+        // Проверяем существование объекта метаданных
+        if self.metadata_lookup.exists_metadata_object(kind, name) {
+            return None; // Объект найден
+        }
+
+        // Объект не найден - генерируем предложения
+        let suggestions = self.metadata_lookup.suggest_similar_names(kind, name, 3);
+
+        Some(TypeErrorKind::UnknownMetadataObject {
+            kind,
+            name: name.to_string(),
+            suggestions,
+            variable_name,
+        })
+    }
 
     /// Проверка операций с коллекциями
     pub fn validate_collection_operation(

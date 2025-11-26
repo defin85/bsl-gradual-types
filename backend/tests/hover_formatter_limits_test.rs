@@ -42,6 +42,7 @@ fn create_test_repository_with_n_methods(method_count: usize) -> Arc<InMemoryTyp
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     };
 
     repo.load_types(vec![test_type]).unwrap();
@@ -75,6 +76,7 @@ fn create_test_repository_with_n_properties(property_count: usize) -> Arc<InMemo
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     };
 
     repo.load_types(vec![test_type]).unwrap();

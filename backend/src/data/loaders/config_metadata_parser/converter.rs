@@ -28,6 +28,7 @@ impl UniversalMetadataObject {
     /// ```
     pub fn to_raw_type_data(&self, prefix: Option<&str>) -> RawTypeData {
         let type_name = self.get_full_type_name(prefix);
+        let module_paths = self.build_module_paths();
 
         RawTypeData {
             name: type_name.clone(),
@@ -43,7 +44,28 @@ impl UniversalMetadataObject {
             tabular_sections: self.convert_tabular_sections(),
             enum_values: Vec::new(), // Для перечислений будет заполнено отдельно
             generic_info: None,      // Конфигурационные типы не имеют Generic метаданных (пока)
+            module_paths,            // Milestone 3.14: пути к модулям для Go To Definition
         }
+    }
+
+    /// Построить ModulePaths из путей к модулям объекта метаданных (Milestone 3.14)
+    ///
+    /// Конвертирует пути из UniversalMetadataObject в структуру ModulePaths
+    /// для использования в Go To Definition навигации.
+    fn build_module_paths(&self) -> Option<bsl_shared::domain::type_definition_location::ModulePaths> {
+        // Если нет ни одного пути к модулю - возвращаем None
+        if self.object_module_path.is_none()
+            && self.manager_module_path.is_none()
+            && self.record_set_module_path.is_none()
+        {
+            return None;
+        }
+
+        Some(bsl_shared::domain::type_definition_location::ModulePaths {
+            object_module: self.object_module_path.clone(),
+            manager_module: self.manager_module_path.clone(),
+            recordset_module: self.record_set_module_path.clone(),
+        })
     }
 
     /// Применяет префикс к имени объекта
@@ -189,5 +211,109 @@ mod tests {
         // Пустой префикс (эквивалент None)
         let raw_type_empty_prefix = obj.to_raw_type_data(Some(""));
         assert_eq!(raw_type_empty_prefix.name, "Справочники.Контрагенты");
+    }
+
+    // ============================================================================
+    // Milestone 3.14: Module Paths Integration
+    // ============================================================================
+
+    #[test]
+    fn test_convert_with_module_paths() {
+        use std::path::PathBuf;
+
+        let mut obj = UniversalMetadataObject::new(
+            "Catalog".to_string(),
+            "Контрагенты".to_string(),
+            "12345678-1234-1234-1234-123456789012".to_string(),
+        );
+        obj.object_module_path = Some(PathBuf::from("Catalogs/Контрагенты/Ext/ObjectModule.bsl"));
+        obj.manager_module_path = Some(PathBuf::from("Catalogs/Контрагенты/Ext/ManagerModule.bsl"));
+
+        let raw_type = obj.to_raw_type_data(None);
+
+        assert!(raw_type.module_paths.is_some());
+        let module_paths = raw_type.module_paths.unwrap();
+        assert!(module_paths.object_module.is_some());
+        assert!(module_paths.manager_module.is_some());
+        assert!(module_paths.recordset_module.is_none());
+
+        assert!(module_paths
+            .object_module
+            .unwrap()
+            .to_string_lossy()
+            .contains("ObjectModule.bsl"));
+        assert!(module_paths
+            .manager_module
+            .unwrap()
+            .to_string_lossy()
+            .contains("ManagerModule.bsl"));
+    }
+
+    #[test]
+    fn test_convert_without_module_paths() {
+        let obj = UniversalMetadataObject::new(
+            "Catalog".to_string(),
+            "Товары".to_string(),
+            "12345678-1234-1234-1234-123456789012".to_string(),
+        );
+
+        let raw_type = obj.to_raw_type_data(None);
+
+        // Без путей к модулям - module_paths должен быть None
+        assert!(raw_type.module_paths.is_none());
+    }
+
+    #[test]
+    fn test_convert_register_with_recordset_module() {
+        use std::path::PathBuf;
+
+        let mut obj = UniversalMetadataObject::new(
+            "InformationRegister".to_string(),
+            "КурсыВалют".to_string(),
+            "12345678-1234-1234-1234-123456789012".to_string(),
+        );
+        obj.manager_module_path = Some(PathBuf::from(
+            "InformationRegisters/КурсыВалют/Ext/ManagerModule.bsl",
+        ));
+        obj.record_set_module_path = Some(PathBuf::from(
+            "InformationRegisters/КурсыВалют/Ext/RecordSetModule.bsl",
+        ));
+
+        let raw_type = obj.to_raw_type_data(None);
+
+        assert!(raw_type.module_paths.is_some());
+        let module_paths = raw_type.module_paths.unwrap();
+        assert!(module_paths.object_module.is_none());
+        assert!(module_paths.manager_module.is_some());
+        assert!(module_paths.recordset_module.is_some());
+
+        assert!(module_paths
+            .recordset_module
+            .unwrap()
+            .to_string_lossy()
+            .contains("RecordSetModule.bsl"));
+    }
+
+    #[test]
+    fn test_convert_only_one_module_path() {
+        use std::path::PathBuf;
+
+        let mut obj = UniversalMetadataObject::new(
+            "Document".to_string(),
+            "ЗаказПокупателя".to_string(),
+            "12345678-1234-1234-1234-123456789012".to_string(),
+        );
+        // Только ObjectModule, без ManagerModule
+        obj.object_module_path = Some(PathBuf::from(
+            "Documents/ЗаказПокупателя/Ext/ObjectModule.bsl",
+        ));
+
+        let raw_type = obj.to_raw_type_data(None);
+
+        assert!(raw_type.module_paths.is_some());
+        let module_paths = raw_type.module_paths.unwrap();
+        assert!(module_paths.object_module.is_some());
+        assert!(module_paths.manager_module.is_none());
+        assert!(module_paths.recordset_module.is_none());
     }
 }

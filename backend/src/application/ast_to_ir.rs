@@ -201,17 +201,49 @@ impl AstToIrConverter {
                 span: ast_span,
             } => {
                 if let Expression::Identifier { name: var_name, .. } = target {
-                    // ✅ ИСПРАВЛЕНИЕ Milestone 3.5: Обрабатываем value expression ПЕРЕД Assignment
-                    // Это создаст промежуточные узлы (FunctionCall, MemberAccess) для hover
-                    let value_node_idx = if let Expression::Call {
-                        function,
-                        args,
-                        span: call_span,
-                    } = &value
-                    {
-                        self.convert_call_expression(*function.clone(), args.clone(), *call_span)?
-                    } else {
-                        None
+                    // ✅ ИСПРАВЛЕНИЕ Milestone 3.5 + 3.16: Обрабатываем value expression ПЕРЕД Assignment
+                    // Это создаст промежуточные узлы (FunctionCall, MemberAccess) для hover и валидации
+                    let value_node_idx = match &value {
+                        Expression::Call {
+                            function,
+                            args,
+                            span: call_span,
+                        } => self.convert_call_expression(*function.clone(), args.clone(), *call_span)?,
+
+                        // ✅ MILESTONE 3.16: Обрабатываем PropertyAccess для валидации метаданных
+                        // Например: Док = Документы.ЗаказКлиента
+                        Expression::PropertyAccess {
+                            object,
+                            property,
+                            span: prop_span,
+                        } => {
+                            // Извлекаем имя объекта (для "Документы.ЗаказКлиента" это "Документы")
+                            let object_name = match object.as_ref() {
+                                Expression::Identifier { name, .. } => Some(name.clone()),
+                                _ => None,
+                            };
+
+                            // Инферим тип объекта
+                            let object_type = self.infer_expression_type(object);
+                            let span = self.ast_span_to_ir_span(*prop_span);
+
+                            // Создаём MemberAccess узел для валидации
+                            let node = SemanticNode {
+                                kind: SemanticNodeKind::MemberAccess {
+                                    object_name,
+                                    object_type,
+                                    member_name: property.clone(),
+                                    is_method: false,
+                                },
+                                span,
+                                scope_id: self.current_scope,
+                            };
+
+                            self.nodes.push(node);
+                            Some(self.nodes.len() - 1)
+                        }
+
+                        _ => None,
                     };
 
                     let value_type = self.infer_expression_type(&value);

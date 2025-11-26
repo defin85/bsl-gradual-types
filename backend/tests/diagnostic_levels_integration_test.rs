@@ -17,25 +17,25 @@ mod diagnostic_levels_integration_tests {
 
     #[test]
     fn test_diagnostics_detail_level_conversion_compact() {
-        let level = DetailLevel::from_str("compact");
+        let level = DetailLevel::parse("compact");
         assert_eq!(level, DetailLevel::Compact);
     }
 
     #[test]
     fn test_diagnostics_detail_level_conversion_full() {
-        let level = DetailLevel::from_str("full");
+        let level = DetailLevel::parse("full");
         assert_eq!(level, DetailLevel::Full);
     }
 
     #[test]
     fn test_diagnostics_detail_level_conversion_detailed() {
-        let level = DetailLevel::from_str("detailed");
+        let level = DetailLevel::parse("detailed");
         assert_eq!(level, DetailLevel::Detailed);
     }
 
     #[test]
     fn test_diagnostics_detail_level_default_for_unknown() {
-        let level = DetailLevel::from_str("unknown_setting");
+        let level = DetailLevel::parse("unknown_setting");
         assert_eq!(level, DetailLevel::Full);
     }
 

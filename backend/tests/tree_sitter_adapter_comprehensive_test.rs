@@ -453,6 +453,8 @@ fn test_property_access_expression() {
     match &program.statements[0] {
         Statement::Assignment { value, .. } => {
             // Может быть PropertyAccess или Identifier (fallback)
+            // DEBUG: Показываем что именно получили
+            eprintln!("DEBUG: value = {:?}", value);
             assert!(
                 matches!(value, Expression::PropertyAccess { .. })
                     || matches!(value, Expression::Identifier { .. })

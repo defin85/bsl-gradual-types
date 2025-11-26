@@ -15,7 +15,7 @@ pub enum DetailLevel {
 
 impl DetailLevel {
     /// Конвертация из строки (из VSCode settings)
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "compact" => Self::Compact,
             "detailed" => Self::Detailed,
@@ -30,10 +30,10 @@ mod tests {
 
     #[test]
     fn test_detail_level_from_str() {
-        assert_eq!(DetailLevel::from_str("compact"), DetailLevel::Compact);
-        assert_eq!(DetailLevel::from_str("full"), DetailLevel::Full);
-        assert_eq!(DetailLevel::from_str("detailed"), DetailLevel::Detailed);
-        assert_eq!(DetailLevel::from_str("FULL"), DetailLevel::Full);
-        assert_eq!(DetailLevel::from_str("unknown"), DetailLevel::Full); // default
+        assert_eq!(DetailLevel::parse("compact"), DetailLevel::Compact);
+        assert_eq!(DetailLevel::parse("full"), DetailLevel::Full);
+        assert_eq!(DetailLevel::parse("detailed"), DetailLevel::Detailed);
+        assert_eq!(DetailLevel::parse("FULL"), DetailLevel::Full);
+        assert_eq!(DetailLevel::parse("unknown"), DetailLevel::Full); // default
     }
 }

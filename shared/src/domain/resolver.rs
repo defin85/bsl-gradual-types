@@ -311,7 +311,7 @@ impl TypeResolver {
             result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
                 kind,
                 name: member.to_string(),
-                facet: Some(facet.clone()), // Используем определённый facet
+                facet: Some(facet), // Используем определённый facet (Copy trait)
                 attributes: vec![],
                 tabular_sections: vec![],
             })),

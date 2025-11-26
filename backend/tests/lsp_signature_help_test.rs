@@ -449,21 +449,21 @@ mod lsp_signature_help_tests {
     fn test_signature_index_add_and_find() {
         let mut index = SignatureIndex::new();
 
-        let sig = MethodSignature {
-            name: "Добавить".to_string(),
-            owner_type: Some("Массив".to_string()),
-            params: vec![ParameterInfo {
+        let sig = MethodSignature::new(
+            "Добавить".to_string(),
+            Some("Массив".to_string()),
+            vec![ParameterInfo {
                 name: "Элемент".to_string(),
                 type_name: Some("Произвольный".to_string()),
                 is_optional: false,
                 default_value: None,
                 description: None,
             }],
-            return_type: None,
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        };
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
 
         index.add_platform_method("Массив".to_string(), sig);
 
@@ -476,15 +476,15 @@ mod lsp_signature_help_tests {
     fn test_signature_index_case_insensitive_search() {
         let mut index = SignatureIndex::new();
 
-        let sig = MethodSignature {
-            name: "Добавить".to_string(),
-            owner_type: Some("Массив".to_string()),
-            params: vec![],
-            return_type: None,
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        };
+        let sig = MethodSignature::new(
+            "Добавить".to_string(),
+            Some("Массив".to_string()),
+            vec![],
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
 
         index.add_platform_method("Массив".to_string(), sig);
 
@@ -497,21 +497,21 @@ mod lsp_signature_help_tests {
     fn test_signature_index_global_function() {
         let mut index = SignatureIndex::new();
 
-        let sig = MethodSignature {
-            name: "Сообщить".to_string(),
-            owner_type: None,
-            params: vec![ParameterInfo {
+        let sig = MethodSignature::new(
+            "Сообщить".to_string(),
+            None,
+            vec![ParameterInfo {
                 name: "Текст".to_string(),
                 type_name: Some("Строка".to_string()),
                 is_optional: false,
                 default_value: None,
                 description: None,
             }],
-            return_type: None,
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        };
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
 
         index.add_global_function("Сообщить".to_string(), sig);
 
@@ -524,15 +524,15 @@ mod lsp_signature_help_tests {
     fn test_signature_index_global_function_case_insensitive() {
         let mut index = SignatureIndex::new();
 
-        let sig = MethodSignature {
-            name: "Сообщить".to_string(),
-            owner_type: None,
-            params: vec![],
-            return_type: None,
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        };
+        let sig = MethodSignature::new(
+            "Сообщить".to_string(),
+            None,
+            vec![],
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
 
         index.add_global_function("Сообщить".to_string(), sig);
 

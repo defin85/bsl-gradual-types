@@ -15,21 +15,21 @@ fn test_validate_call_success() {
     let mut index = SignatureIndex::new();
 
     // Создаём тестовую сигнатуру
-    let sig = MethodSignature {
-        name: "Добавить".to_string(),
-        owner_type: Some("Массив".to_string()),
-        params: vec![ParameterInfo {
+    let sig = MethodSignature::new(
+        "Добавить".to_string(),
+        Some("Массив".to_string()),
+        vec![ParameterInfo {
             name: "Значение".to_string(),
             type_name: Some("Произвольный".to_string()),
             is_optional: false,
             default_value: None,
             description: None,
         }],
-        return_type: None,
-        source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-    };
+        None,
+        SignatureSource::Platform,
+        None,
+        ContextRequirements::default(),
+    );
 
     index.add_platform_method("Массив".to_string(), sig);
 
@@ -45,21 +45,21 @@ fn test_validate_call_missing_param() {
     let resolver = TypeResolver::new(repo);
     let mut index = SignatureIndex::new();
 
-    let sig = MethodSignature {
-        name: "Тест".to_string(),
-        owner_type: Some("ТестТип".to_string()),
-        params: vec![ParameterInfo {
+    let sig = MethodSignature::new(
+        "Тест".to_string(),
+        Some("ТестТип".to_string()),
+        vec![ParameterInfo {
             name: "Параметр1".to_string(),
             type_name: Some("Строка".to_string()),
             is_optional: false,
             default_value: None,
             description: None,
         }],
-        return_type: Some("Число".to_string()),
-        source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-    };
+        Some("Число".to_string()),
+        SignatureSource::Platform,
+        None,
+        ContextRequirements::default(),
+    );
 
     index.add_platform_method("ТестТип".to_string(), sig);
 
@@ -88,21 +88,21 @@ fn test_validate_call_too_many_args() {
     let resolver = TypeResolver::new(repo);
     let mut index = SignatureIndex::new();
 
-    let sig = MethodSignature {
-        name: "Метод".to_string(),
-        owner_type: Some("Тип".to_string()),
-        params: vec![ParameterInfo {
+    let sig = MethodSignature::new(
+        "Метод".to_string(),
+        Some("Тип".to_string()),
+        vec![ParameterInfo {
             name: "Параметр1".to_string(),
             type_name: Some("Строка".to_string()),
             is_optional: false,
             default_value: None,
             description: None,
         }],
-        return_type: None,
-        source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-    };
+        None,
+        SignatureSource::Platform,
+        None,
+        ContextRequirements::default(),
+    );
 
     index.add_platform_method("Тип".to_string(), sig);
 
@@ -139,10 +139,10 @@ fn test_validate_call_optional_params() {
     let resolver = TypeResolver::new(repo);
     let mut index = SignatureIndex::new();
 
-    let sig = MethodSignature {
-        name: "Метод".to_string(),
-        owner_type: Some("Тип".to_string()),
-        params: vec![
+    let sig = MethodSignature::new(
+        "Метод".to_string(),
+        Some("Тип".to_string()),
+        vec![
             ParameterInfo {
                 name: "Обязательный".to_string(),
                 type_name: Some("Строка".to_string()),
@@ -158,11 +158,11 @@ fn test_validate_call_optional_params() {
                 description: None,
             },
         ],
-        return_type: Some("Булево".to_string()),
-        source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-    };
+        Some("Булево".to_string()),
+        SignatureSource::Platform,
+        None,
+        ContextRequirements::default(),
+    );
 
     index.add_platform_method("Тип".to_string(), sig);
 
@@ -189,21 +189,21 @@ fn test_validate_call_global_function() {
     let mut index = SignatureIndex::new();
 
     // Добавляем глобальную функцию
-    let sig = MethodSignature {
-        name: "Сообщить".to_string(),
-        owner_type: None,
-        params: vec![ParameterInfo {
+    let sig = MethodSignature::new(
+        "Сообщить".to_string(),
+        None,
+        vec![ParameterInfo {
             name: "Сообщение".to_string(),
             type_name: Some("Строка".to_string()),
             is_optional: false,
             default_value: None,
             description: None,
         }],
-        return_type: None,
-        source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-    };
+        None,
+        SignatureSource::Platform,
+        None,
+        ContextRequirements::default(),
+    );
 
     index.add_global_function("Сообщить".to_string(), sig);
 
@@ -223,15 +223,15 @@ fn test_validate_call_case_insensitive() {
     let resolver = TypeResolver::new(repo);
     let mut index = SignatureIndex::new();
 
-    let sig = MethodSignature {
-        name: "Добавить".to_string(),
-        owner_type: Some("Массив".to_string()),
-        params: vec![],
-        return_type: None,
-        source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-    };
+    let sig = MethodSignature::new(
+        "Добавить".to_string(),
+        Some("Массив".to_string()),
+        vec![],
+        None,
+        SignatureSource::Platform,
+        None,
+        ContextRequirements::default(),
+    );
 
     index.add_platform_method("Массив".to_string(), sig);
 
@@ -254,10 +254,10 @@ fn test_validate_call_type_mismatch() {
     let mut index = SignatureIndex::new();
 
     // Метод Вставить(Индекс: Число, Значение: Произвольный)
-    let sig = MethodSignature {
-        name: "Вставить".to_string(),
-        owner_type: Some("Массив".to_string()),
-        params: vec![
+    let sig = MethodSignature::new(
+        "Вставить".to_string(),
+        Some("Массив".to_string()),
+        vec![
             ParameterInfo {
                 name: "Индекс".to_string(),
                 type_name: Some("Число".to_string()),
@@ -273,11 +273,11 @@ fn test_validate_call_type_mismatch() {
                 description: None,
             },
         ],
-        return_type: None,
-        source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-    };
+        None,
+        SignatureSource::Platform,
+        None,
+        ContextRequirements::default(),
+    );
 
     index.add_platform_method("Массив".to_string(), sig);
 
@@ -309,21 +309,21 @@ fn test_validate_call_gradual_typing() {
     let resolver = TypeResolver::new(repo);
     let mut index = SignatureIndex::new();
 
-    let sig = MethodSignature {
-        name: "Метод".to_string(),
-        owner_type: Some("Тип".to_string()),
-        params: vec![ParameterInfo {
+    let sig = MethodSignature::new(
+        "Метод".to_string(),
+        Some("Тип".to_string()),
+        vec![ParameterInfo {
             name: "Параметр".to_string(),
             type_name: Some("Строка".to_string()),
             is_optional: false,
             default_value: None,
             description: None,
         }],
-        return_type: None,
-        source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-    };
+        None,
+        SignatureSource::Platform,
+        None,
+        ContextRequirements::default(),
+    );
 
     index.add_platform_method("Тип".to_string(), sig);
 
@@ -365,21 +365,21 @@ fn test_validate_call_proizvol_parameter_accepts_all() {
     let mut index = SignatureIndex::new();
 
     // Метод с параметром Произвольный
-    let sig = MethodSignature {
-        name: "Добавить".to_string(),
-        owner_type: Some("Массив".to_string()),
-        params: vec![ParameterInfo {
+    let sig = MethodSignature::new(
+        "Добавить".to_string(),
+        Some("Массив".to_string()),
+        vec![ParameterInfo {
             name: "Значение".to_string(),
             type_name: Some("Произвольный".to_string()),
             is_optional: false,
             default_value: None,
             description: None,
         }],
-        return_type: None,
-        source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-    };
+        None,
+        SignatureSource::Platform,
+        None,
+        ContextRequirements::default(),
+    );
 
     index.add_platform_method("Массив".to_string(), sig);
 
@@ -420,21 +420,21 @@ fn test_validate_call_case_insensitive_types() {
     let resolver = TypeResolver::new(repo);
     let mut index = SignatureIndex::new();
 
-    let sig = MethodSignature {
-        name: "Метод".to_string(),
-        owner_type: Some("Тип".to_string()),
-        params: vec![ParameterInfo {
+    let sig = MethodSignature::new(
+        "Метод".to_string(),
+        Some("Тип".to_string()),
+        vec![ParameterInfo {
             name: "Строка".to_string(),
             type_name: Some("Строка".to_string()),
             is_optional: false,
             default_value: None,
             description: None,
         }],
-        return_type: None,
-        source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-    };
+        None,
+        SignatureSource::Platform,
+        None,
+        ContextRequirements::default(),
+    );
 
     index.add_platform_method("Тип".to_string(), sig);
 

@@ -23,57 +23,57 @@ fn create_test_signature_index_with_methods() -> SignatureIndex {
     // Метод Массив.Количество() -> "Число"
     sig_idx.add_platform_method(
         "Массив".to_string(),
-        MethodSignature {
-            name: "Количество".to_string(),
-            owner_type: Some("Массив".to_string()),
-            params: vec![],
-            return_type: Some("Число".to_string()),
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        },
+        MethodSignature::new(
+            "Количество".to_string(),
+            Some("Массив".to_string()),
+            vec![],
+            Some("Число".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        ),
     );
 
     // Метод ТаблицаЗначений.Количество() -> "Число"
     sig_idx.add_platform_method(
         "ТаблицаЗначений".to_string(),
-        MethodSignature {
-            name: "Количество".to_string(),
-            owner_type: Some("ТаблицаЗначений".to_string()),
-            params: vec![],
-            return_type: Some("Число".to_string()),
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        },
+        MethodSignature::new(
+            "Количество".to_string(),
+            Some("ТаблицаЗначений".to_string()),
+            vec![],
+            Some("Число".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        ),
     );
 
     // Глобальная функция ТипЗнч() -> "Тип"
     sig_idx.add_global_function(
         "ТипЗнч".to_string(),
-        MethodSignature {
-            name: "ТипЗнч".to_string(),
-            owner_type: None,
-            params: vec![],
-            return_type: Some("Тип".to_string()),
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        },
+        MethodSignature::new(
+            "ТипЗнч".to_string(),
+            None,
+            vec![],
+            Some("Тип".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        ),
     );
 
     // Void метод (процедура) Сообщить() -> None
     sig_idx.add_global_function(
         "Сообщить".to_string(),
-        MethodSignature {
-            name: "Сообщить".to_string(),
-            owner_type: None,
-            params: vec![],
-            return_type: None,
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        },
+        MethodSignature::new(
+            "Сообщить".to_string(),
+            None,
+            vec![],
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        ),
     );
 
     sig_idx

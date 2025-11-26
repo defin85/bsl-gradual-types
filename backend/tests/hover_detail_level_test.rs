@@ -21,49 +21,49 @@ mod detail_level_tests {
     use std::sync::Arc;
 
     // ============================================================================
-    // TEST 1.1: DetailLevel::from_str() - Парсинг уровней детализации
+    // TEST 1.1: DetailLevel::parse() - Парсинг уровней детализации
     // ============================================================================
 
     #[test]
     fn test_detail_level_from_str_compact() {
-        assert_eq!(DetailLevel::from_str("compact"), DetailLevel::Compact);
+        assert_eq!(DetailLevel::parse("compact"), DetailLevel::Compact);
     }
 
     #[test]
     fn test_detail_level_from_str_full() {
-        assert_eq!(DetailLevel::from_str("full"), DetailLevel::Full);
+        assert_eq!(DetailLevel::parse("full"), DetailLevel::Full);
     }
 
     #[test]
     fn test_detail_level_from_str_detailed() {
-        assert_eq!(DetailLevel::from_str("detailed"), DetailLevel::Detailed);
+        assert_eq!(DetailLevel::parse("detailed"), DetailLevel::Detailed);
     }
 
     #[test]
     fn test_detail_level_case_insensitive_compact() {
-        assert_eq!(DetailLevel::from_str("COMPACT"), DetailLevel::Compact);
-        assert_eq!(DetailLevel::from_str("Compact"), DetailLevel::Compact);
-        assert_eq!(DetailLevel::from_str("CoMpAcT"), DetailLevel::Compact);
+        assert_eq!(DetailLevel::parse("COMPACT"), DetailLevel::Compact);
+        assert_eq!(DetailLevel::parse("Compact"), DetailLevel::Compact);
+        assert_eq!(DetailLevel::parse("CoMpAcT"), DetailLevel::Compact);
     }
 
     #[test]
     fn test_detail_level_case_insensitive_full() {
-        assert_eq!(DetailLevel::from_str("FULL"), DetailLevel::Full);
-        assert_eq!(DetailLevel::from_str("Full"), DetailLevel::Full);
+        assert_eq!(DetailLevel::parse("FULL"), DetailLevel::Full);
+        assert_eq!(DetailLevel::parse("Full"), DetailLevel::Full);
     }
 
     #[test]
     fn test_detail_level_case_insensitive_detailed() {
-        assert_eq!(DetailLevel::from_str("DETAILED"), DetailLevel::Detailed);
-        assert_eq!(DetailLevel::from_str("Detailed"), DetailLevel::Detailed);
+        assert_eq!(DetailLevel::parse("DETAILED"), DetailLevel::Detailed);
+        assert_eq!(DetailLevel::parse("Detailed"), DetailLevel::Detailed);
     }
 
     #[test]
     fn test_detail_level_default_fallback_unknown() {
         // Неизвестное значение должно fallback к Full (по умолчанию)
-        assert_eq!(DetailLevel::from_str("unknown"), DetailLevel::Full);
-        assert_eq!(DetailLevel::from_str("invalid"), DetailLevel::Full);
-        assert_eq!(DetailLevel::from_str(""), DetailLevel::Full);
+        assert_eq!(DetailLevel::parse("unknown"), DetailLevel::Full);
+        assert_eq!(DetailLevel::parse("invalid"), DetailLevel::Full);
+        assert_eq!(DetailLevel::parse(""), DetailLevel::Full);
     }
 
     // ============================================================================
@@ -101,6 +101,7 @@ mod detail_level_tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            module_paths: None,
         };
 
         repo.load_types(vec![test_type]).unwrap();
@@ -149,6 +150,7 @@ mod detail_level_tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            module_paths: None,
         };
 
         repo.load_types(vec![test_type]).unwrap();
@@ -363,6 +365,7 @@ mod detail_level_tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            module_paths: None,
         };
 
         repo.load_types(vec![test_type]).unwrap();

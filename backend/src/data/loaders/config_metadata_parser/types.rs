@@ -143,7 +143,7 @@ impl UniversalMetadataObject {
             | Some(MetadataKind::Language)
             | Some(MetadataKind::ExchangePlan) => vec![FacetKind::Metadata],
             Some(MetadataKind::Register) => vec![FacetKind::Manager, FacetKind::Object],
-            None => vec![], // Неизвестный тип - пустой список фасетов
+            Some(MetadataKind::Unknown) | None => vec![], // Неизвестный тип - пустой список фасетов
         }
     }
 }

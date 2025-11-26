@@ -2,12 +2,59 @@
 use bsl_shared::domain::resolver::{TypeResolver, ValidationResult, ValidationResultV2};
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::{Certainty, ConcreteType, ConfigurationType, DiagnosticSeverity, FacetKind, MetadataKind, ResolutionResult, TypeDiagnostic};
-use bsl_shared::domain::validators::TypeValidator;
+use bsl_shared::domain::validators::{TypeValidator, TypeErrorKind};
 use bsl_shared::domain::RuntimeExecutionContext;  // MILESTONE 3.11 Phase 3
 use bsl_shared::formatting::DetailLevel;  // MILESTONE 3.6 Phase 3
 use bsl_shared::ir::{
     FlowContext, SemanticNode, SemanticNodeKind, SemanticProgram, SemanticVisitor, Span,
 };
+
+// === MILESTONE 3.16: Helper функции для детекции коллекций метаданных ===
+
+/// Маппинг имён коллекций метаданных на MetadataKind
+/// (русское имя, английское имя, MetadataKind)
+///
+/// Единый источник истины для конвертации имён коллекций в MetadataKind.
+/// Используется в is_metadata_collection_name() и collection_name_to_metadata_kind().
+static METADATA_COLLECTIONS: &[(&str, &str, MetadataKind)] = &[
+    ("Справочники", "Catalogs", MetadataKind::Catalog),
+    ("Документы", "Documents", MetadataKind::Document),
+    ("Перечисления", "Enums", MetadataKind::Enum),
+    ("РегистрыСведений", "InformationRegisters", MetadataKind::InformationRegister),
+    ("РегистрыНакопления", "AccumulationRegisters", MetadataKind::AccumulationRegister),
+    ("РегистрыБухгалтерии", "AccountingRegisters", MetadataKind::AccountingRegister),
+    ("РегистрыРасчета", "CalculationRegisters", MetadataKind::CalculationRegister),
+    ("Отчеты", "Reports", MetadataKind::Report),
+    ("Обработки", "DataProcessors", MetadataKind::DataProcessor),
+    ("ПланыСчетов", "ChartsOfAccounts", MetadataKind::ChartOfAccounts),
+    ("ПланыВидовХарактеристик", "ChartsOfCharacteristicTypes", MetadataKind::ChartOfCharacteristicTypes),
+    ("ПланыВидовРасчета", "ChartsOfCalculationTypes", MetadataKind::ChartOfCalculationTypes),
+    ("БизнесПроцессы", "BusinessProcesses", MetadataKind::BusinessProcess),
+    ("Задачи", "Tasks", MetadataKind::Task),
+];
+
+/// Проверяет, является ли имя коллекцией метаданных
+///
+/// # Примеры
+/// - "Справочники" / "Catalogs" → true
+/// - "Документы" / "Documents" → true
+/// - "Массив" → false
+fn is_metadata_collection_name(name: &str) -> bool {
+    METADATA_COLLECTIONS.iter().any(|(ru, en, _)| *ru == name || *en == name)
+}
+
+/// Конвертирует имя коллекции метаданных в MetadataKind
+///
+/// # Примеры
+/// - "Справочники" → Some(MetadataKind::Catalog)
+/// - "Документы" → Some(MetadataKind::Document)
+/// - "Массив" → None
+fn collection_name_to_metadata_kind(name: &str) -> Option<MetadataKind> {
+    METADATA_COLLECTIONS
+        .iter()
+        .find(|(ru, en, _)| *ru == name || *en == name)
+        .map(|(_, _, kind)| *kind)
+}
 
 pub struct SemanticValidationVisitor<'a> {
     validator: &'a TypeValidator<'a>,
@@ -88,7 +135,44 @@ impl<'a> SemanticValidationVisitor<'a> {
         None
     }
 
+    /// MILESTONE 3.16: Валидация доступа к члену коллекции метаданных
+    ///
+    /// Проверяет существование объекта метаданных при обращении вида:
+    /// `Справочники.Контрагенты`, `Документы.ЗаказПокупателя` и т.д.
+    ///
+    /// # Параметры
+    ///
+    /// * `object_type` - тип объекта (например, "Справочники")
+    /// * `member_name` - имя члена (например, "Контрагенты")
+    /// * `variable_name` - имя переменной (для диагностики)
+    ///
+    /// # Возвращает
+    ///
+    /// `Some(TypeErrorKind)` если объект не найден, `None` иначе
+    fn validate_metadata_member_access(
+        &self,
+        object_type: &str,
+        member_name: &str,
+        variable_name: Option<String>,
+    ) -> Option<TypeErrorKind> {
+        // Проверяем, является ли object_type коллекцией метаданных
+        if !is_metadata_collection_name(object_type) {
+            return None;
+        }
+
+        // Получаем вид метаданных
+        let kind = match collection_name_to_metadata_kind(object_type) {
+            Some(k) => k,
+            None => return None,
+        };
+
+        // Используем метод из TypeValidator для валидации
+        self.validator.validate_metadata_object_exists(kind, member_name, variable_name)
+    }
+
     /// Конвертирует ValidationResult в TypeDiagnostic (Milestone 3.10)
+    /// TODO: Использовать в будущем для детальной диагностики параметров
+    #[allow(dead_code)]
     fn validation_result_to_diagnostic(
         result: &ValidationResult,
         span: bsl_shared::ir::Span,
@@ -355,6 +439,32 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 is_method: false,
                 ..
             } => {
+                // ✅ MILESTONE 3.16: Валидация доступа к объектам метаданных
+                // Проверяем конструкции вида: Справочники.Контрагенты, Документы.ЗаказПокупателя
+                // ВАЖНО: object_name содержит оригинальное имя ("Документы"),
+                //        object_type содержит трансформированный тип ("ДокументМенеджер.ЗаказКлиента")
+                tracing::debug!(
+                    "🔍 MemberAccess: object_name={:?}, object_type={}, member_name={}",
+                    object_name, object_type, member_name
+                );
+                if let Some(collection_name) = object_name {
+                    tracing::debug!("🔍 Checking if '{}' is metadata collection: {}", collection_name, is_metadata_collection_name(collection_name));
+                    if is_metadata_collection_name(collection_name) {
+                        // Это обращение к коллекции метаданных - валидируем объект
+                        if let Some(error_kind) = self.validate_metadata_member_access(
+                            collection_name,
+                            member_name,
+                            Some(collection_name.clone()),
+                        ) {
+                            let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                            self.errors.push(diagnostic);
+                        }
+                        // Независимо от результата, не проверяем свойства для коллекций метаданных
+                        // т.к. это не обычный доступ к свойству объекта
+                        return;
+                    }
+                }
+
                 let resolution = Self::simple_resolution(object_type);
                 // ✅ MILESTONE 3.6 Phase 3: Передаём имя переменной
                 if let Some(error_kind) = self
@@ -378,6 +488,7 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
 mod tests {
     use super::*;
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+    use bsl_shared::domain::repository::TypeRepository;  // MILESTONE 3.16: Import trait for load_types
     use bsl_shared::ir::{SemanticNode, SemanticNodeKind, Span};
 
     #[test]
@@ -444,5 +555,204 @@ mod tests {
             "Должна быть ошибка для несуществующего свойства"
         );
         assert!(errors[0].message.contains("НесуществующееСвойство"));
+    }
+
+    // === MILESTONE 3.16: Тесты валидации объектов метаданных ===
+
+    #[test]
+    fn test_is_metadata_collection_name() {
+        // Русские названия
+        assert!(is_metadata_collection_name("Справочники"));
+        assert!(is_metadata_collection_name("Документы"));
+        assert!(is_metadata_collection_name("РегистрыСведений"));
+        assert!(is_metadata_collection_name("Перечисления"));
+
+        // Английские названия
+        assert!(is_metadata_collection_name("Catalogs"));
+        assert!(is_metadata_collection_name("Documents"));
+        assert!(is_metadata_collection_name("InformationRegisters"));
+        assert!(is_metadata_collection_name("Enums"));
+
+        // Не коллекции метаданных
+        assert!(!is_metadata_collection_name("Массив"));
+        assert!(!is_metadata_collection_name("ТаблицаЗначений"));
+        assert!(!is_metadata_collection_name("Строка"));
+    }
+
+    #[test]
+    fn test_collection_name_to_metadata_kind() {
+        // Русские названия
+        assert_eq!(collection_name_to_metadata_kind("Справочники"), Some(MetadataKind::Catalog));
+        assert_eq!(collection_name_to_metadata_kind("Документы"), Some(MetadataKind::Document));
+        assert_eq!(collection_name_to_metadata_kind("РегистрыСведений"), Some(MetadataKind::InformationRegister));
+        assert_eq!(collection_name_to_metadata_kind("РегистрыНакопления"), Some(MetadataKind::AccumulationRegister));
+
+        // Английские названия
+        assert_eq!(collection_name_to_metadata_kind("Catalogs"), Some(MetadataKind::Catalog));
+        assert_eq!(collection_name_to_metadata_kind("Documents"), Some(MetadataKind::Document));
+
+        // Неизвестные
+        assert_eq!(collection_name_to_metadata_kind("Массив"), None);
+        assert_eq!(collection_name_to_metadata_kind("Unknown"), None);
+    }
+
+    #[test]
+    fn test_visitor_validates_metadata_object_when_config_loaded() {
+        use std::sync::Arc;
+        use bsl_shared::domain::repository::InMemoryTypeRepository;
+        use bsl_shared::domain::types::{RawTypeData, RawDataSource};
+
+        // Создаём репозиторий с конфигурационными типами
+        let repository = Arc::new(InMemoryTypeRepository::new());
+
+        // Добавляем справочник "Контрагенты"
+        let catalog = RawTypeData {
+            name: "Справочники.Контрагенты".to_string(),
+            english_name: "Catalogs.Contractors".to_string(),
+            description: "Справочник контрагентов".to_string(),
+            category: "Справочники".to_string(),
+            source: RawDataSource::Configuration,
+            methods: vec![],
+            properties: vec![],
+            facets: vec![FacetKind::Manager, FacetKind::Object],
+            kind: Some(MetadataKind::Catalog),
+            attributes: vec![],
+            tabular_sections: vec![],
+            enum_values: vec![],
+            generic_info: None,
+            module_paths: None,
+        };
+        repository.load_types(vec![catalog]).unwrap();
+
+        let metadata = TypeMetadataLookup::new(repository.clone());
+        let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
+        let mut program = SemanticProgram::new();
+
+        // Тестируем обращение к несуществующему справочнику
+        // Справочники.НесуществующийСправочник
+        // ВАЖНО: object_name должен быть Some("Справочники") - так формируется в ast_to_ir.rs
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::MemberAccess {
+                object_name: Some("Справочники".to_string()),
+                object_type: "СправочникМенеджер".to_string(),  // После infer_expression_type
+                member_name: "НесуществующийСправочник".to_string(),
+                is_method: false,
+            },
+            span: Span::new(1, 0, 1, 35),
+            scope_id: program.symbols.root_scope,
+        });
+
+        let mut visitor = SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut context = FlowContext::new(program.symbols.root_scope);
+        visitor.visit_node(&program.nodes[0], &mut context);
+
+        let errors = visitor.into_errors();
+        assert!(
+            !errors.is_empty(),
+            "Должна быть ошибка для несуществующего справочника"
+        );
+        assert!(errors[0].message.contains("Справочник"));
+        assert!(errors[0].message.contains("не найден"));
+    }
+
+    #[test]
+    fn test_visitor_no_error_for_existing_metadata_object() {
+        use std::sync::Arc;
+        use bsl_shared::domain::repository::InMemoryTypeRepository;
+        use bsl_shared::domain::types::{RawTypeData, RawDataSource};
+
+        let repository = Arc::new(InMemoryTypeRepository::new());
+
+        // Добавляем справочник "Контрагенты"
+        let catalog = RawTypeData {
+            name: "Справочники.Контрагенты".to_string(),
+            english_name: "Catalogs.Contractors".to_string(),
+            description: "Справочник контрагентов".to_string(),
+            category: "Справочники".to_string(),
+            source: RawDataSource::Configuration,
+            methods: vec![],
+            properties: vec![],
+            facets: vec![FacetKind::Manager, FacetKind::Object],
+            kind: Some(MetadataKind::Catalog),
+            attributes: vec![],
+            tabular_sections: vec![],
+            enum_values: vec![],
+            generic_info: None,
+            module_paths: None,
+        };
+        repository.load_types(vec![catalog]).unwrap();
+
+        let metadata = TypeMetadataLookup::new(repository.clone());
+        let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
+        let mut program = SemanticProgram::new();
+
+        // Тестируем обращение к существующему справочнику
+        // Справочники.Контрагенты
+        // ВАЖНО: object_name должен быть Some("Справочники") - так формируется в ast_to_ir.rs
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::MemberAccess {
+                object_name: Some("Справочники".to_string()),
+                object_type: "СправочникМенеджер".to_string(),  // После infer_expression_type
+                member_name: "Контрагенты".to_string(),
+                is_method: false,
+            },
+            span: Span::new(1, 0, 1, 25),
+            scope_id: program.symbols.root_scope,
+        });
+
+        let mut visitor = SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut context = FlowContext::new(program.symbols.root_scope);
+        visitor.visit_node(&program.nodes[0], &mut context);
+
+        let errors = visitor.into_errors();
+        assert!(
+            errors.is_empty(),
+            "Не должно быть ошибок для существующего справочника"
+        );
+    }
+
+    #[test]
+    fn test_visitor_no_error_when_config_not_loaded() {
+        use std::sync::Arc;
+        use bsl_shared::domain::repository::InMemoryTypeRepository;
+
+        // Репозиторий БЕЗ конфигурационных типов
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        let metadata = TypeMetadataLookup::new(repository.clone());
+        let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
+        let mut program = SemanticProgram::new();
+
+        // Тестируем обращение к несуществующему справочнику
+        // Когда конфигурация не загружена, ошибка не должна появляться (graceful degradation)
+        // ВАЖНО: object_name должен быть Some("Справочники") для прохождения через is_metadata_collection_name
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::MemberAccess {
+                object_name: Some("Справочники".to_string()),
+                object_type: "СправочникМенеджер".to_string(),
+                member_name: "НесуществующийСправочник".to_string(),
+                is_method: false,
+            },
+            span: Span::new(1, 0, 1, 35),
+            scope_id: program.symbols.root_scope,
+        });
+
+        let mut visitor = SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut context = FlowContext::new(program.symbols.root_scope);
+        visitor.visit_node(&program.nodes[0], &mut context);
+
+        let errors = visitor.into_errors();
+        // Когда конфигурация не загружена, пропускаем валидацию
+        // Но может быть ошибка "свойство не существует" для типа "Справочники"
+        // Это ожидаемое поведение - graceful degradation
+        assert!(
+            errors.is_empty() || !errors[0].message.contains("не найден в конфигурации"),
+            "Не должно быть ошибки 'не найден в конфигурации' когда конфигурация не загружена"
+        );
     }
 }

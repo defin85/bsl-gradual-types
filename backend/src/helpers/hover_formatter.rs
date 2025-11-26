@@ -40,6 +40,12 @@ use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::types::{Certainty, ResolutionResult, TypeResolution};
 use bsl_shared::formatting::DetailLevel; // MILESTONE 3.6 Phase 1
 
+/// Порог уверенности, ниже которого тип считается "низкой уверенности"
+/// и проверяется существование объекта метаданных.
+/// Используется в check_unknown_metadata_object() для определения,
+/// нужно ли показывать hover с ошибкой вместо стандартного hover.
+const LOW_CONFIDENCE_THRESHOLD: f32 = 0.6;
+
 /// Формат вывода hover информации
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
@@ -205,6 +211,9 @@ impl HoverFormatter {
     pub fn format_variable(&self, name: &str, resolution: &TypeResolution) -> String {
         use bsl_shared::domain::types::Certainty;
 
+        // NOTE: Ошибки о несуществующих объектах метаданных показываются через Diagnostics,
+        // а не через Hover. Hover показывает информацию о типе.
+
         // Проверка наличия метаданных
         let has_metadata = self.metadata_lookup.get_raw_type(resolution).is_some();
 
@@ -275,6 +284,153 @@ impl HoverFormatter {
             .add_header("Функция", name)
             .add_section("Сигнатура", signature)
             .build()
+    }
+
+    /// Форматирует hover для несуществующего объекта метаданных
+    ///
+    /// MILESTONE 3.16: Отображает информативное сообщение об ошибке
+    /// с предложениями похожих имён (fuzzy matching).
+    ///
+    /// NOTE: В текущей реализации ошибки показываются через Diagnostics.
+    /// Этот метод оставлен для возможного использования в будущем.
+    ///
+    /// # Аргументы
+    ///
+    /// * `kind` - вид метаданных (Catalog, Document, etc.)
+    /// * `name` - имя несуществующего объекта
+    /// * `suggestions` - список похожих имён для предложения исправления
+    ///
+    /// # Формат вывода (Markdown)
+    ///
+    /// ```text
+    /// ## Справочник "Контрагенты" не найден
+    ///
+    /// Объект не существует в загруженной конфигурации.
+    ///
+    /// ### Возможно, вы имели в виду:
+    /// - `Контрагент`
+    /// - `КонтрагентыПоставщики`
+    ///
+    /// ---
+    /// *Загрузите конфигурацию командой `BSL: Parse Configuration`*
+    /// ```
+    ///
+    /// # Примеры
+    ///
+    /// ```rust,no_run
+    /// use bsl_backend::helpers::hover_formatter::{HoverFormatter, HoverFormatConfig};
+    /// use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+    /// use bsl_shared::domain::repository::InMemoryTypeRepository;
+    /// use bsl_shared::domain::types::MetadataKind;
+    /// use std::sync::Arc;
+    ///
+    /// let repo = Arc::new(InMemoryTypeRepository::new());
+    /// let metadata_lookup = TypeMetadataLookup::new(repo);
+    /// let formatter = HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup);
+    ///
+    /// let hover = formatter.format_unknown_metadata_object(
+    ///     MetadataKind::Catalog,
+    ///     "Контрагенты",
+    ///     &["Контрагент".to_string(), "Контрагенты_Поставщики".to_string()],
+    /// );
+    /// // hover содержит информативное сообщение с предложениями
+    /// ```
+    #[allow(dead_code)]
+    pub fn format_unknown_metadata_object(
+        &self,
+        kind: bsl_shared::domain::types::MetadataKind,
+        name: &str,
+        suggestions: &[String],
+    ) -> String {
+        // Используем централизованный метод to_russian_name() из MetadataKind
+        let kind_name = kind.to_russian_name();
+
+        match self.config.output_format {
+            OutputFormat::Markdown => {
+                let mut result = format!(
+                    "## {} \"{}\" не найден\n\n\
+                     Объект не существует в загруженной конфигурации.",
+                    kind_name, name
+                );
+
+                // Добавляем предложения, если есть
+                if !suggestions.is_empty() {
+                    result.push_str("\n\n### Возможно, вы имели в виду:\n");
+                    for suggestion in suggestions {
+                        result.push_str(&format!("- `{}`\n", suggestion));
+                    }
+                }
+
+                result.push_str("\n---\n");
+                result.push_str("*Загрузите конфигурацию командой `BSL: Parse Configuration`*");
+
+                result
+            }
+            OutputFormat::PlainText => {
+                let mut result = format!(
+                    "{} \"{}\" не найден\n\
+                     Объект не существует в загруженной конфигурации.",
+                    kind_name, name
+                );
+
+                if !suggestions.is_empty() {
+                    result.push_str("\n\nВозможно, вы имели в виду:\n");
+                    for suggestion in suggestions {
+                        result.push_str(&format!("- {}\n", suggestion));
+                    }
+                }
+
+                result
+            }
+        }
+    }
+
+    /// Проверяет, является ли TypeResolution несуществующим объектом метаданных
+    ///
+    /// MILESTONE 3.16: Определяет, нужно ли показывать hover с ошибкой
+    /// вместо стандартного hover.
+    ///
+    /// # Условия для показа ошибки:
+    ///
+    /// 1. Тип = Configuration с Certainty::Inferred(0.5) (низкая уверенность)
+    /// 2. Конфигурация загружена (is_configuration_loaded() == true)
+    /// 3. Объект НЕ существует в метаданных (exists_metadata_object() == false)
+    ///
+    /// # Возвращает
+    ///
+    /// `Some((kind, name))` если объект не найден и нужно показать hover с ошибкой
+    /// `None` если объект существует или конфигурация не загружена
+    ///
+    /// NOTE: В текущей реализации ошибки показываются через Diagnostics.
+    /// Этот метод оставлен для возможного использования в будущем.
+    #[allow(dead_code)]
+    pub fn check_unknown_metadata_object(
+        &self,
+        resolution: &TypeResolution,
+    ) -> Option<(bsl_shared::domain::types::MetadataKind, String)> {
+        use bsl_shared::domain::types::{Certainty, ConcreteType};
+
+        // Проверяем что это Configuration тип с низкой уверенностью (50%)
+        if let ResolutionResult::Concrete(ConcreteType::Configuration(config)) = &resolution.result
+        {
+            // Certainty должна быть Inferred с низким значением (около 0.5)
+            if let Certainty::Inferred(conf) = resolution.certainty {
+                if conf <= LOW_CONFIDENCE_THRESHOLD {
+                    // Проверяем загружена ли конфигурация
+                    if self.metadata_lookup.is_configuration_loaded() {
+                        // Проверяем существует ли объект
+                        if !self
+                            .metadata_lookup
+                            .exists_metadata_object(config.kind, &config.name)
+                        {
+                            return Some((config.kind, config.name.clone()));
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -848,6 +1004,7 @@ mod tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            module_paths: None,
         };
 
         repo.load_types(vec![test_type]).unwrap();
@@ -883,6 +1040,7 @@ mod tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            module_paths: None,
         };
 
         repo.load_types(vec![test_type]).unwrap();
@@ -947,4 +1105,268 @@ mod tests {
         assert!(!result.contains("Свойство5")); // За пределами лимита
         assert!(result.contains("... и ещё 5 свойств"));
     }
+
+    // === MILESTONE 3.16: Тесты для format_unknown_metadata_object ===
+
+    #[test]
+    fn test_format_unknown_metadata_object_markdown() {
+        use bsl_shared::domain::types::MetadataKind;
+
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+
+        let config = HoverFormatConfig {
+            output_format: OutputFormat::Markdown,
+            ..Default::default()
+        };
+
+        let formatter = HoverFormatter::new(config, metadata_lookup);
+
+        let result = formatter.format_unknown_metadata_object(
+            MetadataKind::Catalog,
+            "Контрагенты",
+            &["Контрагент".to_string(), "КонтрагентыПоставщики".to_string()],
+        );
+
+        // Проверяем заголовок
+        assert!(result.contains("## Справочник \"Контрагенты\" не найден"));
+        // Проверяем описание
+        assert!(result.contains("Объект не существует в загруженной конфигурации"));
+        // Проверяем предложения
+        assert!(result.contains("### Возможно, вы имели в виду:"));
+        assert!(result.contains("- `Контрагент`"));
+        assert!(result.contains("- `КонтрагентыПоставщики`"));
+        // Проверяем инструкцию
+        assert!(result.contains("BSL: Parse Configuration"));
+    }
+
+    #[test]
+    fn test_format_unknown_metadata_object_plaintext() {
+        use bsl_shared::domain::types::MetadataKind;
+
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+
+        let config = HoverFormatConfig {
+            output_format: OutputFormat::PlainText,
+            ..Default::default()
+        };
+
+        let formatter = HoverFormatter::new(config, metadata_lookup);
+
+        let result = formatter.format_unknown_metadata_object(
+            MetadataKind::Document,
+            "ЗаказПокупателя",
+            &[],
+        );
+
+        // Проверяем заголовок (plain text без Markdown)
+        assert!(result.contains("Документ \"ЗаказПокупателя\" не найден"));
+        // Проверяем что нет Markdown форматирования
+        assert!(!result.contains("##"));
+        // Проверяем что нет предложений (пустой массив)
+        assert!(!result.contains("Возможно, вы имели в виду"));
+    }
+
+    #[test]
+    fn test_format_unknown_metadata_object_without_suggestions() {
+        use bsl_shared::domain::types::MetadataKind;
+
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+
+        let config = HoverFormatConfig::default();
+        let formatter = HoverFormatter::new(config, metadata_lookup);
+
+        let result = formatter.format_unknown_metadata_object(
+            MetadataKind::Enum,
+            "НесуществующееПеречисление",
+            &[],
+        );
+
+        // Проверяем заголовок
+        assert!(result.contains("## Перечисление \"НесуществующееПеречисление\" не найден"));
+        // Проверяем что нет блока предложений
+        assert!(!result.contains("### Возможно, вы имели в виду:"));
+        // Но есть инструкция
+        assert!(result.contains("BSL: Parse Configuration"));
+    }
+
+    #[test]
+    fn test_format_unknown_metadata_object_different_kinds() {
+        use bsl_shared::domain::types::MetadataKind;
+
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+
+        let config = HoverFormatConfig::default();
+        let formatter = HoverFormatter::new(config, metadata_lookup);
+
+        // Тестируем разные виды метаданных
+        let test_cases = vec![
+            (MetadataKind::Catalog, "Справочник"),
+            (MetadataKind::Document, "Документ"),
+            (MetadataKind::InformationRegister, "Регистр сведений"),
+            (MetadataKind::AccumulationRegister, "Регистр накопления"),
+            (MetadataKind::Report, "Отчет"),
+            (MetadataKind::DataProcessor, "Обработка"),
+        ];
+
+        for (kind, expected_name) in test_cases {
+            let result = formatter.format_unknown_metadata_object(kind, "Тест", &[]);
+            assert!(
+                result.contains(&format!("{} \"Тест\" не найден", expected_name)),
+                "Failed for kind {:?}: expected '{}', got: {}",
+                kind,
+                expected_name,
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_check_unknown_metadata_object_returns_none_for_known_type() {
+        use bsl_shared::domain::types::ConfigurationType;
+
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+
+        let config = HoverFormatConfig::default();
+        let formatter = HoverFormatter::new(config, metadata_lookup);
+
+        // Known certainty - должен вернуть None
+        let resolution = TypeResolution {
+            result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+                kind: bsl_shared::domain::types::MetadataKind::Catalog,
+                name: "Контрагенты".to_string(),
+                facet: None,
+                attributes: vec![],
+                tabular_sections: vec![],
+            })),
+            certainty: Certainty::Known, // Known = 100% уверенность
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
+        };
+
+        // Должен вернуть None, т.к. certainty = Known
+        assert!(formatter.check_unknown_metadata_object(&resolution).is_none());
+    }
+
+    #[test]
+    fn test_check_unknown_metadata_object_returns_none_for_platform_type() {
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+
+        let config = HoverFormatConfig::default();
+        let formatter = HoverFormatter::new(config, metadata_lookup);
+
+        // Platform type - должен вернуть None (не Configuration)
+        let resolution = TypeResolution {
+            result: ResolutionResult::Concrete(ConcreteType::Platform(PlatformType {
+                name: "Массив".to_string(),
+            })),
+            certainty: Certainty::Inferred(0.5),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
+        };
+
+        // Должен вернуть None, т.к. это Platform type, не Configuration
+        assert!(formatter.check_unknown_metadata_object(&resolution).is_none());
+    }
+
+    #[test]
+    fn test_check_unknown_metadata_object_returns_none_when_config_not_loaded() {
+        use bsl_shared::domain::types::ConfigurationType;
+
+        // Пустой репозиторий = конфигурация не загружена
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+
+        let config = HoverFormatConfig::default();
+        let formatter = HoverFormatter::new(config, metadata_lookup);
+
+        let resolution = TypeResolution {
+            result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+                kind: bsl_shared::domain::types::MetadataKind::Catalog,
+                name: "НесуществующийСправочник".to_string(),
+                facet: None,
+                attributes: vec![],
+                tabular_sections: vec![],
+            })),
+            certainty: Certainty::Inferred(0.5),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
+        };
+
+        // Должен вернуть None, т.к. конфигурация не загружена
+        // (is_configuration_loaded() == false)
+        assert!(formatter.check_unknown_metadata_object(&resolution).is_none());
+    }
+
+    #[test]
+    fn test_check_unknown_metadata_object_returns_some_when_object_not_found() {
+        use bsl_shared::domain::types::{ConfigurationType, FacetKind, RawDataSource, RawTypeData};
+
+        // Создаём репозиторий с одним справочником
+        let repo = Arc::new(InMemoryTypeRepository::new());
+
+        // Добавляем существующий справочник "Контрагенты"
+        let existing_catalog = RawTypeData {
+            name: "Справочники.Контрагенты".to_string(),
+            english_name: "Catalogs.Contractors".to_string(),
+            description: "Справочник контрагентов".to_string(),
+            category: "Справочники".to_string(),
+            source: RawDataSource::Configuration,
+            methods: vec![],
+            properties: vec![],
+            facets: vec![FacetKind::Manager],
+            kind: Some(bsl_shared::domain::types::MetadataKind::Catalog),
+            attributes: vec![],
+            tabular_sections: vec![],
+            enum_values: vec![],
+            generic_info: None,
+            module_paths: None,
+        };
+        repo.load_types(vec![existing_catalog]).unwrap();
+
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+        let config = HoverFormatConfig::default();
+        let formatter = HoverFormatter::new(config, metadata_lookup);
+
+        // Запрашиваем НЕсуществующий справочник с низкой certainty
+        let resolution = TypeResolution {
+            result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+                kind: bsl_shared::domain::types::MetadataKind::Catalog,
+                name: "НесуществующийСправочник".to_string(),
+                facet: None,
+                attributes: vec![],
+                tabular_sections: vec![],
+            })),
+            certainty: Certainty::Inferred(0.5), // Низкая certainty
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
+        };
+
+        // Должен вернуть Some, т.к.:
+        // 1. Это Configuration type
+        // 2. Certainty = Inferred(0.5) <= 0.6
+        // 3. Конфигурация загружена (есть Справочники.Контрагенты)
+        // 4. НесуществующийСправочник не существует
+        let result = formatter.check_unknown_metadata_object(&resolution);
+        assert!(result.is_some());
+
+        let (kind, name) = result.unwrap();
+        assert_eq!(kind, bsl_shared::domain::types::MetadataKind::Catalog);
+        assert_eq!(name, "НесуществующийСправочник");
+    }
+
+    // REMOVED: test_format_variable_uses_unknown_metadata_hover - hover should not show errors (Milestone 3.16)
 }

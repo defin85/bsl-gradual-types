@@ -655,9 +655,14 @@ impl TreeSitterAdapter {
         let mut value = None;
 
         for child in node.children(&mut cursor) {
-            if child.kind() == "identifier" || child.kind() == "property_access" {
+            let child_kind = child.kind();
+            if child_kind == "identifier" || child_kind == "property_access" {
                 if target.is_none() {
                     target = Self::convert_expression(&child, source)?;
+                } else if value.is_none() {
+                    // BUGFIX MILESTONE 3.16: If target is already set,
+                    // property_access/identifier goes to value!
+                    value = Self::convert_expression(&child, source)?;
                 }
             } else if let Some(expr) = Self::convert_expression(&child, source)? {
                 value = Some(expr);
@@ -1304,6 +1309,7 @@ impl TreeSitterAdapter {
 
         for child in node.children(&mut cursor) {
             match child.kind() {
+                // Прямой identifier (старая грамматика или fallback)
                 "identifier" => {
                     if object.is_none() {
                         let child_span = Self::node_to_span(&child, source);
@@ -1313,6 +1319,16 @@ impl TreeSitterAdapter {
                         });
                     } else {
                         property = Self::node_text(&child, source);
+                    }
+                }
+                // BUGFIX: tree-sitter-bsl использует "access" узел для объекта
+                // Структура: property_access -> access -> identifier
+                "access" => {
+                    if object.is_none() {
+                        // Рекурсивно конвертируем содержимое access
+                        if let Some(expr) = Self::convert_expression(&child, source)? {
+                            object = Some(expr);
+                        }
                     }
                 }
                 "property_access" => {
@@ -1850,9 +1866,17 @@ impl TreeSitterAdapter {
         let mut value = None;
 
         for child in node.children(&mut cursor) {
-            if child.kind() == "identifier" || child.kind() == "property_access" {
+            let child_kind = child.kind();
+            if child_kind == "identifier" || child_kind == "property_access" {
                 if target.is_none() {
                     target = Self::convert_expression(&child, source)?;
+                } else if value.is_none() {
+                    // BUGFIX MILESTONE 3.16: If target is already set,
+                    // property_access/identifier goes to value!
+                    // Example: Dok = Documents.OrderClient
+                    //   - target = "Dok" (identifier)
+                    //   - value = "Documents.OrderClient" (property_access)
+                    value = Self::convert_expression(&child, source)?;
                 }
             } else if let Some(expr) = Self::convert_expression(&child, source)? {
                 value = Some(expr);

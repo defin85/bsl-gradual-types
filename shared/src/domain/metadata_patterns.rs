@@ -203,8 +203,8 @@ impl MetadataPatternRegistry {
         ];
 
         for suffix in FACET_SUFFIXES {
-            if prefix.ends_with(suffix) {
-                return &prefix[..prefix.len() - suffix.len()];
+            if let Some(stripped) = prefix.strip_suffix(suffix) {
+                return stripped;
             }
         }
         prefix

@@ -8,6 +8,7 @@ use crate::domain::types::{
     ConcreteType, FacetKind, GenericType, MetadataKind, RawMethodData, RawPropertyData,
     RawTypeData, ResolutionResult, TypeResolution,
 };
+use crate::utils::string_utils::levenshtein_distance;
 use std::sync::Arc;
 
 /// Сервис для получения метаданных типа по TypeResolution
@@ -505,6 +506,129 @@ impl TypeMetadataLookup {
         // "тип найден, но методов нет" от "тип не найден"
         Some(platform_type.methods.clone())
     }
+
+    // === Milestone 3.16: MetadataLookup API ===
+
+    /// Проверяет существование объекта метаданных указанного вида
+    ///
+    /// # Параметры
+    ///
+    /// * `kind` - вид метаданных (Catalog, Document, etc.)
+    /// * `name` - имя объекта без префикса (например, "Контрагенты")
+    ///
+    /// # Возвращает
+    ///
+    /// `true` если объект найден в репозитории
+    ///
+    /// # Примеры
+    ///
+    /// ```ignore
+    /// let lookup = TypeMetadataLookup::new(repository);
+    ///
+    /// // Проверяем существующий справочник
+    /// assert!(lookup.exists_metadata_object(MetadataKind::Catalog, "Контрагенты"));
+    ///
+    /// // Проверяем несуществующий справочник
+    /// assert!(!lookup.exists_metadata_object(MetadataKind::Catalog, "НесуществующийСправочник"));
+    /// ```
+    pub fn exists_metadata_object(&self, kind: MetadataKind, name: &str) -> bool {
+        let full_type_name = format!("{}.{}", kind.to_prefix(), name);
+        self.repository.find_type(&full_type_name).is_some()
+    }
+
+    /// Возвращает похожие имена объектов метаданных (fuzzy matching)
+    ///
+    /// Использует алгоритм Левенштейна для поиска похожих имён.
+    /// Полезно для диагностических сообщений с предложениями исправлений.
+    ///
+    /// # Параметры
+    ///
+    /// * `kind` - вид метаданных (Catalog, Document, etc.)
+    /// * `name` - имя для поиска похожих
+    /// * `max_suggestions` - максимальное количество предложений
+    ///
+    /// # Алгоритм
+    ///
+    /// 1. Получает все объекты указанного вида
+    /// 2. Вычисляет расстояние Левенштейна для каждого
+    /// 3. Фильтрует по порогу (distance <= max(len/2, 3))
+    /// 4. Сортирует по расстоянию (меньше = лучше)
+    /// 5. Возвращает топ-N результатов
+    ///
+    /// # Примеры
+    ///
+    /// ```ignore
+    /// let lookup = TypeMetadataLookup::new(repository);
+    ///
+    /// // Опечатка: "Контрогенты" вместо "Контрагенты"
+    /// let suggestions = lookup.suggest_similar_names(
+    ///     MetadataKind::Catalog,
+    ///     "Контрогенты",
+    ///     3
+    /// );
+    /// // → ["Контрагенты"]
+    /// ```
+    pub fn suggest_similar_names(
+        &self,
+        kind: MetadataKind,
+        name: &str,
+        max_suggestions: usize,
+    ) -> Vec<String> {
+        let all_objects = self.repository.get_metadata_objects_by_kind(kind);
+
+        let mut candidates: Vec<(String, usize)> = all_objects
+            .into_iter()
+            .filter_map(|obj_name| {
+                let distance = levenshtein_distance(name, &obj_name);
+                // Порог: до половины длины имени, но минимум 3
+                let threshold = (name.chars().count() / 2).max(3);
+                if distance <= threshold {
+                    Some((obj_name, distance))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Сортируем по расстоянию (меньше = лучше совпадение)
+        candidates.sort_by_key(|(_, dist)| *dist);
+
+        candidates
+            .into_iter()
+            .take(max_suggestions)
+            .map(|(n, _)| n)
+            .collect()
+    }
+
+    /// Проверяет, загружена ли конфигурация в репозиторий
+    ///
+    /// # Возвращает
+    ///
+    /// `true` если есть хотя бы один конфигурационный тип
+    ///
+    /// # Использование
+    ///
+    /// Полезно для определения, нужно ли выполнять валидацию
+    /// объектов метаданных или просто пропустить проверку.
+    ///
+    /// # Примеры
+    ///
+    /// ```ignore
+    /// let lookup = TypeMetadataLookup::new(repository);
+    ///
+    /// if lookup.is_configuration_loaded() {
+    ///     // Выполняем валидацию объектов метаданных
+    ///     if !lookup.exists_metadata_object(kind, name) {
+    ///         // Генерируем ошибку
+    ///     }
+    /// } else {
+    ///     // Пропускаем валидацию - конфигурация не загружена
+    /// }
+    /// ```
+    pub fn is_configuration_loaded(&self) -> bool {
+        let stats = self.repository.get_stats();
+        stats.configuration_types > 0
+    }
 }
 
 #[cfg(test)]
@@ -557,6 +681,7 @@ mod tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            module_paths: None,
         };
 
         repo.load_types(vec![array_type]).unwrap();
@@ -720,6 +845,7 @@ mod tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            module_paths: None,
         };
 
         repo.load_types(vec![tabular_type]).unwrap();
@@ -866,5 +992,195 @@ mod tests {
         assert!(method_names.contains(&"Получить"));
         assert!(method_names.contains(&"Количество"));
         assert!(method_names.contains(&"Индекс"));
+    }
+
+    // === Тесты для Milestone 3.16: MetadataLookup API ===
+
+    /// Создаёт репозиторий с конфигурационными типами для тестирования
+    fn create_test_repository_with_config_types() -> Arc<InMemoryTypeRepository> {
+        use crate::domain::types::RawDataSource;
+
+        let repo = Arc::new(InMemoryTypeRepository::new());
+
+        // Создаём тестовые справочники
+        let catalog1 = RawTypeData {
+            name: "Справочники.Контрагенты".to_string(),
+            english_name: "Catalogs.Contractors".to_string(),
+            description: "Справочник контрагентов".to_string(),
+            category: "Справочники".to_string(),
+            source: RawDataSource::Configuration,
+            methods: vec![],
+            properties: vec![],
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Catalog),
+            attributes: vec![],
+            tabular_sections: vec![],
+            enum_values: vec![],
+            generic_info: None,
+            module_paths: None,
+        };
+
+        let catalog2 = RawTypeData {
+            name: "Справочники.Номенклатура".to_string(),
+            english_name: "Catalogs.Products".to_string(),
+            description: "Справочник номенклатуры".to_string(),
+            category: "Справочники".to_string(),
+            source: RawDataSource::Configuration,
+            methods: vec![],
+            properties: vec![],
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Catalog),
+            attributes: vec![],
+            tabular_sections: vec![],
+            enum_values: vec![],
+            generic_info: None,
+            module_paths: None,
+        };
+
+        let catalog3 = RawTypeData {
+            name: "Справочники.Склады".to_string(),
+            english_name: "Catalogs.Warehouses".to_string(),
+            description: "Справочник складов".to_string(),
+            category: "Справочники".to_string(),
+            source: RawDataSource::Configuration,
+            methods: vec![],
+            properties: vec![],
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Catalog),
+            attributes: vec![],
+            tabular_sections: vec![],
+            enum_values: vec![],
+            generic_info: None,
+            module_paths: None,
+        };
+
+        // Создаём тестовый документ
+        let document = RawTypeData {
+            name: "Документы.ЗаказПокупателя".to_string(),
+            english_name: "Documents.CustomerOrder".to_string(),
+            description: "Заказ покупателя".to_string(),
+            category: "Документы".to_string(),
+            source: RawDataSource::Configuration,
+            methods: vec![],
+            properties: vec![],
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Document),
+            attributes: vec![],
+            tabular_sections: vec![],
+            enum_values: vec![],
+            generic_info: None,
+            module_paths: None,
+        };
+
+        repo.load_types(vec![catalog1, catalog2, catalog3, document])
+            .unwrap();
+        repo
+    }
+
+    #[test]
+    fn test_exists_metadata_object_found() {
+        let repo = create_test_repository_with_config_types();
+        let lookup = TypeMetadataLookup::new(repo);
+
+        assert!(lookup.exists_metadata_object(MetadataKind::Catalog, "Контрагенты"));
+        assert!(lookup.exists_metadata_object(MetadataKind::Catalog, "Номенклатура"));
+        assert!(lookup.exists_metadata_object(MetadataKind::Document, "ЗаказПокупателя"));
+    }
+
+    #[test]
+    fn test_exists_metadata_object_not_found() {
+        let repo = create_test_repository_with_config_types();
+        let lookup = TypeMetadataLookup::new(repo);
+
+        assert!(!lookup.exists_metadata_object(MetadataKind::Catalog, "НесуществующийСправочник"));
+        assert!(!lookup.exists_metadata_object(MetadataKind::Document, "НесуществующийДокумент"));
+        // Неправильный вид метаданных
+        assert!(!lookup.exists_metadata_object(MetadataKind::Document, "Контрагенты"));
+    }
+
+    #[test]
+    fn test_suggest_similar_names_typo() {
+        let repo = create_test_repository_with_config_types();
+        let lookup = TypeMetadataLookup::new(repo);
+
+        // Опечатка: "Контрогенты" вместо "Контрагенты"
+        let suggestions =
+            lookup.suggest_similar_names(MetadataKind::Catalog, "Контрогенты", 3);
+
+        assert!(!suggestions.is_empty());
+        assert!(suggestions.contains(&"Контрагенты".to_string()));
+    }
+
+    #[test]
+    fn test_suggest_similar_names_no_match() {
+        let repo = create_test_repository_with_config_types();
+        let lookup = TypeMetadataLookup::new(repo);
+
+        // Совсем непохожее имя
+        let suggestions =
+            lookup.suggest_similar_names(MetadataKind::Catalog, "АбсолютноДругоеИмя", 3);
+
+        // Должен вернуть пустой вектор - слишком большое расстояние
+        assert!(suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_suggest_similar_names_sorting() {
+        let repo = create_test_repository_with_config_types();
+        let lookup = TypeMetadataLookup::new(repo);
+
+        // "Склад" близко к "Склады" (1 операция)
+        let suggestions = lookup.suggest_similar_names(MetadataKind::Catalog, "Склад", 3);
+
+        assert!(!suggestions.is_empty());
+        // Склады должен быть в списке (расстояние = 1)
+        assert!(suggestions.contains(&"Склады".to_string()));
+    }
+
+    #[test]
+    fn test_suggest_similar_names_max_limit() {
+        let repo = create_test_repository_with_config_types();
+        let lookup = TypeMetadataLookup::new(repo);
+
+        // Ограничение на количество предложений
+        let suggestions = lookup.suggest_similar_names(MetadataKind::Catalog, "Н", 1);
+
+        assert!(suggestions.len() <= 1);
+    }
+
+    #[test]
+    fn test_is_configuration_loaded_true() {
+        let repo = create_test_repository_with_config_types();
+        let lookup = TypeMetadataLookup::new(repo);
+
+        assert!(lookup.is_configuration_loaded());
+    }
+
+    #[test]
+    fn test_is_configuration_loaded_false() {
+        // Репозиторий только с платформенными типами
+        let repo = create_test_repository();
+        let lookup = TypeMetadataLookup::new(repo);
+
+        assert!(!lookup.is_configuration_loaded());
+    }
+
+    #[test]
+    fn test_get_metadata_objects_by_kind() {
+        let repo = create_test_repository_with_config_types();
+
+        let catalogs = repo.get_metadata_objects_by_kind(MetadataKind::Catalog);
+        assert_eq!(catalogs.len(), 3);
+        assert!(catalogs.contains(&"Контрагенты".to_string()));
+        assert!(catalogs.contains(&"Номенклатура".to_string()));
+        assert!(catalogs.contains(&"Склады".to_string()));
+
+        let documents = repo.get_metadata_objects_by_kind(MetadataKind::Document);
+        assert_eq!(documents.len(), 1);
+        assert!(documents.contains(&"ЗаказПокупателя".to_string()));
+
+        // Пустой результат для несуществующего вида
+        let enums = repo.get_metadata_objects_by_kind(MetadataKind::Enum);
+        assert!(enums.is_empty());
     }
 }

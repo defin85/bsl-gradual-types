@@ -3,14 +3,28 @@
 //! Milestone 2.20: Function Signature Validation System
 //! Milestone 3.11: Method Signature Enhancement with Facets and Context
 //! Milestone 3.13: MetadataPatternRegistry Integration
+//! Milestone 3.15: Lazy Resolution with Arc<OnceLock>
 
 use super::metadata_patterns::{ExtractedPattern, MetadataPatternRegistry};
-use super::types::{FacetKind, MetadataKind, ParameterInfo};
+use super::types::{FacetKind, MetadataKind, ParameterInfo, TypeResolution};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
 
 // MILESTONE 3.11 Phase 3: Re-export ContextRequirements для обратной совместимости
 pub use super::runtime_context::ContextRequirements;
+
+// ==================== MILESTONE 3.15: Lazy Resolution Defaults ====================
+
+/// Default function for serde skip - creates empty resolved_return cache
+fn default_resolved_return() -> Arc<OnceLock<Option<TypeResolution>>> {
+    Arc::new(OnceLock::new())
+}
+
+/// Default function for serde skip - creates empty resolved_params cache
+fn default_resolved_params() -> Arc<OnceLock<Vec<(String, TypeResolution)>>> {
+    Arc::new(OnceLock::new())
+}
 
 /// Индекс сигнатур функций и методов
 #[derive(Debug, Clone)]
@@ -35,6 +49,7 @@ pub struct SignatureIndex {
 /// - Базовые параметры (имя, тип владельца, параметры)
 /// - Facet информацию для методов конфигурационных объектов
 /// - Требования к контексту выполнения
+/// - Lazy Resolution Cache (Milestone 3.15) для отложенного резолвинга типов
 ///
 /// # Примеры
 /// ```
@@ -42,17 +57,17 @@ pub struct SignatureIndex {
 /// use bsl_shared::domain::types::{ParameterInfo, FacetKind};
 ///
 /// // Метод Справочник.СоздатьЭлемент() → Object, ServerOnly
-/// let signature = MethodSignature {
-///     name: "СоздатьЭлемент".to_string(),
-///     owner_type: Some("СправочникМенеджер.Номенклатура".to_string()),
-///     params: vec![],
-///     return_type: Some("СправочникОбъект.Номенклатура".to_string()),
-///     source: SignatureSource::Platform,
-///     return_facet: Some(FacetKind::Object),
-///     context_requirements: ContextRequirements::ServerOnly,
-/// };
+/// let signature = MethodSignature::new(
+///     "СоздатьЭлемент".to_string(),
+///     Some("СправочникМенеджер.Номенклатура".to_string()),
+///     vec![],
+///     Some("СправочникОбъект.Номенклатура".to_string()),
+///     SignatureSource::Platform,
+///     Some(FacetKind::Object),
+///     ContextRequirements::ServerOnly,
+/// );
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)] // БЕЗ Clone - реализуем вручную!
 pub struct MethodSignature {
     pub name: String,
     pub owner_type: Option<String>, // None для глобальных функций
@@ -74,6 +89,157 @@ pub struct MethodSignature {
     /// Определяет где может быть вызван метод (сервер/клиент/везде)
     #[serde(default)]
     pub context_requirements: ContextRequirements,
+
+    // ==================== MILESTONE 3.15: Lazy Resolution Cache ====================
+
+    /// Кэш резолвленного типа возврата (lazy, thread-safe)
+    ///
+    /// Заполняется при первом вызове `get_resolved_return_type()`.
+    /// Arc позволяет разделять кэш между клонированными сигнатурами.
+    #[serde(skip, default = "default_resolved_return")]
+    resolved_return: Arc<OnceLock<Option<TypeResolution>>>,
+
+    /// Кэш резолвленных типов параметров (lazy, thread-safe)
+    ///
+    /// Заполняется при первом вызове `get_resolved_params()`.
+    /// Vec содержит пары (имя_параметра, TypeResolution).
+    #[serde(skip, default = "default_resolved_params")]
+    resolved_params: Arc<OnceLock<Vec<(String, TypeResolution)>>>,
+}
+
+// ==================== MILESTONE 3.15: Clone и Lazy Resolution ====================
+
+impl Clone for MethodSignature {
+    /// Клонирование с разделяемым кэшем
+    ///
+    /// ВАЖНО: Arc::clone создаёт shared reference на кэш.
+    /// Это означает что клонированные сигнатуры разделяют кэш резолвленных типов.
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            owner_type: self.owner_type.clone(),
+            params: self.params.clone(),
+            return_type: self.return_type.clone(),
+            source: self.source,
+            return_facet: self.return_facet,
+            context_requirements: self.context_requirements, // Copy trait
+            // ВАЖНО: Arc::clone = shared cache между всеми клонами!
+            resolved_return: Arc::clone(&self.resolved_return),
+            resolved_params: Arc::clone(&self.resolved_params),
+        }
+    }
+}
+
+impl MethodSignature {
+    /// Создать новую сигнатуру метода
+    ///
+    /// Инициализирует lazy resolution кэши как пустые.
+    pub fn new(
+        name: String,
+        owner_type: Option<String>,
+        params: Vec<ParameterInfo>,
+        return_type: Option<String>,
+        source: SignatureSource,
+        return_facet: Option<FacetKind>,
+        context_requirements: ContextRequirements,
+    ) -> Self {
+        Self {
+            name,
+            owner_type,
+            params,
+            return_type,
+            source,
+            return_facet,
+            context_requirements,
+            resolved_return: default_resolved_return(),
+            resolved_params: default_resolved_params(),
+        }
+    }
+
+    /// Получить резолвленный тип возврата (lazy, с кэшированием)
+    ///
+    /// При первом вызове выполняет резолвинг через переданную функцию.
+    /// Последующие вызовы возвращают закэшированное значение.
+    ///
+    /// # Arguments
+    /// * `resolve_fn` - Функция резолвинга: принимает строку типа, возвращает TypeResolution
+    ///
+    /// # Returns
+    /// * `Some(&TypeResolution)` - если return_type определён
+    /// * `None` - если return_type = None (процедура без возвращаемого значения)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let resolved = method.get_resolved_return_type(|type_str| {
+    ///     resolver.resolve_expression_sync(type_str)
+    /// });
+    /// ```
+    pub fn get_resolved_return_type<F>(&self, resolve_fn: F) -> Option<&TypeResolution>
+    where
+        F: FnOnce(&str) -> TypeResolution,
+    {
+        self.resolved_return
+            .get_or_init(|| self.return_type.as_ref().map(|rt| resolve_fn(rt)))
+            .as_ref()
+    }
+
+    /// Получить резолвленные типы параметров (lazy, с кэшированием)
+    ///
+    /// При первом вызове выполняет резолвинг всех параметров.
+    /// Последующие вызовы возвращают закэшированное значение.
+    ///
+    /// # Arguments
+    /// * `resolve_fn` - Функция резолвинга: принимает строку типа, возвращает TypeResolution
+    ///
+    /// # Returns
+    /// Слайс пар (имя_параметра, TypeResolution)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let params = method.get_resolved_params(|type_str| {
+    ///     resolver.resolve_expression_sync(type_str)
+    /// });
+    /// for (name, resolution) in params {
+    ///     println!("{}: {:?}", name, resolution);
+    /// }
+    /// ```
+    pub fn get_resolved_params<F>(&self, resolve_fn: F) -> &[(String, TypeResolution)]
+    where
+        F: Fn(&str) -> TypeResolution,
+    {
+        self.resolved_params.get_or_init(|| {
+            self.params
+                .iter()
+                .map(|p| {
+                    let resolved = p
+                        .type_name
+                        .as_ref()
+                        .map(|t| resolve_fn(t))
+                        .unwrap_or_else(TypeResolution::unknown);
+                    (p.name.clone(), resolved)
+                })
+                .collect()
+        })
+    }
+
+    /// Проверить, закэширован ли тип возврата
+    pub fn has_cached_return_type(&self) -> bool {
+        self.resolved_return.get().is_some()
+    }
+
+    /// Проверить, закэшированы ли типы параметров
+    pub fn has_cached_params(&self) -> bool {
+        self.resolved_params.get().is_some()
+    }
+
+    /// Сбросить кэш резолвленных типов
+    ///
+    /// Создаёт новые пустые кэши. Полезно при изменении TypeResolver.
+    /// ВНИМАНИЕ: Это НЕ влияет на уже склонированные сигнатуры!
+    pub fn reset_cache(&mut self) {
+        self.resolved_return = default_resolved_return();
+        self.resolved_params = default_resolved_params();
+    }
 }
 
 /// Сигнатура конструктора
@@ -259,6 +425,33 @@ impl SignatureIndex {
         }
 
         None
+    }
+
+    /// Получить все методы для указанного типа (Milestone 3.15: Pre-warm Cache)
+    ///
+    /// Возвращает все платформенные и конфигурационные методы для типа.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let methods = signature_index.get_type_methods("Массив");
+    /// for method in methods {
+    ///     println!("{}", method.name);
+    /// }
+    /// ```
+    pub fn get_type_methods(&self, type_name: &str) -> Vec<&MethodSignature> {
+        let mut result = Vec::new();
+
+        // Платформенные методы
+        if let Some(methods) = self.platform_methods.get(type_name) {
+            result.extend(methods.iter());
+        }
+
+        // Конфигурационные методы
+        if let Some(methods) = self.config_methods.get(type_name) {
+            result.extend(methods.iter());
+        }
+
+        result
     }
 
     /// Извлечь базовый фасетный тип из полного имени типа
@@ -651,15 +844,15 @@ mod tests {
     fn test_signature_index_basic() {
         let mut index = SignatureIndex::new();
 
-        let sig = MethodSignature {
-            name: "Добавить".to_string(),
-            owner_type: Some("Массив".to_string()),
-            params: vec![],
-            return_type: None,
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        };
+        let sig = MethodSignature::new(
+            "Добавить".to_string(),
+            Some("Массив".to_string()),
+            vec![],
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
 
         index.add_platform_method("Массив".to_string(), sig);
 
@@ -672,15 +865,15 @@ mod tests {
     fn test_signature_index_case_insensitive() {
         let mut index = SignatureIndex::new();
 
-        let sig = MethodSignature {
-            name: "Добавить".to_string(),
-            owner_type: Some("Массив".to_string()),
-            params: vec![],
-            return_type: None,
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        };
+        let sig = MethodSignature::new(
+            "Добавить".to_string(),
+            Some("Массив".to_string()),
+            vec![],
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
 
         index.add_platform_method("Массив".to_string(), sig);
 
@@ -880,15 +1073,15 @@ mod tests {
         let mut index = SignatureIndex::new();
 
         // Добавляем метод под базовым типом (как в platform_types.rs)
-        let sig = MethodSignature {
-            name: "СоздатьЭлемент".to_string(),
-            owner_type: Some("СправочникМенеджер".to_string()),
-            params: vec![],
-            return_type: Some("СправочникОбъект".to_string()),
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        };
+        let sig = MethodSignature::new(
+            "СоздатьЭлемент".to_string(),
+            Some("СправочникМенеджер".to_string()),
+            vec![],
+            Some("СправочникОбъект".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
 
         index.add_platform_method("СправочникМенеджер".to_string(), sig);
 
@@ -911,15 +1104,15 @@ mod tests {
     fn test_find_method_document_faceted() {
         let mut index = SignatureIndex::new();
 
-        let sig = MethodSignature {
-            name: "Провести".to_string(),
-            owner_type: Some("ДокументОбъект".to_string()),
-            params: vec![],
-            return_type: Some("Неопределено".to_string()),
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        };
+        let sig = MethodSignature::new(
+            "Провести".to_string(),
+            Some("ДокументОбъект".to_string()),
+            vec![],
+            Some("Неопределено".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
 
         index.add_platform_method("ДокументОбъект".to_string(), sig);
 
@@ -933,15 +1126,15 @@ mod tests {
     fn test_find_method_non_faceted_still_works() {
         let mut index = SignatureIndex::new();
 
-        let sig = MethodSignature {
-            name: "Добавить".to_string(),
-            owner_type: Some("Массив".to_string()),
-            params: vec![],
-            return_type: None,
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::default(),
-        };
+        let sig = MethodSignature::new(
+            "Добавить".to_string(),
+            Some("Массив".to_string()),
+            vec![],
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
 
         index.add_platform_method("Массив".to_string(), sig);
 
@@ -1242,5 +1435,173 @@ mod tests {
             SignatureIndex::extract_base_facet_type("ПланОбменаОбъект.РаспределённаяБаза"),
             Some("ПланОбменаОбъект")
         );
+    }
+
+    // ================= MILESTONE 3.15: Lazy Resolution Tests =================
+
+    #[test]
+    fn test_lazy_return_type_caching() {
+        let method = MethodSignature::new(
+            "Количество".to_string(),
+            Some("Массив".to_string()),
+            vec![],
+            Some("Число".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
+
+        // Изначально кэш пустой
+        assert!(!method.has_cached_return_type());
+
+        // Первый вызов заполняет кэш
+        let result1 = method.get_resolved_return_type(|_| TypeResolution::unknown());
+        assert!(method.has_cached_return_type());
+        assert!(result1.is_some());
+
+        // Второй вызов использует кэш (closure не вызывается)
+        let result2 = method.get_resolved_return_type(|_| panic!("Should use cache!"));
+        assert_eq!(result1.is_some(), result2.is_some());
+    }
+
+    #[test]
+    fn test_lazy_return_type_none() {
+        // Процедура без возвращаемого значения
+        let method = MethodSignature::new(
+            "Сообщить".to_string(),
+            None,
+            vec![],
+            None, // return_type = None
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
+
+        assert!(!method.has_cached_return_type());
+
+        // Для None return_type результат тоже None
+        let result = method.get_resolved_return_type(|_| panic!("Should not be called!"));
+        assert!(result.is_none());
+
+        // Кэш всё равно заполняется
+        assert!(method.has_cached_return_type());
+    }
+
+    #[test]
+    fn test_lazy_params_caching() {
+        use crate::domain::types::ParameterInfo;
+
+        let method = MethodSignature::new(
+            "Вставить".to_string(),
+            Some("Массив".to_string()),
+            vec![
+                ParameterInfo {
+                    name: "Индекс".to_string(),
+                    type_name: Some("Число".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: None,
+                },
+                ParameterInfo {
+                    name: "Значение".to_string(),
+                    type_name: Some("Произвольный".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: None,
+                },
+            ],
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
+
+        assert!(!method.has_cached_params());
+
+        // Первый вызов заполняет кэш
+        let params = method.get_resolved_params(|_| TypeResolution::unknown());
+        assert!(method.has_cached_params());
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].0, "Индекс");
+        assert_eq!(params[1].0, "Значение");
+
+        // Второй вызов использует кэш
+        let params2 = method.get_resolved_params(|_| panic!("Should use cache!"));
+        assert_eq!(params.len(), params2.len());
+    }
+
+    #[test]
+    fn test_clone_shares_cache() {
+        let method1 = MethodSignature::new(
+            "Тест".to_string(),
+            Some("Тип".to_string()),
+            vec![],
+            Some("Строка".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
+
+        // Заполняем кэш в method1
+        let _ = method1.get_resolved_return_type(|_| TypeResolution::unknown());
+        assert!(method1.has_cached_return_type());
+
+        // Клонируем - кэш должен разделяться
+        let method2 = method1.clone();
+        assert!(method2.has_cached_return_type()); // Кэш уже заполнен!
+
+        // Closure не вызывается т.к. кэш общий
+        let _ = method2.get_resolved_return_type(|_| panic!("Should use shared cache!"));
+    }
+
+    #[test]
+    fn test_reset_cache() {
+        let mut method = MethodSignature::new(
+            "Тест".to_string(),
+            Some("Тип".to_string()),
+            vec![],
+            Some("Строка".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
+
+        // Заполняем кэш
+        let _ = method.get_resolved_return_type(|_| TypeResolution::unknown());
+        let _ = method.get_resolved_params(|_| TypeResolution::unknown());
+        assert!(method.has_cached_return_type());
+        assert!(method.has_cached_params());
+
+        // Сбрасываем кэш
+        method.reset_cache();
+        assert!(!method.has_cached_return_type());
+        assert!(!method.has_cached_params());
+    }
+
+    #[test]
+    fn test_param_with_no_type() {
+        use crate::domain::types::ParameterInfo;
+
+        let method = MethodSignature::new(
+            "МетодБезТипов".to_string(),
+            None,
+            vec![ParameterInfo {
+                name: "Параметр".to_string(),
+                type_name: None, // Тип не указан
+                is_optional: false,
+                default_value: None,
+                description: None,
+            }],
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
+
+        // Для параметра без типа должен вернуться unknown
+        let params = method.get_resolved_params(|_| panic!("Should not be called for None type"));
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].0, "Параметр");
+        // TypeResolution.unknown() возвращается для параметров без типа
     }
 }

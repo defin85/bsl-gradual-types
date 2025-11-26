@@ -329,6 +329,7 @@ fn test_handle_query_type_no_constructor_graceful() {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None,
     };
 
     repo.load_types(vec![type_data]).unwrap();

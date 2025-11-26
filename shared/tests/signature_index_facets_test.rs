@@ -75,15 +75,15 @@ fn test_context_requirements_server_preferred() {
 
 #[test]
 fn test_method_signature_with_facet_object() {
-    let sig = MethodSignature {
-        name: "СоздатьЭлемент".to_string(),
-        owner_type: Some("СправочникМенеджер.Номенклатура".to_string()),
-        params: vec![],
-        return_type: Some("СправочникОбъект.Номенклатура".to_string()),
-        source: SignatureSource::Platform,
-        return_facet: Some(FacetKind::Object),
-        context_requirements: ContextRequirements::ServerOnly,
-    };
+    let sig = MethodSignature::new(
+        "СоздатьЭлемент".to_string(),
+        Some("СправочникМенеджер.Номенклатура".to_string()),
+        vec![],
+        Some("СправочникОбъект.Номенклатура".to_string()),
+        SignatureSource::Platform,
+        Some(FacetKind::Object),
+        ContextRequirements::ServerOnly,
+    );
 
     assert_eq!(sig.name, "СоздатьЭлемент");
     assert_eq!(sig.return_facet, Some(FacetKind::Object));
@@ -92,21 +92,21 @@ fn test_method_signature_with_facet_object() {
 
 #[test]
 fn test_method_signature_with_facet_reference() {
-    let sig = MethodSignature {
-        name: "НайтиПоКоду".to_string(),
-        owner_type: Some("СправочникМенеджер.Номенклатура".to_string()),
-        params: vec![ParameterInfo {
+    let sig = MethodSignature::new(
+        "НайтиПоКоду".to_string(),
+        Some("СправочникМенеджер.Номенклатура".to_string()),
+        vec![ParameterInfo {
             name: "Код".to_string(),
             type_name: Some("Строка".to_string()),
             is_optional: false,
             default_value: None,
             description: None,
         }],
-        return_type: Some("СправочникСсылка.Номенклатура".to_string()),
-        source: SignatureSource::Platform,
-        return_facet: Some(FacetKind::Reference),
-        context_requirements: ContextRequirements::ServerOnly,
-    };
+        Some("СправочникСсылка.Номенклатура".to_string()),
+        SignatureSource::Platform,
+        Some(FacetKind::Reference),
+        ContextRequirements::ServerOnly,
+    );
 
     assert_eq!(sig.name, "НайтиПоКоду");
     assert_eq!(sig.return_facet, Some(FacetKind::Reference));
@@ -116,15 +116,15 @@ fn test_method_signature_with_facet_reference() {
 
 #[test]
 fn test_method_signature_with_facet_selection() {
-    let sig = MethodSignature {
-        name: "Выбрать".to_string(),
-        owner_type: Some("СправочникМенеджер.Номенклатура".to_string()),
-        params: vec![],
-        return_type: Some("СправочникВыборка.Номенклатура".to_string()),
-        source: SignatureSource::Platform,
-        return_facet: Some(FacetKind::Selection),
-        context_requirements: ContextRequirements::ServerOnly,
-    };
+    let sig = MethodSignature::new(
+        "Выбрать".to_string(),
+        Some("СправочникМенеджер.Номенклатура".to_string()),
+        vec![],
+        Some("СправочникВыборка.Номенклатура".to_string()),
+        SignatureSource::Platform,
+        Some(FacetKind::Selection),
+        ContextRequirements::ServerOnly,
+    );
 
     assert_eq!(sig.name, "Выбрать");
     assert_eq!(sig.return_facet, Some(FacetKind::Selection));
@@ -132,15 +132,15 @@ fn test_method_signature_with_facet_selection() {
 
 #[test]
 fn test_method_signature_without_facet() {
-    let sig = MethodSignature {
-        name: "Количество".to_string(),
-        owner_type: Some("Массив".to_string()),
-        params: vec![],
-        return_type: Some("Число".to_string()),
-        source: SignatureSource::Platform,
-        return_facet: None,
-        context_requirements: ContextRequirements::Universal,
-    };
+    let sig = MethodSignature::new(
+        "Количество".to_string(),
+        Some("Массив".to_string()),
+        vec![],
+        Some("Число".to_string()),
+        SignatureSource::Platform,
+        None,
+        ContextRequirements::Universal,
+    );
 
     assert_eq!(sig.name, "Количество");
     assert_eq!(sig.return_facet, None);
@@ -149,15 +149,15 @@ fn test_method_signature_without_facet() {
 
 #[test]
 fn test_method_signature_universal_context() {
-    let sig = MethodSignature {
-        name: "ПустаяСсылка".to_string(),
-        owner_type: Some("СправочникМенеджер.Номенклатура".to_string()),
-        params: vec![],
-        return_type: Some("СправочникСсылка.Номенклатура".to_string()),
-        source: SignatureSource::Platform,
-        return_facet: Some(FacetKind::Reference),
-        context_requirements: ContextRequirements::Universal,
-    };
+    let sig = MethodSignature::new(
+        "ПустаяСсылка".to_string(),
+        Some("СправочникМенеджер.Номенклатура".to_string()),
+        vec![],
+        Some("СправочникСсылка.Номенклатура".to_string()),
+        SignatureSource::Platform,
+        Some(FacetKind::Reference),
+        ContextRequirements::Universal,
+    );
 
     assert_eq!(sig.name, "ПустаяСсылка");
     assert_eq!(sig.context_requirements, ContextRequirements::Universal);
@@ -172,15 +172,15 @@ fn test_method_signature_universal_context() {
 fn test_signature_index_add_facet_method() {
     let mut index = SignatureIndex::new();
 
-    let sig = MethodSignature {
-        name: "СоздатьЭлемент".to_string(),
-        owner_type: Some("СправочникМенеджер.Номенклатура".to_string()),
-        params: vec![],
-        return_type: Some("СправочникОбъект.Номенклатура".to_string()),
-        source: SignatureSource::Platform,
-        return_facet: Some(FacetKind::Object),
-        context_requirements: ContextRequirements::ServerOnly,
-    };
+    let sig = MethodSignature::new(
+        "СоздатьЭлемент".to_string(),
+        Some("СправочникМенеджер.Номенклатура".to_string()),
+        vec![],
+        Some("СправочникОбъект.Номенклатура".to_string()),
+        SignatureSource::Platform,
+        Some(FacetKind::Object),
+        ContextRequirements::ServerOnly,
+    );
 
     index.add_platform_method("СправочникМенеджер.Номенклатура".to_string(), sig);
 
@@ -200,29 +200,29 @@ fn test_signature_index_multiple_facet_methods() {
     // Добавляем метод Manager facet
     index.add_platform_method(
         "СправочникМенеджер".to_string(),
-        MethodSignature {
-            name: "СоздатьЭлемент".to_string(),
-            owner_type: Some("СправочникМенеджер".to_string()),
-            params: vec![],
-            return_type: Some("СправочникОбъект".to_string()),
-            source: SignatureSource::Platform,
-            return_facet: Some(FacetKind::Object),
-            context_requirements: ContextRequirements::ServerOnly,
-        },
+        MethodSignature::new(
+            "СоздатьЭлемент".to_string(),
+            Some("СправочникМенеджер".to_string()),
+            vec![],
+            Some("СправочникОбъект".to_string()),
+            SignatureSource::Platform,
+            Some(FacetKind::Object),
+            ContextRequirements::ServerOnly,
+        ),
     );
 
     // Добавляем метод Object facet
     index.add_platform_method(
         "СправочникОбъект".to_string(),
-        MethodSignature {
-            name: "Записать".to_string(),
-            owner_type: Some("СправочникОбъект".to_string()),
-            params: vec![],
-            return_type: None,
-            source: SignatureSource::Platform,
-            return_facet: None,
-            context_requirements: ContextRequirements::ServerOnly,
-        },
+        MethodSignature::new(
+            "Записать".to_string(),
+            Some("СправочникОбъект".to_string()),
+            vec![],
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::ServerOnly,
+        ),
     );
 
     // Проверяем оба метода
@@ -240,15 +240,15 @@ fn test_signature_index_facet_method_case_insensitive() {
 
     index.add_platform_method(
         "СправочникМенеджер".to_string(),
-        MethodSignature {
-            name: "СоздатьЭлемент".to_string(),
-            owner_type: Some("СправочникМенеджер".to_string()),
-            params: vec![],
-            return_type: Some("СправочникОбъект".to_string()),
-            source: SignatureSource::Platform,
-            return_facet: Some(FacetKind::Object),
-            context_requirements: ContextRequirements::ServerOnly,
-        },
+        MethodSignature::new(
+            "СоздатьЭлемент".to_string(),
+            Some("СправочникМенеджер".to_string()),
+            vec![],
+            Some("СправочникОбъект".to_string()),
+            SignatureSource::Platform,
+            Some(FacetKind::Object),
+            ContextRequirements::ServerOnly,
+        ),
     );
 
     // Разный регистр должен работать
@@ -264,16 +264,16 @@ fn test_signature_index_facet_method_case_insensitive() {
 fn test_signature_index_backward_compatibility() {
     let mut index = SignatureIndex::new();
 
-    // Старый способ - без facets
-    let sig = MethodSignature {
-        name: "Добавить".to_string(),
-        owner_type: Some("Массив".to_string()),
-        params: vec![],
-        return_type: None,
-        source: SignatureSource::Platform,
-        return_facet: None,
-        context_requirements: ContextRequirements::default(),
-    };
+    // Новый способ через MethodSignature::new()
+    let sig = MethodSignature::new(
+        "Добавить".to_string(),
+        Some("Массив".to_string()),
+        vec![],
+        None,
+        SignatureSource::Platform,
+        None,
+        ContextRequirements::default(),
+    );
 
     index.add_platform_method("Массив".to_string(), sig);
 

@@ -27,43 +27,43 @@ fn create_catalog_signature_index() -> SignatureIndex {
     // Методы хранятся под БАЗОВЫМ типом "СправочникМенеджер"
     sig_idx.add_platform_method(
         "СправочникМенеджер".to_string(),
-        MethodSignature {
-            name: "СоздатьЭлемент".to_string(),
-            owner_type: Some("СправочникМенеджер".to_string()),
-            params: vec![],
-            return_type: Some("СправочникОбъект".to_string()), // Базовый фасетный тип
-            source: SignatureSource::Platform,
-            return_facet: Some(FacetKind::Object),
-            context_requirements: ContextRequirements::ServerOnly,
-        },
+        MethodSignature::new(
+            "СоздатьЭлемент".to_string(),
+            Some("СправочникМенеджер".to_string()),
+            vec![],
+            Some("СправочникОбъект".to_string()), // Базовый фасетный тип
+            SignatureSource::Platform,
+            Some(FacetKind::Object),
+            ContextRequirements::ServerOnly,
+        ),
     );
 
     // СправочникМенеджер.НайтиПоКоду() → СправочникСсылка
     sig_idx.add_platform_method(
         "СправочникМенеджер".to_string(),
-        MethodSignature {
-            name: "НайтиПоКоду".to_string(),
-            owner_type: Some("СправочникМенеджер".to_string()),
-            params: vec![],
-            return_type: Some("СправочникСсылка".to_string()),
-            source: SignatureSource::Platform,
-            return_facet: Some(FacetKind::Reference),
-            context_requirements: ContextRequirements::ServerOnly,
-        },
+        MethodSignature::new(
+            "НайтиПоКоду".to_string(),
+            Some("СправочникМенеджер".to_string()),
+            vec![],
+            Some("СправочникСсылка".to_string()),
+            SignatureSource::Platform,
+            Some(FacetKind::Reference),
+            ContextRequirements::ServerOnly,
+        ),
     );
 
     // СправочникМенеджер.Выбрать() → СправочникВыборка
     sig_idx.add_platform_method(
         "СправочникМенеджер".to_string(),
-        MethodSignature {
-            name: "Выбрать".to_string(),
-            owner_type: Some("СправочникМенеджер".to_string()),
-            params: vec![],
-            return_type: Some("СправочникВыборка".to_string()),
-            source: SignatureSource::Platform,
-            return_facet: Some(FacetKind::Selection),
-            context_requirements: ContextRequirements::ServerOnly,
-        },
+        MethodSignature::new(
+            "Выбрать".to_string(),
+            Some("СправочникМенеджер".to_string()),
+            vec![],
+            Some("СправочникВыборка".to_string()),
+            SignatureSource::Platform,
+            Some(FacetKind::Selection),
+            ContextRequirements::ServerOnly,
+        ),
     );
 
     sig_idx

@@ -112,7 +112,7 @@ impl TypeSystemService {
 
     /// Определяет категорию и источник типа на основе TypeResolution
     fn determine_category_and_source(res: &TypeResolution) -> (String, String) {
-        use bsl_shared::domain::types::{Certainty, ResolutionResult};
+        use bsl_shared::domain::types::{Certainty, ConcreteType, ResolutionResult};
 
         // 1. Union типы (приоритет выше всего)
         if matches!(res.result, ResolutionResult::Union(_)) {
@@ -124,12 +124,18 @@ impl TypeSystemService {
             return ("Dynamic".to_string(), "Runtime".to_string());
         }
 
-        // 3. Стандартные категории
-        match &res.source {
-            bsl_shared::domain::types::ResolutionSource::Static => {
+        // 3. Определяем категорию по ConcreteType
+        match &res.result {
+            ResolutionResult::Concrete(ConcreteType::Platform(_)) => {
                 ("Platform".to_string(), "Static Analysis".to_string())
             }
-            _ => ("Configuration".to_string(), "Configuration".to_string()),
+            ResolutionResult::Concrete(ConcreteType::Configuration(_)) => {
+                ("Configuration".to_string(), "Configuration".to_string())
+            }
+            ResolutionResult::Concrete(ConcreteType::Primitive(_)) => {
+                ("Platform".to_string(), "Primitive".to_string())
+            }
+            _ => ("Platform".to_string(), "Static Analysis".to_string()),
         }
     }
 
@@ -2690,6 +2696,60 @@ impl TypeSystemService {
         repository
             .find_type(type_name)
             .and_then(|raw| raw.module_paths.clone())
+    }
+
+    /// Предварительно резолвить типы для часто используемых сигнатур (Milestone 3.15)
+    ///
+    /// Вызывается после загрузки platform types для ускорения первых hover/completion.
+    /// Заполняет lazy cache в MethodSignature для типов из списка common_types.
+    ///
+    /// # Example
+    /// ```ignore
+    /// service.prewarm_signature_cache();
+    /// ```
+    pub fn prewarm_signature_cache(&self) {
+        let resolver = self.analysis_engine.get_resolver();
+        let repository = self.analysis_engine.get_repository();
+        let signature_index = repository.get_signature_index_clone();
+
+        // Часто используемые типы для pre-warm
+        let common_types = [
+            "Массив",
+            "ТаблицаЗначений",
+            "СтрокаТаблицыЗначений",
+            "Соответствие",
+            "Структура",
+            "СписокЗначений",
+            "Строка",
+            "Число",
+            "Дата",
+            "Булево",
+            // Фасетные типы
+            "СправочникМенеджер",
+            "СправочникОбъект",
+            "СправочникСсылка",
+            "ДокументМенеджер",
+            "ДокументОбъект",
+            "ДокументСсылка",
+        ];
+
+        let mut warmed_count = 0;
+
+        for type_name in &common_types {
+            // Получаем методы для типа
+            let methods = signature_index.get_type_methods(type_name);
+            for method in methods {
+                // Trigger lazy resolution через closure
+                let _ = method.get_resolved_return_type(|t| resolver.resolve_expression_sync(t));
+                warmed_count += 1;
+            }
+        }
+
+        info!(
+            "🔥 Signature cache pre-warmed: {} method signatures for {} common types",
+            warmed_count,
+            common_types.len()
+        );
     }
 }
 

@@ -390,6 +390,7 @@ pub fn create_tabular_section_type() -> RawTypeData {
                 },
             ],
         }),
+        module_paths: None, // Platform types don't have module paths
     }
 }
 
@@ -563,6 +564,7 @@ pub fn create_array_type() -> RawTypeData {
         attributes: vec![],
         tabular_sections: vec![],
         enum_values: vec![],
+        module_paths: None, // Platform types don't have module paths
     }
 }
 
@@ -708,6 +710,7 @@ pub fn create_map_type() -> RawTypeData {
         attributes: vec![],
         tabular_sections: vec![],
         enum_values: vec![],
+        module_paths: None, // Platform types don't have module paths
     }
 }
 
@@ -791,6 +794,7 @@ pub fn create_value_list_type() -> RawTypeData {
         attributes: vec![],
         tabular_sections: vec![],
         enum_values: vec![],
+        module_paths: None, // Platform types don't have module paths
     }
 }
 
@@ -903,6 +907,7 @@ pub fn create_catalog_manager_type() -> RawTypeData {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None, // Platform types don't have module paths
     }
 }
 
@@ -984,6 +989,7 @@ pub fn create_catalog_object_type() -> RawTypeData {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None, // Platform types don't have module paths
     }
 }
 
@@ -1045,6 +1051,7 @@ pub fn create_catalog_reference_type() -> RawTypeData {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None, // Platform types don't have module paths
     }
 }
 
@@ -1134,6 +1141,7 @@ pub fn create_document_manager_type() -> RawTypeData {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None, // Platform types don't have module paths
     }
 }
 
@@ -1208,6 +1216,7 @@ pub fn create_document_object_type() -> RawTypeData {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        module_paths: None, // Platform types don't have module paths
     }
 }
 
@@ -1317,19 +1326,19 @@ fn raw_method_to_signature(method: &RawMethodData, owner_type: &str) -> MethodSi
     // Определяем facet и context requirements на основе имени метода и возвращаемого типа
     let (return_facet, context_requirements) = infer_method_metadata(method);
 
-    MethodSignature {
-        name: method.name.clone(),
-        owner_type: Some(owner_type.to_string()),
+    MethodSignature::new(
+        method.name.clone(),
+        Some(owner_type.to_string()),
         params,
-        return_type: if method.return_type.is_empty() {
+        if method.return_type.is_empty() {
             None
         } else {
             Some(method.return_type.clone())
         },
-        source: SignatureSource::Platform,
+        SignatureSource::Platform,
         return_facet,
         context_requirements,
-    }
+    )
 }
 
 /// Выводит метаданные метода (facet и context) на основе его сигнатуры

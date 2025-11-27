@@ -4,6 +4,7 @@ pub mod analysis;
 pub mod code_location; // Code location and execution context determination (Milestone 3.12)
 pub mod flow_analysis; // Flow-sensitive analysis for tracking type changes
 pub mod generic_inference; // Generic type inference from method calls (Milestone 2.3)
+pub mod metadata_constants; // Centralized metadata collections and faceted types constants
 pub mod metadata_lookup; // Bridge between TypeResolution and RawTypeData
 pub mod metadata_patterns; // MetadataKind pattern registry from Syntax Helper (Milestone 3.13)
 pub mod null_safety; // Null safety analysis via CFG (Milestone 2.3)
@@ -36,5 +37,10 @@ pub use signature_index::{
 pub use types::{RawTypeData, TypeCompatibility, TypeRef, TypeResolution};
 pub use validators::{TypeErrorKind, TypeValidator};
 pub use runtime_context::{ContextRequirements, RuntimeExecutionContext};
+pub use metadata_constants::{
+    get_base_type_info, get_collection_kind, get_faceted_type_info,
+    is_configuration_type_pattern, is_faceted_type, is_metadata_collection,
+    FACETED_TYPES, METADATA_COLLECTIONS,
+};
 pub use metadata_patterns::{ExtractedPattern, MetadataPatternRegistry};
 pub use type_definition_location::{ModulePaths, TypeDefinitionLocation};

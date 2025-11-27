@@ -51,7 +51,8 @@ pub struct SystemCoordinator {
     // === SYSTEM LAYER COMPONENTS ONLY ===
     cache: Arc<AnalysisCache>,
     ir_cache: Arc<IrCache>, // Milestone 2.13: IR кеширование для LSP hover
-    parser: Arc<ParserCoordinator>,
+    /// ParserCoordinator обёрнут в RwLock для обновления с TypeResolver (Milestone 3.17)
+    parser: Arc<RwLock<Arc<ParserCoordinator>>>,
     observability: Arc<BasicObservability>,
 
     // === ANALYSIS ENGINE CACHE ===
@@ -79,8 +80,9 @@ impl SystemCoordinator {
         // 2. IR caching (Milestone 2.13)
         let ir_cache = Arc::new(IrCache::new(100)); // 100 файлов (~10 MB RAM)
 
-        // 3. Simple parsing
-        let parser = Arc::new(ParserCoordinator::with_fallback());
+        // 3. Simple parsing (будет обновлён с TypeResolver в start_with_paths_blocking)
+        // Milestone 3.17: Используем RwLock для возможности обновления
+        let parser = Arc::new(RwLock::new(Arc::new(ParserCoordinator::with_fallback())));
 
         // 4. Basic observability
         let observability = Arc::new(BasicObservability::default());
@@ -321,6 +323,21 @@ impl SystemCoordinator {
         // 5. Создаем Domain resolver
         let resolver = Arc::new(TypeResolver::new(repository.clone()));
 
+        // MILESTONE 3.17: Обновляем ParserCoordinator с TypeResolver для резолюции active_facet
+        {
+            let new_parser = Arc::new(ParserCoordinator::new_with_resolver(
+                repository.clone(),
+                resolver.clone(),
+            ));
+            let mut parser_guard = self.parser.write()
+                .unwrap_or_else(|poisoned| {
+                    warn!("⚠️ Parser RwLock poisoned (write), recovering data.");
+                    poisoned.into_inner()
+                });
+            *parser_guard = new_parser;
+            info!("📇 ParserCoordinator обновлён с TypeResolver для Milestone 3.17");
+        }
+
         // 6. Создаем упрощенный AnalysisEngine (без Infrastructure зависимостей)
         let analysis_engine = AnalysisEngine::new(resolver, repository);
 
@@ -449,12 +466,22 @@ impl SystemCoordinator {
 
     /// Получить компоненты для создания TypeSystemService
     pub fn get_system_components(&self) -> (Arc<AnalysisCache>, Arc<ParserCoordinator>) {
-        (self.cache.clone(), self.parser.clone())
+        let parser = self.parser.read()
+            .unwrap_or_else(|poisoned| {
+                warn!("⚠️ Parser RwLock poisoned (read), recovering data.");
+                poisoned.into_inner()
+            });
+        (self.cache.clone(), parser.clone())
     }
 
     /// Получить ParserCoordinator (Milestone 2.18: для синтаксических ошибок в LSP)
     pub fn parser_coordinator(&self) -> Option<Arc<ParserCoordinator>> {
-        Some(self.parser.clone())
+        let parser = self.parser.read()
+            .unwrap_or_else(|poisoned| {
+                warn!("⚠️ Parser RwLock poisoned (read), recovering data.");
+                poisoned.into_inner()
+            });
+        Some(parser.clone())
     }
 
     /// Получить IR Cache
@@ -505,10 +532,20 @@ impl SystemCoordinator {
 
         if let Some(engine) = analysis_engine {
             // TypeSystemService теперь использует AnalysisEngine вместо прямого доступа к Domain Layer
+            // Milestone 3.17: Получаем ParserCoordinator через RwLock
+            let parser = {
+                let parser_guard = self.parser.read()
+                    .unwrap_or_else(|poisoned| {
+                        warn!("⚠️ Parser RwLock poisoned (read), recovering data.");
+                        poisoned.into_inner()
+                    });
+                parser_guard.clone()
+            };
+
             let service = Arc::new(TypeSystemService::new(
                 engine,
                 self.cache.clone(),
-                self.parser.clone(),
+                parser,
                 self.ir_cache.clone(), // Milestone 2.13: передаём IR Cache
             ));
 

@@ -182,6 +182,7 @@ impl TypeResolver {
 
     /// Разрешение доступа к членам конфигурации
     fn resolve_member_access(&self, base: &str, member: &str) -> TypeResolution {
+        use super::metadata_constants::get_base_type_info;
         use crate::domain::types::{
             Certainty, ConcreteType, ConfigurationType, MetadataKind, ResolutionMetadata,
             ResolutionResult, ResolutionSource, UncertaintyReason,
@@ -227,67 +228,10 @@ impl TypeResolver {
         // MILESTONE 3.11: Распознаём как коллекции, так и фасетные типы
         // Коллекции: Справочники.X → Manager facet
         // Фасетные: СправочникМенеджер.X, СправочникОбъект.X, etc.
-        let (kind, facet) = match base {
-            // Коллекции → Manager facet
-            "Справочники" | "Catalogs" => (MetadataKind::Catalog, crate::domain::types::FacetKind::Manager),
-            "Документы" | "Documents" => (MetadataKind::Document, crate::domain::types::FacetKind::Manager),
-            "Перечисления" | "Enums" => (MetadataKind::Enum, crate::domain::types::FacetKind::Manager),
-            "РегистрыСведений" | "InformationRegisters" => (MetadataKind::InformationRegister, crate::domain::types::FacetKind::Manager),
-            "РегистрыНакопления" | "AccumulationRegisters" => (MetadataKind::AccumulationRegister, crate::domain::types::FacetKind::Manager),
-            "РегистрыБухгалтерии" | "AccountingRegisters" => (MetadataKind::AccountingRegister, crate::domain::types::FacetKind::Manager),
-            "РегистрыРасчета" | "CalculationRegisters" => (MetadataKind::CalculationRegister, crate::domain::types::FacetKind::Manager),
-            "ПланыВидовХарактеристик" | "ChartsOfCharacteristicTypes" => (MetadataKind::ChartOfCharacteristicTypes, crate::domain::types::FacetKind::Manager),
-            "ПланыСчетов" | "ChartsOfAccounts" => (MetadataKind::ChartOfAccounts, crate::domain::types::FacetKind::Manager),
-            "ПланыВидовРасчета" | "ChartsOfCalculationTypes" => (MetadataKind::ChartOfCalculationTypes, crate::domain::types::FacetKind::Manager),
-            "БизнесПроцессы" | "BusinessProcesses" => (MetadataKind::BusinessProcess, crate::domain::types::FacetKind::Manager),
-            "Задачи" | "Tasks" => (MetadataKind::Task, crate::domain::types::FacetKind::Manager),
-            "ПланыОбмена" | "ExchangePlans" => (MetadataKind::ExchangePlan, crate::domain::types::FacetKind::Manager),
-
-            // Фасетные типы - Справочники
-            "СправочникМенеджер" | "CatalogManager" => (MetadataKind::Catalog, crate::domain::types::FacetKind::Manager),
-            "СправочникОбъект" | "CatalogObject" => (MetadataKind::Catalog, crate::domain::types::FacetKind::Object),
-            "СправочникСсылка" | "CatalogRef" => (MetadataKind::Catalog, crate::domain::types::FacetKind::Reference),
-            "СправочникВыборка" | "CatalogSelection" => (MetadataKind::Catalog, crate::domain::types::FacetKind::Selection),
-            "СправочникСписок" | "CatalogList" => (MetadataKind::Catalog, crate::domain::types::FacetKind::List),
-
-            // Фасетные типы - Документы
-            "ДокументМенеджер" | "DocumentManager" => (MetadataKind::Document, crate::domain::types::FacetKind::Manager),
-            "ДокументОбъект" | "DocumentObject" => (MetadataKind::Document, crate::domain::types::FacetKind::Object),
-            "ДокументСсылка" | "DocumentRef" => (MetadataKind::Document, crate::domain::types::FacetKind::Reference),
-            "ДокументВыборка" | "DocumentSelection" => (MetadataKind::Document, crate::domain::types::FacetKind::Selection),
-            "ДокументСписок" | "DocumentList" => (MetadataKind::Document, crate::domain::types::FacetKind::List),
-
-            // Фасетные типы - Регистры сведений
-            "РегистрСведенийМенеджер" | "InformationRegisterManager" => (MetadataKind::InformationRegister, crate::domain::types::FacetKind::Manager),
-            "РегистрСведенийНаборЗаписей" | "InformationRegisterRecordSet" => (MetadataKind::InformationRegister, crate::domain::types::FacetKind::Object),
-            "РегистрСведенийВыборка" | "InformationRegisterSelection" => (MetadataKind::InformationRegister, crate::domain::types::FacetKind::Selection),
-
-            // Фасетные типы - Регистры накопления
-            "РегистрНакопленияМенеджер" | "AccumulationRegisterManager" => (MetadataKind::AccumulationRegister, crate::domain::types::FacetKind::Manager),
-            "РегистрНакопленияНаборЗаписей" | "AccumulationRegisterRecordSet" => (MetadataKind::AccumulationRegister, crate::domain::types::FacetKind::Object),
-            "РегистрНакопленияВыборка" | "AccumulationRegisterSelection" => (MetadataKind::AccumulationRegister, crate::domain::types::FacetKind::Selection),
-
-            // Фасетные типы - Планы видов характеристик
-            "ПланВидовХарактеристикМенеджер" | "ChartOfCharacteristicTypesManager" => (MetadataKind::ChartOfCharacteristicTypes, crate::domain::types::FacetKind::Manager),
-            "ПланВидовХарактеристикОбъект" | "ChartOfCharacteristicTypesObject" => (MetadataKind::ChartOfCharacteristicTypes, crate::domain::types::FacetKind::Object),
-            "ПланВидовХарактеристикСсылка" | "ChartOfCharacteristicTypesRef" => (MetadataKind::ChartOfCharacteristicTypes, crate::domain::types::FacetKind::Reference),
-
-            // Фасетные типы - Планы счетов
-            "ПланСчетовМенеджер" | "ChartOfAccountsManager" => (MetadataKind::ChartOfAccounts, crate::domain::types::FacetKind::Manager),
-            "ПланСчетовОбъект" | "ChartOfAccountsObject" => (MetadataKind::ChartOfAccounts, crate::domain::types::FacetKind::Object),
-            "ПланСчетовСсылка" | "ChartOfAccountsRef" => (MetadataKind::ChartOfAccounts, crate::domain::types::FacetKind::Reference),
-
-            // Фасетные типы - Бизнес-процессы
-            "БизнесПроцессМенеджер" | "BusinessProcessManager" => (MetadataKind::BusinessProcess, crate::domain::types::FacetKind::Manager),
-            "БизнесПроцессОбъект" | "BusinessProcessObject" => (MetadataKind::BusinessProcess, crate::domain::types::FacetKind::Object),
-            "БизнесПроцессСсылка" | "BusinessProcessRef" => (MetadataKind::BusinessProcess, crate::domain::types::FacetKind::Reference),
-
-            // Фасетные типы - Задачи
-            "ЗадачаМенеджер" | "TaskManager" => (MetadataKind::Task, crate::domain::types::FacetKind::Manager),
-            "ЗадачаОбъект" | "TaskObject" => (MetadataKind::Task, crate::domain::types::FacetKind::Object),
-            "ЗадачаСсылка" | "TaskRef" => (MetadataKind::Task, crate::domain::types::FacetKind::Reference),
-
-            _ => {
+        // Используем централизованные константы из metadata_constants
+        let (kind, facet) = match get_base_type_info(base) {
+            Some((kind, facet)) => (kind, facet),
+            None => {
                 let mut resolution = TypeResolution::unknown();
                 resolution
                     .metadata

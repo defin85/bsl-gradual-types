@@ -11,7 +11,9 @@
 
 use crate::parsing::bsl::ast::{Expression, Program, Statement};
 use anyhow::Result;
+use bsl_shared::domain::is_configuration_type_pattern;
 use bsl_shared::domain::repository::TypeRepository;
+use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::TypeResolution;
 // Note: FacetKind removed in Phase 2 refactoring - using SignatureIndex methods instead
@@ -43,6 +45,9 @@ pub struct AstToIrConverter {
 
     /// SignatureIndex для return type inference (Milestone 3.9)
     signature_index: SignatureIndex,
+
+    /// TypeResolver для резолюции типов с active_facet (DI Milestone 3.17)
+    resolver: Option<Arc<TypeResolver>>,
 }
 
 impl AstToIrConverter {
@@ -51,6 +56,7 @@ impl AstToIrConverter {
         source: String,
         repository: Arc<dyn TypeRepository>,
         signature_index: SignatureIndex,
+        resolver: Option<Arc<TypeResolver>>,
     ) -> Self {
         let symbol_table = SymbolTable::new();
         let current_scope = symbol_table.root_scope;
@@ -62,6 +68,7 @@ impl AstToIrConverter {
             source,
             repository,
             signature_index,
+            resolver,
         }
     }
 
@@ -89,7 +96,26 @@ impl AstToIrConverter {
         repository: Arc<dyn TypeRepository>,
         signature_index: SignatureIndex,
     ) -> Result<SemanticProgram> {
-        let mut converter = Self::new(source.clone(), repository, signature_index);
+        Self::convert_with_resolver(ast, source, file_path, repository, signature_index, None)
+    }
+
+    /// Главный entry point с TypeResolver: AST → SemanticProgram
+    ///
+    /// Использует TypeResolver для резолюции типов с корректным active_facet.
+    /// Это необходимо для правильной валидации методов фасетных типов.
+    ///
+    /// # Milestone 3.17: TypeResolver DI
+    /// Метод СоздатьЭлемент() для СправочникМенеджер.Контрагенты теперь
+    /// корректно резолвится благодаря active_facet = Manager.
+    pub fn convert_with_resolver(
+        ast: Program,
+        source: String,
+        file_path: String,
+        repository: Arc<dyn TypeRepository>,
+        signature_index: SignatureIndex,
+        resolver: Option<Arc<TypeResolver>>,
+    ) -> Result<SemanticProgram> {
+        let mut converter = Self::new(source.clone(), repository, signature_index, resolver);
 
         // Проход 1: Сбор глобальных функций/процедур
         for statement in &ast.statements {
@@ -984,6 +1010,10 @@ impl AstToIrConverter {
     ///
     /// В отличие от `infer_expression_type()`, возвращает TypeResolution
     /// с Certainty и ResolutionSource для точного отслеживания происхождения типа.
+    ///
+    /// # Milestone 3.17: TypeResolver DI
+    /// Использует TypeResolver для резолюции конфигурационных типов с корректным active_facet.
+    /// Это критично для валидации методов фасетных типов (СправочникМенеджер.СоздатьЭлемент()).
     fn infer_type_resolution(&self, expr: &Expression) -> TypeResolution {
         match expr {
             // Примитивные литералы — высокая уверенность
@@ -1003,15 +1033,29 @@ impl AstToIrConverter {
                     return TypeResolution::primitive("Null");
                 }
 
+                // Сначала ищем в SymbolTable
                 if let Some(resolution) = self
                     .symbol_table
                     .get_variable_type(self.current_scope, name)
                 {
-                    resolution.clone()
-                } else {
-                    // Переменная не найдена — unknown
-                    TypeResolution::unknown()
+                    // Milestone 3.17: Если active_facet отсутствует, но это конфигурационный тип,
+                    // пробуем обогатить через TypeResolver
+                    if resolution.active_facet.is_none() {
+                        let type_name = resolution.type_name();
+                        if is_configuration_type_pattern(&type_name) {
+                            if let Some(ref resolver) = self.resolver {
+                                let enriched = resolver.resolve_expression_sync(&type_name);
+                                if enriched.active_facet.is_some() {
+                                    return enriched;
+                                }
+                            }
+                        }
+                    }
+                    return resolution.clone();
                 }
+
+                // Переменная не найдена — unknown
+                TypeResolution::unknown()
             }
 
             // Новые конструкции (Новый Тип())
@@ -1021,10 +1065,21 @@ impl AstToIrConverter {
                 TypeResolution::explicit(clean_type_name)
             }
 
-            // Доступ к свойству (object.property)
+            // Доступ к свойству (object.property) — критично для конфигурационных типов
+            // MILESTONE 3.17: Используем TypeResolver для установки active_facet
             Expression::PropertyAccess { object, property, .. } => {
                 let base = self.infer_type_resolution(object);
                 let type_str = format!("{}.{}", base.type_name(), property);
+
+                // Проверяем, является ли это конфигурационным типом (Справочники.X, Документы.X, etc.)
+                if is_configuration_type_pattern(&type_str) {
+                    // Используем TypeResolver для корректной резолюции с active_facet
+                    if let Some(ref resolver) = self.resolver {
+                        return resolver.resolve_expression_sync(&type_str);
+                    }
+                }
+
+                // Fallback для обычных типов
                 TypeResolution::inferred(&type_str, 0.7)
             }
 

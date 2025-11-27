@@ -14,6 +14,7 @@ use crate::parsing::ParseResult;
 use crate::system::tree_cache::{hash_content, TreeCache};
 use crate::system::tree_sitter_adapter::TreeSitterAdapter;
 use bsl_shared::domain::repository::TypeRepository;
+use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::parsing::Parser as ParserTrait; // Milestone 2.8: Parser trait
 
 /// Текстовое изменение для инкрементального парсинга (из LSP)
@@ -37,6 +38,8 @@ pub struct ParserCoordinator {
     tree_sitter: TreeSitterParser,
     tree_cache: TreeCache,
     repository: Arc<dyn TypeRepository>,
+    /// TypeResolver для резолюции типов с active_facet (Milestone 3.17)
+    resolver: Option<Arc<TypeResolver>>,
 }
 
 /// TreeSitter парсер с tree-sitter-bsl
@@ -66,6 +69,37 @@ impl ParserCoordinator {
             tree_sitter: TreeSitterParser::new(),
             tree_cache: TreeCache::new(),
             repository,
+            resolver: None,
+        }
+    }
+
+    /// Создаёт координатор с TypeRepository и TypeResolver.
+    ///
+    /// # Milestone 3.17: TypeResolver DI
+    /// TypeResolver используется для резолюции типов с корректным active_facet,
+    /// что необходимо для валидации методов фасетных типов.
+    ///
+    /// # Примеры
+    ///
+    /// ```no_run
+    /// use bsl_backend::system::ParserCoordinator;
+    /// use bsl_shared::domain::repository::InMemoryTypeRepository;
+    /// use bsl_shared::domain::resolver::TypeResolver;
+    /// use std::sync::Arc;
+    ///
+    /// let repo = Arc::new(InMemoryTypeRepository::new());
+    /// let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    /// let parser = ParserCoordinator::new_with_resolver(repo, resolver);
+    /// ```
+    pub fn new_with_resolver(
+        repository: Arc<dyn TypeRepository>,
+        resolver: Arc<TypeResolver>,
+    ) -> Self {
+        Self {
+            tree_sitter: TreeSitterParser::new(),
+            tree_cache: TreeCache::new(),
+            repository,
+            resolver: Some(resolver),
         }
     }
 
@@ -95,7 +129,12 @@ impl ParserCoordinator {
     pub fn with_fallback() -> Self {
         use bsl_shared::domain::repository::InMemoryTypeRepository;
         let empty_repo = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
-        Self::new(empty_repo)
+        Self {
+            tree_sitter: TreeSitterParser::new(),
+            tree_cache: TreeCache::new(),
+            repository: empty_repo,
+            resolver: None,
+        }
     }
 
     /// Парсинг через Tree-sitter с поддержкой ParseResult (Milestone 2.7 Task 3)
@@ -177,6 +216,10 @@ impl ParserCoordinator {
 
     /// Парсинг с конвертацией в IR (Milestone 2.8)
     ///
+    /// # Milestone 3.17: TypeResolver DI
+    /// Если ParserCoordinator создан с TypeResolver (через `new_with_resolver()`),
+    /// он будет использоваться для резолюции типов с корректным active_facet.
+    ///
     /// # Примеры
     ///
     /// ```no_run
@@ -215,13 +258,15 @@ impl ParserCoordinator {
         }
 
         // 2. Конвертация AST → IR (извлекаем program из ParseResult)
+        // Milestone 3.17: Передаём TypeResolver для резолюции типов с active_facet
         let signature_index = self.repository.get_signature_index_clone(); // Milestone 3.9
-        AstToIrConverter::convert(
+        AstToIrConverter::convert_with_resolver(
             parse_result.program,
             content.to_string(),
             file_path.to_string(),
             self.repository.clone(), // ✅ Передаём TypeRepository для Generic inference
             signature_index, // ✅ Milestone 3.9: Передаём SignatureIndex для return type inference
+            self.resolver.clone(), // ✅ Milestone 3.17: Передаём TypeResolver для active_facet
         )
         .map_err(|e| format!("AST to IR conversion failed: {}", e))
     }

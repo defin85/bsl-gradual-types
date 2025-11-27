@@ -6,7 +6,7 @@ use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::parsing::bsl::ast::{Expression, Program, Span as AstSpan, Statement};
 use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::ir::TypeHint;
+use bsl_shared::domain::types::{TypeResolution, Certainty, ResolutionResult};
 use std::sync::Arc;
 
 /// Helper функция - создаёт пустой SignatureIndex
@@ -44,23 +44,8 @@ fn test_array_initialization_as_generic() {
     let var_type = program.symbols.get_variable_type(root_scope, "МассивСтрок");
 
     // Проверяем, что это Generic тип
-    match var_type {
-        Some(TypeHint::Generic {
-            base_type,
-            type_params,
-            certainty,
-        }) => {
-            assert_eq!(base_type, "Массив", "Base type должен быть Массив");
-            assert_eq!(type_params.len(), 1, "Должен быть 1 параметр");
-            assert_eq!(type_params[0], "?", "Параметр должен быть неизвестен");
-            assert_eq!(
-                certainty, 0.0,
-                "Certainty должна быть 0 (параметры неизвестны)"
-            );
-        }
-        Some(hint) => panic!("Expected Generic hint, got {:?}", hint),
-        None => panic!("Variable МассивСтрок not found in scope"),
-    }
+    let res = var_type.expect("Variable МассивСтрок not found in scope");
+    assert_eq!(res.type_name(), "Массив<Неопределено>", "Type должен быть Массив<Неопределено>");
 }
 
 #[test]
@@ -92,30 +77,8 @@ fn test_map_initialization_as_generic() {
     let var_type = program.symbols.get_variable_type(root_scope, "Словарь");
 
     // Проверяем, что это Generic тип с 2 параметрами
-    match var_type {
-        Some(TypeHint::Generic {
-            base_type,
-            type_params,
-            certainty,
-        }) => {
-            assert_eq!(
-                base_type, "Соответствие",
-                "Base type должен быть Соответствие"
-            );
-            assert_eq!(type_params.len(), 2, "Должно быть 2 параметра");
-            assert_eq!(
-                type_params[0], "?",
-                "Первый параметр (ключ) должен быть неизвестен"
-            );
-            assert_eq!(
-                type_params[1], "?",
-                "Второй параметр (значение) должен быть неизвестен"
-            );
-            assert_eq!(certainty, 0.0, "Certainty должна быть 0");
-        }
-        Some(hint) => panic!("Expected Generic hint, got {:?}", hint),
-        None => panic!("Variable Словарь not found in scope"),
-    }
+    let res = var_type.expect("Variable Словарь not found in scope");
+    assert_eq!(res.type_name(), "Соответствие<Неопределено, Неопределено>", "Type должен быть Соответствие<Неопределено, Неопределено>");
 }
 
 #[test]
@@ -146,19 +109,8 @@ fn test_list_initialization_as_generic() {
     let root_scope = program.symbols.root_scope;
     let var_type = program.symbols.get_variable_type(root_scope, "Список");
 
-    match var_type {
-        Some(TypeHint::Generic {
-            base_type,
-            type_params,
-            ..
-        }) => {
-            assert_eq!(base_type, "Список");
-            assert_eq!(type_params.len(), 1);
-            assert_eq!(type_params[0], "?");
-        }
-        Some(hint) => panic!("Expected Generic hint, got {:?}", hint),
-        None => panic!("Variable Список not found"),
-    }
+    let res = var_type.expect("Variable Список not found");
+    assert_eq!(res.type_name(), "Список<Неопределено>", "Type должен быть Список<Неопределено>");
 }
 
 #[test]
@@ -190,13 +142,8 @@ fn test_non_generic_types_not_converted() {
     let var_type = program.symbols.get_variable_type(root_scope, "Х");
 
     // Для непривычных типов должно быть Inferred, не Generic
-    match var_type {
-        Some(TypeHint::Inferred(type_name)) => {
-            assert_eq!(type_name, "Число");
-        }
-        Some(hint) => panic!("Expected Inferred hint, got {:?}", hint),
-        None => panic!("Variable Х not found"),
-    }
+    let res = var_type.expect("Variable Х not found");
+    assert_eq!(res.type_name(), "Число");
 }
 
 #[test]
@@ -247,12 +194,9 @@ fn test_multiple_arrays_have_independent_types() {
     let x_type = program.symbols.get_variable_type(root_scope, "Х");
     let y_type = program.symbols.get_variable_type(root_scope, "Y");
 
-    assert!(
-        matches!(x_type, Some(TypeHint::Generic { .. })),
-        "Х должен быть Generic"
-    );
-    assert!(
-        matches!(y_type, Some(TypeHint::Generic { .. })),
-        "Y должен быть Generic"
-    );
+    // Обе переменные должны быть Generic (содержать "<" в type_name)
+    assert!(x_type.is_some(), "Х должен быть определён");
+    assert!(x_type.unwrap().type_name().contains("<"), "Х должен быть Generic");
+    assert!(y_type.is_some(), "Y должен быть определён");
+    assert!(y_type.unwrap().type_name().contains("<"), "Y должен быть Generic");
 }

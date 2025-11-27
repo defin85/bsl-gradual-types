@@ -549,6 +549,85 @@ impl TypeResolution {
         }
     }
 
+    /// Явно указанный тип (100% уверенность)
+    ///
+    /// Семантически эквивалентен primitive(), но с source: Static.
+    /// Используется для типов, указанных разработчиком явно (в аннотациях или коде).
+    ///
+    /// # Примеры
+    /// ```
+    /// use bsl_shared::domain::types::TypeResolution;
+    ///
+    /// let explicit_type = TypeResolution::explicit("Строка");
+    /// assert_eq!(explicit_type.type_name(), "Строка");
+    /// ```
+    pub fn explicit(type_name: &str) -> Self {
+        Self::primitive(type_name) // primitive уже использует Known + Static
+    }
+
+    /// Generic тип с параметрами (Массив<Строка>, Соответствие<Строка, Число>)
+    ///
+    /// # Параметры
+    /// - `base_type`: базовый тип (например, "Массив")
+    /// - `type_params`: список параметров типа ("?" означает неизвестный параметр)
+    /// - `certainty`: уровень уверенности (0.0 - 1.0, где 1.0 = Known)
+    ///
+    /// # Примеры
+    /// ```
+    /// use bsl_shared::domain::types::TypeResolution;
+    ///
+    /// let array = TypeResolution::generic("Массив", &["Строка"], 0.8);
+    /// assert_eq!(array.type_name(), "Массив<Строка>");
+    ///
+    /// let unknown_array = TypeResolution::generic("Массив", &["?"], 0.0);
+    /// assert_eq!(unknown_array.type_name(), "Массив<Неопределено>");
+    /// ```
+    pub fn generic(base_type: &str, type_params: &[&str], certainty: f32) -> Self {
+        let params: Vec<ConcreteType> = type_params
+            .iter()
+            .map(|p| {
+                if *p == "?" {
+                    // Неизвестный параметр
+                    ConcreteType::Special(SpecialType::Undefined)
+                } else {
+                    // Конвертируем в ConcreteType через вспомогательный метод
+                    Self::string_to_concrete(p)
+                }
+            })
+            .collect();
+
+        let cert = if certainty >= 1.0 {
+            Certainty::Known
+        } else {
+            Certainty::Inferred(certainty)
+        };
+
+        Self {
+            certainty: cert,
+            result: ResolutionResult::Generic(GenericType {
+                base_type: base_type.to_string(),
+                type_params: params,
+            }),
+            source: ResolutionSource::Inferred,
+            metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
+        }
+    }
+
+    /// Вспомогательный метод: String → ConcreteType
+    pub fn string_to_concrete(type_name: &str) -> ConcreteType {
+        match type_name.to_lowercase().as_str() {
+            "строка" | "string" => ConcreteType::Primitive(PrimitiveType::String),
+            "число" | "number" => ConcreteType::Primitive(PrimitiveType::Number),
+            "булево" | "boolean" => ConcreteType::Primitive(PrimitiveType::Boolean),
+            "дата" | "date" => ConcreteType::Primitive(PrimitiveType::Date),
+            _ => ConcreteType::Platform(PlatformType {
+                name: type_name.to_string(),
+            }),
+        }
+    }
+
     /// Проверка: тип Unknown?
     ///
     /// # Примеры
@@ -1581,6 +1660,68 @@ impl TypeResolution {
 #[cfg(test)]
 mod advanced_types_tests {
     use super::*;
+
+    // === TypeResolution Constructor Tests (Phase 2.1) ===
+
+    #[test]
+    fn test_explicit_constructor() {
+        let explicit_str = TypeResolution::explicit("Строка");
+        assert_eq!(explicit_str.type_name(), "Строка");
+        assert!(matches!(explicit_str.certainty, Certainty::Known));
+        assert!(matches!(explicit_str.source, ResolutionSource::Static));
+
+        let explicit_num = TypeResolution::explicit("Число");
+        assert_eq!(explicit_num.type_name(), "Число");
+    }
+
+    #[test]
+    fn test_generic_constructor_with_known_type() {
+        let array = TypeResolution::generic("Массив", &["Строка"], 1.0);
+        assert_eq!(array.type_name(), "Массив<Строка>");
+        assert!(matches!(array.certainty, Certainty::Known));
+    }
+
+    #[test]
+    fn test_generic_constructor_with_inferred_certainty() {
+        let array = TypeResolution::generic("Массив", &["Число"], 0.8);
+        assert_eq!(array.type_name(), "Массив<Число>");
+        assert!(matches!(array.certainty, Certainty::Inferred(c) if (c - 0.8).abs() < 0.001));
+    }
+
+    #[test]
+    fn test_generic_constructor_with_unknown_param() {
+        let array = TypeResolution::generic("Массив", &["?"], 0.0);
+        assert_eq!(array.type_name(), "Массив<Неопределено>");
+        assert!(matches!(array.certainty, Certainty::Inferred(c) if (c - 0.0).abs() < 0.001));
+    }
+
+    #[test]
+    fn test_generic_constructor_with_two_params() {
+        let map = TypeResolution::generic("Соответствие", &["Строка", "Число"], 0.9);
+        assert_eq!(map.type_name(), "Соответствие<Строка, Число>");
+    }
+
+    #[test]
+    fn test_string_to_concrete_primitives() {
+        // Test via generic constructor
+        let array_str = TypeResolution::generic("Массив", &["String"], 1.0);
+        assert_eq!(array_str.type_name(), "Массив<Строка>");
+
+        let array_num = TypeResolution::generic("Массив", &["Number"], 1.0);
+        assert_eq!(array_num.type_name(), "Массив<Число>");
+
+        let array_bool = TypeResolution::generic("Массив", &["Boolean"], 1.0);
+        assert_eq!(array_bool.type_name(), "Массив<Булево>");
+
+        let array_date = TypeResolution::generic("Массив", &["Date"], 1.0);
+        assert_eq!(array_date.type_name(), "Массив<Дата>");
+    }
+
+    #[test]
+    fn test_string_to_concrete_platform_type() {
+        let array = TypeResolution::generic("Массив", &["ТаблицаЗначений"], 1.0);
+        assert_eq!(array.type_name(), "Массив<ТаблицаЗначений>");
+    }
 
     // === Task 1: Union Types Tests ===
 

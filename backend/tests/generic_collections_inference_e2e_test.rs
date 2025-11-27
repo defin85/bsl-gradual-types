@@ -5,7 +5,7 @@
 //! # Статус
 //! ⚠️ STUB: тесты помечены как #[ignore] — требуется настройка SystemCoordinator
 
-use bsl_shared::ir::TypeHint;
+use bsl_shared::domain::types::TypeResolution;
 
 /// Создаёт минимальный TypeResolver для тестирования
 ///
@@ -43,7 +43,7 @@ fn test_array_inference_from_add_string() {
     // 1. Создать SystemCoordinator с загруженными Platform Types
     // 2. Парсить source через ParserCoordinator
     // 3. Конвертировать AST → IR через AstToIrConverter
-    // 4. Проверить TypeHint::Generic в SymbolTable
+    // 4. Проверить TypeResolution::Generic в SymbolTable
     // 5. Вызвать resolve_variable_with_context()
     // 6. Проверить TypeResolution::Generic(Массив<Строка>)
 
@@ -88,11 +88,7 @@ fn test_resolve_generic_from_hint_basic() {
     symbol_table.register_variable(
         scope_id,
         "МассивСтрок".to_string(),
-        TypeHint::Generic {
-            base_type: "Массив".to_string(),
-            type_params: vec!["Строка".to_string()],
-            certainty: 1.0,
-        },
+        TypeResolution::generic("Массив", &["Строка"], 1.0),
         bsl_shared::ir::Span::stub(),
     );
 
@@ -128,7 +124,7 @@ fn test_resolve_variable_with_context_explicit_type() {
     symbol_table.register_variable(
         scope_id,
         "x".to_string(),
-        TypeHint::Explicit("Строка".to_string()),
+        TypeResolution::explicit("Строка"),
         bsl_shared::ir::Span::stub(),
     );
 

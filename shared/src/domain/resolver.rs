@@ -1306,14 +1306,14 @@ impl TypeResolver {
     /// Резолюция переменной с использованием SymbolTable контекста
     ///
     /// Используется для вывода Generic типов из flow-sensitive анализа.
-    /// Метод получает TypeHint из SymbolTable (через Inline Scope Analysis)
+    /// Метод получает TypeResolution из SymbolTable (через Inline Scope Analysis)
     /// и преобразует его в TypeResolution для hover/diagnostics.
     ///
     /// # Примеры
     ///
     /// ```bsl
     /// МассивСтрок = Новый Массив();
-    /// МассивСтрок.Добавить("текст");  // ← SymbolTable содержит TypeHint::Generic { "Массив", ["Строка"], 1.0 }
+    /// МассивСтрок.Добавить("текст");  // ← SymbolTable содержит TypeResolution::Generic { "Массив", ["Строка"], 1.0 }
     /// // resolve_variable_with_context("МассивСтрок", symbol_table, scope_id)
     /// // → TypeResolution::Generic(Массив<Строка>)
     /// ```
@@ -1323,38 +1323,47 @@ impl TypeResolver {
         symbol_table: &crate::ir::SymbolTable,
         scope_id: crate::ir::ScopeId,
     ) -> TypeResolution {
-        use crate::ir::TypeHint;
         use tracing::{debug, info};
 
         // Ищем переменную в scope hierarchy
-        if let Some(hint) = symbol_table.get_variable_type(scope_id, var_name) {
-            // 🔍 DEBUG MILESTONE 3.11: Логируем TypeHint из SymbolTable
+        if let Some(resolution) = symbol_table.get_variable_type(scope_id, var_name) {
+            // 🔍 DEBUG MILESTONE 3.11: Логируем TypeResolution из SymbolTable
             info!(
-                "🔍 resolve_variable_with_context('{}', scope={:?}): TypeHint = {:?}",
-                var_name, scope_id, hint
+                "🔍 resolve_variable_with_context('{}', scope={:?}): TypeResolution = {:?}",
+                var_name, scope_id, resolution
             );
 
-            match hint {
-                TypeHint::Generic {
-                    base_type,
-                    type_params,
-                    certainty,
-                } => {
-                    // Резолвим Generic тип из hint
-                    debug!("  → Generic: base={}, params={:?}", base_type, type_params);
-                    return self.resolve_generic_from_hint(&base_type, &type_params, certainty);
-                }
-                TypeHint::Explicit(type_name) | TypeHint::Inferred(type_name) => {
-                    // Обычная резолюция по имени типа
-                    info!("  → Resolving type_name: '{}'", type_name);
-                    let resolution = self.resolve_expression_sync(&type_name);
-                    info!("  → Resolution result: {:?}", resolution.result);
-                    return resolution;
-                }
-                TypeHint::Unknown => {
+            use super::types::{Certainty, ResolutionResult};
+
+            match (&resolution.certainty, &resolution.result) {
+                (Certainty::Unknown, _) => {
                     // Тип неизвестен
-                    debug!("  → TypeHint::Unknown");
+                    debug!("  → TypeResolution::unknown()");
                     return TypeResolution::unknown();
+                }
+                (_, ResolutionResult::Generic(gen)) => {
+                    // Резолвим Generic тип из resolution
+                    let type_params: Vec<String> = gen.type_params.iter()
+                        .map(|ct| {
+                            let temp = TypeResolution::known(ct.clone());
+                            temp.type_name()
+                        })
+                        .collect();
+                    let certainty = match resolution.certainty {
+                        Certainty::Known => 1.0,
+                        Certainty::Inferred(c) => c,
+                        Certainty::Unknown => 0.0,
+                    };
+                    debug!("  → Generic: base={}, params={:?}", gen.base_type, type_params);
+                    return self.resolve_generic_from_hint(&gen.base_type, &type_params, certainty);
+                }
+                _ => {
+                    // Обычная резолюция по имени типа
+                    let type_name = resolution.type_name();
+                    info!("  → Resolving type_name: '{}'", type_name);
+                    let resolved = self.resolve_expression_sync(&type_name);
+                    info!("  → Resolution result: {:?}", resolved.result);
+                    return resolved;
                 }
             }
         }
@@ -1367,9 +1376,9 @@ impl TypeResolver {
         TypeResolution::unknown()
     }
 
-    /// Резолюция Generic типа из TypeHint
+    /// Резолюция Generic типа из TypeResolution
     ///
-    /// Преобразует TypeHint::Generic (IR layer) в TypeResolution::Generic (Domain layer).
+    /// Преобразует TypeResolution::Generic (IR layer) в TypeResolution::Generic (Domain layer).
     /// Используется после flow-sensitive анализа для получения детальной информации о типе.
     ///
     /// # Параметры

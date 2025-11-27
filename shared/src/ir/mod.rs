@@ -29,6 +29,8 @@ pub use visitor::{walk_program, FlowContext, SemanticVisitor};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::domain::types::TypeResolution;
+
 /// Семантическое представление программы
 ///
 /// Не зависит от конкретного парсера и представляет программу
@@ -298,7 +300,7 @@ pub struct Scope {
     pub parent: Option<ScopeId>,
 
     /// Переменные в этом scope
-    pub variables: HashMap<String, (TypeHint, Span)>,
+    pub variables: HashMap<String, (TypeResolution, Span)>,
 
     /// Дочерние scope-ы
     pub children: Vec<ScopeId>,
@@ -307,38 +309,6 @@ pub struct Scope {
 /// Идентификатор scope
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ScopeId(pub usize);
-
-/// Подсказка типа переменной
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TypeHint {
-    /// Явно указанный тип: `Перем x: Число`
-    Explicit(String),
-
-    /// Выведенный из значения: `Перем x = 42`
-    Inferred(String),
-
-    /// Generic тип с параметрами: `Массив<Строка>`, `Соответствие<Строка, Число>`
-    ///
-    /// Используется для flow-sensitive inference типов параметров коллекций.
-    /// Когда парсим `МассивСтрок = Новый Массив()` и затем `МассивСтрок.Добавить("текст")`,
-    /// выводим, что Generic параметр T = Строка.
-    Generic {
-        /// Базовый тип (например, "Массив", "Соответствие")
-        base_type: String,
-
-        /// Конкретные типы параметров (например, ["Строка"], ["Строка", "Число"])
-        /// Если параметр неизвестен, хранится "?" (для отображения в диагностиках)
-        type_params: Vec<String>,
-
-        /// Уверенность в выведённых типах (0.0-1.0)
-        /// 0.0 = все параметры неизвестны (только что создан)
-        /// 1.0 = все параметры выведены из кода
-        certainty: f32,
-    },
-
-    /// Тип неизвестен
-    Unknown,
-}
 
 /// Сигнатура функции/процедуры
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -540,7 +510,7 @@ impl SemanticProgram {
     /// Получить переменную в scope (с поиском в родительских scope)
     ///
     /// Поиск идёт от текущего scope вверх по иерархии до root
-    pub fn resolve_variable(&self, name: &str, scope_id: ScopeId) -> Option<(TypeHint, Span)> {
+    pub fn resolve_variable(&self, name: &str, scope_id: ScopeId) -> Option<(TypeResolution, Span)> {
         let mut current_scope_id = Some(scope_id);
 
         while let Some(sid) = current_scope_id {
@@ -568,23 +538,19 @@ impl SemanticProgram {
     /// 2. Получить scope_id узла
     /// 3. Извлечь имя переменной из узла (Assignment, MemberAccess, VariableDeclaration)
     /// 4. Вызвать resolve_variable() для поиска в scope hierarchy
-    /// 5. Вернуть (имя_переменной, TypeHint)
+    /// 5. Вернуть (имя_переменной, TypeResolution)
     ///
     /// # Примеры
     ///
     /// ```no_run
-    /// use bsl_shared::ir::{SemanticProgram, TypeHint};
+    /// use bsl_shared::ir::SemanticProgram;
+    /// use bsl_shared::domain::types::TypeResolution;
     ///
     /// let program = SemanticProgram::new();
     /// // Предположим, в программе есть: МассивДанных = Новый Массив;
-    /// if let Some((var_name, type_hint)) = program.find_variable_at_position(5, 10) {
-    ///     match type_hint {
-    ///         TypeHint::Inferred(type_name) => {
-    ///             assert_eq!(var_name, "МассивДанных");
-    ///             assert_eq!(type_name, "Массив");
-    ///         }
-    ///         _ => {}
-    ///     }
+    /// if let Some((var_name, resolution)) = program.find_variable_at_position(5, 10) {
+    ///     assert_eq!(var_name, "МассивДанных");
+    ///     assert_eq!(resolution.type_name(), "Массив");
     /// }
     /// ```
     /// Извлечь имя переменной из узла IR (если узел содержит переменную)
@@ -626,7 +592,7 @@ impl SemanticProgram {
         }
     }
 
-    pub fn find_variable_at_position(&self, line: u32, column: u32) -> Option<(String, TypeHint)> {
+    pub fn find_variable_at_position(&self, line: u32, column: u32) -> Option<(String, TypeResolution)> {
         // 1. Находим узел в позиции
         let node = self.find_node_at_position(line, column)?;
 
@@ -637,10 +603,10 @@ impl SemanticProgram {
         let var_name = Self::extract_variable_name(node)?;
 
         // 4. Ищем переменную в scope (с поиском в родительских scope)
-        let (type_hint, _span) = self.resolve_variable(&var_name, scope_id)?;
+        let (resolution, _span) = self.resolve_variable(&var_name, scope_id)?;
 
         // 5. Возвращаем результат
-        Some((var_name, type_hint))
+        Some((var_name, resolution))
     }
 
     /// Найти переменную по позиции с возвратом scope_id для резолюции через TypeResolver
@@ -654,7 +620,7 @@ impl SemanticProgram {
     /// ```bsl
     /// МассивСтрок = Новый Массив();
     /// МассивСтрок.Добавить("текст");  // ← cursor здесь
-    /// // find_variable_with_scope(3, 12) → ("МассивСтрок", TypeHint::Generic{...}, scope_id)
+    /// // find_variable_with_scope(3, 12) → ("МассивСтрок", TypeResolution::generic(...), scope_id)
     /// // → TypeResolver::resolve_variable_with_context("МассивСтрок", symbols, scope_id)
     /// // → TypeResolution::Generic(Массив<Строка>) с методами
     /// ```
@@ -662,7 +628,7 @@ impl SemanticProgram {
         &self,
         line: u32,
         column: u32,
-    ) -> Option<(String, TypeHint, ScopeId)> {
+    ) -> Option<(String, TypeResolution, ScopeId)> {
         // 1. Находим узел в позиции
         let node = self.find_node_at_position(line, column)?;
 
@@ -673,10 +639,10 @@ impl SemanticProgram {
         let var_name = Self::extract_variable_name(node)?;
 
         // 4. Ищем переменную в scope (с поиском в родительских scope)
-        let (type_hint, _span) = self.resolve_variable(&var_name, scope_id)?;
+        let (resolution, _span) = self.resolve_variable(&var_name, scope_id)?;
 
         // 5. Возвращаем результат с scope_id
-        Some((var_name, type_hint, scope_id))
+        Some((var_name, resolution, scope_id))
     }
 
     /// Создать новую пустую программу
@@ -748,11 +714,11 @@ impl SymbolTable {
         &mut self,
         scope_id: ScopeId,
         name: String,
-        hint: TypeHint,
+        resolution: TypeResolution,
         span: Span,
     ) {
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
-            scope.variables.insert(name, (hint, span));
+            scope.variables.insert(name, (resolution, span));
         }
     }
 
@@ -769,13 +735,13 @@ impl SymbolTable {
     }
 
     /// Получить тип переменной из текущего или родительского scope
-    pub fn get_variable_type(&self, scope_id: ScopeId, name: &str) -> Option<TypeHint> {
+    pub fn get_variable_type(&self, scope_id: ScopeId, name: &str) -> Option<TypeResolution> {
         let mut current_scope_id = Some(scope_id);
 
         while let Some(sid) = current_scope_id {
             if let Some(scope) = self.scopes.get(&sid) {
-                if let Some((hint, _span)) = scope.variables.get(name) {
-                    return Some(hint.clone());
+                if let Some((resolution, _span)) = scope.variables.get(name) {
+                    return Some(resolution.clone());
                 }
                 current_scope_id = scope.parent;
             } else {
@@ -791,11 +757,11 @@ impl SymbolTable {
         &mut self,
         scope_id: ScopeId,
         name: String,
-        new_hint: TypeHint,
+        new_resolution: TypeResolution,
     ) -> bool {
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
-            if let Some((hint, _span)) = scope.variables.get_mut(&name) {
-                *hint = new_hint;
+            if let Some((resolution, _span)) = scope.variables.get_mut(&name) {
+                *resolution = new_resolution;
                 return true;
             }
         }
@@ -807,19 +773,16 @@ impl SymbolTable {
     /// # Примеры
     ///
     /// ```
-    /// # use bsl_shared::ir::{SymbolTable, TypeHint};
+    /// # use bsl_shared::ir::SymbolTable;
+    /// # use bsl_shared::domain::types::{TypeResolution, Certainty, ResolutionResult};
     /// let mut table = SymbolTable::new();
     /// table.initialize_as_generic(table.root_scope, "МассивСтрок".to_string(), "Массив".to_string(), 1);
     ///
-    /// let hint = table.get_variable_type(table.root_scope, "МассивСтрок");
-    /// match hint {
-    ///     Some(TypeHint::Generic { base_type, type_params, certainty }) => {
-    ///         assert_eq!(base_type, "Массив");
-    ///         assert_eq!(type_params, vec!["?".to_string()]);
-    ///         assert_eq!(certainty, 0.0);
-    ///     }
-    ///     _ => panic!("Expected Generic type"),
-    /// }
+    /// let resolution = table.get_variable_type(table.root_scope, "МассивСтрок");
+    /// assert!(resolution.is_some());
+    /// let res = resolution.unwrap();
+    /// assert_eq!(res.type_name(), "Массив<Неопределено>");
+    /// assert!(matches!(res.certainty, Certainty::Inferred(c) if c == 0.0));
     /// ```
     pub fn initialize_as_generic(
         &mut self,
@@ -828,14 +791,11 @@ impl SymbolTable {
         base_type: String,
         type_param_count: usize,
     ) {
-        // Создаём пустые параметры (неизвестные типы)
-        let type_params = vec!["?".to_string(); type_param_count];
+        // Создаём пустые параметры (неизвестные типы = "?")
+        let type_params: Vec<&str> = vec!["?"; type_param_count];
 
-        let hint = TypeHint::Generic {
-            base_type,
-            type_params,
-            certainty: 0.0, // Пока параметры неизвестны
-        };
+        // Используем TypeResolution::generic() с certainty = 0.0 (параметры неизвестны)
+        let resolution = TypeResolution::generic(&base_type, &type_params, 0.0);
 
         // Регистрируем или обновляем переменную
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
@@ -846,7 +806,7 @@ impl SymbolTable {
                 .map(|(_, s)| *s)
                 .unwrap_or_else(Span::stub);
 
-            scope.variables.insert(var_name, (hint, span));
+            scope.variables.insert(var_name, (resolution, span));
         }
     }
 
@@ -855,19 +815,17 @@ impl SymbolTable {
     /// # Примеры
     ///
     /// ```
-    /// # use bsl_shared::ir::{SymbolTable, TypeHint};
+    /// # use bsl_shared::ir::SymbolTable;
+    /// # use bsl_shared::domain::types::{TypeResolution, Certainty, ResolutionResult};
     /// let mut table = SymbolTable::new();
     /// table.initialize_as_generic(table.root_scope, "МассивСтрок".to_string(), "Массив".to_string(), 1);
     /// table.update_generic_param(table.root_scope, "МассивСтрок", 0, "Строка".to_string());
     ///
-    /// let hint = table.get_variable_type(table.root_scope, "МассивСтрок");
-    /// match hint {
-    ///     Some(TypeHint::Generic { type_params, certainty, .. }) => {
-    ///         assert_eq!(type_params[0], "Строка");
-    ///         assert_eq!(certainty, 1.0);
-    ///     }
-    ///     _ => panic!("Expected Generic type"),
-    /// }
+    /// let resolution = table.get_variable_type(table.root_scope, "МассивСтрок");
+    /// assert!(resolution.is_some());
+    /// let res = resolution.unwrap();
+    /// assert_eq!(res.type_name(), "Массив<Строка>");
+    /// assert!(matches!(res.certainty, Certainty::Known));
     /// ```
     pub fn update_generic_param(
         &mut self,
@@ -876,25 +834,32 @@ impl SymbolTable {
         param_index: usize,
         param_type: String,
     ) -> bool {
+        use crate::domain::types::{Certainty, ConcreteType, ResolutionResult, SpecialType};
+
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
-            if let Some((hint, _span)) = scope.variables.get_mut(var_name) {
-                match hint {
-                    TypeHint::Generic {
-                        type_params,
-                        certainty,
-                        ..
-                    } => {
+            if let Some((resolution, _span)) = scope.variables.get_mut(var_name) {
+                match &mut resolution.result {
+                    ResolutionResult::Generic(gen) => {
+                        // Получаем новый ConcreteType для параметра
+                        let new_param = TypeResolution::string_to_concrete(&param_type);
+
                         // Обновляем конкретный параметр (расширяем вектор, если нужно)
-                        if param_index < type_params.len() {
-                            type_params[param_index] = param_type;
+                        if param_index < gen.type_params.len() {
+                            gen.type_params[param_index] = new_param;
                         } else {
-                            type_params.push(param_type);
+                            gen.type_params.push(new_param);
                         }
 
                         // Вычисляем новую уверенность
-                        // Если ВСЕ параметры известны (не "?"), то certainty = 1.0
-                        let all_known = type_params.iter().all(|p| p != "?");
-                        *certainty = if all_known { 1.0 } else { 0.5 };
+                        // Если ВСЕ параметры известны (не Undefined), то certainty = Known
+                        let all_known = gen.type_params.iter().all(|p| {
+                            !matches!(p, ConcreteType::Special(SpecialType::Undefined))
+                        });
+                        resolution.certainty = if all_known {
+                            Certainty::Known
+                        } else {
+                            Certainty::Inferred(0.5)
+                        };
 
                         return true;
                     }
@@ -915,46 +880,48 @@ impl SymbolTable {
 
     /// Поиск переменной в заданной области видимости
     ///
-    /// Возвращает TypeHint переменной, если она существует в указанном scope.
+    /// Возвращает TypeResolution переменной, если она существует в указанном scope.
     /// Не выполняет поиск в родительских scope (для этого используйте `lookup_variable_in_hierarchy`).
     ///
     /// # Примеры
     ///
     /// ```
-    /// # use bsl_shared::ir::{SymbolTable, TypeHint, Span};
+    /// # use bsl_shared::ir::{SymbolTable, Span};
+    /// # use bsl_shared::domain::types::TypeResolution;
     /// let mut table = SymbolTable::new();
     /// table.register_variable(
     ///     table.root_scope,
     ///     "x".to_string(),
-    ///     TypeHint::Explicit("Число".to_string()),
+    ///     TypeResolution::explicit("Число"),
     ///     Span::stub(),
     /// );
     ///
-    /// let hint = table.lookup_variable(table.root_scope, "x");
-    /// assert!(hint.is_some());
+    /// let resolution = table.lookup_variable(table.root_scope, "x");
+    /// assert!(resolution.is_some());
     /// ```
-    pub fn lookup_variable(&self, scope_id: ScopeId, name: &str) -> Option<&TypeHint> {
+    pub fn lookup_variable(&self, scope_id: ScopeId, name: &str) -> Option<&TypeResolution> {
         self.scopes
             .get(&scope_id)?
             .variables
             .get(name)
-            .map(|(hint, _)| hint)
+            .map(|(resolution, _)| resolution)
     }
 
     /// Поиск переменной с подъёмом по цепочке родительских scope
     ///
     /// Ищет переменную начиная с указанного scope и поднимаясь вверх по иерархии
-    /// до root scope. Возвращает scope_id где была найдена переменная и её TypeHint.
+    /// до root scope. Возвращает scope_id где была найдена переменная и её TypeResolution.
     ///
     /// # Примеры
     ///
     /// ```
-    /// # use bsl_shared::ir::{SymbolTable, TypeHint, Span};
+    /// # use bsl_shared::ir::{SymbolTable, Span};
+    /// # use bsl_shared::domain::types::TypeResolution;
     /// let mut table = SymbolTable::new();
     /// table.register_variable(
     ///     table.root_scope,
     ///     "globalVar".to_string(),
-    ///     TypeHint::Explicit("Число".to_string()),
+    ///     TypeResolution::explicit("Число"),
     ///     Span::stub(),
     /// );
     ///
@@ -966,12 +933,12 @@ impl SymbolTable {
         &self,
         scope_id: ScopeId,
         name: &str,
-    ) -> Option<(ScopeId, &TypeHint)> {
+    ) -> Option<(ScopeId, &TypeResolution)> {
         let mut current = Some(scope_id);
         while let Some(sid) = current {
             if let Some(scope) = self.scopes.get(&sid) {
-                if let Some((hint, _)) = scope.variables.get(name) {
-                    return Some((sid, hint));
+                if let Some((resolution, _)) = scope.variables.get(name) {
+                    return Some((sid, resolution));
                 }
                 current = scope.parent;
             } else {
@@ -994,19 +961,19 @@ impl SymbolTable {
         &mut self,
         scope_id: ScopeId,
         name: &str,
-        hint: TypeHint,
+        resolution: TypeResolution,
     ) -> Result<(), String> {
         let scope = self
             .scopes
             .get_mut(&scope_id)
             .ok_or_else(|| format!("Scope {:?} not found", scope_id))?;
 
-        let (existing_hint, _span) = scope
+        let (existing_resolution, _span) = scope
             .variables
             .get_mut(name)
             .ok_or_else(|| format!("Variable '{}' not found in scope {:?}", name, scope_id))?;
 
-        *existing_hint = hint;
+        *existing_resolution = resolution;
         Ok(())
     }
 
@@ -1015,12 +982,13 @@ impl SymbolTable {
     /// # Примеры
     ///
     /// ```
-    /// # use bsl_shared::ir::{SymbolTable, TypeHint, Span};
+    /// # use bsl_shared::ir::{SymbolTable, Span};
+    /// # use bsl_shared::domain::types::TypeResolution;
     /// let mut table = SymbolTable::new();
     /// table.register_variable(
     ///     table.root_scope,
     ///     "x".to_string(),
-    ///     TypeHint::Explicit("Число".to_string()),
+    ///     TypeResolution::explicit("Число"),
     ///     Span::stub(),
     /// );
     ///
@@ -1077,15 +1045,15 @@ impl SymbolTable {
 
     /// Итератор по всем переменным в scope
     ///
-    /// Возвращает итератор по парам (имя переменной, TypeHint) для указанного scope.
+    /// Возвращает итератор по парам (имя переменной, TypeResolution) для указанного scope.
     /// Не включает переменные из родительских scope.
     pub fn variables_in_scope(
         &self,
         scope_id: ScopeId,
-    ) -> Option<impl Iterator<Item = (&String, &TypeHint)>> {
+    ) -> Option<impl Iterator<Item = (&String, &TypeResolution)>> {
         self.scopes
             .get(&scope_id)
-            .map(|scope| scope.variables.iter().map(|(name, (hint, _))| (name, hint)))
+            .map(|scope| scope.variables.iter().map(|(name, (resolution, _))| (name, resolution)))
     }
 
     /// Получить количество глобальных функций
@@ -1436,11 +1404,11 @@ impl SemanticProgram {
 
         // Обходим все scopes используя публичное API
         for (_scope_id, scope) in self.symbols.iter_all_scopes() {
-            for (var_name, (type_hint, span)) in &scope.variables {
+            for (var_name, (resolution, span)) in &scope.variables {
                 let symbol = SymbolInfoDto {
                     name: var_name.clone(),
                     kind: "Variable".to_string(),
-                    resolved_type: self.type_hint_to_dto(type_hint),
+                    resolved_type: self.type_resolution_to_dto(resolution),
                     scope: "Local".to_string(), // TODO: различать Global/Local
                     declaration_location: SourceLocationDto {
                         line: span.start_line,
@@ -1492,63 +1460,44 @@ impl SemanticProgram {
         result
     }
 
-    /// Конвертировать TypeHint в TypeResolutionDto
-    fn type_hint_to_dto(&self, hint: &TypeHint) -> Option<TypeResolutionDto> {
-        match hint {
-            TypeHint::Explicit(type_name) => Some(TypeResolutionDto {
-                name: type_name.clone(),
-                category: "Platform".to_string(),
-                certainty: "Known".to_string(),
-                certainty_percent: 100,
-                active_facet: None,
-                methods: Vec::new(),
-                properties: Vec::new(),
-                is_union: None,
-                union_components: Vec::new(),
-            }),
-            TypeHint::Inferred(type_name) => Some(TypeResolutionDto {
-                name: type_name.clone(),
-                category: "Inferred".to_string(),
-                certainty: "Inferred".to_string(),
-                certainty_percent: 75,
-                active_facet: None,
-                methods: Vec::new(),
-                properties: Vec::new(),
-                is_union: None,
-                union_components: Vec::new(),
-            }),
-            TypeHint::Generic {
-                base_type,
-                type_params,
-                certainty,
-            } => {
-                // Форматируем Generic тип как "Массив<Строка>" или "Соответствие<Строка, Число>"
-                let generic_type_str = if type_params.is_empty() {
-                    base_type.clone()
-                } else {
-                    format!("{}<{}>", base_type, type_params.join(", "))
-                };
+    /// Конвертировать TypeResolution в TypeResolutionDto
+    fn type_resolution_to_dto(&self, resolution: &TypeResolution) -> Option<TypeResolutionDto> {
+        use crate::domain::types::{Certainty, ResolutionResult};
 
-                let certainty_percent = (*certainty * 100.0) as u8;
+        if matches!(resolution.certainty, Certainty::Unknown) {
+            return None;
+        }
 
-                Some(TypeResolutionDto {
-                    name: generic_type_str,
-                    category: "Generic".to_string(),
-                    certainty: if *certainty > 0.8 {
-                        "Known".to_string()
+        let type_name = resolution.type_name();
+
+        let (category, certainty_str, certainty_percent) = match &resolution.certainty {
+            Certainty::Known => ("Platform".to_string(), "Known".to_string(), 100u8),
+            Certainty::Inferred(conf) => {
+                let percent = (*conf * 100.0) as u8;
+                (
+                    if matches!(resolution.result, ResolutionResult::Generic(_)) {
+                        "Generic".to_string()
                     } else {
                         "Inferred".to_string()
                     },
-                    certainty_percent,
-                    active_facet: None,
-                    methods: Vec::new(),
-                    properties: Vec::new(),
-                    is_union: None,
-                    union_components: Vec::new(),
-                })
+                    if *conf > 0.8 { "Known".to_string() } else { "Inferred".to_string() },
+                    percent,
+                )
             }
-            TypeHint::Unknown => None,
-        }
+            Certainty::Unknown => return None,
+        };
+
+        Some(TypeResolutionDto {
+            name: type_name,
+            category,
+            certainty: certainty_str,
+            certainty_percent,
+            active_facet: None,
+            methods: Vec::new(),
+            properties: Vec::new(),
+            is_union: None,
+            union_components: Vec::new(),
+        })
     }
 
     /// Извлечь граф вызовов функций
@@ -1561,6 +1510,8 @@ impl SemanticProgram {
 
     /// Вычислить метрики семантического анализа
     fn calculate_metrics(&self) -> SemanticMetricsDto {
+        use crate::domain::types::Certainty;
+
         let mut procedure_count = 0;
         let mut function_count = 0;
         let mut variable_count = 0;
@@ -1580,19 +1531,17 @@ impl SemanticProgram {
 
         // Подсчёт типов
         for scope in self.symbols.scopes.values() {
-            for (type_hint, _span) in scope.variables.values() {
-                match type_hint {
-                    TypeHint::Explicit(_) => known_types += 1,
-                    TypeHint::Inferred(_) => inferred_types += 1,
-                    TypeHint::Generic { certainty, .. } => {
-                        // Generic типы считаются как inferred, но с переменной уверенностью
-                        if *certainty > 0.8 {
+            for (resolution, _span) in scope.variables.values() {
+                match &resolution.certainty {
+                    Certainty::Known => known_types += 1,
+                    Certainty::Inferred(conf) => {
+                        if *conf > 0.8 {
                             known_types += 1;
                         } else {
                             inferred_types += 1;
                         }
                     }
-                    TypeHint::Unknown => unknown_types += 1,
+                    Certainty::Unknown => unknown_types += 1,
                 }
             }
         }
@@ -1683,7 +1632,7 @@ mod tests {
         program.symbols.register_variable(
             program.symbols.root_scope,
             "globalVar".to_string(),
-            TypeHint::Explicit("Число".to_string()),
+            TypeResolution::explicit("Число"),
             Span::stub(),
         );
 
@@ -1691,7 +1640,7 @@ mod tests {
         program.symbols.register_variable(
             child_scope,
             "localVar".to_string(),
-            TypeHint::Explicit("Строка".to_string()),
+            TypeResolution::explicit("Строка"),
             Span::stub(),
         );
 
@@ -1753,10 +1702,12 @@ mod tests {
         assert!(program.find_node_at_position(10, 5).is_none());
     }
 
-    // === Tests for Generic TypeHint functionality ===
+    // === Tests for Generic TypeResolution functionality ===
 
     #[test]
     fn test_initialize_as_generic() {
+        use crate::domain::types::{Certainty, ResolutionResult};
+
         let mut table = SymbolTable::new();
 
         table.initialize_as_generic(
@@ -1766,25 +1717,27 @@ mod tests {
             1,
         );
 
-        let hint = table.get_variable_type(table.root_scope, "МассивСтрок");
+        let resolution = table.get_variable_type(table.root_scope, "МассивСтрок");
 
-        match hint {
-            Some(TypeHint::Generic {
-                base_type,
-                type_params,
-                certainty,
-            }) => {
-                assert_eq!(base_type, "Массив");
-                assert_eq!(type_params.len(), 1);
-                assert_eq!(type_params[0], "?"); // Неизвестный параметр
-                assert_eq!(certainty, 0.0); // Уверенность минимальная
-            }
-            _ => panic!("Expected Generic hint, got {:?}", hint),
+        assert!(resolution.is_some(), "Variable should exist");
+        let res = resolution.unwrap();
+
+        // Проверяем, что это Generic тип
+        if let ResolutionResult::Generic(gen) = &res.result {
+            assert_eq!(gen.base_type, "Массив");
+            assert_eq!(gen.type_params.len(), 1);
+        } else {
+            panic!("Expected Generic resolution, got {:?}", res.result);
         }
+
+        // Проверяем certainty = Inferred(0.0) (параметры неизвестны)
+        assert!(matches!(res.certainty, Certainty::Inferred(c) if (c - 0.0).abs() < 0.001));
     }
 
     #[test]
     fn test_update_generic_param() {
+        use crate::domain::types::{Certainty, ResolutionResult};
+
         let mut table = SymbolTable::new();
 
         // Инициализируем как Generic
@@ -1801,24 +1754,22 @@ mod tests {
 
         assert!(success, "update_generic_param должна вернуть true");
 
-        let hint = table.get_variable_type(table.root_scope, "МассивСтрок");
+        let resolution = table.get_variable_type(table.root_scope, "МассивСтрок");
 
-        match hint {
-            Some(TypeHint::Generic {
-                base_type,
-                type_params,
-                certainty,
-            }) => {
-                assert_eq!(base_type, "Массив");
-                assert_eq!(type_params[0], "Строка");
-                assert_eq!(certainty, 1.0); // Уверенность повысилась (все параметры известны)
-            }
-            _ => panic!("Expected Generic hint with Строка"),
-        }
+        assert!(resolution.is_some());
+        let res = resolution.unwrap();
+
+        // Проверяем имя типа
+        assert_eq!(res.type_name(), "Массив<Строка>");
+
+        // Проверяем certainty = Known (все параметры известны)
+        assert!(matches!(res.certainty, Certainty::Known));
     }
 
     #[test]
     fn test_update_map_generic_params() {
+        use crate::domain::types::{Certainty, ResolutionResult};
+
         let mut table = SymbolTable::new();
 
         // Инициализируем Соответствие с 2 параметрами
@@ -1835,26 +1786,21 @@ mod tests {
         // Обновляем второй параметр (значение)
         table.update_generic_param(table.root_scope, "Словарь", 1, "Число".to_string());
 
-        let hint = table.get_variable_type(table.root_scope, "Словарь");
+        let resolution = table.get_variable_type(table.root_scope, "Словарь");
 
-        match hint {
-            Some(TypeHint::Generic {
-                base_type,
-                type_params,
-                certainty,
-            }) => {
-                assert_eq!(base_type, "Соответствие");
-                assert_eq!(type_params.len(), 2);
-                assert_eq!(type_params[0], "Строка");
-                assert_eq!(type_params[1], "Число");
-                assert_eq!(certainty, 1.0); // Все параметры известны
-            }
-            _ => panic!("Expected Generic hint with 2 params"),
-        }
+        assert!(resolution.is_some());
+        let res = resolution.unwrap();
+
+        // Проверяем имя типа
+        assert_eq!(res.type_name(), "Соответствие<Строка, Число>");
+
+        // Проверяем certainty = Known (все параметры известны)
+        assert!(matches!(res.certainty, Certainty::Known));
     }
 
     #[test]
     fn test_partial_generic_params() {
+        use crate::domain::types::Certainty;
         let mut table = SymbolTable::new();
 
         // Инициализируем с 3 параметрами (не существует такого типа, но для теста)
@@ -1868,20 +1814,17 @@ mod tests {
         // Обновляем только первый параметр
         table.update_generic_param(table.root_scope, "МойТип", 0, "Строка".to_string());
 
-        let hint = table.get_variable_type(table.root_scope, "МойТип");
+        let resolution = table.get_variable_type(table.root_scope, "МойТип");
+        assert!(resolution.is_some());
+        let res = resolution.unwrap();
 
-        match hint {
-            Some(TypeHint::Generic {
-                type_params,
-                certainty,
-                ..
-            }) => {
-                assert_eq!(type_params[0], "Строка");
-                assert_eq!(type_params[1], "?");
-                assert_eq!(type_params[2], "?");
-                assert_eq!(certainty, 0.5); // Промежуточная уверенность (не все параметры)
-            }
-            _ => panic!("Expected partial Generic hint"),
+        // Проверяем что тип - Generic с частично заполненными параметрами
+        assert_eq!(res.type_name(), "МойКонтейнер<Строка, Неопределено, Неопределено>");
+
+        // Проверяем certainty - промежуточная уверенность (не все параметры заполнены)
+        match &res.certainty {
+            Certainty::Inferred(c) => assert!((*c - 0.5).abs() < 0.01),
+            _ => panic!("Expected Inferred certainty for partial generic"),
         }
     }
 
@@ -1915,16 +1858,14 @@ mod tests {
         );
 
         // Проверяем видимость из child scope
-        let hint = program
+        let resolution = program
             .symbols
             .get_variable_type(child_scope, "МассивВРуте");
 
-        match hint {
-            Some(TypeHint::Generic { .. }) => {
-                // OK, видна переменная из root scope
-            }
-            _ => panic!("Should see Generic variable from parent scope"),
-        }
+        // Должна быть видна переменная из root scope
+        assert!(resolution.is_some(), "Should see Generic variable from parent scope");
+        // Проверяем что это действительно Generic (начинается с "Массив<")
+        assert!(resolution.unwrap().type_name().starts_with("Массив<"));
 
         // Проверяем, что child переменная не видна из root scope
         let hint = program
@@ -2105,17 +2046,14 @@ mod tests {
         table.register_variable(
             table.root_scope,
             "x".to_string(),
-            TypeHint::Explicit("Число".to_string()),
+            TypeResolution::explicit("Число"),
             Span::stub(),
         );
 
         let hint = table.lookup_variable(table.root_scope, "x");
         assert!(hint.is_some());
 
-        match hint.unwrap() {
-            TypeHint::Explicit(t) => assert_eq!(t, "Число"),
-            _ => panic!("Expected Explicit type hint"),
-        }
+        assert_eq!(hint.unwrap().type_name(), "Число");
     }
 
     #[test]
@@ -2133,7 +2071,7 @@ mod tests {
         table.register_variable(
             table.root_scope,
             "x".to_string(),
-            TypeHint::Explicit("Строка".to_string()),
+            TypeResolution::explicit("Строка"),
             Span::stub(),
         );
 
@@ -2142,10 +2080,7 @@ mod tests {
 
         let (scope_id, hint) = result.unwrap();
         assert_eq!(scope_id, table.root_scope);
-        match hint {
-            TypeHint::Explicit(t) => assert_eq!(t, "Строка"),
-            _ => panic!("Expected Explicit type hint"),
-        }
+        assert_eq!(hint.type_name(), "Строка");
     }
 
     #[test]
@@ -2156,7 +2091,7 @@ mod tests {
         table.register_variable(
             table.root_scope,
             "global_var".to_string(),
-            TypeHint::Explicit("Число".to_string()),
+            TypeResolution::explicit("Число"),
             Span::stub(),
         );
 
@@ -2169,10 +2104,7 @@ mod tests {
 
         let (found_scope, hint) = result.unwrap();
         assert_eq!(found_scope, table.root_scope);
-        match hint {
-            TypeHint::Explicit(t) => assert_eq!(t, "Число"),
-            _ => panic!("Expected Explicit type hint"),
-        }
+        assert_eq!(hint.type_name(), "Число");
     }
 
     #[test]
@@ -2183,7 +2115,7 @@ mod tests {
         table.register_variable(
             table.root_scope,
             "x".to_string(),
-            TypeHint::Explicit("Число".to_string()),
+            TypeResolution::explicit("Число"),
             Span::stub(),
         );
 
@@ -2194,7 +2126,7 @@ mod tests {
         table.register_variable(
             child,
             "x".to_string(),
-            TypeHint::Explicit("Строка".to_string()),
+            TypeResolution::explicit("Строка"),
             Span::stub(),
         );
 
@@ -2204,10 +2136,7 @@ mod tests {
 
         let (found_scope, hint) = result.unwrap();
         assert_eq!(found_scope, child);
-        match hint {
-            TypeHint::Explicit(t) => assert_eq!(t, "Строка"),
-            _ => panic!("Expected Explicit type hint"),
-        }
+        assert_eq!(hint.type_name(), "Строка");
     }
 
     #[test]
@@ -2223,7 +2152,7 @@ mod tests {
         table.register_variable(
             level1,
             "mid_var".to_string(),
-            TypeHint::Explicit("Булево".to_string()),
+            TypeResolution::explicit("Булево"),
             Span::stub(),
         );
 
@@ -2251,7 +2180,7 @@ mod tests {
         table.register_variable(
             table.root_scope,
             "x".to_string(),
-            TypeHint::Explicit("Число".to_string()),
+            TypeResolution::explicit("Число"),
             Span::stub(),
         );
 
@@ -2259,7 +2188,7 @@ mod tests {
         let result = table.update_variable_type_checked(
             table.root_scope,
             "x",
-            TypeHint::Explicit("Строка".to_string()),
+            TypeResolution::explicit("Строка"),
         );
 
         assert!(result.is_ok());
@@ -2267,10 +2196,7 @@ mod tests {
         // Проверяем что тип обновлён
         let hint = table.lookup_variable(table.root_scope, "x");
         assert!(hint.is_some());
-        match hint.unwrap() {
-            TypeHint::Explicit(t) => assert_eq!(t, "Строка"),
-            _ => panic!("Expected Explicit type hint"),
-        }
+        assert_eq!(hint.unwrap().type_name(), "Строка");
     }
 
     #[test]
@@ -2282,7 +2208,7 @@ mod tests {
         let result = table.update_variable_type_checked(
             invalid_scope,
             "x",
-            TypeHint::Explicit("Число".to_string()),
+            TypeResolution::explicit("Число"),
         );
 
         assert!(result.is_err());
@@ -2296,7 +2222,7 @@ mod tests {
         let result = table.update_variable_type_checked(
             table.root_scope,
             "nonexistent",
-            TypeHint::Explicit("Число".to_string()),
+            TypeResolution::explicit("Число"),
         );
 
         assert!(result.is_err());
@@ -2310,7 +2236,7 @@ mod tests {
         table.register_variable(
             table.root_scope,
             "x".to_string(),
-            TypeHint::Explicit("Число".to_string()),
+            TypeResolution::explicit("Число"),
             Span::stub(),
         );
 
@@ -2332,7 +2258,7 @@ mod tests {
         table.register_variable(
             table.root_scope,
             "x".to_string(),
-            TypeHint::Explicit("Число".to_string()),
+            TypeResolution::explicit("Число"),
             Span::stub(),
         );
 
@@ -2466,7 +2392,7 @@ mod tests {
         table.register_variable(
             table.root_scope,
             "x".to_string(),
-            TypeHint::Explicit("Число".to_string()),
+            TypeResolution::explicit("Число"),
             Span::stub(),
         );
 
@@ -2485,21 +2411,21 @@ mod tests {
         table.register_variable(
             table.root_scope,
             "x".to_string(),
-            TypeHint::Explicit("Число".to_string()),
+            TypeResolution::explicit("Число"),
             Span::stub(),
         );
 
         table.register_variable(
             table.root_scope,
             "y".to_string(),
-            TypeHint::Explicit("Строка".to_string()),
+            TypeResolution::explicit("Строка"),
             Span::stub(),
         );
 
         table.register_variable(
             table.root_scope,
             "z".to_string(),
-            TypeHint::Explicit("Булево".to_string()),
+            TypeResolution::explicit("Булево"),
             Span::stub(),
         );
 
@@ -2518,7 +2444,7 @@ mod tests {
         table.register_variable(
             table.root_scope,
             "global".to_string(),
-            TypeHint::Explicit("Число".to_string()),
+            TypeResolution::explicit("Число"),
             Span::stub(),
         );
 
@@ -2527,7 +2453,7 @@ mod tests {
         table.register_variable(
             child,
             "local".to_string(),
-            TypeHint::Explicit("Строка".to_string()),
+            TypeResolution::explicit("Строка"),
             Span::stub(),
         );
 

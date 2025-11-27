@@ -8,7 +8,7 @@ use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::{
     ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
 };
-use bsl_shared::ir::TypeHint;
+use bsl_shared::domain::types::TypeResolution;
 use std::sync::Arc;
 
 fn create_test_repository() -> Arc<dyn TypeRepository> {
@@ -122,7 +122,7 @@ fn test_generic_collection_method() {
     let kol_type = ir.symbols.get_variable_type(root_scope, "Кол");
 
     match kol_type {
-        Some(TypeHint::Inferred(type_name)) => {
+        Some(res) => { let type_name = res.type_name();
             assert_eq!(type_name, "Число", "Generic массив.Количество() должен возвращать Число");
         }
         other => panic!("Expected Inferred(Число), got {:?}", other),
@@ -190,7 +190,7 @@ fn test_chained_method_calls() {
     let size_type = ir.symbols.get_variable_type(root_scope, "Размер");
 
     match size_type {
-        Some(TypeHint::Inferred(type_name)) => {
+        Some(res) => { let type_name = res.type_name();
             assert_eq!(type_name, "Число", "Результат Количество() должен быть Число");
         }
         other => panic!("Expected Inferred(Число), got {:?}", other),
@@ -256,7 +256,7 @@ fn test_nonexistent_method_on_generic_type() {
     let result_type = ir.symbols.get_variable_type(root_scope, "Результат");
 
     match result_type {
-        Some(TypeHint::Inferred(type_name)) => {
+        Some(res) => { let type_name = res.type_name();
             assert_eq!(type_name, "Dynamic", "Несуществующий метод должен возвращать Dynamic");
         }
         other => panic!("Expected Inferred(Dynamic), got {:?}", other),
@@ -345,7 +345,7 @@ fn test_multiple_method_calls_different_returns() {
     let k2_type = ir.symbols.get_variable_type(root_scope, "К2");
 
     match (k1_type, k2_type) {
-        (Some(TypeHint::Inferred(t1)), Some(TypeHint::Inferred(t2))) => {
+        (Some(res1), Some(res2)) => { let t1 = res1.type_name(); let t2 = res2.type_name();
             assert_eq!(t1, "Число", "К1 должна быть Число");
             assert_eq!(t2, "Число", "К2 должна быть Число");
         }

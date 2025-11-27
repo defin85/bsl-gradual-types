@@ -8,7 +8,7 @@ use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::parsing::bsl::ast::{Expression, Program, Span as AstSpan, Statement};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::ir::TypeHint;
+use bsl_shared::domain::types::TypeResolution;
 use std::sync::Arc;
 
 /// Helper функция - создаёт TypeRepository с базовыми типами
@@ -169,19 +169,8 @@ fn test_assignment_declares_variable_in_symbol_table() {
     );
 
     // Проверить тип: должен быть Generic<Массив, [?]>
-    match var_type.unwrap() {
-        TypeHint::Generic {
-            base_type,
-            type_params,
-            certainty,
-        } => {
-            assert_eq!(base_type, "Массив");
-            assert_eq!(type_params.len(), 1);
-            assert_eq!(type_params[0], "?");
-            assert_eq!(certainty, 0.0);
-        }
-        other => panic!("❌ FAILED: Ожидался TypeHint::Generic, получен {:?}", other),
-    }
+    let res = var_type.unwrap();
+    assert_eq!(res.type_name(), "Массив<Неопределено>", "Type должен быть Массив<Неопределено>");
 
     println!("✅ PASSED: Переменная МассивСтрок добавлена в SymbolTable как Generic<Массив, [?]>");
 }
@@ -231,19 +220,8 @@ fn test_assignment_map_generic_type() {
     let var_type = ir.symbols.get_variable_type(scope_id, "СоответствиеДанных");
     assert!(var_type.is_some(), "Переменная НЕ найдена в SymbolTable");
 
-    match var_type.unwrap() {
-        TypeHint::Generic {
-            base_type,
-            type_params,
-            ..
-        } => {
-            assert_eq!(base_type, "Соответствие");
-            assert_eq!(type_params.len(), 2);
-            assert_eq!(type_params[0], "?");
-            assert_eq!(type_params[1], "?");
-        }
-        other => panic!("Ожидался Generic, получен {:?}", other),
-    }
+    let res = var_type.unwrap();
+    assert_eq!(res.type_name(), "Соответствие<Неопределено, Неопределено>", "Type должен быть Соответствие<Неопределено, Неопределено>");
 
     println!("✅ PASSED: Соответствие инициализировано как Generic<Соответствие, [?, ?]>");
 }
@@ -291,12 +269,8 @@ fn test_assignment_explicit_type() {
     let var_type = ir.symbols.get_variable_type(scope_id, "Строка1");
     assert!(var_type.is_some(), "Переменная НЕ найдена в SymbolTable");
 
-    match var_type.unwrap() {
-        TypeHint::Inferred(type_name) => {
-            assert_eq!(type_name, "Строка");
-        }
-        other => panic!("Ожидался TypeHint::Inferred, получен {:?}", other),
-    }
+    let res = var_type.unwrap();
+    assert_eq!(res.type_name(), "Строка");
 
     println!("✅ PASSED: Строка1 инициализирована как Inferred(Строка)");
 }
@@ -352,12 +326,8 @@ fn test_assignment_updates_existing_variable() {
     assert!(var_type.is_some(), "Переменная НЕ найдена в SymbolTable");
 
     // После assignment тип ДОЛЖЕН измениться с "Число" на "Строка"
-    match var_type.unwrap() {
-        TypeHint::Inferred(type_name) => {
-            assert_eq!(type_name, "Строка", "Тип не обновился!");
-        }
-        other => panic!("Ожидался TypeHint::Inferred, получен {:?}", other),
-    }
+    let res = var_type.unwrap();
+    assert_eq!(res.type_name(), "Строка", "Тип не обновился!");
 
     println!("✅ PASSED: Flow-sensitive обновление типа работает");
 }

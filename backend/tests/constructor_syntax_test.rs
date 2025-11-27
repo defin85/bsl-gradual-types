@@ -4,7 +4,7 @@
 /// - `Новый ТаблицаЗначений` (без скобок)
 /// - `Новый ТаблицаЗначений()` (со скобками)
 ///
-/// Проверяем что оба варианта корректно парсятся и сохраняют TypeHint.
+/// Проверяем что оба варианта корректно парсятся и сохраняют TypeResolution.
 
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;

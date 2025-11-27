@@ -717,7 +717,7 @@ impl TypeSystemService {
                 self.hover_formatter.clone()
             };
 
-            // Форматируем hover через TypeResolution (вместо TypeHint)
+            // Форматируем hover через TypeResolution (вместо старого TypeHint enum)
             Some(formatter.format_variable(&var_name, &resolution))
         } else {
             // Milestone 2.11 Task B1: Логи когда переменная не найдена
@@ -2078,33 +2078,20 @@ impl TypeSystemService {
     fn format_variable_hover(
         &self,
         var_name: &str,
-        type_hint: &bsl_shared::ir::TypeHint,
+        resolution: &bsl_shared::domain::types::TypeResolution,
     ) -> String {
         use bsl_shared::domain::types::Certainty;
-        use bsl_shared::ir::TypeHint;
 
-        // Извлекаем имя типа из TypeHint
-        let type_name = match type_hint {
-            TypeHint::Explicit(t) | TypeHint::Inferred(t) => t.clone(),
-            TypeHint::Generic {
-                base_type,
-                type_params,
-                ..
-            } => {
-                // Generic тип: форматируем как "Массив<Строка>" или "Соответствие<Строка, Число>"
-                if type_params.is_empty() {
-                    base_type.clone()
-                } else {
-                    format!("{}<{}>", base_type, type_params.join(", "))
-                }
-            }
-            TypeHint::Unknown => {
-                return format!(
-                    "**Переменная:** `{}`\n\n*Тип:* Неопределено\n\n💡 *Подсказка:* Переменная объявлена, но тип не выведен из присваивания",
-                    var_name
-                );
-            }
-        };
+        // Проверяем, известен ли тип
+        if matches!(resolution.certainty, Certainty::Unknown) {
+            return format!(
+                "**Переменная:** `{}`\n\n*Тип:* Неопределено\n\n*Подсказка:* Переменная объявлена, но тип не выведен из присваивания",
+                var_name
+            );
+        }
+
+        // Получаем имя типа из TypeResolution
+        let type_name = resolution.type_name();
 
         // Резолвим тип через AnalysisEngine → TypeRepository
         let resolution = self.analysis_engine.resolve_type(&type_name);

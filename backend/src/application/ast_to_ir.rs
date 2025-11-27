@@ -13,6 +13,7 @@ use crate::parsing::bsl::ast::{Expression, Program, Statement};
 use anyhow::Result;
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::signature_index::SignatureIndex;
+use bsl_shared::domain::types::TypeResolution;
 // Note: FacetKind removed in Phase 2 refactoring - using SignatureIndex methods instead
 use bsl_shared::ir::*;
 use bsl_shared::utils::hash::hash_content;
@@ -183,13 +184,13 @@ impl AstToIrConverter {
                 };
 
                 // Регистрируем переменную в текущем scope
-                let hint = if let Some(ref t) = type_hint {
-                    TypeHint::Explicit(t.clone())
+                let resolution = if let Some(ref t) = type_hint {
+                    TypeResolution::explicit(t)
                 } else {
-                    TypeHint::Unknown
+                    TypeResolution::unknown()
                 };
                 self.symbol_table
-                    .register_variable(self.current_scope, name, hint, span);
+                    .register_variable(self.current_scope, name, resolution, span);
 
                 self.nodes.push(node);
                 Ok(Some(self.nodes.len() - 1))
@@ -250,34 +251,22 @@ impl AstToIrConverter {
                     let span = self.ast_span_to_ir_span(ast_span);
 
                     // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Определяем тип для переменной
-                    let type_hint = if let Expression::New { type_name, .. } = value {
+                    let type_resolution = if let Expression::New { type_name, .. } = value {
                         // ✅ ОЧИСТКА: Убираем скобки если tree-sitter включил их в type_name
                         let clean_type_name = type_name.trim().trim_end_matches("()").trim();
 
                         // Для Generic коллекций (Массив, Соответствие, Список)
                         match clean_type_name {
-                            "Массив" => TypeHint::Generic {
-                                base_type: "Массив".to_string(),
-                                type_params: vec!["?".to_string()],
-                                certainty: 0.0,
-                            },
-                            "Соответствие" => TypeHint::Generic {
-                                base_type: "Соответствие".to_string(),
-                                type_params: vec!["?".to_string(), "?".to_string()],
-                                certainty: 0.0,
-                            },
-                            "Список" => TypeHint::Generic {
-                                base_type: "Список".to_string(),
-                                type_params: vec!["?".to_string()],
-                                certainty: 0.0,
-                            },
+                            "Массив" => TypeResolution::generic("Массив", &["?"], 0.0),
+                            "Соответствие" => TypeResolution::generic("Соответствие", &["?", "?"], 0.0),
+                            "Список" => TypeResolution::generic("Список", &["?"], 0.0),
                             _ => {
                                 // ✅ ИСПРАВЛЕНИЕ: ДЛЯ ВСЕХ ОСТАЛЬНЫХ ТИПОВ создаём Explicit!
-                                TypeHint::Explicit(clean_type_name.to_string())
+                                TypeResolution::explicit(clean_type_name)
                             }
                         }
                     } else {
-                        TypeHint::Inferred(value_type.clone())
+                        TypeResolution::inferred(&value_type, 0.8)
                     };
 
                     // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Проверяем, существует ли переменная
@@ -291,12 +280,12 @@ impl AstToIrConverter {
                         use tracing::debug;
                         debug!(
                             "Assignment declares new variable: {} with type {:?}",
-                            var_name, type_hint
+                            var_name, type_resolution
                         );
                         self.symbol_table.register_variable(
                             self.current_scope,
                             var_name.clone(),
-                            type_hint,
+                            type_resolution,
                             span,
                         );
                     } else {
@@ -305,7 +294,7 @@ impl AstToIrConverter {
                         if !self.symbol_table.update_variable_type(
                             self.current_scope,
                             var_name.clone(),
-                            type_hint,
+                            type_resolution,
                         ) {
                             tracing::warn!(
                                 "Failed to update variable type for '{}' in scope {:?}",
@@ -445,7 +434,7 @@ impl AstToIrConverter {
                 self.symbol_table.register_variable(
                     self.current_scope,
                     variable.clone(),
-                    TypeHint::Explicit("Число".to_string()),
+                    TypeResolution::primitive("Число"),
                     span,
                 );
 
@@ -951,22 +940,7 @@ impl AstToIrConverter {
         // ✅ Используем публичный API вместо прямого доступа к scopes
         self.symbol_table
             .lookup_variable_in_hierarchy(self.current_scope, name)
-            .map(|(_, hint)| match hint {
-                TypeHint::Explicit(t) | TypeHint::Inferred(t) => t.clone(),
-                TypeHint::Generic {
-                    base_type,
-                    type_params,
-                    ..
-                } => {
-                    // ✅ Generic тип: форматируем как "Массив<Строка>" или "Соответствие<Строка, Число>"
-                    if type_params.is_empty() {
-                        base_type.clone()
-                    } else {
-                        format!("{}<{}>", base_type, type_params.join(", "))
-                    }
-                }
-                TypeHint::Unknown => "Dynamic".to_string(),
-            })
+            .map(|(_, resolution)| resolution.type_name())
     }
 
 
@@ -1031,11 +1005,11 @@ impl AstToIrConverter {
         use tracing::debug;
 
         // Получаем текущий тип receiver из SymbolTable
-        let current_hint = match self
+        let current_resolution = match self
             .symbol_table
             .get_variable_type(self.current_scope, receiver)
         {
-            Some(hint) => hint,
+            Some(resolution) => resolution,
             None => {
                 debug!(
                     "try_infer_generic: переменная {} не найдена в scope",
@@ -1046,8 +1020,9 @@ impl AstToIrConverter {
         };
 
         // Проверяем, что это Generic тип
-        let base_type = match &current_hint {
-            TypeHint::Generic { base_type, .. } => base_type.clone(),
+        use bsl_shared::domain::types::ResolutionResult;
+        let base_type = match &current_resolution.result {
+            ResolutionResult::Generic(gen) => gen.base_type.clone(),
             _ => {
                 debug!(
                     "try_infer_generic: {} не Generic тип, пропускаем inference",

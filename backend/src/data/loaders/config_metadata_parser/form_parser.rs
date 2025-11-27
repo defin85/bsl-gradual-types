@@ -5,7 +5,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::fs;
 use std::path::Path;
-use tracing::{info, trace};
+use tracing::trace;
 
 use super::form_types::*;
 use super::types::ExecutionContext;
@@ -36,7 +36,7 @@ impl FormParser {
         owner_type: &str,
         form_name: &str,
     ) -> Result<FormMetadata> {
-        info!("📄 Parsing form: {} ({})", form_name, owner_type);
+        trace!("📄 Parsing form: {} ({})", form_name, owner_type);
 
         let content = fs::read_to_string(form_xml_path)?;
 

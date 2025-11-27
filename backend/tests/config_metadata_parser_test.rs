@@ -14,7 +14,7 @@ fn test_parse_test_configuration() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
 
     // Проверяем парсинг ChildObjects сначала
     let config_xml = config_path.join("Configuration.xml");
@@ -66,7 +66,7 @@ fn test_parse_child_objects_list() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
     let config_xml = config_path.join("Configuration.xml");
 
     let child_objects = discovery
@@ -185,7 +185,7 @@ fn test_graceful_handling_unknown_type() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
 
     // Даже если встретятся неизвестные типы, парсинг не должен упасть
     let result = discovery

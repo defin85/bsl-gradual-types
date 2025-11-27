@@ -577,7 +577,8 @@ impl SystemCoordinator {
         info!("🔍 Загрузка метаданных конфигурации из {:?}", config_path);
 
         // Создаём discovery и обнаруживаем все объекты
-        let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+        // show_progress = false - нет терминального прогресс-бара для этого метода
+        let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
 
         // Без progress_callback в публичном методе (для обратной совместимости)
         let metadata_objects = discovery
@@ -648,7 +649,8 @@ impl SystemCoordinator {
             config_path.display()
         );
 
-        let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+        // show_progress = true - показываем терминальный прогресс-бар для Web Server
+        let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), true);
         let configurations = discovery
             .discover_all_configurations()
             .map_err(|e| anyhow::anyhow!("Ошибка обнаружения конфигураций: {}", e))?;
@@ -755,7 +757,8 @@ impl SystemCoordinator {
 
         info!("🔍 Обнаружение конфигураций в: {}", config_path.display());
 
-        let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+        // show_progress = true - показываем терминальный прогресс-бар при парсинге конфигурации
+        let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), true);
         let configurations = discovery
             .discover_all_configurations()
             .map_err(|e| anyhow::anyhow!("Ошибка обнаружения конфигураций: {}", e))?;

@@ -15,7 +15,7 @@ use std::path::PathBuf;
 fn test_load_metadata_from_base_configuration() {
     // Arrange
     let conf_path = PathBuf::from("../examples/conf/conf_test");
-    let discovery = ConfigurationDiscovery::new(conf_path);
+    let discovery = ConfigurationDiscovery::new(conf_path, false);
 
     // Act
     let configurations_result = discovery.discover_all_configurations();
@@ -93,7 +93,7 @@ fn test_load_metadata_from_base_configuration() {
 fn test_load_metadata_from_extension_configuration() {
     // Arrange
     let parent_path = PathBuf::from("../examples/conf");
-    let discovery = ConfigurationDiscovery::new(parent_path);
+    let discovery = ConfigurationDiscovery::new(parent_path, false);
 
     // Act
     let configurations_result = discovery.discover_all_configurations();
@@ -162,7 +162,7 @@ fn test_load_metadata_from_extension_configuration() {
 fn test_sequential_metadata_loading_all_configurations() {
     // Arrange
     let parent_path = PathBuf::from("../examples/conf");
-    let discovery = ConfigurationDiscovery::new(parent_path);
+    let discovery = ConfigurationDiscovery::new(parent_path, false);
 
     // Act - получаем список всех конфигураций
     let configurations_result = discovery.discover_all_configurations();
@@ -226,7 +226,7 @@ fn test_sequential_metadata_loading_all_configurations() {
 fn test_metadata_objects_structure() {
     // Arrange
     let conf_path = PathBuf::from("../examples/conf/conf_test");
-    let discovery = ConfigurationDiscovery::new(conf_path);
+    let discovery = ConfigurationDiscovery::new(conf_path, false);
 
     // Act
     let configurations_result = discovery.discover_all_configurations();
@@ -288,7 +288,7 @@ fn test_metadata_objects_structure() {
 fn test_catalog_facets() {
     // Arrange
     let conf_path = PathBuf::from("../examples/conf/conf_test");
-    let discovery = ConfigurationDiscovery::new(conf_path);
+    let discovery = ConfigurationDiscovery::new(conf_path, false);
 
     // Act
     let configurations_result = discovery.discover_all_configurations();
@@ -336,7 +336,7 @@ fn test_catalog_facets() {
 fn test_attributes_and_tabular_sections() {
     // Arrange
     let conf_path = PathBuf::from("../examples/conf/conf_test");
-    let discovery = ConfigurationDiscovery::new(conf_path);
+    let discovery = ConfigurationDiscovery::new(conf_path, false);
 
     // Act
     let configurations_result = discovery.discover_all_configurations();

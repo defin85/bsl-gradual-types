@@ -202,7 +202,7 @@ impl UniversalMetadataParser {
                 Ok(props) => {
                     metadata.execution_contexts = props.get_execution_contexts();
                     metadata.common_module_properties = Some(props);
-                    tracing::info!(
+                    tracing::debug!(
                         "✅ CommonModule '{}': контекстов={}, global={}",
                         metadata.name,
                         metadata.execution_contexts.len(),
@@ -214,7 +214,7 @@ impl UniversalMetadataParser {
                     );
                 }
                 Err(e) => {
-                    tracing::warn!(
+                    tracing::debug!(
                         "⚠️ Не удалось распарсить свойства CommonModule '{}': {}",
                         metadata.name,
                         e
@@ -319,7 +319,7 @@ impl UniversalMetadataParser {
                                 "DuringRequest" => ReturnValuesReuse::DuringRequest,
                                 "DuringSession" => ReturnValuesReuse::DuringSession,
                                 _ => {
-                                    tracing::warn!("⚠️ Неизвестное значение ReturnValuesReuse: {}", text);
+                                    tracing::debug!("⚠️ Неизвестное значение ReturnValuesReuse: {}", text);
                                     ReturnValuesReuse::DontUse
                                 }
                             };

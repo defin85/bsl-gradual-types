@@ -16,7 +16,7 @@ fn test_config_path() -> PathBuf {
 
 #[test]
 fn test_discover_object_modules_returns_tuples() {
-    let discovery = ConfigurationDiscovery::new(test_config_path());
+    let discovery = ConfigurationDiscovery::new(test_config_path(), false);
 
     // Тестируем на любом существующем каталоге
     let (object_mod, manager_mod, record_set_mod) =
@@ -30,7 +30,7 @@ fn test_discover_object_modules_returns_tuples() {
 
 #[test]
 fn test_discover_metadata_includes_module_paths() {
-    let discovery = ConfigurationDiscovery::new(test_config_path());
+    let discovery = ConfigurationDiscovery::new(test_config_path(), false);
 
     // Обнаруживаем все конфигурации
     let configs = discovery

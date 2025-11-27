@@ -170,7 +170,7 @@ fn test_discovery_extension_configuration() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(ext_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(ext_path.to_path_buf(), false);
     let metadata = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>)
         .expect("Не удалось обнаружить метаданные расширения");
@@ -312,7 +312,7 @@ fn test_parse_all_objects_gracefully() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
@@ -356,7 +356,7 @@ fn test_empty_child_objects_handling() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
     let config_xml = config_path.join("Configuration.xml");
 
     let child_objects_result = discovery.parse_child_objects_list(&config_xml);
@@ -429,7 +429,7 @@ fn test_full_configuration_parsing_performance() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
 
     let start = Instant::now();
     let metadata = discovery

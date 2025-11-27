@@ -1341,7 +1341,6 @@ mod tests {
 
 #[cfg(test)]
 mod directive_tests {
-    use super::*;
     use bsl_shared::domain::code_location::CompilerDirective;
 
     /// Test helper: Парсит директиву компиляции из текста

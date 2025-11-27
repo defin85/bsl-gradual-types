@@ -13,7 +13,7 @@ use std::path::PathBuf;
 fn test_detect_base_configuration() {
     // Arrange
     let conf_path = PathBuf::from("../examples/conf/conf_test");
-    let discovery = ConfigurationDiscovery::new(conf_path);
+    let discovery = ConfigurationDiscovery::new(conf_path, false);
 
     // Act
     let result = discovery.discover_all_configurations();
@@ -52,7 +52,7 @@ fn test_detect_base_configuration() {
 fn test_detect_extension_configuration() {
     // Arrange
     let ext_path = PathBuf::from("../examples/conf/ext_test");
-    let discovery = ConfigurationDiscovery::new(ext_path);
+    let discovery = ConfigurationDiscovery::new(ext_path, false);
 
     // Act
     let result = discovery.discover_all_configurations();
@@ -87,7 +87,7 @@ fn test_discover_all_configurations_multiple() {
     // Arrange
     // Тестируем папку, которая может содержать и базу, и расширения
     let parent_path = PathBuf::from("../examples/conf");
-    let discovery = ConfigurationDiscovery::new(parent_path);
+    let discovery = ConfigurationDiscovery::new(parent_path, false);
 
     // Act
     let result = discovery.discover_all_configurations();
@@ -134,7 +134,7 @@ fn test_discover_all_configurations_multiple() {
 fn test_discover_metadata_in_specific_configuration() {
     // Arrange
     let conf_path = PathBuf::from("../examples/conf/conf_test");
-    let discovery = ConfigurationDiscovery::new(conf_path);
+    let discovery = ConfigurationDiscovery::new(conf_path, false);
 
     // Act
     let configurations = discovery.discover_all_configurations();
@@ -177,7 +177,7 @@ fn test_discover_metadata_in_specific_configuration() {
 fn test_backward_compatibility_discover_all_metadata() {
     // Arrange
     let conf_path = PathBuf::from("../examples/conf/conf_test");
-    let discovery = ConfigurationDiscovery::new(conf_path);
+    let discovery = ConfigurationDiscovery::new(conf_path, false);
 
     // Act
     let result = discovery

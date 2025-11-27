@@ -27,7 +27,7 @@ fn test_find_configuration_direct() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
 
     // ВАЖНО: Используем приватный метод через публичный API
     // find_configuration_folder() вызывается внутри discover_all_metadata()
@@ -61,7 +61,7 @@ fn test_find_configuration_in_subfolder() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(parent_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(parent_path.to_path_buf(), false);
 
     // Метод должен найти ПЕРВУЮ подпапку с Configuration.xml
     let result = discovery
@@ -92,7 +92,7 @@ fn test_find_configuration_not_found() {
     let temp_dir = TempDir::new().expect("Не удалось создать временную папку");
 
     // Создаём пустую временную папку без Configuration.xml
-    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
+    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -180,7 +180,7 @@ fn test_workflow_with_nested_structure() {
     fs::write(&catalog_xml_path, catalog_xml_content).expect("Не удалось записать XML справочника");
 
     // Теперь тестируем: передаём родительскую папку (temp_dir)
-    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
+    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -237,7 +237,7 @@ fn test_workflow_with_multiple_subfolders() {
     fs::write(&config_xml_path, config_xml_content).expect("Не удалось записать Configuration.xml");
 
     // Тестируем
-    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
+    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -264,7 +264,7 @@ fn test_real_conf_test_configuration() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -301,7 +301,7 @@ fn test_real_ext_test_configuration() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(ext_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(ext_path.to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -340,7 +340,7 @@ fn test_parent_folder_auto_discovery() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(parent_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(parent_path.to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);

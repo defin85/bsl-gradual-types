@@ -2822,7 +2822,8 @@ impl BslLanguageServer {
             })
             .await;
 
-        let discovery = ConfigurationDiscovery::new(canonical_path.clone());
+        // show_progress = false для LSP (прогресс передаётся через LSP protocol)
+        let discovery = ConfigurationDiscovery::new(canonical_path.clone(), false);
 
         // Создаём callback для передачи прогресса в LSP клиент
         let client_clone = self.client.clone();

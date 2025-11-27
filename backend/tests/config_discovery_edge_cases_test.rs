@@ -47,7 +47,7 @@ fn test_multiple_configurations_returns_first() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(parent_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(parent_path.to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -85,7 +85,7 @@ fn test_backward_compatibility_direct_path() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf());
+    let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -146,7 +146,7 @@ fn test_deeply_nested_configuration() {
     fs::write(&config_xml_path, config_xml_content).expect("Не удалось записать Configuration.xml");
 
     // Запускаем discovery с temp (корневой папки)
-    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
+    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -161,7 +161,7 @@ fn test_deeply_nested_configuration() {
     println!("✅ Глубокая вложенность корректно НЕ обнаружена (нерекурсивное сканирование)");
 
     // Но если указать путь до level1, то config будет найден
-    let discovery_level1 = ConfigurationDiscovery::new(level1.clone());
+    let discovery_level1 = ConfigurationDiscovery::new(level1.clone(), false);
     let result_level1 = discovery_level1
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
@@ -171,7 +171,7 @@ fn test_deeply_nested_configuration() {
     );
 
     // Но если указать путь до level2, то config будет найден
-    let discovery_level2 = ConfigurationDiscovery::new(level2);
+    let discovery_level2 = ConfigurationDiscovery::new(level2, false);
     let result_level2 = discovery_level2
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
 
@@ -212,7 +212,7 @@ fn test_empty_subfolders_skip() {
     let config_xml_path = config_folder.join("Configuration.xml");
     fs::write(&config_xml_path, config_xml_content).expect("Не удалось записать Configuration.xml");
 
-    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
+    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -257,7 +257,7 @@ fn test_files_in_parent_folder_ignored() {
     let config_xml_path = config_folder.join("Configuration.xml");
     fs::write(&config_xml_path, config_xml_content).expect("Не удалось записать Configuration.xml");
 
-    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
+    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -279,7 +279,7 @@ fn test_error_message_clarity() {
     // Проверяем, что сообщение об ошибке информативное
     let temp_dir = TempDir::new().expect("Не удалось создать временную папку");
 
-    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
+    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -358,7 +358,7 @@ fn test_real_project_structure() {
     fs::write(&config_xml_path, config_xml_content).expect("Не удалось записать Configuration.xml");
 
     // Запускаем discovery с корня проекта
-    let discovery_root = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
+    let discovery_root = ConfigurationDiscovery::new(temp_dir.path().to_path_buf(), false);
 
     let result_root = discovery_root
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -370,7 +370,7 @@ fn test_real_project_structure() {
     );
 
     // Но если указать путь до src, должна найтись
-    let discovery_src = ConfigurationDiscovery::new(src_folder);
+    let discovery_src = ConfigurationDiscovery::new(src_folder, false);
 
     let result_src = discovery_src
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);
@@ -406,7 +406,7 @@ fn test_russian_paths() {
     fs::write(&config_xml_path, config_xml_content)
         .expect("Не удалось записать Configuration.xml в русский путь");
 
-    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf());
+    let discovery = ConfigurationDiscovery::new(temp_dir.path().to_path_buf(), false);
 
     let result = discovery
         .discover_all_metadata(None::<fn(bsl_backend::data::loaders::progress::ProgressUpdate)>);

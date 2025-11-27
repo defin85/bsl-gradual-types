@@ -15,7 +15,7 @@ fn benchmark_parallel_parsing(c: &mut Criterion) {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path);
+    let discovery = ConfigurationDiscovery::new(config_path, false);
 
     // Обнаруживаем конфигурации один раз (вне бенчмарка)
     let configurations = discovery
@@ -61,7 +61,7 @@ fn benchmark_configuration_discovery(c: &mut Criterion) {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path);
+    let discovery = ConfigurationDiscovery::new(config_path, false);
 
     c.bench_function("discover_all_configurations", |b| {
         b.iter(|| {

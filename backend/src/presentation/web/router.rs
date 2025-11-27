@@ -3,12 +3,14 @@
 //! Настройка маршрутов для веб-сервера
 
 use axum::{
-    http::StatusCode,
+    http::{header, HeaderValue, StatusCode},
     routing::{get, post},
     Router,
 };
-use std::collections::HashMap;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::{
+    services::{ServeDir, ServeFile},
+    set_header::SetResponseHeaderLayer,
+};
 
 use super::handlers::{
     get_hover, get_metrics, get_types, health_check, search_types, validate_code, AppState,
@@ -23,11 +25,6 @@ async fn favicon() -> StatusCode {
 /// Create web application router
 pub fn create_router(app_state: AppState, static_path: &str, enable_cors: bool) -> Router {
     let index_path = format!("{}/index.html", static_path);
-
-    // Configure MIME types for WASM and JS files
-    let mut mime_overrides = HashMap::new();
-    mime_overrides.insert("wasm", "application/wasm");
-    mime_overrides.insert("js", "application/javascript");
 
     let static_dir = ServeDir::new(static_path)
         .not_found_service(ServeFile::new(&index_path))
@@ -47,10 +44,16 @@ pub fn create_router(app_state: AppState, static_path: &str, enable_cors: bool) 
         .fallback_service(static_dir)
         .with_state(app_state);
 
-    // Add CORS if enabled
+    // Add CORS and Cache-Control headers for development mode
     if enable_cors {
         use tower_http::cors::CorsLayer;
-        app = app.layer(CorsLayer::permissive());
+        app = app
+            .layer(CorsLayer::permissive())
+            // Disable browser cache for development - prevents stale index.html issues
+            .layer(SetResponseHeaderLayer::overriding(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+            ));
     }
 
     app

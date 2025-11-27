@@ -137,7 +137,7 @@ fn test_parse_form_module_contexts() {
 
 #[test]
 fn test_discover_all_forms_for_document() {
-    let discovery = ConfigurationDiscovery::new(test_config_path());
+    let discovery = ConfigurationDiscovery::new(test_config_path(), false);
     let forms = discovery
         .discover_forms("Documents", "ЗаказНаряды")
         .expect("Failed to discover forms");
@@ -149,7 +149,7 @@ fn test_discover_all_forms_for_document() {
 
 #[test]
 fn test_discover_forms_no_forms_directory() {
-    let discovery = ConfigurationDiscovery::new(test_config_path());
+    let discovery = ConfigurationDiscovery::new(test_config_path(), false);
 
     // Константы не имеют форм
     let forms = discovery
@@ -190,7 +190,7 @@ fn test_form_attributes_all_parsed() {
 
 #[test]
 fn test_form_metadata_integration_with_discovery() {
-    let discovery = ConfigurationDiscovery::new(test_config_path());
+    let discovery = ConfigurationDiscovery::new(test_config_path(), false);
 
     // Обнаруживаем все конфигурации
     let configurations = discovery

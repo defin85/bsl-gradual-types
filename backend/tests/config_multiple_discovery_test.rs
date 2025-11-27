@@ -17,7 +17,7 @@ use std::path::PathBuf;
 fn test_discover_multiple_configurations() {
     // Arrange
     let parent_path = PathBuf::from("../examples/conf");
-    let discovery = ConfigurationDiscovery::new(parent_path);
+    let discovery = ConfigurationDiscovery::new(parent_path, false);
 
     // Act
     let result = discovery.discover_all_configurations();
@@ -62,7 +62,7 @@ fn test_discover_multiple_configurations() {
 fn test_configurations_sorted_base_first() {
     // Arrange
     let parent_path = PathBuf::from("../examples/conf");
-    let discovery = ConfigurationDiscovery::new(parent_path);
+    let discovery = ConfigurationDiscovery::new(parent_path, false);
 
     // Act
     let result = discovery.discover_all_configurations();
@@ -108,7 +108,7 @@ fn test_configurations_sorted_base_first() {
 fn test_configuration_paths_correctness() {
     // Arrange
     let parent_path = PathBuf::from("../examples/conf");
-    let discovery = ConfigurationDiscovery::new(parent_path);
+    let discovery = ConfigurationDiscovery::new(parent_path, false);
 
     // Act
     let result = discovery.discover_all_configurations();
@@ -166,7 +166,7 @@ fn test_configuration_paths_correctness() {
 fn test_backward_compatibility_discover_all_metadata() {
     // Arrange
     let parent_path = PathBuf::from("../examples/conf");
-    let discovery = ConfigurationDiscovery::new(parent_path.clone());
+    let discovery = ConfigurationDiscovery::new(parent_path.clone(), false);
 
     // Act - новый метод
     let configurations_result = discovery.discover_all_configurations();
@@ -210,7 +210,7 @@ fn test_backward_compatibility_discover_all_metadata() {
 fn test_both_base_and_extension_present() {
     // Arrange
     let parent_path = PathBuf::from("../examples/conf");
-    let discovery = ConfigurationDiscovery::new(parent_path);
+    let discovery = ConfigurationDiscovery::new(parent_path, false);
 
     // Act
     let result = discovery.discover_all_configurations();
@@ -240,7 +240,7 @@ fn test_both_base_and_extension_present() {
 fn test_no_duplicate_configurations() {
     // Arrange
     let parent_path = PathBuf::from("../examples/conf");
-    let discovery = ConfigurationDiscovery::new(parent_path);
+    let discovery = ConfigurationDiscovery::new(parent_path, false);
 
     // Act
     let result = discovery.discover_all_configurations();

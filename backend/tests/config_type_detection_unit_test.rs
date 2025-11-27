@@ -18,7 +18,7 @@ use std::path::PathBuf;
 fn test_detect_base_configuration_details() {
     // Arrange
     let conf_path = PathBuf::from("../examples/conf/conf_test");
-    let discovery = ConfigurationDiscovery::new(conf_path.clone());
+    let discovery = ConfigurationDiscovery::new(conf_path.clone(), false);
 
     // Act
     let result = discovery.discover_all_configurations();
@@ -89,7 +89,7 @@ fn test_detect_base_configuration_details() {
 fn test_detect_extension_configuration_details() {
     // Arrange
     let ext_path = PathBuf::from("../examples/conf/ext_test");
-    let discovery = ConfigurationDiscovery::new(ext_path.clone());
+    let discovery = ConfigurationDiscovery::new(ext_path.clone(), false);
 
     // Act
     let result = discovery.discover_all_configurations();
@@ -165,7 +165,7 @@ fn test_detect_extension_configuration_details() {
 fn test_extension_markers_detection() {
     // Arrange
     let ext_path = PathBuf::from("../examples/conf/ext_test");
-    let discovery = ConfigurationDiscovery::new(ext_path);
+    let discovery = ConfigurationDiscovery::new(ext_path, false);
 
     // Act
     let result = discovery.discover_all_configurations();
@@ -199,7 +199,7 @@ fn test_extension_markers_detection() {
 fn test_base_configuration_no_extension_markers() {
     // Arrange
     let conf_path = PathBuf::from("../examples/conf/conf_test");
-    let discovery = ConfigurationDiscovery::new(conf_path);
+    let discovery = ConfigurationDiscovery::new(conf_path, false);
 
     // Act
     let result = discovery.discover_all_configurations();
@@ -230,7 +230,7 @@ fn test_base_configuration_no_extension_markers() {
 fn test_name_prefix_extraction() {
     // Arrange
     let ext_path = PathBuf::from("../examples/conf/ext_test");
-    let discovery = ConfigurationDiscovery::new(ext_path);
+    let discovery = ConfigurationDiscovery::new(ext_path, false);
 
     // Act
     let result = discovery.discover_all_configurations();
@@ -262,7 +262,7 @@ fn test_name_prefix_extraction() {
 fn test_empty_name_prefix_in_base() {
     // Arrange
     let conf_path = PathBuf::from("../examples/conf/conf_test");
-    let discovery = ConfigurationDiscovery::new(conf_path);
+    let discovery = ConfigurationDiscovery::new(conf_path, false);
 
     // Act
     let result = discovery.discover_all_configurations();

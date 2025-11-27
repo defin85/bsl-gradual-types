@@ -1,9 +1,10 @@
 //! Обнаружение и навигация по структуре конфигурации
 
-use super::parser::UniversalMetadataParser;
-use super::types::{ConfigurationInfo, ConfigurationType, UniversalMetadataObject};
 use super::form_parser::FormParser;
 use super::form_types::FormMetadata;
+use super::parser::UniversalMetadataParser;
+use super::types::{ConfigurationInfo, ConfigurationType, UniversalMetadataObject};
+use indicatif::{ProgressBar, ProgressStyle};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use rayon::prelude::*;
@@ -26,12 +27,21 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 /// затем парсит каждый объект через UniversalMetadataParser.
 pub struct ConfigurationDiscovery {
     base_path: PathBuf,
+    /// Флаг отображения прогресс-бара в терминале (для CLI/Web сервера)
+    show_progress: bool,
 }
 
 impl ConfigurationDiscovery {
     /// Создать новый обнаруживатель для указанного пути конфигурации
-    pub fn new(base_path: PathBuf) -> Self {
-        Self { base_path }
+    ///
+    /// # Параметры
+    /// - `base_path` - путь к папке с конфигурацией
+    /// - `show_progress` - показывать ли прогресс-бар в терминале (true для CLI/Web, false для LSP)
+    pub fn new(base_path: PathBuf, show_progress: bool) -> Self {
+        Self {
+            base_path,
+            show_progress,
+        }
     }
 
     /// Конвертирует XML тег из Configuration.xml в название папки
@@ -164,10 +174,10 @@ impl ConfigurationDiscovery {
             .to_path_buf();
 
         let mut info = if is_extension {
-            tracing::info!("🧩 Расширение: {} (prefix: {:?})", config_name, prefix);
+            tracing::debug!("🧩 Расширение: {} (prefix: {:?})", config_name, prefix);
             ConfigurationInfo::extension(config_path, config_name, prefix)
         } else {
-            tracing::info!("📦 Основная конфигурация: {}", config_name);
+            tracing::debug!("📦 Основная конфигурация: {}", config_name);
             ConfigurationInfo::base(config_path, config_name)
         };
 
@@ -187,7 +197,7 @@ impl ConfigurationDiscovery {
     /// Возвращает:
     /// - `Vec<ConfigurationInfo>` — отсортированный список (база → расширения)
     pub fn discover_all_configurations(&self) -> Result<Vec<ConfigurationInfo>> {
-        tracing::info!("🔍 Обнаружение всех конфигураций в {:?}", self.base_path);
+        tracing::debug!("🔍 Обнаружение всех конфигураций в {:?}", self.base_path);
 
         let mut configurations = Vec::new();
 
@@ -201,7 +211,7 @@ impl ConfigurationDiscovery {
 
             match Self::detect_configuration_type(&direct_config) {
                 Ok(info) => configurations.push(info),
-                Err(e) => tracing::warn!(
+                Err(e) => tracing::debug!(
                     "⚠️ Не удалось определить тип конфигурации {:?}: {}",
                     direct_config,
                     e
@@ -230,7 +240,7 @@ impl ConfigurationDiscovery {
 
                         match Self::detect_configuration_type(&config_in_subdir) {
                             Ok(info) => configurations.push(info),
-                            Err(e) => tracing::warn!(
+                            Err(e) => tracing::debug!(
                                 "⚠️ Не удалось определить тип конфигурации {:?}: {}",
                                 config_in_subdir,
                                 e
@@ -256,7 +266,7 @@ impl ConfigurationDiscovery {
             ConfigurationType::Extension => 1,
         });
 
-        tracing::info!(
+        tracing::debug!(
             "✅ Найдено конфигураций: {} (Base: {}, Extension: {})",
             configurations.len(),
             configurations.iter().filter(|c| c.is_base()).count(),
@@ -264,7 +274,7 @@ impl ConfigurationDiscovery {
         );
 
         for (idx, info) in configurations.iter().enumerate() {
-            tracing::info!(
+            tracing::debug!(
                 "  {}. {} {} ({})",
                 idx + 1,
                 if info.is_base() { "📦" } else { "🧩" },
@@ -294,7 +304,7 @@ impl ConfigurationDiscovery {
     where
         F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
     {
-        tracing::info!(
+        tracing::debug!(
             "📦 [4-Phase] Парсинг метаданных из конфигурации: {} ({:?})",
             config_info.name,
             config_info.config_type
@@ -330,7 +340,7 @@ impl ConfigurationDiscovery {
             .collect();
 
         let total_objects = parsing_tasks.len();
-        tracing::info!(
+        tracing::debug!(
             "📊 Найдено {} объектов для парсинга в конфигурации {}",
             total_objects,
             config_info.name
@@ -350,6 +360,21 @@ impl ConfigurationDiscovery {
             total_objects,
             Some("Начинаем парсинг XML файлов...".to_string()),
         ));
+
+        // Создаём терминальный прогресс-бар если show_progress == true
+        let terminal_progress = if self.show_progress {
+            let pb = ProgressBar::new(total_objects as u64);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]")
+                    .unwrap()
+                    .progress_chars("##-"),
+            );
+            pb.set_message(format!("Парсинг {}", config_info.name));
+            Some(pb)
+        } else {
+            None
+        };
 
         // Счётчик обработанных объектов (потокобезопасный)
         let processed = Arc::new(AtomicUsize::new(0));
@@ -382,7 +407,7 @@ impl ConfigurationDiscovery {
                 };
 
                 if !xml_file.exists() {
-                    tracing::warn!(
+                    tracing::debug!(
                         "⚠️ XML файл не найден для объекта {}.{}: {:?}",
                         object_type,
                         object_name,
@@ -397,6 +422,12 @@ impl ConfigurationDiscovery {
                         // Увеличиваем счётчик обработанных объектов
                         let count = processed.fetch_add(1, Ordering::Relaxed) + 1;
 
+                        // Обновляем терминальный прогресс-бар (thread-safe)
+                        if let Some(ref pb) = terminal_progress {
+                            pb.inc(1);
+                            pb.set_message(format!("{}", object_name));
+                        }
+
                         tracing::trace!(
                             "    ✅ Распарсен объект: {} ({}/{})",
                             metadata.name,
@@ -407,7 +438,8 @@ impl ConfigurationDiscovery {
                         // Парсим формы для Document и Catalog
                         if matches!(object_type.as_str(), "Document" | "Catalog") {
                             // Создаём временный discovery для поиска форм (с корректным base_path)
-                            let forms_discovery = ConfigurationDiscovery::new(config_info.path.clone());
+                            // show_progress = false чтобы не создавать вложенные прогресс-бары
+                            let forms_discovery = ConfigurationDiscovery::new(config_info.path.clone(), false);
 
                             if let Ok(forms) = forms_discovery.discover_forms(&folder_name, object_name) {
                                 metadata.forms = forms;
@@ -469,6 +501,15 @@ impl ConfigurationDiscovery {
             })
             .collect();
 
+        // Завершаем терминальный прогресс-бар
+        if let Some(pb) = terminal_progress {
+            pb.finish_with_message(format!(
+                "Парсинг {} завершён ({} объектов)",
+                config_info.name,
+                all_metadata.len()
+            ));
+        }
+
         // === PHASE 3: Linking (85-95%) ===
         progress_callback(ProgressUpdate::new(
             IndexingPhase::ConfigurationLinking,
@@ -496,7 +537,7 @@ impl ConfigurationDiscovery {
             )),
         ));
 
-        tracing::info!(
+        tracing::debug!(
             "✅ Обнаружено {} объектов метаданных в конфигурации {}",
             all_metadata.len(),
             config_info.name
@@ -609,7 +650,7 @@ impl ConfigurationDiscovery {
             buf.clear();
         }
 
-        tracing::info!(
+        tracing::debug!(
             "📊 Найдено {} типов объектов, всего {} объектов",
             child_objects.len(),
             child_objects.values().map(|v| v.len()).sum::<usize>()
@@ -654,7 +695,7 @@ impl ConfigurationDiscovery {
                     let config_in_subdir = subdir_path.join("Configuration.xml");
 
                     if config_in_subdir.exists() {
-                        tracing::info!("✅ Найдена конфигурация в подпапке: {:?}", subdir_path);
+                        tracing::debug!("✅ Найдена конфигурация в подпапке: {:?}", subdir_path);
                         return Ok(subdir_path);
                     }
                 }
@@ -681,7 +722,7 @@ impl ConfigurationDiscovery {
     where
         F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
     {
-        tracing::warn!(
+        tracing::debug!(
             "⚠️ discover_all_metadata() вызван — используйте discover_all_configurations()"
         );
 
@@ -693,7 +734,7 @@ impl ConfigurationDiscovery {
         }
 
         let first_config = &configurations[0];
-        tracing::info!("  → Загружаем метаданные из {}", first_config.name);
+        tracing::debug!("  → Загружаем метаданные из {}", first_config.name);
 
         self.discover_metadata_in_configuration(first_config, progress_callback)
     }

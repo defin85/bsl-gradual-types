@@ -105,16 +105,15 @@
 | 3.1 Code Intelligence | ✅ | 2025-11-XX | Goto Definition, Find References, Rename Symbol, Signature Help — полная навигация по коду | — |
 | 3.2 Code Actions | ✅ | 2025-11-XX | 20+ Code Actions: Quick Fixes, Refactorings (Extract Method/Variable), Generate Code | — |
 | 3.3 Static Analysis | ✅ | 2025-11-XX | 50+ правил статического анализа: Code Quality, Security, Performance Rules | — |
-| 3.4 MCP Server Integration | ✅ | 2025-11-XX | MCP сервер для LLM, File Watcher, Resources/Tools/Prompts, Claude Desktop интеграция | — |
 | 3.12 Enhanced Config Parser | ✅ | 2025-11-23 | Парсинг форм, модулей, контекстных свойств. CodeLocation система. 44 теста (100% pass, 4 фазы) | — |
 | 3.13 Object-Based Type Comparison | ✅ | 2025-11-25 | TypeCompatibility, is_compatible_with(), фасетная совместимость (Object→Reference OK), validate_call_v2() | [Детали](docs/roadmap/milestones-3.13-3.15-object-types.md) |
 | 3.14 Go To Definition для типов | ✅ | 2025-11-26 | TypeDefinitionLocation, LSP textDocument/definition, навигация к модулям объекта/менеджера | [Детали](docs/roadmap/milestones-3.13-3.15-object-types.md) |
 | 3.15 Lazy Resolution | ✅ | 2025-11-26 | OnceCell для кэширования return types, prewarm_signature_cache() | [Детали](docs/roadmap/milestones-3.13-3.15-object-types.md) |
 | 3.11 Context-Aware Facet Selection | ✅ | 2025-11-26 | PropertyAccess→Manager, Method facet switching, RuntimeExecutionContext, ContextRequirements | — |
 
-**Итого завершено:** 31 Milestones
+**Итого завершено:** 30 Milestones
 **Прогресс Версии 2.0:** ~95% завершено (19/20 Milestones)
-**Прогресс Версии 3.0:** ~93% завершено (14/15 Milestones: 3.1-3.15)
+**Прогресс Версии 3.0:** ~87% завершено (13/15 Milestones: 3.1-3.3, 3.5-3.15)
 
 ---
 
@@ -372,6 +371,238 @@ impl BatchAnalyzer {
 
 ---
 
+### 🔧 Milestone 3.18: IR Type Resolution Refactoring (2-3 недели)
+
+**Приоритет:** 🔴 ВЫСОКИЙ — фундаментальное исправление архитектуры
+
+**Проблема:**
+IR хранит типы как `String`, теряя критичную информацию:
+- **Certainty** (Known/Inferred/Unknown) — не сохраняется
+- **Facet** (Manager/Object/Reference) — не сохраняется
+- **UncertaintyReason** — не передается в диагностики
+
+**Результат бага:** Валидация показывает ошибки для Unknown типов (должна пропускать).
+
+```
+Hover: ДокОбъект → Unknown (0%)
+Validation: "Метод 'Провести' не существует" ← ОШИБКА!
+```
+
+**Корень проблемы:**
+- `infer_expression_type()` в ast_to_ir.rs возвращает String, не вызывает TypeResolver
+- `simple_resolution()` конвертирует String → TypeResolution с `certainty: Known` (всегда!)
+
+**Решение: TypeResolution как единая точка ответственности**
+
+```rust
+// Используем существующий TypeResolution напрямую в IR (не создаём TypeRef)
+pub struct TypeResolution {
+    pub certainty: Certainty,        // Known/Inferred/Unknown
+    pub result: ResolutionResult,    // Resolved/Unknown с причиной
+    pub source: ResolutionSource,    // Static/Inferred/Metadata
+    pub metadata: ResolutionMetadata,
+    pub active_facet: Option<FacetKind>,
+    pub available_facets: Vec<FacetKind>,
+}
+// Размер: ~300 байт × 200 типов × 100 файлов = ~6 MB (допустимо)
+```
+
+**Удаляемые структуры:**
+- `TypeHint` — BSL не имеет type annotations, всё выводится
+- `simple_resolution()` — костыль с багом (всегда Known)
+
+#### Фазы реализации:
+
+| Фаза | Срок | Задачи |
+|------|------|--------|
+| Phase 1 | 2 дня | Serialize/Deserialize для TypeResolution, конструкторы |
+| Phase 2 | 2 дня | Удалить TypeHint, заменить на TypeResolution в SymbolTable |
+| Phase 3 | 1 неделя | Мигрировать 24 поля SemanticNodeKind на TypeResolution |
+| Phase 4 | 2 дня | Удалить `simple_resolution()`, обновить валидацию |
+| Phase 5 | 3 дня | Интеграционное тестирование |
+
+#### Критерии успеха:
+
+- [ ] TypeResolution используется напрямую в IR
+- [ ] TypeHint полностью удалён
+- [ ] `simple_resolution()` полностью удалён
+- [ ] Unknown типы **НЕ** генерируют cascade ошибки
+- [ ] UncertaintyReason отображается в hover/diagnostics
+- [ ] 100% существующих тестов проходят
+- [ ] IR Cache работает с TypeResolution (~6 MB допустимо)
+
+**Зависимости:**
+- ✅ Milestone 3.13 (TypeCompatibility, is_compatible_with)
+- ✅ Milestone 3.16 (UncertaintyReason)
+
+**Разблокирует:**
+- Milestone 3.4 (LLM-First Tooling) — корректный Impact Analysis
+
+> **Детали:** [docs/roadmap/milestone-3.18-ir-type-resolution.md](docs/roadmap/milestone-3.18-ir-type-resolution.md)
+
+---
+
+### 🤖 Milestone 3.4: LLM-First Tooling — MCP Server & CLI (2.5-3.5 недели)
+
+**Приоритет:** 🔴 ВЫСОКИЙ — ключевой инструмент для AI-assisted разработки
+
+**Проблема:**
+
+При использовании **gradual typing** одна ошибка в коде может привести к тому, что большая часть последующего кода остаётся **непроверенной**. LLM-агент (Claude, ChatGPT) видит только одну диагностику и не понимает полный "радиус поражения" ошибки.
+
+**Пример проблемы:**
+```bsl
+// Строка 1: Ошибка - документ не существует
+ДокМенеджер = Документы.НесуществующийДокумент;
+
+// Строки 2-5: Весь код НЕ ПРОВЕРЯЕТСЯ!
+Ссылка = ДокМенеджер.НайтиПоНомеру("123");  // НЕ проверено
+Объект = Ссылка.ПолучитьОбъект();           // НЕ проверено
+Объект.НесуществующееСвойство = 123;        // ПРОПУЩЕНА ошибка!
+Объект.Записать();                          // НЕ проверено
+```
+
+**Что видит LLM:** `Error: Документ "НесуществующийДокумент" не найден`
+
+**Что LLM НЕ понимает:**
+- Переменные `ДокМенеджер`, `Ссылка`, `Объект` теперь имеют тип `Unknown`
+- Все вызовы методов на Unknown типах НЕ валидировались
+- Ошибка `НесуществующееСвойство` была **ПРОПУЩЕНА** из-за gradual typing
+- ~80% кода не было проверено
+
+#### Решение: LLM-First диагностики
+
+**Расширенный вывод с Impact Analysis:**
+```json
+{
+  "diagnostics": [{
+    "message": "Документ \"НесуществующийДокумент\" не найден",
+    "impact_severity": "Critical",
+    "affected_variables": [
+      {"name": "ДокМенеджер", "usage_count": 3},
+      {"name": "Ссылка", "usage_count": 2},
+      {"name": "Объект", "usage_count": 2}
+    ],
+    "unchecked_operations": [
+      {"kind": "MethodCall", "line": 2, "method": "НайтиПоНомеру"},
+      {"kind": "MethodCall", "line": 3, "method": "ПолучитьОбъект"},
+      {"kind": "PropertyAccess", "line": 4, "property": "НесуществующееСвойство"},
+      {"kind": "MethodCall", "line": 5, "method": "Записать"}
+    ]
+  }],
+  "coverage": {
+    "coverage_percent": 20.0,
+    "checked_expressions": 1,
+    "unchecked_expressions": 4
+  },
+  "summary": "Critical error affecting 3 variables and 4 operations. Fix to unlock 80% of validation."
+}
+```
+
+#### Задачи
+
+**Phase 1: LLM-Friendly Diagnostics (4-5 дней)**
+
+- [ ] **Task 1.1:** Impact Tracking в TypeResolver
+  - `ImpactTracker` — отслеживание "радиуса поражения" Unknown типов
+  - `AffectedVariable` — переменные, ставшие Unknown из-за ошибки
+  - `UncheckedOperation` — операции, не прошедшие валидацию
+
+- [ ] **Task 1.2:** Extended Diagnostics API
+  - `LlmDiagnostic` — расширенная структура с impact analysis
+  - `ImpactSeverity` — Low/Medium/High/Critical на основе радиуса поражения
+  - `validate_for_llm()` в TypeSystemService
+
+- [ ] **Task 1.3:** Type Coverage Calculator
+  - `TypeCoverageReport` — % кода с проверенными типами
+  - Breakdown по переменным и операциям
+  - Причины непроверенных участков
+
+**Phase 2: MCP Server Implementation (5-6 дней)**
+
+- [ ] **Task 2.1:** MCP Server Core (`bsl-mcp-server` crate)
+  - Resources: `bsl://types/platform`, `bsl://types/config`
+  - Tools: `validate_code`, `get_type_info`, `get_error_impact`
+  - STDIO transport для Claude Desktop
+
+- [ ] **Task 2.2:** MCP Tools
+  ```rust
+  #[tool(description = "Validate BSL code with impact analysis")]
+  async fn validate_code(code: String, include_coverage: bool) -> ValidateResult;
+
+  #[tool(description = "Get type at position")]
+  async fn get_type_info(code: String, line: u32, column: u32) -> TypeInfo;
+
+  #[tool(description = "Analyze error blast radius")]
+  async fn get_error_impact(code: String, error_line: u32) -> ImpactResult;
+  ```
+
+- [ ] **Task 2.3:** MCP Prompts
+  - `analyze-bsl` — шаблон для анализа кода
+  - `fix-type-errors` — шаблон для исправления с учётом gradual typing
+
+**Phase 3: CLI Implementation (3-4 дня)**
+
+- [ ] **Task 3.1:** CLI Binary (`bsl-types`)
+  ```bash
+  bsl-types validate <file> [--json] [--sarif] [--coverage] [--impact]
+  bsl-types coverage <file>
+  bsl-types hover <file> <line> <column>
+  bsl-types impact <file> <error_line>
+  bsl-types mcp-server [--stdio]
+  ```
+
+- [ ] **Task 3.2:** Output Formatters
+  - Text (human-readable с emoji для severity)
+  - JSON (для LLM и программной обработки)
+  - SARIF (для IDE интеграции)
+
+**Phase 4: Documentation & Prompts (2 дня)**
+
+- [ ] **Task 4.1:** System Prompts для Claude/ChatGPT
+  - Объяснение gradual typing и "радиуса поражения"
+  - Best practices для работы с BSL кодом
+
+- [ ] **Task 4.2:** Usage Guide
+  - CLI примеры
+  - MCP integration для Claude Desktop
+  - Интерпретация результатов
+
+#### Критерии успеха
+
+- [ ] `validate_code` возвращает `affected_variables` и `unchecked_operations`
+- [ ] `impact_severity` корректно вычисляется (Low/Medium/High/Critical)
+- [ ] Type coverage report показывает % проверенного кода
+- [ ] MCP Server работает через STDIO с Claude Desktop
+- [ ] CLI выводит в форматах text/json/sarif
+- [ ] 30+ unit-тестов для impact tracking
+- [ ] 10+ integration-тестов для MCP server
+- [ ] Документация с примерами
+
+#### Зависимости
+
+**Использует:**
+- ✅ Milestone 2.8 (Semantic IR) — для анализа AST
+- ✅ Milestone 3.7 (Semantic Diagnostics) — для базовых ошибок
+- ✅ Milestone 3.16 (Metadata Validation) — для UncertaintyReason
+
+**Внешние зависимости:**
+```toml
+rmcp = "0.3"  # MCP protocol implementation
+```
+
+#### Оценка времени
+
+| Phase | Задачи | Оценка |
+|-------|--------|--------|
+| Phase 1: LLM Diagnostics | 1.1, 1.2, 1.3 | 4-5 дней |
+| Phase 2: MCP Server | 2.1, 2.2, 2.3 | 5-6 дней |
+| Phase 3: CLI | 3.1, 3.2 | 3-4 дня |
+| Phase 4: Documentation | 4.1, 4.2 | 2 дня |
+| **Итого** | | **14-17 дней (2.5-3.5 недели)** |
+
+---
+
 ### 🎯 Результаты Версии 3.0 (через 6 месяцев от старта)
 
 **Технические метрики:**
@@ -383,9 +614,9 @@ impl BatchAnalyzer {
 - ✅ Semantic Diagnostics MVP — несуществующие методы/свойства показываются в LSP
 - ✅ Enhanced Hover — три уровня детализации, фасеты, Generic типы, ссылки на документацию
 - ✅ LSP Settings для кастомизации hover (как Rust Analyzer)
-- ✅ MCP Server для интеграции с LLM (Claude, ChatGPT)
-- ✅ File Watching (Windows/Linux/macOS) через notify
-- ✅ Resources, Tools, Prompts для AI-ассистентов
+- ⏳ MCP Server для интеграции с LLM (Milestone 3.4)
+- ⏳ LLM-First диагностики с Impact Analysis (Milestone 3.4)
+- ⏳ CLI утилита `bsl-types` для shell (Milestone 3.4)
 
 **Пользовательские метрики:**
 - ✅ Навигация как в IntelliJ IDEA
@@ -398,8 +629,8 @@ impl BatchAnalyzer {
 - ✅ Ссылки на platform documentation в hover
 - ✅ Красные волнистые линии для несуществующих методов/свойств (покрывает ~70% типовых ошибок)
 - ✅ Semantic diagnostics в реальном времени (latency <10ms)
-- ✅ AI-ассистент с полным контекстом BSL проекта
-- ✅ Генерация кода с типизацией через Claude
+- ⏳ AI-ассистент понимает "радиус поражения" ошибок (Milestone 3.4)
+- ⏳ Type Coverage отчёты для LLM (Milestone 3.4)
 
 ---
 

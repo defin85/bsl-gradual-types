@@ -56,7 +56,7 @@ fn test_parallel_parsing_correctness() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path);
+    let discovery = ConfigurationDiscovery::new(config_path, false);
 
     // Act - обнаруживаем конфигурации
     let configurations = discovery
@@ -112,7 +112,7 @@ fn test_parallel_parsing_all_objects_processed() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path.clone());
+    let discovery = ConfigurationDiscovery::new(config_path.clone(), false);
     let configurations = discovery
         .discover_all_configurations()
         .expect("Не удалось обнаружить конфигурации");
@@ -179,7 +179,7 @@ fn test_progress_callback_invoked() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path);
+    let discovery = ConfigurationDiscovery::new(config_path, false);
     let configurations = discovery
         .discover_all_configurations()
         .expect("Не удалось обнаружить конфигурации");
@@ -252,7 +252,7 @@ fn test_progress_final_100_percent() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path);
+    let discovery = ConfigurationDiscovery::new(config_path, false);
     let configurations = discovery
         .discover_all_configurations()
         .expect("Не удалось обнаружить конфигурации");
@@ -306,7 +306,7 @@ fn test_progress_monotonic_increase() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path);
+    let discovery = ConfigurationDiscovery::new(config_path, false);
     let configurations = discovery
         .discover_all_configurations()
         .expect("Не удалось обнаружить конфигурации");
@@ -361,7 +361,7 @@ fn test_parallel_parsing_performance() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path);
+    let discovery = ConfigurationDiscovery::new(config_path, false);
     let configurations = discovery
         .discover_all_configurations()
         .expect("Не удалось обнаружить конфигурации");
@@ -420,7 +420,7 @@ fn test_parallel_parsing_speedup() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path);
+    let discovery = ConfigurationDiscovery::new(config_path, false);
     let configurations = discovery
         .discover_all_configurations()
         .expect("Не удалось обнаружить конфигурации");
@@ -489,7 +489,7 @@ fn test_parallel_parsing_no_race_conditions() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path);
+    let discovery = ConfigurationDiscovery::new(config_path, false);
     let configurations = discovery
         .discover_all_configurations()
         .expect("Не удалось обнаружить конфигурации");
@@ -545,7 +545,7 @@ fn test_parallel_parsing_multiple_configurations() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(parent_path);
+    let discovery = ConfigurationDiscovery::new(parent_path, false);
 
     // Act - обнаруживаем все конфигурации
     let configurations = discovery
@@ -604,7 +604,7 @@ fn test_parallel_parsing_no_callback() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path);
+    let discovery = ConfigurationDiscovery::new(config_path, false);
     let configurations = discovery
         .discover_all_configurations()
         .expect("Не удалось обнаружить конфигурации");
@@ -681,7 +681,7 @@ fn test_discover_all_metadata_backward_compatibility() {
         return;
     }
 
-    let discovery = ConfigurationDiscovery::new(config_path);
+    let discovery = ConfigurationDiscovery::new(config_path, false);
 
     // Act - вызываем УСТАРЕВШИЙ метод
     let result = discovery.discover_all_metadata(None::<fn(ProgressUpdate)>);

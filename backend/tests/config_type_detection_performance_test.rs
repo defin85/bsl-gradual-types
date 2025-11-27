@@ -17,8 +17,8 @@ fn test_detect_configuration_type_performance() {
     let conf_path = PathBuf::from("../examples/conf/conf_test");
     let ext_path = PathBuf::from("../examples/conf/ext_test");
 
-    let conf_discovery = ConfigurationDiscovery::new(conf_path);
-    let ext_discovery = ConfigurationDiscovery::new(ext_path);
+    let conf_discovery = ConfigurationDiscovery::new(conf_path, false);
+    let ext_discovery = ConfigurationDiscovery::new(ext_path, false);
 
     // Прогрев (чтобы учесть I/O кеширование ОС)
     let _ = conf_discovery.discover_all_configurations();
@@ -64,7 +64,7 @@ fn test_detect_configuration_type_performance() {
 fn test_discover_all_configurations_performance() {
     // Arrange
     let parent_path = PathBuf::from("../examples/conf");
-    let discovery = ConfigurationDiscovery::new(parent_path);
+    let discovery = ConfigurationDiscovery::new(parent_path, false);
 
     // Прогрев
     let _ = discovery.discover_all_configurations();
@@ -101,7 +101,7 @@ fn test_discover_all_configurations_performance() {
 fn test_detect_configuration_type_stability() {
     // Arrange
     let conf_path = PathBuf::from("../examples/conf/conf_test");
-    let discovery = ConfigurationDiscovery::new(conf_path);
+    let discovery = ConfigurationDiscovery::new(conf_path, false);
 
     let iterations = 100;
 

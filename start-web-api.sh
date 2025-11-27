@@ -55,11 +55,42 @@ fi
 STATIC_ARG=""
 if [[ "$NO_FRONTEND" != "true" ]]; then
     FRONTEND_INDEX="./backend/static/index.html"
+    NEED_BUILD=false
+
+    # Проверяем нужна ли сборка
     if [[ ! -f "$FRONTEND_INDEX" ]] || [[ "$DO_BUILD" == "true" ]]; then
+        NEED_BUILD=true
+    else
+        # Проверяем что файлы на которые ссылается index.html существуют
+        WASM_FILE=$(grep -oP 'bsl-frontend-[a-f0-9]+_bg\.wasm' "$FRONTEND_INDEX" | head -1)
+        if [[ -n "$WASM_FILE" ]] && [[ ! -f "./backend/static/$WASM_FILE" ]]; then
+            echo "⚠️ WASM файл $WASM_FILE не найден, требуется пересборка"
+            NEED_BUILD=true
+        fi
+    fi
+
+    if [[ "$NEED_BUILD" == "true" ]]; then
         echo "🎨 Сборка frontend (WASM)..."
         cd frontend
         trunk build --release
         cd ..
+
+        # Оптимизация WASM с wasm-opt (trunk не передаёт --all-features)
+        WASM_FILE=$(ls target/site/bsl-frontend-*_bg.wasm 2>/dev/null | head -1)
+        if [[ -n "$WASM_FILE" ]] && command -v wasm-opt &> /dev/null; then
+            echo "⚡ Оптимизация WASM с wasm-opt..."
+            WASM_SIZE_BEFORE=$(du -h "$WASM_FILE" | cut -f1)
+            wasm-opt --all-features -Oz -o "${WASM_FILE}.opt" "$WASM_FILE" 2>/dev/null
+            if [[ -f "${WASM_FILE}.opt" ]]; then
+                mv "${WASM_FILE}.opt" "$WASM_FILE"
+                WASM_SIZE_AFTER=$(du -h "$WASM_FILE" | cut -f1)
+                echo "   $WASM_SIZE_BEFORE → $WASM_SIZE_AFTER"
+            fi
+        fi
+
+        # Копируем собранные файлы в backend/static
+        echo "📁 Копирование файлов в backend/static..."
+        cp -r target/site/* backend/static/
     else
         echo "✅ Frontend: используем существующую сборку"
     fi

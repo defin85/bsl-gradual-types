@@ -6,6 +6,7 @@
 use anyhow::Result;
 use bsl_shared::api::{MethodDto, ParamDto};
 use bsl_shared::utils::hash::hash_content;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -2481,6 +2482,8 @@ impl TypeSystemService {
     /// - Вместо: LSP Server → TypeRepository (обход Application Layer)
     pub fn load_configuration_types(&self, config_path: &std::path::Path) -> Result<usize> {
         use crate::data::loaders::config_metadata_parser::ConfigurationDiscovery;
+        use crate::data::loaders::progress::ProgressUpdate;
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
         info!(
             "📦 Loading configuration types from: {}",
@@ -2509,11 +2512,44 @@ impl TypeSystemService {
             .canonicalize()
             .map_err(|e| anyhow::anyhow!("Invalid configuration path: {}", e))?;
 
-        // Обнаружение метаданных
+        // Создаём progress bar для конфигурации
+        let pb = ProgressBar::new(100);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.green/white} {pos}% {msg}")
+                .unwrap_or_else(|_| ProgressStyle::default_bar())
+                .progress_chars("##-"),
+        );
+        pb.set_message("Загрузка конфигурации");
+
+        // Атомарный счётчик для последнего процента (избегаем дублирования обновлений)
+        let last_percent = Arc::new(AtomicUsize::new(0));
+        let pb_clone = pb.clone();
+        let last_percent_clone = last_percent.clone();
+
+        // Callback для прогресса
+        let progress_callback = move |update: ProgressUpdate| {
+            let percent = update.percentage as usize;
+            let prev = last_percent_clone.swap(percent, Ordering::Relaxed);
+
+            // Обновляем только если процент изменился
+            if percent != prev {
+                pb_clone.set_position(percent as u64);
+                if let Some(msg) = update.message {
+                    pb_clone.set_message(msg);
+                } else {
+                    pb_clone.set_message(update.phase.display_name().to_string());
+                }
+            }
+        };
+
+        // Обнаружение метаданных с прогрессом
         let discovery = ConfigurationDiscovery::new(canonical_path.clone());
         let metadata = discovery
-            .discover_all_metadata(None::<fn(crate::data::loaders::progress::ProgressUpdate)>)
+            .discover_all_metadata(Some(progress_callback))
             .map_err(|e| anyhow::anyhow!("Failed to discover metadata: {}", e))?;
+
+        pb.finish_with_message(format!("✅ Найдено {} объектов", metadata.len()));
 
         info!("📋 Discovered {} metadata objects", metadata.len());
 

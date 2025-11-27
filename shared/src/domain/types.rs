@@ -465,6 +465,34 @@ pub enum Certainty {
     Unknown,
 }
 
+/// Reason why type resolution resulted in Unknown certainty
+/// Used for precise error messages and validation decisions
+///
+/// # MILESTONE 3.16: Unknown Certainty Semantics
+///
+/// This enum captures WHY a type is unknown, enabling:
+/// - Precise error messages (e.g., "Document 'Контрогенты' not found")
+/// - Graceful degradation when configuration is not loaded
+/// - Suggestions for typo fixes
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum UncertaintyReason {
+    /// Configuration metadata is not loaded yet
+    /// In this case, we don't report errors (graceful degradation)
+    ConfigurationNotLoaded,
+
+    /// Metadata object was not found in the loaded configuration
+    /// This indicates a potential typo or missing object
+    MetadataObjectNotFound {
+        /// Kind of metadata (Document, Catalog, etc.)
+        kind: MetadataKind,
+        /// Name that was not found
+        name: String,
+    },
+
+    /// Other reason for uncertainty
+    Other(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ResolutionResult {
     Concrete(ConcreteType),
@@ -672,6 +700,10 @@ pub struct ResolutionMetadata {
     pub line: Option<u32>,
     pub column: Option<u32>,
     pub notes: Vec<String>,
+    /// MILESTONE 3.16: Reason why type resolution resulted in Unknown/Inferred certainty
+    /// Used for precise error messages and validation decisions
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uncertainty_reason: Option<UncertaintyReason>,
 }
 
 // --- Analysis-related structures ---

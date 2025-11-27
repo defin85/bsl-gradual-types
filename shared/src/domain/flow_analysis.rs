@@ -169,6 +169,7 @@ impl FlowAnalysisContext {
                                     "Union type from conditional branches for variable: {}",
                                     var_name
                                 )],
+                                uncertainty_reason: None,
                             },
                             active_facet: None,
                             available_facets: vec![],

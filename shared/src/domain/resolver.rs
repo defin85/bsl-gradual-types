@@ -90,6 +90,14 @@ impl TypeResolver {
         Self { repository }
     }
 
+    /// MILESTONE 3.16: Check if configuration metadata is loaded
+    ///
+    /// Returns true if repository contains any configuration types.
+    /// Used for graceful degradation - don't report errors when config is not loaded.
+    fn is_configuration_loaded(&self) -> bool {
+        self.repository.get_stats().configuration_types > 0
+    }
+
     /// Синхронное разрешение выражения (чистая Domain логика)
     pub fn resolve_expression_sync(&self, expression: &str) -> TypeResolution {
         // 1. Прямой поиск в repository
@@ -176,7 +184,7 @@ impl TypeResolver {
     fn resolve_member_access(&self, base: &str, member: &str) -> TypeResolution {
         use crate::domain::types::{
             Certainty, ConcreteType, ConfigurationType, MetadataKind, ResolutionMetadata,
-            ResolutionResult, ResolutionSource,
+            ResolutionResult, ResolutionSource, UncertaintyReason,
         };
 
         // ✅ УЛУЧШЕНИЕ: Поддержка вложенных точек (Документы.ЗаказНаряды.Работы)
@@ -292,18 +300,76 @@ impl TypeResolver {
         // Получаем префикс коллекции для поиска в repository
         let collection_prefix = kind.to_prefix();
 
-        // ✅ ИСПРАВЛЕНИЕ: Проверяем наличие метаданных для честного certainty
+        // ✅ MILESTONE 3.16: Three-level resolution logic
         // Формируем имя типа для поиска в repository
         let type_name = format!("{}.{}", collection_prefix, member);
         let has_metadata = self.repository.find_type(&type_name).is_some();
+        let config_loaded = self.is_configuration_loaded();
 
-        // Определяем уровень уверенности:
-        // - Known (100%) - тип найден в метаданных конфигурации
-        // - Inferred (50%) - только синтаксис распарсили, метаданных нет
-        let (certainty, source) = if has_metadata {
-            (Certainty::Known, ResolutionSource::Static)
-        } else {
-            (Certainty::Inferred(0.5), ResolutionSource::Inferred)
+        // Three-level certainty determination:
+        // 1. Known (100%) - type found in loaded configuration metadata
+        // 2. Inferred (50%) - configuration not loaded, syntax parsed only (graceful degradation)
+        // 3. Unknown - configuration loaded but object not found (potential error)
+        let (certainty, source, uncertainty_reason, note) = match (has_metadata, config_loaded) {
+            // Case 1: Metadata found - full confidence
+            (true, _) => (
+                Certainty::Known,
+                ResolutionSource::Static,
+                None,
+                format!(
+                    "Found {} type in metadata: {}.{}",
+                    match kind {
+                        MetadataKind::Catalog => "catalog",
+                        MetadataKind::Document => "document",
+                        MetadataKind::Enum => "enum",
+                        MetadataKind::InformationRegister => "information register",
+                        MetadataKind::AccumulationRegister => "accumulation register",
+                        _ => "configuration object",
+                    },
+                    base,
+                    member
+                ),
+            ),
+            // Case 2: Configuration not loaded - graceful degradation
+            (false, false) => (
+                Certainty::Inferred(0.5),
+                ResolutionSource::Inferred,
+                Some(UncertaintyReason::ConfigurationNotLoaded),
+                format!(
+                    "Inferred {} type from syntax: {}.{} (configuration not loaded)",
+                    match kind {
+                        MetadataKind::Catalog => "catalog",
+                        MetadataKind::Document => "document",
+                        MetadataKind::Enum => "enum",
+                        MetadataKind::InformationRegister => "information register",
+                        MetadataKind::AccumulationRegister => "accumulation register",
+                        _ => "configuration object",
+                    },
+                    base,
+                    member
+                ),
+            ),
+            // Case 3: Configuration loaded but object not found - potential error
+            (false, true) => (
+                Certainty::Unknown,
+                ResolutionSource::Static,
+                Some(UncertaintyReason::MetadataObjectNotFound {
+                    kind,
+                    name: member.to_string(),
+                }),
+                format!(
+                    "{} '{}' not found in loaded configuration",
+                    match kind {
+                        MetadataKind::Catalog => "Catalog",
+                        MetadataKind::Document => "Document",
+                        MetadataKind::Enum => "Enum",
+                        MetadataKind::InformationRegister => "Information register",
+                        MetadataKind::AccumulationRegister => "Accumulation register",
+                        _ => "Configuration object",
+                    },
+                    member
+                ),
+            ),
         };
 
         TypeResolution {
@@ -320,35 +386,8 @@ impl TypeResolver {
                 file: Some(format!("{}:{}", collection_prefix, member)),
                 line: None,
                 column: None,
-                notes: vec![if has_metadata {
-                    format!(
-                        "Found {} type in metadata: {}.{}",
-                        match kind {
-                            MetadataKind::Catalog => "catalog",
-                            MetadataKind::Document => "document",
-                            MetadataKind::Enum => "enum",
-                            MetadataKind::InformationRegister => "information register",
-                            MetadataKind::AccumulationRegister => "accumulation register",
-                            _ => "configuration object",
-                        },
-                        base,
-                        member
-                    )
-                } else {
-                    format!(
-                        "Inferred {} type from syntax: {}.{} (metadata not available)",
-                        match kind {
-                            MetadataKind::Catalog => "catalog",
-                            MetadataKind::Document => "document",
-                            MetadataKind::Enum => "enum",
-                            MetadataKind::InformationRegister => "information register",
-                            MetadataKind::AccumulationRegister => "accumulation register",
-                            _ => "configuration object",
-                        },
-                        base,
-                        member
-                    )
-                }],
+                notes: vec![note],
+                uncertainty_reason,
             },
             active_facet: Some(facet),
             available_facets: vec![
@@ -425,6 +464,7 @@ impl TypeResolver {
                     tabular_section.name,
                     tabular_section.attributes.len()
                 )],
+                uncertainty_reason: None,
             },
             active_facet: Some(FacetKind::Collection), // Табличная часть - это коллекция
             available_facets: vec![FacetKind::Collection],
@@ -651,6 +691,7 @@ impl TypeResolver {
                 line: None,
                 column: None,
                 notes: vec![format!("Union type: {}", union_str)],
+                uncertainty_reason: None,
             },
             active_facet: None,
             available_facets: vec![],
@@ -781,6 +822,7 @@ impl TypeResolver {
                 line: None,
                 column: None,
                 notes: vec![format!("Intersection type: {}", intersection_str)],
+                uncertainty_reason: None,
             },
             active_facet: None,
             available_facets: vec![],
@@ -915,6 +957,7 @@ impl TypeResolver {
                     line: None,
                     column: None,
                     notes: vec![format!("Generic type: {}", generic_str)],
+                    uncertainty_reason: None,
                 },
                 active_facet: None,
                 available_facets: vec![],
@@ -1007,6 +1050,7 @@ impl TypeResolver {
                     line: None,
                     column: None,
                     notes: vec![format!("Nullable type: {}", nullable_str)],
+                    uncertainty_reason: None,
                 },
                 active_facet: None,
                 available_facets: vec![],
@@ -1042,6 +1086,7 @@ impl TypeResolver {
                         line: nullable_resolution.metadata.line,
                         column: nullable_resolution.metadata.column,
                         notes: vec!["Type narrowed from nullable".to_string()],
+                        uncertainty_reason: None,
                     },
                     active_facet: nullable_resolution.active_facet,
                     available_facets: nullable_resolution.available_facets.clone(),
@@ -1390,6 +1435,7 @@ impl TypeResolver {
                     "Generic type inferred from flow-sensitive analysis (certainty: {:.0}%)",
                     certainty * 100.0
                 )],
+                uncertainty_reason: None,
             },
             active_facet: Some(crate::domain::types::FacetKind::Collection),
             available_facets: vec![crate::domain::types::FacetKind::Collection],

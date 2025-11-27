@@ -2,57 +2,57 @@
 
 AI-ассистент инструкции для BSL Gradual Type System проекта.
 
-## 🤖 Автономное тестирование LSP (ВАЖНО!)
+## 🤖 Тестирование LSP через Web API
 
-**С 2025-11-12 ты можешь САМОСТОЯТЕЛЬНО тестировать LSP функции!**
+### ⛔ ВАЖНОЕ ПРАВИЛО
+
+**Claude НЕ должен самостоятельно:**
+- ❌ Собирать LSP/Web сервер (`cargo build --bin bsl-lsp-server/bsl-web-server`)
+- ❌ Запускать LSP/Web сервер (ни в фоне, ни в foreground)
+- ❌ Останавливать серверы (`pkill`)
+
+**Claude МОЖЕТ:**
+- ✅ Тестировать через `curl` когда сервер уже запущен пользователем
+- ✅ Запускать `cargo test` для unit/integration тестов
+- ✅ Использовать `/build` skill для полной сборки проекта
 
 ### Как тестировать:
 
-1. **Запустить Web API сервер:**
+1. **Пользователь запускает сервер** в отдельном терминале:
    ```bash
-   /start-lsp-api
-   # Или вручную (только платформенные типы):
-   cargo run --release -p bsl-backend --bin bsl-web-server -- \
-     --port 3002 --enable-cors true \
-     --syntax-helper-path examples/syntax_helper
+   # С конфигурацией (рекомендуется для полного тестирования):
+   ./start-web-api.sh
 
-   # С тестовой конфигурацией (платформенные + конфигурационные типы):
-   cargo run --release -p bsl-backend --bin bsl-web-server -- \
-     --port 3002 --enable-cors true \
-     --syntax-helper-path examples/syntax_helper \
-     --project-path C:/1CProject/conf
+   # Только platform types (без конфигурации):
+   ./start-web-api.sh --no-config
    ```
 
-   **Тестовая конфигурация:** `C:\1CProject\conf` — содержит документы, справочники и другие объекты метаданных для тестирования конфигурационных типов.
-
-2. **Использовать endpoints для тестирования:**
+2. **Claude тестирует через curl:**
    ```bash
-   # Тестировать hover
-   curl -X POST http://localhost:3002/api/hover/enhanced \
-     -H "Content-Type: application/json" \
-     -d '{"code":"ТЗ = Новый ТаблицаЗначений;","line":1,"column":0}'
+   # Проверить что сервер работает
+   curl -s http://localhost:3002/api/health
+
+   # Тестировать hover (через файл для кириллицы)
+   echo '{"code":"ТЗ = Новый ТаблицаЗначений;","line":1,"column":10}' > test.json
+   curl -s -X POST http://localhost:3002/api/hover/enhanced \
+     -H "Content-Type: application/json; charset=utf-8" -d @test.json
 
    # Тестировать diagnostics
-   curl -X POST http://localhost:3002/api/diagnostics \
-     -H "Content-Type: application/json" \
-     -d '{"code":"...код BSL..."}'
-
-   # Отладка AST парсинга
-   curl -X POST http://localhost:3002/api/debug/ast \
-     -H "Content-Type: application/json" \
-     -d '{"code":"..."}'
+   echo '{"code":"x = Документы.ЗаказКлиента;"}' > test_diag.json
+   curl -s -X POST http://localhost:3002/api/diagnostics \
+     -H "Content-Type: application/json; charset=utf-8" -d @test_diag.json
    ```
 
-3. **Итерировать быстро:**
-   - Изменить код → Пересобрать → Перезапустить сервер → Протестировать через curl
-   - **НЕ нужно** просить пользователя перезапускать VSCode!
-   - **5-10x быстрее** итерации
+**Примечание:** Для кириллицы в JSON используй файлы (`-d @file.json`), а не inline строки.
 
 **Доступные endpoints:**
+- `GET  /api/health` - проверка работоспособности
 - `POST /api/hover/enhanced` - детальная информация hover
 - `POST /api/diagnostics` - синтаксические + семантические ошибки
 - `POST /api/debug/ast` - AST дерево и symbol table
-- `POST /api/validate` - быстрая валидация (legacy)
+- `GET  /api/types` - список всех типов
+
+**Тестовая конфигурация:** `C:\1CProject\conf` — содержит документы, справочники и другие объекты метаданных.
 
 **См:** [docs/api/web-api-reference.md](docs/api/web-api-reference.md) для полной документации.
 

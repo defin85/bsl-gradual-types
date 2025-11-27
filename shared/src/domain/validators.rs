@@ -14,6 +14,7 @@ use crate::domain::metadata_lookup::TypeMetadataLookup;
 use crate::domain::runtime_context::ContextRequirements;  // MILESTONE 3.11 Phase 3
 use crate::domain::types::{
     ConcreteType, DiagnosticSeverity, MetadataKind, SpecialType, TypeDiagnostic, TypeResolution,
+    UncertaintyReason,
 };
 use crate::formatting::DetailLevel;  // MILESTONE 3.6 Phase 3
 use crate::ir::Span;
@@ -581,6 +582,55 @@ impl<'a> TypeValidator<'a> {
             suggestions,
             variable_name,
         })
+    }
+
+    /// MILESTONE 3.16: Validate type resolution and extract error if appropriate
+    ///
+    /// This method checks the `uncertainty_reason` field of a TypeResolution
+    /// and generates appropriate validation errors.
+    ///
+    /// # Behavior
+    ///
+    /// - If `uncertainty_reason` is `MetadataObjectNotFound` and configuration is loaded,
+    ///   returns `TypeErrorKind::UnknownMetadataObject` with suggestions
+    /// - If `uncertainty_reason` is `ConfigurationNotLoaded`, returns `None` (graceful degradation)
+    /// - Otherwise returns `None`
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let resolution = resolver.resolve_expression_sync("Справочники.Контрогенты");
+    /// if let Some(error) = validator.validate_from_resolution(&resolution) {
+    ///     // error = UnknownMetadataObject { kind: Catalog, name: "Контрогенты", ... }
+    /// }
+    /// ```
+    pub fn validate_from_resolution(&self, resolution: &TypeResolution) -> Option<TypeErrorKind> {
+        // Check if there's an uncertainty reason in the resolution metadata
+        if let Some(reason) = &resolution.metadata.uncertainty_reason {
+            match reason {
+                UncertaintyReason::MetadataObjectNotFound { kind, name } => {
+                    // Generate suggestions for similar names
+                    let suggestions = self.metadata_lookup.suggest_similar_names(*kind, name, 3);
+
+                    Some(TypeErrorKind::UnknownMetadataObject {
+                        kind: *kind,
+                        name: name.clone(),
+                        suggestions,
+                        variable_name: None, // Will be filled by the caller if needed
+                    })
+                }
+                UncertaintyReason::ConfigurationNotLoaded => {
+                    // Graceful degradation: don't report errors when config is not loaded
+                    None
+                }
+                UncertaintyReason::Other(_) => {
+                    // Other reasons don't generate validation errors
+                    None
+                }
+            }
+        } else {
+            None
+        }
     }
 
     /// Проверка операций с коллекциями

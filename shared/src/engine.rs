@@ -250,10 +250,12 @@ impl<'a> IrTypeResolverVisitor<'a> {
             SemanticNodeKind::VariableDeclaration {
                 name, type_hint, ..
             } => {
-                // Если есть type hint, резолвим его
-                if let Some(hint) = type_hint {
-                    let res = self.resolver.resolve_expression_sync(hint);
-                    context.update_variable_type(name.clone(), hint.clone());
+                // Phase 3: type_hint теперь Option<TypeResolution>
+                if let Some(hint_resolution) = type_hint {
+                    // Резолвим тип через resolver для дополнительной информации
+                    let res = self.resolver.resolve_expression_sync(&hint_resolution.type_name());
+                    // Обновляем тип переменной в контексте
+                    context.update_variable_type(name.clone(), hint_resolution.clone());
                     res
                 } else {
                     // Без hint - Unknown
@@ -266,9 +268,11 @@ impl<'a> IrTypeResolverVisitor<'a> {
                 value_type,
                 ..
             } => {
+                // Phase 3: value_type уже TypeResolution
                 // Обновляем тип переменной в контексте
                 context.update_variable_type(variable.clone(), value_type.clone());
-                self.resolver.resolve_expression_sync(value_type)
+                // Phase 3: Возвращаем value_type напрямую (уже TypeResolution)
+                value_type.clone()
             }
 
             SemanticNodeKind::MemberAccess {
@@ -276,8 +280,9 @@ impl<'a> IrTypeResolverVisitor<'a> {
                 member_name,
                 ..
             } => {
+                // Phase 3: object_type теперь TypeResolution
                 // Резолвим доступ к члену: object_type.member_name
-                let full_path = format!("{}.{}", object_type, member_name);
+                let full_path = format!("{}.{}", object_type.type_name(), member_name);
                 self.resolver.resolve_expression_sync(&full_path)
             }
 
@@ -288,13 +293,14 @@ impl<'a> IrTypeResolverVisitor<'a> {
 
             SemanticNodeKind::IfStatement { condition_type, .. }
             | SemanticNodeKind::WhileLoop { condition_type, .. } => {
+                // Phase 3: condition_type теперь TypeResolution
                 // Условия должны быть Boolean
-                self.resolver.resolve_expression_sync(condition_type)
+                self.resolver.resolve_expression_sync(&condition_type.type_name())
             }
 
             SemanticNodeKind::ForLoop { range_type, .. } => {
-                // Диапазон цикла
-                self.resolver.resolve_expression_sync(range_type)
+                // Phase 3: range_type теперь TypeResolution
+                self.resolver.resolve_expression_sync(&range_type.type_name())
             }
 
             _ => {
@@ -358,7 +364,8 @@ mod ir_analysis_tests {
             nodes: vec![SemanticNode {
                 kind: SemanticNodeKind::VariableDeclaration {
                     name: "МояПеременная".to_string(),
-                    type_hint: Some("Строка | Число".to_string()),
+                    // Phase 3: type_hint теперь Option<TypeResolution>
+                    type_hint: Some(TypeResolution::explicit("Строка | Число")),
                     is_export: false,
                     initial_value_type: None,
                 },

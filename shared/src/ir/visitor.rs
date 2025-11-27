@@ -3,17 +3,26 @@
 //! Позволяет выполнять различные анализы над IR без изменения самой структуры.
 
 use super::*;
+use crate::domain::types::TypeResolution;
 
 /// Контекст для flow-sensitive анализа
 ///
 /// Отслеживает текущее состояние анализа при обходе дерева
+///
+/// # Phase 3: TypeResolution для variable_types
+///
+/// `variable_types` теперь хранит `TypeResolution` вместо `String`,
+/// что позволяет отслеживать:
+/// - Certainty (уверенность в типе)
+/// - ResolutionSource (откуда пришёл тип)
+/// - Unknown типы (для graceful degradation)
 pub struct FlowContext {
     /// Текущий scope
     pub current_scope: ScopeId,
 
     /// Типы переменных в текущей точке выполнения
-    /// (для flow-sensitive анализа типы могут меняться по пути)
-    pub variable_types: HashMap<String, String>,
+    /// (Phase 3: TypeResolution вместо String для flow-sensitive анализа)
+    pub variable_types: HashMap<String, TypeResolution>,
 
     /// Путь выполнения (для branch-aware analysis)
     pub execution_path: Vec<CfgNodeId>,
@@ -30,12 +39,14 @@ impl FlowContext {
     }
 
     /// Обновить тип переменной в текущей точке
-    pub fn update_variable_type(&mut self, name: String, type_name: String) {
-        self.variable_types.insert(name, type_name);
+    /// Phase 3: Теперь принимает TypeResolution вместо String
+    pub fn update_variable_type(&mut self, name: String, resolution: TypeResolution) {
+        self.variable_types.insert(name, resolution);
     }
 
     /// Получить тип переменной в текущей точке
-    pub fn get_variable_type(&self, name: &str) -> Option<&String> {
+    /// Phase 3: Теперь возвращает TypeResolution вместо String
+    pub fn get_variable_type(&self, name: &str) -> Option<&TypeResolution> {
         self.variable_types.get(name)
     }
 
@@ -66,10 +77,11 @@ impl FlowContext {
 /// impl SemanticVisitor for TypeCollector {
 ///     fn visit_node(&mut self, node: &SemanticNode, context: &mut FlowContext) {
 ///         // Собираем все типы из переменных
+///         // Phase 3: type_hint теперь Option<TypeResolution>
 ///         match &node.kind {
 ///             bsl_shared::ir::SemanticNodeKind::VariableDeclaration { type_hint, .. } => {
-///                 if let Some(t) = type_hint {
-///                     self.types.push(t.clone());
+///                 if let Some(resolution) = type_hint {
+///                     self.types.push(resolution.type_name());
 ///                 }
 ///             }
 ///             _ => {}
@@ -82,34 +94,38 @@ pub trait SemanticVisitor {
     fn visit_node(&mut self, node: &SemanticNode, context: &mut FlowContext);
 
     /// Посетить объявление переменной
+    /// Phase 3: type_hint теперь Option<TypeResolution>
     fn visit_variable_declaration(
         &mut self,
         _name: &str,
-        _type_hint: &Option<String>,
+        _type_hint: &Option<TypeResolution>,
         _context: &mut FlowContext,
     ) {
         // Default implementation — ничего не делаем
     }
 
     /// Посетить присваивание
-    fn visit_assignment(&mut self, _variable: &str, _value_type: &str, _context: &mut FlowContext) {
+    /// Phase 3: value_type теперь TypeResolution
+    fn visit_assignment(&mut self, _variable: &str, _value_type: &TypeResolution, _value_node: Option<usize>, _context: &mut FlowContext) {
         // Default implementation
     }
 
     /// Посетить вызов функции
+    /// Phase 3: args теперь Vec<TypeResolution>
     fn visit_function_call(
         &mut self,
         _function: &str,
-        _args: &[String],
+        _args: &[TypeResolution],
         _context: &mut FlowContext,
     ) {
         // Default implementation
     }
 
     /// Посетить условный оператор
+    /// Phase 3: condition_type теперь TypeResolution
     fn visit_if_statement(
         &mut self,
-        _condition_type: &str,
+        _condition_type: &TypeResolution,
         _then_branch: &[usize],
         _else_branch: &Option<Vec<usize>>,
         _context: &mut FlowContext,
@@ -176,19 +192,22 @@ fn walk_node<V: SemanticVisitor>(
             visitor.visit_variable_declaration(name, type_hint, context);
 
             // Обновляем контекст типов
-            if let Some(t) = type_hint {
-                context.update_variable_type(name.clone(), t.clone());
+            // Phase 3: type_hint уже TypeResolution, просто клонируем
+            if let Some(resolution) = type_hint {
+                context.update_variable_type(name.clone(), resolution.clone());
             }
         }
 
         SemanticNodeKind::Assignment {
             variable,
             value_type,
-            ..
+            value_node,
         } => {
-            visitor.visit_assignment(variable, value_type, context);
+            // Phase 3: value_type теперь TypeResolution
+            visitor.visit_assignment(variable, value_type, *value_node, context);
 
             // Обновляем контекст типов (flow-sensitive)
+            // Phase 3: context.update_variable_type теперь принимает TypeResolution
             context.update_variable_type(variable.clone(), value_type.clone());
         }
 
@@ -331,10 +350,11 @@ mod tests {
         let mut program = SemanticProgram::new();
 
         // Добавляем узлы
+        // Phase 3: type_hint и initial_value_type теперь Option<TypeResolution>
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::VariableDeclaration {
                 name: "x".to_string(),
-                type_hint: Some("Число".to_string()),
+                type_hint: Some(TypeResolution::explicit("Число")),
                 is_export: false,
                 initial_value_type: None,
             },
@@ -345,7 +365,8 @@ mod tests {
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::Assignment {
                 variable: "x".to_string(),
-                value_type: "Число".to_string(),
+                // Phase 3: value_type теперь TypeResolution
+                value_type: TypeResolution::explicit("Число"),
                 value_node: None,
             },
             span: Span::stub(),
@@ -357,7 +378,8 @@ mod tests {
                 function_name: "Сообщить".to_string(),
                 object_name: None,
                 object_type: None,
-                arg_types: vec!["Строка".to_string()],
+                // Phase 3: arg_types теперь Vec<TypeResolution>
+                arg_types: vec![TypeResolution::explicit("Строка")],
             },
             span: Span::stub(),
             scope_id: program.symbols.root_scope,
@@ -382,10 +404,11 @@ mod tests {
     fn test_flow_context_tracks_types() {
         let mut program = SemanticProgram::new();
 
+        // Phase 3: type_hint теперь Option<TypeResolution>
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::VariableDeclaration {
                 name: "x".to_string(),
-                type_hint: Some("Число".to_string()),
+                type_hint: Some(TypeResolution::explicit("Число")),
                 is_export: false,
                 initial_value_type: None,
             },
@@ -396,7 +419,8 @@ mod tests {
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::Assignment {
                 variable: "x".to_string(),
-                value_type: "Строка".to_string(), // Переприсваиваем другой тип
+                // Phase 3: value_type теперь TypeResolution
+                value_type: TypeResolution::explicit("Строка"), // Переприсваиваем другой тип
                 value_node: None,
             },
             span: Span::stub(),
@@ -413,15 +437,17 @@ mod tests {
                 // Не используем, отслеживаем только через visit_assignment
             }
 
+            // Phase 3: value_type теперь TypeResolution
             fn visit_assignment(
                 &mut self,
                 variable: &str,
-                value_type: &str,
+                value_type: &TypeResolution,
+                _value_node: Option<usize>,
                 _context: &mut FlowContext,
             ) {
                 // Собираем типы после обновления контекста
                 if variable == "x" {
-                    self.types_seen.push(value_type.to_string());
+                    self.types_seen.push(value_type.type_name());
                 }
             }
         }

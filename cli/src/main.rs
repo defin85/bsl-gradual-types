@@ -265,20 +265,22 @@ async fn analyze_ir_command(
 
         if verbose {
             for (name, sig) in &ir_result.ir.symbols.global_functions {
+                // Phase 3: type_hint теперь Option<TypeResolution>
                 let params = sig
                     .params
                     .iter()
-                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_deref().unwrap_or("?")))
+                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_ref().map(|t| t.type_name()).unwrap_or_else(|| "?".to_string())))
                     .collect::<Vec<_>>()
                     .join(", ");
                 println!("     - Функция {}({})", name.cyan(), params);
             }
 
             for (name, sig) in &ir_result.ir.symbols.global_procedures {
+                // Phase 3: type_hint теперь Option<TypeResolution>
                 let params = sig
                     .params
                     .iter()
-                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_deref().unwrap_or("?")))
+                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_ref().map(|t| t.type_name()).unwrap_or_else(|| "?".to_string())))
                     .collect::<Vec<_>>()
                     .join(", ");
                 println!("     - Процедура {}({})", name.cyan(), params);

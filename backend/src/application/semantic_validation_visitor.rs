@@ -1,7 +1,7 @@
 //! Semantic Validation Visitor
 use bsl_shared::domain::resolver::{TypeResolver, ValidationResult, ValidationResultV2};
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::{Certainty, ConcreteType, ConfigurationType, DiagnosticSeverity, FacetKind, MetadataKind, ResolutionResult, TypeDiagnostic};
+use bsl_shared::domain::types::{DiagnosticSeverity, MetadataKind, TypeDiagnostic};
 use bsl_shared::domain::validators::{TypeValidator, TypeErrorKind};
 use bsl_shared::domain::RuntimeExecutionContext;  // MILESTONE 3.11 Phase 3
 use bsl_shared::formatting::DetailLevel;  // MILESTONE 3.6 Phase 3
@@ -283,97 +283,9 @@ impl<'a> SemanticValidationVisitor<'a> {
         }
     }
 
-    fn simple_resolution(type_name: &str) -> bsl_shared::domain::types::TypeResolution {
-        use bsl_shared::domain::types::{
-            PrimitiveType, ResolutionMetadata, ResolutionSource, TypeResolution,
-        };
-
-        // ✅ MILESTONE 3.10: Убираем Generic параметры для поиска методов
-        // "Массив<?>" → "Массив"
-        let clean_type_name = if let Some(idx) = type_name.find('<') {
-            &type_name[..idx]
-        } else {
-            type_name
-        };
-
-        // ✅ MILESTONE 3.11: Попытка распарсить фасетный тип конфигурации
-        if let Some((facet_kind, metadata_kind, object_name)) = Self::try_parse_faceted_type(clean_type_name) {
-            return TypeResolution {
-                certainty: Certainty::Known,
-                result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
-                    name: object_name,
-                    kind: metadata_kind,
-                    facet: Some(facet_kind),
-                    attributes: vec![],
-                    tabular_sections: vec![],
-                })),
-                source: ResolutionSource::Static,
-                metadata: ResolutionMetadata::default(),
-                active_facet: Some(facet_kind),
-                available_facets: vec![],
-            };
-        }
-
-        // Примитивные типы
-        let result = match clean_type_name {
-            "Число" | "Number" => {
-                ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Number))
-            }
-            "Строка" | "String" => {
-                ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::String))
-            }
-            "Булево" | "Boolean" => {
-                ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Boolean))
-            }
-            "Дата" | "Date" => {
-                ResolutionResult::Concrete(ConcreteType::Primitive(PrimitiveType::Date))
-            }
-            _ => {
-                use bsl_shared::domain::types::PlatformType;
-                ResolutionResult::Concrete(ConcreteType::Platform(PlatformType {
-                    name: clean_type_name.to_string(),
-                }))
-            }
-        };
-
-        // ✅ MILESTONE 3.7 BUGFIX: Устанавливаем default фасет для Platform типов
-        // Для объектов, созданных через `Новый`, используем Object фасет
-        let active_facet = match &result {
-            ResolutionResult::Concrete(ConcreteType::Platform(_)) => {
-                Some(FacetKind::Object)
-            }
-            _ => None,
-        };
-
-        TypeResolution {
-            certainty: Certainty::Known,
-            result,
-            source: ResolutionSource::Static,
-            metadata: ResolutionMetadata::default(),
-            active_facet,
-            available_facets: vec![],
-        }
-    }
-
-    /// Попытка распарсить фасетный тип конфигурации
-    ///
-    /// # Примеры
-    /// - "СправочникМенеджер.Контрагенты" -> Some((Manager, Catalog, "Контрагенты"))
-    /// - "ДокументОбъект.ЗаказКлиента" -> Some((Object, Document, "ЗаказКлиента"))
-    /// - "Массив" -> None
-    fn try_parse_faceted_type(type_name: &str) -> Option<(FacetKind, MetadataKind, String)> {
-        // Проверяем наличие точки (признак конкретизированного типа)
-        let dot_pos = type_name.find('.')?;
-
-        let prefix = &type_name[..dot_pos];
-        let object_name = &type_name[dot_pos + 1..];
-
-        // Используем pattern-matching функции из SignatureIndex
-        let facet_kind = SignatureIndex::get_facet_kind_from_prefix(prefix)?;
-        let metadata_kind = SignatureIndex::get_metadata_kind_from_prefix(prefix)?;
-
-        Some((facet_kind, metadata_kind, object_name.to_string()))
-    }
+    // Phase 4: simple_resolution() и try_parse_faceted_type() удалены
+    // IR теперь хранит TypeResolution напрямую, а metadata_lookup корректно
+    // обрабатывает Generic типы и фасеты без дополнительной конвертации
 }
 
 impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
@@ -382,17 +294,24 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
             SemanticNodeKind::FunctionCall {
                 function_name,
                 object_name,
+                // Phase 3: object_type теперь TypeResolution
                 object_type: Some(obj_type),
                 arg_types,
                 ..
             } => {
-                let resolution = Self::simple_resolution(obj_type);
+                // Phase 3: Graceful degradation для Unknown типов
+                if obj_type.is_unknown() {
+                    return; // Пропускаем валидацию если тип неизвестен
+                }
 
-                // 1. ✅ MILESTONE 3.6 Phase 3: Проверяем существование метода с передачей variable_name
+                // Phase 4: obj_type уже TypeResolution — используем напрямую
+                // metadata_lookup.get_methods() уже обрабатывает Generic и фасеты корректно
+
+                // 1. MILESTONE 3.6 Phase 3: Проверяем существование метода с передачей variable_name
                 if let Some(error_kind) = self
                     .validator
                     .validate_method_exists_with_variable(
-                        &resolution,
+                        obj_type,  // Phase 4: Прямое использование TypeResolution
                         function_name,
                         object_name.clone(),  // Передаём имя переменной
                     )
@@ -402,9 +321,10 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     return; // Нет смысла проверять параметры если метод не существует
                 }
 
-                // 1.5. ✅ MILESTONE 3.11 Phase 3: Проверяем доступность метода в текущем контексте
+                // 1.5. MILESTONE 3.11 Phase 3: Проверяем доступность метода в текущем контексте
+                // Phase 3: Передаём type_name() вместо String
                 if let Some(error_kind) = self.validate_method_call_context(
-                    obj_type,
+                    &obj_type.type_name(),
                     function_name,
                     object_name.clone(),
                     node.span,
@@ -419,11 +339,15 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     // НЕ return - продолжаем проверку параметров
                 }
 
-                // 2. ✅ MILESTONE 3.13: Проверяем типы параметров с объектным сравнением (v2)
+                // 2. MILESTONE 3.13: Проверяем типы параметров с объектным сравнением (v2)
+                // Phase 3: Конвертируем Vec<TypeResolution> → Vec<String> для validate_call_v2
+                let arg_types_str: Vec<String> = arg_types.iter()
+                    .map(|tr| tr.type_name())
+                    .collect();
                 let validation_result = self.resolver.validate_call_v2(
-                    Some(obj_type),
+                    Some(&obj_type.type_name()),
                     function_name,
-                    arg_types,
+                    &arg_types_str,
                     self.signature_index,
                 );
 
@@ -443,9 +367,10 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 // Проверяем конструкции вида: Справочники.Контрагенты, Документы.ЗаказПокупателя
                 // ВАЖНО: object_name содержит оригинальное имя ("Документы"),
                 //        object_type содержит трансформированный тип ("ДокументМенеджер.ЗаказКлиента")
+                // Phase 3: object_type теперь TypeResolution
                 tracing::debug!(
                     "🔍 MemberAccess: object_name={:?}, object_type={}, member_name={}",
-                    object_name, object_type, member_name
+                    object_name, object_type.type_name(), member_name
                 );
                 if let Some(collection_name) = object_name {
                     tracing::debug!("🔍 Checking if '{}' is metadata collection: {}", collection_name, is_metadata_collection_name(collection_name));
@@ -465,12 +390,18 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     }
                 }
 
-                let resolution = Self::simple_resolution(object_type);
+                // Phase 4: object_type уже TypeResolution — используем напрямую
+                // metadata_lookup.get_properties() уже обрабатывает Generic и фасеты корректно
+                // Graceful degradation: пропускаем валидацию для Unknown типов
+                if object_type.is_unknown() {
+                    return;
+                }
+
                 // ✅ MILESTONE 3.6 Phase 3: Передаём имя переменной
                 if let Some(error_kind) = self
                     .validator
                     .validate_property_exists_with_variable(
-                        &resolution,
+                        object_type,  // Phase 4: Прямое использование TypeResolution
                         member_name,
                         object_name.clone(),  // Передаём имя переменной
                     )
@@ -489,11 +420,13 @@ mod tests {
     use super::*;
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
     use bsl_shared::domain::repository::TypeRepository;  // MILESTONE 3.16: Import trait for load_types
+    use bsl_shared::domain::types::FacetKind;  // Phase 4: Moved from main imports (used only in tests)
     use bsl_shared::ir::{SemanticNode, SemanticNodeKind, Span};
 
     #[test]
     fn test_visitor_detects_nonexistent_method() {
         use std::sync::Arc;
+        use bsl_shared::domain::types::TypeResolution;
         let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
         let metadata = TypeMetadataLookup::new(repository.clone());
         let validator = TypeValidator::new(&metadata);
@@ -505,7 +438,9 @@ mod tests {
             kind: SemanticNodeKind::FunctionCall {
                 function_name: "НесуществующийМетод".to_string(),
                 object_name: Some("МассивДанных".to_string()),
-                object_type: Some("Массив".to_string()),
+                // Phase 3: object_type теперь TypeResolution
+                object_type: Some(TypeResolution::explicit("Массив")),
+                // Phase 3: arg_types теперь Vec<TypeResolution>
                 arg_types: vec![],
             },
             span: Span::new(5, 10, 5, 40),
@@ -527,6 +462,7 @@ mod tests {
     #[test]
     fn test_visitor_detects_nonexistent_property() {
         use std::sync::Arc;
+        use bsl_shared::domain::types::TypeResolution;
         let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
         let metadata = TypeMetadataLookup::new(repository.clone());
         let validator = TypeValidator::new(&metadata);
@@ -537,7 +473,8 @@ mod tests {
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
                 object_name: Some("МассивДанных".to_string()),
-                object_type: "Массив".to_string(),
+                // Phase 3: object_type теперь TypeResolution
+                object_type: TypeResolution::explicit("Массив"),
                 member_name: "НесуществующееСвойство".to_string(),
                 is_method: false,
             },
@@ -600,7 +537,7 @@ mod tests {
     fn test_visitor_validates_metadata_object_when_config_loaded() {
         use std::sync::Arc;
         use bsl_shared::domain::repository::InMemoryTypeRepository;
-        use bsl_shared::domain::types::{RawTypeData, RawDataSource};
+        use bsl_shared::domain::types::{RawTypeData, RawDataSource, TypeResolution};
 
         // Создаём репозиторий с конфигурационными типами
         let repository = Arc::new(InMemoryTypeRepository::new());
@@ -636,7 +573,8 @@ mod tests {
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
                 object_name: Some("Справочники".to_string()),
-                object_type: "СправочникМенеджер".to_string(),  // После infer_expression_type
+                // Phase 3: object_type теперь TypeResolution
+                object_type: TypeResolution::explicit("СправочникМенеджер"),
                 member_name: "НесуществующийСправочник".to_string(),
                 is_method: false,
             },
@@ -661,7 +599,7 @@ mod tests {
     fn test_visitor_no_error_for_existing_metadata_object() {
         use std::sync::Arc;
         use bsl_shared::domain::repository::InMemoryTypeRepository;
-        use bsl_shared::domain::types::{RawTypeData, RawDataSource};
+        use bsl_shared::domain::types::{RawTypeData, RawDataSource, TypeResolution};
 
         let repository = Arc::new(InMemoryTypeRepository::new());
 
@@ -696,7 +634,8 @@ mod tests {
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
                 object_name: Some("Справочники".to_string()),
-                object_type: "СправочникМенеджер".to_string(),  // После infer_expression_type
+                // Phase 3: object_type теперь TypeResolution
+                object_type: TypeResolution::explicit("СправочникМенеджер"),
                 member_name: "Контрагенты".to_string(),
                 is_method: false,
             },
@@ -719,6 +658,7 @@ mod tests {
     fn test_visitor_no_error_when_config_not_loaded() {
         use std::sync::Arc;
         use bsl_shared::domain::repository::InMemoryTypeRepository;
+        use bsl_shared::domain::types::TypeResolution;
 
         // Репозиторий БЕЗ конфигурационных типов
         let repository = Arc::new(InMemoryTypeRepository::new());
@@ -734,7 +674,8 @@ mod tests {
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
                 object_name: Some("Справочники".to_string()),
-                object_type: "СправочникМенеджер".to_string(),
+                // Phase 3: object_type теперь TypeResolution
+                object_type: TypeResolution::explicit("СправочникМенеджер"),
                 member_name: "НесуществующийСправочник".to_string(),
                 is_method: false,
             },

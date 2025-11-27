@@ -117,41 +117,51 @@ impl AstToIrConverter {
     }
 
     /// Сбор глобальных символов (функции, процедуры)
+    ///
+    /// # Phase 3: TypeResolution для Parameter.type_hint и FunctionSignature.return_type
+    ///
+    /// - Parameter.type_hint = None (пока не парсим типы параметров из AST)
+    /// - FunctionSignature.return_type = None (будет выведен из return statements)
     fn collect_global_symbols(&mut self, statement: &Statement) -> Result<()> {
         match statement {
             Statement::FunctionDecl { name, params, .. } => {
+                // Phase 3: Parameter.type_hint теперь Option<TypeResolution>
                 let params_vec: Vec<Parameter> = params
                     .iter()
                     .map(|p| Parameter {
                         name: p.clone(),
-                        type_hint: None,
+                        type_hint: None, // Phase 3: TypeResolution, не парсим из AST пока
                         default_value: None,
                         is_val: false,
                     })
                     .collect();
 
+                // Phase 3: FunctionSignature.return_type теперь Option<TypeResolution>
                 self.symbol_table.register_function(FunctionSignature {
                     name: name.clone(),
                     params: params_vec,
-                    return_type: None,
+                    return_type: None, // Phase 3: TypeResolution, будет выведен из return
                     is_export: false,
                 });
             }
             Statement::ProcedureDecl { name, params, .. } => {
+                // Phase 3: Parameter.type_hint теперь Option<TypeResolution>
                 let params_vec: Vec<Parameter> = params
                     .iter()
                     .map(|p| Parameter {
                         name: p.clone(),
-                        type_hint: None,
+                        type_hint: None, // Phase 3: TypeResolution
                         default_value: None,
                         is_val: false,
                     })
                     .collect();
 
+                // Phase 3: FunctionSignature.return_type теперь Option<TypeResolution>
+                // Процедуры не возвращают значение, поэтому return_type = None
                 self.symbol_table.register_procedure(FunctionSignature {
                     name: name.clone(),
                     params: params_vec,
-                    return_type: None,
+                    return_type: None, // Phase 3: TypeResolution
                     is_export: false,
                 });
             }
@@ -172,10 +182,14 @@ impl AstToIrConverter {
                 span: ast_span,
             } => {
                 let span = self.ast_span_to_ir_span(ast_span);
+
+                // Phase 3: type_hint теперь TypeResolution
+                let type_hint_resolution = type_hint.as_ref().map(|t| TypeResolution::explicit(t));
+
                 let node = SemanticNode {
                     kind: SemanticNodeKind::VariableDeclaration {
                         name: name.clone(),
-                        type_hint: type_hint.clone(),
+                        type_hint: type_hint_resolution.clone(),
                         is_export: false,
                         initial_value_type: None,
                     },
@@ -184,11 +198,7 @@ impl AstToIrConverter {
                 };
 
                 // Регистрируем переменную в текущем scope
-                let resolution = if let Some(ref t) = type_hint {
-                    TypeResolution::explicit(t)
-                } else {
-                    TypeResolution::unknown()
-                };
+                let resolution = type_hint_resolution.unwrap_or_else(TypeResolution::unknown);
                 self.symbol_table
                     .register_variable(self.current_scope, name, resolution, span);
 
@@ -224,8 +234,8 @@ impl AstToIrConverter {
                                 _ => None,
                             };
 
-                            // Инферим тип объекта
-                            let object_type = self.infer_expression_type(object);
+                            // Phase 3: Инферим тип объекта с TypeResolution
+                            let object_type = self.infer_type_resolution(object);
                             let span = self.ast_span_to_ir_span(*prop_span);
 
                             // Создаём MemberAccess узел для валидации
@@ -250,9 +260,10 @@ impl AstToIrConverter {
                     let value_type = self.infer_expression_type(&value);
                     let span = self.ast_span_to_ir_span(ast_span);
 
-                    // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Определяем тип для переменной
-                    let type_resolution = if let Expression::New { type_name, .. } = value {
-                        // ✅ ОЧИСТКА: Убираем скобки если tree-sitter включил их в type_name
+                    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Определяем тип для переменной
+                    // Phase 3: Используем ref для избежания partial move
+                    let type_resolution = if let Expression::New { ref type_name, .. } = value {
+                        // ОЧИСТКА: Убираем скобки если tree-sitter включил их в type_name
                         let clean_type_name = type_name.trim().trim_end_matches("()").trim();
 
                         // Для Generic коллекций (Массив, Соответствие, Список)
@@ -304,11 +315,16 @@ impl AstToIrConverter {
                         }
                     }
 
+                    // Phase 3: value_type теперь TypeResolution
+                    // Используем infer_type_resolution вместо infer_expression_type
+                    let value_type_resolution = self.infer_type_resolution(&value);
+
                     let node = SemanticNode {
                         kind: SemanticNodeKind::Assignment {
                             variable: var_name.clone(),
-                            value_type: value_type.clone(),
-                            value_node: value_node_idx, // ✅ MILESTONE 3.5: сохраняем индекс узла value
+                            // Phase 3: value_type теперь TypeResolution
+                            value_type: value_type_resolution,
+                            value_node: value_node_idx, // MILESTONE 3.5: сохраняем индекс узла value
                         },
                         span,
                         scope_id: self.current_scope,
@@ -326,7 +342,8 @@ impl AstToIrConverter {
                 else_body,
                 span: ast_span,
             } => {
-                let condition_type = self.infer_expression_type(&condition);
+                // Phase 3: Используем infer_type_resolution для условия
+                let condition_type = self.infer_type_resolution(&condition);
                 let span = self.ast_span_to_ir_span(ast_span);
 
                 // Создаём scope для then ветки
@@ -382,7 +399,8 @@ impl AstToIrConverter {
                 body,
                 span: ast_span,
             } => {
-                let condition_type = self.infer_expression_type(&condition);
+                // Phase 3: Используем infer_type_resolution для условия
+                let condition_type = self.infer_type_resolution(&condition);
                 let span = self.ast_span_to_ir_span(ast_span);
 
                 let body_scope = self.symbol_table.create_scope(self.current_scope);
@@ -419,12 +437,13 @@ impl AstToIrConverter {
                 body,
                 span: ast_span,
             } => {
-                let range_type = format!(
-                    "{}..{}",
-                    self.infer_expression_type(&start),
-                    self.infer_expression_type(&end)
-                );
+                // Phase 3: For loop range всегда числовой
+                let range_type = TypeResolution::primitive("Число");
                 let span = self.ast_span_to_ir_span(ast_span);
+
+                // Debug info о start/end типах (для будущей валидации)
+                let _start_type = self.infer_expression_type(&start);
+                let _end_type = self.infer_expression_type(&end);
 
                 let body_scope = self.symbol_table.create_scope(self.current_scope);
                 let old_scope = self.current_scope;
@@ -438,7 +457,7 @@ impl AstToIrConverter {
                     span,
                 );
 
-                // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                // Собираем только прямые дочерние индексы
                 let mut body_indices = Vec::new();
                 for stmt in body {
                     if let Some(idx) = self.convert_statement(stmt)? {
@@ -468,14 +487,15 @@ impl AstToIrConverter {
                 body,
                 span: ast_span,
             } => {
-                let collection_type = self.infer_expression_type(&collection);
+                // Phase 3: Используем infer_type_resolution для коллекции
+                let collection_type = self.infer_type_resolution(&collection);
                 let span = self.ast_span_to_ir_span(ast_span);
 
                 let body_scope = self.symbol_table.create_scope(self.current_scope);
                 let old_scope = self.current_scope;
                 self.current_scope = body_scope;
 
-                // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                // Собираем только прямые дочерние индексы
                 let mut body_indices = Vec::new();
                 for stmt in body {
                     if let Some(idx) = self.convert_statement(stmt)? {
@@ -503,7 +523,8 @@ impl AstToIrConverter {
                 value,
                 span: ast_span,
             } => {
-                let value_type = value.as_ref().map(|v| self.infer_expression_type(v));
+                // Phase 3: Используем infer_type_resolution для возвращаемого значения
+                let value_type = value.as_ref().map(|v| self.infer_type_resolution(v));
                 let span = self.ast_span_to_ir_span(ast_span);
 
                 let node = SemanticNode {
@@ -584,13 +605,13 @@ impl AstToIrConverter {
                         _ => None, // Для сложных выражений object_name = None
                     };
 
-                    // Инферим ТИП объекта (всегда)
-                    let object_type = self.infer_expression_type(&object);
+                    // Phase 3: Инферим ТИП объекта с TypeResolution
+                    let object_type = self.infer_type_resolution(&object);
 
                     let node = SemanticNode {
                         kind: SemanticNodeKind::MemberAccess {
                             object_name, // ✅ Имя переменной
-                            object_type, // ✅ Тип переменной
+                            object_type, // ✅ Phase 3: TypeResolution
                             member_name: property,
                             is_method: true,
                         },
@@ -635,21 +656,21 @@ impl AstToIrConverter {
                 let span = self.ast_span_to_ir_span(ast_span);
                 let body_scope = self.symbol_table.create_scope(self.current_scope);
 
+                // Phase 3: Parameter.type_hint теперь Option<TypeResolution>
                 let params_vec: Vec<Parameter> = params
                     .iter()
                     .map(|p| Parameter {
                         name: p.clone(),
-                        type_hint: None,
+                        type_hint: None, // Phase 3: TypeResolution
                         default_value: None,
                         is_val: false,
                     })
                     .collect();
 
-                // ✅ ИСПРАВЛЕНИЕ: Применяем паттерн из IfStatement
                 let old_scope = self.current_scope;
                 self.current_scope = body_scope;
 
-                // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                // Собираем только прямые дочерние индексы
                 let mut body_indices = Vec::new();
                 for stmt in body {
                     if let Some(idx) = self.convert_statement(stmt)? {
@@ -659,11 +680,12 @@ impl AstToIrConverter {
 
                 self.current_scope = old_scope;
 
+                // Phase 3: return_type теперь Option<TypeResolution>
                 let node = SemanticNode {
                     kind: SemanticNodeKind::FunctionDeclaration {
                         name,
                         params: params_vec,
-                        return_type: None,
+                        return_type: None, // Phase 3: TypeResolution, будет выведен из return
                         body_scope,
                         body: body_indices,
                     },
@@ -684,21 +706,21 @@ impl AstToIrConverter {
                 let span = self.ast_span_to_ir_span(ast_span);
                 let body_scope = self.symbol_table.create_scope(self.current_scope);
 
+                // Phase 3: Parameter.type_hint теперь Option<TypeResolution>
                 let params_vec: Vec<Parameter> = params
                     .iter()
                     .map(|p| Parameter {
                         name: p.clone(),
-                        type_hint: None,
+                        type_hint: None, // Phase 3: TypeResolution
                         default_value: None,
                         is_val: false,
                     })
                     .collect();
 
-                // ✅ ИСПРАВЛЕНИЕ: Применяем паттерн из IfStatement
                 let old_scope = self.current_scope;
                 self.current_scope = body_scope;
 
-                // ✅ ИСПРАВЛЕНИЕ: Собираем только прямые дочерние индексы
+                // Собираем только прямые дочерние индексы
                 let mut body_indices = Vec::new();
                 for stmt in body {
                     if let Some(idx) = self.convert_statement(stmt)? {
@@ -738,30 +760,39 @@ impl AstToIrConverter {
         args: Vec<Expression>,
         span: Span,
     ) -> Result<Option<usize>> {
-        // ✅ Возвращаем индекс созданного узла
+        // Возвращаем индекс созданного узла
         let function_name = match function {
             Expression::Identifier { name, .. } => name,
             Expression::PropertyAccess {
                 object, property, ..
             } => {
                 // Метод объекта: объект.Метод()
-                let object_type = self.infer_expression_type(&object);
-                let arg_types: Vec<String> = args
+                // Phase 3: Используем infer_type_resolution для полной информации
+                let object_type = self.infer_type_resolution(&object);
+
+                // Для Generic inference всё ещё нужны String типы
+                let arg_types_str: Vec<String> = args
                     .iter()
                     .map(|arg| self.infer_expression_type(arg))
                     .collect();
 
-                // ✅ НОВОЕ: Generic inference из вызова метода
+                // Phase 3: arg_types как Vec<TypeResolution>
+                let arg_types: Vec<TypeResolution> = args
+                    .iter()
+                    .map(|arg| self.infer_type_resolution(arg))
+                    .collect();
+
+                // НОВОЕ: Generic inference из вызова метода
                 // Если это вызов метода переменной (а не выражения),
-                // пытаемся вывести Generic тип
+                // пытаемся вывести Generic тип (используем arg_types_str для совместимости)
                 let object_name = if let Expression::Identifier { name, .. } = &*object {
-                    self.try_infer_generic_from_method_call(name, &property, &arg_types);
+                    self.try_infer_generic_from_method_call(name, &property, &arg_types_str);
                     Some(name.clone())
                 } else {
                     None
                 };
 
-                // ✅ MILESTONE 2.11: Расширяем span FunctionCall узла, чтобы включить объект
+                // MILESTONE 2.11: Расширяем span FunctionCall узла, чтобы включить объект
                 // Это позволит hover правильно работать на объекте в вызове метода
                 let expanded_span = if let Expression::Identifier { span: obj_span, .. } = &*object {
                     // Объединяем span объекта (ТаблицаТип) и span вызова (Количество())
@@ -778,30 +809,34 @@ impl AstToIrConverter {
                 let node = SemanticNode {
                     kind: SemanticNodeKind::FunctionCall {
                         function_name: property.clone(),
-                        object_name, // ✅ НОВОЕ: имя объекта для методов
+                        object_name, // Имя объекта для методов
+                        // Phase 3: object_type теперь TypeResolution
                         object_type: Some(object_type),
+                        // Phase 3: arg_types теперь Vec<TypeResolution>
                         arg_types,
                     },
-                    span: expanded_span, // ✅ Используем расширенный span
+                    span: expanded_span, // Используем расширенный span
                     scope_id: self.current_scope,
                 };
 
                 self.nodes.push(node);
-                return Ok(Some(self.nodes.len() - 1)); // ✅ Возвращаем индекс
+                return Ok(Some(self.nodes.len() - 1)); // Возвращаем индекс
             }
             _ => "Unknown".to_string(),
         };
 
-        let arg_types: Vec<String> = args
+        // Phase 3: arg_types как Vec<TypeResolution>
+        let arg_types: Vec<TypeResolution> = args
             .iter()
-            .map(|arg| self.infer_expression_type(arg))
+            .map(|arg| self.infer_type_resolution(arg))
             .collect();
 
         let node = SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name,
-                object_name: None, // ✅ НОВОЕ: обычная функция, не метод
+                object_name: None, // Обычная функция, не метод
                 object_type: None,
+                // Phase 3: arg_types теперь Vec<TypeResolution>
                 arg_types,
             },
             span,
@@ -809,7 +844,7 @@ impl AstToIrConverter {
         };
 
         self.nodes.push(node);
-        Ok(Some(self.nodes.len() - 1)) // ✅ Возвращаем индекс
+        Ok(Some(self.nodes.len() - 1)) // Возвращаем индекс
     }
 
     /// Вывод типа выражения (простая эвристика)
@@ -918,10 +953,12 @@ impl AstToIrConverter {
                         }
 
                         // Fallback: пользовательские функции из SymbolTable
+                        // Phase 3: return_type теперь Option<TypeResolution>
                         if let Some(sig) = self.symbol_table.find_function(func_name) {
                             return sig
                                 .return_type
-                                .clone()
+                                .as_ref()
+                                .map(|r| r.type_name())
                                 .unwrap_or_else(|| "Dynamic".to_string());
                         }
 
@@ -937,13 +974,83 @@ impl AstToIrConverter {
 
     /// Поиск типа переменной в scope hierarchy
     fn lookup_variable_type(&self, name: &str) -> Option<String> {
-        // ✅ Используем публичный API вместо прямого доступа к scopes
+        // Используем публичный API вместо прямого доступа к scopes
         self.symbol_table
             .lookup_variable_in_hierarchy(self.current_scope, name)
             .map(|(_, resolution)| resolution.type_name())
     }
 
+    /// Phase 3: Вывод типа с полной информацией TypeResolution
+    ///
+    /// В отличие от `infer_expression_type()`, возвращает TypeResolution
+    /// с Certainty и ResolutionSource для точного отслеживания происхождения типа.
+    fn infer_type_resolution(&self, expr: &Expression) -> TypeResolution {
+        match expr {
+            // Примитивные литералы — высокая уверенность
+            Expression::Number { .. } => TypeResolution::primitive("Число"),
+            Expression::String { .. } => TypeResolution::primitive("Строка"),
+            Expression::Boolean { .. } => TypeResolution::primitive("Булево"),
+            Expression::Date { .. } => TypeResolution::primitive("Дата"),
 
+            // Идентификаторы — поиск в SymbolTable
+            Expression::Identifier { name, .. } => {
+                // Проверяем на Неопределено/Null (парсятся как идентификаторы)
+                let name_lower = name.to_lowercase();
+                if name_lower == "неопределено" || name_lower == "undefined" {
+                    return TypeResolution::primitive("Неопределено");
+                }
+                if name_lower == "null" {
+                    return TypeResolution::primitive("Null");
+                }
+
+                if let Some(resolution) = self
+                    .symbol_table
+                    .get_variable_type(self.current_scope, name)
+                {
+                    resolution.clone()
+                } else {
+                    // Переменная не найдена — unknown
+                    TypeResolution::unknown()
+                }
+            }
+
+            // Новые конструкции (Новый Тип())
+            Expression::New { type_name, .. } => {
+                // Очищаем скобки если tree-sitter включил их
+                let clean_type_name = type_name.trim().trim_end_matches("()").trim();
+                TypeResolution::explicit(clean_type_name)
+            }
+
+            // Доступ к свойству (object.property)
+            Expression::PropertyAccess { object, property, .. } => {
+                let base = self.infer_type_resolution(object);
+                let type_str = format!("{}.{}", base.type_name(), property);
+                TypeResolution::inferred(&type_str, 0.7)
+            }
+
+            // Вызов функции/метода
+            Expression::Call { .. } => {
+                let type_str = self.infer_expression_type(expr);
+                TypeResolution::inferred(&type_str, 0.6)
+            }
+
+            // Бинарные/унарные операции
+            Expression::Binary { .. } | Expression::Unary { .. } => {
+                let type_str = self.infer_expression_type(expr);
+                TypeResolution::inferred(&type_str, 0.8)
+            }
+
+            // Остальные случаи — используем fallback
+            _ => {
+                let type_str = self.infer_expression_type(expr);
+                if type_str.is_empty() || type_str == "Unknown" || type_str == "Dynamic" {
+                    TypeResolution::unknown()
+                } else {
+                    TypeResolution::inferred(&type_str, 0.5)
+                }
+            }
+        }
+    }
 
     // TODO: Интеграция parse_compiler_directive() для context tracking (Milestone 3.11 Phase 2)
     // Функция была удалена по результатам code review.
@@ -1140,7 +1247,9 @@ mod tests {
         } = &ir.nodes[0].kind
         {
             assert_eq!(name, "x");
-            assert_eq!(type_hint, &Some("Число".to_string()));
+            // Phase 3: type_hint теперь Option<TypeResolution>
+            assert!(type_hint.is_some());
+            assert_eq!(type_hint.as_ref().unwrap().type_name(), "Число");
         } else {
             panic!("Expected VariableDeclaration");
         }
@@ -1217,7 +1326,8 @@ mod tests {
         {
             assert_eq!(function_name, "Сообщить");
             assert_eq!(arg_types.len(), 1);
-            assert_eq!(arg_types[0], "Строка");
+            // Phase 3: arg_types теперь Vec<TypeResolution>
+            assert_eq!(arg_types[0].type_name(), "Строка");
         } else {
             panic!("Expected FunctionCall");
         }

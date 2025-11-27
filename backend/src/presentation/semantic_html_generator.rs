@@ -494,11 +494,12 @@ fn render_single_node(
         } => (
             "node-function",
             "⚙️",
+            // Phase 3: return_type теперь Option<TypeResolution>
             format!(
                 "Function <span class=\"node-name\">{}</span> ({} params) → <span class=\"detail-value\">{}</span>",
                 escape_html(name),
                 params.len(),
-                return_type.as_ref().map(|t| escape_html(t)).unwrap_or_else(|| "Void".to_string())
+                return_type.as_ref().map(|t| escape_html(&t.type_name())).unwrap_or_else(|| "Void".to_string())
             ),
         ),
         SemanticNodeKind::VariableDeclaration {
@@ -508,10 +509,11 @@ fn render_single_node(
         } => (
             "node-variable",
             "📌",
+            // Phase 3: type_hint теперь Option<TypeResolution>
             format!(
                 "Variable <span class=\"node-name\">{}</span>: <span class=\"detail-value\">{}</span>",
                 escape_html(name),
-                type_hint.as_ref().map(|t| escape_html(t)).unwrap_or_else(|| "Unknown".to_string())
+                type_hint.as_ref().map(|t| escape_html(&t.type_name())).unwrap_or_else(|| "Unknown".to_string())
             ),
         ),
         SemanticNodeKind::Assignment {
@@ -521,10 +523,11 @@ fn render_single_node(
         } => (
             "node-assignment",
             "✏️",
+            // Phase 3: value_type теперь TypeResolution, используем type_name()
             format!(
                 "Assignment <span class=\"node-name\">{}</span> = <span class=\"detail-value\">{}</span>",
                 escape_html(variable),
-                escape_html(value_type)
+                escape_html(&value_type.type_name())
             ),
         ),
         SemanticNodeKind::IfStatement { .. } => (
@@ -547,7 +550,8 @@ fn render_single_node(
             "↩️",
             format!(
                 "Return Statement: <span class=\"detail-value\">{}</span>",
-                value_type.as_ref().map(|t| escape_html(t)).unwrap_or_else(|| "Void".to_string())
+                // Phase 3: value_type теперь Option<TypeResolution>
+                value_type.as_ref().map(|t| escape_html(&t.type_name())).unwrap_or_else(|| "Void".to_string())
             ),
         ),
         _ => (
@@ -606,11 +610,12 @@ fn render_symbol_table(symbols: &bsl_shared::ir::SymbolTable) -> String {
     let mut table_rows = String::new();
 
     // Add functions using public API
+    // Phase 3: return_type теперь Option<TypeResolution>
     for (name, sig) in symbols.iter_functions() {
         let return_type = sig
             .return_type
             .as_ref()
-            .map(|t| escape_html(t))
+            .map(|t| escape_html(&t.type_name()))
             .unwrap_or_else(|| "void".to_string());
 
         table_rows.push_str(&format!(

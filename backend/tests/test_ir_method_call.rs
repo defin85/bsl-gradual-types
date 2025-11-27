@@ -69,9 +69,10 @@ fn test_ir_for_method_call_assignment() {
             value_node,
         } = &node.kind
         {
+            // Phase 3: value_type теперь TypeResolution, используем type_name()
             println!(
                 "    Assignment: {} = {} | value_node={:?}",
-                variable, value_type, value_node
+                variable, value_type.type_name(), value_node
             );
         }
     }

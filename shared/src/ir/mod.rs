@@ -68,27 +68,49 @@ pub struct SemanticNode {
 pub enum SemanticNodeKind {
     // === Базовые объявления ===
     /// Объявление переменной: `Перем x: Число;`
+    ///
+    /// # Phase 3: TypeResolution для type_hint и initial_value_type
+    ///
+    /// - `type_hint` - явная аннотация типа из исходного кода (Explicit source)
+    /// - `initial_value_type` - выведенный тип из инициализирующего значения (Inferred source)
     VariableDeclaration {
         name: String,
-        type_hint: Option<String>,
+        /// Phase 3: TypeResolution вместо String для явной аннотации типа
+        type_hint: Option<TypeResolution>,
         is_export: bool,
-        initial_value_type: Option<String>,
+        /// Phase 3: TypeResolution вместо String для типа начального значения
+        initial_value_type: Option<TypeResolution>,
     },
 
     /// Присваивание: `x = 42;`
+    ///
+    /// # Phase 3: TypeResolution для value_type
+    ///
+    /// `value_type` теперь содержит полную информацию о выведенном типе:
+    /// - Certainty (уверенность в типе)
+    /// - ResolutionSource (откуда пришёл тип)
+    /// - Metadata (дополнительная информация)
     Assignment {
         variable: String,
-        value_type: String,
-        value_node: Option<usize>, // ✅ MILESTONE 3.5: индекс узла value expression (для hover)
+        /// Phase 3: TypeResolution вместо String для полной информации о типе
+        value_type: TypeResolution,
+        value_node: Option<usize>, // MILESTONE 3.5: индекс узла value expression (для hover)
     },
 
     /// Объявление функции
+    ///
+    /// # Phase 3: TypeResolution для return_type
+    ///
+    /// `return_type` теперь содержит полную информацию о возвращаемом типе:
+    /// - Explicit если явно указан в коде
+    /// - Inferred если выведен из return statements
     FunctionDeclaration {
         name: String,
         params: Vec<Parameter>,
-        return_type: Option<String>,
+        /// Phase 3: TypeResolution вместо String для возвращаемого типа
+        return_type: Option<TypeResolution>,
         body_scope: ScopeId,
-        body: Vec<usize>, // ✅ НОВОЕ: индексы узлов тела функции
+        body: Vec<usize>, // индексы узлов тела функции
     },
 
     /// Объявление процедуры
@@ -102,33 +124,40 @@ pub enum SemanticNodeKind {
     // === Control Flow (КРИТИЧНО для Milestone 2.3 flow-sensitive) ===
     /// Условный оператор: `Если условие Тогда ... Иначе ... КонецЕсли`
     IfStatement {
-        condition_type: String,
+        /// Phase 3: TypeResolution для условия (обычно Булево)
+        condition_type: TypeResolution,
         then_branch: Vec<usize>, // Индексы SemanticNode в then ветке
         else_branch: Option<Vec<usize>>,
     },
 
     /// Цикл While: `Пока условие Цикл ... КонецЦикла`
     WhileLoop {
-        condition_type: String,
+        /// Phase 3: TypeResolution для условия (обычно Булево)
+        condition_type: TypeResolution,
         body: Vec<usize>,
     },
 
     /// Цикл For: `Для i = 1 По 10 Цикл ... КонецЦикла`
     ForLoop {
         variable: String,
-        range_type: String,
+        /// Phase 3: TypeResolution для диапазона (всегда Число для For loop)
+        range_type: TypeResolution,
         body: Vec<usize>,
     },
 
     /// Цикл ForEach: `Для Каждого элемент Из коллекция Цикл ... КонецЦикла`
     ForEachLoop {
         variable: String,
-        collection_type: String,
+        /// Phase 3: TypeResolution для коллекции (массив, соответствие и т.д.)
+        collection_type: TypeResolution,
         body: Vec<usize>,
     },
 
     /// Возврат из функции: `Возврат значение;`
-    Return { value_type: Option<String> },
+    Return {
+        /// Phase 3: TypeResolution для возвращаемого значения
+        value_type: Option<TypeResolution>,
+    },
 
     /// Прерывание цикла: `Прервать;`
     Break,
@@ -164,7 +193,8 @@ pub enum SemanticNodeKind {
     /// ```
     MemberAccess {
         object_name: Option<String>, // ✅ ИСПРАВЛЕНО: Option вместо String
-        object_type: String,         // Тип переменной (результат inference)
+        /// Phase 3: TypeResolution для типа объекта (результат inference)
+        object_type: TypeResolution,
         member_name: String,
         is_method: bool, // true = метод, false = свойство
     },
@@ -178,28 +208,30 @@ pub enum SemanticNodeKind {
     ///   - Some(name) для методов переменных: `МассивДанных.Добавить("x")`
     ///   - None для глобальных функций: `Сообщить("текст")`
     ///   - None для сложных выражений: `ПолучитьОбъект().Метод()`
-    /// - `object_type`: **Тип объекта** для вызовов методов
-    ///   - Some(type) для методов: `object_type = "Массив"`
+    /// - `object_type`: **Тип объекта** для вызовов методов (Phase 3: TypeResolution)
+    ///   - Some(TypeResolution) для методов
     ///   - None для глобальных функций
-    /// - `arg_types`: Типы аргументов вызова
+    /// - `arg_types`: Типы аргументов вызова (Phase 3: Vec<TypeResolution>)
     ///
     /// # Примеры
     ///
     /// ```bsl
     /// Сообщить("текст");  // object_name=None, object_type=None
-    /// МассивДанных.Добавить("x");  // object_name=Some("МассивДанных"), object_type=Some("Массив")
+    /// МассивДанных.Добавить("x");  // object_name=Some("МассивДанных"), object_type=Some(TypeResolution)
     /// ```
     ///
-    /// # Milestone 3.5 Phase 2
+    /// # Phase 3: TypeResolution для object_type и arg_types
     ///
-    /// `object_name` введён для flow-sensitive анализа, чтобы различать:
-    /// - **Имя переменной** (для lookup в SymbolTable)
-    /// - **Тип объекта** (для резолюции методов)
+    /// - `object_type` и `arg_types` теперь содержат полную информацию о типах
+    /// - Для Unknown типов валидация пропускается (graceful degradation)
+    /// - `object_name` по-прежнему String для flow-sensitive анализа (lookup в SymbolTable)
     FunctionCall {
         function_name: String,
         object_name: Option<String>,
-        object_type: Option<String>,
-        arg_types: Vec<String>,
+        /// Phase 3: TypeResolution вместо String для полной информации о типе объекта
+        object_type: Option<TypeResolution>,
+        /// Phase 3: TypeResolution вместо String для полной информации о типах аргументов
+        arg_types: Vec<TypeResolution>,
     },
 
     // === Scope tracking ===
@@ -236,24 +268,19 @@ pub enum SemanticNodeKind {
         /// Имя типа для создания ("Массив", "ТаблицаЗначений", "СправочникСсылка.Номенклатура")
         type_name: String,
 
-        /// Типы аргументов конструктора
-        ///
-        /// # Примеры
-        /// - `Новый Массив(10)` → `vec!["Число"]`
-        /// - `Новый ТаблицаЗначений` → `vec![]` (без аргументов)
-        arg_types: Vec<String>,
-
-        /// Динамический конструктор через строку
-        ///
-        /// `true` для выражений вида `Новый("СправочникСсылка.Номенклатура")`
-        is_dynamic: bool,
-
-        /// Результирующий тип конструктора
+        /// Phase 3: TypeResolution для результирующего типа конструктора
         ///
         /// Обычно равен `type_name`, но для Generic коллекций может включать параметры:
-        /// - `Массив` → "Массив" (без параметров, inference отложен)
-        /// - `Массив<Число>` → "Массив<Число>" (явно указанный Generic параметр)
-        result_type: String,
+        /// - `Массив` → TypeResolution::generic("Массив", ["?"])
+        /// - `Массив<Число>` → TypeResolution::generic("Массив", ["Число"])
+        result_type: TypeResolution,
+
+        /// Phase 3: TypeResolution для типов аргументов конструктора
+        ///
+        /// # Примеры
+        /// - `Новый Массив(10)` → `vec![TypeResolution::primitive("Число")]`
+        /// - `Новый ТаблицаЗначений` → `vec![]` (без аргументов)
+        arg_types: Vec<TypeResolution>,
 
         /// Generic параметры для коллекций (None если тип не Generic)
         ///
@@ -262,14 +289,26 @@ pub enum SemanticNodeKind {
         /// - `Массив<Число>` → Some(vec!["Число"]) (явный параметр)
         /// - `Соответствие<Строка, Число>` → Some(vec!["Строка", "Число"])
         generic_params: Option<Vec<String>>,
+
+        /// Динамический конструктор через строку
+        ///
+        /// `true` для выражений вида `Новый("СправочникСсылка.Номенклатура")`
+        is_dynamic: bool,
     },
 }
 
 /// Параметр функции/процедуры
+///
+/// # Phase 3: TypeResolution для type_hint
+///
+/// `type_hint` теперь содержит полную информацию о типе параметра:
+/// - Explicit если явно указан в коде (`Параметр: Строка`)
+/// - None если тип не указан (динамический параметр)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Parameter {
     pub name: String,
-    pub type_hint: Option<String>,
+    /// Phase 3: TypeResolution вместо String для типа параметра
+    pub type_hint: Option<TypeResolution>,
     pub default_value: Option<String>,
     pub is_val: bool, // ByVal параметр
 }
@@ -311,11 +350,19 @@ pub struct Scope {
 pub struct ScopeId(pub usize);
 
 /// Сигнатура функции/процедуры
+///
+/// # Phase 3: TypeResolution для return_type
+///
+/// `return_type` теперь содержит полную информацию о возвращаемом типе:
+/// - Explicit если явно указан в коде
+/// - Inferred если выведен из анализа тела функции
+/// - None для процедур (не возвращают значение)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionSignature {
     pub name: String,
     pub params: Vec<Parameter>,
-    pub return_type: Option<String>,
+    /// Phase 3: TypeResolution вместо String для возвращаемого типа
+    pub return_type: Option<TypeResolution>,
     pub is_export: bool,
 }
 
@@ -1008,11 +1055,13 @@ impl SymbolTable {
     ///
     /// ```
     /// # use bsl_shared::ir::{SymbolTable, FunctionSignature, Parameter};
+    /// # use bsl_shared::domain::types::TypeResolution;
     /// let mut table = SymbolTable::new();
+    /// // Phase 3: return_type теперь Option<TypeResolution>
     /// table.register_function(FunctionSignature {
     ///     name: "МояФункция".to_string(),
     ///     params: vec![],
-    ///     return_type: Some("Число".to_string()),
+    ///     return_type: Some(TypeResolution::explicit("Число")),
     ///     is_export: false,
     /// });
     ///
@@ -1214,8 +1263,9 @@ impl SemanticProgram {
                 is_export,
                 ..
             } => {
+                // Phase 3: type_hint теперь Option<TypeResolution>
                 if let Some(hint) = type_hint {
-                    attributes.insert("type".to_string(), hint.clone());
+                    attributes.insert("type".to_string(), hint.type_name());
                 }
                 attributes.insert("is_export".to_string(), is_export.to_string());
                 ("Variable".to_string(), Some(name.clone()), attributes)
@@ -1227,8 +1277,9 @@ impl SemanticProgram {
                 ..
             } => {
                 attributes.insert("parameter_count".to_string(), params.len().to_string());
+                // Phase 3: return_type теперь Option<TypeResolution>
                 if let Some(ret) = return_type {
-                    attributes.insert("return_type".to_string(), ret.clone());
+                    attributes.insert("return_type".to_string(), ret.type_name());
                 }
                 ("Function".to_string(), Some(name.clone()), attributes)
             }
@@ -1242,14 +1293,15 @@ impl SemanticProgram {
                 value_node,
             } => {
                 attributes.insert("variable".to_string(), variable.clone());
-                attributes.insert("value_type".to_string(), value_type.clone());
+                // Phase 3: value_type теперь TypeResolution, используем type_name()
+                attributes.insert("value_type".to_string(), value_type.type_name());
                 if let Some(vn) = value_node {
                     attributes.insert("value_node".to_string(), vn.to_string());
                 }
-                // ✅ Показываем имя переменной в UI
+                // Показываем имя переменной в UI
                 (
                     "Assignment".to_string(),
-                    Some(format!("{} = {}", variable, value_type)),
+                    Some(format!("{} = {}", variable, value_type.type_name())),
                     attributes,
                 )
             }
@@ -1289,7 +1341,8 @@ impl SemanticProgram {
                 ..
             } => {
                 attributes.insert("variable".to_string(), variable.clone());
-                attributes.insert("collection_type".to_string(), collection_type.clone());
+                // Phase 3: collection_type теперь TypeResolution
+                attributes.insert("collection_type".to_string(), collection_type.type_name());
                 ("ForEachLoop".to_string(), None, attributes)
             }
             SemanticNodeKind::MemberAccess {
@@ -1302,7 +1355,8 @@ impl SemanticProgram {
                 if let Some(name) = object_name {
                     attributes.insert("object_name".to_string(), name.clone());
                 }
-                attributes.insert("object_type".to_string(), object_type.clone());
+                // Phase 3: object_type теперь TypeResolution
+                attributes.insert("object_type".to_string(), object_type.type_name());
                 attributes.insert("member_name".to_string(), member_name.clone());
                 attributes.insert("is_method".to_string(), is_method.to_string());
 
@@ -1324,7 +1378,8 @@ impl SemanticProgram {
                 attributes.insert("type_name".to_string(), type_name.clone());
                 attributes.insert("arg_count".to_string(), arg_types.len().to_string());
                 attributes.insert("is_dynamic".to_string(), is_dynamic.to_string());
-                attributes.insert("result_type".to_string(), result_type.clone());
+                // Phase 3: result_type теперь TypeResolution
+                attributes.insert("result_type".to_string(), result_type.type_name());
 
                 if let Some(params) = generic_params {
                     attributes.insert("generic_params".to_string(), params.join(", "));
@@ -1424,6 +1479,7 @@ impl SemanticProgram {
         }
 
         // Добавляем функции используя публичное API
+        // Phase 3: return_type теперь Option<TypeResolution>
         for (fn_name, sig) in self.symbols.iter_functions() {
             let symbol = SymbolInfoDto {
                 name: fn_name.clone(),
@@ -1433,7 +1489,7 @@ impl SemanticProgram {
                     "Procedure".to_string()
                 },
                 resolved_type: sig.return_type.as_ref().map(|rt| TypeResolutionDto {
-                    name: rt.clone(),
+                    name: rt.type_name(), // Phase 3: используем type_name()
                     category: "Unknown".to_string(),
                     certainty: "Inferred".to_string(),
                     certainty_percent: 50,
@@ -1661,10 +1717,11 @@ mod tests {
     fn test_find_node_at_position() {
         let mut program = SemanticProgram::new();
 
+        // Phase 3: type_hint теперь Option<TypeResolution>
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::VariableDeclaration {
                 name: "x".to_string(),
-                type_hint: Some("Число".to_string()),
+                type_hint: Some(TypeResolution::explicit("Число")),
                 is_export: false,
                 initial_value_type: None,
             },
@@ -1675,7 +1732,8 @@ mod tests {
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::Assignment {
                 variable: "x".to_string(),
-                value_type: "Число".to_string(),
+                // Phase 3: value_type теперь TypeResolution
+                value_type: TypeResolution::explicit("Число"),
                 value_node: None,
             },
             span: Span::new(2, 0, 2, 10),
@@ -1884,13 +1942,14 @@ mod tests {
         let mut program = SemanticProgram::new();
 
         // Простой конструктор: Новый Массив
+        // Phase 3: result_type и arg_types теперь TypeResolution
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::NewExpression {
                 type_name: "Массив".to_string(),
+                result_type: TypeResolution::explicit("Массив"),
                 arg_types: vec![],
-                is_dynamic: false,
-                result_type: "Массив".to_string(),
                 generic_params: None,
+                is_dynamic: false,
             },
             span: Span::new(1, 0, 1, 12),
             scope_id: program.symbols.root_scope,
@@ -1916,13 +1975,14 @@ mod tests {
         let mut program = SemanticProgram::new();
 
         // Конструктор с параметром: Новый Массив(10)
+        // Phase 3: result_type и arg_types теперь TypeResolution
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::NewExpression {
                 type_name: "Массив".to_string(),
-                arg_types: vec!["Число".to_string()],
-                is_dynamic: false,
-                result_type: "Массив".to_string(),
+                result_type: TypeResolution::explicit("Массив"),
+                arg_types: vec![TypeResolution::primitive("Число")],
                 generic_params: None,
+                is_dynamic: false,
             },
             span: Span::new(1, 0, 1, 16),
             scope_id: program.symbols.root_scope,
@@ -1930,7 +1990,7 @@ mod tests {
 
         if let SemanticNodeKind::NewExpression { arg_types, .. } = &program.nodes[0].kind {
             assert_eq!(arg_types.len(), 1);
-            assert_eq!(arg_types[0], "Число");
+            assert_eq!(arg_types[0].type_name(), "Число");
         } else {
             panic!("Expected NewExpression node");
         }
@@ -1941,13 +2001,14 @@ mod tests {
         let mut program = SemanticProgram::new();
 
         // Динамический конструктор: Новый("СправочникСсылка.Номенклатура")
+        // Phase 3: result_type и arg_types теперь TypeResolution
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::NewExpression {
                 type_name: "СправочникСсылка.Номенклатура".to_string(),
+                result_type: TypeResolution::explicit("СправочникСсылка.Номенклатура"),
                 arg_types: vec![],
-                is_dynamic: true,
-                result_type: "СправочникСсылка.Номенклатура".to_string(),
                 generic_params: None,
+                is_dynamic: true,
             },
             span: Span::new(1, 0, 1, 40),
             scope_id: program.symbols.root_scope,
@@ -1971,13 +2032,14 @@ mod tests {
         let mut program = SemanticProgram::new();
 
         // Generic конструктор: Новый Массив<Число>
+        // Phase 3: result_type теперь TypeResolution::generic
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::NewExpression {
                 type_name: "Массив".to_string(),
+                result_type: TypeResolution::generic("Массив", &["Число"], 1.0),
                 arg_types: vec![],
-                is_dynamic: false,
-                result_type: "Массив<Число>".to_string(),
                 generic_params: Some(vec!["Число".to_string()]),
+                is_dynamic: false,
             },
             span: Span::new(1, 0, 1, 20),
             scope_id: program.symbols.root_scope,
@@ -1989,7 +2051,8 @@ mod tests {
             ..
         } = &program.nodes[0].kind
         {
-            assert_eq!(result_type, "Массив<Число>");
+            // Phase 3: result_type теперь TypeResolution
+            assert_eq!(result_type.type_name(), "Массив<Число>");
             assert!(generic_params.is_some());
             let params = generic_params.as_ref().unwrap();
             assert_eq!(params.len(), 1);
@@ -2004,13 +2067,14 @@ mod tests {
         let mut program = SemanticProgram::new();
 
         // Добавляем NewExpression узел
+        // Phase 3: result_type и arg_types теперь TypeResolution
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::NewExpression {
                 type_name: "Массив".to_string(),
-                arg_types: vec!["Число".to_string()],
-                is_dynamic: false,
-                result_type: "Массив".to_string(),
+                result_type: TypeResolution::explicit("Массив"),
+                arg_types: vec![TypeResolution::primitive("Число")],
                 generic_params: None,
+                is_dynamic: false,
             },
             span: Span::new(1, 0, 1, 16),
             scope_id: program.symbols.root_scope,
@@ -2271,10 +2335,11 @@ mod tests {
     fn test_find_function_found() {
         let mut table = SymbolTable::new();
 
+        // Phase 3: return_type теперь Option<TypeResolution>
         let sig = FunctionSignature {
             name: "МояФункция".to_string(),
             params: vec![],
-            return_type: Some("Число".to_string()),
+            return_type: Some(TypeResolution::explicit("Число")),
             is_export: false,
         };
 
@@ -2283,7 +2348,8 @@ mod tests {
         let found = table.find_function("МояФункция");
         assert!(found.is_some());
         assert_eq!(found.unwrap().name, "МояФункция");
-        assert_eq!(found.unwrap().return_type, Some("Число".to_string()));
+        // Phase 3: сравниваем type_name()
+        assert_eq!(found.unwrap().return_type.as_ref().map(|r| r.type_name()), Some("Число".to_string()));
     }
 
     #[test]
@@ -2298,10 +2364,11 @@ mod tests {
     fn test_find_function_case_insensitive() {
         let mut table = SymbolTable::new();
 
+        // Phase 3: return_type теперь Option<TypeResolution>
         let sig = FunctionSignature {
             name: "МояФункция".to_string(),
             params: vec![],
-            return_type: Some("Число".to_string()),
+            return_type: Some(TypeResolution::explicit("Число")),
             is_export: false,
         };
 

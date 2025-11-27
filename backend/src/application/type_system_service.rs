@@ -847,21 +847,23 @@ impl TypeSystemService {
             // Извлекаем тип из узла в зависимости от его kind
             match &node.kind {
                 bsl_shared::ir::SemanticNodeKind::VariableDeclaration { type_hint, .. } => {
-                    if let Some(type_name) = type_hint {
+                    // Phase 3: type_hint теперь Option<TypeResolution>
+                    if let Some(resolution) = type_hint {
                         let resolver = self.analysis_engine.get_resolver();
-                        return Ok(Some(resolver.resolve_expression_sync(type_name)));
+                        return Ok(Some(resolver.resolve_expression_sync(&resolution.type_name())));
                     }
                 }
                 bsl_shared::ir::SemanticNodeKind::FunctionCall { object_type, .. } => {
-                    if let Some(type_name) = object_type {
+                    // Phase 3: object_type теперь Option<TypeResolution>
+                    if let Some(type_resolution) = object_type {
                         let resolver = self.analysis_engine.get_resolver();
-                        return Ok(Some(resolver.resolve_expression_sync(type_name)));
+                        return Ok(Some(resolver.resolve_expression_sync(&type_resolution.type_name())));
                     }
                 }
                 bsl_shared::ir::SemanticNodeKind::MemberAccess { object_type, .. } => {
-                    // object_type is String, not Option
+                    // Phase 3: object_type теперь TypeResolution
                     let resolver = self.analysis_engine.get_resolver();
-                    return Ok(Some(resolver.resolve_expression_sync(object_type)));
+                    return Ok(Some(resolver.resolve_expression_sync(&object_type.type_name())));
                 }
                 bsl_shared::ir::SemanticNodeKind::NewExpression { type_name, .. } => {
                     let resolver = self.analysis_engine.get_resolver();
@@ -1683,10 +1685,11 @@ impl TypeSystemService {
                 initial_value_type,
                 ..
             } => {
+                // Phase 3: type_hint и initial_value_type теперь Option<TypeResolution>
                 let type_info = type_hint
                     .as_ref()
                     .or(initial_value_type.as_ref())
-                    .map(|t| format!("*Тип:* {}", t))
+                    .map(|resolution| format!("*Тип:* {}", resolution.type_name()))
                     .unwrap_or_else(|| "*Тип:* Неопределено".to_string());
 
                 format!(
@@ -1706,14 +1709,16 @@ impl TypeSystemService {
             } => {
                 use bsl_shared::domain::types::Certainty;
 
-                let resolution = self.analysis_engine.resolve_type(value_type);
+                // Phase 3: value_type уже TypeResolution, используем напрямую
+                let resolution = value_type.clone();
                 let raw_type = self.metadata_lookup.get_raw_type(&resolution);
 
-                // ✅ ИСПРАВЛЕНИЕ: Показываем certainty в пользовательском формате (как в format_variable_hover)
+                // ИСПРАВЛЕНИЕ: Показываем certainty в пользовательском формате (как в format_variable_hover)
                 let mut output = format!("**Присваивание:** `{} = ...`\n", variable);
-                output.push_str(&format!("*Тип:* `{}`\n", value_type));
+                // Phase 3: Используем type_name() для отображения типа
+                output.push_str(&format!("*Тип:* `{}`\n", value_type.type_name()));
 
-                // ✅ ВСЕГДА показываем certainty
+                // ВСЕГДА показываем certainty
                 let certainty_text = match resolution.certainty {
                     Certainty::Known => "🟢 Known (100%)".to_string(),
                     Certainty::Inferred(val) => format!("🟡 Inferred ({:.0}%)", val * 100.0),
@@ -1752,11 +1757,12 @@ impl TypeSystemService {
                 let properties = self.metadata_lookup.get_properties(&resolution);
 
                 // Форматируем описание из RawTypeData
+                // Phase 3: Используем type_name() для отображения типа
                 let description = raw_type
                     .as_ref()
                     .map(|rt| rt.description.clone())
                     .filter(|d| !d.is_empty())
-                    .unwrap_or_else(|| format!("Тип {}", value_type));
+                    .unwrap_or_else(|| format!("Тип {}", value_type.type_name()));
 
                 output.push_str(&format!("📝 {}\n\n", description));
 
@@ -1816,20 +1822,22 @@ impl TypeSystemService {
                 body,
                 ..
             } => {
+                // Phase 3: type_hint теперь Option<TypeResolution>
                 let params_str = params
                     .iter()
                     .map(|p| {
                         format!(
                             "{}: {}",
                             p.name,
-                            p.type_hint.as_ref().unwrap_or(&"Неопределено".to_string())
+                            p.type_hint.as_ref().map(|t| t.type_name()).unwrap_or_else(|| "Неопределено".to_string())
                         )
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
+                // Phase 3: return_type теперь Option<TypeResolution>
                 let return_str = return_type
                     .as_ref()
-                    .map(|t| format!("*Возвращает:* {}", t))
+                    .map(|t| format!("*Возвращает:* {}", t.type_name()))
                     .unwrap_or_else(|| "*Возвращает:* Неопределено".to_string());
 
                 // ✅ НОВОЕ: Добавляем количество statements в теле
@@ -1854,13 +1862,14 @@ impl TypeSystemService {
             SemanticNodeKind::ProcedureDeclaration {
                 name, params, body, ..
             } => {
+                // Phase 3: type_hint теперь Option<TypeResolution>
                 let params_str = params
                     .iter()
                     .map(|p| {
                         format!(
                             "{}: {}",
                             p.name,
-                            p.type_hint.as_ref().unwrap_or(&"Неопределено".to_string())
+                            p.type_hint.as_ref().map(|t| t.type_name()).unwrap_or_else(|| "Неопределено".to_string())
                         )
                     })
                     .collect::<Vec<_>>()
@@ -1885,9 +1894,10 @@ impl TypeSystemService {
                 )
             }
             SemanticNodeKind::IfStatement { condition_type, .. } => {
+                // Phase 3: condition_type теперь TypeResolution
                 format!(
                     "**Условие:** `Если ... Тогда`\n\n*Условие:* {}\n\n📍 Позиция: {}:{}-{}:{}",
-                    condition_type,
+                    condition_type.type_name(),
                     node.span.start_line,
                     node.span.start_column,
                     node.span.end_line,
@@ -1895,9 +1905,10 @@ impl TypeSystemService {
                 )
             }
             SemanticNodeKind::WhileLoop { condition_type, .. } => {
+                // Phase 3: condition_type теперь TypeResolution
                 format!(
                     "**Цикл:** `Пока ... Цикл`\n\n*Условие:* {}\n\n📍 Позиция: {}:{}-{}:{}",
-                    condition_type,
+                    condition_type.type_name(),
                     node.span.start_line,
                     node.span.start_column,
                     node.span.end_line,

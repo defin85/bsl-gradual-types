@@ -6,6 +6,7 @@ pub mod config_metadata_parser;
 pub mod hbk_recovery;
 pub mod platform_types;
 pub mod progress;
+pub mod signature_sources;
 pub mod syntax_helper;
 pub mod syntax_helper_parser;
 
@@ -25,3 +26,5 @@ pub use platform_types::{
     create_tabular_section_type, load_all_platform_types,
     populate_signature_index_from_platform_types,
 };
+
+pub use signature_sources::{PlatformFacetTypesSource, SyntaxHelperSource};

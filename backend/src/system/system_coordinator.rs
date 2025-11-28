@@ -287,27 +287,17 @@ impl SystemCoordinator {
                 .load_types(platform_raw_data)
                 .map_err(StartupError::PlatformTypesError)?;
 
-            // Заполняем SignatureIndex
-            repository.populate_signature_index(|index| {
-                // Сначала инициализируем встроенные конструкторы
-                index.initialize_builtin_constructors();
+            // Заполняем SignatureIndex через Registry паттерн
+            // Это гарантирует что все источники типов (SyntaxHelper + PlatformFacetTypes)
+            // всегда применяются в правильном порядке и невозможно забыть какой-либо источник
+            use bsl_shared::domain::SignatureSourceRegistry;
+            use crate::data::loaders::{SyntaxHelperSource, PlatformFacetTypesSource};
 
-                // Затем заполняем методами из загруженных типов (syntax_helper)
-                crate::data::loaders::populate_signature_index_from_platform_types(
-                    &platform_types_clone,
-                    index,
-                );
-
-                // MILESTONE 3.11 Phase 2: Добавляем методы базовых фасетных типов
-                // (СправочникМенеджер, СправочникОбъект, ДокументМенеджер и т.д.)
-                // Эти типы определены в platform_types.rs и содержат методы типа
-                // СоздатьЭлемент(), НайтиПоКоду(), Записать() и т.д.
-                let facet_types = crate::data::loaders::load_all_platform_types();
-                crate::data::loaders::populate_signature_index_from_platform_types(
-                    &facet_types,
-                    index,
-                );
-            });
+            let index = SignatureSourceRegistry::new()
+                .register(SyntaxHelperSource::new(platform_types_clone))
+                .register(PlatformFacetTypesSource)
+                .build();
+            repository.set_signature_index(index);
 
             let stats = repository.get_stats();
             info!(
@@ -444,17 +434,17 @@ impl SystemCoordinator {
             .load_types(platform_types)
             .map_err(StartupError::PlatformTypesError)?;
 
-        // Заполняем SignatureIndex
-        repository.populate_signature_index(|index| {
-            // Сначала инициализируем встроенные конструкторы
-            index.initialize_builtin_constructors();
+        // Заполняем SignatureIndex через Registry паттерн
+        // ВАЖНО: PlatformFacetTypesSource гарантирует что фасетные типы всегда добавлены!
+        // Раньше в fallback пути забывали добавлять PlatformFacetTypes - Registry исключает эту ошибку
+        use bsl_shared::domain::SignatureSourceRegistry;
+        use crate::data::loaders::{SyntaxHelperSource, PlatformFacetTypesSource};
 
-            // Затем заполняем методами из загруженных типов
-            crate::data::loaders::populate_signature_index_from_platform_types(
-                &platform_types_clone,
-                index,
-            );
-        });
+        let index = SignatureSourceRegistry::new()
+            .register(SyntaxHelperSource::new(platform_types_clone.clone()))
+            .register(PlatformFacetTypesSource)
+            .build();
+        repository.set_signature_index(index);
 
         info!(
             "✅ Базовые типы загружены: {} типов",

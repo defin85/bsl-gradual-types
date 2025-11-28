@@ -31,19 +31,46 @@ AI-ассистент инструкции для BSL Gradual Type System про
    ```bash
    # Проверить что сервер работает
    curl -s http://localhost:3002/api/health
-
-   # Тестировать hover (через файл для кириллицы)
-   echo '{"code":"ТЗ = Новый ТаблицаЗначений;","line":1,"column":10}' > test.json
-   curl -s -X POST http://localhost:3002/api/hover/enhanced \
-     -H "Content-Type: application/json; charset=utf-8" -d @test.json
-
-   # Тестировать diagnostics
-   echo '{"code":"x = Документы.ЗаказКлиента;"}' > test_diag.json
-   curl -s -X POST http://localhost:3002/api/diagnostics \
-     -H "Content-Type: application/json; charset=utf-8" -d @test_diag.json
    ```
 
-**Примечание:** Для кириллицы в JSON используй файлы (`-d @file.json`), а не inline строки.
+### ⚠️ Шаблон для кириллицы (ОБЯЗАТЕЛЬНО)
+
+**ВАЖНО:** На Windows/GitBash используй `codecs` + локальный файл `test_api.json`:
+
+```bash
+# 1. Тест BSL файла
+cd /c/1CProject/bsl-gradual-types && python -c "
+import json, codecs
+with codecs.open('examples/bsl/ФАЙЛ.bsl', 'r', 'utf-8-sig') as f:
+    code = f.read()
+with codecs.open('test_api.json', 'w', 'utf-8') as f:
+    json.dump({'code': code}, f, ensure_ascii=False)
+" && curl -s -X POST http://localhost:3002/api/diagnostics -H "Content-Type: application/json" -d @test_api.json
+
+# 2. Тест inline кода
+cd /c/1CProject/bsl-gradual-types && python -c "
+import json, codecs
+code = '''Процедура Тест()
+    ТЗ = Новый ТаблицаЗначений;
+    ТЗ.Добавить();
+КонецПроцедуры'''
+with codecs.open('test_api.json', 'w', 'utf-8') as f:
+    json.dump({'code': code}, f, ensure_ascii=False)
+" && curl -s -X POST http://localhost:3002/api/diagnostics -H "Content-Type: application/json" -d @test_api.json
+
+# 3. Hover
+cd /c/1CProject/bsl-gradual-types && python -c "
+import json, codecs
+with codecs.open('test_api.json', 'w', 'utf-8') as f:
+    json.dump({'code': 'ТЗ = Новый ТаблицаЗначений;', 'line': 1, 'column': 10}, f, ensure_ascii=False)
+" && curl -s -X POST http://localhost:3002/api/hover/enhanced -H "Content-Type: application/json" -d @test_api.json
+```
+
+**Ключевые моменты:**
+- Используй `codecs.open(..., 'utf-8-sig')` для чтения (убирает BOM)
+- Используй `codecs.open(..., 'utf-8')` для записи
+- Файл `test_api.json` в корне проекта (НЕ в /tmp — разные файловые системы)
+- `ensure_ascii=False` обязательно
 
 **Доступные endpoints:**
 - `GET  /api/health` - проверка работоспособности

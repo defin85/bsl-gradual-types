@@ -11,6 +11,7 @@ pub mod null_safety; // Null safety analysis via CFG (Milestone 2.3)
 pub mod repository;
 pub mod resolver;
 pub mod signature_index; // Function signature validation system (Milestone 2.20)
+pub mod signature_registry; // Registry pattern for SignatureIndex data sources
 pub mod runtime_context; // Runtime execution context tracking (Milestone 3.11 Phase 2)
 pub mod type_definition_location; // Go To Definition location types (Milestone 3.14)
 pub mod types;
@@ -43,4 +44,5 @@ pub use metadata_constants::{
     FACETED_TYPES, METADATA_COLLECTIONS,
 };
 pub use metadata_patterns::{ExtractedPattern, MetadataPatternRegistry};
+pub use signature_registry::{SignatureDataSource, SignatureSourceRegistry};
 pub use type_definition_location::{ModulePaths, TypeDefinitionLocation};

@@ -199,8 +199,32 @@ impl InMemoryTypeRepository {
     where
         F: FnOnce(&mut SignatureIndex),
     {
-        let mut index = self.signature_index.write().unwrap();
+        let mut index = self.signature_index.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("SignatureIndex RwLock poisoned in populate_signature_index, recovering");
+            poisoned.into_inner()
+        });
         populate_fn(&mut index);
+    }
+
+    /// Установить SignatureIndex напрямую (для Registry паттерна)
+    ///
+    /// Заменяет текущий индекс на предоставленный.
+    /// Используется с SignatureSourceRegistry для декларативной настройки.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let index = SignatureSourceRegistry::new()
+    ///     .register(SyntaxHelperSource::new(types))
+    ///     .register(PlatformFacetTypesSource)
+    ///     .build();
+    /// repository.set_signature_index(index);
+    /// ```
+    pub fn set_signature_index(&self, index: SignatureIndex) {
+        let mut sig_index = self.signature_index.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("SignatureIndex RwLock poisoned in set_signature_index, recovering");
+            poisoned.into_inner()
+        });
+        *sig_index = index;
     }
 }
 

@@ -162,28 +162,29 @@ pub async fn get_hover(
 
 /// Enhanced diagnostics endpoint - separates syntax and semantic errors
 /// Milestone 2.18: Comprehensive diagnostics
+/// UPDATED Phase 5: Now uses validate_semantics for full semantic validation
 pub async fn get_diagnostics(
     State(state): State<AppState>,
     Json(payload): Json<bsl_shared::api::ValidateCodeRequest>,
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    // For now, use validation errors as semantic errors
+    // Use full semantic validation (Phase 5: Unknown type, method/property existence)
     match state
         .type_service
-        .validate_code_fragment(&payload.code)
+        .validate_semantics(&payload.code, None)
         .await
     {
-        Ok(errors) => {
-            let semantic_errors: Vec<SemanticErrorDto> = errors
+        Ok(diagnostics) => {
+            let semantic_errors: Vec<SemanticErrorDto> = diagnostics
                 .iter()
-                .map(|e| SemanticErrorDto {
-                    message: e.message.clone(),
-                    line: e.line,
-                    column: e.column,
-                    end_line: e.end_line,
-                    end_column: e.end_column,
-                    severity: e.severity.clone(),
+                .map(|d| SemanticErrorDto {
+                    message: d.message.clone(),
+                    line: d.line,
+                    column: d.column,
+                    end_line: d.end_line,
+                    end_column: d.end_column,
+                    severity: format!("{:?}", d.severity).to_lowercase(),
                 })
                 .collect();
 

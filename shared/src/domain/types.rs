@@ -659,7 +659,13 @@ impl TypeResolution {
                 ConcreteType::Primitive(pt) => pt.display_name().to_string(),
                 ConcreteType::Platform(platform) => platform.name.clone(),
                 ConcreteType::Configuration(cfg) => {
-                    format!("{}.{}", cfg.kind.to_prefix(), cfg.name)
+                    // Используем active_facet или facet из cfg для формирования правильного имени
+                    // Это нужно для поиска методов в signature_index
+                    if let Some(facet) = self.active_facet.as_ref().or(cfg.facet.as_ref()) {
+                        format!("{}.{}", cfg.kind.faceted_type_prefix(facet), cfg.name)
+                    } else {
+                        format!("{}.{}", cfg.kind.to_prefix(), cfg.name)
+                    }
                 }
                 ConcreteType::Special(special) => special.display_name().to_string(),
                 ConcreteType::GlobalFunction(func) => func.name.clone(),

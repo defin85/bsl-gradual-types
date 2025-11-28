@@ -1553,20 +1553,30 @@ impl TypeSystemService {
                             }
                         }
                     }
-                    Statement::FunctionDecl { name, params, .. } if name == &word_under_cursor => {
+                    Statement::FunctionDecl { name, params, compiler_directive, .. } if name == &word_under_cursor => {
+                        let directive_str = match compiler_directive {
+                            Some(d) => format!("\n\n*Директива:* {:?}", d),
+                            None => String::new(),
+                        };
                         return Some(format!(
-                            "**Функция:** `{}({})`\n\n*Параметры:* {}",
+                            "**Функция:** `{}({})`\n\n*Параметры:* {}{}",
                             name,
                             params.join(", "),
-                            params.len()
+                            params.len(),
+                            directive_str
                         ));
                     }
-                    Statement::ProcedureDecl { name, params, .. } if name == &word_under_cursor => {
+                    Statement::ProcedureDecl { name, params, compiler_directive, .. } if name == &word_under_cursor => {
+                        let directive_str = match compiler_directive {
+                            Some(d) => format!("\n\n*Директива:* {:?}", d),
+                            None => String::new(),
+                        };
                         return Some(format!(
-                            "**Процедура:** `{}({})`\n\n*Параметры:* {}",
+                            "**Процедура:** `{}({})`\n\n*Параметры:* {}{}",
                             name,
                             params.join(", "),
-                            params.len()
+                            params.len(),
+                            directive_str
                         ));
                     }
                     _ => {}
@@ -2648,33 +2658,37 @@ impl TypeSystemService {
         // 4. Получаем клон SignatureIndex ДО того как repository будет moved (Milestone 3.10)
         let signature_index = repository.get_signature_index_clone();
 
-        // 5. Конвертация AST → IR (repository будет moved здесь)
-        let ir = AstToIrConverter::convert(
+        // 5. Получение resolver для Milestone 3.17 (TypeResolver DI)
+        // ВАЖНО: resolver нужен ДО конвертации для корректного active_facet
+        let resolver_arc = self.analysis_engine.get_resolver();
+
+        // 6. Конвертация AST → IR с TypeResolver для active_facet resolution (Milestone 3.17)
+        let ir = AstToIrConverter::convert_with_resolver(
             parse_result.program,
             code.to_string(),
             "<semantic_validation>".to_string(),
             repository,
             signature_index.clone(), // ✅ Milestone 3.9: Передаём SignatureIndex для return type inference
+            Some(resolver_arc.clone()), // ✅ Milestone 3.17: Передаём TypeResolver для active_facet
         )?;
 
-        // 6. Создание TypeValidator
+        // 7. Создание TypeValidator
         let validator = TypeValidator::new(&self.metadata_lookup);
 
-        // 7. Получение resolver для Milestone 3.10
-        let resolver_arc = self.analysis_engine.get_resolver();
+        // 8. Получаем ссылку на resolver для visitor
         let resolver = resolver_arc.as_ref();
 
-        // 8. Создание SemanticValidationVisitor с настраиваемым detail_level (Milestone 3.6 Phase 3)
+        // 9. Создание SemanticValidationVisitor с настраиваемым detail_level (Milestone 3.6 Phase 3)
         let mut visitor = if let Some(level) = detail_level {
             SemanticValidationVisitor::with_detail_level(&validator, &ir, resolver, &signature_index, level)
         } else {
             SemanticValidationVisitor::new(&validator, &ir, resolver, &signature_index)
         };
 
-        // 9. Обход IR
+        // 10. Обход IR
         walk_program(&ir, &mut visitor);
 
-        // 9. Возврат errors
+        // 11. Возврат errors
         Ok(visitor.into_errors())
     }
 

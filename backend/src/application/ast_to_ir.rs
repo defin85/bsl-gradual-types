@@ -150,7 +150,7 @@ impl AstToIrConverter {
     /// - FunctionSignature.return_type = None (будет выведен из return statements)
     fn collect_global_symbols(&mut self, statement: &Statement) -> Result<()> {
         match statement {
-            Statement::FunctionDecl { name, params, .. } => {
+            Statement::FunctionDecl { name, params, compiler_directive: _, .. } => {
                 // Phase 3: Parameter.type_hint теперь Option<TypeResolution>
                 let params_vec: Vec<Parameter> = params
                     .iter()
@@ -170,7 +170,7 @@ impl AstToIrConverter {
                     is_export: false,
                 });
             }
-            Statement::ProcedureDecl { name, params, .. } => {
+            Statement::ProcedureDecl { name, params, compiler_directive: _, .. } => {
                 // Phase 3: Parameter.type_hint теперь Option<TypeResolution>
                 let params_vec: Vec<Parameter> = params
                     .iter()
@@ -639,7 +639,7 @@ impl AstToIrConverter {
                             object_name, // ✅ Имя переменной
                             object_type, // ✅ Phase 3: TypeResolution
                             member_name: property,
-                            is_method: true,
+                            is_method: false, // ✅ PropertyAccess = свойство, не метод
                         },
                         span,
                         scope_id: self.current_scope,
@@ -677,6 +677,7 @@ impl AstToIrConverter {
                 name,
                 params,
                 body,
+                compiler_directive,
                 span: ast_span,
             } => {
                 let span = self.ast_span_to_ir_span(ast_span);
@@ -707,6 +708,7 @@ impl AstToIrConverter {
                 self.current_scope = old_scope;
 
                 // Phase 3: return_type теперь Option<TypeResolution>
+                // Context-Aware: передаём директиву компилятора для валидации
                 let node = SemanticNode {
                     kind: SemanticNodeKind::FunctionDeclaration {
                         name,
@@ -714,6 +716,7 @@ impl AstToIrConverter {
                         return_type: None, // Phase 3: TypeResolution, будет выведен из return
                         body_scope,
                         body: body_indices,
+                        compiler_directive, // Context-Aware валидация
                     },
                     span,
                     scope_id: self.current_scope,
@@ -727,6 +730,7 @@ impl AstToIrConverter {
                 name,
                 params,
                 body,
+                compiler_directive,
                 span: ast_span,
             } => {
                 let span = self.ast_span_to_ir_span(ast_span);
@@ -756,12 +760,14 @@ impl AstToIrConverter {
 
                 self.current_scope = old_scope;
 
+                // Context-Aware: передаём директиву компилятора для валидации
                 let node = SemanticNode {
                     kind: SemanticNodeKind::ProcedureDeclaration {
                         name,
                         params: params_vec,
                         body_scope,
                         body: body_indices,
+                        compiler_directive, // Context-Aware валидация
                     },
                     span,
                     scope_id: self.current_scope,
@@ -948,16 +954,25 @@ impl AstToIrConverter {
                             &object_type
                         };
 
+                        // ИСПРАВЛЕНИЕ: Для фасетных типов нужно использовать базовый тип
+                        // "СправочникМенеджер.Контрагенты" → "СправочникМенеджер" (поиск)
+                        // Но сохранить исходный тип для подстановки имени объекта
+                        let search_type = if let Some(base_type) = SignatureIndex::extract_base_facet_type(clean_type) {
+                            base_type
+                        } else {
+                            clean_type
+                        };
+
                         // Поиск метода в SignatureIndex (платформенные методы)
                         // MILESTONE 3.11 Phase 2: Facet switching с подстановкой имени объекта
-                        if let Some(method) = self.signature_index.find_method(clean_type, property) {
+                        if let Some(method) = self.signature_index.find_method(search_type, property) {
                             // Получаем return_type метода
                             if let Some(return_type) = &method.return_type {
                                 // Извлекаем имя объекта из исходного типа
                                 // "СправочникМенеджер.Контрагенты" → "Контрагенты"
                                 if let Some(metadata_name) = SignatureIndex::extract_metadata_name(&object_type) {
                                     // Подставляем имя в return_type
-                                    // "СправочникОбъект" + "Контрагенты" → "СправочникОбъект.Контрагенты"
+                                    // "СправочникСсылка" + "Контрагенты" → "СправочникСсылка.Контрагенты"
                                     return SignatureIndex::substitute_type_name(return_type, metadata_name);
                                 }
 
@@ -967,7 +982,6 @@ impl AstToIrConverter {
 
                             return "Неопределено".to_string();
                         }
-
                         "Dynamic".to_string()
                     },
 
@@ -1405,6 +1419,7 @@ mod tests {
                         type_hint: Some("Число".to_string()),
                         span: AstSpan::stub(),
                     }],
+                    compiler_directive: None,
                     span: AstSpan::stub(),
                 },
             ],
@@ -1452,6 +1467,7 @@ mod tests {
                         span: AstSpan::stub(),
                     },
                 ],
+                compiler_directive: None,
                 span: AstSpan::stub(),
             }],
         };

@@ -828,17 +828,26 @@ pub fn create_catalog_manager_type() -> RawTypeData {
                 context_requirements: None,
                 return_facet: None,
             },
-            // НайтиПоКоду(Код: Строка) → Reference, ServerOnly
+            // НайтиПоКоду(Код: Число | Строка, ПоискПоПолномуКоду?: Булево) → Reference, ServerOnly
             RawMethodData {
                 name: "НайтиПоКоду".to_string(),
                 english_name: "FindByCode".to_string(),
                 return_type: "СправочникСсылка".to_string(),
-                params: vec![RawParamData {
-                    name: "Код".to_string(),
-                    param_type: "Строка".to_string(),
-                    is_optional: false,
-                    default_value: None,
-                }],
+                params: vec![
+                    RawParamData {
+                        name: "Код".to_string(),
+                        param_type: "Число | Строка".to_string(),  // Union тип
+                        is_optional: false,
+                        default_value: None,
+                    },
+                    RawParamData {
+                        name: "ПоискПоПолномуКоду".to_string(),
+                        param_type: "Булево".to_string(),
+                        is_optional: true,
+                        default_value: None,
+                    },
+                    // Родитель и Владелец опустим для простоты (placeholder типы)
+                ],
                 description: Some("Ищет элемент справочника по коду".to_string()),
                 is_deprecated: false,
                 is_constructor: false,

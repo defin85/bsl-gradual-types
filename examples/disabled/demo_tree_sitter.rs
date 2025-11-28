@@ -62,19 +62,25 @@ fn main() -> anyhow::Result<()> {
                         name,
                         params,
                         body,
-                        export,
+                        compiler_directive,
+                        ..
                     } => {
                         println!("{}. Процедура '{}'", i + 1, name);
                         println!("   - Параметров: {}", params.len());
                         println!("   - Операторов в теле: {}", body.len());
-                        println!("   - Экспортная: {}", if *export { "Да" } else { "Нет" });
+                        if let Some(dir) = compiler_directive {
+                            println!("   - Директива: {:?}", dir);
+                        }
                     }
                     Statement::FunctionDecl {
-                        name, params, body, ..
+                        name, params, body, compiler_directive, ..
                     } => {
                         println!("{}. Функция '{}'", i + 1, name);
                         println!("   - Параметров: {}", params.len());
                         println!("   - Операторов в теле: {}", body.len());
+                        if let Some(dir) = compiler_directive {
+                            println!("   - Директива: {:?}", dir);
+                        }
                     }
                     _ => {
                         println!("{}. Другой оператор", i + 1);

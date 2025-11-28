@@ -104,6 +104,11 @@ pub enum SemanticNodeKind {
     /// `return_type` теперь содержит полную информацию о возвращаемом типе:
     /// - Explicit если явно указан в коде
     /// - Inferred если выведен из return statements
+    ///
+    /// # Context-Aware Validation
+    ///
+    /// `compiler_directive` содержит директиву компилятора из исходного кода
+    /// для context-aware валидации (например, &НаСервере, &НаКлиенте).
     FunctionDeclaration {
         name: String,
         params: Vec<Parameter>,
@@ -111,14 +116,23 @@ pub enum SemanticNodeKind {
         return_type: Option<TypeResolution>,
         body_scope: ScopeId,
         body: Vec<usize>, // индексы узлов тела функции
+        /// Директива компилятора для context-aware валидации
+        compiler_directive: Option<crate::domain::CompilerDirective>,
     },
 
     /// Объявление процедуры
+    ///
+    /// # Context-Aware Validation
+    ///
+    /// `compiler_directive` содержит директиву компилятора из исходного кода
+    /// для context-aware валидации (например, &НаСервере, &НаКлиенте).
     ProcedureDeclaration {
         name: String,
         params: Vec<Parameter>,
         body_scope: ScopeId,
         body: Vec<usize>, // ✅ НОВОЕ: индексы узлов тела процедуры
+        /// Директива компилятора для context-aware валидации
+        compiler_directive: Option<crate::domain::CompilerDirective>,
     },
 
     // === Control Flow (КРИТИЧНО для Milestone 2.3 flow-sensitive) ===

@@ -17,6 +17,7 @@ pub mod ast {
     //!    └─── Single Source of Truth для типов ошибок
     //! ```
 
+    pub use bsl_shared::domain::code_location::CompilerDirective;
     pub use bsl_shared::domain::types::{ErrorType, ParseError};
     pub use bsl_shared::ir::Span;
 
@@ -71,12 +72,14 @@ pub mod ast {
             name: String,
             params: Vec<String>,
             body: Vec<Statement>,
+            compiler_directive: Option<CompilerDirective>,
             span: Span,
         },
         ProcedureDecl {
             name: String,
             params: Vec<String>,
             body: Vec<Statement>,
+            compiler_directive: Option<CompilerDirective>,
             span: Span,
         },
         If {

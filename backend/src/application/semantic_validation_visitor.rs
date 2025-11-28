@@ -291,6 +291,37 @@ impl<'a> SemanticValidationVisitor<'a> {
 impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
     fn visit_node(&mut self, node: &SemanticNode, _context: &mut FlowContext) {
         match &node.kind {
+            // Context-Aware валидация: обновляем директиву при входе в функцию/процедуру
+            SemanticNodeKind::FunctionDeclaration { compiler_directive, name, .. } => {
+                // Обновляем runtime контекст на основе директивы из AST
+                tracing::debug!(
+                    "FunctionDeclaration '{}': compiler_directive = {:?}",
+                    name, compiler_directive
+                );
+                if let Some(directive) = compiler_directive {
+                    self.current_execution_context.current_directive = *directive;
+                    self.current_execution_context.in_function = Some(name.clone());
+                } else {
+                    // Нет директивы = Unknown контекст
+                    self.current_execution_context.current_directive = bsl_shared::domain::CompilerDirective::Unknown;
+                    self.current_execution_context.in_function = Some(name.clone());
+                }
+            }
+            SemanticNodeKind::ProcedureDeclaration { compiler_directive, name, .. } => {
+                // Обновляем runtime контекст на основе директивы из AST
+                tracing::debug!(
+                    "ProcedureDeclaration '{}': compiler_directive = {:?}",
+                    name, compiler_directive
+                );
+                if let Some(directive) = compiler_directive {
+                    self.current_execution_context.current_directive = *directive;
+                    self.current_execution_context.in_function = Some(name.clone());
+                } else {
+                    // Нет директивы = Unknown контекст
+                    self.current_execution_context.current_directive = bsl_shared::domain::CompilerDirective::Unknown;
+                    self.current_execution_context.in_function = Some(name.clone());
+                }
+            }
             SemanticNodeKind::FunctionCall {
                 function_name,
                 object_name,
@@ -344,6 +375,7 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 let arg_types_str: Vec<String> = arg_types.iter()
                     .map(|tr| tr.type_name())
                     .collect();
+
                 let validation_result = self.resolver.validate_call_v2(
                     Some(&obj_type.type_name()),
                     function_name,

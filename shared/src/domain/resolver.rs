@@ -1535,8 +1535,22 @@ impl TypeResolver {
             // Если expected_type = None (Произвольный), то любой тип подходит
         }
 
-        // 4. Вернуть тип возврата
-        ValidationResultV2::Ok(signature.return_type.clone())
+        // 4. Вернуть тип возврата с подстановкой имени объекта для фасетных типов
+        let return_type = if let Some(ref rt) = signature.return_type {
+            // Извлекаем имя объекта из type_name (СправочникМенеджер.Контрагенты → Контрагенты)
+            if let Some(type_name) = type_name {
+                if let Some(metadata_name) = SignatureIndex::extract_metadata_name(type_name) {
+                    Some(SignatureIndex::substitute_type_name(rt, metadata_name))
+                } else {
+                    Some(rt.clone())
+                }
+            } else {
+                Some(rt.clone())
+            }
+        } else {
+            None
+        };
+        ValidationResultV2::Ok(return_type)
     }
 }
 // Milestone 2.20: Function Signature Validation tests

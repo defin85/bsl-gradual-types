@@ -1105,15 +1105,115 @@ impl TreeSitterAdapter {
             "property_access" => Self::convert_property_access(node, source),
 
             "access" => {
-                // access может быть частью property_access или index_access
-                // Рекурсивно обрабатываем дочерние узлы
+                // ✅ MILESTONE 5.3 FIX: Правильная обработка access узлов для цепочек вызовов
+                //
+                // access может содержать:
+                // 1. Простой property access: access { access { identifier }, ".", property }
+                // 2. Method call: access { access { ... }, ".", method_call { ... } }
+                // 3. Вложенные chains: access { access { access {...}, ".", method_call }, ".", property }
+                //
+                // Нужно собрать структуру: объект + (property ИЛИ method_call)
+                let span = Self::node_to_span(node, source);
                 let mut cursor = node.walk();
+                let mut object = None;
+                let mut property_name = None;
+                let mut method_call_node = None;
+
                 for child in node.children(&mut cursor) {
-                    if let Some(expr) = Self::convert_expression(&child, source)? {
-                        return Ok(Some(expr));
+                    match child.kind() {
+                        "access" => {
+                            // Внутренний access - рекурсивно конвертируем как объект
+                            object = Self::convert_expression(&child, source)?;
+                        }
+                        "identifier" => {
+                            // Простой идентификатор (leaf node)
+                            if object.is_none() {
+                                object = Some(Expression::Identifier {
+                                    name: Self::node_text(&child, source),
+                                    span: Self::node_to_span(&child, source),
+                                });
+                            }
+                        }
+                        "property" => {
+                            // Свойство после точки
+                            property_name = Some(Self::node_text(&child, source));
+                        }
+                        "method_call" => {
+                            // Вызов метода после точки
+                            method_call_node = Some(child);
+                        }
+                        "." => {} // Игнорируем точку
+                        _ => {
+                            debug!("access: skipping child {}", child.kind());
+                        }
                     }
                 }
-                Ok(None)
+
+                // Строим результат в зависимости от структуры
+                match (method_call_node, object, property_name) {
+                    // Случай 1: access содержит method_call → это Call expression
+                    (Some(method), Some(obj), _) => {
+                        // Извлекаем имя метода и аргументы
+                        let mut method_cursor = method.walk();
+                        let mut method_name = String::new();
+                        let mut method_args = Vec::new();
+                        let mut method_identifier_span = span;
+
+                        for child in method.children(&mut method_cursor) {
+                            match child.kind() {
+                                "identifier" => {
+                                    method_name = Self::node_text(&child, source);
+                                    method_identifier_span = Self::node_to_span(&child, source);
+                                }
+                                "arguments" => {
+                                    let mut args_cursor = child.walk();
+                                    for arg_child in child.children(&mut args_cursor) {
+                                        if arg_child.kind() == "expression" {
+                                            if let Some(expr) = Self::convert_expression(&arg_child, source)? {
+                                                method_args.push(expr);
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        // Создаём PropertyAccess + Call
+                        let property_access = Expression::PropertyAccess {
+                            object: Box::new(obj),
+                            property: method_name,
+                            span: method_identifier_span,
+                        };
+
+                        Ok(Some(Expression::Call {
+                            function: Box::new(property_access),
+                            args: method_args,
+                            span,
+                        }))
+                    }
+                    // Случай 2: access содержит property → это PropertyAccess
+                    (None, Some(obj), Some(prop)) => {
+                        Ok(Some(Expression::PropertyAccess {
+                            object: Box::new(obj),
+                            property: prop,
+                            span,
+                        }))
+                    }
+                    // Случай 3: только объект (leaf node)
+                    (None, Some(obj), None) => {
+                        Ok(Some(obj))
+                    }
+                    // method_call без объекта - ошибка
+                    (Some(_), None, _) => {
+                        Err("access with method_call but no object".to_string())
+                    }
+                    // Ничего не распознано
+                    (None, None, _) => {
+                        debug!("access: couldn't parse structure, returning None");
+                        Ok(None)
+                    }
+                }
             }
 
             "index" => Self::convert_index_access(node, source),

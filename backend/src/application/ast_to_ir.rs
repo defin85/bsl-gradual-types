@@ -270,7 +270,7 @@ impl AstToIrConverter {
                                     object_name,
                                     object_type,
                                     member_name: property.clone(),
-                                    is_method: false,
+                                    access_kind: MemberAccessKind::Property,
                                 },
                                 span,
                                 scope_id: self.current_scope,
@@ -636,10 +636,10 @@ impl AstToIrConverter {
 
                     let node = SemanticNode {
                         kind: SemanticNodeKind::MemberAccess {
-                            object_name, // ✅ Имя переменной
-                            object_type, // ✅ Phase 3: TypeResolution
+                            object_name, // Имя переменной
+                            object_type, // Phase 3: TypeResolution
                             member_name: property,
-                            is_method: false, // ✅ PropertyAccess = свойство, не метод
+                            access_kind: MemberAccessKind::Property, // PropertyAccess = свойство
                         },
                         span,
                         scope_id: self.current_scope,

@@ -63,6 +63,37 @@ pub struct SemanticNode {
     pub scope_id: ScopeId,
 }
 
+/// Тип доступа к члену объекта
+///
+/// Расширяемый enum для представления различных видов обращения к членам объекта.
+/// Поддерживает вызовы методов, доступ к свойствам и индексированный доступ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MemberAccessKind {
+    /// Вызов метода: `obj.Method()`
+    Method,
+    /// Доступ к свойству: `obj.Property`
+    Property,
+    /// Индексированный доступ: `obj[index]` (для будущего расширения)
+    Indexer,
+}
+
+impl MemberAccessKind {
+    /// Проверяет, является ли это вызовом метода
+    pub fn is_method(&self) -> bool {
+        matches!(self, MemberAccessKind::Method)
+    }
+
+    /// Проверяет, является ли это доступом к свойству
+    pub fn is_property(&self) -> bool {
+        matches!(self, MemberAccessKind::Property)
+    }
+
+    /// Проверяет, является ли это индексированным доступом
+    pub fn is_indexer(&self) -> bool {
+        matches!(self, MemberAccessKind::Indexer)
+    }
+}
+
 /// Виды семантических узлов
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SemanticNodeKind {
@@ -195,22 +226,24 @@ pub enum SemanticNodeKind {
     ///   - None для сложных выражений (PropertyAccess, Call, New, etc.)
     /// - `object_type`: **Тип объекта** (результат type inference, например, "Массив")
     /// - `member_name`: Имя свойства или метода (например, "Добавить")
-    /// - `is_method`: true если это вызов метода, false если доступ к свойству
+    /// - `access_kind`: Тип доступа (Method, Property, Indexer)
     ///
     /// # Примеры
     ///
     /// ```bsl
     /// МассивДанных = Новый Массив();
-    /// МассивДанных.Добавить("текст");  // object_name=Some("МассивДанных"), object_type="Массив"
+    /// МассивДанных.Добавить("текст");  // object_name=Some("МассивДанных"), access_kind=Method
     ///
-    /// obj.prop1.prop2.Метод();  // object_name=None, object_type="<inferred_type>"
+    /// obj.prop1.prop2.Метод();  // object_name=None, access_kind=Method
+    /// obj.Свойство;             // access_kind=Property
     /// ```
     MemberAccess {
-        object_name: Option<String>, // ✅ ИСПРАВЛЕНО: Option вместо String
+        object_name: Option<String>,
         /// Phase 3: TypeResolution для типа объекта (результат inference)
         object_type: TypeResolution,
         member_name: String,
-        is_method: bool, // true = метод, false = свойство
+        /// Тип доступа к члену: метод, свойство или индексатор
+        access_kind: MemberAccessKind,
     },
 
     /// Вызов функции или метода: `Функция()` или `объект.Метод(args)`
@@ -1363,7 +1396,7 @@ impl SemanticProgram {
                 object_name,
                 object_type,
                 member_name,
-                is_method,
+                access_kind,
             } => {
                 // object_name теперь Option<String>
                 if let Some(name) = object_name {
@@ -1372,7 +1405,7 @@ impl SemanticProgram {
                 // Phase 3: object_type теперь TypeResolution
                 attributes.insert("object_type".to_string(), object_type.type_name());
                 attributes.insert("member_name".to_string(), member_name.clone());
-                attributes.insert("is_method".to_string(), is_method.to_string());
+                attributes.insert("access_kind".to_string(), format!("{:?}", access_kind));
 
                 let description = object_name
                     .as_ref()

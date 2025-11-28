@@ -313,12 +313,47 @@ impl SignatureIndex {
         }
     }
 
-    /// Добавить платформенный метод
+    /// Добавить платформенный метод с поддержкой merge
+    ///
+    /// Если метод с таким именем уже существует, обновляет его поля если:
+    /// - return_type у существующего None, а у нового Some
+    /// - return_facet у существующего None, а у нового Some
+    /// - context_requirements у существующего Universal, а у нового более специфичные
+    ///
+    /// Это позволяет "обогащать" методы из syntax_helper (без return types)
+    /// данными из platform_types.rs (с return types).
     pub fn add_platform_method(&mut self, type_name: String, method: MethodSignature) {
-        self.platform_methods
-            .entry(type_name)
-            .or_default()
-            .push(method);
+        let methods = self.platform_methods.entry(type_name).or_default();
+
+        // Ищем существующий метод с таким же именем (регистронезависимо)
+        let method_name_lower = method.name.to_lowercase();
+        if let Some(existing) = methods.iter_mut().find(|m| m.name.to_lowercase() == method_name_lower) {
+            // Обновляем return_type если у существующего None/пустой
+            if existing.return_type.as_ref().map_or(true, |s| s.is_empty()) {
+                if method.return_type.is_some() {
+                    existing.return_type = method.return_type;
+                }
+            }
+
+            // Обновляем return_facet если у существующего None
+            if existing.return_facet.is_none() && method.return_facet.is_some() {
+                existing.return_facet = method.return_facet;
+            }
+
+            // Обновляем context_requirements если у существующего Universal
+            if existing.context_requirements == ContextRequirements::Universal
+               && method.context_requirements != ContextRequirements::Universal {
+                existing.context_requirements = method.context_requirements;
+            }
+
+            // Обновляем params если у существующего пусто
+            if existing.params.is_empty() && !method.params.is_empty() {
+                existing.params = method.params;
+            }
+        } else {
+            // Метод не найден - добавляем новый
+            methods.push(method);
+        }
     }
 
     /// Добавить конфигурационный метод
@@ -1603,5 +1638,124 @@ mod tests {
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].0, "Параметр");
         // TypeResolution.unknown() возвращается для параметров без типа
+    }
+
+    // ================= MERGE LOGIC TESTS =================
+
+    /// Тест: При добавлении метода с return_type обновляется существующий метод без return_type
+    #[test]
+    fn test_add_platform_method_merges_return_type() {
+        let mut index = SignatureIndex::new();
+
+        // Добавляем метод БЕЗ return_type (как из syntax_helper)
+        let sig_no_return = MethodSignature::new(
+            "НайтиПоКоду".to_string(),
+            Some("СправочникМенеджер".to_string()),
+            vec![],
+            None, // Нет return type
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+        index.add_platform_method("СправочникМенеджер".to_string(), sig_no_return);
+
+        // Добавляем метод С return_type (как из platform_types.rs)
+        let sig_with_return = MethodSignature::new(
+            "НайтиПоКоду".to_string(),
+            Some("СправочникМенеджер".to_string()),
+            vec![],
+            Some("СправочникСсылка".to_string()), // Есть return type
+            SignatureSource::Platform,
+            Some(FacetKind::Reference),
+            ContextRequirements::ServerOnly,
+        );
+        index.add_platform_method("СправочникМенеджер".to_string(), sig_with_return);
+
+        // Проверяем что метод обновился
+        let found = index.find_method("СправочникМенеджер", "НайтиПоКоду");
+        assert!(found.is_some());
+
+        let method = found.unwrap();
+        assert_eq!(method.return_type, Some("СправочникСсылка".to_string()));
+        assert_eq!(method.return_facet, Some(FacetKind::Reference));
+        assert_eq!(method.context_requirements, ContextRequirements::ServerOnly);
+    }
+
+    /// Тест: Существующий return_type НЕ перезаписывается
+    #[test]
+    fn test_add_platform_method_preserves_existing_return_type() {
+        let mut index = SignatureIndex::new();
+
+        // Добавляем метод С return_type
+        let sig_with_return = MethodSignature::new(
+            "Добавить".to_string(),
+            Some("Массив".to_string()),
+            vec![],
+            Some("Число".to_string()), // Есть return type
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+        index.add_platform_method("Массив".to_string(), sig_with_return);
+
+        // Добавляем метод с ДРУГИМ return_type
+        let sig_different_return = MethodSignature::new(
+            "Добавить".to_string(),
+            Some("Массив".to_string()),
+            vec![],
+            Some("Строка".to_string()), // Другой return type
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+        index.add_platform_method("Массив".to_string(), sig_different_return);
+
+        // Проверяем что оригинальный return_type сохранился
+        let found = index.find_method("Массив", "Добавить");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().return_type, Some("Число".to_string()));
+    }
+
+    /// Тест: Параметры обновляются если у существующего метода их нет
+    #[test]
+    fn test_add_platform_method_merges_params() {
+        let mut index = SignatureIndex::new();
+
+        // Добавляем метод БЕЗ параметров
+        let sig_no_params = MethodSignature::new(
+            "Вставить".to_string(),
+            Some("Массив".to_string()),
+            vec![], // Нет параметров
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+        index.add_platform_method("Массив".to_string(), sig_no_params);
+
+        // Добавляем метод С параметрами
+        let param = ParameterInfo {
+            name: "Индекс".to_string(),
+            type_name: Some("Число".to_string()),
+            is_optional: false,
+            default_value: None,
+            description: None,
+        };
+        let sig_with_params = MethodSignature::new(
+            "Вставить".to_string(),
+            Some("Массив".to_string()),
+            vec![param],
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+        index.add_platform_method("Массив".to_string(), sig_with_params);
+
+        // Проверяем что параметры обновились
+        let found = index.find_method("Массив", "Вставить");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().params.len(), 1);
+        assert_eq!(found.unwrap().params[0].name, "Индекс");
     }
 }

@@ -6,7 +6,7 @@ use bsl_shared::domain::validators::{TypeValidator, TypeErrorKind};
 use bsl_shared::domain::RuntimeExecutionContext;  // MILESTONE 3.11 Phase 3
 use bsl_shared::formatting::DetailLevel;  // MILESTONE 3.6 Phase 3
 use bsl_shared::ir::{
-    FlowContext, SemanticNode, SemanticNodeKind, SemanticProgram, SemanticVisitor, Span,
+    FlowContext, MemberAccessKind, SemanticNode, SemanticNodeKind, SemanticProgram, SemanticVisitor, Span,
 };
 
 // === MILESTONE 3.16: Helper функции для детекции коллекций метаданных ===
@@ -330,9 +330,15 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 arg_types,
                 ..
             } => {
-                // Phase 3: Graceful degradation для Unknown типов
+                // MILESTONE 5.1: Генерируем ошибку для Unknown типов
                 if obj_type.is_unknown() {
-                    return; // Пропускаем валидацию если тип неизвестен
+                    let error_kind = TypeErrorKind::UnknownTypeAccess {
+                        variable_name: object_name.clone(),
+                        member_name: function_name.clone(),
+                    };
+                    let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                    self.errors.push(diagnostic);
+                    return;
                 }
 
                 // Phase 4: obj_type уже TypeResolution — используем напрямую
@@ -392,7 +398,7 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 object_name,
                 object_type,
                 member_name,
-                is_method: false,
+                access_kind: MemberAccessKind::Property,
                 ..
             } => {
                 // ✅ MILESTONE 3.16: Валидация доступа к объектам метаданных
@@ -424,8 +430,14 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
 
                 // Phase 4: object_type уже TypeResolution — используем напрямую
                 // metadata_lookup.get_properties() уже обрабатывает Generic и фасеты корректно
-                // Graceful degradation: пропускаем валидацию для Unknown типов
+                // MILESTONE 5.1: Генерируем ошибку для Unknown типов
                 if object_type.is_unknown() {
+                    let error_kind = TypeErrorKind::UnknownTypeAccess {
+                        variable_name: object_name.clone(),
+                        member_name: member_name.clone(),
+                    };
+                    let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                    self.errors.push(diagnostic);
                     return;
                 }
 
@@ -508,7 +520,7 @@ mod tests {
                 // Phase 3: object_type теперь TypeResolution
                 object_type: TypeResolution::explicit("Массив"),
                 member_name: "НесуществующееСвойство".to_string(),
-                is_method: false,
+                access_kind: MemberAccessKind::Property,
             },
             span: Span::new(3, 5, 3, 35),
             scope_id: program.symbols.root_scope,
@@ -608,7 +620,7 @@ mod tests {
                 // Phase 3: object_type теперь TypeResolution
                 object_type: TypeResolution::explicit("СправочникМенеджер"),
                 member_name: "НесуществующийСправочник".to_string(),
-                is_method: false,
+                access_kind: MemberAccessKind::Property,
             },
             span: Span::new(1, 0, 1, 35),
             scope_id: program.symbols.root_scope,
@@ -669,7 +681,7 @@ mod tests {
                 // Phase 3: object_type теперь TypeResolution
                 object_type: TypeResolution::explicit("СправочникМенеджер"),
                 member_name: "Контрагенты".to_string(),
-                is_method: false,
+                access_kind: MemberAccessKind::Property,
             },
             span: Span::new(1, 0, 1, 25),
             scope_id: program.symbols.root_scope,
@@ -709,7 +721,7 @@ mod tests {
                 // Phase 3: object_type теперь TypeResolution
                 object_type: TypeResolution::explicit("СправочникМенеджер"),
                 member_name: "НесуществующийСправочник".to_string(),
-                is_method: false,
+                access_kind: MemberAccessKind::Property,
             },
             span: Span::new(1, 0, 1, 35),
             scope_id: program.symbols.root_scope,

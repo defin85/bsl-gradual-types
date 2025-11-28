@@ -68,6 +68,13 @@ pub enum TypeErrorKind {
         /// Имя переменной (если доступно)
         variable_name: Option<String>,
     },
+    /// Доступ к члену у типа Unknown (переменная не была присвоена) - MILESTONE 5.1
+    UnknownTypeAccess {
+        /// Имя переменной (если известно)
+        variable_name: Option<String>,
+        /// Имя члена (свойство или метод)
+        member_name: String,
+    },
 }
 
 
@@ -180,6 +187,22 @@ impl TypeErrorKind {
                 "{} \"{}\" не найден в конфигурации",
                 kind.to_russian_name(), name
             ),
+            TypeErrorKind::UnknownTypeAccess {
+                variable_name,
+                member_name,
+            } => {
+                if let Some(var_name) = variable_name {
+                    format!(
+                        "Невозможно определить член '{}' для переменной '{}': тип не определён",
+                        member_name, var_name
+                    )
+                } else {
+                    format!(
+                        "Невозможно определить член '{}': тип объекта не определён",
+                        member_name
+                    )
+                }
+            }
         }
     }
 
@@ -294,6 +317,8 @@ impl TypeErrorKind {
 
                 msg
             }
+            // UnknownTypeAccess: Standard формат совпадает с Brief
+            TypeErrorKind::UnknownTypeAccess { .. } => self.format_brief(),
         }
     }
 
@@ -402,6 +427,21 @@ impl TypeErrorKind {
                 } else {
                     "💡 Подсказка: Проверьте правильность написания имени. \
                         Используйте команду VSCode: BSL: Parse Configuration для загрузки метаданных.".to_string()
+                }
+            }
+            TypeErrorKind::UnknownTypeAccess {
+                variable_name,
+                ..
+            } => {
+                if let Some(var_name) = variable_name {
+                    format!(
+                        "💡 Подсказка: Переменная '{}' не была инициализирована. \
+                        Присвойте значение переменной перед обращением к её членам.",
+                        var_name
+                    )
+                } else {
+                    "💡 Подсказка: Переменная не была инициализирована. \
+                        Присвойте значение переменной перед обращением к её членам.".to_string()
                 }
             }
         }

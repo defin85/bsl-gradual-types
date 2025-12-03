@@ -1,14 +1,54 @@
 #!/bin/bash
 # ============================================================================
-# BSL Gradual Types - Универсальный скрипт сборки
+# BSL Gradual Types - Универсальный кросс-платформенный скрипт сборки
 # ============================================================================
-# Собирает все компоненты проекта: Rust бинарники + VSCode Extension
+# Поддерживает: Linux, macOS, Windows (Git Bash, MSYS2, Cygwin, WSL)
 # Использование: ./build-all.sh [--release|--debug] [--skip-tests]
 # ============================================================================
 
 set -e  # Остановка при первой ошибке
 
+# ============================================================================
+# Определение платформы
+# ============================================================================
+
+detect_platform() {
+    case "$(uname -s)" in
+        Linux*)
+            if grep -qi microsoft /proc/version 2>/dev/null; then
+                PLATFORM="wsl"
+            else
+                PLATFORM="linux"
+            fi
+            BINARY_EXT=""
+            ;;
+        Darwin*)
+            PLATFORM="macos"
+            BINARY_EXT=""
+            ;;
+        CYGWIN*|MINGW*|MSYS*)
+            PLATFORM="windows"
+            BINARY_EXT=".exe"
+            ;;
+        *)
+            # Fallback: проверяем наличие Windows-специфичных переменных
+            if [[ -n "$WINDIR" ]] || [[ -n "$SYSTEMROOT" ]]; then
+                PLATFORM="windows"
+                BINARY_EXT=".exe"
+            else
+                PLATFORM="unknown"
+                BINARY_EXT=""
+            fi
+            ;;
+    esac
+}
+
+detect_platform
+
+# ============================================================================
 # Цвета для вывода
+# ============================================================================
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -16,7 +56,10 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
+# ============================================================================
 # Параметры сборки
+# ============================================================================
+
 BUILD_MODE="release"
 SKIP_TESTS=false
 
@@ -40,7 +83,10 @@ for arg in "$@"; do
     esac
 done
 
+# ============================================================================
 # Функции для логирования
+# ============================================================================
+
 log_info() {
     echo -e "${CYAN}$1${NC}"
 }
@@ -110,15 +156,15 @@ build_rust_binaries() {
     local target_dir="target/$BUILD_MODE"
     local all_ok=true
 
-    check_file "$target_dir/bsl-lsp-server.exe" "LSP Server" || all_ok=false
+    check_file "$target_dir/bsl-lsp-server${BINARY_EXT}" "LSP Server (bsl-lsp-server${BINARY_EXT})" || all_ok=false
 
     # Web Server и CLI - опциональные
-    if [ -f "$target_dir/bsl-web-server.exe" ]; then
-        check_file "$target_dir/bsl-web-server.exe" "Web Server"
+    if [ -f "$target_dir/bsl-web-server${BINARY_EXT}" ]; then
+        check_file "$target_dir/bsl-web-server${BINARY_EXT}" "Web Server (bsl-web-server${BINARY_EXT})"
     fi
 
-    if [ -f "$target_dir/bsl-cli.exe" ]; then
-        check_file "$target_dir/bsl-cli.exe" "CLI"
+    if [ -f "$target_dir/bsl-cli${BINARY_EXT}" ]; then
+        check_file "$target_dir/bsl-cli${BINARY_EXT}" "CLI (bsl-cli${BINARY_EXT})"
     fi
 
     if [ "$all_ok" = false ]; then
@@ -138,22 +184,24 @@ copy_binaries() {
 
     local source_dir="target/$BUILD_MODE"
     local target_dir="vscode-extension/bin"
+    local src_file="$source_dir/bsl-lsp-server${BINARY_EXT}"
+    local dst_file="$target_dir/lsp-server${BINARY_EXT}"
 
     log_info "\n📋 Копирование бинарников:"
-    log_info "Источник: $source_dir/"
-    log_info "Назначение: $target_dir/"
+    log_info "  Источник: $src_file"
+    log_info "  Назначение: $dst_file"
 
     # Создаём директорию если не существует
     mkdir -p "$target_dir"
 
     # Копируем LSP Server
     log_info "\n🔍 LSP Server:"
-    if [ -f "$source_dir/bsl-lsp-server.exe" ]; then
-        cp "$source_dir/bsl-lsp-server.exe" "$target_dir/lsp-server.exe"
-        local size=$(du -h "$target_dir/lsp-server.exe" | cut -f1)
-        log_success "  ✅ Скопирован lsp-server.exe ($size)"
+    if [ -f "$src_file" ]; then
+        cp "$src_file" "$dst_file"
+        local size=$(du -h "$dst_file" | cut -f1)
+        log_success "  ✅ Скопирован ($size)"
     else
-        log_error "  ❌ bsl-lsp-server.exe не найден в $source_dir/"
+        log_error "  ❌ Файл не найден: $src_file"
         return 1
     fi
 
@@ -190,7 +238,7 @@ build_vscode_extension() {
 
     local all_ok=true
     check_file "vscode-extension/out/extension.js" "Extension main file" || all_ok=false
-    check_file "vscode-extension/bin/lsp-server.exe" "LSP Server binary" || all_ok=false
+    check_file "vscode-extension/bin/lsp-server${BINARY_EXT}" "LSP Server binary (lsp-server${BINARY_EXT})" || all_ok=false
 
     if [ "$all_ok" = false ]; then
         log_error "\n❌ Не все файлы расширения собраны!"
@@ -234,15 +282,15 @@ print_summary() {
     # Rust бинарники
     local target_dir="target/$BUILD_MODE"
     echo -e "${CYAN}🦀 Rust ($BUILD_MODE):${NC}"
-    [ -f "$target_dir/bsl-lsp-server.exe" ] && echo "  ✅ LSP Server ($(du -h "$target_dir/bsl-lsp-server.exe" | cut -f1))"
-    [ -f "$target_dir/bsl-web-server.exe" ] && echo "  ✅ Web Server ($(du -h "$target_dir/bsl-web-server.exe" | cut -f1))"
-    [ -f "$target_dir/bsl-cli.exe" ] && echo "  ✅ CLI ($(du -h "$target_dir/bsl-cli.exe" | cut -f1))"
+    [ -f "$target_dir/bsl-lsp-server${BINARY_EXT}" ] && echo "  ✅ LSP Server ($(du -h "$target_dir/bsl-lsp-server${BINARY_EXT}" | cut -f1))"
+    [ -f "$target_dir/bsl-web-server${BINARY_EXT}" ] && echo "  ✅ Web Server ($(du -h "$target_dir/bsl-web-server${BINARY_EXT}" | cut -f1))"
+    [ -f "$target_dir/bsl-cli${BINARY_EXT}" ] && echo "  ✅ CLI ($(du -h "$target_dir/bsl-cli${BINARY_EXT}" | cut -f1))"
 
     # VSCode Extension
     echo ""
     echo -e "${CYAN}📦 VSCode Extension:${NC}"
     [ -f "vscode-extension/out/extension.js" ] && echo "  ✅ TypeScript ($(du -h vscode-extension/out/extension.js | cut -f1))"
-    [ -f "vscode-extension/bin/lsp-server.exe" ] && echo "  ✅ LSP Server binary ($(du -h vscode-extension/bin/lsp-server.exe | cut -f1))"
+    [ -f "vscode-extension/bin/lsp-server${BINARY_EXT}" ] && echo "  ✅ LSP Server binary ($(du -h "vscode-extension/bin/lsp-server${BINARY_EXT}" | cut -f1))"
 
     local wasm_count=$(find vscode-extension/media/webview -name "*.wasm" 2>/dev/null | wc -l)
     if [ "$wasm_count" -gt 0 ]; then
@@ -268,6 +316,8 @@ print_summary() {
 main() {
     log_section "🏗️  BSL Gradual Types - Полная сборка"
 
+    log_info "Платформа: $PLATFORM"
+    log_info "Расширение бинарников: '${BINARY_EXT:-<нет>}'"
     log_info "Режим сборки: $BUILD_MODE"
     log_info "Тесты: $([ "$SKIP_TESTS" = true ] && echo "пропущены" || echo "включены")"
 

@@ -4,9 +4,10 @@
 //! на основе результата статического анализа (TypeResolution).
 
 use crate::domain::repository::TypeRepository;
+use crate::domain::signature_index::MethodSignature;
 use crate::domain::types::{
-    ConcreteType, FacetKind, GenericType, MetadataKind, RawMethodData, RawPropertyData,
-    RawTypeData, ResolutionResult, TypeResolution,
+    ConcreteType, FacetKind, GenericType, MetadataKind, RawMethodData, RawParamData,
+    RawPropertyData, RawTypeData, ResolutionResult, TypeResolution,
 };
 use crate::utils::string_utils::levenshtein_distance;
 use std::sync::Arc;
@@ -120,22 +121,41 @@ impl TypeMetadataLookup {
             // Если lookup не удался, продолжаем с fallback
         }
 
-        // Fallback: старая логика для совместимости
-        // Используется для:
-        // - Примитивных типов (Строка, Число)
-        // - Типов без активного фасета
-        // - Случаев когда платформенный тип не загружен
+        // Извлекаем имя типа для поиска
         let type_name = self.extract_type_name(resolution);
 
-        if let Some(name) = type_name {
-            // Пробуем найти тип напрямую
-            if let Some(raw) = self.repository.find_type(&name) {
+        if let Some(name) = &type_name {
+            // ✅ ПРИОРИТЕТ: Сначала ищем в signature_index (обогащённые данные)
+            let sig_methods = self.repository.get_methods_from_signature_index(name);
+            if !sig_methods.is_empty() {
+                tracing::trace!(
+                    "get_methods('{}') → found {} methods in signature_index",
+                    name,
+                    sig_methods.len()
+                );
+                return sig_methods
+                    .into_iter()
+                    .map(Self::method_signature_to_raw)
+                    .collect();
+            }
+
+            // Fallback: старая логика для совместимости
+            // Используется для:
+            // - Примитивных типов (Строка, Число)
+            // - Типов без активного фасета
+            // - Случаев когда платформенный тип не загружен в signature_index
+            if let Some(raw) = self.repository.find_type(name) {
+                tracing::trace!(
+                    "get_methods('{}') → fallback to raw types ({} methods)",
+                    name,
+                    raw.methods.len()
+                );
                 return raw.methods.clone();
             }
 
             // MILESTONE 5.3 FIX: Для фасетных типов (СправочникСсылка.Контрагенты)
             // извлекаем базовый тип (СправочникСсылка) и ищем методы в нём
-            if let Some(base_type) = Self::extract_base_facet_type(&name) {
+            if let Some(base_type) = Self::extract_base_facet_type(name) {
                 if let Some(raw) = self.repository.find_type(base_type) {
                     return raw.methods.clone();
                 }
@@ -345,6 +365,33 @@ impl TypeMetadataLookup {
         }
     }
 
+    /// Конвертирует MethodSignature из signature_index в RawMethodData
+    ///
+    /// Это необходимо для обратной совместимости с существующим API,
+    /// который возвращает Vec<RawMethodData>.
+    fn method_signature_to_raw(sig: MethodSignature) -> RawMethodData {
+        RawMethodData {
+            name: sig.name,
+            english_name: String::new(), // SignatureIndex не хранит english_name
+            return_type: sig.return_type.unwrap_or_default(),
+            params: sig
+                .params
+                .into_iter()
+                .map(|p| RawParamData {
+                    name: p.name,
+                    param_type: p.type_name.unwrap_or_default(),
+                    is_optional: p.is_optional,
+                    default_value: p.default_value,
+                })
+                .collect(),
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+            context_requirements: Some(sig.context_requirements),
+            return_facet: sig.return_facet,
+        }
+    }
+
     /// Возвращает методы для Generic типа с подстановкой типовых параметров
     ///
     /// # Примеры
@@ -548,13 +595,53 @@ impl TypeMetadataLookup {
         // 2. Получаем имя платформенного типа через mapping
         let platform_type_name = Self::get_platform_facet_type(metadata_kind, facet)?;
 
-        // 3. Ищем платформенный тип в репозитории
-        let platform_type = self.repository.find_type(platform_type_name)?;
+        // 3. ✅ ПРИОРИТЕТ: Сначала ищем в signature_index (обогащённые данные)
+        let sig_methods = self.repository.get_methods_from_signature_index(platform_type_name);
+        if !sig_methods.is_empty() {
+            tracing::trace!(
+                "get_facet_methods('{}') → found {} methods in signature_index",
+                platform_type_name,
+                sig_methods.len()
+            );
+            return Some(
+                sig_methods
+                    .into_iter()
+                    .map(Self::method_signature_to_raw)
+                    .collect(),
+            );
+        }
 
-        // 4. Возвращаем клонированные методы
-        // Важно: возвращаем Some даже для пустого Vec, чтобы отличать
-        // "тип найден, но методов нет" от "тип не найден"
-        Some(platform_type.methods.clone())
+        // Fallback: ищем в raw types
+        // Сначала пробуем точное имя с placeholder ("ДокументМенеджер.<Имя документа>")
+        if let Some(platform_type) = self.repository.find_type(platform_type_name) {
+            tracing::trace!(
+                "get_facet_methods('{}') → fallback to raw types ({} methods)",
+                platform_type_name,
+                platform_type.methods.len()
+            );
+            return Some(platform_type.methods.clone());
+        }
+
+        // Если не найдено, пробуем извлечь базовый тип ("ДокументМенеджер")
+        // Это нужно для тестов, которые создают типы без placeholder
+        if let Some(base_type_name) =
+            crate::domain::signature_index::SignatureIndex::extract_base_facet_type(
+                platform_type_name,
+            )
+        {
+            if let Some(platform_type) = self.repository.find_type(base_type_name) {
+                tracing::trace!(
+                    "get_facet_methods('{}') → fallback to raw types via base type '{}' ({} methods)",
+                    platform_type_name,
+                    base_type_name,
+                    platform_type.methods.len()
+                );
+                return Some(platform_type.methods.clone());
+            }
+        }
+
+        // Тип не найден ни с placeholder, ни без него
+        None
     }
 
     // === Milestone 3.16: MetadataLookup API ===
@@ -1232,5 +1319,144 @@ mod tests {
         // Пустой результат для несуществующего вида
         let enums = repo.get_metadata_objects_by_kind(MetadataKind::Enum);
         assert!(enums.is_empty());
+    }
+
+    // === Тесты для приоритета signature_index над raw types ===
+
+    #[test]
+    fn test_get_methods_prefers_signature_index() {
+        use crate::domain::signature_index::{MethodSignature, SignatureSource, ContextRequirements};
+        use crate::domain::types::ParameterInfo;
+
+        let repo = Arc::new(InMemoryTypeRepository::new());
+
+        // 1. Создаём тип с методом БЕЗ return_type (как из syntax_helper)
+        let manager_type = RawTypeData {
+            name: "СправочникМенеджер.<Имя справочника>".to_string(),
+            english_name: "CatalogManager".to_string(),
+            description: "Менеджер справочника".to_string(),
+            category: "Справочники".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![
+                RawMethodData {
+                    name: "НайтиПоКоду".to_string(),
+                    english_name: "FindByCode".to_string(),
+                    return_type: "".to_string(), // Пустой return_type в raw data!
+                    params: vec![],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                    context_requirements: None,
+                    return_facet: None,
+                },
+            ],
+            properties: vec![],
+            facets: vec![FacetKind::Manager],
+            kind: None,
+            attributes: vec![],
+            tabular_sections: vec![],
+            enum_values: vec![],
+            generic_info: None,
+            module_paths: None,
+        };
+
+        repo.load_types(vec![manager_type]).unwrap();
+
+        // 2. Добавляем метод в signature_index С return_type (как из platform_types.rs)
+        repo.populate_signature_index(|index| {
+            let sig = MethodSignature::new(
+                "НайтиПоКоду".to_string(),
+                Some("СправочникМенеджер.<Имя справочника>".to_string()),
+                vec![
+                    ParameterInfo {
+                        name: "Код".to_string(),
+                        type_name: Some("Число | Строка".to_string()),
+                        is_optional: false,
+                        default_value: None,
+                        description: None,
+                    },
+                ],
+                Some("СправочникСсылка".to_string()), // Корректный return_type!
+                SignatureSource::Platform,
+                Some(FacetKind::Reference),
+                ContextRequirements::Universal,
+            );
+            index.add_platform_method("СправочникМенеджер.<Имя справочника>".to_string(), sig);
+        });
+
+        // 3. Проверяем через TypeMetadataLookup
+        let lookup = TypeMetadataLookup::new(repo.clone());
+        let resolution = create_test_resolution("СправочникМенеджер.<Имя справочника>");
+
+        let methods = lookup.get_methods(&resolution);
+
+        // Должен найти 1 метод
+        assert_eq!(methods.len(), 1, "Should find 1 method");
+
+        let method = &methods[0];
+        assert_eq!(method.name, "НайтиПоКоду");
+
+        // ГЛАВНАЯ ПРОВЕРКА: return_type должен быть из signature_index, не из raw data!
+        assert_eq!(
+            method.return_type, "СправочникСсылка",
+            "return_type should come from signature_index, not raw data"
+        );
+
+        // Проверяем параметры тоже из signature_index
+        assert_eq!(method.params.len(), 1, "Should have 1 param from signature_index");
+        assert_eq!(method.params[0].name, "Код");
+        assert_eq!(method.params[0].param_type, "Число | Строка");
+
+        // Проверяем return_facet
+        assert_eq!(method.return_facet, Some(FacetKind::Reference));
+    }
+
+    #[test]
+    fn test_get_methods_fallback_to_raw_when_no_signature_index() {
+        let repo = Arc::new(InMemoryTypeRepository::new());
+
+        // Создаём тип ТОЛЬКО в raw types (без signature_index)
+        let simple_type = RawTypeData {
+            name: "ПростойТип".to_string(),
+            english_name: "SimpleType".to_string(),
+            description: "Тип без signature_index".to_string(),
+            category: "Тестовые".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![
+                RawMethodData {
+                    name: "Метод1".to_string(),
+                    english_name: "Method1".to_string(),
+                    return_type: "Строка".to_string(),
+                    params: vec![],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                    context_requirements: None,
+                    return_facet: None,
+                },
+            ],
+            properties: vec![],
+            facets: vec![],
+            kind: None,
+            attributes: vec![],
+            tabular_sections: vec![],
+            enum_values: vec![],
+            generic_info: None,
+            module_paths: None,
+        };
+
+        repo.load_types(vec![simple_type]).unwrap();
+
+        // НЕ добавляем в signature_index
+
+        let lookup = TypeMetadataLookup::new(repo.clone());
+        let resolution = create_test_resolution("ПростойТип");
+
+        let methods = lookup.get_methods(&resolution);
+
+        // Должен найти метод из raw types (fallback)
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0].name, "Метод1");
+        assert_eq!(methods[0].return_type, "Строка");
     }
 }

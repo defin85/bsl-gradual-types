@@ -288,23 +288,25 @@ impl SystemCoordinator {
                 .map_err(StartupError::PlatformTypesError)?;
 
             // Заполняем SignatureIndex через Registry паттерн
-            // Это гарантирует что все источники типов (SyntaxHelper + PlatformFacetTypes)
-            // всегда применяются в правильном порядке и невозможно забыть какой-либо источник
+            // Единственный источник данных — syntax_helper (документация 1С)
             use bsl_shared::domain::SignatureSourceRegistry;
-            use crate::data::loaders::{SyntaxHelperSource, PlatformFacetTypesSource};
+            use crate::data::loaders::{SyntaxHelperSource, apply_generic_info_to_repository};
 
             let index = SignatureSourceRegistry::new()
                 .register(SyntaxHelperSource::new(platform_types_clone))
-                .register(PlatformFacetTypesSource)
                 .build();
             repository.set_signature_index(index);
+
+            // ✅ Milestone 3.x: Применяем GenericInfo для типов-коллекций (inference rules)
+            let generic_count = apply_generic_info_to_repository(repository.as_ref());
 
             let stats = repository.get_stats();
             info!(
                 "📊 Загружено {} типов из синтаксис-помощника",
                 stats.total_types
             );
-            info!("📇 SignatureIndex заполнен платформенными методами и конструкторами");
+            info!("📇 SignatureIndex заполнен платформенными методами");
+            info!("🔧 GenericInfo применён к {} типам-коллекциям", generic_count);
         } else {
             // Загружаем базовые типы как fallback
             Self::load_fallback_types(&repository)?;
@@ -383,16 +385,17 @@ impl SystemCoordinator {
     }
 
     /// Загрузка базовых типов как fallback
+    ///
+    /// Используется когда syntax_helper не доступен.
+    /// Загружает только примитивные типы и типы-коллекции без методов.
+    /// Методы будут недоступны, но GenericInfo для inference будет работать.
     fn load_fallback_types(repository: &Arc<InMemoryTypeRepository>) -> Result<(), StartupError> {
         use bsl_shared::domain::types::{RawDataSource, RawTypeData};
 
-        info!("📦 Загружаем базовые типы платформы 1С...");
+        info!("📦 Загружаем базовые типы платформы 1С (fallback mode)...");
 
-        // Используем платформенные типы из loaders
-        let mut platform_types = crate::data::loaders::load_all_platform_types();
-
-        // Добавляем примитивные типы
-        platform_types.extend(vec![
+        // Примитивные типы
+        let platform_types = vec![
             RawTypeData {
                 name: "Строка".to_string(),
                 english_name: "String".to_string(),
@@ -425,32 +428,63 @@ impl SystemCoordinator {
                 source: RawDataSource::Platform,
                 ..Default::default()
             },
-        ]);
+            // Типы-коллекции (без методов, только для GenericInfo)
+            RawTypeData {
+                name: "Массив".to_string(),
+                english_name: "Array".to_string(),
+                description: "Динамический массив".to_string(),
+                category: "Универсальные коллекции значений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "Соответствие".to_string(),
+                english_name: "Map".to_string(),
+                description: "Ассоциативный массив (ключ-значение)".to_string(),
+                category: "Универсальные коллекции значений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "СписокЗначений".to_string(),
+                english_name: "ValueList".to_string(),
+                description: "Список значений с представлениями".to_string(),
+                category: "Универсальные коллекции значений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ТабличнаяЧасть".to_string(),
+                english_name: "TabularSection".to_string(),
+                description: "Табличная часть объекта".to_string(),
+                category: "Универсальные коллекции значений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ];
 
-        // ✅ MILESTONE 2.20.5: Клонируем для SignatureIndex
         let platform_types_clone = platform_types.clone();
+        let type_count = platform_types.len();
 
         repository
             .load_types(platform_types)
             .map_err(StartupError::PlatformTypesError)?;
 
-        // Заполняем SignatureIndex через Registry паттерн
-        // ВАЖНО: PlatformFacetTypesSource гарантирует что фасетные типы всегда добавлены!
-        // Раньше в fallback пути забывали добавлять PlatformFacetTypes - Registry исключает эту ошибку
+        // Заполняем SignatureIndex (будет пустой в fallback mode)
         use bsl_shared::domain::SignatureSourceRegistry;
-        use crate::data::loaders::{SyntaxHelperSource, PlatformFacetTypesSource};
+        use crate::data::loaders::{SyntaxHelperSource, apply_generic_info_to_repository};
 
         let index = SignatureSourceRegistry::new()
-            .register(SyntaxHelperSource::new(platform_types_clone.clone()))
-            .register(PlatformFacetTypesSource)
+            .register(SyntaxHelperSource::new(platform_types_clone))
             .build();
         repository.set_signature_index(index);
 
-        info!(
-            "✅ Базовые типы загружены: {} типов",
-            platform_types_clone.len()
-        );
-        info!("📇 SignatureIndex заполнен платформенными методами и конструкторами");
+        // Применяем GenericInfo для типов-коллекций
+        let generic_count = apply_generic_info_to_repository(repository.as_ref());
+
+        info!("✅ Базовые типы загружены: {} типов (fallback mode)", type_count);
+        info!("🔧 GenericInfo применён к {} типам-коллекциям", generic_count);
+        warn!("⚠️ Методы недоступны в fallback mode. Укажите путь к syntax_helper для полной функциональности.");
         Ok(())
     }
 
@@ -891,22 +925,51 @@ mod tests {
 
     /// Вспомогательная функция для создания тестового репозитория с инициализированными конструкторами
     fn create_test_repository() -> Arc<InMemoryTypeRepository> {
+        use bsl_shared::domain::types::{RawDataSource, RawTypeData};
+
         let repo = Arc::new(InMemoryTypeRepository::new());
 
-        // Загружаем базовые типы с конструкторами
-        let platform_types = crate::data::loaders::load_all_platform_types();
-        let platform_types_clone = platform_types.clone();
+        // Загружаем базовые типы-коллекции
+        let platform_types = vec![
+            RawTypeData {
+                name: "Массив".to_string(),
+                english_name: "Array".to_string(),
+                category: "Универсальные коллекции значений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "Соответствие".to_string(),
+                english_name: "Map".to_string(),
+                category: "Универсальные коллекции значений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "СписокЗначений".to_string(),
+                english_name: "ValueList".to_string(),
+                category: "Универсальные коллекции значений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ТабличнаяЧасть".to_string(),
+                english_name: "TabularSection".to_string(),
+                category: "Универсальные коллекции значений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ];
 
         repo.load_types(platform_types).unwrap();
 
         // Инициализируем SignatureIndex с конструкторами
         repo.populate_signature_index(|index| {
             index.initialize_builtin_constructors();
-            crate::data::loaders::populate_signature_index_from_platform_types(
-                &platform_types_clone,
-                index,
-            );
         });
+
+        // Применяем GenericInfo
+        crate::data::loaders::apply_generic_info_to_repository(repo.as_ref());
 
         repo
     }

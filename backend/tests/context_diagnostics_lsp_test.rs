@@ -37,14 +37,17 @@ fn create_test_service() -> TypeSystemService {
         .load_types(parsed_types)
         .expect("Failed to load types");
 
-    // Заполняем SignatureIndex методами из загруженных типов
-    repository_impl.populate_signature_index(|index| {
-        index.initialize_builtin_constructors();
-        bsl_backend::data::loaders::populate_signature_index_from_platform_types(
-            &platform_types_clone,
-            index,
-        );
-    });
+    // ✅ НОВАЯ АРХИТЕКТУРА: SignatureIndex заполняется из syntax_helper
+    use bsl_shared::domain::SignatureSourceRegistry;
+    use bsl_backend::data::loaders::SyntaxHelperSource;
+
+    let index = SignatureSourceRegistry::new()
+        .register(SyntaxHelperSource::new(platform_types_clone))
+        .build();
+    repository_impl.set_signature_index(index);
+
+    // Применяем GenericInfo для типов-коллекций
+    bsl_backend::data::loaders::apply_generic_info_to_repository(repository_impl.as_ref());
 
     let repository = repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
 

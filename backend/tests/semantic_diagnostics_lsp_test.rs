@@ -29,32 +29,30 @@ fn create_test_service() -> TypeSystemService {
 
     let db = parser.export_database();
 
-    // ✅ КРИТИЧНОЕ ИСПРАВЛЕНИЕ: Используем встроенные платформенные типы вместо синтаксис-помощника
-    // Синтаксис-помощник не содержит return_type для методов, что приводит к потере информации о типах возврата
-    let mut parsed_types = bsl_backend::data::loaders::load_all_platform_types();
-
-    // Добавляем конфигурационные типы из синтаксис-помощника
-    let syntax_helper_types = convert_syntax_helper_to_raw(&db);
-    parsed_types.extend(syntax_helper_types);
+    // ✅ НОВАЯ АРХИТЕКТУРА: Все данные о методах из syntax_helper
+    let parsed_types = convert_syntax_helper_to_raw(&db);
 
     // 2. Создаём репозиторий и загружаем типы
     let repository_impl = Arc::new(InMemoryTypeRepository::new());
 
-    // ✅ MILESTONE 3.10: Клонируем типы для заполнения SignatureIndex
+    // Клонируем типы для заполнения SignatureIndex
     let platform_types_clone = parsed_types.clone();
 
     repository_impl
         .load_types(parsed_types)
         .expect("Failed to load types");
 
-    // ✅ MILESTONE 3.10: Заполняем SignatureIndex методами из загруженных типов
-    repository_impl.populate_signature_index(|index| {
-        index.initialize_builtin_constructors();
-        bsl_backend::data::loaders::populate_signature_index_from_platform_types(
-            &platform_types_clone,
-            index,
-        );
-    });
+    // ✅ НОВАЯ АРХИТЕКТУРА: SignatureIndex заполняется из syntax_helper
+    use bsl_shared::domain::SignatureSourceRegistry;
+    use bsl_backend::data::loaders::SyntaxHelperSource;
+
+    let index = SignatureSourceRegistry::new()
+        .register(SyntaxHelperSource::new(platform_types_clone))
+        .build();
+    repository_impl.set_signature_index(index);
+
+    // Применяем GenericInfo для типов-коллекций
+    bsl_backend::data::loaders::apply_generic_info_to_repository(repository_impl.as_ref());
 
     // Приводим к trait object для передачи в компоненты
     let repository = repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
@@ -64,7 +62,7 @@ fn create_test_service() -> TypeSystemService {
     let analysis_engine = Arc::new(AnalysisEngine::new(resolver.clone(), repository.clone()));
     let cache = Arc::new(AnalysisCache::new(100));
     let ir_cache = Arc::new(IrCache::new(50));
-    // ✅ Milestone 3.17: Передаём TypeResolver для корректного active_facet в IR
+    // Milestone 3.17: Передаём TypeResolver для корректного active_facet в IR
     let parser = Arc::new(ParserCoordinator::new_with_resolver(repository.clone(), resolver));
 
     let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
@@ -223,7 +221,7 @@ async fn test_with_dynamic_constructor() {
 
 #[tokio::test]
 async fn test_signature_index_loaded() {
-    // Debug тест: проверяем что SignatureIndex загружен методами
+    // Debug тест: проверяем что SignatureIndex загружен методами из syntax_helper
     let repository_impl = Arc::new(InMemoryTypeRepository::new());
 
     let mut parser = SyntaxHelperParser::new();
@@ -251,14 +249,17 @@ async fn test_signature_index_loaded() {
         println!("  Тип 'Массив' НЕ найден в parsed_types!");
     }
 
-    // Заполняем SignatureIndex
-    repository_impl.populate_signature_index(|index| {
-        index.initialize_builtin_constructors();
-        bsl_backend::data::loaders::populate_signature_index_from_platform_types(
-            &platform_types_clone,
-            index,
-        );
-    });
+    // ✅ НОВАЯ АРХИТЕКТУРА: Заполняем SignatureIndex из syntax_helper
+    use bsl_shared::domain::SignatureSourceRegistry;
+    use bsl_backend::data::loaders::SyntaxHelperSource;
+
+    let index = SignatureSourceRegistry::new()
+        .register(SyntaxHelperSource::new(platform_types_clone))
+        .build();
+    repository_impl.set_signature_index(index);
+
+    // Применяем GenericInfo
+    bsl_backend::data::loaders::apply_generic_info_to_repository(repository_impl.as_ref());
 
     // Получаем клон и проверяем
     let signature_index = repository_impl.get_signature_index_clone();

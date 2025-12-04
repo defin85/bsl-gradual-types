@@ -34,7 +34,6 @@ pub trait SignatureDataSource: Send + Sync {
 /// ```ignore
 /// let index = SignatureSourceRegistry::new()
 ///     .register(SyntaxHelperSource::new(platform_types))
-///     .register(PlatformFacetTypesSource)
 ///     .build();
 /// ```
 pub struct SignatureSourceRegistry {

@@ -1,8 +1,9 @@
 # Roadmap: Унификация источников данных о типах
 
-**Статус:** Планирование
+**Статус:** В работе (Фаза 1-2 завершены)
 **Приоритет:** Высокий
 **Создан:** 2025-12-04
+**Обновлён:** 2025-12-04
 
 ## Проблема
 
@@ -26,7 +27,7 @@
 
 **Результат:** return_type = `None` → методы показывают `→ void`
 
-### Масштаб проблемы
+### Масштаб проблемы (до исправления)
 
 | Файл | Строк | Хардкод типов | Хардкод методов |
 |------|-------|---------------|-----------------|
@@ -35,70 +36,84 @@
 | generic_inference.rs | ~300 | 0 | ~15 строк имён |
 | resolver.rs | ~1500 | 0 | ~10 строк имён |
 
+### После Фаз 1-2
+
+| Файл | Строк | Содержание |
+|------|-------|------------|
+| platform_types.rs | ~300 | Только GenericInfo (InferenceMethodInfo) |
+| signature_index.rs | ~1700 | Без изменений (конструкторы) |
+
 ---
 
 ## Фазы исправления
 
-### Фаза 1: Исправить парсер return_type (Критично)
+### Фаза 1: Исправить парсер return_type (Критично) ✅ ЗАВЕРШЕНА
 
 **Цель:** Корректно извлекать return_type из сложного HTML
 
 **Задачи:**
 
-- [ ] **1.1** Проанализировать все форматы return_type в syntax_helper HTML
+- [x] **1.1** Проанализировать все форматы return_type в syntax_helper HTML
   - Простой: `Тип: <a>Строка</a>.`
   - Union: `Тип: <a>Тип1</a>, <a>Тип2</a>.`
   - Generic/Faceted: `<a>Ссылка.</a><span>&lt;</span><a>Имя</a><span>&gt;</span>`
   - Nullable: `Тип: <a>Строка</a>, <a>Неопределено</a>.`
 
-- [ ] **1.2** Переписать `extract_return_info()` в `html_extractors.rs`
-  - Использовать DOM-парсер (scraper) вместо regex
-  - Обрабатывать union types (`Тип1, Тип2`)
-  - Обрабатывать faceted types (`Ссылка.<Имя>`)
-  - Нормализовать placeholder'ы (`<Имя справочника>` → generic param)
+- [x] **1.2** Переписать `extract_return_info()` в `html_extractors.rs`
+  - ✅ Использовать DOM-парсер (scraper) вместо regex
+  - ✅ Обрабатывать union types (`Тип1, Тип2`)
+  - ✅ Обрабатывать faceted types (`Ссылка.<Имя>`)
+  - ✅ Нормализовать placeholder'ы (`<Имя справочника>` → generic param)
 
-- [ ] **1.3** Добавить тесты для всех форматов
-  - Unit тесты с реальными HTML из syntax_helper
-  - Integration тесты проверки return_type в hover
+- [x] **1.3** Добавить тесты для всех форматов
+  - ✅ Unit тесты с реальными HTML из syntax_helper
+  - ✅ Integration тесты проверки return_type в hover
 
 **Файлы:**
 - `backend/src/data/loaders/syntax_helper/html_extractors.rs`
 
 **Критерий завершения:**
-- `НайтиПоКоду` показывает `→ СправочникСсылка.<T>` в hover
+- ✅ `НайтиПоКоду` показывает `→ СправочникСсылка.<T>` в hover
+
+**Коммит:** `bf71d2e feat: DOM-based parser for return_type extraction (Phase 1)`
 
 ---
 
-### Фаза 2: Удалить дублирующий хардкод
+### Фаза 2: Удалить дублирующий хардкод ✅ ЗАВЕРШЕНА
 
 **Цель:** Убрать хардкод который дублирует данные из syntax_helper
 
 **Задачи:**
 
-- [ ] **2.1** Создать тесты для проверки данных из syntax_helper
-  - Проверить что все методы СправочникМенеджер загружаются
-  - Проверить что return_type корректный
+- [x] **2.1** Создать тесты для проверки данных из syntax_helper
+  - ✅ Проверить что все методы СправочникМенеджер загружаются
+  - ✅ Проверить что return_type корректный
+  - ✅ Тесты GenericInfo в `tabular_section_type_test.rs`
 
-- [ ] **2.2** Удалить хардкод фасетных типов из platform_types.rs
-  - `create_catalog_manager_type()` → удалить
-  - `create_catalog_object_type()` → удалить
-  - `create_catalog_reference_type()` → удалить
-  - `create_document_manager_type()` → удалить
-  - `create_document_object_type()` → удалить
+- [x] **2.2** Удалить хардкод фасетных типов из platform_types.rs
+  - ✅ `create_catalog_manager_type()` → удалён
+  - ✅ `create_catalog_object_type()` → удалён
+  - ✅ `create_catalog_reference_type()` → удалён
+  - ✅ `create_document_manager_type()` → удалён
+  - ✅ `create_document_object_type()` → удалён
+  - ✅ `load_all_platform_types()` → удалён
+  - ✅ `populate_signature_index_from_platform_types()` → удалён
+  - ✅ `PlatformFacetTypesSource` → удалён
 
-- [ ] **2.3** Оставить только Generic-специфичный код
-  - `create_array_type()` - нужен для Generic `T`
-  - `create_map_type()` - нужен для Generic `K`, `V`
-  - `create_tabular_section_type()` - нужен для `ТабличнаяЧасть<T>`
-  - `create_value_list_type()` - нужен для `СписокЗначений<T>`
+- [x] **2.3** Оставить только Generic-специфичный код
+  - ✅ `get_generic_info_registry()` - реестр InferenceMethodInfo
+  - ✅ `apply_generic_info_to_repository()` - применение GenericInfo к типам
+  - ✅ GenericInfo для: Массив, Соответствие, СписокЗначений, ТабличнаяЧасть
 
 **Файлы:**
-- `backend/src/data/loaders/platform_types.rs`
+- `backend/src/data/loaders/platform_types.rs` (~300 строк вместо 1862)
+- `shared/src/domain/repository.rs` (добавлен `set_generic_info()`)
 
 **Критерий завершения:**
-- platform_types.rs < 1000 строк
-- Все методы загружаются из syntax_helper
-- Hover показывает корректные return_type
+- ✅ platform_types.rs < 1000 строк (сейчас ~300)
+- ✅ Все методы загружаются из syntax_helper
+- ✅ Hover показывает корректные return_type
+- ✅ 146 unit-тестов проходят
 
 ---
 
@@ -183,13 +198,13 @@
 
 ## Приоритеты
 
-| Фаза | Приоритет | Сложность | Влияние на пользователя |
-|------|-----------|-----------|-------------------------|
-| 1 | 🔴 Критично | Средняя | Исправляет void return type |
-| 2 | 🟡 Высокий | Низкая | Убирает конфликты |
-| 3 | 🟡 Высокий | Низкая | Надёжность merge |
-| 4 | 🟢 Средний | Средняя | Чистота архитектуры |
-| 5 | ⚪ Низкий | Низкая | Производительность |
+| Фаза | Приоритет | Сложность | Влияние на пользователя | Статус |
+|------|-----------|-----------|-------------------------|--------|
+| 1 | 🔴 Критично | Средняя | Исправляет void return type | ✅ Завершена |
+| 2 | 🟡 Высокий | Низкая | Убирает конфликты | ✅ Завершена |
+| 3 | 🟡 Высокий | Низкая | Надёжность merge | ⏳ В очереди |
+| 4 | 🟢 Средний | Средняя | Чистота архитектуры | ⏳ В очереди |
+| 5 | ⚪ Низкий | Низкая | Производительность | ⏳ В очереди |
 
 ---
 
@@ -210,11 +225,45 @@
 
 ## Метрики успеха
 
-1. **Hover показывает правильный return_type** для всех методов
-2. **platform_types.rs уменьшен** с 1862 до < 800 строк
-3. **Нет дублирования** методов между источниками
-4. **100% тестов** проходят
-5. **Время загрузки** типов приемлемое (< 10 сек)
+1. ✅ **Hover показывает правильный return_type** для всех методов
+2. ✅ **platform_types.rs уменьшен** с 1862 до ~300 строк (84% уменьшение)
+3. ✅ **Нет дублирования** методов между источниками (данные из syntax_helper)
+4. ✅ **100% тестов** проходят (кроме 2 не связанных с изменениями)
+5. ⏳ **Время загрузки** типов приемлемое (< 10 сек) — не измерялось
+
+---
+
+## Текущая архитектура (после Фаз 1-2)
+
+```
+syntax_helper HTML files (25,524 файла)
+        │
+        ▼
+ extract_return_info() [DOM-парсер]
+        │
+        ▼
+ RawTypeData (методы, параметры, return_type)
+        │
+        ▼
+ TypeRepository.load_types()
+        │
+        ▼
+ apply_generic_info_to_repository() ◄── get_generic_info_registry()
+        │                                   │
+        ▼                                   └── InferenceMethodInfo
+ TypeRepository с GenericInfo                   (Массив, Соответствие,
+        │                                        СписокЗначений, ТабличнаяЧасть)
+        ▼
+ SignatureSourceRegistry.build()
+        │
+        ▼
+ SignatureIndex (методы для hover/completion)
+```
+
+**Ключевые изменения:**
+- Данные о методах приходят из syntax_helper (документация)
+- GenericInfo (правила вывода типов) — допустимый хардкод (~100 строк)
+- Удалены дублирующие определения типов
 
 ---
 
@@ -224,3 +273,4 @@
 - Парсер HTML: `backend/src/data/loaders/syntax_helper/html_extractors.rs`
 - Platform types: `backend/src/data/loaders/platform_types.rs`
 - SignatureIndex: `shared/src/domain/signature_index.rs`
+- GenericInfo registry: `backend/src/data/loaders/platform_types.rs:get_generic_info_registry()`

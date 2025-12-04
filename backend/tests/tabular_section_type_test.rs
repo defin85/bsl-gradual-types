@@ -1,244 +1,146 @@
-//! Интеграционные тесты для платформенного типа ТабличнаяЧасть
+//! Интеграционные тесты для GenericInfo типов-коллекций
+//!
+//! Тестирует что GenericInfo корректно настроен для типов:
+//! - Массив<T>
+//! - Соответствие<K, V>
+//! - СписокЗначений<T>
+//! - ТабличнаяЧасть<T>
 
-use bsl_backend::data::loaders::platform_types::load_all_platform_types;
-use bsl_shared::domain::types::FacetKind;
+use bsl_backend::data::loaders::get_generic_info_registry;
 
 #[test]
-fn test_tabular_section_type_exists() {
-    let platform_types = load_all_platform_types();
+fn test_generic_info_registry_has_array() {
+    let registry = get_generic_info_registry();
 
-    let tabular_type = platform_types
-        .iter()
-        .find(|t| t.name == "ТабличнаяЧасть")
-        .expect("ТабличнаяЧасть должен быть в платформенных типах");
+    let array_info = registry
+        .get("Массив")
+        .expect("Массив должен быть в реестре GenericInfo");
 
-    assert_eq!(tabular_type.category, "PlatformType");
-    assert_eq!(tabular_type.english_name, "TabularSection");
+    assert_eq!(array_info.base_type, "Массив");
+    assert_eq!(array_info.type_param_count, 1);
+    assert!(!array_info.inference_methods.is_empty());
 }
 
 #[test]
-fn test_tabular_section_has_collection_facet() {
-    let platform_types = load_all_platform_types();
+fn test_generic_info_registry_has_map() {
+    let registry = get_generic_info_registry();
 
-    let tabular_type = platform_types
-        .iter()
-        .find(|t| t.name == "ТабличнаяЧасть")
-        .unwrap();
+    let map_info = registry
+        .get("Соответствие")
+        .expect("Соответствие должен быть в реестре GenericInfo");
 
-    assert!(tabular_type.facets.contains(&FacetKind::Collection));
+    assert_eq!(map_info.base_type, "Соответствие");
+    assert_eq!(map_info.type_param_count, 2); // K и V
+    assert!(!map_info.inference_methods.is_empty());
 }
 
 #[test]
-fn test_tabular_section_has_generic_methods() {
-    let platform_types = load_all_platform_types();
+fn test_generic_info_registry_has_value_list() {
+    let registry = get_generic_info_registry();
 
-    let tabular_type = platform_types
-        .iter()
-        .find(|t| t.name == "ТабличнаяЧасть")
-        .unwrap();
+    let list_info = registry
+        .get("СписокЗначений")
+        .expect("СписокЗначений должен быть в реестре GenericInfo");
 
-    // Проверяем методы с Generic параметром "T"
-    let add_method = tabular_type
-        .methods
-        .iter()
-        .find(|m| m.name == "Добавить")
-        .unwrap();
-    assert_eq!(add_method.return_type, "T");
-    assert_eq!(add_method.params.len(), 0);
-
-    let get_method = tabular_type
-        .methods
-        .iter()
-        .find(|m| m.name == "Получить")
-        .unwrap();
-    assert_eq!(get_method.return_type, "T");
-    assert_eq!(get_method.params.len(), 1);
-    assert_eq!(get_method.params[0].name, "Индекс");
-
-    let insert_method = tabular_type
-        .methods
-        .iter()
-        .find(|m| m.name == "Вставить")
-        .unwrap();
-    assert_eq!(insert_method.return_type, "T");
+    assert_eq!(list_info.base_type, "СписокЗначений");
+    assert_eq!(list_info.type_param_count, 1);
 }
 
 #[test]
-fn test_tabular_section_has_non_generic_methods() {
-    let platform_types = load_all_platform_types();
+fn test_generic_info_registry_has_tabular_section() {
+    let registry = get_generic_info_registry();
 
-    let tabular_type = platform_types
-        .iter()
-        .find(|t| t.name == "ТабличнаяЧасть")
-        .unwrap();
+    let tab_info = registry
+        .get("ТабличнаяЧасть")
+        .expect("ТабличнаяЧасть должен быть в реестре GenericInfo");
 
-    // Проверяем методы БЕЗ Generic параметра
-    let count_method = tabular_type
-        .methods
-        .iter()
-        .find(|m| m.name == "Количество")
-        .unwrap();
-    assert_eq!(count_method.return_type, "Число");
-
-    let clear_method = tabular_type
-        .methods
-        .iter()
-        .find(|m| m.name == "Очистить")
-        .unwrap();
-    assert_eq!(clear_method.return_type, "Неопределено");
-
-    let delete_method = tabular_type
-        .methods
-        .iter()
-        .find(|m| m.name == "Удалить")
-        .unwrap();
-    assert_eq!(delete_method.return_type, "Неопределено");
+    assert_eq!(tab_info.base_type, "ТабличнаяЧасть");
+    assert_eq!(tab_info.type_param_count, 1);
+    assert!(!tab_info.inference_methods.is_empty());
 }
 
 #[test]
-fn test_tabular_section_method_count() {
-    let platform_types = load_all_platform_types();
+fn test_array_add_inference_method() {
+    let registry = get_generic_info_registry();
+    let array_info = registry.get("Массив").unwrap();
 
-    let tabular_type = platform_types
+    let add_method = array_info
+        .inference_methods
         .iter()
-        .find(|t| t.name == "ТабличнаяЧасть")
-        .unwrap();
+        .find(|m| m.method_name == "Добавить")
+        .expect("Метод Добавить должен быть в inference_methods");
 
-    // Должно быть 16 методов
-    assert_eq!(tabular_type.methods.len(), 16);
+    // Добавить(Значение) — первый параметр определяет T
+    assert_eq!(add_method.param_indices, vec![0]);
+    assert_eq!(add_method.inferred_type_params, vec![0]); // T
 }
 
 #[test]
-fn test_tabular_section_has_count_property() {
-    let platform_types = load_all_platform_types();
+fn test_map_insert_inference_method() {
+    let registry = get_generic_info_registry();
+    let map_info = registry.get("Соответствие").unwrap();
 
-    let tabular_type = platform_types
+    let insert_methods: Vec<_> = map_info
+        .inference_methods
         .iter()
-        .find(|t| t.name == "ТабличнаяЧасть")
-        .unwrap();
+        .filter(|m| m.method_name == "Вставить")
+        .collect();
 
-    // Проверяем свойство Количество
-    let count_property = tabular_type
-        .properties
-        .iter()
-        .find(|p| p.name == "Количество")
-        .unwrap();
-    assert_eq!(count_property.prop_type, "Число");
-    assert!(count_property.is_readonly);
+    // Вставить(Ключ, Значение) — два inference rules для K и V
+    assert_eq!(insert_methods.len(), 2);
 }
 
 #[test]
-fn test_tabular_section_find_method_params() {
-    let platform_types = load_all_platform_types();
+fn test_tabular_section_add_inference() {
+    let registry = get_generic_info_registry();
+    let tab_info = registry.get("ТабличнаяЧасть").unwrap();
 
-    let tabular_type = platform_types
+    let add_method = tab_info
+        .inference_methods
         .iter()
-        .find(|t| t.name == "ТабличнаяЧасть")
-        .unwrap();
+        .find(|m| m.method_name == "Добавить")
+        .expect("Метод Добавить должен быть в inference_methods");
 
-    // Проверяем метод Найти с параметрами
-    let find_method = tabular_type
-        .methods
-        .iter()
-        .find(|m| m.name == "Найти")
-        .unwrap();
-    assert_eq!(find_method.return_type, "T");
-    assert_eq!(find_method.params.len(), 2);
-    assert_eq!(find_method.params[0].name, "Значение");
-    assert_eq!(find_method.params[0].param_type, "Произвольный");
-    assert_eq!(find_method.params[1].name, "ИмяКолонки");
-    assert_eq!(find_method.params[1].param_type, "Строка");
+    // ТабличнаяЧасть.Добавить() — возвращает T (новую строку)
+    assert_eq!(add_method.inferred_type_params, vec![0]);
 }
 
 #[test]
-fn test_all_16_methods_present() {
-    let platform_types = load_all_platform_types();
+fn test_apply_generic_info_to_repository() {
+    use bsl_backend::data::loaders::apply_generic_info_to_repository;
+    use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+    use bsl_shared::domain::types::{RawDataSource, RawTypeData};
 
-    let tabular_type = platform_types
-        .iter()
-        .find(|t| t.name == "ТабличнаяЧасть")
-        .unwrap();
+    let repository = InMemoryTypeRepository::new();
 
-    // Проверяем наличие всех 16 методов по имени
-    let expected_methods = vec![
-        "Добавить",
-        "Вставить",
-        "Получить",
-        "Удалить",
-        "Количество",
-        "Очистить",
-        "Индекс",
-        "Найти",
-        "Сдвинуть",
-        "ВыгрузитьКолонку",
-        "ЗагрузитьКолонку",
-        "Свернуть",
-        "Скопировать",
-        "Итог",
-        "Заполнить",
-        "Сортировать",
+    // Добавляем типы-коллекции (без GenericInfo)
+    let types = vec![
+        RawTypeData {
+            name: "Массив".to_string(),
+            english_name: "Array".to_string(),
+            source: RawDataSource::Platform,
+            ..Default::default()
+        },
+        RawTypeData {
+            name: "Соответствие".to_string(),
+            english_name: "Map".to_string(),
+            source: RawDataSource::Platform,
+            ..Default::default()
+        },
     ];
 
-    for expected_method_name in expected_methods {
-        assert!(
-            tabular_type
-                .methods
-                .iter()
-                .any(|m| m.name == expected_method_name),
-            "Метод '{}' не найден",
-            expected_method_name
-        );
-    }
+    repository.load_types(types).unwrap();
 
-    assert_eq!(tabular_type.methods.len(), 16);
-}
+    // Проверяем что GenericInfo НЕТ
+    let arr_before = repository.find_type("Массив").unwrap();
+    assert!(arr_before.generic_info.is_none());
 
-#[test]
-fn test_generic_parameter_in_copy_method() {
-    let platform_types = load_all_platform_types();
+    // Применяем GenericInfo
+    let applied = apply_generic_info_to_repository(&repository);
+    assert!(applied >= 2); // Массив и Соответствие
 
-    let tabular_type = platform_types
-        .iter()
-        .find(|t| t.name == "ТабличнаяЧасть")
-        .unwrap();
-
-    // Проверяем метод Скопировать с Generic типом в return_type
-    let copy_method = tabular_type
-        .methods
-        .iter()
-        .find(|m| m.name == "Скопировать")
-        .unwrap();
-    assert_eq!(copy_method.return_type, "ТабличнаяЧасть<T>");
-}
-
-#[test]
-fn test_english_names_present() {
-    let platform_types = load_all_platform_types();
-
-    let tabular_type = platform_types
-        .iter()
-        .find(|t| t.name == "ТабличнаяЧасть")
-        .unwrap();
-
-    // Проверяем наличие английских имён у методов
-    let add_method = tabular_type
-        .methods
-        .iter()
-        .find(|m| m.name == "Добавить")
-        .unwrap();
-    assert_eq!(add_method.english_name, "Add");
-
-    let count_method = tabular_type
-        .methods
-        .iter()
-        .find(|m| m.name == "Количество")
-        .unwrap();
-    assert_eq!(count_method.english_name, "Count");
-
-    let find_method = tabular_type
-        .methods
-        .iter()
-        .find(|m| m.name == "Найти")
-        .unwrap();
-    assert_eq!(find_method.english_name, "Find");
+    // Проверяем что GenericInfo ЕСТЬ
+    let arr_after = repository.find_type("Массив").unwrap();
+    assert!(arr_after.generic_info.is_some());
+    assert_eq!(arr_after.generic_info.as_ref().unwrap().base_type, "Массив");
 }

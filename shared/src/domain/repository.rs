@@ -160,6 +160,61 @@ pub trait TypeRepository: Send + Sync {
     /// // → ["Контрагенты", "Номенклатура", "Склады", ...]
     /// ```
     fn get_metadata_objects_by_kind(&self, kind: MetadataKind) -> Vec<String>;
+
+    /// Найти метод по имени типа и имени метода из signature_index
+    ///
+    /// Использует обогащённые сигнатуры из signature_index, где return_type корректный.
+    /// Поддерживает фасетные типы с fallback к базовому типу.
+    ///
+    /// # Параметры
+    ///
+    /// * `owner_type` - имя типа-владельца (например, "СправочникМенеджер.Контрагенты")
+    /// * `method_name` - имя метода
+    ///
+    /// # Возвращает
+    ///
+    /// `Some(MethodSignature)` если метод найден, иначе `None`
+    fn find_method(
+        &self,
+        owner_type: Option<&str>,
+        method_name: &str,
+    ) -> Option<crate::domain::signature_index::MethodSignature>;
+
+    /// Получить все методы для указанного типа из signature_index
+    ///
+    /// Возвращает методы с обогащёнными сигнатурами (включая return_type).
+    /// Поддерживает фасетные типы с fallback к базовому типу.
+    ///
+    /// # Параметры
+    ///
+    /// * `type_name` - имя типа (например, "СправочникМенеджер" или "СправочникМенеджер.Контрагенты")
+    ///
+    /// # Возвращает
+    ///
+    /// Вектор сигнатур методов (клонированных)
+    fn get_methods_from_signature_index(
+        &self,
+        type_name: &str,
+    ) -> Vec<crate::domain::signature_index::MethodSignature>;
+
+    /// Установить GenericInfo для типа (Milestone 3.x: Унификация источников данных)
+    ///
+    /// Применяет GenericInfo к существующему типу в репозитории.
+    /// Используется для добавления inference metadata к типам из syntax_helper.
+    ///
+    /// # Параметры
+    ///
+    /// * `type_name` - имя типа (например, "Массив", "Соответствие")
+    /// * `generic_info` - метаданные для Generic inference
+    ///
+    /// # Возвращает
+    ///
+    /// `true` если тип найден и GenericInfo установлен, `false` если тип не найден
+    fn set_generic_info(
+        &self,
+        type_name: &str,
+        generic_info: crate::domain::types::GenericInfo,
+    ) -> bool;
 }
 
 /// Статистика репозитория
@@ -348,7 +403,13 @@ impl TypeRepository for InMemoryTypeRepository {
         owner_type: Option<&str>,
         method_name: &str,
     ) -> Option<crate::domain::signature_index::MethodSignature> {
-        let index = self.signature_index.read().unwrap();
+        let index = match self.signature_index.read() {
+            Ok(idx) => idx,
+            Err(poisoned) => {
+                tracing::warn!("SignatureIndex RwLock poisoned in find_method_signature, recovering");
+                poisoned.into_inner()
+            }
+        };
 
         if let Some(owner) = owner_type {
             // Ищем метод типа
@@ -393,5 +454,67 @@ impl TypeRepository for InMemoryTypeRepository {
                     .map(|s| s.to_string())
             })
             .collect()
+    }
+
+    fn find_method(
+        &self,
+        owner_type: Option<&str>,
+        method_name: &str,
+    ) -> Option<crate::domain::signature_index::MethodSignature> {
+        self.find_method_signature(owner_type, method_name)
+    }
+
+    fn get_methods_from_signature_index(
+        &self,
+        type_name: &str,
+    ) -> Vec<crate::domain::signature_index::MethodSignature> {
+        let index = match self.signature_index.read() {
+            Ok(idx) => idx,
+            Err(poisoned) => {
+                tracing::warn!("SignatureIndex RwLock poisoned in get_methods_from_signature_index, recovering");
+                poisoned.into_inner()
+            }
+        };
+
+        // 1. Сначала пробуем найти методы по точному имени типа
+        let methods = index.get_type_methods(type_name);
+        if !methods.is_empty() {
+            return methods.into_iter().cloned().collect();
+        }
+
+        // 2. Если не найдено, пробуем извлечь базовый фасетный тип
+        if let Some(base_type) = SignatureIndex::extract_base_facet_type(type_name) {
+            let base_methods = index.get_type_methods(base_type);
+            return base_methods.into_iter().cloned().collect();
+        }
+
+        vec![]
+    }
+
+    fn set_generic_info(
+        &self,
+        type_name: &str,
+        generic_info: crate::domain::types::GenericInfo,
+    ) -> bool {
+        let mut types = self.types.write().unwrap();
+
+        // Ищем тип по имени (русскому или английскому)
+        for type_data in types.iter_mut() {
+            if type_data.name == type_name || type_data.english_name == type_name {
+                type_data.generic_info = Some(generic_info);
+                tracing::debug!(
+                    "set_generic_info: установлен GenericInfo для типа '{}' (inference_methods: {})",
+                    type_name,
+                    type_data.generic_info.as_ref().map(|g| g.inference_methods.len()).unwrap_or(0)
+                );
+                return true;
+            }
+        }
+
+        tracing::debug!(
+            "set_generic_info: тип '{}' не найден в репозитории",
+            type_name
+        );
+        false
     }
 }

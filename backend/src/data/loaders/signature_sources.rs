@@ -1,22 +1,17 @@
 //! Реализации источников данных для SignatureIndex
 //!
-//! Конкретные источники типов для Registry паттерна.
+//! Единственный источник типов: syntax_helper (документация 1С).
+//! GenericInfo применяется отдельно через apply_generic_info_to_repository().
 
 use bsl_shared::domain::signature_registry::SignatureDataSource;
 use bsl_shared::domain::types::RawTypeData;
 
-use super::platform_types::load_all_platform_types;
-
 /// Источник: типы из syntax_helper (загруженные из Syntax Helper файлов)
 ///
-/// Это основной источник данных о типах платформы,
-/// содержащий методы, свойства и другие метаданные.
+/// Это единственный источник данных о методах, свойствах и типах платформы.
+/// Все данные (параметры, описания, return_type) берутся из документации 1С.
 ///
-/// # Приоритет: 10 (обрабатывается первым)
-///
-/// Методы из syntax_helper могут не иметь return_type,
-/// поэтому PlatformFacetTypesSource с приоритетом 20
-/// может дополнить их.
+/// # Приоритет: 10 (единственный источник)
 pub struct SyntaxHelperSource {
     types: Vec<RawTypeData>,
 }
@@ -42,37 +37,6 @@ impl SignatureDataSource for SyntaxHelperSource {
     }
 }
 
-/// Источник: базовые фасетные типы платформы
-///
-/// Содержит типы:
-/// - СправочникМенеджер, СправочникОбъект, СправочникСсылка, СправочникВыборка
-/// - ДокументМенеджер, ДокументОбъект, ДокументСсылка, ДокументВыборка
-/// - РегистрСведенийМенеджер, РегистрСведенийНаборЗаписей и т.д.
-///
-/// Эти типы определены в platform_types.rs и содержат методы:
-/// СоздатьЭлемент(), НайтиПоКоду(), Записать(), Провести() и т.д.
-///
-/// # Приоритет: 20 (обрабатывается после SyntaxHelper)
-///
-/// Методы из этого источника дополняют (merge) методы из SyntaxHelper:
-/// - Добавляют return_type если его не было
-/// - Добавляют return_facet и context_requirements
-pub struct PlatformFacetTypesSource;
-
-impl SignatureDataSource for PlatformFacetTypesSource {
-    fn name(&self) -> &str {
-        "PlatformFacetTypes"
-    }
-
-    fn priority(&self) -> u32 {
-        20
-    }
-
-    fn load(&self) -> Vec<RawTypeData> {
-        load_all_platform_types()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,29 +56,9 @@ mod tests {
     }
 
     #[test]
-    fn test_platform_facet_types_source() {
-        let source = PlatformFacetTypesSource;
+    fn test_syntax_helper_source_empty() {
+        let source = SyntaxHelperSource::new(vec![]);
 
-        assert_eq!(source.name(), "PlatformFacetTypes");
-        assert_eq!(source.priority(), 20);
-
-        // Должен загружать типы из platform_types.rs
-        let types = source.load();
-        assert!(!types.is_empty());
-
-        // Проверяем наличие ключевых типов
-        let has_catalog_manager = types
-            .iter()
-            .any(|t| t.name.contains("СправочникМенеджер"));
-        assert!(has_catalog_manager);
-    }
-
-    #[test]
-    fn test_priority_order() {
-        let syntax = SyntaxHelperSource::new(vec![]);
-        let facet = PlatformFacetTypesSource;
-
-        // SyntaxHelper должен обрабатываться раньше (меньший приоритет)
-        assert!(syntax.priority() < facet.priority());
+        assert_eq!(source.load().len(), 0);
     }
 }

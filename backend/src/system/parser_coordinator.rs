@@ -272,18 +272,55 @@ impl ParserCoordinator {
     }
 
     /// Загрузка платформенных типов (упрощенная)
+    ///
+    /// Примечание: В новой архитектуре данные о методах приходят из syntax_helper.
+    /// Эта функция создаёт только базовые типы-коллекции и применяет GenericInfo.
     pub async fn load_platform_types(&self, repository: &Arc<dyn TypeRepository>) -> Result<()> {
+        use bsl_shared::domain::types::{RawDataSource, RawTypeData};
+
         debug!("Loading platform types via simple parser coordination");
 
-        // Загружаем базовые платформенные типы
-        let platform_types = crate::data::loaders::load_all_platform_types();
+        // Базовые типы-коллекции (без методов - методы из syntax_helper)
+        let platform_types = vec![
+            RawTypeData {
+                name: "Массив".to_string(),
+                english_name: "Array".to_string(),
+                category: "Универсальные коллекции значений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "Соответствие".to_string(),
+                english_name: "Map".to_string(),
+                category: "Универсальные коллекции значений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "СписокЗначений".to_string(),
+                english_name: "ValueList".to_string(),
+                category: "Универсальные коллекции значений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ТабличнаяЧасть".to_string(),
+                english_name: "TabularSection".to_string(),
+                category: "Универсальные коллекции значений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ];
 
-        debug!("Loaded {} platform types", platform_types.len());
+        debug!("Loaded {} basic platform types", platform_types.len());
 
         // Загружаем типы в репозиторий
         repository
             .load_types(platform_types)
             .map_err(|e| anyhow::anyhow!("Failed to load platform types: {}", e))?;
+
+        // Применяем GenericInfo для inference
+        crate::data::loaders::apply_generic_info_to_repository(repository.as_ref());
 
         let stats = repository.get_stats();
         debug!(

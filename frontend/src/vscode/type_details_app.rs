@@ -10,8 +10,8 @@ use web_sys::console;
 
 // Import components from parent modules
 use super::common::{send_to_vscode, setup_vscode_listener, VsCodeMessage};
+use super::type_details_simple::SimpleTypeDetails;
 use crate::api::{MethodDto, ParamDto, TypeDto};
-use crate::components::TypeDetailsModal;
 
 /// VSCode-specific TypeInfo structure (matches typeDetailsWebview.ts format)
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -161,7 +161,7 @@ pub fn VsCodeTypeDetailsApp() -> impl IntoView {
 
     view! {
         <Show when=move || is_visible.get()>
-            <TypeDetailsModal
+            <SimpleTypeDetails
                 type_info=Signal::derive(move || type_info.get())
                 on_close=on_close
             />

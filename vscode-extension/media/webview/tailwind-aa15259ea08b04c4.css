@@ -717,6 +717,10 @@ video {
   margin-bottom: 4px;
 }
 
+.mb-1\.5 {
+  margin-bottom: 6px;
+}
+
 .mb-2 {
   margin-bottom: 8px;
 }
@@ -743,6 +747,10 @@ video {
 
 .ml-1 {
   margin-left: 4px;
+}
+
+.mr-1 {
+  margin-right: 4px;
 }
 
 .mr-2 {
@@ -874,6 +882,10 @@ video {
 
 .w-16 {
   width: 4rem;
+}
+
+.w-28 {
+  width: 7rem;
 }
 
 .w-6 {
@@ -1055,6 +1067,10 @@ video {
   align-items: center;
 }
 
+.items-baseline {
+  align-items: baseline;
+}
+
 .justify-end {
   justify-content: flex-end;
 }
@@ -1093,6 +1109,18 @@ video {
 
 .gap-6 {
   gap: 24px;
+}
+
+.space-y-0 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-y-reverse: 0;
+  margin-top: calc(0px * calc(1 - var(--tw-space-y-reverse)));
+  margin-bottom: calc(0px * var(--tw-space-y-reverse));
+}
+
+.space-y-0\.5 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-y-reverse: 0;
+  margin-top: calc(1px * calc(1 - var(--tw-space-y-reverse)));
+  margin-bottom: calc(1px * var(--tw-space-y-reverse));
 }
 
 .space-y-2 > :not([hidden]) ~ :not([hidden]) {
@@ -1520,6 +1548,18 @@ video {
   background-color: transparent;
 }
 
+.bg-vscode-bg {
+  background-color: var(--vscode-editor-background);
+}
+
+.bg-vscode-button-bg {
+  background-color: var(--vscode-button-background);
+}
+
+.bg-vscode-input-bg {
+  background-color: var(--vscode-input-background);
+}
+
 .bg-white {
   --tw-bg-opacity: 1;
   background-color: rgb(255 255 255 / var(--tw-bg-opacity));
@@ -1655,6 +1695,16 @@ video {
   padding: 32px;
 }
 
+.px-1 {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.px-1\.5 {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
 .px-2 {
   padding-left: 8px;
   padding-right: 8px;
@@ -1725,6 +1775,10 @@ video {
   padding-bottom: 24px;
 }
 
+.pb-2 {
+  padding-bottom: 8px;
+}
+
 .pb-3 {
   padding-bottom: 12px;
 }
@@ -1735,6 +1789,10 @@ video {
 
 .pl-10 {
   padding-left: 2.5rem;
+}
+
+.pt-2 {
+  padding-top: 8px;
 }
 
 .text-left {
@@ -1768,6 +1826,10 @@ video {
 .text-6xl {
   font-size: 3.75rem;
   line-height: 1;
+}
+
+.text-\[10px\] {
+  font-size: 10px;
 }
 
 .text-base {
@@ -1806,12 +1868,20 @@ video {
   text-transform: uppercase;
 }
 
+.leading-normal {
+  line-height: 1.5;
+}
+
 .leading-relaxed {
   line-height: 1.625;
 }
 
 .leading-tight {
   line-height: 1.2;
+}
+
+.tracking-wide {
+  letter-spacing: 0.025em;
 }
 
 .tracking-wider {
@@ -2006,6 +2076,18 @@ video {
   color: rgb(17 94 89 / var(--tw-text-opacity));
 }
 
+.text-vscode-button-fg {
+  color: var(--vscode-button-foreground);
+}
+
+.text-vscode-fg {
+  color: var(--vscode-editor-foreground);
+}
+
+.text-vscode-input-fg {
+  color: var(--vscode-input-foreground);
+}
+
 .text-white {
   --tw-text-opacity: 1;
   color: rgb(255 255 255 / var(--tw-text-opacity));
@@ -2024,8 +2106,20 @@ video {
   opacity: 1;
 }
 
+.opacity-40 {
+  opacity: 0.4;
+}
+
 .opacity-50 {
   opacity: 0.5;
+}
+
+.opacity-70 {
+  opacity: 0.7;
+}
+
+.opacity-80 {
+  opacity: 0.8;
 }
 
 .shadow-2xl {
@@ -2273,6 +2367,14 @@ video {
 .hover\:bg-purple-200:hover {
   --tw-bg-opacity: 1;
   background-color: rgb(233 213 255 / var(--tw-bg-opacity));
+}
+
+.hover\:bg-vscode-button-hover:hover {
+  background-color: var(--vscode-button-hoverBackground);
+}
+
+.hover\:bg-vscode-list-hover:hover {
+  background-color: var(--vscode-list-hoverBackground);
 }
 
 .hover\:text-bsl-slate-900:hover {

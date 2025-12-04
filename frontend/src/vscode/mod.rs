@@ -8,6 +8,7 @@ pub mod common;
 pub mod quick_actions_app;
 pub mod quick_actions_panel;
 pub mod type_details_app;
+pub mod type_details_simple;
 
 #[cfg(test)]
 mod tests;

@@ -122,6 +122,23 @@ export default {
   theme: {
     extend: {
       colors: {
+        // VSCode CSS Variables (for webview integration)
+        // These map to VSCode's built-in CSS variables
+        vscode: {
+          bg: 'var(--vscode-editor-background)',
+          fg: 'var(--vscode-editor-foreground)',
+          'input-bg': 'var(--vscode-input-background)',
+          'input-fg': 'var(--vscode-input-foreground)',
+          'button-bg': 'var(--vscode-button-background)',
+          'button-fg': 'var(--vscode-button-foreground)',
+          'button-hover': 'var(--vscode-button-hoverBackground)',
+          'list-hover': 'var(--vscode-list-hoverBackground)',
+          'border': 'var(--vscode-panel-border)',
+          'link': 'var(--vscode-textLink-foreground)',
+          'error': 'var(--vscode-errorForeground)',
+          'warning': 'var(--vscode-editorWarning-foreground)',
+          'success': 'var(--vscode-terminal-ansiGreen)',
+        },
         // BSL custom color palette
         bsl: {
           // Primitives

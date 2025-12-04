@@ -64,6 +64,19 @@ for (const webview of webviews) {
                 const src = path.join(tempDist, file);
                 const dest = path.join(WEBVIEW_DIST, file);
 
+                // Check if it's a directory (e.g., snippets from inline_js)
+                const stats = fs.statSync(src);
+                if (stats.isDirectory()) {
+                    // Recursively copy directory
+                    if (!fs.existsSync(dest)) {
+                        fs.cpSync(src, dest, { recursive: true });
+                        console.log(`   ✅ ${file}/ (directory)`);
+                    } else {
+                        console.log(`   ⏭️  ${file}/ (directory exists, skipping)`);
+                    }
+                    continue;
+                }
+
                 // Копируем только если файл не существует ИЛИ это CSS файл (CSS уникальны)
                 const isCss = file.endsWith('.css');
                 const exists = fs.existsSync(dest);

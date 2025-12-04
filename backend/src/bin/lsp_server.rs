@@ -162,10 +162,10 @@ struct CallContext {
     call_start: Position,
 }
 
-/// Записывает сообщение в vscode-extension/progress_debug.log с временной меткой
-/// Использует абсолютный путь (как и rust_lsp_server.log)
+/// Записывает сообщение в progress_debug.log с временной меткой
+/// Логи пишутся в текущую рабочую директорию (там где запущен LSP сервер)
 fn log_progress_to_file(message: &str) {
-    let log_path = "C:\\1CProject\\bsl-gradual-types\\vscode-extension\\progress_debug.log";
+    let log_path = "progress_debug.log";
     let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
     let log_line = format!("[{}] {}\n", timestamp, message);
 
@@ -3406,11 +3406,12 @@ fn extract_return_type_from_node(
 async fn main() -> Result<()> {
     // ОТЛАДКА: логируем в файл, чтобы увидеть что происходит при запуске из VSCode
     // ✅ MILESTONE 2.10: Перезаписываем файл при каждом запуске (.write(true).truncate(true))
+    // Логи пишутся в текущую рабочую директорию (кросс-платформенно)
     let log_file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true) // Очищаем файл при каждом запуске
-        .open("C:\\1CProject\\bsl-gradual-types\\vscode-extension\\rust_lsp_server.log")
+        .open("rust_lsp_server.log")
         .expect("Failed to create log file");
 
     // Настраиваем логирование В ФАЙЛ вместо stderr
@@ -3441,7 +3442,7 @@ async fn main() -> Result<()> {
         .create(true)
         .write(true)
         .truncate(true) // Перезатираем файл при старте
-        .open("C:\\1CProject\\bsl-gradual-types\\vscode-extension\\progress_debug.log")
+        .open("progress_debug.log")
     {
         use std::io::Write;
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");

@@ -17949,7 +17949,7 @@ function getBinaryPath(binaryName, extensionContext2) {
   const useBundled = BslAnalyzerConfig.useBundledBinaries;
   if (useBundled) {
     if (extensionContext2) {
-      const contextBinPath = path.join(extensionContext2.extensionPath, "bin", `${binaryName}.exe`);
+      const contextBinPath = path.join(extensionContext2.extensionPath, "bin", `${binaryName}${EXE_EXT}`);
       if (fs.existsSync(contextBinPath)) {
         outputChannel2?.appendLine(`\u2705 Using bundled binary from context: ${contextBinPath}`);
         return contextBinPath;
@@ -17957,7 +17957,7 @@ function getBinaryPath(binaryName, extensionContext2) {
     }
     const extensionPath = vscode3.extensions.getExtension("bsl-analyzer-team.bsl-type-safety-analyzer")?.extensionPath;
     if (extensionPath) {
-      const bundledBinPath = path.join(extensionPath, "bin", `${binaryName}.exe`);
+      const bundledBinPath = path.join(extensionPath, "bin", `${binaryName}${EXE_EXT}`);
       if (fs.existsSync(bundledBinPath)) {
         outputChannel2?.appendLine(`\u2705 Using bundled binary: ${bundledBinPath}`);
         return bundledBinPath;
@@ -17965,7 +17965,7 @@ function getBinaryPath(binaryName, extensionContext2) {
     }
     const workspacePath = vscode3.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (workspacePath) {
-      const devBinPath = path.join(workspacePath, "vscode-extension", "bin", `${binaryName}.exe`);
+      const devBinPath = path.join(workspacePath, "vscode-extension", "bin", `${binaryName}${EXE_EXT}`);
       if (fs.existsSync(devBinPath)) {
         outputChannel2?.appendLine(`\u2705 Using development binary: ${devBinPath}`);
         return devBinPath;
@@ -17974,18 +17974,18 @@ function getBinaryPath(binaryName, extensionContext2) {
   }
   const binaryPath = BslAnalyzerConfig.binaryPath;
   if (binaryPath) {
-    const externalBinPath = path.join(binaryPath, `${binaryName}.exe`);
+    const externalBinPath = path.join(binaryPath, `${binaryName}${EXE_EXT}`);
     if (fs.existsSync(externalBinPath)) {
       outputChannel2?.appendLine(`\u2705 Using external binary: ${externalBinPath}`);
       return externalBinPath;
     }
     outputChannel2?.appendLine(`\u274C Binary not found in specified path: ${externalBinPath}`);
   }
-  const pathBinary = `${binaryName}.exe`;
+  const pathBinary = `${binaryName}${EXE_EXT}`;
   outputChannel2?.appendLine(`\u26A0\uFE0F Attempting to use binary from PATH: ${pathBinary}`);
   return pathBinary;
 }
-var vscode3, path, fs, outputChannel2;
+var vscode3, path, fs, EXE_EXT, outputChannel2;
 var init_binaryPath = __esm({
   "src/utils/binaryPath.ts"() {
     "use strict";
@@ -17993,6 +17993,7 @@ var init_binaryPath = __esm({
     path = __toESM(require("path"));
     fs = __toESM(require("fs"));
     init_configHelper();
+    EXE_EXT = process.platform === "win32" ? ".exe" : "";
   }
 });
 
@@ -19486,7 +19487,9 @@ var BslActionsWebviewProvider = class {
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [
-        vscode13.Uri.joinPath(this.extensionUri, "media", "webview")
+        vscode13.Uri.joinPath(this.extensionUri, "media", "webview"),
+        // Include snippets subdirectory for inline_js support
+        vscode13.Uri.joinPath(this.extensionUri, "media", "webview", "snippets")
       ]
     };
     webviewView.webview.html = this.getWebviewContent(webviewView.webview);

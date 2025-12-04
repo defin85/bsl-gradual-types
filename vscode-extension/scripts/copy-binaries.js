@@ -21,17 +21,21 @@ function log(message, color = colors.reset) {
     console.log(`${color}${message}${colors.reset}`);
 }
 
+// Определяем платформу
+const isWindows = process.platform === 'win32';
+const EXE_EXT = isWindows ? '.exe' : '';
+
 // Пути
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const EXTENSION_BIN_DIR = path.join(__dirname, '..', 'bin');
 const TARGET_RELEASE_DIR = path.join(PROJECT_ROOT, 'target', 'release');
 
-// Конфигурация бинарников
+// Конфигурация бинарников (расширение добавляется динамически)
 const BINARIES = [
     {
         name: 'LSP Server',
-        source: 'bsl-lsp-server.exe',
-        target: 'lsp-server.exe',
+        source: `bsl-lsp-server${EXE_EXT}`,
+        target: `lsp-server${EXE_EXT}`,
         description: 'Language Server Protocol server для VSCode'
     }
 ];
@@ -129,6 +133,7 @@ function buildRustBinaries(force = false) {
 function main() {
     log('🚀 BSL Gradual Types - Синхронизация бинарников', colors.cyan);
     log('=' .repeat(60), colors.cyan);
+    log(`🖥️  Платформа: ${process.platform} (${isWindows ? 'Windows' : 'Linux/macOS'})`, colors.cyan);
 
     // Создаём директорию bin если не существует
     if (!fileExists(EXTENSION_BIN_DIR)) {

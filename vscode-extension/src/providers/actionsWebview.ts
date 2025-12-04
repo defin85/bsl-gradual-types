@@ -21,7 +21,9 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: [
-                vscode.Uri.joinPath(this.extensionUri, 'media', 'webview')
+                vscode.Uri.joinPath(this.extensionUri, 'media', 'webview'),
+                // Include snippets subdirectory for inline_js support
+                vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'snippets')
             ]
         };
 

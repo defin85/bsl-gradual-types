@@ -4,25 +4,45 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use web_sys::{console, window};
 
-/// VSCode API handle for postMessage communication
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = ["window"], js_name = acquireVsCodeApi)]
-    fn acquire_vscode_api() -> VsCodeApi;
+// ============================================================================
+// VSCode API - JavaScript Bridge
+// ============================================================================
+// VSCode's acquireVsCodeApi() can only be called ONCE, but VSCode itself
+// caches the result. We use a JS-side cache to be safe.
+
+#[wasm_bindgen(inline_js = r#"
+let cachedVsCodeApi = null;
+
+export function getVsCodeApi() {
+    if (!cachedVsCodeApi) {
+        if (typeof acquireVsCodeApi === 'function') {
+            cachedVsCodeApi = acquireVsCodeApi();
+            console.log('[VSCode WASM] VSCode API acquired successfully');
+        } else {
+            console.error('[VSCode WASM] acquireVsCodeApi is not available!');
+            return null;
+        }
+    }
+    return cachedVsCodeApi;
 }
 
-#[wasm_bindgen]
+export function postMessageToVscode(message) {
+    const api = getVsCodeApi();
+    if (api) {
+        api.postMessage(message);
+        console.log('[VSCode WASM] Message sent:', message);
+        return true;
+    }
+    console.error('[VSCode WASM] Cannot send message - no VSCode API');
+    return false;
+}
+"#)]
 extern "C" {
-    pub type VsCodeApi;
+    #[wasm_bindgen(js_name = getVsCodeApi)]
+    fn get_vscode_api_js() -> JsValue;
 
-    #[wasm_bindgen(method, structural, js_name = postMessage)]
-    pub fn post_message(this: &VsCodeApi, message: &JsValue);
-
-    #[wasm_bindgen(method, structural, js_name = getState)]
-    pub fn get_state(this: &VsCodeApi) -> JsValue;
-
-    #[wasm_bindgen(method, structural, js_name = setState)]
-    pub fn set_state(this: &VsCodeApi, state: &JsValue);
+    #[wasm_bindgen(js_name = postMessageToVscode)]
+    fn post_message_to_vscode_js(message: &JsValue) -> bool;
 }
 
 /// Generic message structure for VSCode communication
@@ -67,16 +87,15 @@ impl<T: Serialize> VsCodeMessage<T> {
 
 /// Send message to VSCode extension via postMessage API
 pub fn send_to_vscode<T: Serialize>(msg: VsCodeMessage<T>) -> Result<(), JsValue> {
-    let vscode_api = acquire_vscode_api();
     let js_value = serde_wasm_bindgen::to_value(&msg)
         .map_err(|e| JsValue::from_str(&format!("Serialization error: {:?}", e)))?;
 
-    vscode_api.post_message(&js_value);
-
-    // Log for debugging
-    console::log_2(&JsValue::from_str("Sent to VSCode:"), &js_value);
-
-    Ok(())
+    // Use JS bridge for VSCode API (handles caching internally)
+    if post_message_to_vscode_js(&js_value) {
+        Ok(())
+    } else {
+        Err(JsValue::from_str("Failed to send message to VSCode"))
+    }
 }
 
 /// Setup message listener from VSCode

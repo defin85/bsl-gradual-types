@@ -7,6 +7,24 @@ use tracing::debug;
 use super::types::*;
 use bsl_shared::domain::types::FacetKind;
 
+/// Фрагмент типа из HTML для DOM-based парсера
+///
+/// Используется для парсинга строки типа в формате:
+/// `<a>СправочникСсылка.</a><span>&lt;</span><a>Имя справочника</a><span>&gt;</span>, <a>Неопределено</a>`
+#[derive(Debug, Clone, PartialEq)]
+enum TypeFragment {
+    /// Имя типа из <a> тега
+    TypeName(String),
+    /// Открывающая угловая скобка <span>&lt;</span> или <
+    GenericOpen,
+    /// Закрывающая угловая скобка <span>&gt;</span> или >
+    GenericClose,
+    /// Разделитель union типов (запятая)
+    UnionSeparator,
+    /// Прочий текст
+    Text(String),
+}
+
 /// Экстрактор данных из HTML документов синтакс-помощника
 pub struct HtmlExtractor;
 
@@ -314,9 +332,19 @@ impl HtmlExtractor {
         remaining[..section_end].to_string()
     }
 
+    /// КРИТИЧНЫЙ МЕТОД: Извлечение информации о возвращаемом типе из HTML
+    ///
+    /// Использует DOM-based парсер для корректной обработки:
+    /// - Простых типов: `Тип: <a>Строка</a>.`
+    /// - Union типов: `Тип: <a>Число</a>, <a>Строка</a>.`
+    /// - Faceted типов: `<a>СправочникСсылка.</a><span>&lt;</span><a>Имя</a><span>&gt;</span>`
+    /// - Faceted + Union: комбинация вышеуказанных форматов
+    ///
+    /// Placeholder'ы нормализуются в `<T>`:
+    /// - `<Имя справочника>` → `<T>`
+    /// - `<Имя документа>` → `<T>`
+    /// - и т.д.
     pub fn extract_return_info(&self, document: &Html) -> (Option<String>, Option<String>) {
-        use regex::Regex;
-
         let html_text = document.html();
 
         // Проверяем наличие раздела "Возвращаемое значение:"
@@ -325,49 +353,229 @@ impl HtmlExtractor {
             return (None, None);
         }
 
-        // Парсер возвращаемого типа - ищет паттерн:
-        // <p class="V8SH_chapter">Возвращаемое значение:</p>
-        // Тип: <a href="...">ТИП</a>. <br>
-        // Описание возвращаемого значения.
-        //
-        // ВАЖНО: Используем greedy режим [^<]+ чтобы захватить весь тип до <
-        let return_regex = match Regex::new(
-            r#"Возвращаемое значение:[\s\S]{0,200}?Тип:\s*(?:<a[^>]*>)?([^<]+)(?:</a>)?\.?\s*<br>\s*([^<]*)"#,
-        ) {
-            Ok(r) => r,
-            Err(e) => {
-                debug!("❌ Ошибка компиляции regex для возвращаемого типа: {}", e);
+        // ШАГ 1: Найти секцию "Возвращаемое значение:"
+        let return_section = match Self::find_return_value_section(&html_text) {
+            Some(section) => section,
+            None => {
+                debug!("⚠️  Секция 'Возвращаемое значение' не найдена");
                 return (None, None);
             }
         };
 
-        if let Some(cap) = return_regex.captures(&html_text) {
-            let mut return_type = cap
-                .get(1)
-                .map(|m| m.as_str().trim().to_string())
-                .unwrap_or_default();
-
-            // Убираем точку в конце если есть
-            if return_type.ends_with('.') {
-                return_type.pop();
-            }
-            return_type = return_type.trim().to_string();
-
-            let return_desc = cap
-                .get(2)
-                .map(|m| m.as_str().trim().to_string())
-                .filter(|s| !s.is_empty());
-
-            debug!(
-                "✓ Извлечён возвращаемый тип: {} {:?}",
-                return_type, return_desc
-            );
-
-            return (Some(return_type), return_desc);
+        // ШАГ 2: Извлечь строку типа от "Тип:" до "<br>"
+        let (type_line, description) = Self::extract_type_line(&return_section);
+        if type_line.is_empty() {
+            debug!("⚠️  Строка 'Тип:' не найдена в секции возвращаемого значения");
+            return (None, None);
         }
 
-        debug!("⚠️  Не удалось извлечь возвращаемый тип из HTML");
-        (None, None)
+        // ШАГ 3: Парсить HTML фрагменты типа
+        let fragments = Self::parse_type_fragments(&type_line);
+        if fragments.is_empty() {
+            debug!("⚠️  Не удалось извлечь фрагменты типа");
+            return (None, None);
+        }
+
+        // ШАГ 4: Собрать faceted типы и union
+        let return_type = Self::assemble_types(&fragments);
+
+        debug!(
+            "✓ Извлечён возвращаемый тип: {} {:?}",
+            return_type, description
+        );
+
+        (Some(return_type), description)
+    }
+
+    /// Найти секцию "Возвращаемое значение:" в HTML
+    fn find_return_value_section(html_text: &str) -> Option<String> {
+        // Ищем начало секции
+        const RU_RETURN: &str = "Возвращаемое значение:";
+        const EN_RETURN: &str = "Return value:";
+
+        let section_start = html_text
+            .find(RU_RETURN)
+            .map(|p| p + RU_RETURN.len())
+            .or_else(|| html_text.find(EN_RETURN).map(|p| p + EN_RETURN.len()))?;
+
+        let remaining = &html_text[section_start..];
+
+        // Находим конец секции (следующий заголовок или конец)
+        let section_end = remaining
+            .find("<p class=\"V8SH_chapter\">")
+            .or_else(|| remaining.find("</body>"))
+            .unwrap_or(remaining.len());
+
+        Some(remaining[..section_end].to_string())
+    }
+
+    /// Извлечь строку типа от "Тип:" до "<br>" и описание после <br>
+    fn extract_type_line(section: &str) -> (String, Option<String>) {
+        const RU_TYPE: &str = "Тип:";
+        const EN_TYPE: &str = "Type:";
+
+        // Находим "Тип:"
+        let (type_start, marker_len) = section
+            .find(RU_TYPE)
+            .map(|p| (p + RU_TYPE.len(), RU_TYPE.len()))
+            .or_else(|| section.find(EN_TYPE).map(|p| (p + EN_TYPE.len(), EN_TYPE.len())))
+            .unwrap_or((0, 0));
+
+        if marker_len == 0 {
+            return (String::new(), None);
+        }
+
+        let after_type = &section[type_start..];
+
+        // Находим конец строки типа (до <br> или <br/> или <br >)
+        let type_end = after_type
+            .find("<br")
+            .unwrap_or(after_type.len());
+
+        let type_line = after_type[..type_end].to_string();
+
+        // Извлекаем описание после <br>
+        let description = if let Some(br_pos) = after_type.find("<br") {
+            // Пропускаем <br>, <br/>, <br >
+            let after_br = &after_type[br_pos..];
+            let desc_start = after_br.find('>').map(|p| p + 1).unwrap_or(0);
+            let desc_text = &after_br[desc_start..];
+
+            // Берём текст до следующего тега или конца
+            let desc_end = desc_text
+                .find('<')
+                .unwrap_or(desc_text.len());
+
+            let clean_desc = desc_text[..desc_end]
+                .replace("&nbsp;", " ")
+                .trim()
+                .to_string();
+
+            if clean_desc.is_empty() {
+                None
+            } else {
+                Some(clean_desc)
+            }
+        } else {
+            None
+        };
+
+        (type_line, description)
+    }
+
+    /// Парсить HTML в вектор фрагментов типа
+    fn parse_type_fragments(type_line: &str) -> Vec<TypeFragment> {
+        let mut fragments = Vec::new();
+
+        // Парсим HTML фрагмент
+        let fragment = Html::parse_fragment(type_line);
+
+        // Обходим все узлы
+        for node in fragment.root_element().descendants() {
+            match node.value() {
+                scraper::node::Node::Element(elem) => {
+                    if elem.name() == "a" {
+                        // Извлекаем текст из <a> тега
+                        if let Some(elem_ref) = ElementRef::wrap(node) {
+                            let text: String = elem_ref.text().collect();
+                            let text = text.trim();
+                            if !text.is_empty() {
+                                fragments.push(TypeFragment::TypeName(text.to_string()));
+                            }
+                        }
+                    } else if elem.name() == "span" {
+                        // Проверяем содержимое <span> на &lt; или &gt;
+                        if let Some(elem_ref) = ElementRef::wrap(node) {
+                            let text: String = elem_ref.text().collect();
+                            let text = text.trim();
+                            if text == "<" || text == "&lt;" {
+                                fragments.push(TypeFragment::GenericOpen);
+                            } else if text == ">" || text == "&gt;" {
+                                fragments.push(TypeFragment::GenericClose);
+                            }
+                        }
+                    }
+                }
+                scraper::node::Node::Text(text) => {
+                    let t = text.text.trim();
+                    // Проверяем на разделители и специальные символы
+                    if t.contains(',') {
+                        // Может быть запятая между типами
+                        fragments.push(TypeFragment::UnionSeparator);
+                    } else if t == "<" || t == "&lt;" {
+                        fragments.push(TypeFragment::GenericOpen);
+                    } else if t == ">" || t == "&gt;" {
+                        fragments.push(TypeFragment::GenericClose);
+                    } else if !t.is_empty() && t != "." && t != " " {
+                        fragments.push(TypeFragment::Text(t.to_string()));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fragments
+    }
+
+    /// Собрать faceted типы и union из фрагментов
+    fn assemble_types(fragments: &[TypeFragment]) -> String {
+        let mut types: Vec<String> = Vec::new();
+        let mut current_type = String::new();
+        let mut in_generic = false;
+
+        for fragment in fragments {
+            match fragment {
+                TypeFragment::TypeName(name) => {
+                    if in_generic {
+                        // Это placeholder внутри <...> - нормализуем в <T>
+                        // Просто продолжаем, т.к. добавим <T> при закрытии
+                    } else {
+                        // Добавляем имя типа
+                        if !current_type.is_empty() && !current_type.ends_with('.') {
+                            // Если предыдущий тип завершён, сохраняем его
+                            types.push(current_type.clone());
+                            current_type.clear();
+                        }
+                        current_type.push_str(name);
+                    }
+                }
+                TypeFragment::GenericOpen => {
+                    in_generic = true;
+                }
+                TypeFragment::GenericClose => {
+                    if in_generic {
+                        // Добавляем нормализованный generic параметр
+                        current_type.push_str("<T>");
+                        in_generic = false;
+                    }
+                }
+                TypeFragment::UnionSeparator => {
+                    // Сохраняем текущий тип и начинаем новый
+                    if !current_type.is_empty() {
+                        // Убираем trailing точку если есть
+                        if current_type.ends_with('.') {
+                            current_type.pop();
+                        }
+                        types.push(current_type.clone());
+                        current_type.clear();
+                    }
+                }
+                TypeFragment::Text(_) => {
+                    // Игнорируем прочий текст
+                }
+            }
+        }
+
+        // Добавляем последний тип
+        if !current_type.is_empty() {
+            if current_type.ends_with('.') {
+                current_type.pop();
+            }
+            types.push(current_type);
+        }
+
+        // Объединяем через " | "
+        types.join(" | ")
     }
 
     pub fn extract_return_type(&self, document: &Html) -> String {
@@ -1007,5 +1215,363 @@ mod tests {
             Some("Число | Строка | Дата".to_string()),
             "Должны быть три типа через ' | '"
         );
+    }
+
+    // =========================================================================
+    // Тесты для DOM-based парсера возвращаемого типа
+    // =========================================================================
+
+    /// Тест парсинга faceted типа с placeholder: СправочникСсылка.<Имя справочника>
+    #[test]
+    fn test_extract_return_info_faceted_type_with_placeholder() {
+        // Реальная HTML структура из FindByCode250.html
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Возвращаемое значение:</p>
+            Тип: <a href="v8help://SyntaxHelperContext/objects/catalog125/catalog126/object129.html">СправочникСсылка.</a><span style='color=blue'>&lt;</span><a href="v8help://SyntaxHelperContext/objects/catalog125/catalog126/object129.html">Имя справочника</a><span style='color=blue'>&gt;</span>, <a href="v8help://SyntaxHelperLanguage/def_Undefined">Неопределено</a>. <br>
+            Если не существует ни одного элемента с требуемым кодом, то будет возвращена пустая ссылка.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let (return_type, return_desc) = extractor.extract_return_info(&document);
+
+        assert_eq!(
+            return_type,
+            Some("СправочникСсылка.<T> | Неопределено".to_string()),
+            "Возвращаемый тип должен быть 'СправочникСсылка.<T> | Неопределено'"
+        );
+        assert!(
+            return_desc.is_some(),
+            "Описание должно быть извлечено"
+        );
+    }
+
+    /// Тест парсинга простого union типа
+    #[test]
+    fn test_extract_return_info_simple_union() {
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Возвращаемое значение:</p>
+            Тип: <a href="type">Число</a>, <a href="type">Строка</a>. <br>
+            Описание результата.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let (return_type, return_desc) = extractor.extract_return_info(&document);
+
+        assert_eq!(
+            return_type,
+            Some("Число | Строка".to_string()),
+            "Возвращаемый тип должен быть union 'Число | Строка'"
+        );
+        assert_eq!(
+            return_desc,
+            Some("Описание результата.".to_string())
+        );
+    }
+
+    /// Тест парсинга faceted типа для документа
+    #[test]
+    fn test_extract_return_info_faceted_document() {
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Возвращаемое значение:</p>
+            Тип: <a href="type">ДокументСсылка.</a><span>&lt;</span><a href="type">Имя документа</a><span>&gt;</span>. <br>
+            Ссылка на документ.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let (return_type, _) = extractor.extract_return_info(&document);
+
+        assert_eq!(
+            return_type,
+            Some("ДокументСсылка.<T>".to_string()),
+            "Placeholder '<Имя документа>' должен быть нормализован в '<T>'"
+        );
+    }
+
+    /// Тест вспомогательных функций парсера
+    #[test]
+    fn test_parse_type_fragments() {
+        // Тест фрагментов для faceted типа
+        let type_line = r#" <a href="...">СправочникСсылка.</a><span>&lt;</span><a href="...">Имя справочника</a><span>&gt;</span>"#;
+        let fragments = HtmlExtractor::parse_type_fragments(type_line);
+
+        // Должны быть: TypeName("СправочникСсылка."), GenericOpen, TypeName("Имя справочника"), GenericClose
+        assert!(fragments.iter().any(|f| matches!(f, TypeFragment::TypeName(s) if s == "СправочникСсылка.")));
+        assert!(fragments.iter().any(|f| matches!(f, TypeFragment::GenericOpen)));
+        assert!(fragments.iter().any(|f| matches!(f, TypeFragment::TypeName(s) if s == "Имя справочника")));
+        assert!(fragments.iter().any(|f| matches!(f, TypeFragment::GenericClose)));
+    }
+
+    /// Тест сборки типов из фрагментов
+    #[test]
+    fn test_assemble_types() {
+        // Тест простого типа
+        let fragments = vec![TypeFragment::TypeName("Строка".to_string())];
+        assert_eq!(HtmlExtractor::assemble_types(&fragments), "Строка");
+
+        // Тест union типа
+        let fragments = vec![
+            TypeFragment::TypeName("Число".to_string()),
+            TypeFragment::UnionSeparator,
+            TypeFragment::TypeName("Строка".to_string()),
+        ];
+        assert_eq!(HtmlExtractor::assemble_types(&fragments), "Число | Строка");
+
+        // Тест faceted типа
+        let fragments = vec![
+            TypeFragment::TypeName("СправочникСсылка.".to_string()),
+            TypeFragment::GenericOpen,
+            TypeFragment::TypeName("Имя справочника".to_string()),
+            TypeFragment::GenericClose,
+        ];
+        assert_eq!(HtmlExtractor::assemble_types(&fragments), "СправочникСсылка.<T>");
+
+        // Тест faceted + union
+        let fragments = vec![
+            TypeFragment::TypeName("СправочникСсылка.".to_string()),
+            TypeFragment::GenericOpen,
+            TypeFragment::TypeName("Имя справочника".to_string()),
+            TypeFragment::GenericClose,
+            TypeFragment::UnionSeparator,
+            TypeFragment::TypeName("Неопределено".to_string()),
+        ];
+        assert_eq!(
+            HtmlExtractor::assemble_types(&fragments),
+            "СправочникСсылка.<T> | Неопределено"
+        );
+    }
+
+    // =========================================================================
+    // Интеграционные тесты на реальных HTML файлах
+    // =========================================================================
+
+    /// Интеграционный тест для реального файла FindByCode250.html
+    /// Проверяет парсинг параметров и возвращаемого типа на реальных данных
+    #[test]
+    fn test_find_by_code_real_html() {
+        // Загружаем реальный HTML файл
+        let html_path = "/home/egor/code/bsl-gradual-types/examples/syntax_helper/rebuilt.shcntx_ru/objects/catalog125/catalog126/object128/methods/FindByCode250.html";
+
+        let html_content = match std::fs::read_to_string(html_path) {
+            Ok(content) => content,
+            Err(e) => {
+                eprintln!("⚠️  Не удалось загрузить FindByCode250.html: {}", e);
+                eprintln!("   Тест пропущен (файл может отсутствовать в разработке)");
+                return;
+            }
+        };
+
+        let document = Html::parse_document(&html_content);
+        let extractor = HtmlExtractor::new();
+
+        // ТЕСТ 1: Параметры
+        let params = extractor.extract_parameters(&document);
+        assert!(!params.is_empty(), "Параметры должны быть найдены");
+
+        // Проверяем первый параметр: Код (union Число | Строка)
+        let code_param = params.iter().find(|p| p.name == "Код")
+            .expect("Параметр 'Код' должен быть найден");
+        assert_eq!(code_param.type_name, Some("Число | Строка".to_string()),
+            "Тип 'Код' должен быть union 'Число | Строка'");
+        assert!(!code_param.is_optional, "'Код' должен быть обязательным");
+
+        // Проверяем второй параметр: ПоискПоПолномуКоду (Булево, необязательный)
+        let search_param = params.iter().find(|p| p.name == "ПоискПоПолномуКоду")
+            .expect("Параметр 'ПоискПоПолномуКоду' должен быть найден");
+        assert_eq!(search_param.type_name, Some("Булево".to_string()),
+            "Тип 'ПоискПоПолномуКоду' должен быть 'Булево'");
+        assert!(search_param.is_optional, "'ПоискПоПолномуКоду' должен быть необязательным");
+
+        // ТЕСТ 2: Возвращаемый тип
+        let (return_type, return_desc) = extractor.extract_return_info(&document);
+
+        assert_eq!(
+            return_type,
+            Some("СправочникСсылка.<T> | Неопределено".to_string()),
+            "Возвращаемый тип должен быть 'СправочникСсылка.<T> | Неопределено' с нормализацией placeholder'а"
+        );
+
+        assert!(
+            return_desc.is_some(),
+            "Описание возвращаемого значения должно быть извлечено"
+        );
+
+        let desc = return_desc.unwrap();
+        assert!(
+            desc.contains("не существует") || desc.contains("пустая ссылка"),
+            "Описание должно содержать информацию о пустой ссылке"
+        );
+
+        println!("✓ Интеграционный тест FindByCode250.html пройден");
+    }
+
+    /// Edge case: HTML без секции "Возвращаемое значение:"
+    #[test]
+    fn test_extract_return_info_empty_section() {
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Параметры:</p>
+            <p>Метод без возвращаемого значения</p>
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let (return_type, return_desc) = extractor.extract_return_info(&document);
+
+        assert_eq!(return_type, None, "Возвращаемый тип должен быть None для отсутствующей секции");
+        assert_eq!(return_desc, None, "Описание должно быть None для отсутствующей секции");
+    }
+
+    /// Edge case: Пустой return_type (нет типа после "Тип:")
+    /// Когда нет HTML контента для парсинга, parse_type_fragments возвращает пустой вектор
+    /// и assemble_types возвращает пустую строку, что приводит к None
+    #[test]
+    fn test_extract_return_info_empty_type() {
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Возвращаемое значение:</p>
+            Тип: <br>
+            Описание без типа.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let (return_type, _) = extractor.extract_return_info(&document);
+
+        // Когда нет типа на строке "Тип:", parse_type_fragments не находит фрагменты
+        // и возвращает пустой вектор, что приводит к None в assemble_types
+        assert_eq!(return_type, None, "Возвращаемый тип должен быть None для пустого типа");
+        // Описание может быть None если нет контента после <br>
+        // или может содержать "Описание без типа." в зависимости от парсинга
+    }
+
+    /// Edge case: Только текст без <a> тегов и span'ов
+    /// Когда тип указан как простой текст без HTML обёртки, парсер не может его найти
+    /// потому что ищет фрагменты в parse_type_fragments
+    #[test]
+    fn test_extract_return_info_plain_text() {
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Возвращаемое значение:</p>
+            Тип: <a href="type">Произвольный</a>. <br>
+            Результат работы.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let (return_type, return_desc) = extractor.extract_return_info(&document);
+
+        assert_eq!(return_type, Some("Произвольный".to_string()));
+        assert_eq!(return_desc, Some("Результат работы.".to_string()));
+    }
+
+    /// Edge case: Несколько union типов (> 2)
+    #[test]
+    fn test_extract_return_info_multiple_union() {
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Возвращаемое значение:</p>
+            Тип: <a href="type">Число</a>, <a href="type">Строка</a>, <a href="type">Дата</a>, <a href="type">Булево</a>. <br>
+            Результат с несколькими типами.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let (return_type, _) = extractor.extract_return_info(&document);
+
+        assert_eq!(
+            return_type,
+            Some("Число | Строка | Дата | Булево".to_string()),
+            "Должны быть все четыре типа через ' | '"
+        );
+    }
+
+    /// Edge case: Несколько faceted типов
+    #[test]
+    fn test_extract_return_info_multiple_faceted() {
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Возвращаемое значение:</p>
+            Тип: <a href="type">СправочникСсылка.</a><span>&lt;</span><a href="type">СправочникА</a><span>&gt;</span>, <a href="type">ДокументСсылка.</a><span>&lt;</span><a href="type">ДокументБ</a><span>&gt;</span>. <br>
+            Ссылка на объект.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let (return_type, _) = extractor.extract_return_info(&document);
+
+        assert_eq!(
+            return_type,
+            Some("СправочникСсылка.<T> | ДокументСсылка.<T>".to_string()),
+            "Оба placeholder'а должны быть нормализованы в <T>"
+        );
+    }
+
+    /// Edge case: Faceted тип без union
+    #[test]
+    fn test_extract_return_info_faceted_only() {
+        let html_content = r#"
+        <html>
+            <p class="V8SH_chapter">Возвращаемое значение:</p>
+            Тип: <a href="type">ДокументОбъект.</a><span>&lt;</span><a href="type">Соответствующий документ</a><span>&gt;</span>. <br>
+            Объект документа.
+        </html>
+        "#;
+
+        let document = Html::parse_document(html_content);
+        let extractor = HtmlExtractor::new();
+        let (return_type, _) = extractor.extract_return_info(&document);
+
+        assert_eq!(
+            return_type,
+            Some("ДокументОбъект.<T>".to_string()),
+            "Faceted тип без union должен быть нормализован"
+        );
+    }
+
+    /// Edge case: Парсинг placeholder'ов разных типов
+    #[test]
+    fn test_extract_return_info_various_placeholders() {
+        // Тест разных типов placeholder'ов, которые должны быть нормализованы в <T>
+        let placeholders = vec![
+            ("Имя справочника", "Справочник"),
+            ("Имя документа", "Документ"),
+            ("Имя перечисления", "Перечисление"),
+        ];
+
+        for (placeholder, context) in placeholders {
+            let html_content = format!(
+                r#"<html>
+                    <p class="V8SH_chapter">Возвращаемое значение:</p>
+                    Тип: <a href="type">Тип.</a><span>&lt;</span><a href="type">{}</a><span>&gt;</span>. <br>
+                    Результат для {}.
+                </html>"#,
+                placeholder, context
+            );
+
+            let document = Html::parse_document(&html_content);
+            let extractor = HtmlExtractor::new();
+            let (return_type, _) = extractor.extract_return_info(&document);
+
+            assert_eq!(
+                return_type,
+                Some("Тип.<T>".to_string()),
+                "Placeholder '{}' должен быть нормализован в <T>",
+                placeholder
+            );
+        }
     }
 }

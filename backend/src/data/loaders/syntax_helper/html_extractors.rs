@@ -4,26 +4,9 @@ use scraper::{ElementRef, Html, Selector};
 use std::path::Path;
 use tracing::debug;
 
+use super::type_parser::{TypeParser, UNION_SEPARATOR};
 use super::types::*;
 use bsl_shared::domain::types::FacetKind;
-
-/// Фрагмент типа из HTML для DOM-based парсера
-///
-/// Используется для парсинга строки типа в формате:
-/// `<a>СправочникСсылка.</a><span>&lt;</span><a>Имя справочника</a><span>&gt;</span>, <a>Неопределено</a>`
-#[derive(Debug, Clone, PartialEq)]
-enum TypeFragment {
-    /// Имя типа из <a> тега
-    TypeName(String),
-    /// Открывающая угловая скобка <span>&lt;</span> или <
-    GenericOpen,
-    /// Закрывающая угловая скобка <span>&gt;</span> или >
-    GenericClose,
-    /// Разделитель union типов (запятая)
-    UnionSeparator,
-    /// Прочий текст
-    Text(String),
-}
 
 /// Экстрактор данных из HTML документов синтакс-помощника
 pub struct HtmlExtractor;
@@ -204,8 +187,8 @@ impl HtmlExtractor {
                     .collect();
 
                 if !types.is_empty() {
-                    // Объединяем union типы через " | "
-                    param_type = types.join(" | ");
+                    // Объединяем union типы через UNION_SEPARATOR
+                    param_type = types.join(UNION_SEPARATOR);
                 } else {
                     // Fallback: если нет <a> тегов, берём текст напрямую
                     let clean_text = type_section
@@ -344,238 +327,11 @@ impl HtmlExtractor {
     /// - `<Имя справочника>` → `<T>`
     /// - `<Имя документа>` → `<T>`
     /// - и т.д.
+    ///
+    /// Делегирует парсинг в `TypeParser` для лучшей модульности.
     pub fn extract_return_info(&self, document: &Html) -> (Option<String>, Option<String>) {
         let html_text = document.html();
-
-        // Проверяем наличие раздела "Возвращаемое значение:"
-        if !html_text.contains("Возвращаемое значение:") && !html_text.contains("Return value:")
-        {
-            return (None, None);
-        }
-
-        // ШАГ 1: Найти секцию "Возвращаемое значение:"
-        let return_section = match Self::find_return_value_section(&html_text) {
-            Some(section) => section,
-            None => {
-                debug!("⚠️  Секция 'Возвращаемое значение' не найдена");
-                return (None, None);
-            }
-        };
-
-        // ШАГ 2: Извлечь строку типа от "Тип:" до "<br>"
-        let (type_line, description) = Self::extract_type_line(&return_section);
-        if type_line.is_empty() {
-            debug!("⚠️  Строка 'Тип:' не найдена в секции возвращаемого значения");
-            return (None, None);
-        }
-
-        // ШАГ 3: Парсить HTML фрагменты типа
-        let fragments = Self::parse_type_fragments(&type_line);
-        if fragments.is_empty() {
-            debug!("⚠️  Не удалось извлечь фрагменты типа");
-            return (None, None);
-        }
-
-        // ШАГ 4: Собрать faceted типы и union
-        let return_type = Self::assemble_types(&fragments);
-
-        debug!(
-            "✓ Извлечён возвращаемый тип: {} {:?}",
-            return_type, description
-        );
-
-        (Some(return_type), description)
-    }
-
-    /// Найти секцию "Возвращаемое значение:" в HTML
-    fn find_return_value_section(html_text: &str) -> Option<String> {
-        // Ищем начало секции
-        const RU_RETURN: &str = "Возвращаемое значение:";
-        const EN_RETURN: &str = "Return value:";
-
-        let section_start = html_text
-            .find(RU_RETURN)
-            .map(|p| p + RU_RETURN.len())
-            .or_else(|| html_text.find(EN_RETURN).map(|p| p + EN_RETURN.len()))?;
-
-        let remaining = &html_text[section_start..];
-
-        // Находим конец секции (следующий заголовок или конец)
-        let section_end = remaining
-            .find("<p class=\"V8SH_chapter\">")
-            .or_else(|| remaining.find("</body>"))
-            .unwrap_or(remaining.len());
-
-        Some(remaining[..section_end].to_string())
-    }
-
-    /// Извлечь строку типа от "Тип:" до "<br>" и описание после <br>
-    fn extract_type_line(section: &str) -> (String, Option<String>) {
-        const RU_TYPE: &str = "Тип:";
-        const EN_TYPE: &str = "Type:";
-
-        // Находим "Тип:"
-        let (type_start, marker_len) = section
-            .find(RU_TYPE)
-            .map(|p| (p + RU_TYPE.len(), RU_TYPE.len()))
-            .or_else(|| section.find(EN_TYPE).map(|p| (p + EN_TYPE.len(), EN_TYPE.len())))
-            .unwrap_or((0, 0));
-
-        if marker_len == 0 {
-            return (String::new(), None);
-        }
-
-        let after_type = &section[type_start..];
-
-        // Находим конец строки типа (до <br> или <br/> или <br >)
-        let type_end = after_type
-            .find("<br")
-            .unwrap_or(after_type.len());
-
-        let type_line = after_type[..type_end].to_string();
-
-        // Извлекаем описание после <br>
-        let description = if let Some(br_pos) = after_type.find("<br") {
-            // Пропускаем <br>, <br/>, <br >
-            let after_br = &after_type[br_pos..];
-            let desc_start = after_br.find('>').map(|p| p + 1).unwrap_or(0);
-            let desc_text = &after_br[desc_start..];
-
-            // Берём текст до следующего тега или конца
-            let desc_end = desc_text
-                .find('<')
-                .unwrap_or(desc_text.len());
-
-            let clean_desc = desc_text[..desc_end]
-                .replace("&nbsp;", " ")
-                .trim()
-                .to_string();
-
-            if clean_desc.is_empty() {
-                None
-            } else {
-                Some(clean_desc)
-            }
-        } else {
-            None
-        };
-
-        (type_line, description)
-    }
-
-    /// Парсить HTML в вектор фрагментов типа
-    fn parse_type_fragments(type_line: &str) -> Vec<TypeFragment> {
-        let mut fragments = Vec::new();
-
-        // Парсим HTML фрагмент
-        let fragment = Html::parse_fragment(type_line);
-
-        // Обходим все узлы
-        for node in fragment.root_element().descendants() {
-            match node.value() {
-                scraper::node::Node::Element(elem) => {
-                    if elem.name() == "a" {
-                        // Извлекаем текст из <a> тега
-                        if let Some(elem_ref) = ElementRef::wrap(node) {
-                            let text: String = elem_ref.text().collect();
-                            let text = text.trim();
-                            if !text.is_empty() {
-                                fragments.push(TypeFragment::TypeName(text.to_string()));
-                            }
-                        }
-                    } else if elem.name() == "span" {
-                        // Проверяем содержимое <span> на &lt; или &gt;
-                        if let Some(elem_ref) = ElementRef::wrap(node) {
-                            let text: String = elem_ref.text().collect();
-                            let text = text.trim();
-                            if text == "<" || text == "&lt;" {
-                                fragments.push(TypeFragment::GenericOpen);
-                            } else if text == ">" || text == "&gt;" {
-                                fragments.push(TypeFragment::GenericClose);
-                            }
-                        }
-                    }
-                }
-                scraper::node::Node::Text(text) => {
-                    let t = text.text.trim();
-                    // Проверяем на разделители и специальные символы
-                    if t.contains(',') {
-                        // Может быть запятая между типами
-                        fragments.push(TypeFragment::UnionSeparator);
-                    } else if t == "<" || t == "&lt;" {
-                        fragments.push(TypeFragment::GenericOpen);
-                    } else if t == ">" || t == "&gt;" {
-                        fragments.push(TypeFragment::GenericClose);
-                    } else if !t.is_empty() && t != "." && t != " " {
-                        fragments.push(TypeFragment::Text(t.to_string()));
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        fragments
-    }
-
-    /// Собрать faceted типы и union из фрагментов
-    fn assemble_types(fragments: &[TypeFragment]) -> String {
-        let mut types: Vec<String> = Vec::new();
-        let mut current_type = String::new();
-        let mut in_generic = false;
-
-        for fragment in fragments {
-            match fragment {
-                TypeFragment::TypeName(name) => {
-                    if in_generic {
-                        // Это placeholder внутри <...> - нормализуем в <T>
-                        // Просто продолжаем, т.к. добавим <T> при закрытии
-                    } else {
-                        // Добавляем имя типа
-                        if !current_type.is_empty() && !current_type.ends_with('.') {
-                            // Если предыдущий тип завершён, сохраняем его
-                            types.push(current_type.clone());
-                            current_type.clear();
-                        }
-                        current_type.push_str(name);
-                    }
-                }
-                TypeFragment::GenericOpen => {
-                    in_generic = true;
-                }
-                TypeFragment::GenericClose => {
-                    if in_generic {
-                        // Добавляем нормализованный generic параметр
-                        current_type.push_str("<T>");
-                        in_generic = false;
-                    }
-                }
-                TypeFragment::UnionSeparator => {
-                    // Сохраняем текущий тип и начинаем новый
-                    if !current_type.is_empty() {
-                        // Убираем trailing точку если есть
-                        if current_type.ends_with('.') {
-                            current_type.pop();
-                        }
-                        types.push(current_type.clone());
-                        current_type.clear();
-                    }
-                }
-                TypeFragment::Text(_) => {
-                    // Игнорируем прочий текст
-                }
-            }
-        }
-
-        // Добавляем последний тип
-        if !current_type.is_empty() {
-            if current_type.ends_with('.') {
-                current_type.pop();
-            }
-            types.push(current_type);
-        }
-
-        // Объединяем через " | "
-        types.join(" | ")
+        TypeParser::parse_return_type(&html_text)
     }
 
     pub fn extract_return_type(&self, document: &Html) -> String {
@@ -1296,12 +1052,14 @@ mod tests {
         );
     }
 
-    /// Тест вспомогательных функций парсера
+    /// Тест вспомогательных функций парсера (делегирован в TypeParser)
     #[test]
     fn test_parse_type_fragments() {
+        use crate::data::loaders::syntax_helper::type_parser::TypeFragment;
+
         // Тест фрагментов для faceted типа
         let type_line = r#" <a href="...">СправочникСсылка.</a><span>&lt;</span><a href="...">Имя справочника</a><span>&gt;</span>"#;
-        let fragments = HtmlExtractor::parse_type_fragments(type_line);
+        let fragments = TypeParser::parse_type_fragments(type_line);
 
         // Должны быть: TypeName("СправочникСсылка."), GenericOpen, TypeName("Имя справочника"), GenericClose
         assert!(fragments.iter().any(|f| matches!(f, TypeFragment::TypeName(s) if s == "СправочникСсылка.")));
@@ -1310,12 +1068,14 @@ mod tests {
         assert!(fragments.iter().any(|f| matches!(f, TypeFragment::GenericClose)));
     }
 
-    /// Тест сборки типов из фрагментов
+    /// Тест сборки типов из фрагментов (делегирован в TypeParser)
     #[test]
     fn test_assemble_types() {
+        use crate::data::loaders::syntax_helper::type_parser::TypeFragment;
+
         // Тест простого типа
         let fragments = vec![TypeFragment::TypeName("Строка".to_string())];
-        assert_eq!(HtmlExtractor::assemble_types(&fragments), "Строка");
+        assert_eq!(TypeParser::assemble_types(&fragments), "Строка");
 
         // Тест union типа
         let fragments = vec![
@@ -1323,7 +1083,7 @@ mod tests {
             TypeFragment::UnionSeparator,
             TypeFragment::TypeName("Строка".to_string()),
         ];
-        assert_eq!(HtmlExtractor::assemble_types(&fragments), "Число | Строка");
+        assert_eq!(TypeParser::assemble_types(&fragments), "Число | Строка");
 
         // Тест faceted типа
         let fragments = vec![
@@ -1332,7 +1092,7 @@ mod tests {
             TypeFragment::TypeName("Имя справочника".to_string()),
             TypeFragment::GenericClose,
         ];
-        assert_eq!(HtmlExtractor::assemble_types(&fragments), "СправочникСсылка.<T>");
+        assert_eq!(TypeParser::assemble_types(&fragments), "СправочникСсылка.<T>");
 
         // Тест faceted + union
         let fragments = vec![
@@ -1344,8 +1104,34 @@ mod tests {
             TypeFragment::TypeName("Неопределено".to_string()),
         ];
         assert_eq!(
-            HtmlExtractor::assemble_types(&fragments),
+            TypeParser::assemble_types(&fragments),
             "СправочникСсылка.<T> | Неопределено"
+        );
+    }
+
+    /// Тест для malformed HTML: unclosed generic (делегирован в TypeParser)
+    #[test]
+    fn test_assemble_types_unclosed_generic() {
+        use crate::data::loaders::syntax_helper::type_parser::TypeFragment;
+
+        // Malformed: открыли generic, но не закрыли
+        let fragments = vec![
+            TypeFragment::TypeName("СправочникСсылка.".to_string()),
+            TypeFragment::GenericOpen,
+            TypeFragment::TypeName("Имя".to_string()),
+            // GenericClose отсутствует
+        ];
+
+        let result = TypeParser::assemble_types(&fragments);
+
+        // Тип должен быть возвращен БЕЗ паники
+        assert!(!result.is_empty(), "Результат не должен быть пустым");
+
+        // Проверяем, что добавлен <T> для robustness
+        // Trailing точка удаляется при финализации типа, поэтому результат без точки
+        assert_eq!(
+            result, "СправочникСсылка<T>",
+            "Unclosed generic должен быть закрыт автоматически"
         );
     }
 

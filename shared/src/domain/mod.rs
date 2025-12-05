@@ -2,6 +2,7 @@
 
 pub mod analysis;
 pub mod code_location; // Code location and execution context determination (Milestone 3.12)
+pub mod facet_utils; // Centralized facet type extraction utilities (Phase 4.1 refactoring)
 pub mod flow_analysis; // Flow-sensitive analysis for tracking type changes
 pub mod generic_inference; // Generic type inference from method calls (Milestone 2.3)
 pub mod metadata_constants; // Centralized metadata collections and faceted types constants
@@ -46,3 +47,4 @@ pub use metadata_constants::{
 pub use metadata_patterns::{ExtractedPattern, MetadataPatternRegistry};
 pub use signature_registry::{SignatureDataSource, SignatureSourceRegistry};
 pub use type_definition_location::{ModulePaths, TypeDefinitionLocation};
+pub use facet_utils::{extract_base_facet_type, extract_placeholder_base_type, is_known_facet_prefix};

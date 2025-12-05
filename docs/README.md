@@ -26,6 +26,7 @@
 - **[Components Detailed](architecture/components-detailed.md)** — детальные компоненты
 - **[Constructor Support](architecture/constructor-support.md)** — поддержка конструкторов
 - **[Milestones History](architecture/milestones-history.md)** — история Milestone 2.8-2.18
+- **[Type Lookup Architecture](guides/type-lookup-architecture.md)** — архитектура поиска типов с фасетами
 
 ### 🎯 [Целевая архитектура](reference/target_architecture/)
 Прагматичная версия «революционной» архитектуры:

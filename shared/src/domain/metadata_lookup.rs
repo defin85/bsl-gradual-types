@@ -112,21 +112,16 @@ impl TypeMetadataLookup {
             return self.get_methods_for_generic(generic_type);
         }
 
-        // ✅ НОВОЕ: Приоритет 1 - Lazy lookup через active_facet
+        // Приоритет 1 - Lazy lookup через active_facet (для конфигурационных типов)
         if let Some(facet) = resolution.active_facet {
             if let Some(facet_methods) = self.get_facet_methods(resolution, facet) {
-                // Нашли методы платформенного типа для фасета
                 return facet_methods;
             }
-            // Если lookup не удался, продолжаем с fallback
         }
 
-        // Извлекаем имя типа для поиска
-        let type_name = self.extract_type_name(resolution);
-
-        if let Some(name) = &type_name {
-            // ✅ ПРИОРИТЕТ: Сначала ищем в signature_index (обогащённые данные)
-            let sig_methods = self.repository.get_methods_from_signature_index(name);
+        // Приоритет 2 - Нормализованное имя типа через SignatureIndex
+        if let Some(name) = self.normalize_type_name(resolution) {
+            let sig_methods = self.repository.get_methods_from_signature_index(&name);
             if !sig_methods.is_empty() {
                 tracing::trace!(
                     "get_methods('{}') → found {} methods in signature_index",
@@ -138,13 +133,26 @@ impl TypeMetadataLookup {
                     .map(Self::method_signature_to_raw)
                     .collect();
             }
+        }
 
-            // Fallback: старая логика для совместимости
-            // Используется для:
-            // - Примитивных типов (Строка, Число)
-            // - Типов без активного фасета
-            // - Случаев когда платформенный тип не загружен в signature_index
-            if let Some(raw) = self.repository.find_type(name) {
+        // Приоритет 3 - Извлекаем имя типа для fallback поиска
+        if let Some(name) = self.extract_type_name(resolution) {
+            // Сначала пробуем SignatureIndex с извлечённым именем
+            let sig_methods = self.repository.get_methods_from_signature_index(&name);
+            if !sig_methods.is_empty() {
+                tracing::trace!(
+                    "get_methods('{}') → found {} methods in signature_index (extracted name)",
+                    name,
+                    sig_methods.len()
+                );
+                return sig_methods
+                    .into_iter()
+                    .map(Self::method_signature_to_raw)
+                    .collect();
+            }
+
+            // Fallback: для типов не в SignatureIndex (примитивные, тестовые)
+            if let Some(raw) = self.repository.find_type(&name) {
                 tracing::trace!(
                     "get_methods('{}') → fallback to raw types ({} methods)",
                     name,
@@ -153,10 +161,31 @@ impl TypeMetadataLookup {
                 return raw.methods.clone();
             }
 
-            // MILESTONE 5.3 FIX: Для фасетных типов (СправочникСсылка.Контрагенты)
-            // извлекаем базовый тип (СправочникСсылка) и ищем методы в нём
-            if let Some(base_type) = Self::extract_base_facet_type(name) {
+            // Fallback для фасетных типов: извлекаем базовый тип
+            if let Some(base_type) = super::facet_utils::extract_base_facet_type(&name) {
+                // Сначала пробуем SignatureIndex
+                let sig_methods = self.repository.get_methods_from_signature_index(base_type);
+                if !sig_methods.is_empty() {
+                    tracing::trace!(
+                        "get_methods('{}') → found {} methods via base type '{}' in signature_index",
+                        name,
+                        sig_methods.len(),
+                        base_type
+                    );
+                    return sig_methods
+                        .into_iter()
+                        .map(Self::method_signature_to_raw)
+                        .collect();
+                }
+
+                // Затем raw types
                 if let Some(raw) = self.repository.find_type(base_type) {
+                    tracing::trace!(
+                        "get_methods('{}') → fallback via base type '{}' ({} methods)",
+                        name,
+                        base_type,
+                        raw.methods.len()
+                    );
                     return raw.methods.clone();
                 }
             }
@@ -165,39 +194,25 @@ impl TypeMetadataLookup {
         vec![]
     }
 
-    /// MILESTONE 5.3: Извлечь базовый фасетный тип из полного имени
+    /// Нормализует имя типа для поиска в SignatureIndex
     ///
-    /// # Примеры
-    /// - "СправочникСсылка.Контрагенты" → "СправочникСсылка"
-    /// - "ДокументОбъект.ЗаказКлиента" → "ДокументОбъект"
-    /// - "Массив" → None (не фасетный)
-    fn extract_base_facet_type(type_name: &str) -> Option<&str> {
-        // Список известных фасетных типов
-        const FACET_PREFIXES: &[&str] = &[
-            "СправочникМенеджер", "СправочникСсылка", "СправочникОбъект", "СправочникВыборка", "СправочникСписок",
-            "ДокументМенеджер", "ДокументСсылка", "ДокументОбъект", "ДокументВыборка", "ДокументСписок",
-            "ПланВидовХарактеристикМенеджер", "ПланВидовХарактеристикСсылка", "ПланВидовХарактеристикОбъект",
-            "ПланСчетовМенеджер", "ПланСчетовСсылка", "ПланСчетовОбъект",
-            "ПланВидовРасчетаМенеджер", "ПланВидовРасчетаСсылка", "ПланВидовРасчетаОбъект",
-            "БизнесПроцессМенеджер", "БизнесПроцессСсылка", "БизнесПроцессОбъект",
-            "ЗадачаМенеджер", "ЗадачаСсылка", "ЗадачаОбъект",
-            "РегистрСведенийМенеджер", "РегистрСведенийНаборЗаписей", "РегистрСведенийЗапись",
-            "РегистрНакопленияМенеджер", "РегистрНакопленияНаборЗаписей", "РегистрНакопленияЗапись",
-            "РегистрБухгалтерииМенеджер", "РегистрБухгалтерииНаборЗаписей", "РегистрБухгалтерииЗапись",
-            "РегистрРасчетаМенеджер", "РегистрРасчетаНаборЗаписей", "РегистрРасчетаЗапись",
-        ];
-
-        for prefix in FACET_PREFIXES {
-            if type_name.starts_with(prefix) && type_name.len() > prefix.len() {
-                // Проверяем что после prefix идёт точка
-                let suffix = &type_name[prefix.len()..];
-                if suffix.starts_with('.') {
-                    return Some(*prefix);
+    /// Учитывает active_facet для построения имени платформенного типа.
+    ///
+    /// # Возвращает
+    /// * `Some(String)` - нормализованное имя типа для SignatureIndex
+    /// * `None` - если тип не поддерживается
+    fn normalize_type_name(&self, resolution: &TypeResolution) -> Option<String> {
+        // 1. Если есть active_facet → строим platform facet type name
+        if let Some(facet) = resolution.active_facet {
+            if let Some(metadata_kind) = self.extract_metadata_kind(resolution) {
+                if let Some(platform_name) = Self::get_platform_facet_type(metadata_kind, facet) {
+                    return Some(platform_name.to_string());
                 }
             }
         }
 
-        None
+        // 2. Fallback на extract_type_name
+        self.extract_type_name(resolution)
     }
 
     /// Получить свойства для TypeResolution
@@ -624,11 +639,26 @@ impl TypeMetadataLookup {
 
         // Если не найдено, пробуем извлечь базовый тип ("ДокументМенеджер")
         // Это нужно для тестов, которые создают типы без placeholder
-        if let Some(base_type_name) =
-            crate::domain::signature_index::SignatureIndex::extract_base_facet_type(
-                platform_type_name,
-            )
+        if let Some(base_type_name) = super::facet_utils::extract_base_facet_type(platform_type_name)
         {
+            // Сначала пробуем SignatureIndex с базовым типом
+            let sig_methods = self.repository.get_methods_from_signature_index(base_type_name);
+            if !sig_methods.is_empty() {
+                tracing::trace!(
+                    "get_facet_methods('{}') → found {} methods via base type '{}' in signature_index",
+                    platform_type_name,
+                    sig_methods.len(),
+                    base_type_name
+                );
+                return Some(
+                    sig_methods
+                        .into_iter()
+                        .map(Self::method_signature_to_raw)
+                        .collect(),
+                );
+            }
+
+            // Затем fallback на raw types
             if let Some(platform_type) = self.repository.find_type(base_type_name) {
                 tracing::trace!(
                     "get_facet_methods('{}') → fallback to raw types via base type '{}' ({} methods)",

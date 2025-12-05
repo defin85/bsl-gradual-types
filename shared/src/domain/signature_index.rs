@@ -323,35 +323,63 @@ impl SignatureIndex {
     /// Это позволяет "обогащать" методы из syntax_helper (без return types)
     /// данными из platform_types.rs (с return types).
     pub fn add_platform_method(&mut self, type_name: String, method: MethodSignature) {
-        let methods = self.platform_methods.entry(type_name).or_default();
+        let methods = self.platform_methods.entry(type_name.clone()).or_default();
 
         // Ищем существующий метод с таким же именем (регистронезависимо)
         let method_name_lower = method.name.to_lowercase();
         if let Some(existing) = methods.iter_mut().find(|m| m.name.to_lowercase() == method_name_lower) {
             // Обновляем return_type если у существующего None/пустой
             if existing.return_type.as_ref().map_or(true, |s| s.is_empty()) {
-                if method.return_type.is_some() {
+                if let Some(ref new_return_type) = method.return_type {
+                    tracing::debug!(
+                        "Merge {}.{}: return_type updated to '{}'",
+                        type_name, method.name, new_return_type
+                    );
                     existing.return_type = method.return_type;
                 }
+            } else if method.return_type.is_some() && existing.return_type != method.return_type {
+                // Конфликт: оба return_type непустые, но разные
+                tracing::warn!(
+                    "Merge conflict {}.{}: return_type '{}' vs '{}' - keeping first",
+                    type_name, method.name,
+                    existing.return_type.as_deref().unwrap_or("None"),
+                    method.return_type.as_deref().unwrap_or("None")
+                );
             }
 
             // Обновляем return_facet если у существующего None
             if existing.return_facet.is_none() && method.return_facet.is_some() {
+                tracing::debug!(
+                    "Merge {}.{}: return_facet updated to {:?}",
+                    type_name, method.name, method.return_facet
+                );
                 existing.return_facet = method.return_facet;
             }
 
             // Обновляем context_requirements если у существующего Universal
             if existing.context_requirements == ContextRequirements::Universal
                && method.context_requirements != ContextRequirements::Universal {
+                tracing::debug!(
+                    "Merge {}.{}: context_requirements updated to {:?}",
+                    type_name, method.name, method.context_requirements
+                );
                 existing.context_requirements = method.context_requirements;
             }
 
             // Обновляем params если у существующего пусто
             if existing.params.is_empty() && !method.params.is_empty() {
+                tracing::debug!(
+                    "Merge {}.{}: params updated ({} params)",
+                    type_name, method.name, method.params.len()
+                );
                 existing.params = method.params;
             }
         } else {
             // Метод не найден - добавляем новый
+            tracing::trace!(
+                "Add new method {}.{} (return_type: {:?})",
+                type_name, method.name, method.return_type
+            );
             methods.push(method);
         }
     }
@@ -1757,5 +1785,202 @@ mod tests {
         assert!(found.is_some());
         assert_eq!(found.unwrap().params.len(), 1);
         assert_eq!(found.unwrap().params[0].name, "Индекс");
+    }
+
+    // ================= PHASE 3: Enhanced Merge Tests =================
+
+    /// Тест: syntax_helper (без return) + platform_types (с return) = merged result
+    #[test]
+    fn test_merge_syntax_helper_then_platform_types() {
+        let mut index = SignatureIndex::new();
+
+        // Шаг 1: syntax_helper добавляет метод БЕЗ return_type
+        let sig_syntax_helper = MethodSignature::new(
+            "СоздатьЭлемент".to_string(),
+            Some("СправочникМенеджер".to_string()),
+            vec![], // Нет параметров
+            None,   // Нет return_type (syntax_helper не парсит return types)
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+        index.add_platform_method("СправочникМенеджер".to_string(), sig_syntax_helper);
+
+        // Шаг 2: platform_types добавляет тот же метод С return_type
+        let sig_platform_types = MethodSignature::new(
+            "СоздатьЭлемент".to_string(),
+            Some("СправочникМенеджер".to_string()),
+            vec![],
+            Some("СправочникОбъект.<Имя справочника>".to_string()), // С return_type
+            SignatureSource::Platform,
+            Some(FacetKind::Object),
+            ContextRequirements::ServerOnly,
+        );
+        index.add_platform_method("СправочникМенеджер".to_string(), sig_platform_types);
+
+        // Проверяем результат merge
+        let found = index.find_method("СправочникМенеджер", "СоздатьЭлемент");
+        assert!(found.is_some(), "Метод должен быть найден");
+
+        let method = found.unwrap();
+        assert_eq!(
+            method.return_type,
+            Some("СправочникОбъект.<Имя справочника>".to_string()),
+            "return_type должен быть заполнен из platform_types"
+        );
+        assert_eq!(
+            method.return_facet,
+            Some(FacetKind::Object),
+            "return_facet должен быть Object"
+        );
+        assert_eq!(
+            method.context_requirements,
+            ContextRequirements::ServerOnly,
+            "context_requirements должен быть ServerOnly"
+        );
+    }
+
+    /// Тест: порядок merge не влияет на результат (platform_types первый)
+    #[test]
+    fn test_merge_order_independence_platform_first() {
+        let mut index = SignatureIndex::new();
+
+        // Шаг 1: platform_types ПЕРВЫМ добавляет метод С return_type
+        let sig_platform_types = MethodSignature::new(
+            "НайтиПоКоду".to_string(),
+            Some("СправочникМенеджер".to_string()),
+            vec![],
+            Some("СправочникСсылка".to_string()),
+            SignatureSource::Platform,
+            Some(FacetKind::Reference),
+            ContextRequirements::ServerOnly,
+        );
+        index.add_platform_method("СправочникМенеджер".to_string(), sig_platform_types);
+
+        // Шаг 2: syntax_helper ВТОРЫМ добавляет тот же метод БЕЗ return_type
+        let sig_syntax_helper = MethodSignature::new(
+            "НайтиПоКоду".to_string(),
+            Some("СправочникМенеджер".to_string()),
+            vec![],
+            None, // Нет return_type
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+        index.add_platform_method("СправочникМенеджер".to_string(), sig_syntax_helper);
+
+        // Проверяем что оригинальный return_type сохранился
+        let found = index.find_method("СправочникМенеджер", "НайтиПоКоду");
+        assert!(found.is_some());
+
+        let method = found.unwrap();
+        assert_eq!(
+            method.return_type,
+            Some("СправочникСсылка".to_string()),
+            "return_type должен сохраниться от platform_types"
+        );
+        assert_eq!(
+            method.return_facet,
+            Some(FacetKind::Reference),
+            "return_facet должен сохраниться"
+        );
+        assert_eq!(
+            method.context_requirements,
+            ContextRequirements::ServerOnly,
+            "context_requirements должен сохраниться"
+        );
+    }
+
+    /// Тест: конфликт return_type - первый побеждает (логируется warning)
+    #[test]
+    fn test_merge_conflict_return_type_keeps_first() {
+        let mut index = SignatureIndex::new();
+
+        // Первый источник: return_type = "Число"
+        let sig_first = MethodSignature::new(
+            "Количество".to_string(),
+            Some("Массив".to_string()),
+            vec![],
+            Some("Число".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+        index.add_platform_method("Массив".to_string(), sig_first);
+
+        // Второй источник: return_type = "Строка" (конфликт!)
+        let sig_second = MethodSignature::new(
+            "Количество".to_string(),
+            Some("Массив".to_string()),
+            vec![],
+            Some("Строка".to_string()), // Другой return_type
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+        index.add_platform_method("Массив".to_string(), sig_second);
+
+        // Первый return_type должен сохраниться
+        let found = index.find_method("Массив", "Количество");
+        assert!(found.is_some());
+        assert_eq!(
+            found.unwrap().return_type,
+            Some("Число".to_string()),
+            "При конфликте первый return_type должен сохраниться"
+        );
+    }
+
+    /// Тест: регистронезависимость при merge
+    #[test]
+    fn test_merge_case_insensitive() {
+        let mut index = SignatureIndex::new();
+
+        // Первый: имя в нижнем регистре
+        let sig_lower = MethodSignature::new(
+            "добавить".to_string(), // lower case
+            Some("Массив".to_string()),
+            vec![],
+            None, // Нет return_type
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+        index.add_platform_method("Массив".to_string(), sig_lower);
+
+        // Второй: имя в смешанном регистре с return_type
+        let sig_mixed = MethodSignature::new(
+            "Добавить".to_string(), // Mixed case
+            Some("Массив".to_string()),
+            vec![],
+            Some("Неопределено".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+        index.add_platform_method("Массив".to_string(), sig_mixed);
+
+        // Проверяем что merge произошёл (поиск в любом регистре)
+        let found_lower = index.find_method("Массив", "добавить");
+        let found_upper = index.find_method("Массив", "ДОБАВИТЬ");
+        let found_mixed = index.find_method("Массив", "Добавить");
+
+        assert!(found_lower.is_some(), "Должен найти в lower case");
+        assert!(found_upper.is_some(), "Должен найти в UPPER case");
+        assert!(found_mixed.is_some(), "Должен найти в Mixed case");
+
+        // Все должны указывать на один и тот же метод с merged return_type
+        assert_eq!(
+            found_lower.unwrap().return_type,
+            Some("Неопределено".to_string()),
+            "return_type должен быть merged"
+        );
+        assert_eq!(
+            found_upper.unwrap().return_type,
+            Some("Неопределено".to_string())
+        );
+        assert_eq!(
+            found_mixed.unwrap().return_type,
+            Some("Неопределено".to_string())
+        );
     }
 }

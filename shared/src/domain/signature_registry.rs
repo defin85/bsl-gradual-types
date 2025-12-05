@@ -153,21 +153,39 @@ pub fn raw_method_to_signature(method: &RawMethodData, owner_type: &str) -> Meth
 
 /// Извлекает базовое имя фасетного типа из полного имени с template параметром
 ///
+/// Поддерживает форматы:
+/// - Стандартный: "СправочникМенеджер.<Имя справочника>"
+/// - HTML-encoded: "СправочникМенеджер.&lt;Имя справочника&gt;"
+/// - Английский: "CatalogManager.<Catalog name>"
+///
 /// # Примеры
 /// - "СправочникМенеджер.<Имя справочника>" -> Some("СправочникМенеджер")
 /// - "ДокументОбъект.<Имя документа>" -> Some("ДокументОбъект")
+/// - "СправочникМенеджер.&lt;Имя справочника&gt;" -> Some("СправочникМенеджер")
 /// - "Массив" -> None
 fn extract_base_facet_type_name(type_name: &str) -> Option<&str> {
-    // Ищем паттерн ".<Имя" который указывает на template параметр
+    // Стандартный формат: .<Имя
     if let Some(pos) = type_name.find(".<Имя") {
         return Some(&type_name[..pos]);
     }
-    // Английский вариант
+
+    // HTML-encoded формат: .&lt;Имя
+    if let Some(pos) = type_name.find(".&lt;Имя") {
+        return Some(&type_name[..pos]);
+    }
+
+    // Альтернативный HTML-encoded: .&lt; с любым содержимым
+    if let Some(pos) = type_name.find(".&lt;") {
+        return Some(&type_name[..pos]);
+    }
+
+    // Английский вариант: .< с " name>"
     if let Some(pos) = type_name.find(".<") {
         if type_name[pos..].contains(" name>") {
             return Some(&type_name[..pos]);
         }
     }
+
     None
 }
 
@@ -374,6 +392,7 @@ mod tests {
 
     #[test]
     fn test_extract_base_facet_type_name() {
+        // Стандартный формат
         assert_eq!(
             extract_base_facet_type_name("СправочникМенеджер.<Имя справочника>"),
             Some("СправочникМенеджер")
@@ -382,6 +401,18 @@ mod tests {
             extract_base_facet_type_name("ДокументОбъект.<Имя документа>"),
             Some("ДокументОбъект")
         );
+
+        // HTML-encoded формат
+        assert_eq!(
+            extract_base_facet_type_name("СправочникМенеджер.&lt;Имя справочника&gt;"),
+            Some("СправочникМенеджер")
+        );
+        assert_eq!(
+            extract_base_facet_type_name("ДокументОбъект.&lt;Имя документа&gt;"),
+            Some("ДокументОбъект")
+        );
+
+        // Не-фасетные типы
         assert_eq!(extract_base_facet_type_name("Массив"), None);
         assert_eq!(extract_base_facet_type_name("СправочникМенеджер"), None);
     }

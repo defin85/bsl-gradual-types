@@ -286,6 +286,34 @@ impl<'a> SemanticValidationVisitor<'a> {
     // Phase 4: simple_resolution() и try_parse_faceted_type() удалены
     // IR теперь хранит TypeResolution напрямую, а metadata_lookup корректно
     // обрабатывает Generic типы и фасеты без дополнительной конвертации
+
+    /// MILESTONE 5.5: Извлекает имя коллекции метаданных из MemberAccess
+    ///
+    /// # Алгоритм
+    /// 1. Если `object_name` задан — возвращаем его (legacy path)
+    /// 2. Если `object_node` указывает на GlobalPropertyAccess — извлекаем name
+    /// 3. Иначе — None (не метаданные)
+    fn extract_collection_name_for_metadata(
+        &self,
+        object_name: &Option<String>,
+        object_node: Option<usize>,
+    ) -> Option<String> {
+        // Legacy path: object_name уже содержит имя коллекции
+        if let Some(name) = object_name {
+            return Some(name.clone());
+        }
+
+        // New path (MILESTONE 5.5): извлекаем из GlobalPropertyAccess
+        if let Some(idx) = object_node {
+            if let Some(node) = self.program.nodes.get(idx) {
+                if let SemanticNodeKind::GlobalPropertyAccess { name, .. } = &node.kind {
+                    return Some(name.clone());
+                }
+            }
+        }
+
+        None
+    }
 }
 
 impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
@@ -403,29 +431,29 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 }
             }
             SemanticNodeKind::MemberAccess {
+                object_node,  // MILESTONE 5.5: добавлено для извлечения имени из GlobalPropertyAccess
                 object_name,
                 object_type,
                 member_name,
                 access_kind: MemberAccessKind::Property,
                 ..
             } => {
-                // ✅ MILESTONE 3.16: Валидация доступа к объектам метаданных
-                // Проверяем конструкции вида: Справочники.Контрагенты, Документы.ЗаказПокупателя
-                // ВАЖНО: object_name содержит оригинальное имя ("Документы"),
-                //        object_type содержит трансформированный тип ("ДокументМенеджер.ЗаказКлиента")
-                // Phase 3: object_type теперь TypeResolution
+                // ✅ MILESTONE 5.5 Fix: Извлекаем имя коллекции с учетом object_node
+                let collection_name = self.extract_collection_name_for_metadata(object_name, *object_node);
+
                 tracing::debug!(
-                    "🔍 MemberAccess: object_name={:?}, object_type={}, member_name={}",
-                    object_name, object_type.type_name(), member_name
+                    "🔍 MemberAccess: collection_name={:?}, object_type={}, member_name={}",
+                    collection_name, object_type.type_name(), member_name
                 );
-                if let Some(collection_name) = object_name {
-                    tracing::debug!("🔍 Checking if '{}' is metadata collection: {}", collection_name, is_metadata_collection_name(collection_name));
-                    if is_metadata_collection_name(collection_name) {
+
+                if let Some(ref name) = collection_name {
+                    tracing::debug!("🔍 Checking if '{}' is metadata collection: {}", name, is_metadata_collection_name(name));
+                    if is_metadata_collection_name(name) {
                         // Это обращение к коллекции метаданных - валидируем объект
                         if let Some(error_kind) = self.validate_metadata_member_access(
-                            collection_name,
+                            name,
                             member_name,
-                            Some(collection_name.clone()),
+                            collection_name.clone(),
                         ) {
                             let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                             self.errors.push(diagnostic);

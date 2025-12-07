@@ -1282,3 +1282,47 @@ async fn test_chain_result_variable_type() {
         write_errors
     );
 }
+
+/// MILESTONE 5.6: Тест для Справочники.Контрагенты.СоздатьЭлемент()
+///
+/// Проверяет что метод СоздатьЭлемент() корректно находится для типа
+/// СправочникМенеджер.<Имя справочника> при обращении через Справочники.X
+#[tokio::test]
+async fn test_catalog_manager_create_element_no_error() {
+    let service = create_test_service();
+
+    // Код с вызовом метода менеджера справочника
+    let code = r#"
+Процедура Тест()
+    Контр = Справочники.Контрагенты.СоздатьЭлемент();
+КонецПроцедуры
+    "#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics должна вернуть Ok");
+
+    let errors = result.unwrap();
+
+    // Фильтруем ошибки про СоздатьЭлемент
+    let create_element_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.message.contains("СоздатьЭлемент"))
+        .collect();
+
+    if !create_element_errors.is_empty() {
+        println!("\n❌ UNEXPECTED ERRORS:");
+        for err in &create_element_errors {
+            println!("  Line {}: {}", err.line, err.message);
+        }
+        println!("\n  Root cause: Method СоздатьЭлемент should be found for Справочники.Контрагенты");
+        println!("  Expected type resolution: СправочникМенеджер.<Имя справочника> with active_facet=Manager");
+    }
+
+    assert!(
+        create_element_errors.is_empty(),
+        "СоздатьЭлемент() is a valid method for СправочникМенеджер. \
+         It should NOT produce errors. \
+         Found errors: {:?}",
+        create_element_errors
+    );
+}

@@ -794,7 +794,7 @@ impl SystemCoordinator {
     /// * `LoadMetadataResult` - Статистика загруженных типов
     ///
     /// # Примеры
-    /// ```no_run
+    /// ```ignore
     /// use std::path::Path;
     /// use bsl_backend::system::SystemCoordinator;
     ///

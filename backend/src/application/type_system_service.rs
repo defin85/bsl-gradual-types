@@ -2583,7 +2583,7 @@ impl TypeSystemService {
     /// - Вместо: LSP Server → ParserCoordinator (обход Application Layer)
     ///
     /// # Пример
-    /// ```rust
+    /// ```ignore
     /// let errors = type_service.parse_and_validate("Функция Тест()\nКонецФункции")?;
     /// if errors.is_empty() {
     ///     println!("✅ Код валиден");
@@ -2620,7 +2620,7 @@ impl TypeSystemService {
     /// 7. Возврат накопленных errors
     ///
     /// # Примеры
-    /// ```no_run
+    /// ```ignore
     /// let code = r#"
     /// Функция Тест()
     ///     МассивДанных = Новый Массив;

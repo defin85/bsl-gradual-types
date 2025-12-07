@@ -307,8 +307,7 @@ impl HbkRecovery {
     /// use bsl_backend::data::loaders::hbk_recovery::HbkRecovery;
     /// use std::path::Path;
     ///
-    /// let mut recovery = HbkRecovery::new();
-    /// recovery.clear_cache(
+    /// HbkRecovery::clear_cache(
     ///     Path::new("shcntx_ru.hbk"),
     ///     Some(Path::new("output"))
     /// )?;

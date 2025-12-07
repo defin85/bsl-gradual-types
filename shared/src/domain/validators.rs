@@ -495,6 +495,13 @@ impl<'a> TypeValidator<'a> {
     ) -> Option<TypeErrorKind> {
         let methods = self.metadata_lookup.get_methods(object_resolution);
 
+        tracing::debug!(
+            "validate_method_exists_with_variable: method='{}', active_facet={:?}, found {} methods",
+            method_name,
+            object_resolution.active_facet,
+            methods.len()
+        );
+
         let method_exists = methods.iter().any(|m| {
             Self::names_equal_ignore_case(&m.name, method_name)
                 || Self::names_equal_ignore_case(&m.english_name, method_name)
@@ -502,6 +509,11 @@ impl<'a> TypeValidator<'a> {
 
         if !method_exists {
             let type_name = Self::resolution_to_string(object_resolution);
+            tracing::debug!(
+                "validate_method_exists_with_variable: method '{}' NOT found for type '{}'",
+                method_name,
+                type_name
+            );
             Some(TypeErrorKind::NonExistentMethod {
                 object_type: type_name,
                 method_name: method_name.to_string(),

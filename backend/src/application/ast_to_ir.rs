@@ -392,8 +392,11 @@ impl AstToIrConverter {
                         _ => None,
                     };
 
-                    let value_type = self.infer_expression_type(&value);
                     let span = self.ast_span_to_ir_span(ast_span);
+
+                    // ✅ FIX: Используем infer_type_resolution для получения полного TypeResolution
+                    // Это обеспечивает согласованность между Symbol Table и SemanticNode
+                    let value_type_resolution = self.infer_type_resolution(&value);
 
                     // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Определяем тип для переменной
                     // Phase 3: Используем ref для избежания partial move
@@ -412,7 +415,8 @@ impl AstToIrConverter {
                             }
                         }
                     } else {
-                        TypeResolution::inferred(&value_type, 0.8)
+                        // ✅ FIX: Используем уже вычисленный value_type_resolution
+                        value_type_resolution.clone()
                     };
 
                     // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Проверяем, существует ли переменная
@@ -451,9 +455,7 @@ impl AstToIrConverter {
                     }
 
                     // Phase 3: value_type теперь TypeResolution
-                    // Используем infer_type_resolution вместо infer_expression_type
-                    let value_type_resolution = self.infer_type_resolution(&value);
-
+                    // ✅ FIX: Используем уже вычисленный value_type_resolution (строка 399)
                     let node = SemanticNode {
                         kind: SemanticNodeKind::Assignment {
                             variable: var_name.clone(),

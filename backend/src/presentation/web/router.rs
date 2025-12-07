@@ -14,7 +14,7 @@ use tower_http::{
 
 use super::handlers::{
     get_hover, get_metrics, get_types, health_check, search_types, validate_code, AppState,
-    get_diagnostics, get_debug_ast, get_enhanced_hover, get_semantic_tree, get_version,
+    get_diagnostics, get_diagnostics_debug, get_debug_ast, get_enhanced_hover, get_semantic_tree, get_version,
 };
 
 /// Handler for favicon.ico - returns 204 No Content to avoid 404 errors
@@ -40,6 +40,7 @@ pub fn create_router(app_state: AppState, static_path: &str, enable_cors: bool) 
         .route("/api/hover", post(get_hover)) // Hover information endpoint
         .route("/api/hover/enhanced", post(get_enhanced_hover)) // Enhanced hover with details
         .route("/api/diagnostics", post(get_diagnostics)) // Diagnostics with error separation
+        .route("/api/diagnostics/debug", post(get_diagnostics_debug)) // Debug diagnostics with extended info
         .route("/api/debug/ast", post(get_debug_ast)) // AST debugging endpoint
         .route("/api/semantic-tree", post(get_semantic_tree)) // Semantic tree visualization
         .route("/favicon.ico", get(favicon))

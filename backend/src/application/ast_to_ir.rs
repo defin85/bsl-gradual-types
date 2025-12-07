@@ -1305,10 +1305,22 @@ impl AstToIrConverter {
                 let type_str = format!("{}.{}", base.type_name(), property);
 
                 // Проверяем, является ли это конфигурационным типом (Справочники.X, Документы.X, etc.)
-                if is_configuration_type_pattern(&type_str) {
+                let is_config = is_configuration_type_pattern(&type_str);
+                let has_resolver = self.resolver.is_some();
+                tracing::info!(
+                    "🔍 PropertyAccess: type_str='{}', is_config={}, has_resolver={}",
+                    type_str, is_config, has_resolver
+                );
+
+                if is_config {
                     // Используем TypeResolver для корректной резолюции с active_facet
                     if let Some(ref resolver) = self.resolver {
-                        return resolver.resolve_expression_sync(&type_str);
+                        let resolution = resolver.resolve_expression_sync(&type_str);
+                        tracing::info!(
+                            "🔍 Resolver result: type='{}', active_facet={:?}",
+                            resolution.type_name(), resolution.active_facet
+                        );
+                        return resolution;
                     }
                 }
 

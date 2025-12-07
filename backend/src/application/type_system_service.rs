@@ -2663,6 +2663,7 @@ impl TypeSystemService {
         let resolver_arc = self.analysis_engine.get_resolver();
 
         // 6. Конвертация AST → IR с TypeResolver для active_facet resolution (Milestone 3.17)
+        tracing::info!("🔍 validate_semantics: converting AST to IR with resolver");
         let ir = AstToIrConverter::convert_with_resolver(
             parse_result.program,
             code.to_string(),
@@ -2671,6 +2672,7 @@ impl TypeSystemService {
             signature_index.clone(), // ✅ Milestone 3.9: Передаём SignatureIndex для return type inference
             Some(resolver_arc.clone()), // ✅ Milestone 3.17: Передаём TypeResolver для active_facet
         )?;
+        tracing::info!("🔍 validate_semantics: IR created with {} nodes", ir.nodes.len());
 
         // 7. Создание TypeValidator
         let validator = TypeValidator::new(&self.metadata_lookup);
@@ -2690,6 +2692,84 @@ impl TypeSystemService {
 
         // 11. Возврат errors
         Ok(visitor.into_errors())
+    }
+
+    /// Debug версия validate_semantics с расширенной диагностикой
+    pub async fn validate_semantics_debug(
+        &self,
+        code: &str,
+    ) -> Result<(Vec<bsl_shared::domain::types::TypeDiagnostic>, serde_json::Value)> {
+        use crate::application::ast_to_ir::AstToIrConverter;
+        use crate::application::semantic_validation_visitor::SemanticValidationVisitor;
+        use bsl_shared::domain::validators::TypeValidator;
+        use bsl_shared::ir::walk_program;
+
+        let mut debug_info = serde_json::json!({
+            "steps": [],
+            "resolver_available": false,
+            "property_accesses": []
+        });
+
+        // 1. Парсинг
+        let parse_result = self
+            .parser
+            .parse(code)
+            .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
+
+        debug_info["steps"].as_array_mut().unwrap().push(serde_json::json!({
+            "step": "parse",
+            "success": true,
+            "syntax_errors": parse_result.syntax_errors.len()
+        }));
+
+        if !parse_result.syntax_errors.is_empty() {
+            return Ok((Vec::new(), debug_info));
+        }
+
+        // 2. Получаем repository и SignatureIndex
+        let repository = self.analysis_engine.get_repository();
+        let signature_index = repository.get_signature_index_clone();
+        let resolver_arc = self.analysis_engine.get_resolver();
+
+        debug_info["resolver_available"] = serde_json::json!(true);
+
+        // 3. Конвертация AST → IR
+        let ir = AstToIrConverter::convert_with_resolver(
+            parse_result.program,
+            code.to_string(),
+            "<debug_validation>".to_string(),
+            repository.clone(),
+            signature_index.clone(),
+            Some(resolver_arc.clone()),
+        )?;
+
+        debug_info["steps"].as_array_mut().unwrap().push(serde_json::json!({
+            "step": "ast_to_ir",
+            "success": true,
+            "ir_nodes": ir.nodes.len()
+        }));
+
+        // 4. Добавляем базовую информацию об IR
+        debug_info["ir_info"] = serde_json::json!({
+            "nodes_count": ir.nodes.len(),
+            "has_cfg": ir.cfg.is_some()
+        });
+
+        // 5. Создание TypeValidator и выполнение валидации
+        let validator = TypeValidator::new(&self.metadata_lookup);
+        let resolver = resolver_arc.as_ref();
+        let mut visitor = SemanticValidationVisitor::new(&validator, &ir, resolver, &signature_index);
+
+        walk_program(&ir, &mut visitor);
+        let errors = visitor.into_errors();
+
+        debug_info["steps"].as_array_mut().unwrap().push(serde_json::json!({
+            "step": "semantic_validation",
+            "success": true,
+            "errors_found": errors.len()
+        }));
+
+        Ok((errors, debug_info))
     }
 
     /// Получить пути к модулям для конфигурационного типа (Milestone 3.14)

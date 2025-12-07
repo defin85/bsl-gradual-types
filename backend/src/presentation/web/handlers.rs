@@ -218,6 +218,46 @@ pub async fn get_diagnostics(
     }
 }
 
+/// Debug diagnostics endpoint - returns extended debug info
+pub async fn get_diagnostics_debug(
+    State(state): State<AppState>,
+    Json(payload): Json<bsl_shared::api::ValidateCodeRequest>,
+) -> impl IntoResponse {
+    let start = Instant::now();
+
+    // Собираем debug info через validate_semantics_debug
+    match state
+        .type_service
+        .validate_semantics_debug(&payload.code)
+        .await
+    {
+        Ok((diagnostics, debug_info)) => {
+            let semantic_errors: Vec<SemanticErrorDto> = diagnostics
+                .iter()
+                .map(|d| SemanticErrorDto {
+                    message: d.message.clone(),
+                    line: d.line,
+                    column: d.column,
+                    end_line: d.end_line,
+                    end_column: d.end_column,
+                    severity: format!("{:?}", d.severity).to_lowercase(),
+                })
+                .collect();
+
+            let duration_ms = start.elapsed().as_millis();
+
+            Json(serde_json::json!({
+                "syntaxErrors": [],
+                "semanticErrors": semantic_errors,
+                "totalErrors": semantic_errors.len(),
+                "durationMs": duration_ms,
+                "debug": debug_info
+            })).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 /// Debug AST endpoint - shows parsed structure for debugging
 /// Milestone 2.16: Semantic visualization
 pub async fn get_debug_ast(

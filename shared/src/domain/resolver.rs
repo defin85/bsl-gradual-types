@@ -139,17 +139,47 @@ impl TypeResolver {
     }
 
     /// Преобразование RawTypeData в TypeResolution (чистая логика)
+    ///
+    /// Для конфигурационных типов (Справочники.X, Документы.X) создаёт
+    /// ConcreteType::Configuration с правильным MetadataKind для корректного
+    /// lookup методов через get_facet_methods().
     fn create_resolution_from_raw(
         &self,
         raw_type: &crate::domain::types::RawTypeData,
     ) -> TypeResolution {
-        let mut resolution = TypeResolution::known(crate::domain::types::ConcreteType::Platform(
-            crate::domain::types::PlatformType {
+        use super::metadata_constants::get_base_type_info;
+        use crate::domain::types::{ConfigurationType, ConcreteType, PlatformType};
+
+        // Проверяем, является ли это конфигурационным типом (Справочники.X, Документы.X)
+        if let Some(dot_pos) = raw_type.name.find('.') {
+            let prefix = &raw_type.name[..dot_pos];
+            let object_name = &raw_type.name[dot_pos + 1..];
+
+            // Если prefix — коллекция метаданных, создаём ConfigurationType
+            if let Some((metadata_kind, facet)) = get_base_type_info(prefix) {
+                let mut resolution = TypeResolution::known(ConcreteType::Configuration(
+                    ConfigurationType {
+                        kind: metadata_kind,
+                        name: object_name.to_string(),
+                        facet: Some(facet),
+                        attributes: vec![],
+                        tabular_sections: vec![],
+                    },
+                ));
+                resolution.available_facets = raw_type.facets.clone();
+                resolution.active_facet = Some(facet);
+                return resolution;
+            }
+        }
+
+        // Fallback: обычный платформенный тип
+        let mut resolution = TypeResolution::known(ConcreteType::Platform(
+            PlatformType {
                 name: raw_type.name.clone(),
             },
         ));
-        // Копируем фасеты из RawTypeData
         resolution.available_facets = raw_type.facets.clone();
+
         resolution
     }
 

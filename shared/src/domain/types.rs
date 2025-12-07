@@ -641,6 +641,26 @@ impl TypeResolution {
         matches!(self.certainty, Certainty::Unknown)
     }
 
+    /// Проверить, является ли тип Dynamic (неопределённым в контексте)
+    ///
+    /// Возвращает true если:
+    /// - ResolutionResult::Dynamic
+    /// - Или type_name() == "Dynamic"
+    ///
+    /// Dynamic типы не должны валидироваться на наличие методов/свойств,
+    /// чтобы избежать каскадных ошибок в цепочках вызовов.
+    ///
+    /// # Примеры
+    /// ```
+    /// use bsl_shared::domain::types::TypeResolution;
+    ///
+    /// assert!(TypeResolution::inferred("Dynamic", 0.5).is_dynamic());
+    /// assert!(!TypeResolution::primitive("Строка").is_dynamic());
+    /// ```
+    pub fn is_dynamic(&self) -> bool {
+        matches!(&self.result, ResolutionResult::Dynamic) || self.type_name() == "Dynamic"
+    }
+
     /// Получить имя типа как String (для совместимости)
     ///
     /// # Примеры

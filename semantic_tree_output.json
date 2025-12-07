@@ -1,0 +1,356 @@
+{
+  "file_path": "test_milestone_3_11_facets.bsl",
+  "metrics": {
+    "analysis_time_ms": 0,
+    "function_count": 1,
+    "inferred_types": 1,
+    "known_types": 0,
+    "node_count": 13,
+    "procedure_count": 0,
+    "request_duration_ms": 3,
+    "unknown_types": 0,
+    "variable_count": 0
+  },
+  "root_nodes": [
+    {
+      "attributes": {
+        "parameter_count": "0"
+      },
+      "children": [
+        {
+          "attributes": {
+            "arg_count": "0",
+            "function_name": "Записать"
+          },
+          "children": [
+            {
+              "attributes": {
+                "arg_count": "0",
+                "function_name": "СоздатьЭлемент"
+              },
+              "children": [
+                {
+                  "attributes": {
+                    "access_kind": "Property",
+                    "member_name": "Контрагенты",
+                    "object_name": "Справочники",
+                    "object_type": "Справочники"
+                  },
+                  "children": [],
+                  "kind": "MemberAccess",
+                  "location": {
+                    "column": 4,
+                    "line": 2
+                  },
+                  "name": "Справочники.Контрагенты",
+                  "range": {
+                    "end": {
+                      "column": 27,
+                      "line": 2
+                    },
+                    "start": {
+                      "column": 4,
+                      "line": 2
+                    }
+                  }
+                }
+              ],
+              "kind": "FunctionCall",
+              "location": {
+                "column": 4,
+                "line": 2
+              },
+              "name": "СоздатьЭлемент",
+              "range": {
+                "end": {
+                  "column": 44,
+                  "line": 2
+                },
+                "start": {
+                  "column": 4,
+                  "line": 2
+                }
+              }
+            }
+          ],
+          "kind": "FunctionCall",
+          "location": {
+            "column": 4,
+            "line": 2
+          },
+          "name": "Записать",
+          "range": {
+            "end": {
+              "column": 56,
+              "line": 2
+            },
+            "start": {
+              "column": 4,
+              "line": 2
+            }
+          }
+        },
+        {
+          "attributes": {
+            "value_node": "5",
+            "value_type": "СправочникОбъект.Контрагенты",
+            "variable": "ПолученныйОбъект"
+          },
+          "children": [
+            {
+              "attributes": {
+                "arg_count": "0",
+                "function_name": "ПолучитьОбъект"
+              },
+              "children": [
+                {
+                  "attributes": {
+                    "arg_count": "1",
+                    "function_name": "НайтиПоКоду"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "access_kind": "Property",
+                        "member_name": "Контрагенты",
+                        "object_name": "Справочники",
+                        "object_type": "Справочники"
+                      },
+                      "children": [],
+                      "kind": "MemberAccess",
+                      "location": {
+                        "column": 23,
+                        "line": 5
+                      },
+                      "name": "Справочники.Контрагенты",
+                      "range": {
+                        "end": {
+                          "column": 46,
+                          "line": 5
+                        },
+                        "start": {
+                          "column": 23,
+                          "line": 5
+                        }
+                      }
+                    }
+                  ],
+                  "kind": "FunctionCall",
+                  "location": {
+                    "column": 23,
+                    "line": 5
+                  },
+                  "name": "НайтиПоКоду",
+                  "range": {
+                    "end": {
+                      "column": 65,
+                      "line": 5
+                    },
+                    "start": {
+                      "column": 23,
+                      "line": 5
+                    }
+                  }
+                }
+              ],
+              "kind": "FunctionCall",
+              "location": {
+                "column": 66,
+                "line": 5
+              },
+              "name": "ПолучитьОбъект",
+              "range": {
+                "end": {
+                  "column": 80,
+                  "line": 5
+                },
+                "start": {
+                  "column": 66,
+                  "line": 5
+                }
+              }
+            }
+          ],
+          "kind": "Assignment",
+          "location": {
+            "column": 4,
+            "line": 5
+          },
+          "name": "ПолученныйОбъект = СправочникОбъект.Контрагенты",
+          "range": {
+            "end": {
+              "column": 83,
+              "line": 5
+            },
+            "start": {
+              "column": 4,
+              "line": 5
+            }
+          }
+        },
+        {
+          "attributes": {
+            "value_node": "9",
+            "value_type": "Dynamic",
+            "variable": "ПолученныйОбъект"
+          },
+          "children": [
+            {
+              "attributes": {
+                "arg_count": "0",
+                "function_name": "ПолучитьОбъект"
+              },
+              "children": [
+                {
+                  "attributes": {
+                    "arg_count": "1",
+                    "function_name": "НеСуществующийМетод"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "access_kind": "Property",
+                        "member_name": "Контрагенты",
+                        "object_name": "Справочники",
+                        "object_type": "Справочники"
+                      },
+                      "children": [],
+                      "kind": "MemberAccess",
+                      "location": {
+                        "column": 23,
+                        "line": 6
+                      },
+                      "name": "Справочники.Контрагенты",
+                      "range": {
+                        "end": {
+                          "column": 46,
+                          "line": 6
+                        },
+                        "start": {
+                          "column": 23,
+                          "line": 6
+                        }
+                      }
+                    }
+                  ],
+                  "kind": "FunctionCall",
+                  "location": {
+                    "column": 23,
+                    "line": 6
+                  },
+                  "name": "НеСуществующийМетод",
+                  "range": {
+                    "end": {
+                      "column": 73,
+                      "line": 6
+                    },
+                    "start": {
+                      "column": 23,
+                      "line": 6
+                    }
+                  }
+                }
+              ],
+              "kind": "FunctionCall",
+              "location": {
+                "column": 74,
+                "line": 6
+              },
+              "name": "ПолучитьОбъект",
+              "range": {
+                "end": {
+                  "column": 88,
+                  "line": 6
+                },
+                "start": {
+                  "column": 74,
+                  "line": 6
+                }
+              }
+            }
+          ],
+          "kind": "Assignment",
+          "location": {
+            "column": 4,
+            "line": 6
+          },
+          "name": "ПолученныйОбъект = Dynamic",
+          "range": {
+            "end": {
+              "column": 91,
+              "line": 6
+            },
+            "start": {
+              "column": 4,
+              "line": 6
+            }
+          }
+        },
+        {
+          "children": [],
+          "kind": "Return",
+          "location": {
+            "column": 4,
+            "line": 8
+          },
+          "range": {
+            "end": {
+              "column": 29,
+              "line": 8
+            },
+            "start": {
+              "column": 4,
+              "line": 8
+            }
+          }
+        }
+      ],
+      "kind": "Function",
+      "location": {
+        "column": 0,
+        "line": 0
+      },
+      "name": "ТестЦепочкиМетодов",
+      "range": {
+        "end": {
+          "column": 12,
+          "line": 9
+        },
+        "start": {
+          "column": 0,
+          "line": 0
+        }
+      }
+    }
+  ],
+  "symbol_table": {
+    "ПолученныйОбъект": {
+      "declaration_location": {
+        "column": 4,
+        "line": 5
+      },
+      "kind": "Variable",
+      "name": "ПолученныйОбъект",
+      "resolved_type": {
+        "category": "Inferred",
+        "certainty": "Inferred",
+        "certainty_percent": 80,
+        "name": "Dynamic"
+      },
+      "scope": "Local"
+    },
+    "ТестЦепочкиМетодов": {
+      "declaration_location": {
+        "column": 0,
+        "line": 0
+      },
+      "kind": "Procedure",
+      "metadata": {
+        "is_export": "false",
+        "parameter_count": "0"
+      },
+      "name": "ТестЦепочкиМетодов",
+      "scope": "Global"
+    }
+  }
+}

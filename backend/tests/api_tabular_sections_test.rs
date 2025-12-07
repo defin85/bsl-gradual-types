@@ -10,12 +10,15 @@
 mod tabular_sections_api_tests {
     use bsl_backend::system::system_coordinator::SystemCoordinator;
     use bsl_shared::api::dtos::{TabularSectionAttributeDto, TabularSectionDto};
+    use bsl_shared::domain::types::RawDataSource;
     use std::path::Path;
 
     /// Helper function to create a test coordinator
     async fn create_test_coordinator() -> SystemCoordinator {
         let coordinator = SystemCoordinator::new();
-        let config_path = Path::new("examples/conf/conf_test");
+
+        // Тесты запускаются из директории backend/, поэтому нужно подняться на уровень выше
+        let config_path = Path::new("../examples/conf/conf_test");
 
         coordinator
             .start_with_paths(None, Some(config_path), None)
@@ -40,15 +43,23 @@ mod tabular_sections_api_tests {
 
         assert!(
             !result.types.is_empty(),
-            "Should find документы.ЗаказНаряды"
+            "Should find документы.ЗаказНаряды. Найдено {} типов",
+            result.types.len()
         );
 
         let doc = &result.types[0];
 
+        println!("DEBUG: Найден документ: {}", doc.name);
+        println!("DEBUG: Количество табличных частей: {}", doc.tabular_sections.len());
+        for ts in &doc.tabular_sections {
+            println!("  - ТЧ: {} (атрибутов: {})", ts.name, ts.attributes.len());
+        }
+
         assert_eq!(
             doc.tabular_sections.len(),
             2,
-            "Document should have 2 tabular sections"
+            "Document should have 2 tabular sections. Found: {:?}",
+            doc.tabular_sections.iter().map(|ts| &ts.name).collect::<Vec<_>>()
         );
 
         let raboty = doc

@@ -216,17 +216,43 @@ pub enum SemanticNodeKind {
         except_body: Vec<usize>,
     },
 
+    // === Global Property Access (платформенные менеджеры) ===
+    /// Доступ к глобальному свойству платформы: `Справочники`, `Документы`, `РегистрыСведений`
+    ///
+    /// # Семантика
+    ///
+    /// Глобальные свойства платформы — это точки входа к менеджерам объектов метаданных.
+    /// Они всегда доступны в глобальной области видимости и возвращают Manager-типы.
+    ///
+    /// # Примеры
+    ///
+    /// ```bsl
+    /// Справочники          // GlobalPropertyAccess { name: "Справочники", result_type: СправочникиМенеджер }
+    /// Документы            // GlobalPropertyAccess { name: "Документы", result_type: ДокументыМенеджер }
+    /// РегистрыСведений     // GlobalPropertyAccess { name: "РегистрыСведений", result_type: РегистрыСведенийМенеджер }
+    /// ```
+    GlobalPropertyAccess {
+        /// Имя глобального свойства: "Справочники", "Документы", "РегистрыСведений"
+        name: String,
+        /// Тип результата: СправочникиМенеджер, ДокументыМенеджер, etc.
+        result_type: TypeResolution,
+    },
+
     // === Member Access (КРИТИЧНО для LSP hover) ===
     /// Доступ к члену объекта: `объект.свойство` или `объект.Метод()`
     ///
     /// # Семантика полей
     ///
+    /// - `object_node`: **Индекс узла-объекта** для цепочек доступа
+    ///   - Some(index) для вложенных выражений (GlobalPropertyAccess, MemberAccess, FunctionCall)
+    ///   - None для простых переменных (используется object_name)
     /// - `object_name`: **Имя переменной** из исходного кода (Some("МассивДанных"))
     ///   - Some(name) для простых переменных (Identifier)
     ///   - None для сложных выражений (PropertyAccess, Call, New, etc.)
-    /// - `object_type`: **Тип объекта** (результат type inference, например, "Массив")
+    /// - `object_type`: **Тип объекта СЛЕВА от точки** (результат type inference)
     /// - `member_name`: Имя свойства или метода (например, "Добавить")
     /// - `access_kind`: Тип доступа (Method, Property, Indexer)
+    /// - `result_type`: **Тип РЕЗУЛЬТАТА доступа** (тип значения после разрешения члена)
     ///
     /// # Примеры
     ///
@@ -234,16 +260,24 @@ pub enum SemanticNodeKind {
     /// МассивДанных = Новый Массив();
     /// МассивДанных.Добавить("текст");  // object_name=Some("МассивДанных"), access_kind=Method
     ///
-    /// obj.prop1.prop2.Метод();  // object_name=None, access_kind=Method
+    /// obj.prop1.prop2.Метод();  // object_name=None, object_node=Some(...), access_kind=Method
     /// obj.Свойство;             // access_kind=Property
+    ///
+    /// // Цепочка: Справочники.Контрагенты
+    /// // GlobalPropertyAccess(Справочники) → MemberAccess(object_node=GlobalPropertyAccess, member_name=Контрагенты)
     /// ```
     MemberAccess {
+        /// НОВОЕ: Индекс узла-объекта для цепочек (GlobalPropertyAccess, MemberAccess, FunctionCall)
+        object_node: Option<usize>,
+        /// Имя переменной (для простых переменных, deprecated для цепочек)
         object_name: Option<String>,
-        /// Phase 3: TypeResolution для типа объекта (результат inference)
+        /// Phase 3: TypeResolution для типа объекта СЛЕВА от точки
         object_type: TypeResolution,
         member_name: String,
         /// Тип доступа к члену: метод, свойство или индексатор
         access_kind: MemberAccessKind,
+        /// НОВОЕ: Тип РЕЗУЛЬТАТА доступа (тип значения справа от точки)
+        result_type: TypeResolution,
     },
 
     /// Вызов функции или метода: `Функция()` или `объект.Метод(args)`
@@ -279,6 +313,17 @@ pub enum SemanticNodeKind {
         object_type: Option<TypeResolution>,
         /// Phase 3: TypeResolution вместо String для полной информации о типах аргументов
         arg_types: Vec<TypeResolution>,
+        /// Индекс вложенного узла (для цепочек методов)
+        /// Например: Справочники.Контрагенты.НайтиПоКоду().ПолучитьОбъект()
+        /// ПолучитьОбъект будет иметь object_node указывающий на НайтиПоКоду
+        object_node: Option<usize>,
+        /// НОВОЕ: Тип возвращаемого значения функции/метода
+        ///
+        /// # Примеры
+        /// - `Справочники.Контрагенты.НайтиПоКоду("001")` → result_type: СправочникСсылка.Контрагенты
+        /// - `Массив.Добавить("x")` → result_type: Неопределено (процедура)
+        /// - `Строка(123)` → result_type: Строка
+        result_type: TypeResolution,
     },
 
     // === Scope tracking ===
@@ -1393,11 +1438,17 @@ impl SemanticProgram {
                 ("ForEachLoop".to_string(), None, attributes)
             }
             SemanticNodeKind::MemberAccess {
+                object_node,
                 object_name,
                 object_type,
                 member_name,
                 access_kind,
+                result_type,
             } => {
+                // object_node — индекс узла-объекта
+                if let Some(node_idx) = object_node {
+                    attributes.insert("object_node".to_string(), node_idx.to_string());
+                }
                 // object_name теперь Option<String>
                 if let Some(name) = object_name {
                     attributes.insert("object_name".to_string(), name.clone());
@@ -1406,6 +1457,8 @@ impl SemanticProgram {
                 attributes.insert("object_type".to_string(), object_type.type_name());
                 attributes.insert("member_name".to_string(), member_name.clone());
                 attributes.insert("access_kind".to_string(), format!("{:?}", access_kind));
+                // НОВОЕ: result_type — тип результата доступа
+                attributes.insert("result_type".to_string(), result_type.type_name());
 
                 let description = object_name
                     .as_ref()
@@ -1415,6 +1468,11 @@ impl SemanticProgram {
                 ("MemberAccess".to_string(), Some(description), attributes)
             }
             SemanticNodeKind::BlockScope { .. } => ("BlockScope".to_string(), None, attributes),
+            SemanticNodeKind::GlobalPropertyAccess { name, result_type } => {
+                attributes.insert("name".to_string(), name.clone());
+                attributes.insert("result_type".to_string(), result_type.type_name());
+                ("GlobalPropertyAccess".to_string(), Some(name.clone()), attributes)
+            }
             SemanticNodeKind::NewExpression {
                 type_name,
                 arg_types,
@@ -1488,7 +1546,19 @@ impl SemanticProgram {
                 value_node.iter().copied().collect()
             }
 
-            // Листовые узлы (нет детей)
+            // ✅ MILESTONE 5.4: FunctionCall может содержать вложенный узел (цепочки методов)
+            // Например: Справочники.Контрагенты.НайтиПоКоду().ПолучитьОбъект()
+            FunctionCall { object_node, .. } => {
+                object_node.iter().copied().collect()
+            }
+
+            // ✅ MILESTONE 5.4: MemberAccess может содержать вложенный узел (цепочки доступа)
+            // Например: Справочники.Контрагенты (GlobalPropertyAccess → MemberAccess)
+            MemberAccess { object_node, .. } => {
+                object_node.iter().copied().collect()
+            }
+
+            // Листовые узлы (нет детей): GlobalPropertyAccess, VariableDeclaration, Return, Break, Continue и др.
             _ => Vec::new(),
         };
 

@@ -341,6 +341,14 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     return;
                 }
 
+                // MILESTONE 5.3: Пропускаем валидацию для Dynamic типов
+                // Dynamic означает, что предыдущий метод не был найден и вернул Dynamic.
+                // Выдавать ошибку "метод не существует для типа Dynamic" неинформативно —
+                // настоящая ошибка уже была показана ранее в цепочке.
+                if obj_type.is_dynamic() {
+                    return;
+                }
+
                 // Phase 4: obj_type уже TypeResolution — используем напрямую
                 // metadata_lookup.get_methods() уже обрабатывает Generic и фасеты корректно
 
@@ -486,6 +494,8 @@ mod tests {
                 object_type: Some(TypeResolution::explicit("Массив")),
                 // Phase 3: arg_types теперь Vec<TypeResolution>
                 arg_types: vec![],
+                object_node: None,
+                result_type: TypeResolution::unknown(),
             },
             span: Span::new(5, 10, 5, 40),
             scope_id: program.symbols.root_scope,
@@ -516,11 +526,13 @@ mod tests {
 
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
+                object_node: None,
                 object_name: Some("МассивДанных".to_string()),
                 // Phase 3: object_type теперь TypeResolution
                 object_type: TypeResolution::explicit("Массив"),
                 member_name: "НесуществующееСвойство".to_string(),
                 access_kind: MemberAccessKind::Property,
+                result_type: TypeResolution::unknown(),
             },
             span: Span::new(3, 5, 3, 35),
             scope_id: program.symbols.root_scope,
@@ -616,11 +628,13 @@ mod tests {
         // ВАЖНО: object_name должен быть Some("Справочники") - так формируется в ast_to_ir.rs
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
+                object_node: None,
                 object_name: Some("Справочники".to_string()),
                 // Phase 3: object_type теперь TypeResolution
                 object_type: TypeResolution::explicit("СправочникМенеджер"),
                 member_name: "НесуществующийСправочник".to_string(),
                 access_kind: MemberAccessKind::Property,
+                result_type: TypeResolution::unknown(),
             },
             span: Span::new(1, 0, 1, 35),
             scope_id: program.symbols.root_scope,
@@ -677,11 +691,13 @@ mod tests {
         // ВАЖНО: object_name должен быть Some("Справочники") - так формируется в ast_to_ir.rs
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
+                object_node: None,
                 object_name: Some("Справочники".to_string()),
                 // Phase 3: object_type теперь TypeResolution
                 object_type: TypeResolution::explicit("СправочникМенеджер"),
                 member_name: "Контрагенты".to_string(),
                 access_kind: MemberAccessKind::Property,
+                result_type: TypeResolution::unknown(),
             },
             span: Span::new(1, 0, 1, 25),
             scope_id: program.symbols.root_scope,
@@ -717,11 +733,13 @@ mod tests {
         // ВАЖНО: object_name должен быть Some("Справочники") для прохождения через is_metadata_collection_name
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
+                object_node: None,
                 object_name: Some("Справочники".to_string()),
                 // Phase 3: object_type теперь TypeResolution
                 object_type: TypeResolution::explicit("СправочникМенеджер"),
                 member_name: "НесуществующийСправочник".to_string(),
                 access_kind: MemberAccessKind::Property,
+                result_type: TypeResolution::unknown(),
             },
             span: Span::new(1, 0, 1, 35),
             scope_id: program.symbols.root_scope,

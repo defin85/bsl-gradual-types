@@ -694,6 +694,190 @@ curl -X POST "http://127.0.0.1:3002/api/debug/ast" \
 
 ---
 
+### 9. Semantic Tree Visualization (NEW)
+
+**Endpoint:** `POST /api/semantic-tree`
+
+**Назначение:** Получение семантического дерева BSL модуля с метриками
+
+**Статус:** ✅ Работает (Milestone 2.16)
+
+#### Описание
+
+Анализирует BSL код и возвращает структурированное семантическое дерево с:
+- Иерархией узлов (функции, процедуры, переменные, вызовы)
+- Таблицей символов
+- Метриками анализа (количество узлов, время)
+
+**Отличие от `/api/debug/ast`:** Возвращает семантическую модель (SemanticProgram) вместо низкоуровневого AST
+
+#### Запрос (с файлом .bsl)
+
+**⚠️ ВАЖНО для кириллицы:** Используй Python + локальный файл `test_api.json` на Windows/GitBash
+
+```bash
+# 1. Создать JSON через Python (с правильной кодировкой)
+cd /c/1CProject/bsl-gradual-types && python -c "
+import json, codecs
+with codecs.open('examples/bsl/ТестМодуль.bsl', 'r', 'utf-8-sig') as f:
+    code = f.read()
+with codecs.open('test_api.json', 'w', 'utf-8') as f:
+    json.dump({'code': code, 'file_path': 'examples/bsl/ТестМодуль.bsl'}, f, ensure_ascii=False)
+"
+
+# 2. Отправить запрос
+curl -s -X POST http://localhost:3002/api/semantic-tree \
+  -H "Content-Type: application/json" \
+  -d @test_api.json | jq '.'
+```
+
+#### Запрос (inline код)
+
+```bash
+cd /c/1CProject/bsl-gradual-types && python -c "
+import json, codecs
+code = '''Процедура Тест()
+    ТЗ = Новый ТаблицаЗначений;
+    ТЗ.Добавить();
+КонецПроцедуры'''
+with codecs.open('test_api.json', 'w', 'utf-8') as f:
+    json.dump({'code': code, 'file_path': 'test.bsl'}, f, ensure_ascii=False)
+" && curl -s -X POST http://localhost:3002/api/semantic-tree \
+  -H "Content-Type: application/json" \
+  -d @test_api.json | jq '.'
+```
+
+#### Поля запроса
+
+| Поле | Тип | Обязательно | Описание |
+|------|-----|-------------|----------|
+| `code` | String | ✅ | BSL код для анализа |
+| `file_path` | String | ❌ | Путь к файлу (для отображения) |
+
+#### Ответ
+
+```json
+{
+  "file_path": "test.bsl",
+  "root_nodes": [
+    {
+      "node_type": "Procedure",
+      "name": "Тест",
+      "span": {
+        "start_line": 1,
+        "start_column": 0,
+        "end_line": 4,
+        "end_column": 0
+      },
+      "children": [
+        {
+          "node_type": "Assignment",
+          "variable": "ТЗ",
+          "type_hint": "ТаблицаЗначений",
+          "span": {
+            "start_line": 2,
+            "start_column": 4,
+            "end_line": 2,
+            "end_column": 35
+          }
+        },
+        {
+          "node_type": "MethodCall",
+          "receiver": "ТЗ",
+          "method": "Добавить",
+          "args_count": 0,
+          "span": {
+            "start_line": 3,
+            "start_column": 4,
+            "end_line": 3,
+            "end_column": 18
+          }
+        }
+      ]
+    }
+  ],
+  "symbol_table": [
+    {
+      "name": "ТЗ",
+      "type_hint": "ТаблицаЗначений",
+      "declared_line": 2,
+      "scope": "Procedure:Тест"
+    }
+  ],
+  "metrics": {
+    "total_nodes": 3,
+    "functions_count": 0,
+    "procedures_count": 1,
+    "variables_count": 1,
+    "method_calls_count": 1,
+    "parse_duration_ms": 12,
+    "analysis_duration_ms": 8
+  }
+}
+```
+
+#### Структура SemanticNode
+
+Каждый узел содержит:
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `node_type` | String | Тип узла: `Function`, `Procedure`, `Assignment`, `MethodCall`, `IfStatement`, `ForLoop` и др. |
+| `name` | String | Имя (для функций/процедур/переменных) |
+| `span` | Object | Позиция в коде (start_line, start_column, end_line, end_column) |
+| `children` | Array | Дочерние узлы |
+
+**Дополнительные поля зависят от типа узла:**
+
+- **Function/Procedure:** `parameters`, `return_type`
+- **Assignment:** `variable`, `type_hint`
+- **MethodCall:** `receiver`, `method`, `args_count`
+- **IfStatement:** `condition`
+- **ForLoop:** `iterator`, `collection`
+
+#### Статус коды
+
+- `200 OK` — дерево успешно построено
+- `400 Bad Request` — отсутствует поле `code`
+- `500 Internal Server Error` — ошибка парсинга или анализа
+
+#### Примеры использования
+
+**1. Анализ файла с кириллицей:**
+```bash
+cd /c/1CProject/bsl-gradual-types && python -c "
+import json, codecs
+with codecs.open('examples/bsl/ПримерТипов.bsl', 'r', 'utf-8-sig') as f:
+    code = f.read()
+with codecs.open('test_api.json', 'w', 'utf-8') as f:
+    json.dump({'code': code, 'file_path': 'examples/bsl/ПримерТипов.bsl'}, f, ensure_ascii=False)
+" && curl -s -X POST http://localhost:3002/api/semantic-tree \
+  -H "Content-Type: application/json" \
+  -d @test_api.json | jq '.metrics'
+```
+
+**2. Быстрая проверка метрик:**
+```bash
+# Получить только метрики (без дерева)
+cd /c/1CProject/bsl-gradual-types && python -c "
+import json, codecs
+code = 'Функция Тест() Возврат 42; КонецФункции'
+with codecs.open('test_api.json', 'w', 'utf-8') as f:
+    json.dump({'code': code}, f, ensure_ascii=False)
+" && curl -s -X POST http://localhost:3002/api/semantic-tree \
+  -H "Content-Type: application/json" \
+  -d @test_api.json | jq '.metrics'
+```
+
+**3. Проверка структуры символов:**
+```bash
+curl -s -X POST http://localhost:3002/api/semantic-tree \
+  -H "Content-Type: application/json" \
+  -d @test_api.json | jq '.symbol_table'
+```
+
+---
+
 ## 📊 Обновлённый статус endpoints
 
 | Endpoint | Метод | Статус | Milestone |
@@ -706,3 +890,4 @@ curl -X POST "http://127.0.0.1:3002/api/debug/ast" \
 | `/api/hover/enhanced` | POST | ✅ | 2.13 |
 | `/api/diagnostics` | POST | ✅ | 2.18 |
 | `/api/debug/ast` | POST | ⚠️ MVP | 2.16 |
+| `/api/semantic-tree` | POST | ✅ | 2.16 |

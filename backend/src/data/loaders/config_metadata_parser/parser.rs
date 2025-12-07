@@ -83,6 +83,7 @@ impl UniversalMetadataParser {
                             synonym: None,
                             attributes: Vec::new(),
                         });
+                        tracing::trace!("📋 Создана новая табличная часть");
                     } else if tag_name == "ChildObjects" && current_tabular.is_some() {
                         in_tabular_attributes = true;
                         tracing::trace!("🔄 Вход в ChildObjects табличной части");
@@ -123,10 +124,13 @@ impl UniversalMetadataParser {
                         "Name" => {
                             if let Some(ref mut attr) = current_attribute {
                                 attr.name = text.clone();
+                                tracing::trace!("  ✅ Имя атрибута: {}", text);
                             } else if let Some(ref mut tab) = current_tabular {
                                 tab.name = text.clone();
+                                tracing::trace!("  ✅ Имя табличной части: {}", text);
                             } else if name.is_empty() {
-                                name = text;
+                                name = text.clone();
+                                tracing::trace!("  ✅ Имя объекта: {}", text);
                             }
                         }
                         "content" => {
@@ -166,6 +170,7 @@ impl UniversalMetadataParser {
                         }
                     } else if tag_name == "TabularSection" {
                         if let Some(tab) = current_tabular.take() {
+                            tracing::trace!("  ✅ Табличная часть '{}' добавлена (атрибутов: {})", tab.name, tab.attributes.len());
                             tabular_sections.push(tab);
                         }
                         in_tabular_attributes = false;

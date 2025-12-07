@@ -23,10 +23,10 @@ detect_platform() {
             if grep -qi microsoft /proc/version 2>/dev/null; then
                 PLATFORM="wsl"
                 # WSL может работать с Windows путями через /mnt/
-                DEFAULT_PROJECT_PATH="/mnt/c/1CProject/conf"
+                DEFAULT_PROJECT_PATH="examples/conf"
             else
                 PLATFORM="linux"
-                DEFAULT_PROJECT_PATH=""
+                DEFAULT_PROJECT_PATH="examples/conf"
             fi
             BINARY_EXT=""
             ;;

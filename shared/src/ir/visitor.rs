@@ -380,6 +380,8 @@ mod tests {
                 object_type: None,
                 // Phase 3: arg_types теперь Vec<TypeResolution>
                 arg_types: vec![TypeResolution::explicit("Строка")],
+                object_node: None,
+                result_type: TypeResolution::unknown(),
             },
             span: Span::stub(),
             scope_id: program.symbols.root_scope,

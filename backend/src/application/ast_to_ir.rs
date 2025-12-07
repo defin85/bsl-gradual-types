@@ -21,6 +21,138 @@ use bsl_shared::ir::*;
 use bsl_shared::utils::hash::hash_content;
 use std::sync::Arc;
 
+/// Информация о глобальной коллекции метаданных платформы 1С
+#[derive(Debug, Clone, Copy)]
+struct GlobalCollectionInfo {
+    /// Русское имя коллекции (Справочники)
+    name_ru: &'static str,
+    /// Английское имя коллекции (Catalogs)
+    name_en: &'static str,
+    /// Тип менеджера коллекции (СправочникиМенеджер)
+    collection_manager_type: &'static str,
+    /// Базовый тип менеджера элемента (СправочникМенеджер)
+    item_manager_type: &'static str,
+}
+
+/// Полный список глобальных коллекций метаданных платформы 1С
+///
+/// Включает все типы объектов метаданных:
+/// - Справочники, Документы, Перечисления, Константы
+/// - Регистры: сведений, накопления, бухгалтерии, расчета
+/// - Планы: обмена, видов характеристик, счетов, видов расчета
+/// - Бизнес-процессы, Задачи
+const GLOBAL_COLLECTIONS_INFO: &[GlobalCollectionInfo] = &[
+    GlobalCollectionInfo {
+        name_ru: "Справочники",
+        name_en: "Catalogs",
+        collection_manager_type: "СправочникиМенеджер",
+        item_manager_type: "СправочникМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "Документы",
+        name_en: "Documents",
+        collection_manager_type: "ДокументыМенеджер",
+        item_manager_type: "ДокументМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "РегистрыСведений",
+        name_en: "InformationRegisters",
+        collection_manager_type: "РегистрСведенийМенеджерКоллекция",
+        item_manager_type: "РегистрСведенийМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "РегистрыНакопления",
+        name_en: "AccumulationRegisters",
+        collection_manager_type: "РегистрНакопленияМенеджерКоллекция",
+        item_manager_type: "РегистрНакопленияМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "РегистрыБухгалтерии",
+        name_en: "AccountingRegisters",
+        collection_manager_type: "РегистрБухгалтерииМенеджерКоллекция",
+        item_manager_type: "РегистрБухгалтерииМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "РегистрыРасчета",
+        name_en: "CalculationRegisters",
+        collection_manager_type: "РегистрРасчетаМенеджерКоллекция",
+        item_manager_type: "РегистрРасчетаМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "Перечисления",
+        name_en: "Enums",
+        collection_manager_type: "ПеречисленияМенеджер",
+        item_manager_type: "ПеречислениеМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "Константы",
+        name_en: "Constants",
+        collection_manager_type: "КонстантыМенеджер",
+        item_manager_type: "КонстантаМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "ПланыОбмена",
+        name_en: "ExchangePlans",
+        collection_manager_type: "ПланОбменаМенеджерКоллекция",
+        item_manager_type: "ПланОбменаМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "ПланыВидовХарактеристик",
+        name_en: "ChartsOfCharacteristicTypes",
+        collection_manager_type: "ПланВидовХарактеристикМенеджерКоллекция",
+        item_manager_type: "ПланВидовХарактеристикМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "ПланыСчетов",
+        name_en: "ChartsOfAccounts",
+        collection_manager_type: "ПланСчетовМенеджерКоллекция",
+        item_manager_type: "ПланСчетовМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "ПланыВидовРасчета",
+        name_en: "ChartsOfCalculationTypes",
+        collection_manager_type: "ПланВидовРасчетаМенеджерКоллекция",
+        item_manager_type: "ПланВидовРасчетаМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "БизнесПроцессы",
+        name_en: "BusinessProcesses",
+        collection_manager_type: "БизнесПроцессМенеджерКоллекция",
+        item_manager_type: "БизнесПроцессМенеджер",
+    },
+    GlobalCollectionInfo {
+        name_ru: "Задачи",
+        name_en: "Tasks",
+        collection_manager_type: "ЗадачаМенеджерКоллекция",
+        item_manager_type: "ЗадачаМенеджер",
+    },
+];
+
+/// Поиск глобальной коллекции по имени.
+///
+/// Сравнение case-insensitive для латиницы (eq_ignore_ascii_case).
+/// Для кириллицы используется точное сравнение, т.к. 1С всегда использует корректный регистр.
+fn lookup_global_collection(name: &str) -> Option<&'static GlobalCollectionInfo> {
+    GLOBAL_COLLECTIONS_INFO.iter().find(|info| {
+        info.name_ru == name || info.name_en.eq_ignore_ascii_case(name)
+    })
+}
+
+/// Проверяет, является ли имя глобальной коллекцией метаданных.
+/// Возвращает тип менеджера коллекции, если это глобальная коллекция.
+fn is_global_collection(name: &str) -> Option<&'static str> {
+    lookup_global_collection(name).map(|info| info.collection_manager_type)
+}
+
+/// Возвращает тип менеджера для конкретного объекта метаданных.
+/// Например: "Справочники" + "Контрагенты" → "СправочникМенеджер.Контрагенты"
+fn get_manager_type_for_metadata(collection_name: &str, object_name: &str) -> String {
+    let base_manager = lookup_global_collection(collection_name)
+        .map(|info| info.item_manager_type)
+        .unwrap_or("Неопределено");
+    format!("{}.{}", base_manager, object_name)
+}
+
 /// Конвертер AST → IR
 ///
 /// Выполняет два прохода:
@@ -247,37 +379,14 @@ impl AstToIrConverter {
                             span: call_span,
                         } => self.convert_call_expression(*function.clone(), args.clone(), *call_span)?,
 
-                        // ✅ MILESTONE 3.16: Обрабатываем PropertyAccess для валидации метаданных
+                        // ✅ MILESTONE 3.16 + 5.5: Обрабатываем PropertyAccess для валидации метаданных
                         // Например: Док = Документы.ЗаказКлиента
                         Expression::PropertyAccess {
                             object,
                             property,
                             span: prop_span,
                         } => {
-                            // Извлекаем имя объекта (для "Документы.ЗаказКлиента" это "Документы")
-                            let object_name = match object.as_ref() {
-                                Expression::Identifier { name, .. } => Some(name.clone()),
-                                _ => None,
-                            };
-
-                            // Phase 3: Инферим тип объекта с TypeResolution
-                            let object_type = self.infer_type_resolution(object);
-                            let span = self.ast_span_to_ir_span(*prop_span);
-
-                            // Создаём MemberAccess узел для валидации
-                            let node = SemanticNode {
-                                kind: SemanticNodeKind::MemberAccess {
-                                    object_name,
-                                    object_type,
-                                    member_name: property.clone(),
-                                    access_kind: MemberAccessKind::Property,
-                                },
-                                span,
-                                scope_id: self.current_scope,
-                            };
-
-                            self.nodes.push(node);
-                            Some(self.nodes.len() - 1)
+                            self.convert_property_access_expression(object, property, *prop_span)?
                         }
 
                         _ => None,
@@ -622,31 +731,11 @@ impl AstToIrConverter {
                 if let Expression::Call { function, args, .. } = expression {
                     return self.convert_call_expression(*function, args, span); // ✅ Возвращаем индекс
                 } else if let Expression::PropertyAccess {
-                    object, property, ..
+                    object, property, span: prop_span
                 } = expression
                 {
-                    // ✅ Извлекаем ИМЯ переменной (только для Identifier)
-                    let object_name = match object.as_ref() {
-                        Expression::Identifier { name, .. } => Some(name.clone()),
-                        _ => None, // Для сложных выражений object_name = None
-                    };
-
-                    // Phase 3: Инферим ТИП объекта с TypeResolution
-                    let object_type = self.infer_type_resolution(&object);
-
-                    let node = SemanticNode {
-                        kind: SemanticNodeKind::MemberAccess {
-                            object_name, // Имя переменной
-                            object_type, // Phase 3: TypeResolution
-                            member_name: property,
-                            access_kind: MemberAccessKind::Property, // PropertyAccess = свойство
-                        },
-                        span,
-                        scope_id: self.current_scope,
-                    };
-
-                    self.nodes.push(node);
-                    return Ok(Some(self.nodes.len() - 1));
+                    // ✅ MILESTONE 5.5: Используем convert_property_access_expression для GlobalPropertyAccess
+                    return self.convert_property_access_expression(&object, &property, prop_span);
                 }
                 Ok(None) // Если expression не Call и не PropertyAccess
             }
@@ -798,6 +887,37 @@ impl AstToIrConverter {
             Expression::PropertyAccess {
                 object, property, ..
             } => {
+                // MILESTONE 5.4: Создаём дерево для цепочек методов
+                // Например для цепочки: Справочники.Контрагенты.НайтиПоКоду("001").ПолучитьОбъект()
+                // Создаётся иерархия:
+                //   FunctionCall ПолучитьОбъект
+                //     └─ FunctionCall НайтиПоКоду
+                //          └─ MemberAccess Справочники.Контрагенты
+                let object_node: Option<usize> = match object.as_ref() {
+                    // Вложенный вызов метода: .НайтиПоКоду().ПолучитьОбъект()
+                    Expression::Call {
+                        function: inner_function,
+                        args: inner_args,
+                        span: inner_span,
+                    } => {
+                        self.convert_call_expression(
+                            *inner_function.clone(),
+                            inner_args.clone(),
+                            *inner_span,
+                        )?
+                    }
+                    // PropertyAccess: Справочники.Контрагенты.НайтиПоКоду()
+                    // ✅ MILESTONE 5.5: Используем convert_property_access_expression для GlobalPropertyAccess
+                    Expression::PropertyAccess {
+                        object: inner_object,
+                        property: inner_property,
+                        span: inner_span,
+                    } => {
+                        self.convert_property_access_expression(inner_object, inner_property, *inner_span)?
+                    }
+                    _ => None,
+                };
+
                 // Метод объекта: объект.Метод()
                 // Phase 3: Используем infer_type_resolution для полной информации
                 let object_type = self.infer_type_resolution(&object);
@@ -846,6 +966,10 @@ impl AstToIrConverter {
                         object_type: Some(object_type),
                         // Phase 3: arg_types теперь Vec<TypeResolution>
                         arg_types,
+                        // MILESTONE 5.4: ссылка на вложенный узел для иерархии
+                        object_node,
+                        // НОВОЕ: тип возвращаемого значения (TODO: resolve from method signature)
+                        result_type: TypeResolution::unknown(),
                     },
                     span: expanded_span, // Используем расширенный span
                     scope_id: self.current_scope,
@@ -870,6 +994,9 @@ impl AstToIrConverter {
                 object_type: None,
                 // Phase 3: arg_types теперь Vec<TypeResolution>
                 arg_types,
+                object_node: None, // Нет вложенного узла для обычных функций
+                // НОВОЕ: тип возвращаемого значения (TODO: resolve from function signature)
+                result_type: TypeResolution::unknown(),
             },
             span,
             scope_id: self.current_scope,
@@ -877,6 +1004,103 @@ impl AstToIrConverter {
 
         self.nodes.push(node);
         Ok(Some(self.nodes.len() - 1)) // Возвращаем индекс
+    }
+
+    /// Конвертация PropertyAccess выражения с поддержкой GlobalPropertyAccess
+    ///
+    /// MILESTONE 5.5: Создаёт GlobalPropertyAccess для глобальных коллекций (Справочники, Документы и т.д.)
+    /// и MemberAccess с object_node для построения иерархии.
+    ///
+    /// # Примеры
+    ///
+    /// ```bsl
+    /// Справочники.Контрагенты
+    /// // Создаёт:
+    /// // 1. GlobalPropertyAccess { name: "Справочники", result_type: СправочникиМенеджер }
+    /// // 2. MemberAccess { object_node: Some(1), member_name: "Контрагенты", result_type: СправочникМенеджер.Контрагенты }
+    /// ```
+    fn convert_property_access_expression(
+        &mut self,
+        object: &Expression,
+        property: &str,
+        ast_span: crate::parsing::bsl::ast::Span,
+    ) -> Result<Option<usize>> {
+        let span = self.ast_span_to_ir_span(ast_span);
+
+        // Проверяем, является ли object глобальной коллекцией (Справочники, Документы и т.д.)
+        if let Expression::Identifier { name, span: obj_span } = object {
+            if let Some(collection_manager_type) = is_global_collection(name) {
+                // ✅ MILESTONE 5.5: Создаём GlobalPropertyAccess узел
+                let global_node = SemanticNode {
+                    kind: SemanticNodeKind::GlobalPropertyAccess {
+                        name: name.clone(),
+                        result_type: TypeResolution::explicit(collection_manager_type),
+                    },
+                    span: self.ast_span_to_ir_span(*obj_span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(global_node);
+                let global_node_idx = self.nodes.len() - 1;
+
+                // Вычисляем result_type для MemberAccess
+                // Для Справочники.Контрагенты → СправочникМенеджер.Контрагенты
+                let result_type = TypeResolution::explicit(&get_manager_type_for_metadata(name, property));
+
+                // Создаём MemberAccess с object_node указывающим на GlobalPropertyAccess
+                let member_node = SemanticNode {
+                    kind: SemanticNodeKind::MemberAccess {
+                        object_node: Some(global_node_idx),
+                        object_name: None, // Не нужен — используем object_node
+                        object_type: TypeResolution::explicit(collection_manager_type),
+                        member_name: property.to_string(),
+                        access_kind: MemberAccessKind::Property,
+                        result_type,
+                    },
+                    span,
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(member_node);
+                return Ok(Some(self.nodes.len() - 1));
+            }
+        }
+
+        // Обычный PropertyAccess (не глобальная коллекция)
+        let object_name = match object {
+            Expression::Identifier { name, .. } => Some(name.clone()),
+            _ => None,
+        };
+
+        // Phase 3: Инферим тип объекта с TypeResolution
+        let object_type = self.infer_type_resolution(object);
+
+        // Для вложенных PropertyAccess рекурсивно обрабатываем object
+        let object_node_idx = match object {
+            Expression::PropertyAccess {
+                object: inner_obj,
+                property: inner_prop,
+                span: inner_span,
+            } => self.convert_property_access_expression(inner_obj, inner_prop, *inner_span)?,
+            _ => None,
+        };
+
+        // Резолвим тип свойства
+        let result_type = self.resolve_member_type(&object_type, property);
+
+        let node = SemanticNode {
+            kind: SemanticNodeKind::MemberAccess {
+                object_node: object_node_idx,
+                object_name,
+                object_type: object_type.clone(),
+                member_name: property.to_string(),
+                access_kind: MemberAccessKind::Property,
+                result_type,
+            },
+            span,
+            scope_id: self.current_scope,
+        };
+
+        self.nodes.push(node);
+        Ok(Some(self.nodes.len() - 1))
     }
 
     /// Вывод типа выражения (простая эвристика)
@@ -893,25 +1117,14 @@ impl AstToIrConverter {
                     let collection = &name[..dot_pos];
                     let object_name = &name[dot_pos + 1..];
 
-                    let result = match collection {
-                        "Справочники" | "Catalogs" => format!("СправочникМенеджер.{}", object_name),
-                        "Документы" | "Documents" => format!("ДокументМенеджер.{}", object_name),
-                        "ПланыВидовХарактеристик" | "ChartsOfCharacteristicTypes" => format!("ПланВидовХарактеристикМенеджер.{}", object_name),
-                        "ПланыСчетов" | "ChartsOfAccounts" => format!("ПланСчетовМенеджер.{}", object_name),
-                        "ПланыВидовРасчета" | "ChartsOfCalculationTypes" => format!("ПланВидовРасчетаМенеджер.{}", object_name),
-                        "БизнесПроцессы" | "BusinessProcesses" => format!("БизнесПроцессМенеджер.{}", object_name),
-                        "Задачи" | "Tasks" => format!("ЗадачаМенеджер.{}", object_name),
-                        "РегистрыСведений" | "InformationRegisters" => format!("РегистрСведенийМенеджер.{}", object_name),
-                        "РегистрыНакопления" | "AccumulationRegisters" => format!("РегистрНакопленияМенеджер.{}", object_name),
-                        "РегистрыБухгалтерии" | "AccountingRegisters" => format!("РегистрБухгалтерииМенеджер.{}", object_name),
-                        "РегистрыРасчета" | "CalculationRegisters" => format!("РегистрРасчетаМенеджер.{}", object_name),
-                        _ => {
-                            // Не глобальная коллекция - поиск переменной
-                            self.lookup_variable_type(name)
-                                .unwrap_or_else(|| name.clone())
-                        }
-                    };
-                    return result;
+                    // Используем lookup_global_collection для унифицированного поиска
+                    if let Some(info) = lookup_global_collection(collection) {
+                        return format!("{}.{}", info.item_manager_type, object_name);
+                    }
+
+                    // Не глобальная коллекция - поиск переменной
+                    return self.lookup_variable_type(name)
+                        .unwrap_or_else(|| name.clone());
                 }
 
                 // Поиск переменной в текущем scope
@@ -925,19 +1138,11 @@ impl AstToIrConverter {
                 let base_type = self.infer_expression_type(object);
 
                 // MILESTONE 3.11 Phase 2: PropertyAccess для глобальных коллекций → Manager facet
-                match base_type.as_str() {
-                    "Справочники" | "Catalogs" => format!("СправочникМенеджер.{}", property),
-                    "Документы" | "Documents" => format!("ДокументМенеджер.{}", property),
-                    "ПланыВидовХарактеристик" | "ChartsOfCharacteristicTypes" => format!("ПланВидовХарактеристикМенеджер.{}", property),
-                    "ПланыСчетов" | "ChartsOfAccounts" => format!("ПланСчетовМенеджер.{}", property),
-                    "ПланыВидовРасчета" | "ChartsOfCalculationTypes" => format!("ПланВидовРасчетаМенеджер.{}", property),
-                    "БизнесПроцессы" | "BusinessProcesses" => format!("БизнесПроцессМенеджер.{}", property),
-                    "Задачи" | "Tasks" => format!("ЗадачаМенеджер.{}", property),
-                    "РегистрыСведений" | "InformationRegisters" => format!("РегистрСведенийМенеджер.{}", property),
-                    "РегистрыНакопления" | "AccumulationRegisters" => format!("РегистрНакопленияМенеджер.{}", property),
-                    "РегистрыБухгалтерии" | "AccountingRegisters" => format!("РегистрБухгалтерииМенеджер.{}", property),
-                    "РегистрыРасчета" | "CalculationRegisters" => format!("РегистрРасчетаМенеджер.{}", property),
-                    _ => format!("{}.{}", base_type, property),
+                // Используем lookup_global_collection для унифицированного поиска
+                if let Some(info) = lookup_global_collection(&base_type) {
+                    format!("{}.{}", info.item_manager_type, property)
+                } else {
+                    format!("{}.{}", base_type, property)
                 }
             }
             Expression::Call { function, .. } => {
@@ -1053,6 +1258,13 @@ impl AstToIrConverter {
                     return TypeResolution::primitive("Null");
                 }
 
+                // MILESTONE 5.3: Глобальные коллекции (Справочники, Документы и т.д.)
+                // возвращают своё имя как тип для корректной работы с PropertyAccess
+                // Используем is_global_collection для унифицированного поиска
+                if is_global_collection(name).is_some() {
+                    return TypeResolution::inferred(name, 1.0);
+                }
+
                 // Сначала ищем в SymbolTable
                 if let Some(resolution) = self
                     .symbol_table
@@ -1075,6 +1287,7 @@ impl AstToIrConverter {
                 }
 
                 // Переменная не найдена — unknown
+                // MILESTONE 5.1: Это важно для диагностики необъявленных переменных
                 TypeResolution::unknown()
             }
 
@@ -1277,6 +1490,58 @@ impl AstToIrConverter {
                 }
             }
         }
+    }
+
+    /// Резолвит тип свойства для MemberAccess
+    ///
+    /// Стратегия поиска:
+    /// 1. Ищем свойство в TypeRepository (платформенные и конфигурационные типы)
+    /// 2. Для фасетных типов (СправочникОбъект.Контрагенты) ищем по базовому типу
+    /// 3. Fallback: TypeResolution::unknown()
+    ///
+    /// # Arguments
+    /// * `object_type` - Тип объекта (из infer_type_resolution)
+    /// * `member_name` - Имя свойства
+    ///
+    /// # Returns
+    /// TypeResolution для свойства или unknown() если свойство не найдено
+    fn resolve_member_type(&self, object_type: &TypeResolution, member_name: &str) -> TypeResolution {
+        let type_name = object_type.type_name();
+
+        // Пустой или unknown тип - не можем резолвить
+        if type_name.is_empty() || type_name == "?" {
+            return TypeResolution::unknown();
+        }
+
+        let member_name_lower = member_name.to_lowercase();
+
+        // 1. Ищем в TypeRepository (свойства платформенных и конфигурационных типов)
+        if let Some(type_data) = self.repository.find_type(&type_name) {
+            // Ищем свойство по имени (регистронезависимо)
+            for prop in &type_data.properties {
+                if prop.name.to_lowercase() == member_name_lower {
+                    if !prop.prop_type.is_empty() {
+                        return TypeResolution::explicit(&prop.prop_type);
+                    }
+                }
+            }
+        }
+
+        // 2. Для фасетных типов (СправочникОбъект.Контрагенты) ищем по базовому типу
+        if let Some(base_type) = SignatureIndex::extract_base_facet_type(&type_name) {
+            if let Some(type_data) = self.repository.find_type(base_type) {
+                for prop in &type_data.properties {
+                    if prop.name.to_lowercase() == member_name_lower {
+                        if !prop.prop_type.is_empty() {
+                            return TypeResolution::explicit(&prop.prop_type);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Fallback: свойство не найдено
+        TypeResolution::unknown()
     }
 }
 
@@ -1568,5 +1833,427 @@ mod directive_tests {
         let text = "&AtServer\nProcedure Test()\nEndProcedure";
         let directive = parse_compiler_directive_test(text);
         assert_eq!(directive, CompilerDirective::OnServer);
+    }
+}
+
+#[cfg(test)]
+mod global_property_access_tests {
+    use super::*;
+    use crate::parsing::bsl::ast::Span as AstSpan;
+    use bsl_shared::domain::repository::InMemoryTypeRepository;
+    use bsl_shared::domain::signature_index::SignatureIndex;
+
+    fn create_test_repository() -> Arc<dyn TypeRepository> {
+        Arc::new(InMemoryTypeRepository::new())
+    }
+
+    fn create_test_signature_index() -> SignatureIndex {
+        SignatureIndex::new()
+    }
+
+    #[test]
+    fn test_is_global_collection() {
+        // Проверяем русские имена (точное совпадение)
+        assert_eq!(is_global_collection("Справочники"), Some("СправочникиМенеджер"));
+        assert_eq!(is_global_collection("Документы"), Some("ДокументыМенеджер"));
+        assert_eq!(is_global_collection("РегистрыСведений"), Some("РегистрСведенийМенеджерКоллекция"));
+        assert_eq!(is_global_collection("РегистрыНакопления"), Some("РегистрНакопленияМенеджерКоллекция"));
+        assert_eq!(is_global_collection("РегистрыБухгалтерии"), Some("РегистрБухгалтерииМенеджерКоллекция"));
+        assert_eq!(is_global_collection("РегистрыРасчета"), Some("РегистрРасчетаМенеджерКоллекция"));
+        assert_eq!(is_global_collection("Перечисления"), Some("ПеречисленияМенеджер"));
+        assert_eq!(is_global_collection("Константы"), Some("КонстантыМенеджер"));
+
+        // Проверяем английские имена
+        assert_eq!(is_global_collection("Catalogs"), Some("СправочникиМенеджер"));
+        assert_eq!(is_global_collection("Documents"), Some("ДокументыМенеджер"));
+        assert_eq!(is_global_collection("InformationRegisters"), Some("РегистрСведенийМенеджерКоллекция"));
+        assert_eq!(is_global_collection("AccumulationRegisters"), Some("РегистрНакопленияМенеджерКоллекция"));
+        assert_eq!(is_global_collection("AccountingRegisters"), Some("РегистрБухгалтерииМенеджерКоллекция"));
+        assert_eq!(is_global_collection("CalculationRegisters"), Some("РегистрРасчетаМенеджерКоллекция"));
+
+        // Проверяем case-insensitive для латиницы
+        assert_eq!(is_global_collection("catalogs"), Some("СправочникиМенеджер"));
+        assert_eq!(is_global_collection("DOCUMENTS"), Some("ДокументыМенеджер"));
+        assert_eq!(is_global_collection("accountingregisters"), Some("РегистрБухгалтерииМенеджерКоллекция"));
+        assert_eq!(is_global_collection("CALCULATIONREGISTERS"), Some("РегистрРасчетаМенеджерКоллекция"));
+
+        // Кириллица с другим регистром НЕ совпадает (1С всегда использует корректный регистр)
+        assert_eq!(is_global_collection("СПРАВОЧНИКИ"), None);
+
+        // Не глобальные коллекции
+        assert_eq!(is_global_collection("МояПеременная"), None);
+        assert_eq!(is_global_collection("Массив"), None);
+    }
+
+    #[test]
+    fn test_get_manager_type_for_metadata() {
+        // Справочники и Документы
+        assert_eq!(
+            get_manager_type_for_metadata("Справочники", "Контрагенты"),
+            "СправочникМенеджер.Контрагенты"
+        );
+        assert_eq!(
+            get_manager_type_for_metadata("Документы", "ЗаказКлиента"),
+            "ДокументМенеджер.ЗаказКлиента"
+        );
+        assert_eq!(
+            get_manager_type_for_metadata("Catalogs", "Partners"),
+            "СправочникМенеджер.Partners"
+        );
+
+        // Регистры сведений и накопления
+        assert_eq!(
+            get_manager_type_for_metadata("РегистрыСведений", "ЦеныНоменклатуры"),
+            "РегистрСведенийМенеджер.ЦеныНоменклатуры"
+        );
+        assert_eq!(
+            get_manager_type_for_metadata("РегистрыНакопления", "ОстаткиТоваров"),
+            "РегистрНакопленияМенеджер.ОстаткиТоваров"
+        );
+        assert_eq!(
+            get_manager_type_for_metadata("InformationRegisters", "Prices"),
+            "РегистрСведенийМенеджер.Prices"
+        );
+        assert_eq!(
+            get_manager_type_for_metadata("AccumulationRegisters", "Inventory"),
+            "РегистрНакопленияМенеджер.Inventory"
+        );
+
+        // НОВЫЕ: Регистры бухгалтерии и расчета
+        assert_eq!(
+            get_manager_type_for_metadata("РегистрыБухгалтерии", "Хозрасчетный"),
+            "РегистрБухгалтерииМенеджер.Хозрасчетный"
+        );
+        assert_eq!(
+            get_manager_type_for_metadata("РегистрыРасчета", "ОсновныеНачисления"),
+            "РегистрРасчетаМенеджер.ОсновныеНачисления"
+        );
+        assert_eq!(
+            get_manager_type_for_metadata("AccountingRegisters", "MainAccounting"),
+            "РегистрБухгалтерииМенеджер.MainAccounting"
+        );
+        assert_eq!(
+            get_manager_type_for_metadata("CalculationRegisters", "Salary"),
+            "РегистрРасчетаМенеджер.Salary"
+        );
+
+        // Планы
+        assert_eq!(
+            get_manager_type_for_metadata("ПланыВидовХарактеристик", "ДополнительныеРеквизиты"),
+            "ПланВидовХарактеристикМенеджер.ДополнительныеРеквизиты"
+        );
+        assert_eq!(
+            get_manager_type_for_metadata("ПланыСчетов", "Хозрасчетный"),
+            "ПланСчетовМенеджер.Хозрасчетный"
+        );
+        assert_eq!(
+            get_manager_type_for_metadata("ПланыВидовРасчета", "Начисления"),
+            "ПланВидовРасчетаМенеджер.Начисления"
+        );
+
+        // Неизвестная коллекция
+        assert_eq!(
+            get_manager_type_for_metadata("НеизвестнаяКоллекция", "Объект"),
+            "Неопределено.Объект"
+        );
+    }
+
+    #[test]
+    fn test_global_property_access_for_справочники() {
+        // Тест: Справочники.Контрагенты создаёт GlobalPropertyAccess + MemberAccess
+        let ast = Program {
+            statements: vec![Statement::Assignment {
+                target: Expression::Identifier {
+                    name: "Менеджер".to_string(),
+                    span: AstSpan::stub(),
+                },
+                value: Expression::PropertyAccess {
+                    object: Box::new(Expression::Identifier {
+                        name: "Справочники".to_string(),
+                        span: AstSpan::stub(),
+                    }),
+                    property: "Контрагенты".to_string(),
+                    span: AstSpan::stub(),
+                },
+                span: AstSpan::stub(),
+            }],
+        };
+
+        let ir = AstToIrConverter::convert(
+            ast,
+            "Менеджер = Справочники.Контрагенты;".to_string(),
+            "test.bsl".to_string(),
+            create_test_repository(),
+            create_test_signature_index(),
+        )
+        .unwrap();
+
+        // Должно быть 3 узла:
+        // 0: GlobalPropertyAccess { name: "Справочники" }
+        // 1: MemberAccess { object_node: Some(0), member_name: "Контрагенты" }
+        // 2: Assignment { variable: "Менеджер", value_node: Some(1) }
+        assert_eq!(ir.nodes.len(), 3);
+
+        // Проверяем GlobalPropertyAccess
+        if let SemanticNodeKind::GlobalPropertyAccess { name, result_type } = &ir.nodes[0].kind {
+            assert_eq!(name, "Справочники");
+            assert_eq!(result_type.type_name(), "СправочникиМенеджер");
+        } else {
+            panic!("Expected GlobalPropertyAccess at nodes[0], got: {:?}", ir.nodes[0].kind);
+        }
+
+        // Проверяем MemberAccess
+        if let SemanticNodeKind::MemberAccess {
+            object_node,
+            member_name,
+            object_type,
+            result_type,
+            ..
+        } = &ir.nodes[1].kind
+        {
+            assert_eq!(*object_node, Some(0)); // Ссылка на GlobalPropertyAccess
+            assert_eq!(member_name, "Контрагенты");
+            assert_eq!(object_type.type_name(), "СправочникиМенеджер");
+            assert_eq!(result_type.type_name(), "СправочникМенеджер.Контрагенты");
+        } else {
+            panic!("Expected MemberAccess at nodes[1], got: {:?}", ir.nodes[1].kind);
+        }
+
+        // Проверяем Assignment
+        if let SemanticNodeKind::Assignment {
+            variable,
+            value_node,
+            ..
+        } = &ir.nodes[2].kind
+        {
+            assert_eq!(variable, "Менеджер");
+            assert_eq!(*value_node, Some(1)); // Ссылка на MemberAccess
+        } else {
+            panic!("Expected Assignment at nodes[2], got: {:?}", ir.nodes[2].kind);
+        }
+    }
+
+    #[test]
+    fn test_global_property_access_for_documents() {
+        // Тест с английским именем: Documents.Order
+        let ast = Program {
+            statements: vec![Statement::Assignment {
+                target: Expression::Identifier {
+                    name: "DocManager".to_string(),
+                    span: AstSpan::stub(),
+                },
+                value: Expression::PropertyAccess {
+                    object: Box::new(Expression::Identifier {
+                        name: "Documents".to_string(),
+                        span: AstSpan::stub(),
+                    }),
+                    property: "Order".to_string(),
+                    span: AstSpan::stub(),
+                },
+                span: AstSpan::stub(),
+            }],
+        };
+
+        let ir = AstToIrConverter::convert(
+            ast,
+            "DocManager = Documents.Order;".to_string(),
+            "test.bsl".to_string(),
+            create_test_repository(),
+            create_test_signature_index(),
+        )
+        .unwrap();
+
+        // Проверяем GlobalPropertyAccess
+        if let SemanticNodeKind::GlobalPropertyAccess { name, result_type } = &ir.nodes[0].kind {
+            assert_eq!(name, "Documents");
+            assert_eq!(result_type.type_name(), "ДокументыМенеджер");
+        } else {
+            panic!("Expected GlobalPropertyAccess at nodes[0]");
+        }
+
+        // Проверяем MemberAccess result_type
+        if let SemanticNodeKind::MemberAccess { result_type, .. } = &ir.nodes[1].kind {
+            assert_eq!(result_type.type_name(), "ДокументМенеджер.Order");
+        } else {
+            panic!("Expected MemberAccess at nodes[1]");
+        }
+    }
+
+    #[test]
+    fn test_regular_property_access_not_global() {
+        // Тест: обычный PropertyAccess (не глобальная коллекция) НЕ создаёт GlobalPropertyAccess
+        let ast = Program {
+            statements: vec![Statement::Assignment {
+                target: Expression::Identifier {
+                    name: "Результат".to_string(),
+                    span: AstSpan::stub(),
+                },
+                value: Expression::PropertyAccess {
+                    object: Box::new(Expression::Identifier {
+                        name: "МояПеременная".to_string(),
+                        span: AstSpan::stub(),
+                    }),
+                    property: "Свойство".to_string(),
+                    span: AstSpan::stub(),
+                },
+                span: AstSpan::stub(),
+            }],
+        };
+
+        let ir = AstToIrConverter::convert(
+            ast,
+            "Результат = МояПеременная.Свойство;".to_string(),
+            "test.bsl".to_string(),
+            create_test_repository(),
+            create_test_signature_index(),
+        )
+        .unwrap();
+
+        // Должно быть 2 узла:
+        // 0: MemberAccess (без GlobalPropertyAccess)
+        // 1: Assignment
+        assert_eq!(ir.nodes.len(), 2);
+
+        // Первый узел должен быть MemberAccess (не GlobalPropertyAccess)
+        if let SemanticNodeKind::MemberAccess {
+            object_node,
+            object_name,
+            member_name,
+            ..
+        } = &ir.nodes[0].kind
+        {
+            assert_eq!(*object_node, None); // Нет вложенного узла
+            assert_eq!(object_name.as_ref().unwrap(), "МояПеременная");
+            assert_eq!(member_name, "Свойство");
+        } else {
+            panic!("Expected MemberAccess at nodes[0], got: {:?}", ir.nodes[0].kind);
+        }
+    }
+
+    #[test]
+    fn test_global_property_access_for_accounting_registers() {
+        // Тест: РегистрыБухгалтерии.Хозрасчетный создаёт GlobalPropertyAccess + MemberAccess
+        let ast = Program {
+            statements: vec![Statement::Assignment {
+                target: Expression::Identifier {
+                    name: "РегМенеджер".to_string(),
+                    span: AstSpan::stub(),
+                },
+                value: Expression::PropertyAccess {
+                    object: Box::new(Expression::Identifier {
+                        name: "РегистрыБухгалтерии".to_string(),
+                        span: AstSpan::stub(),
+                    }),
+                    property: "Хозрасчетный".to_string(),
+                    span: AstSpan::stub(),
+                },
+                span: AstSpan::stub(),
+            }],
+        };
+
+        let ir = AstToIrConverter::convert(
+            ast,
+            "РегМенеджер = РегистрыБухгалтерии.Хозрасчетный;".to_string(),
+            "test.bsl".to_string(),
+            create_test_repository(),
+            create_test_signature_index(),
+        )
+        .unwrap();
+
+        assert_eq!(ir.nodes.len(), 3);
+
+        // Проверяем GlobalPropertyAccess
+        if let SemanticNodeKind::GlobalPropertyAccess { name, result_type } = &ir.nodes[0].kind {
+            assert_eq!(name, "РегистрыБухгалтерии");
+            assert_eq!(result_type.type_name(), "РегистрБухгалтерииМенеджерКоллекция");
+        } else {
+            panic!("Expected GlobalPropertyAccess at nodes[0], got: {:?}", ir.nodes[0].kind);
+        }
+
+        // Проверяем MemberAccess result_type
+        if let SemanticNodeKind::MemberAccess { result_type, member_name, .. } = &ir.nodes[1].kind {
+            assert_eq!(member_name, "Хозрасчетный");
+            assert_eq!(result_type.type_name(), "РегистрБухгалтерииМенеджер.Хозрасчетный");
+        } else {
+            panic!("Expected MemberAccess at nodes[1], got: {:?}", ir.nodes[1].kind);
+        }
+    }
+
+    #[test]
+    fn test_global_property_access_for_calculation_registers() {
+        // Тест: РегистрыРасчета.ОсновныеНачисления создаёт GlobalPropertyAccess + MemberAccess
+        let ast = Program {
+            statements: vec![Statement::Assignment {
+                target: Expression::Identifier {
+                    name: "РегМенеджер".to_string(),
+                    span: AstSpan::stub(),
+                },
+                value: Expression::PropertyAccess {
+                    object: Box::new(Expression::Identifier {
+                        name: "РегистрыРасчета".to_string(),
+                        span: AstSpan::stub(),
+                    }),
+                    property: "ОсновныеНачисления".to_string(),
+                    span: AstSpan::stub(),
+                },
+                span: AstSpan::stub(),
+            }],
+        };
+
+        let ir = AstToIrConverter::convert(
+            ast,
+            "РегМенеджер = РегистрыРасчета.ОсновныеНачисления;".to_string(),
+            "test.bsl".to_string(),
+            create_test_repository(),
+            create_test_signature_index(),
+        )
+        .unwrap();
+
+        assert_eq!(ir.nodes.len(), 3);
+
+        // Проверяем GlobalPropertyAccess
+        if let SemanticNodeKind::GlobalPropertyAccess { name, result_type } = &ir.nodes[0].kind {
+            assert_eq!(name, "РегистрыРасчета");
+            assert_eq!(result_type.type_name(), "РегистрРасчетаМенеджерКоллекция");
+        } else {
+            panic!("Expected GlobalPropertyAccess at nodes[0], got: {:?}", ir.nodes[0].kind);
+        }
+
+        // Проверяем MemberAccess result_type
+        if let SemanticNodeKind::MemberAccess { result_type, member_name, .. } = &ir.nodes[1].kind {
+            assert_eq!(member_name, "ОсновныеНачисления");
+            assert_eq!(result_type.type_name(), "РегистрРасчетаМенеджер.ОсновныеНачисления");
+        } else {
+            panic!("Expected MemberAccess at nodes[1], got: {:?}", ir.nodes[1].kind);
+        }
+    }
+
+    #[test]
+    fn test_lookup_global_collection() {
+        // Проверяем lookup функцию возвращает полную информацию
+        let info = lookup_global_collection("Справочники").unwrap();
+        assert_eq!(info.name_ru, "Справочники");
+        assert_eq!(info.name_en, "Catalogs");
+        assert_eq!(info.collection_manager_type, "СправочникиМенеджер");
+        assert_eq!(info.item_manager_type, "СправочникМенеджер");
+
+        let info = lookup_global_collection("AccountingRegisters").unwrap();
+        assert_eq!(info.name_ru, "РегистрыБухгалтерии");
+        assert_eq!(info.name_en, "AccountingRegisters");
+        assert_eq!(info.collection_manager_type, "РегистрБухгалтерииМенеджерКоллекция");
+        assert_eq!(info.item_manager_type, "РегистрБухгалтерииМенеджер");
+
+        let info = lookup_global_collection("CalculationRegisters").unwrap();
+        assert_eq!(info.name_ru, "РегистрыРасчета");
+        assert_eq!(info.name_en, "CalculationRegisters");
+        assert_eq!(info.collection_manager_type, "РегистрРасчетаМенеджерКоллекция");
+        assert_eq!(info.item_manager_type, "РегистрРасчетаМенеджер");
+
+        // Case-insensitive для английских имён
+        let info = lookup_global_collection("accountingregisters").unwrap();
+        assert_eq!(info.name_ru, "РегистрыБухгалтерии");
+
+        // Несуществующая коллекция
+        assert!(lookup_global_collection("НесуществующаяКоллекция").is_none());
     }
 }

@@ -268,3 +268,60 @@ pub async fn get_enhanced_hover(
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
+
+/// Request для получения семантического дерева
+#[derive(Deserialize)]
+pub struct SemanticTreeRequest {
+    pub code: String,
+    #[serde(default = "default_file_path")]
+    pub file_path: String,
+}
+
+fn default_file_path() -> String {
+    "inline.bsl".to_string()
+}
+
+/// Get semantic tree for code - показывает семантическое представление кода
+/// Milestone 5.3: Web API endpoint для семантического дерева
+///
+/// Возвращает:
+/// - root_nodes: дерево семантических узлов (функции, переменные, вызовы)
+/// - symbol_table: таблица символов с типами
+/// - metrics: метрики анализа (количество узлов, известных/выведенных типов)
+pub async fn get_semantic_tree(
+    State(state): State<AppState>,
+    Json(req): Json<SemanticTreeRequest>,
+) -> impl IntoResponse {
+    let start = Instant::now();
+
+    match state
+        .type_service
+        .get_semantic_tree(&req.code, &req.file_path)
+        .await
+    {
+        Ok(tree) => {
+            let duration_ms = start.elapsed().as_millis();
+
+            // Добавляем время выполнения в метрики
+            let response = serde_json::json!({
+                "file_path": tree.file_path,
+                "root_nodes": tree.root_nodes,
+                "symbol_table": tree.symbol_table,
+                "metrics": {
+                    "node_count": tree.metrics.node_count,
+                    "procedure_count": tree.metrics.procedure_count,
+                    "function_count": tree.metrics.function_count,
+                    "variable_count": tree.metrics.variable_count,
+                    "known_types": tree.metrics.known_types,
+                    "inferred_types": tree.metrics.inferred_types,
+                    "unknown_types": tree.metrics.unknown_types,
+                    "analysis_time_ms": tree.metrics.analysis_time_ms,
+                    "request_duration_ms": duration_ms,
+                }
+            });
+
+            Json(response).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}

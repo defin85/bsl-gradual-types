@@ -16,6 +16,9 @@ fn main() {
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=GIT_HASH={}", git_hash);
 
-    // ВАЖНО: Всегда перекомпилировать для свежего timestamp
-    // Удаляем rerun-if-changed чтобы build.rs запускался КАЖДЫЙ раз
+    // ВАЖНО: Принудительная перекомпиляция при каждой сборке
+    // Это гарантирует актуальный BUILD_TIMESTAMP
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=src/bin/lsp_server.rs");
+    println!("cargo:rerun-if-env-changed=FORCE_REBUILD");
 }

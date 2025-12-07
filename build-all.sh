@@ -146,6 +146,9 @@ build_rust_binaries() {
     log_info "Режим: $BUILD_MODE"
     log_info "Флаги: cargo build $cargo_flags --workspace"
 
+    # Принудительно обновляем build.rs для свежего BUILD_TIMESTAMP
+    touch backend/build.rs
+
     measure_time cargo build $cargo_flags --workspace
 
     log_success "\n✅ Rust бинарники собраны"

@@ -622,6 +622,77 @@ impl TypeSystemService {
         None
     }
 
+    /// Flow-sensitive поиск типа переменной на указанной позиции
+    ///
+    /// Ищет последнее присваивание переменной ДО указанной строки,
+    /// чтобы показать актуальный тип на позиции курсора.
+    fn find_variable_type_at_position(
+        &self,
+        ir_program: &bsl_shared::ir::SemanticProgram,
+        var_name: &str,
+        target_scope: bsl_shared::ir::ScopeId,
+        line: u32,
+    ) -> Option<bsl_shared::domain::types::TypeResolution> {
+        use bsl_shared::ir::SemanticNodeKind;
+
+        let mut assignments: Vec<(u32, bsl_shared::domain::types::TypeResolution)> = Vec::new();
+
+        for node in &ir_program.nodes {
+            // Проверяем видимость scope (текущий или родительский)
+            if !self.is_scope_visible(ir_program, node.scope_id, target_scope) {
+                continue;
+            }
+
+            match &node.kind {
+                // Присваивание переменной
+                SemanticNodeKind::Assignment { variable, value_type, .. }
+                    if variable.eq_ignore_ascii_case(var_name) && node.span.start_line <= line =>
+                {
+                    assignments.push((node.span.start_line, value_type.clone()));
+                }
+                // Объявление с инициализацией
+                SemanticNodeKind::VariableDeclaration {
+                    name,
+                    initial_value_type: Some(value_type),
+                    ..
+                } if name.eq_ignore_ascii_case(var_name) && node.span.start_line <= line => {
+                    assignments.push((node.span.start_line, value_type.clone()));
+                }
+                _ => {}
+            }
+        }
+
+        // Сортируем по строке и берём последнее присваивание
+        assignments.sort_by_key(|(line, _)| *line);
+        assignments.last().map(|(_, res)| res.clone())
+    }
+
+    /// Проверка видимости scope из другого scope
+    fn is_scope_visible(
+        &self,
+        ir_program: &bsl_shared::ir::SemanticProgram,
+        source_scope: bsl_shared::ir::ScopeId,
+        target_scope: bsl_shared::ir::ScopeId,
+    ) -> bool {
+        if source_scope == target_scope {
+            return true;
+        }
+
+        // Проверяем цепочку родителей
+        let mut current = Some(target_scope);
+        while let Some(scope_id) = current {
+            if scope_id == source_scope {
+                return true;
+            }
+            current = ir_program
+                .symbols
+                .scopes
+                .get(&scope_id)
+                .and_then(|s| s.parent);
+        }
+        false
+    }
+
     /// LSP операции - получить информацию о символе в позиции (hover)
     ///
     /// MILESTONE 3.6 Phase 1: Добавлен опциональный параметр hover_config
@@ -704,11 +775,20 @@ impl TypeSystemService {
                 line, column, var_name, scope_id
             );
 
-            // Direction 2: Резолвим переменную через TypeResolver с учётом SymbolTable
-            // Это позволяет корректно обрабатывать Generic типы из flow-sensitive анализа
-            let resolver = self.analysis_engine.get_resolver();
-            let resolution =
-                resolver.resolve_variable_with_context(&var_name, &ir_program.symbols, scope_id);
+            // ✅ FLOW-SENSITIVE: Ищем тип на конкретной позиции (не финальный!)
+            let resolution = if let Some(flow_type) =
+                self.find_variable_type_at_position(&ir_program, &var_name, scope_id, line)
+            {
+                info!(
+                    "✅ Flow-sensitive тип для '{}' на строке {}: {}",
+                    var_name, line, flow_type.type_name()
+                );
+                flow_type
+            } else {
+                // Fallback: используем SymbolTable (финальный тип)
+                let resolver = self.analysis_engine.get_resolver();
+                resolver.resolve_variable_with_context(&var_name, &ir_program.symbols, scope_id)
+            };
 
             // MILESTONE 3.6 Phase 1: Используем переданную конфигурацию или default
             let formatter = if let Some(config) = hover_config {

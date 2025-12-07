@@ -3,7 +3,7 @@
 # BSL Gradual Types - Кросс-платформенный скрипт запуска Web API
 # ============================================================================
 # Поддерживает: Linux, macOS, Windows (Git Bash, MSYS2, Cygwin, WSL)
-# Использование: ./start-web-api.sh [--no-config] [--build] [--no-frontend]
+# Использование: ./scripts/start-web-api.sh [--no-config] [--build] [--no-frontend]
 #
 # Флаги:
 #   --no-config    Запуск без конфигурации (только platform types)
@@ -12,6 +12,11 @@
 # ============================================================================
 
 set -e
+
+# Переходим в корень проекта (скрипт находится в scripts/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
 
 # ============================================================================
 # Определение платформы

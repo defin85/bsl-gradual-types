@@ -21,10 +21,10 @@ AI-ассистент инструкции для BSL Gradual Type System про
 1. **Пользователь запускает сервер** в отдельном терминале:
    ```bash
    # С конфигурацией (рекомендуется для полного тестирования):
-   ./start-web-api.sh
+   ./scripts/start-web-api.sh
 
    # Только platform types (без конфигурации):
-   ./start-web-api.sh --no-config
+   ./scripts/start-web-api.sh --no-config
    ```
 
 2. **Claude тестирует через curl:**

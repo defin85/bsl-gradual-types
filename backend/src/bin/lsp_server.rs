@@ -436,6 +436,11 @@ impl LanguageServer for BslLanguageServer {
             info!("⚠️ No initializationOptions provided - using defaults (4 basic types only)");
         }
 
+        // Версионная информация для LSP Protocol
+        let version = env!("CARGO_PKG_VERSION");
+        let build_timestamp = env!("BUILD_TIMESTAMP");
+        let git_hash = env!("GIT_HASH");
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -483,7 +488,10 @@ impl LanguageServer for BslLanguageServer {
                 }),
                 ..Default::default()
             },
-            ..Default::default()
+            server_info: Some(ServerInfo {
+                name: "BSL Language Server".to_string(),
+                version: Some(format!("{} (build: {}, git: {})", version, build_timestamp, git_hash)),
+            }),
         })
     }
 

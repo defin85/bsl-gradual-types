@@ -94,7 +94,21 @@ pub async fn search_types(
 pub async fn health_check() -> impl IntoResponse {
     Json(serde_json::json!({
         "status": "ok",
-        "service": "bsl-gradual-types"
+        "service": "bsl-gradual-types",
+        "version": env!("CARGO_PKG_VERSION"),
+        "build": env!("BUILD_TIMESTAMP"),
+        "git": env!("GIT_HASH")
+    }))
+}
+
+/// Version information endpoint
+pub async fn get_version() -> impl IntoResponse {
+    Json(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "build_timestamp": env!("BUILD_TIMESTAMP"),
+        "git_hash": env!("GIT_HASH"),
+        "rust_version": env!("CARGO_PKG_RUST_VERSION", "unknown"),
+        "name": "BSL Gradual Types"
     }))
 }
 

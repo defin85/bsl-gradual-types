@@ -14,7 +14,7 @@ use tower_http::{
 
 use super::handlers::{
     get_hover, get_metrics, get_types, health_check, search_types, validate_code, AppState,
-    get_diagnostics, get_debug_ast, get_enhanced_hover, get_semantic_tree,
+    get_diagnostics, get_debug_ast, get_enhanced_hover, get_semantic_tree, get_version,
 };
 
 /// Handler for favicon.ico - returns 204 No Content to avoid 404 errors
@@ -32,6 +32,7 @@ pub fn create_router(app_state: AppState, static_path: &str, enable_cors: bool) 
 
     let mut app = Router::new()
         .route("/api/health", get(health_check))
+        .route("/api/version", get(get_version))
         .route("/api/metrics", get(get_metrics))
         .route("/api/types", get(get_types))
         .route("/api/search", get(search_types))

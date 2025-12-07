@@ -125,6 +125,52 @@ pub fn is_known_facet_prefix(prefix: &str) -> bool {
     )
 }
 
+/// Извлекает базовый фасетный тип из любого формата:
+///
+/// - **Placeholder**: `"СправочникМенеджер.<Имя справочника>"` -> `"СправочникМенеджер"`
+/// - **Конкретизированный**: `"СправочникМенеджер.Контрагенты"` -> `"СправочникМенеджер"`
+/// - **Уже базовый**: `"СправочникМенеджер"` -> `None`
+///
+/// # Параметры
+/// * `type_name` - имя типа в любом формате
+///
+/// # Возвращает
+/// * `Some(&str)` - базовый тип (например `"СправочникМенеджер"`)
+/// * `None` - если тип уже базовый или не является фасетным
+///
+/// # Примеры
+/// ```rust
+/// use bsl_shared::domain::facet_utils::extract_base_facet_type_universal;
+///
+/// // Placeholder формат
+/// assert_eq!(
+///     extract_base_facet_type_universal("СправочникМенеджер.<Имя справочника>"),
+///     Some("СправочникМенеджер")
+/// );
+///
+/// // Конкретизированный формат
+/// assert_eq!(
+///     extract_base_facet_type_universal("СправочникМенеджер.Контрагенты"),
+///     Some("СправочникМенеджер")
+/// );
+///
+/// // Уже базовый тип
+/// assert_eq!(extract_base_facet_type_universal("СправочникМенеджер"), None);
+///
+/// // Не фасетный тип
+/// assert_eq!(extract_base_facet_type_universal("Массив"), None);
+/// ```
+pub fn extract_base_facet_type_universal(type_name: &str) -> Option<&str> {
+    // Сначала пробуем placeholder формат (содержит "<" и ">")
+    if type_name.contains('<') && type_name.contains('>') {
+        // "СправочникМенеджер.<Имя справочника>" → "СправочникМенеджер"
+        return type_name.find('.').map(|pos| &type_name[..pos]);
+    }
+
+    // Затем конкретизированный формат через существующую функцию
+    extract_base_facet_type(type_name)
+}
+
 /// Извлечь базовый фасетный тип из имени типа с placeholder (template параметром)
 ///
 /// Эта функция отличается от `extract_base_facet_type` тем, что работает с
@@ -455,5 +501,57 @@ mod tests {
             extract_placeholder_base_type("ТестТип.&lt;Произвольный текст&gt;"),
             Some("ТестТип")
         );
+    }
+
+    // ================= extract_base_facet_type_universal tests =================
+
+    #[test]
+    fn test_extract_base_facet_type_universal_placeholder() {
+        // Placeholder формат (основной use case для исправления)
+        assert_eq!(
+            extract_base_facet_type_universal("СправочникМенеджер.<Имя справочника>"),
+            Some("СправочникМенеджер")
+        );
+        assert_eq!(
+            extract_base_facet_type_universal("ДокументОбъект.<Имя документа>"),
+            Some("ДокументОбъект")
+        );
+        assert_eq!(
+            extract_base_facet_type_universal("РегистрСведенийМенеджер.<Имя регистра сведений>"),
+            Some("РегистрСведенийМенеджер")
+        );
+    }
+
+    #[test]
+    fn test_extract_base_facet_type_universal_concrete() {
+        // Конкретизированный формат (делегирует в extract_base_facet_type)
+        assert_eq!(
+            extract_base_facet_type_universal("СправочникМенеджер.Контрагенты"),
+            Some("СправочникМенеджер")
+        );
+        assert_eq!(
+            extract_base_facet_type_universal("ДокументОбъект.ЗаказКлиента"),
+            Some("ДокументОбъект")
+        );
+    }
+
+    #[test]
+    fn test_extract_base_facet_type_universal_already_base() {
+        // Уже базовый тип — возвращает None
+        assert_eq!(extract_base_facet_type_universal("СправочникМенеджер"), None);
+        assert_eq!(extract_base_facet_type_universal("ДокументОбъект"), None);
+    }
+
+    #[test]
+    fn test_extract_base_facet_type_universal_non_facet() {
+        // Не фасетные типы
+        assert_eq!(extract_base_facet_type_universal("Массив"), None);
+        assert_eq!(extract_base_facet_type_universal("ТаблицаЗначений"), None);
+        assert_eq!(extract_base_facet_type_universal("Строка"), None);
+    }
+
+    #[test]
+    fn test_extract_base_facet_type_universal_empty() {
+        assert_eq!(extract_base_facet_type_universal(""), None);
     }
 }

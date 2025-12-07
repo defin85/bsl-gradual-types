@@ -483,7 +483,10 @@ impl TypeRepository for InMemoryTypeRepository {
         }
 
         // 2. Если не найдено, пробуем извлечь базовый фасетный тип
-        if let Some(base_type) = SignatureIndex::extract_base_facet_type(type_name) {
+        //    Используем universal функцию, которая обрабатывает как placeholder формат
+        //    ("СправочникМенеджер.<Имя справочника>"), так и конкретизированный
+        //    ("СправочникМенеджер.Контрагенты")
+        if let Some(base_type) = super::facet_utils::extract_base_facet_type_universal(type_name) {
             let base_methods = index.get_type_methods(base_type);
             return base_methods.into_iter().cloned().collect();
         }

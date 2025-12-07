@@ -47,4 +47,4 @@ pub use metadata_constants::{
 pub use metadata_patterns::{ExtractedPattern, MetadataPatternRegistry};
 pub use signature_registry::{SignatureDataSource, SignatureSourceRegistry};
 pub use type_definition_location::{ModulePaths, TypeDefinitionLocation};
-pub use facet_utils::{extract_base_facet_type, extract_placeholder_base_type, is_known_facet_prefix};
+pub use facet_utils::{extract_base_facet_type, extract_base_facet_type_universal, extract_placeholder_base_type, is_known_facet_prefix};

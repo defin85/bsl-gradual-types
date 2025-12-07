@@ -162,7 +162,8 @@ impl TypeMetadataLookup {
             }
 
             // Fallback для фасетных типов: извлекаем базовый тип
-            if let Some(base_type) = super::facet_utils::extract_base_facet_type(&name) {
+            // Используем universal функцию для обработки как placeholder, так и конкретных форматов
+            if let Some(base_type) = super::facet_utils::extract_base_facet_type_universal(&name) {
                 // Сначала пробуем SignatureIndex
                 let sig_methods = self.repository.get_methods_from_signature_index(base_type);
                 if !sig_methods.is_empty() {
@@ -638,8 +639,8 @@ impl TypeMetadataLookup {
         }
 
         // Если не найдено, пробуем извлечь базовый тип ("ДокументМенеджер")
-        // Это нужно для тестов, которые создают типы без placeholder
-        if let Some(base_type_name) = super::facet_utils::extract_base_facet_type(platform_type_name)
+        // Используем universal функцию для обработки как placeholder, так и конкретных форматов
+        if let Some(base_type_name) = super::facet_utils::extract_base_facet_type_universal(platform_type_name)
         {
             // Сначала пробуем SignatureIndex с базовым типом
             let sig_methods = self.repository.get_methods_from_signature_index(base_type_name);

@@ -679,9 +679,15 @@ impl TypeResolution {
                 ConcreteType::Primitive(pt) => pt.display_name().to_string(),
                 ConcreteType::Platform(platform) => platform.name.clone(),
                 ConcreteType::Configuration(cfg) => {
-                    // Для конфигурации формируем полное имя с обычным префиксом
-                    // Например: "Справочники.Контрагенты", "Документы.ЗаказПокупателя"
-                    format!("{}.{}", cfg.kind.to_prefix(), cfg.name)
+                    // Для конфигурации формируем полное имя с учётом активного фасета
+                    // ИСПРАВЛЕНИЕ: Используем фасетный префикс для корректного поиска методов
+                    if let Some(ref facet) = self.active_facet {
+                        // С фасетом: "СправочникМенеджер.Контрагенты"
+                        format!("{}.{}", cfg.kind.faceted_type_prefix(facet), cfg.name)
+                    } else {
+                        // Без фасета (fallback): "Справочники.Контрагенты"
+                        format!("{}.{}", cfg.kind.to_prefix(), cfg.name)
+                    }
                 }
                 ConcreteType::Special(special) => special.display_name().to_string(),
                 ConcreteType::GlobalFunction(func) => func.name.clone(),

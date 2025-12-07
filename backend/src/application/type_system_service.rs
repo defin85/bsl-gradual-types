@@ -737,12 +737,14 @@ impl TypeSystemService {
                 // Конвертация AST → IR для Inline Scope Analysis
                 let repository = self.analysis_engine.get_repository();
                 let signature_index = repository.get_signature_index_clone(); // Milestone 3.9
-                let ir = crate::application::ast_to_ir::AstToIrConverter::convert(
+                let resolver = self.analysis_engine.get_resolver(); // ✅ FIX: TypeResolver для active_facet
+                let ir = crate::application::ast_to_ir::AstToIrConverter::convert_with_resolver(
                     parse_result.program.clone(),
                     file_content.to_string(),
                     "hover_request.bsl".to_string(),
                     repository, // ✅ Передаём TypeRepository для Generic inference
                     signature_index, // ✅ Milestone 3.9: Передаём SignatureIndex для return type inference
+                    Some(resolver), // ✅ FIX: Передаём TypeResolver для корректного active_facet
                 )?;
 
                 let ir_arc = std::sync::Arc::new(ir);

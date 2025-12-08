@@ -7,7 +7,7 @@ use crate::domain::repository::TypeRepository;
 use crate::domain::signature_index::MethodSignature;
 use crate::domain::types::{
     ConcreteType, FacetKind, GenericType, MetadataKind, RawMethodData, RawParamData,
-    RawPropertyData, RawTypeData, ResolutionResult, TypeResolution,
+    RawPropertyData, RawTabularSectionData, RawTypeData, ResolutionResult, TypeResolution,
 };
 use crate::utils::string_utils::levenshtein_distance;
 use std::sync::Arc;
@@ -226,6 +226,11 @@ impl TypeMetadataLookup {
     ///
     /// Вектор свойств типа или пустой вектор если тип не найден
     ///
+    /// # Алгоритм
+    ///
+    /// 1. Приоритет 1: Lazy lookup через active_facet (для конфигурационных типов)
+    /// 2. Приоритет 2: Fallback на raw type properties (для платформенных типов)
+    ///
     /// # Примеры
     ///
     /// ```ignore
@@ -236,8 +241,56 @@ impl TypeMetadataLookup {
     /// }
     /// ```
     pub fn get_properties(&self, resolution: &TypeResolution) -> Vec<RawPropertyData> {
+        // Приоритет 1 - Lazy lookup через active_facet (для конфигурационных типов)
+        if let Some(facet) = resolution.active_facet {
+            if let Some(props) = self.get_facet_properties(resolution, facet) {
+                return props;
+            }
+        }
+
+        // Приоритет 2 - Fallback на raw type properties (для платформенных типов)
         self.get_raw_type(resolution)
             .map(|raw| raw.properties)
+            .unwrap_or_default()
+    }
+
+    /// Получить табличные части для TypeResolution
+    ///
+    /// # Параметры
+    ///
+    /// * `resolution` - результат статического анализа типа
+    ///
+    /// # Возвращает
+    ///
+    /// Вектор табличных частей типа или пустой вектор если тип не найден
+    /// или не имеет табличных частей (платформенные типы)
+    ///
+    /// # Алгоритм
+    ///
+    /// 1. Извлекает имя типа из resolution
+    /// 2. Находит RawTypeData в repository
+    /// 3. Возвращает табличные части из RawTypeData
+    ///
+    /// # Примеры
+    ///
+    /// ```ignore
+    /// let resolution = resolver.resolve_expression_sync("Документ.ЗаказНаряды");
+    /// let tabular_sections = lookup.get_tabular_sections(&resolution);
+    /// for ts in tabular_sections {
+    ///     println!("Табличная часть: {} ({} колонок)", ts.name, ts.attributes.len());
+    /// }
+    /// ```
+    pub fn get_tabular_sections(&self, resolution: &TypeResolution) -> Vec<RawTabularSectionData> {
+        // Табличные части актуальны только для Object/Reference фасетов
+        if let Some(facet) = resolution.active_facet {
+            if !matches!(facet, FacetKind::Object | FacetKind::Reference) {
+                return vec![];
+            }
+        }
+
+        // Получаем RawTypeData и извлекаем табличные части
+        self.get_raw_type(resolution)
+            .map(|raw| raw.tabular_sections.clone())
             .unwrap_or_default()
     }
 
@@ -673,6 +726,75 @@ impl TypeMetadataLookup {
 
         // Тип не найден ни с placeholder, ни без него
         None
+    }
+
+    /// Выполняет lazy lookup свойств для конкретного фасета
+    ///
+    /// # Алгоритм
+    ///
+    /// 1. Проверяем shows_properties() для фасета
+    /// 2. Получаем платформенные свойства через get_platform_facet_type()
+    /// 3. Добавляем конфигурационные свойства (реквизиты) для Object/Reference
+    ///
+    /// # Примеры
+    ///
+    /// ```ignore
+    /// // Справочники.Контрагенты + Object фасет
+    /// let props = lookup.get_facet_properties(&resolution, FacetKind::Object);
+    /// // → Ищет "СправочникОбъект" → Возвращает платформенные + конфигурационные свойства
+    ///
+    /// // Справочники.Контрагенты + Manager фасет
+    /// let props = lookup.get_facet_properties(&resolution, FacetKind::Manager);
+    /// // → Manager не показывает свойства → Возвращает Some(vec![])
+    /// ```
+    fn get_facet_properties(
+        &self,
+        resolution: &TypeResolution,
+        facet: FacetKind,
+    ) -> Option<Vec<RawPropertyData>> {
+        // 1. Проверяем, показывает ли фасет свойства
+        if !facet.shows_properties() {
+            return Some(vec![]); // Пустой список для Manager/Selection/List
+        }
+
+        let mut combined_properties = Vec::new();
+
+        // 2. Получаем платформенные свойства через mapping
+        if let Some(metadata_kind) = self.extract_metadata_kind(resolution) {
+            if let Some(platform_type_name) = Self::get_platform_facet_type(metadata_kind, facet) {
+                // Сначала пробуем точное имя с placeholder
+                if let Some(platform_type) = self.repository.find_type(platform_type_name) {
+                    combined_properties.extend(platform_type.properties.clone());
+                }
+                // Fallback на базовый тип (без placeholder)
+                else if let Some(base_name) =
+                    super::facet_utils::extract_base_facet_type_universal(platform_type_name)
+                {
+                    if let Some(platform_type) = self.repository.find_type(base_name) {
+                        combined_properties.extend(platform_type.properties.clone());
+                    }
+                }
+            }
+        }
+
+        // 3. Добавляем конфигурационные свойства (реквизиты) для Object/Reference
+        if matches!(facet, FacetKind::Object | FacetKind::Reference) {
+            if let Some(config_type) = self.get_raw_type(resolution) {
+                let is_readonly = facet.properties_are_readonly();
+                for prop in config_type.properties.iter() {
+                    // Избегаем дубликатов (платформенные имеют приоритет)
+                    if !combined_properties.iter().any(|p| p.name == prop.name) {
+                        let mut new_prop = prop.clone();
+                        if is_readonly {
+                            new_prop.is_readonly = true;
+                        }
+                        combined_properties.push(new_prop);
+                    }
+                }
+            }
+        }
+
+        Some(combined_properties)
     }
 
     // === Milestone 3.16: MetadataLookup API ===
@@ -1489,5 +1611,158 @@ mod tests {
         assert_eq!(methods.len(), 1);
         assert_eq!(methods[0].name, "Метод1");
         assert_eq!(methods[0].return_type, "Строка");
+    }
+
+    // === Тесты для get_tabular_sections ===
+
+    /// Создаёт репозиторий с документом, имеющим табличные части
+    fn create_test_repository_with_tabular_sections() -> Arc<InMemoryTypeRepository> {
+        use crate::domain::types::{RawAttributeData, RawTabularSectionData};
+
+        let repo = Arc::new(InMemoryTypeRepository::new());
+
+        // Создаём документ с двумя табличными частями
+        let document = RawTypeData {
+            name: "Документы.ЗаказНаряды".to_string(),
+            english_name: "Documents.WorkOrders".to_string(),
+            description: "Документ заказ-наряды".to_string(),
+            category: "Документы".to_string(),
+            source: RawDataSource::Configuration,
+            methods: vec![],
+            properties: vec![],
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Document),
+            attributes: vec![],
+            tabular_sections: vec![
+                RawTabularSectionData {
+                    name: "Работы".to_string(),
+                    attributes: vec![
+                        RawAttributeData {
+                            name: "Номенклатура".to_string(),
+                            attr_type: "СправочникСсылка.Номенклатура".to_string(),
+                        },
+                        RawAttributeData {
+                            name: "Количество".to_string(),
+                            attr_type: "Число".to_string(),
+                        },
+                    ],
+                },
+                RawTabularSectionData {
+                    name: "Материалы".to_string(),
+                    attributes: vec![RawAttributeData {
+                        name: "Материал".to_string(),
+                        attr_type: "СправочникСсылка.Номенклатура".to_string(),
+                    }],
+                },
+            ],
+            enum_values: vec![],
+            generic_info: None,
+            module_paths: None,
+        };
+
+        repo.load_types(vec![document]).unwrap();
+        repo
+    }
+
+    fn create_config_resolution_with_facet(
+        type_name: &str,
+        kind: MetadataKind,
+        facet: Option<FacetKind>,
+    ) -> TypeResolution {
+        use crate::domain::types::ConfigurationType;
+
+        TypeResolution {
+            certainty: Certainty::Known,
+            result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+                kind,
+                name: type_name.to_string(),
+                facet: None,
+                attributes: vec![],
+                tabular_sections: vec![],
+            })),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata::default(),
+            active_facet: facet,
+            available_facets: vec![],
+        }
+    }
+
+    #[test]
+    fn test_get_tabular_sections_returns_sections_for_object_facet() {
+        let repo = create_test_repository_with_tabular_sections();
+        let lookup = TypeMetadataLookup::new(repo);
+
+        // Object фасет - должны вернуться табличные части
+        let resolution = create_config_resolution_with_facet(
+            "ЗаказНаряды",
+            MetadataKind::Document,
+            Some(FacetKind::Object),
+        );
+
+        let sections = lookup.get_tabular_sections(&resolution);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].name, "Работы");
+        assert_eq!(sections[0].attributes.len(), 2);
+        assert_eq!(sections[1].name, "Материалы");
+        assert_eq!(sections[1].attributes.len(), 1);
+    }
+
+    #[test]
+    fn test_get_tabular_sections_returns_sections_for_reference_facet() {
+        let repo = create_test_repository_with_tabular_sections();
+        let lookup = TypeMetadataLookup::new(repo);
+
+        // Reference фасет - тоже должны вернуться табличные части
+        let resolution = create_config_resolution_with_facet(
+            "ЗаказНаряды",
+            MetadataKind::Document,
+            Some(FacetKind::Reference),
+        );
+
+        let sections = lookup.get_tabular_sections(&resolution);
+        assert_eq!(sections.len(), 2);
+    }
+
+    #[test]
+    fn test_get_tabular_sections_empty_for_manager_facet() {
+        let repo = create_test_repository_with_tabular_sections();
+        let lookup = TypeMetadataLookup::new(repo);
+
+        // Manager фасет - табличные части не актуальны
+        let resolution = create_config_resolution_with_facet(
+            "ЗаказНаряды",
+            MetadataKind::Document,
+            Some(FacetKind::Manager),
+        );
+
+        let sections = lookup.get_tabular_sections(&resolution);
+        assert!(sections.is_empty());
+    }
+
+    #[test]
+    fn test_get_tabular_sections_empty_for_platform_type() {
+        let repo = create_test_repository(); // Репозиторий с платформенным типом "Массив"
+        let lookup = TypeMetadataLookup::new(repo);
+
+        let resolution = create_test_resolution("Массив");
+
+        let sections = lookup.get_tabular_sections(&resolution);
+        assert!(sections.is_empty());
+    }
+
+    #[test]
+    fn test_get_tabular_sections_without_facet_returns_sections() {
+        let repo = create_test_repository_with_tabular_sections();
+        let lookup = TypeMetadataLookup::new(repo);
+
+        // Без активного фасета - должны вернуться табличные части
+        let resolution = create_config_resolution_with_facet(
+            "ЗаказНаряды",
+            MetadataKind::Document,
+            None, // Нет активного фасета
+        );
+
+        let sections = lookup.get_tabular_sections(&resolution);
+        assert_eq!(sections.len(), 2);
     }
 }

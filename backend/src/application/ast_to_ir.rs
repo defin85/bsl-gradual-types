@@ -1288,9 +1288,9 @@ impl AstToIrConverter {
                     return resolution.clone();
                 }
 
-                // Переменная не найдена — unknown
+                // Переменная не найдена в scope - возвращаем undeclared
                 // MILESTONE 5.1: Это важно для диагностики необъявленных переменных
-                TypeResolution::unknown()
+                TypeResolution::undeclared_variable(name)
             }
 
             // Новые конструкции (Новый Тип())
@@ -1333,6 +1333,15 @@ impl AstToIrConverter {
             // Вызов функции/метода
             Expression::Call { .. } => {
                 let type_str = self.infer_expression_type(expr);
+
+                // Milestone 3.X: Если результат вызова метода — конфигурационный тип,
+                // используем TypeResolver для корректной резолюции с active_facet
+                if is_configuration_type_pattern(&type_str) {
+                    if let Some(ref resolver) = self.resolver {
+                        return resolver.resolve_expression_sync(&type_str);
+                    }
+                }
+
                 TypeResolution::inferred(&type_str, 0.6)
             }
 

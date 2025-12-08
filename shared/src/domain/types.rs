@@ -295,6 +295,31 @@ impl TypeResolution {
         }
     }
 
+    /// Создать Unknown резолюцию для необъявленной переменной
+    pub fn undeclared_variable(name: &str) -> Self {
+        Self {
+            certainty: Certainty::Unknown,
+            result: ResolutionResult::Dynamic,
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata {
+                uncertainty_reason: Some(UncertaintyReason::UndeclaredVariable {
+                    name: name.to_string(),
+                }),
+                ..Default::default()
+            },
+            active_facet: None,
+            available_facets: vec![],
+        }
+    }
+
+    /// Проверяет, является ли это необъявленной переменной
+    pub fn is_undeclared_variable(&self) -> Option<&str> {
+        match &self.metadata.uncertainty_reason {
+            Some(UncertaintyReason::UndeclaredVariable { name }) => Some(name),
+            _ => None,
+        }
+    }
+
     pub fn known(concrete: ConcreteType) -> Self {
         Self {
             certainty: Certainty::Known,
@@ -778,6 +803,12 @@ pub enum UncertaintyReason {
 
     /// Other reason for uncertainty
     Other(String),
+
+    /// Переменная не найдена в scope
+    UndeclaredVariable {
+        /// Имя переменной
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1222,6 +1253,25 @@ impl FacetKind {
             FacetKind::List => "Список",
             _ => "",
         }
+    }
+
+    /// Показывает ли фасет свойства в hover
+    ///
+    /// Object, Reference, Collection - показывают свойства (это данные объекта)
+    /// Manager, Selection, List - НЕ показывают свойства (это фасеты доступа/навигации)
+    pub fn shows_properties(&self) -> bool {
+        matches!(
+            self,
+            FacetKind::Object | FacetKind::Reference | FacetKind::Collection
+        )
+    }
+
+    /// Свойства только для чтения (для Reference)
+    ///
+    /// Reference - ссылка на элемент, свойства доступны только для чтения
+    /// Object - изменяемый объект, свойства доступны для записи
+    pub fn properties_are_readonly(&self) -> bool {
+        matches!(self, FacetKind::Reference)
     }
 }
 
@@ -3336,5 +3386,60 @@ mod type_resolution_constructors_tests {
     fn test_type_name_dynamic() {
         let t = TypeResolution::unknown();
         assert_eq!(t.type_name(), "Dynamic");
+    }
+}
+
+#[cfg(test)]
+mod facet_visibility_tests {
+    use super::*;
+
+    #[test]
+    fn test_manager_hides_properties() {
+        assert!(!FacetKind::Manager.shows_properties());
+    }
+
+    #[test]
+    fn test_object_shows_properties() {
+        assert!(FacetKind::Object.shows_properties());
+        assert!(!FacetKind::Object.properties_are_readonly());
+    }
+
+    #[test]
+    fn test_reference_shows_readonly_properties() {
+        assert!(FacetKind::Reference.shows_properties());
+        assert!(FacetKind::Reference.properties_are_readonly());
+    }
+
+    #[test]
+    fn test_selection_hides_properties() {
+        assert!(!FacetKind::Selection.shows_properties());
+    }
+
+    #[test]
+    fn test_list_hides_properties() {
+        assert!(!FacetKind::List.shows_properties());
+    }
+
+    #[test]
+    fn test_collection_shows_properties() {
+        assert!(FacetKind::Collection.shows_properties());
+    }
+
+    #[test]
+    fn test_metadata_hides_properties() {
+        // Metadata - это описание структуры, не данные объекта
+        assert!(!FacetKind::Metadata.shows_properties());
+    }
+
+    #[test]
+    fn test_constructor_hides_properties() {
+        // Constructor - для создания объектов, не для доступа к свойствам
+        assert!(!FacetKind::Constructor.shows_properties());
+    }
+
+    #[test]
+    fn test_singleton_hides_properties() {
+        // Singleton - одиночный объект, обычно менеджер
+        assert!(!FacetKind::Singleton.shows_properties());
     }
 }

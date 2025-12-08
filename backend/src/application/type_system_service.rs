@@ -196,7 +196,8 @@ impl TypeSystemService {
                         types
                             .iter()
                             .map(|wt| UnionComponentDto {
-                                type_name: format!("{:?}", wt.type_),
+                                // Используем Display вместо Debug для читаемого формата
+                                type_name: format!("{}", wt.type_),
                                 probability: (wt.weight * 100.0) as u8,
                             })
                             .collect(),
@@ -231,10 +232,11 @@ impl TypeSystemService {
                     category,
                     certainty: certainty_val,
                     certainty_text: format!("{:?} {}%", res.certainty, certainty_val),
+                    // Используем display_name() для читаемого формата фасетов
                     facets: res
                         .available_facets
                         .iter()
-                        .map(|f| format!("{:?}", f))
+                        .map(|f| f.display_name().to_string())
                         .collect(),
                     methods_count: Some(methods.len()),
                     methods: methods
@@ -421,33 +423,44 @@ impl TypeSystemService {
         }
     }
 
-    /// Генерация описания типа
+    /// Генерация описания типа (человекочитаемый формат)
     fn generate_type_description(&self, resolution: &TypeResolution) -> String {
         match &resolution.result {
             ResolutionResult::Concrete(concrete) => {
-                format!("Конкретный тип: {:?}", concrete)
+                // Используем Display вместо Debug для читаемого формата
+                format!("Конкретный тип: {}", concrete)
             }
             ResolutionResult::Union(types) => {
-                format!("Union тип из {} вариантов", types.len())
+                // Показываем варианты union типа
+                let type_names: Vec<String> = types
+                    .iter()
+                    .map(|wt| format!("{}", wt.type_))
+                    .collect();
+                format!("Union тип: {}", type_names.join(" | "))
             }
             ResolutionResult::Intersection(types) => {
-                format!("Intersection тип из {} типов", types.len())
+                let type_names: Vec<String> = types
+                    .iter()
+                    .map(|t| format!("{}", t))
+                    .collect();
+                format!("Intersection тип: {}", type_names.join(" & "))
             }
             ResolutionResult::Generic(gen) => {
-                format!(
-                    "Generic тип: {}<{}>",
-                    gen.base_type,
-                    gen.type_params
-                        .iter()
-                        .map(|t| format!("{:?}", t))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
+                let params: Vec<String> = gen
+                    .type_params
+                    .iter()
+                    .map(|t| format!("{}", t))
+                    .collect();
+                if params.is_empty() {
+                    format!("Generic тип: {}", gen.base_type)
+                } else {
+                    format!("Generic тип: {}<{}>", gen.base_type, params.join(", "))
+                }
             }
             ResolutionResult::Nullable(inner) => {
-                format!("Nullable тип: {:?} | Null", inner)
+                format!("Nullable тип: {} | Неопределено", inner)
             }
-            ResolutionResult::Dynamic => "Динамический тип".to_string(),
+            ResolutionResult::Dynamic => "Динамический тип (Произвольный)".to_string(),
         }
     }
 
@@ -1076,7 +1089,8 @@ impl TypeSystemService {
                         types
                             .iter()
                             .map(|wt| UnionComponentDto {
-                                type_name: format!("{:?}", wt.type_),
+                                // Используем Display вместо Debug для читаемого формата
+                                type_name: format!("{}", wt.type_),
                                 probability: (wt.weight * 100.0) as u8,
                             })
                             .collect(),
@@ -1111,10 +1125,11 @@ impl TypeSystemService {
                     category,
                     certainty: certainty_val,
                     certainty_text: format!("{:?} {}%", res.certainty, certainty_val),
+                    // Используем display_name() для читаемого формата фасетов
                     facets: res
                         .available_facets
                         .iter()
-                        .map(|f| format!("{:?}", f))
+                        .map(|f| f.display_name().to_string())
                         .collect(),
                     methods_count: Some(methods.len()),
                     methods: methods
@@ -1744,21 +1759,33 @@ impl TypeSystemService {
         ))
     }
 
-    /// Форматировать ResolutionResult для отображения
+    /// Форматировать ResolutionResult для отображения (человекочитаемый формат)
     fn format_resolution_result(result: &ResolutionResult) -> String {
         match result {
-            ResolutionResult::Concrete(concrete_type) => format!("{:?}", concrete_type),
+            // Используем Display вместо Debug для читаемого формата
+            ResolutionResult::Concrete(concrete_type) => format!("{}", concrete_type),
             ResolutionResult::Union(types) => {
-                let names: Vec<String> = types.iter().map(|t| format!("{:?}", t)).collect();
-                format!("Union<{}>", names.join(" | "))
+                let names: Vec<String> = types.iter().map(|wt| format!("{}", wt.type_)).collect();
+                names.join(" | ")
             }
-            ResolutionResult::Dynamic => "Dynamic".to_string(),
+            ResolutionResult::Dynamic => "Произвольный".to_string(),
             ResolutionResult::Intersection(types) => {
-                let names: Vec<String> = types.iter().map(|t| format!("{:?}", t)).collect();
-                format!("Intersection<{}>", names.join(" & "))
+                let names: Vec<String> = types.iter().map(|t| format!("{}", t)).collect();
+                names.join(" & ")
             }
-            ResolutionResult::Generic(generic) => format!("Generic<{}>", generic.base_type),
-            ResolutionResult::Nullable(inner) => format!("Nullable<{:?}>", inner),
+            ResolutionResult::Generic(generic) => {
+                if generic.type_params.is_empty() {
+                    generic.base_type.clone()
+                } else {
+                    let params: Vec<String> = generic
+                        .type_params
+                        .iter()
+                        .map(|t| format!("{}", t))
+                        .collect();
+                    format!("{}<{}>", generic.base_type, params.join(", "))
+                }
+            }
+            ResolutionResult::Nullable(inner) => format!("{} | Неопределено", inner),
         }
     }
 
@@ -2441,7 +2468,7 @@ impl TypeSystemService {
         output
     }
 
-    /// Форматирует имя ConcreteType для отображения
+    /// Форматирует имя ConcreteType для отображения (человекочитаемый формат)
     fn format_concrete_type_name(
         &self,
         concrete: &bsl_shared::domain::types::ConcreteType,
@@ -2454,8 +2481,9 @@ impl TypeSystemService {
                 // Используем to_prefix() для корректного форматирования
                 format!("{}.{}", ct.kind.to_prefix(), ct.name)
             }
-            ConcreteType::Primitive(prim) => format!("{:?}", prim),
-            ConcreteType::Special(spec) => format!("{:?}", spec),
+            // Используем display_name() вместо Debug для читаемого формата
+            ConcreteType::Primitive(prim) => prim.display_name().to_string(),
+            ConcreteType::Special(spec) => spec.display_name().to_string(),
             ConcreteType::GlobalFunction(gf) => gf.name.clone(),
             ConcreteType::TabularRow(tr) => tr.get_full_name(),
         }

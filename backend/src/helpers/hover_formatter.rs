@@ -94,7 +94,7 @@ impl Default for HoverFormatConfig {
         Self {
             max_methods: 10,
             max_properties: 5,
-            detail_level: DetailLevel::Full,
+            detail_level: DetailLevel::Detailed,
             show_certainty: true,
             syntax_helper_path: None, // По умолчанию нет
             output_format: OutputFormat::Markdown,
@@ -263,7 +263,7 @@ impl HoverFormatter {
             }
             DetailLevel::Detailed => {
                 // Полный hover с методами, свойствами, фасетами и документацией (Phase 2)
-                // Порядок: тип → фасеты → свойства (state) → методы (behavior) → документация
+                // Порядок: тип → фасеты → свойства (state) → табличные части → методы (behavior) → документация
                 HoverBuilder::new(&self.config)
                     .add_header("Переменная", name)
                     .add_type_info(resolution)
@@ -271,6 +271,7 @@ impl HoverFormatter {
                     .add_facet_info(resolution)              // ← MILESTONE 3.6 Phase 2: Task 2.1
                     .add_generic_info(resolution)            // ← MILESTONE 3.6 Phase 2: Task 2.2
                     .add_properties(resolution, &self.metadata_lookup) // ← Свойства ПЕРЕД методами (best practice)
+                    .add_tabular_sections(resolution, &self.metadata_lookup) // ← Табличные части
                     .add_methods(resolution, &self.metadata_lookup)
                     .add_documentation_links(resolution)    // ← MILESTONE 3.6 Phase 2: Task 2.4
                     .build()
@@ -645,6 +646,7 @@ impl<'a> HoverBuilder<'a> {
         resolution: &TypeResolution,
         metadata_lookup: &TypeMetadataLookup,
     ) -> Self {
+        // Фильтрация по фасету теперь происходит внутри get_properties()
         let properties = metadata_lookup.get_properties(resolution);
 
         if !properties.is_empty() {
@@ -684,6 +686,57 @@ impl<'a> HoverBuilder<'a> {
             self.sections.push(property_lines.join("  \n"));
         }
 
+        self
+    }
+
+    /// Добавить информацию о табличных частях (только для Detailed level)
+    ///
+    /// Табличные части отображаются для конфигурационных типов (Документы, Справочники)
+    /// с фасетами Object или Reference.
+    fn add_tabular_sections(
+        mut self,
+        resolution: &TypeResolution,
+        metadata_lookup: &TypeMetadataLookup,
+    ) -> Self {
+        // Только для Detailed уровня
+        if !matches!(self.config.detail_level, DetailLevel::Detailed) {
+            return self;
+        }
+
+        let sections = metadata_lookup.get_tabular_sections(resolution);
+
+        if sections.is_empty() {
+            return self;
+        }
+
+        let total = sections.len();
+        // Для Detailed показываем все табличные части, для остальных - max_properties
+        let display_count = total; // Показываем все табличные части
+
+        let mut lines = vec![format!(
+            "Табличные части (показано {} из {}):",
+            display_count, total
+        )];
+
+        for section in sections.iter().take(display_count) {
+            let attr_count = section.attributes.len();
+            let line = match self.config.output_format {
+                OutputFormat::Markdown => {
+                    format!("• **{}** ({} колонок)", section.name, attr_count)
+                }
+                OutputFormat::PlainText => {
+                    format!("  - {} ({} колонок)", section.name, attr_count)
+                }
+            };
+            lines.push(line);
+        }
+
+        if total > display_count {
+            lines.push(format!("... и ещё {} табличных частей", total - display_count));
+        }
+
+        // ИСПРАВЛЕНИЕ: Используем "  \n" (два пробела + \n) для Markdown hard break в VSCode hover
+        self.sections.push(lines.join("  \n"));
         self
     }
 
@@ -1067,6 +1120,7 @@ mod tests {
 
         let config = HoverFormatConfig {
             max_methods: 10,
+            detail_level: DetailLevel::Full, // Явно указываем для тестирования лимита
             ..Default::default()
         };
 
@@ -1090,6 +1144,7 @@ mod tests {
 
         let config = HoverFormatConfig {
             max_properties: 5,
+            detail_level: DetailLevel::Full, // Явно указываем для тестирования лимита
             ..Default::default()
         };
 
@@ -1369,4 +1424,161 @@ mod tests {
     }
 
     // REMOVED: test_format_variable_uses_unknown_metadata_hover - hover should not show errors (Milestone 3.16)
+
+    // === Тесты для add_tabular_sections ===
+
+    fn create_test_repository_with_tabular_sections() -> Arc<InMemoryTypeRepository> {
+        use bsl_shared::domain::types::{
+            FacetKind, MetadataKind, RawAttributeData, RawDataSource, RawTabularSectionData,
+            RawTypeData,
+        };
+
+        let repo = Arc::new(InMemoryTypeRepository::new());
+
+        let document = RawTypeData {
+            name: "Документы.ЗаказНаряды".to_string(),
+            english_name: "Documents.WorkOrders".to_string(),
+            description: "Документ заказ-наряды".to_string(),
+            category: "Документы".to_string(),
+            source: RawDataSource::Configuration,
+            methods: vec![],
+            properties: vec![],
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Document),
+            attributes: vec![],
+            tabular_sections: vec![
+                RawTabularSectionData {
+                    name: "Работы".to_string(),
+                    attributes: vec![
+                        RawAttributeData {
+                            name: "Номенклатура".to_string(),
+                            attr_type: "СправочникСсылка.Номенклатура".to_string(),
+                        },
+                        RawAttributeData {
+                            name: "Количество".to_string(),
+                            attr_type: "Число".to_string(),
+                        },
+                    ],
+                },
+                RawTabularSectionData {
+                    name: "Материалы".to_string(),
+                    attributes: vec![RawAttributeData {
+                        name: "Материал".to_string(),
+                        attr_type: "СправочникСсылка.Номенклатура".to_string(),
+                    }],
+                },
+            ],
+            enum_values: vec![],
+            generic_info: None,
+            module_paths: None,
+        };
+
+        repo.load_types(vec![document]).unwrap();
+        repo
+    }
+
+    fn create_config_resolution(
+        type_name: &str,
+        kind: bsl_shared::domain::types::MetadataKind,
+        facet: Option<bsl_shared::domain::types::FacetKind>,
+    ) -> TypeResolution {
+        use bsl_shared::domain::types::ConfigurationType;
+
+        TypeResolution {
+            result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+                kind,
+                name: type_name.to_string(),
+                facet: None,
+                attributes: vec![],
+                tabular_sections: vec![],
+            })),
+            certainty: Certainty::Known,
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata::default(),
+            active_facet: facet,
+            available_facets: vec![],
+        }
+    }
+
+    #[test]
+    fn test_tabular_sections_in_hover() {
+        use bsl_shared::domain::types::{FacetKind, MetadataKind};
+
+        let repo = create_test_repository_with_tabular_sections();
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+
+        let config = HoverFormatConfig {
+            detail_level: DetailLevel::Detailed,
+            ..Default::default()
+        };
+
+        let resolution = create_config_resolution(
+            "ЗаказНаряды",
+            MetadataKind::Document,
+            Some(FacetKind::Object),
+        );
+
+        let result = HoverBuilder::new(&config)
+            .add_tabular_sections(&resolution, &metadata_lookup)
+            .build();
+
+        // Проверяем, что табличные части отображаются
+        assert!(result.contains("Табличные части"));
+        assert!(result.contains("Работы"));
+        assert!(result.contains("Материалы"));
+        assert!(result.contains("2 колонок")); // У "Работы" 2 колонки
+        assert!(result.contains("1 колонок")); // У "Материалы" 1 колонка
+    }
+
+    #[test]
+    fn test_tabular_sections_empty_for_manager_facet() {
+        use bsl_shared::domain::types::{FacetKind, MetadataKind};
+
+        let repo = create_test_repository_with_tabular_sections();
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+
+        let config = HoverFormatConfig {
+            detail_level: DetailLevel::Detailed,
+            ..Default::default()
+        };
+
+        let resolution = create_config_resolution(
+            "ЗаказНаряды",
+            MetadataKind::Document,
+            Some(FacetKind::Manager), // Manager не показывает табличные части
+        );
+
+        let result = HoverBuilder::new(&config)
+            .add_tabular_sections(&resolution, &metadata_lookup)
+            .build();
+
+        // Для Manager фасета табличные части не должны отображаться
+        assert!(!result.contains("Табличные части"));
+    }
+
+    #[test]
+    fn test_tabular_sections_only_for_detailed_level() {
+        use bsl_shared::domain::types::{FacetKind, MetadataKind};
+
+        let repo = create_test_repository_with_tabular_sections();
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+
+        let config = HoverFormatConfig {
+            detail_level: DetailLevel::Full, // НЕ Detailed
+            ..Default::default()
+        };
+
+        let resolution = create_config_resolution(
+            "ЗаказНаряды",
+            MetadataKind::Document,
+            Some(FacetKind::Object),
+        );
+
+        let result = HoverBuilder::new(&config)
+            .add_tabular_sections(&resolution, &metadata_lookup)
+            .build();
+
+        // Для Full уровня табличные части не должны отображаться
+        assert!(!result.contains("Табличные части"));
+    }
 }

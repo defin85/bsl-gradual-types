@@ -39,6 +39,12 @@ pub struct HoverRequest {
     pub code: String,
     pub line: u32,
     pub column: u32,
+    #[serde(default = "default_detail_level")]
+    pub detail_level: String,
+}
+
+fn default_detail_level() -> String {
+    "detailed".to_string()
 }
 
 #[derive(Clone)]
@@ -293,16 +299,28 @@ pub async fn get_enhanced_hover(
     State(state): State<AppState>,
     Json(req): Json<HoverRequest>,
 ) -> impl IntoResponse {
+    use bsl_shared::formatting::DetailLevel;
+    use crate::helpers::hover_formatter::HoverFormatConfig;
+
     let start = Instant::now();
+
+    // Парсить detail_level из request
+    let detail_level = DetailLevel::parse(&req.detail_level);
+
+    // Создать конфиг с нужным detail_level
+    let hover_config = HoverFormatConfig {
+        detail_level,
+        ..Default::default()
+    };
 
     match state
         .type_service
-        .get_hover_info(&req.code, req.line, req.column, None)
+        .get_hover_info(&req.code, req.line, req.column, Some(hover_config))
         .await
     {
         Ok(hover_text) => {
             let duration_ms = start.elapsed().as_millis();
-            
+
             // Handle Option<String> from get_hover_info
             let hover_text_str = hover_text.unwrap_or_else(|| "No information available".to_string());
 

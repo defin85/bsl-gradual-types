@@ -75,6 +75,15 @@ pub enum TypeErrorKind {
         /// Имя члена (свойство или метод)
         member_name: String,
     },
+    /// Необъявленная переменная
+    UndeclaredVariable {
+        /// Имя переменной
+        variable_name: String,
+        /// Имя метода (если в аргументе)
+        method_name: Option<String>,
+        /// Индекс параметра (1-based)
+        param_index: Option<usize>,
+    },
 }
 
 
@@ -203,6 +212,13 @@ impl TypeErrorKind {
                     )
                 }
             }
+            TypeErrorKind::UndeclaredVariable { variable_name, method_name, param_index } => {
+                if let (Some(method), Some(idx)) = (method_name, param_index) {
+                    format!("Необъявленная переменная '{}' в параметре #{} метода '{}'", variable_name, idx, method)
+                } else {
+                    format!("Необъявленная переменная '{}'", variable_name)
+                }
+            }
         }
     }
 
@@ -319,6 +335,8 @@ impl TypeErrorKind {
             }
             // UnknownTypeAccess: Standard формат совпадает с Brief
             TypeErrorKind::UnknownTypeAccess { .. } => self.format_brief(),
+            // UndeclaredVariable: Standard формат совпадает с Brief
+            TypeErrorKind::UndeclaredVariable { .. } => self.format_brief(),
         }
     }
 
@@ -443,6 +461,16 @@ impl TypeErrorKind {
                     "💡 Подсказка: Переменная не была инициализирована. \
                         Присвойте значение переменной перед обращением к её членам.".to_string()
                 }
+            }
+            TypeErrorKind::UndeclaredVariable {
+                variable_name,
+                ..
+            } => {
+                format!(
+                    "💡 Подсказка: Переменная '{}' не объявлена в текущей области видимости. \
+                    Объявите переменную с помощью 'Перем {}' или присвойте ей значение перед использованием.",
+                    variable_name, variable_name
+                )
             }
         }
     }
@@ -680,6 +708,15 @@ impl<'a> TypeValidator<'a> {
                 UncertaintyReason::Other(_) => {
                     // Other reasons don't generate validation errors
                     None
+                }
+                UncertaintyReason::UndeclaredVariable { name } => {
+                    // Undeclared variable errors are handled separately in visitor
+                    // to provide better context (method name, param index)
+                    Some(TypeErrorKind::UndeclaredVariable {
+                        variable_name: name.clone(),
+                        method_name: None,
+                        param_index: None,
+                    })
                 }
             }
         } else {

@@ -358,6 +358,19 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 arg_types,
                 ..
             } => {
+                // НОВОЕ: Проверяем необъявленные переменные в аргументах
+                for (idx, arg_type) in arg_types.iter().enumerate() {
+                    if let Some(var_name) = arg_type.is_undeclared_variable() {
+                        let error_kind = TypeErrorKind::UndeclaredVariable {
+                            variable_name: var_name.to_string(),
+                            method_name: Some(function_name.clone()),
+                            param_index: Some(idx + 1),
+                        };
+                        let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                        self.errors.push(diagnostic);
+                    }
+                }
+
                 // MILESTONE 5.1: Генерируем ошибку для Unknown типов
                 if obj_type.is_unknown() {
                     let error_kind = TypeErrorKind::UnknownTypeAccess {

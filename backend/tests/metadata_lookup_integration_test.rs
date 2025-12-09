@@ -1,39 +1,24 @@
 //! Integration test для TypeMetadataLookup с реальными данными из SyntaxHelper
 
-use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
-use bsl_backend::data::loaders::progress::ProgressUpdate;
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
-use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+mod shared_test_fixtures;
+
+use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::types::{
     Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult, ResolutionSource,
     TypeResolution,
 };
 use bsl_shared::domain::TypeMetadataLookup;
-use std::sync::Arc;
+use shared_test_fixtures::get_test_repository;
 
 #[test]
 fn test_metadata_lookup_with_real_syntax_helper() {
-    // 1. Парсим синтаксис-помощник
-    let mut parser = SyntaxHelperParser::new();
-    parser
-        .parse_directory("examples/syntax_helper", None::<fn(ProgressUpdate)>)
-        .expect("Failed to parse syntax helper");
-
-    let db = parser.export_database();
-    let parsed_types = convert_syntax_helper_to_raw(&db);
-
-    println!("✅ Parsed {} types from syntax helper", parsed_types.len());
-
-    // 2. Загружаем в repository
-    let repository = Arc::new(InMemoryTypeRepository::new());
-    repository
-        .load_types(parsed_types)
-        .expect("Failed to load types");
+    // 1. Получаем shared repository
+    let repository = get_test_repository();
 
     let stats = repository.get_stats();
     println!("📊 Repository stats: {} total types", stats.total_types);
 
-    // 3. Создаем TypeMetadataLookup
+    // 2. Создаем TypeMetadataLookup
     let lookup = TypeMetadataLookup::new(repository.clone());
 
     // 4. Проверяем известные типы с методами
@@ -90,16 +75,7 @@ fn test_metadata_lookup_with_real_syntax_helper() {
 #[test]
 fn test_repository_content_sample() {
     // Быстрый тест - просто посмотрим что есть в repository
-    let mut parser = SyntaxHelperParser::new();
-    parser
-        .parse_directory("examples/syntax_helper", None::<fn(ProgressUpdate)>)
-        .expect("Failed to parse");
-
-    let db = parser.export_database();
-    let parsed_types = convert_syntax_helper_to_raw(&db);
-
-    let repository = Arc::new(InMemoryTypeRepository::new());
-    repository.load_types(parsed_types).expect("Failed to load");
+    let repository = get_test_repository();
 
     let all_types = repository.get_all_types();
 

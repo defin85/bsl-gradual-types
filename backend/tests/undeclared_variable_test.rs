@@ -9,74 +9,14 @@
 //! - Игнорирование глобальных коллекций метаданных
 //! - Корректная обработка множественных необъявленных переменных
 
+mod shared_test_fixtures;
+
 use bsl_backend::application::TypeSystemService;
-use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
-use bsl_backend::data::loaders::progress::ProgressUpdate;
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
-use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
-use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
-use bsl_shared::engine::AnalysisEngine;
-use bsl_shared::TypeResolver;
-use std::sync::Arc;
+use shared_test_fixtures::get_test_service;
 
 /// Helper: создать TypeSystemService для тестов WITH PLATFORM TYPES LOADED
-fn create_test_service() -> TypeSystemService {
-    // 1. Парсим синтаксис-помощник
-    let mut parser = SyntaxHelperParser::new();
-    parser
-        .parse_directory("../examples/syntax_helper", None::<fn(ProgressUpdate)>)
-        .expect("Failed to parse syntax helper");
-
-    let db = parser.export_database();
-
-    // ✅ НОВАЯ АРХИТЕКТУРА: Все данные о методах из syntax_helper
-    let parsed_types = convert_syntax_helper_to_raw(&db);
-
-    // 2. Создаём репозиторий и загружаем типы
-    let repository_impl = Arc::new(InMemoryTypeRepository::new());
-
-    // Клонируем типы для заполнения SignatureIndex
-    let platform_types_clone = parsed_types.clone();
-
-    repository_impl
-        .load_types(parsed_types)
-        .expect("Failed to load types");
-
-    // ✅ НОВАЯ АРХИТЕКТУРА: SignatureIndex заполняется из syntax_helper
-    use bsl_backend::data::loaders::SyntaxHelperSource;
-    use bsl_shared::domain::SignatureSourceRegistry;
-
-    let index = SignatureSourceRegistry::new()
-        .register(SyntaxHelperSource::new(platform_types_clone))
-        .build();
-    repository_impl.set_signature_index(index);
-
-    // Применяем GenericInfo для типов-коллекций
-    bsl_backend::data::loaders::apply_generic_info_to_repository(repository_impl.as_ref());
-
-    // Приводим к trait object для передачи в компоненты
-    let repository =
-        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
-
-    // 3. Создаём остальные компоненты
-    let resolver = Arc::new(TypeResolver::new(repository.clone()));
-    let analysis_engine = Arc::new(AnalysisEngine::new(resolver.clone(), repository.clone()));
-    let cache = Arc::new(AnalysisCache::new(100));
-    let ir_cache = Arc::new(IrCache::new(50));
-    // Milestone 3.17: Передаём TypeResolver для корректного active_facet в IR
-    let parser = Arc::new(ParserCoordinator::new_with_resolver(
-        repository.clone(),
-        resolver,
-    ));
-
-    let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
-
-    // 4. Инициализируем сервис
-    service
-        .initialize()
-        .expect("Failed to initialize TypeSystemService");
-
-    service
+fn create_test_service() -> &'static TypeSystemService {
+    get_test_service()
 }
 
 // ============================================================================

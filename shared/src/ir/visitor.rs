@@ -9,20 +9,21 @@ use crate::domain::types::TypeResolution;
 ///
 /// Отслеживает текущее состояние анализа при обходе дерева
 ///
-/// # Phase 3: TypeResolution для variable_types
+/// # Phase 4: VariableState для variable_states
 ///
-/// `variable_types` теперь хранит `TypeResolution` вместо `String`,
+/// `variable_states` теперь хранит `VariableState` вместо `TypeResolution`,
 /// что позволяет отслеживать:
-/// - Certainty (уверенность в типе)
+/// - Certainty (уверенность в типе) через resolution
 /// - ResolutionSource (откуда пришёл тип)
-/// - Unknown типы (для graceful degradation)
+/// - initialized флаг (инициализирована ли переменная)
+/// - declaration_span (позиция объявления)
 pub struct FlowContext {
     /// Текущий scope
     pub current_scope: ScopeId,
 
-    /// Типы переменных в текущей точке выполнения
-    /// (Phase 3: TypeResolution вместо String для flow-sensitive анализа)
-    pub variable_types: HashMap<String, TypeResolution>,
+    /// Состояния переменных в текущей точке выполнения
+    /// (Phase 4: VariableState вместо TypeResolution для flow-sensitive анализа)
+    pub variable_states: HashMap<String, VariableState>,
 
     /// Путь выполнения (для branch-aware analysis)
     pub execution_path: Vec<CfgNodeId>,
@@ -33,21 +34,42 @@ impl FlowContext {
     pub fn new(root_scope: ScopeId) -> Self {
         Self {
             current_scope: root_scope,
-            variable_types: HashMap::new(),
+            variable_states: HashMap::new(),
             execution_path: Vec::new(),
         }
     }
 
-    /// Обновить тип переменной в текущей точке
-    /// Phase 3: Теперь принимает TypeResolution вместо String
-    pub fn update_variable_type(&mut self, name: String, resolution: TypeResolution) {
-        self.variable_types.insert(name, resolution);
+    /// Обновить состояние переменной в текущей точке
+    /// Phase 4: Теперь принимает VariableState вместо TypeResolution
+    pub fn update_variable_state(&mut self, name: String, state: VariableState) {
+        self.variable_states.insert(name, state);
     }
 
-    /// Получить тип переменной в текущей точке
-    /// Phase 3: Теперь возвращает TypeResolution вместо String
+    /// Обновить тип переменной в текущей точке (удобный метод)
+    /// Создаёт инициализированное состояние с заданным типом
+    pub fn update_variable_type(&mut self, name: String, resolution: TypeResolution) {
+        let state = VariableState::initialized(resolution, Span::stub());
+        self.variable_states.insert(name, state);
+    }
+
+    /// Получить состояние переменной в текущей точке
+    /// Phase 4: Теперь возвращает VariableState вместо TypeResolution
+    pub fn get_variable_state(&self, name: &str) -> Option<&VariableState> {
+        self.variable_states.get(name)
+    }
+
+    /// Получить тип переменной в текущей точке (удобный метод)
+    /// Phase 4: Извлекает resolution из VariableState
     pub fn get_variable_type(&self, name: &str) -> Option<&TypeResolution> {
-        self.variable_types.get(name)
+        self.variable_states.get(name).map(|state| &state.resolution)
+    }
+
+    /// Проверить, инициализирована ли переменная
+    pub fn is_initialized(&self, name: &str) -> bool {
+        self.variable_states
+            .get(name)
+            .map(|state| state.initialized)
+            .unwrap_or(false)
     }
 
     /// Войти в новый scope
@@ -187,14 +209,28 @@ fn walk_node<V: SemanticVisitor>(
     // Затем обрабатываем специфичные типы узлов
     match &node.kind {
         SemanticNodeKind::VariableDeclaration {
-            name, type_hint, ..
+            name, type_hint, initial_value_type, ..
         } => {
             visitor.visit_variable_declaration(name, type_hint, context);
 
             // Обновляем контекст типов
             // Phase 3: type_hint уже TypeResolution, просто клонируем
+
+            // Переменная инициализирована только если есть initial_value_type
+            let initialized = initial_value_type.is_some();
+
             if let Some(resolution) = type_hint {
-                context.update_variable_type(name.clone(), resolution.clone());
+                // Есть явная аннотация типа
+                let state = VariableState::new(resolution.clone(), node.span, initialized);
+                context.update_variable_state(name.clone(), state);
+            } else if let Some(value_type) = initial_value_type {
+                // Нет type_hint, но есть начальное значение - используем тип значения
+                let state = VariableState::initialized(value_type.clone(), node.span);
+                context.update_variable_state(name.clone(), state);
+            } else {
+                // Нет ни type_hint, ни initial_value_type - переменная имеет Unknown тип и неинициализирована
+                let state = VariableState::new(TypeResolution::unknown(), node.span, false);
+                context.update_variable_state(name.clone(), state);
             }
         }
 

@@ -7,19 +7,17 @@
 //! 4. HoverFormatter integration with unknown metadata objects
 //! 5. Graceful degradation without configuration
 
+mod shared_test_fixtures;
+
 #[cfg(test)]
 mod metadata_existence_validation_tests {
-    use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
-    use bsl_backend::data::loaders::progress::ProgressUpdate;
-    use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
-    use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+    use super::shared_test_fixtures::get_test_repository;
     use bsl_shared::domain::types::{
         Certainty, ConcreteType, ConfigurationType, MetadataKind, ResolutionMetadata,
         ResolutionResult, ResolutionSource, TypeResolution,
     };
     use bsl_shared::domain::TypeMetadataLookup;
     use bsl_shared::utils::string_utils::{levenshtein_distance, similarity};
-    use std::sync::Arc;
 
     /// Test 1: Levenshtein algorithm detects typos in Russian metadata names
     #[test]
@@ -57,15 +55,7 @@ mod metadata_existence_validation_tests {
     #[test]
     fn test_exists_metadata_object_without_configuration() {
         // Setup repository with only platform types (no configuration)
-        let mut parser = SyntaxHelperParser::new();
-        parser
-            .parse_directory("examples/syntax_helper", None::<fn(ProgressUpdate)>)
-            .expect("Failed to parse syntax helper");
-
-        let db = parser.export_database();
-        let parsed_types = convert_syntax_helper_to_raw(&db);
-        let repository = Arc::new(InMemoryTypeRepository::new());
-        repository.load_types(parsed_types).expect("Failed to load types");
+        let repository = get_test_repository();
 
         let lookup = TypeMetadataLookup::new(repository.clone());
 
@@ -83,15 +73,7 @@ mod metadata_existence_validation_tests {
     /// Test 4: MetadataLookup.suggest_similar_names returns empty without configuration
     #[test]
     fn test_suggest_similar_names_without_configuration() {
-        let mut parser = SyntaxHelperParser::new();
-        parser
-            .parse_directory("examples/syntax_helper", None::<fn(ProgressUpdate)>)
-            .expect("Failed to parse syntax helper");
-
-        let db = parser.export_database();
-        let parsed_types = convert_syntax_helper_to_raw(&db);
-        let repository = Arc::new(InMemoryTypeRepository::new());
-        repository.load_types(parsed_types).expect("Failed to load types");
+        let repository = get_test_repository();
 
         let lookup = TypeMetadataLookup::new(repository);
 
@@ -106,15 +88,7 @@ mod metadata_existence_validation_tests {
     /// Test 5: Graceful degradation - hover for unknown configuration object
     #[test]
     fn test_hover_unknown_metadata_graceful_degradation() {
-        let mut parser = SyntaxHelperParser::new();
-        parser
-            .parse_directory("examples/syntax_helper", None::<fn(ProgressUpdate)>)
-            .expect("Failed to parse syntax helper");
-
-        let db = parser.export_database();
-        let parsed_types = convert_syntax_helper_to_raw(&db);
-        let repository = Arc::new(InMemoryTypeRepository::new());
-        repository.load_types(parsed_types).expect("Failed to load types");
+        let repository = get_test_repository();
 
         let lookup = TypeMetadataLookup::new(repository);
 
@@ -149,15 +123,7 @@ mod metadata_existence_validation_tests {
     /// Test 6: MetadataLookup provides API for validators
     #[test]
     fn test_metadata_lookup_api_contract() {
-        let mut parser = SyntaxHelperParser::new();
-        parser
-            .parse_directory("examples/syntax_helper", None::<fn(ProgressUpdate)>)
-            .expect("Failed to parse syntax helper");
-
-        let db = parser.export_database();
-        let parsed_types = convert_syntax_helper_to_raw(&db);
-        let repository = Arc::new(InMemoryTypeRepository::new());
-        repository.load_types(parsed_types).expect("Failed to load types");
+        let repository = get_test_repository();
 
         let lookup = TypeMetadataLookup::new(repository);
 
@@ -219,15 +185,7 @@ mod metadata_existence_validation_tests {
     /// Test 9: MetadataLookup graceful fallback to platform types
     #[test]
     fn test_fallback_to_platform_types() {
-        let mut parser = SyntaxHelperParser::new();
-        parser
-            .parse_directory("examples/syntax_helper", None::<fn(ProgressUpdate)>)
-            .expect("Failed to parse syntax helper");
-
-        let db = parser.export_database();
-        let parsed_types = convert_syntax_helper_to_raw(&db);
-        let repository = Arc::new(InMemoryTypeRepository::new());
-        repository.load_types(parsed_types).expect("Failed to load types");
+        let repository = get_test_repository();
 
         let lookup = TypeMetadataLookup::new(repository);
 

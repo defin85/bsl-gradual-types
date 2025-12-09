@@ -1,33 +1,19 @@
 //! Интеграционный тест TypeValidator с реальными данными платформы 1С
 
-use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
-use bsl_backend::data::loaders::progress::ProgressUpdate;
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
-use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+mod shared_test_fixtures;
+
 use bsl_shared::domain::types::{
     Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult, ResolutionSource,
     TypeResolution,
 };
 use bsl_shared::domain::validators::TypeValidator;
 use bsl_shared::domain::TypeMetadataLookup;
-use std::sync::Arc;
+use shared_test_fixtures::get_test_repository;
 
 #[test]
 fn test_validate_array_methods_with_real_data() {
-    // Парсим синтаксис-помощник
-    let mut parser = SyntaxHelperParser::new();
-    parser
-        .parse_directory("../examples/syntax_helper", None::<fn(ProgressUpdate)>)
-        .expect("Failed to parse syntax helper");
-
-    let db = parser.export_database();
-    let parsed_types = convert_syntax_helper_to_raw(&db);
-
-    // Загружаем в repository
-    let repository = Arc::new(InMemoryTypeRepository::new());
-    repository
-        .load_types(parsed_types)
-        .expect("Failed to load types");
+    // Получаем shared repository
+    let repository = get_test_repository();
 
     // Создаем TypeMetadataLookup и TypeValidator
     let lookup = TypeMetadataLookup::new(repository.clone());
@@ -79,20 +65,8 @@ fn test_validate_array_methods_with_real_data() {
 
 #[test]
 fn test_validate_value_table_properties_with_real_data() {
-    // Парсим синтаксис-помощник
-    let mut parser = SyntaxHelperParser::new();
-    parser
-        .parse_directory("../examples/syntax_helper", None::<fn(ProgressUpdate)>)
-        .expect("Failed to parse syntax helper");
-
-    let db = parser.export_database();
-    let parsed_types = convert_syntax_helper_to_raw(&db);
-
-    // Загружаем в repository
-    let repository = Arc::new(InMemoryTypeRepository::new());
-    repository
-        .load_types(parsed_types)
-        .expect("Failed to load types");
+    // Получаем shared repository
+    let repository = get_test_repository();
 
     // Создаем TypeMetadataLookup и TypeValidator
     let lookup = TypeMetadataLookup::new(repository.clone());
@@ -140,18 +114,7 @@ fn test_validate_value_table_properties_with_real_data() {
 #[test]
 fn test_validate_http_connection_complex_type() {
     // Тестируем более сложный тип с множеством методов и свойств
-    let mut parser = SyntaxHelperParser::new();
-    parser
-        .parse_directory("../examples/syntax_helper", None::<fn(ProgressUpdate)>)
-        .expect("Failed to parse syntax helper");
-
-    let db = parser.export_database();
-    let parsed_types = convert_syntax_helper_to_raw(&db);
-
-    let repository = Arc::new(InMemoryTypeRepository::new());
-    repository
-        .load_types(parsed_types)
-        .expect("Failed to load types");
+    let repository = get_test_repository();
 
     let lookup = TypeMetadataLookup::new(repository.clone());
     let validator = TypeValidator::new(&lookup);

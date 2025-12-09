@@ -355,10 +355,11 @@ impl AstToIrConverter {
                     scope_id: self.current_scope,
                 };
 
-                // Регистрируем переменную в текущем scope
+                // Регистрируем переменную в текущем scope БЕЗ инициализации
+                // VarDeclaration - это "Перем X;" без присваивания значения
                 let resolution = type_hint_resolution.unwrap_or_else(TypeResolution::unknown);
                 self.symbol_table
-                    .register_variable(self.current_scope, name, resolution, span);
+                    .register_variable_declared(self.current_scope, name, resolution, span);
 
                 self.nodes.push(node);
                 Ok(Some(self.nodes.len() - 1))
@@ -788,6 +789,16 @@ impl AstToIrConverter {
                 let old_scope = self.current_scope;
                 self.current_scope = body_scope;
 
+                // Регистрируем параметры функции в body_scope
+                for param in &params_vec {
+                    self.symbol_table.register_variable(
+                        body_scope,
+                        param.name.clone(),
+                        TypeResolution::unknown(), // Градуальный тип (пока Unknown)
+                        span,
+                    );
+                }
+
                 // Собираем только прямые дочерние индексы
                 let mut body_indices = Vec::new();
                 for stmt in body {
@@ -840,6 +851,16 @@ impl AstToIrConverter {
 
                 let old_scope = self.current_scope;
                 self.current_scope = body_scope;
+
+                // Регистрируем параметры процедуры в body_scope
+                for param in &params_vec {
+                    self.symbol_table.register_variable(
+                        body_scope,
+                        param.name.clone(),
+                        TypeResolution::unknown(), // Градуальный тип (пока Unknown)
+                        span,
+                    );
+                }
 
                 // Собираем только прямые дочерние индексы
                 let mut body_indices = Vec::new();

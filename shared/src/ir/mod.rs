@@ -430,8 +430,8 @@ pub struct Scope {
     /// Родительский scope (None для root)
     pub parent: Option<ScopeId>,
 
-    /// Переменные в этом scope
-    pub variables: HashMap<String, (TypeResolution, Span)>,
+    /// Переменные в этом scope (имя -> состояние переменной)
+    pub variables: HashMap<String, VariableState>,
 
     /// Дочерние scope-ы
     pub children: Vec<ScopeId>,
@@ -456,6 +456,46 @@ pub struct FunctionSignature {
     /// Phase 3: TypeResolution вместо String для возвращаемого типа
     pub return_type: Option<TypeResolution>,
     pub is_export: bool,
+}
+
+/// Состояние переменной в таблице символов
+///
+/// Содержит полную информацию о переменной: тип, позицию и флаг инициализации.
+/// Используется для отслеживания flow-sensitive состояния переменных.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VariableState {
+    /// Тип переменной (TypeResolution с certainty и metadata)
+    pub resolution: TypeResolution,
+    /// Инициализирована ли переменная (присвоено значение)
+    pub initialized: bool,
+    /// Позиция объявления в исходном коде
+    pub declaration_span: Span,
+}
+
+impl VariableState {
+    /// Создать состояние переменной
+    pub fn new(resolution: TypeResolution, span: Span, initialized: bool) -> Self {
+        Self {
+            resolution,
+            initialized,
+            declaration_span: span,
+        }
+    }
+
+    /// Создать для объявления без инициализации (Перем X;)
+    pub fn declared(resolution: TypeResolution, span: Span) -> Self {
+        Self::new(resolution, span, false)
+    }
+
+    /// Создать для объявления с инициализацией (X = 5; или параметр функции)
+    pub fn initialized(resolution: TypeResolution, span: Span) -> Self {
+        Self::new(resolution, span, true)
+    }
+
+    /// Пометить как инициализированную
+    pub fn mark_initialized(&mut self) {
+        self.initialized = true;
+    }
 }
 
 /// Позиция в исходном коде
@@ -654,8 +694,8 @@ impl SemanticProgram {
 
         while let Some(sid) = current_scope_id {
             if let Some(scope) = self.get_scope(sid) {
-                if let Some(var) = scope.variables.get(name) {
-                    return Some(var.clone());
+                if let Some(var_state) = scope.variables.get(name) {
+                    return Some((var_state.resolution.clone(), var_state.declaration_span));
                 }
                 current_scope_id = scope.parent;
             } else {
@@ -849,6 +889,9 @@ impl SymbolTable {
     }
 
     /// Зарегистрировать переменную в scope
+    ///
+    /// По умолчанию переменная считается инициализированной (например, присваивание X = 5;).
+    /// Для объявления без инициализации (Перем X;) используйте `register_variable_declared`.
     pub fn register_variable(
         &mut self,
         scope_id: ScopeId,
@@ -857,7 +900,26 @@ impl SymbolTable {
         span: Span,
     ) {
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
-            scope.variables.insert(name, (resolution, span));
+            scope
+                .variables
+                .insert(name, VariableState::initialized(resolution, span));
+        }
+    }
+
+    /// Зарегистрировать переменную без инициализации (Перем X;)
+    ///
+    /// Используется для объявлений переменных без начального значения.
+    pub fn register_variable_declared(
+        &mut self,
+        scope_id: ScopeId,
+        name: String,
+        resolution: TypeResolution,
+        span: Span,
+    ) {
+        if let Some(scope) = self.scopes.get_mut(&scope_id) {
+            scope
+                .variables
+                .insert(name, VariableState::declared(resolution, span));
         }
     }
 
@@ -879,8 +941,8 @@ impl SymbolTable {
 
         while let Some(sid) = current_scope_id {
             if let Some(scope) = self.scopes.get(&sid) {
-                if let Some((resolution, _span)) = scope.variables.get(name) {
-                    return Some(resolution.clone());
+                if let Some(var_state) = scope.variables.get(name) {
+                    return Some(var_state.resolution.clone());
                 }
                 current_scope_id = scope.parent;
             } else {
@@ -892,6 +954,8 @@ impl SymbolTable {
     }
 
     /// Обновить тип переменной в указанном scope
+    ///
+    /// При обновлении типа также помечает переменную как инициализированную.
     pub fn update_variable_type(
         &mut self,
         scope_id: ScopeId,
@@ -899,8 +963,9 @@ impl SymbolTable {
         new_resolution: TypeResolution,
     ) -> bool {
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
-            if let Some((resolution, _span)) = scope.variables.get_mut(&name) {
-                *resolution = new_resolution;
+            if let Some(var_state) = scope.variables.get_mut(&name) {
+                var_state.resolution = new_resolution;
+                var_state.mark_initialized();
                 return true;
             }
         }
@@ -938,14 +1003,17 @@ impl SymbolTable {
 
         // Регистрируем или обновляем переменную
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
-            // Если переменная уже зарегистрирована, получаем её span
-            let span = scope
+            // Если переменная уже зарегистрирована, получаем её span и initialized
+            let (span, initialized) = scope
                 .variables
                 .get(&var_name)
-                .map(|(_, s)| *s)
-                .unwrap_or_else(Span::stub);
+                .map(|vs| (vs.declaration_span, vs.initialized))
+                .unwrap_or_else(|| (Span::stub(), true));
 
-            scope.variables.insert(var_name, (resolution, span));
+            scope.variables.insert(
+                var_name,
+                VariableState::new(resolution, span, initialized),
+            );
         }
     }
 
@@ -976,8 +1044,8 @@ impl SymbolTable {
         use crate::domain::types::{Certainty, ConcreteType, ResolutionResult, SpecialType};
 
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
-            if let Some((resolution, _span)) = scope.variables.get_mut(var_name) {
-                match &mut resolution.result {
+            if let Some(var_state) = scope.variables.get_mut(var_name) {
+                match &mut var_state.resolution.result {
                     ResolutionResult::Generic(gen) => {
                         // Получаем новый ConcreteType для параметра
                         let new_param = TypeResolution::string_to_concrete(&param_type);
@@ -994,7 +1062,7 @@ impl SymbolTable {
                         let all_known = gen.type_params.iter().all(|p| {
                             !matches!(p, ConcreteType::Special(SpecialType::Undefined))
                         });
-                        resolution.certainty = if all_known {
+                        var_state.resolution.certainty = if all_known {
                             Certainty::Known
                         } else {
                             Certainty::Inferred(0.5)
@@ -1043,7 +1111,7 @@ impl SymbolTable {
             .get(&scope_id)?
             .variables
             .get(name)
-            .map(|(resolution, _)| resolution)
+            .map(|var_state| &var_state.resolution)
     }
 
     /// Поиск переменной с подъёмом по цепочке родительских scope
@@ -1076,8 +1144,8 @@ impl SymbolTable {
         let mut current = Some(scope_id);
         while let Some(sid) = current {
             if let Some(scope) = self.scopes.get(&sid) {
-                if let Some((resolution, _)) = scope.variables.get(name) {
-                    return Some((sid, resolution));
+                if let Some(var_state) = scope.variables.get(name) {
+                    return Some((sid, &var_state.resolution));
                 }
                 current = scope.parent;
             } else {
@@ -1107,12 +1175,13 @@ impl SymbolTable {
             .get_mut(&scope_id)
             .ok_or_else(|| format!("Scope {:?} not found", scope_id))?;
 
-        let (existing_resolution, _span) = scope
+        let var_state = scope
             .variables
             .get_mut(name)
             .ok_or_else(|| format!("Variable '{}' not found in scope {:?}", name, scope_id))?;
 
-        *existing_resolution = resolution;
+        var_state.resolution = resolution;
+        var_state.mark_initialized();
         Ok(())
     }
 
@@ -1192,9 +1261,12 @@ impl SymbolTable {
         &self,
         scope_id: ScopeId,
     ) -> Option<impl Iterator<Item = (&String, &TypeResolution)>> {
-        self.scopes
-            .get(&scope_id)
-            .map(|scope| scope.variables.iter().map(|(name, (resolution, _))| (name, resolution)))
+        self.scopes.get(&scope_id).map(|scope| {
+            scope
+                .variables
+                .iter()
+                .map(|(name, var_state)| (name, &var_state.resolution))
+        })
     }
 
     /// Получить количество глобальных функций
@@ -1576,15 +1648,15 @@ impl SemanticProgram {
 
         // Обходим все scopes используя публичное API
         for (_scope_id, scope) in self.symbols.iter_all_scopes() {
-            for (var_name, (resolution, span)) in &scope.variables {
+            for (var_name, var_state) in &scope.variables {
                 let symbol = SymbolInfoDto {
                     name: var_name.clone(),
                     kind: "Variable".to_string(),
-                    resolved_type: self.type_resolution_to_dto(resolution),
+                    resolved_type: self.type_resolution_to_dto(&var_state.resolution),
                     scope: "Local".to_string(), // TODO: различать Global/Local
                     declaration_location: SourceLocationDto {
-                        line: span.start_line,
-                        column: span.start_column,
+                        line: var_state.declaration_span.start_line,
+                        column: var_state.declaration_span.start_column,
                     },
                     // TODO: flow-sensitive analysis (пока не реализовано)
                     flow_variants: Vec::new(),
@@ -1704,8 +1776,8 @@ impl SemanticProgram {
 
         // Подсчёт типов
         for scope in self.symbols.scopes.values() {
-            for (resolution, _span) in scope.variables.values() {
-                match &resolution.certainty {
+            for var_state in scope.variables.values() {
+                match &var_state.resolution.certainty {
                     Certainty::Known => known_types += 1,
                     Certainty::Inferred(conf) => {
                         if *conf > 0.8 {

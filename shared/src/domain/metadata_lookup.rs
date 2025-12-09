@@ -791,6 +791,22 @@ impl TypeMetadataLookup {
                         combined_properties.push(new_prop);
                     }
                 }
+
+                // 3b. Табличные части как свойства для Object/Reference
+                // Примечание: реквизиты добавляются раньше (шаг 3a), поэтому при
+                // конфликте имён реквизит имеет приоритет. В 1С такой конфликт
+                // невозможен — конфигуратор запрещает одинаковые имена.
+                for ts in config_type.tabular_sections.iter() {
+                    if !combined_properties.iter().any(|p| p.name == ts.name) {
+                        combined_properties.push(RawPropertyData {
+                            name: ts.name.clone(),
+                            prop_type: format!("ТабличнаяЧасть<{}>", ts.name),
+                            // readonly: табличную часть нельзя заменить целиком
+                            // (Док.ТЧ = Другая), но можно изменять содержимое
+                            is_readonly: true,
+                        });
+                    }
+                }
             }
         }
 

@@ -6,49 +6,14 @@
 ///
 /// Проверяем что оба варианта корректно парсятся и сохраняют TypeResolution.
 
+mod shared_test_fixtures;
+
 use bsl_backend::application::TypeSystemService;
-use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
-use bsl_backend::data::loaders::progress::ProgressUpdate;
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
-use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
-use bsl_shared::domain::repository::InMemoryTypeRepository;
-use bsl_shared::engine::AnalysisEngine;
-use bsl_shared::TypeResolver;
-use std::sync::Arc;
+use shared_test_fixtures::get_test_service;
 
 /// Helper: создать TypeSystemService для тестов WITH PLATFORM TYPES LOADED
-fn create_test_service() -> TypeSystemService {
-    // 1. Парсим синтаксис-помощник
-    let mut parser = SyntaxHelperParser::new();
-    parser
-        .parse_directory("examples/syntax_helper", None::<fn(ProgressUpdate)>)
-        .expect("Failed to parse syntax helper");
-
-    let db = parser.export_database();
-    let parsed_types = convert_syntax_helper_to_raw(&db);
-
-    // 2. Создаём репозиторий и загружаем типы
-    let repository = Arc::new(InMemoryTypeRepository::new())
-        as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
-    repository
-        .load_types(parsed_types)
-        .expect("Failed to load types");
-
-    // 3. Создаём остальные компоненты
-    let resolver = Arc::new(TypeResolver::new(repository.clone()));
-    let analysis_engine = Arc::new(AnalysisEngine::new(resolver, repository.clone()));
-    let cache = Arc::new(AnalysisCache::new(100));
-    let ir_cache = Arc::new(IrCache::new(50));
-    let parser = Arc::new(ParserCoordinator::new(repository.clone()));
-
-    let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
-
-    // 4. Инициализируем сервис
-    service
-        .initialize()
-        .expect("Failed to initialize TypeSystemService");
-
-    service
+fn create_test_service() -> &'static TypeSystemService {
+    get_test_service()
 }
 
 #[tokio::test]

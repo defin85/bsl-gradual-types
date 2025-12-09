@@ -287,6 +287,60 @@ impl<'a> SemanticValidationVisitor<'a> {
     // IR теперь хранит TypeResolution напрямую, а metadata_lookup корректно
     // обрабатывает Generic типы и фасеты без дополнительной конвертации
 
+    /// Валидация позиции объявлений переменных (Перем) в теле функции/процедуры
+    ///
+    /// В 1С объявления переменных должны располагаться в начале функции/процедуры,
+    /// до любого исполняемого кода.
+    fn validate_var_declaration_position(&mut self, body: &[usize], function_name: &str) {
+        let mut found_executable = false;
+
+        for &node_idx in body {
+            if node_idx >= self.program.nodes.len() {
+                continue;
+            }
+            let node = &self.program.nodes[node_idx];
+            match &node.kind {
+                SemanticNodeKind::VariableDeclaration { name, .. } => {
+                    if found_executable {
+                        let error = TypeErrorKind::VarDeclarationAfterExecutable {
+                            variable_name: name.clone(),
+                            function_name: function_name.to_string(),
+                        };
+                        let diagnostic = error.to_diagnostic_with_detail(node.span, self.detail_level);
+                        self.errors.push(diagnostic);
+                    }
+                }
+                _ => {
+                    found_executable = true;
+                }
+            }
+        }
+    }
+
+    /// Проверяет, инициализирована ли переменная в контексте
+    ///
+    /// Возвращает Some(TypeErrorKind) если переменная не инициализирована.
+    /// Используется для валидации FunctionCall.object_name и MemberAccess.object_name.
+    fn check_uninitialized_variable(
+        &self,
+        variable_name: &Option<String>,
+        context: &FlowContext,
+    ) -> Option<TypeErrorKind> {
+        if let Some(var_name) = variable_name {
+            // Проверяем, инициализирована ли переменная
+            if !context.is_initialized(var_name) {
+                // Проверяем, что переменная существует в контексте (объявлена)
+                // Если переменная не существует - это UndeclaredVariable, а не Uninitialized
+                if context.get_variable_type(var_name).is_some() {
+                    return Some(TypeErrorKind::UninitializedVariableUsage {
+                        variable_name: var_name.clone(),
+                    });
+                }
+            }
+        }
+        None
+    }
+
     /// MILESTONE 5.5: Извлекает имя коллекции метаданных из MemberAccess
     ///
     /// # Алгоритм
@@ -317,10 +371,10 @@ impl<'a> SemanticValidationVisitor<'a> {
 }
 
 impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
-    fn visit_node(&mut self, node: &SemanticNode, _context: &mut FlowContext) {
+    fn visit_node(&mut self, node: &SemanticNode, context: &mut FlowContext) {
         match &node.kind {
             // Context-Aware валидация: обновляем директиву при входе в функцию/процедуру
-            SemanticNodeKind::FunctionDeclaration { compiler_directive, name, .. } => {
+            SemanticNodeKind::FunctionDeclaration { compiler_directive, name, body, .. } => {
                 // Обновляем runtime контекст на основе директивы из AST
                 tracing::debug!(
                     "FunctionDeclaration '{}': compiler_directive = {:?}",
@@ -334,8 +388,10 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     self.current_execution_context.current_directive = bsl_shared::domain::CompilerDirective::Unknown;
                     self.current_execution_context.in_function = Some(name.clone());
                 }
+                // Валидация позиции объявлений переменных
+                self.validate_var_declaration_position(body, name);
             }
-            SemanticNodeKind::ProcedureDeclaration { compiler_directive, name, .. } => {
+            SemanticNodeKind::ProcedureDeclaration { compiler_directive, name, body, .. } => {
                 // Обновляем runtime контекст на основе директивы из AST
                 tracing::debug!(
                     "ProcedureDeclaration '{}': compiler_directive = {:?}",
@@ -349,6 +405,8 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     self.current_execution_context.current_directive = bsl_shared::domain::CompilerDirective::Unknown;
                     self.current_execution_context.in_function = Some(name.clone());
                 }
+                // Валидация позиции объявлений переменных
+                self.validate_var_declaration_position(body, name);
             }
             SemanticNodeKind::FunctionCall {
                 function_name,
@@ -369,6 +427,17 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                         let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                         self.errors.push(diagnostic);
                     }
+                }
+
+                // Проверяем неинициализированные переменные (Warning, не Error)
+                if let Some(error_kind) = self.check_uninitialized_variable(object_name, context) {
+                    let diagnostic = error_kind.to_diagnostic_with_severity(
+                        node.span,
+                        self.detail_level,
+                        DiagnosticSeverity::Warning
+                    );
+                    self.errors.push(diagnostic);
+                    // НЕ return - продолжаем валидацию (Unknown тип будет обработан ниже)
                 }
 
                 // MILESTONE 5.1: Генерируем ошибку для Unknown типов
@@ -479,6 +548,18 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
 
                 // Phase 4: object_type уже TypeResolution — используем напрямую
                 // metadata_lookup.get_properties() уже обрабатывает Generic и фасеты корректно
+
+                // Проверяем неинициализированные переменные (Warning, не Error)
+                if let Some(error_kind) = self.check_uninitialized_variable(object_name, context) {
+                    let diagnostic = error_kind.to_diagnostic_with_severity(
+                        node.span,
+                        self.detail_level,
+                        DiagnosticSeverity::Warning
+                    );
+                    self.errors.push(diagnostic);
+                    // НЕ return - продолжаем валидацию (Unknown тип будет обработан ниже)
+                }
+
                 // MILESTONE 5.1: Генерируем ошибку для Unknown типов
                 if object_type.is_unknown() {
                     let error_kind = TypeErrorKind::UnknownTypeAccess {

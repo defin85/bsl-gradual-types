@@ -8,71 +8,23 @@
 //! ПРИМЕЧАНИЕ: Tree-sitter-bsl имеет баг с парсингом property access для кириллицы.
 //! Вместо этого мы проверяем что validate_semantics() работает корректно
 //! и показывает диагностики когда они должны быть.
+//!
+//! ОПТИМИЗАЦИЯ: Используем shared_test_fixtures для переиспользования
+//! TypeSystemService между тестами (LazyLock). Это сокращает время
+//! тестов с ~6 минут до ~15-20 секунд.
+
+mod shared_test_fixtures;
 
 use bsl_backend::application::TypeSystemService;
-use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
-use bsl_backend::data::loaders::progress::ProgressUpdate;
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
-use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
-use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
-use bsl_shared::engine::AnalysisEngine;
-use bsl_shared::TypeResolver;
-use std::sync::Arc;
+use bsl_shared::domain::repository::TypeRepository;
+use bsl_shared::domain::types::DiagnosticSeverity;
 
-/// Helper: создать TypeSystemService для тестов WITH PLATFORM TYPES LOADED
-fn create_test_service() -> TypeSystemService {
-    // 1. Парсим синтаксис-помощник
-    let mut parser = SyntaxHelperParser::new();
-    parser
-        .parse_directory("../examples/syntax_helper", None::<fn(ProgressUpdate)>)
-        .expect("Failed to parse syntax helper");
+use shared_test_fixtures::get_test_service;
 
-    let db = parser.export_database();
-
-    // ✅ НОВАЯ АРХИТЕКТУРА: Все данные о методах из syntax_helper
-    let parsed_types = convert_syntax_helper_to_raw(&db);
-
-    // 2. Создаём репозиторий и загружаем типы
-    let repository_impl = Arc::new(InMemoryTypeRepository::new());
-
-    // Клонируем типы для заполнения SignatureIndex
-    let platform_types_clone = parsed_types.clone();
-
-    repository_impl
-        .load_types(parsed_types)
-        .expect("Failed to load types");
-
-    // ✅ НОВАЯ АРХИТЕКТУРА: SignatureIndex заполняется из syntax_helper
-    use bsl_shared::domain::SignatureSourceRegistry;
-    use bsl_backend::data::loaders::SyntaxHelperSource;
-
-    let index = SignatureSourceRegistry::new()
-        .register(SyntaxHelperSource::new(platform_types_clone))
-        .build();
-    repository_impl.set_signature_index(index);
-
-    // Применяем GenericInfo для типов-коллекций
-    bsl_backend::data::loaders::apply_generic_info_to_repository(repository_impl.as_ref());
-
-    // Приводим к trait object для передачи в компоненты
-    let repository = repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
-
-    // 3. Создаём остальные компоненты
-    let resolver = Arc::new(TypeResolver::new(repository.clone()));
-    let analysis_engine = Arc::new(AnalysisEngine::new(resolver.clone(), repository.clone()));
-    let cache = Arc::new(AnalysisCache::new(100));
-    let ir_cache = Arc::new(IrCache::new(50));
-    // Milestone 3.17: Передаём TypeResolver для корректного active_facet в IR
-    let parser = Arc::new(ParserCoordinator::new_with_resolver(repository.clone(), resolver));
-
-    let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
-
-    // 4. Инициализируем сервис
-    service
-        .initialize()
-        .expect("Failed to initialize TypeSystemService");
-
-    service
+/// Helper: получить shared TypeSystemService для тестов.
+/// Использует LazyLock - инициализация происходит только при первом вызове.
+fn create_test_service() -> &'static TypeSystemService {
+    get_test_service()
 }
 
 #[tokio::test]
@@ -222,44 +174,8 @@ async fn test_with_dynamic_constructor() {
 #[tokio::test]
 async fn test_signature_index_loaded() {
     // Debug тест: проверяем что SignatureIndex загружен методами из syntax_helper
-    let repository_impl = Arc::new(InMemoryTypeRepository::new());
-
-    let mut parser = SyntaxHelperParser::new();
-    parser
-        .parse_directory("../examples/syntax_helper", None::<fn(ProgressUpdate)>)
-        .expect("Failed to parse");
-    let db = parser.export_database();
-    let parsed_types = convert_syntax_helper_to_raw(&db);
-    let platform_types_clone = parsed_types.clone();
-
-    repository_impl.load_types(parsed_types).unwrap();
-
-    println!("\n🔍 Loaded types debug:");
-    println!("  Total types: {}", platform_types_clone.len());
-
-    // Найдём тип Массив
-    let array_type = platform_types_clone.iter().find(|t| t.name == "Массив" || t.english_name == "Array");
-
-    if let Some(arr) = array_type {
-        println!("  Тип 'Массив' найден: {} методов", arr.methods.len());
-        for (i, m) in arr.methods.iter().take(5).enumerate() {
-            println!("    {}: {}", i + 1, m.name);
-        }
-    } else {
-        println!("  Тип 'Массив' НЕ найден в parsed_types!");
-    }
-
-    // ✅ НОВАЯ АРХИТЕКТУРА: Заполняем SignatureIndex из syntax_helper
-    use bsl_shared::domain::SignatureSourceRegistry;
-    use bsl_backend::data::loaders::SyntaxHelperSource;
-
-    let index = SignatureSourceRegistry::new()
-        .register(SyntaxHelperSource::new(platform_types_clone))
-        .build();
-    repository_impl.set_signature_index(index);
-
-    // Применяем GenericInfo
-    bsl_backend::data::loaders::apply_generic_info_to_repository(repository_impl.as_ref());
+    // Используем shared repository для ускорения тестов
+    let repository_impl = shared_test_fixtures::get_test_repository();
 
     // Получаем клон и проверяем
     let signature_index = repository_impl.get_signature_index_clone();
@@ -1324,5 +1240,517 @@ async fn test_catalog_manager_create_element_no_error() {
          It should NOT produce errors. \
          Found errors: {:?}",
         create_element_errors
+    );
+}
+
+// ===== Валидация неинициализированных переменных =====
+//
+// ПРИМЕЧАНИЕ: Текущая реализация проверяет неинициализированные переменные только
+// для получателей методов (object_name), а не для аргументов функций.
+// Для аргументов требуется расширение IR с хранением имён переменных-аргументов.
+
+/// Тест: Переменная объявлена но не инициализирована - вызов метода - должен быть Warning
+#[tokio::test]
+async fn test_uninitialized_variable_in_method_call() {
+    let service = create_test_service();
+
+    // X.Метод() - X является получателем метода (object_name)
+    let code = r#"
+Процедура Тест()
+    Перем X;
+    X.Добавить(123);
+КонецПроцедуры
+"#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics should succeed");
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Test: Uninitialized variable as method receiver");
+    println!("  Total diagnostics: {}", diagnostics.len());
+    for (i, d) in diagnostics.iter().enumerate() {
+        println!("  [{}] Line {}: {:?}: {}", i, d.line, d.severity, d.message);
+    }
+
+    // Должен быть хотя бы один Warning о неинициализированной переменной
+    let uninitialized_warnings: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| {
+            d.message.contains("неинициализирован") &&
+            d.message.contains("X") &&
+            matches!(d.severity, DiagnosticSeverity::Warning)
+        })
+        .collect();
+
+    assert!(
+        !uninitialized_warnings.is_empty(),
+        "Expected Warning about uninitialized variable 'X'. \
+         Got diagnostics: {:?}",
+        diagnostics.iter().map(|d| format!("{:?}: {}", d.severity, d.message)).collect::<Vec<_>>()
+    );
+
+    // Проверяем что это именно Warning, а не Error
+    assert!(
+        uninitialized_warnings.iter().all(|d| matches!(d.severity, DiagnosticSeverity::Warning)),
+        "All uninitialized variable diagnostics should have severity Warning"
+    );
+}
+
+/// Тест: Переменная инициализирована при объявлении - не должно быть предупреждений
+#[tokio::test]
+async fn test_initialized_on_declaration_no_warning() {
+    let service = create_test_service();
+
+    // X - инициализирована при объявлении, используется как получатель метода
+    let code = r#"
+Процедура Тест()
+    Перем X = Новый Массив;
+    X.Добавить(5);
+КонецПроцедуры
+"#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics should succeed");
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Test: Variable initialized on declaration");
+    println!("  Total diagnostics: {}", diagnostics.len());
+    for (i, d) in diagnostics.iter().enumerate() {
+        println!("  [{}] Line {}: {:?}: {}", i, d.line, d.severity, d.message);
+    }
+
+    // НЕ должно быть предупреждений о неинициализированной переменной
+    let uninitialized_warnings: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.message.contains("неинициализирован") && d.message.contains("X"))
+        .collect();
+
+    assert!(
+        uninitialized_warnings.is_empty(),
+        "Variable initialized on declaration should NOT generate warnings. \
+         Got warnings: {:?}",
+        uninitialized_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Тест: Переменная инициализирована перед использованием - не должно быть предупреждений
+#[tokio::test]
+async fn test_initialized_before_use_no_warning() {
+    let service = create_test_service();
+
+    let code = r#"
+Процедура Тест()
+    Перем X;
+    X = Новый Массив;
+    X.Добавить(5);
+КонецПроцедуры
+"#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics should succeed");
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Test: Variable initialized before use");
+    println!("  Total diagnostics: {}", diagnostics.len());
+    for (i, d) in diagnostics.iter().enumerate() {
+        println!("  [{}] Line {}: {:?}: {}", i, d.line, d.severity, d.message);
+    }
+
+    // НЕ должно быть предупреждений о неинициализированной переменной
+    let uninitialized_warnings: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.message.contains("неинициализирован") && d.message.contains("X"))
+        .collect();
+
+    assert!(
+        uninitialized_warnings.is_empty(),
+        "Variable initialized before use should NOT generate warnings. \
+         Got warnings: {:?}",
+        uninitialized_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Тест: Параметр функции всегда инициализирован - не должно быть предупреждений
+#[tokio::test]
+async fn test_function_parameter_always_initialized() {
+    let service = create_test_service();
+
+    // Параметр используется как получатель метода - не должно быть предупреждения
+    let code = r#"
+Процедура Тест(Массив)
+    Массив.Добавить(123);
+КонецПроцедуры
+"#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics should succeed");
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Test: Function parameter always initialized");
+    println!("  Total diagnostics: {}", diagnostics.len());
+    for (i, d) in diagnostics.iter().enumerate() {
+        println!("  [{}] Line {}: {:?}: {}", i, d.line, d.severity, d.message);
+    }
+
+    // НЕ должно быть предупреждений о неинициализированном параметре
+    let uninitialized_warnings: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.message.contains("неинициализирован") && d.message.contains("Массив"))
+        .collect();
+
+    assert!(
+        uninitialized_warnings.is_empty(),
+        "Function parameter should always be initialized. \
+         Got warnings: {:?}",
+        uninitialized_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Тест: Проверка что severity = Warning, а не Error
+#[tokio::test]
+async fn test_uninitialized_variable_severity_is_warning() {
+    let service = create_test_service();
+
+    let code = r#"
+Процедура Тест()
+    Перем Y;
+    Y.Очистить();
+КонецПроцедуры
+"#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics should succeed");
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Test: Uninitialized variable severity check");
+    println!("  Total diagnostics: {}", diagnostics.len());
+    for (i, d) in diagnostics.iter().enumerate() {
+        println!("  [{}] Line {}: {:?}: {}", i, d.line, d.severity, d.message);
+    }
+
+    // Фильтруем диагностики о неинициализированной переменной
+    let uninitialized_diagnostics: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.message.contains("неинициализирован") && d.message.contains("Y"))
+        .collect();
+
+    assert!(
+        !uninitialized_diagnostics.is_empty(),
+        "Expected diagnostic about uninitialized variable"
+    );
+
+    // Проверяем что все диагностики имеют severity Warning
+    for diag in uninitialized_diagnostics {
+        assert!(
+            matches!(diag.severity, DiagnosticSeverity::Warning),
+            "Uninitialized variable diagnostic should have severity Warning, got {:?}",
+            diag.severity
+        );
+    }
+}
+
+/// Тест: Сообщение содержит имя переменной
+#[tokio::test]
+async fn test_uninitialized_variable_message_contains_variable_name() {
+    let service = create_test_service();
+
+    let code = r#"
+Процедура Тест()
+    Перем МояПеременная;
+    МояПеременная.Добавить(1);
+КонецПроцедуры
+"#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics should succeed");
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Test: Uninitialized variable message contains variable name");
+    println!("  Total diagnostics: {}", diagnostics.len());
+    for (i, d) in diagnostics.iter().enumerate() {
+        println!("  [{}] Line {}: {:?}: {}", i, d.line, d.severity, d.message);
+    }
+
+    // Должна быть диагностика содержащая имя переменной "МояПеременная"
+    let contains_variable_name = diagnostics
+        .iter()
+        .any(|d| d.message.contains("неинициализирован") && d.message.contains("МояПеременная"));
+
+    assert!(
+        contains_variable_name,
+        "Diagnostic message should contain variable name 'МояПеременная'. \
+         Got diagnostics: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ===== Валидация позиции Перем объявлений =====
+
+/// Тест: Перем в начале функции - должен работать без ошибок
+#[tokio::test]
+async fn test_var_declaration_at_start_of_function() {
+    let service = create_test_service();
+
+    let code = r#"
+Функция Тест()
+    Перем ЛокальнаяПеременная;
+    ЛокальнаяПеременная = 5;
+    Возврат ЛокальнаяПеременная;
+КонецФункции
+"#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics should succeed");
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Test: Перем at start of function");
+    println!("  Total diagnostics: {}", diagnostics.len());
+    for (i, d) in diagnostics.iter().enumerate() {
+        println!("  [{}] Line {}: {:?}: {}", i, d.line, d.severity, d.message);
+    }
+
+    // Не должно быть ошибок о позиции Перем
+    let var_position_errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.message.contains("Перем") && d.message.contains("после"))
+        .collect();
+
+    assert!(
+        var_position_errors.is_empty(),
+        "Перем в начале функции не должен генерировать ошибку. \
+         Ошибки: {:?}",
+        var_position_errors
+    );
+}
+
+/// Тест: Несколько Перем подряд в начале функции - должны работать без ошибок
+#[tokio::test]
+async fn test_multiple_var_declarations_at_start() {
+    let service = create_test_service();
+
+    let code = r#"
+Процедура Тест()
+    Перем Переменная1;
+    Перем Переменная2;
+    Перем Переменная3;
+
+    Переменная1 = 10;
+    Переменная2 = 20;
+    Переменная3 = 30;
+КонецПроцедуры
+"#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics should succeed");
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Test: Multiple Перем at start");
+    println!("  Total diagnostics: {}", diagnostics.len());
+    for (i, d) in diagnostics.iter().enumerate() {
+        println!("  [{}] Line {}: {:?}: {}", i, d.line, d.severity, d.message);
+    }
+
+    // Не должно быть ошибок о позиции Перем
+    let var_position_errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.message.contains("Перем") && d.message.contains("после"))
+        .collect();
+
+    assert!(
+        var_position_errors.is_empty(),
+        "Несколько Перем подряд не должны генерировать ошибку. \
+         Ошибки: {:?}",
+        var_position_errors
+    );
+}
+
+/// Тест: Перем после присваивания - должна быть ошибка
+#[tokio::test]
+async fn test_var_declaration_after_assignment() {
+    let service = create_test_service();
+
+    let code = r#"
+Функция Тест()
+    Х = 5;
+    Перем ПоздняяПеременная;
+    Возврат Х;
+КонецФункции
+"#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics should succeed");
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Test: Перем after assignment");
+    println!("  Total diagnostics: {}", diagnostics.len());
+    for (i, d) in diagnostics.iter().enumerate() {
+        println!("  [{}] Line {}: {:?}: {}", i, d.line, d.severity, d.message);
+    }
+
+    // Должна быть ошибка о позиции Перем
+    let var_position_errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| {
+            (d.message.contains("Перем") || d.message.contains("ПоздняяПеременная")) &&
+            (d.message.contains("после") || d.message.contains("исполняемого"))
+        })
+        .collect();
+
+    assert!(
+        !var_position_errors.is_empty(),
+        "Перем после присваивания должен генерировать ошибку. \
+         Все диагностики: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+
+    // Проверяем что сообщение содержит имя переменной
+    let contains_var_name = var_position_errors
+        .iter()
+        .any(|d| d.message.contains("ПоздняяПеременная"));
+
+    assert!(
+        contains_var_name,
+        "Сообщение об ошибке должно содержать имя переменной 'ПоздняяПеременная'"
+    );
+}
+
+/// Тест: Перем после вызова функции - должна быть ошибка
+#[tokio::test]
+async fn test_var_declaration_after_function_call() {
+    let service = create_test_service();
+
+    let code = r#"
+Процедура Тест()
+    МассивДанных = Новый Массив;
+    МассивДанных.Добавить(123);
+    Перем ПоздняяПеременная;
+КонецПроцедуры
+"#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics should succeed");
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Test: Перем after function call");
+    println!("  Total diagnostics: {}", diagnostics.len());
+    for (i, d) in diagnostics.iter().enumerate() {
+        println!("  [{}] Line {}: {:?}: {}", i, d.line, d.severity, d.message);
+    }
+
+    // Должна быть ошибка о позиции Перем
+    let var_position_errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| {
+            (d.message.contains("Перем") || d.message.contains("ПоздняяПеременная")) &&
+            (d.message.contains("после") || d.message.contains("исполняемого"))
+        })
+        .collect();
+
+    assert!(
+        !var_position_errors.is_empty(),
+        "Перем после вызова функции должен генерировать ошибку. \
+         Все диагностики: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Тест: Перем в процедуре после исполняемого кода - должна быть ошибка
+#[tokio::test]
+async fn test_var_declaration_after_executable_in_procedure() {
+    let service = create_test_service();
+
+    let code = r#"
+Процедура МояПроцедура()
+    Сообщить("Начало");
+    Перем ПоздняяПеременная;
+    ПоздняяПеременная = 100;
+КонецПроцедуры
+"#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics should succeed");
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Test: Перем after executable in procedure");
+    println!("  Total diagnostics: {}", diagnostics.len());
+    for (i, d) in diagnostics.iter().enumerate() {
+        println!("  [{}] Line {}: {:?}: {}", i, d.line, d.severity, d.message);
+    }
+
+    // Должна быть ошибка о позиции Перем
+    let var_position_errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| {
+            (d.message.contains("Перем") || d.message.contains("ПоздняяПеременная")) &&
+            (d.message.contains("после") || d.message.contains("исполняемого"))
+        })
+        .collect();
+
+    assert!(
+        !var_position_errors.is_empty(),
+        "Перем после исполняемого кода в процедуре должен генерировать ошибку. \
+         Все диагностики: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+
+    // Проверяем что сообщение содержит имя функции
+    let contains_function_name = var_position_errors
+        .iter()
+        .any(|d| d.message.contains("МояПроцедура"));
+
+    assert!(
+        contains_function_name,
+        "Сообщение об ошибке должно содержать имя процедуры 'МояПроцедура'"
+    );
+}
+
+/// Тест: Перем после Return - должна быть ошибка (хотя код никогда не выполнится)
+#[tokio::test]
+async fn test_var_declaration_after_return() {
+    let service = create_test_service();
+
+    let code = r#"
+Функция Тест()
+    Возврат 42;
+    Перем НедостижимаяПеременная;
+КонецФункции
+"#;
+
+    let result = service.validate_semantics(code, None).await;
+    assert!(result.is_ok(), "validate_semantics should succeed");
+
+    let diagnostics = result.unwrap();
+
+    println!("\n🧪 Test: Перем after Return");
+    println!("  Total diagnostics: {}", diagnostics.len());
+    for (i, d) in diagnostics.iter().enumerate() {
+        println!("  [{}] Line {}: {:?}: {}", i, d.line, d.severity, d.message);
+    }
+
+    // Должна быть ошибка о позиции Перем
+    let var_position_errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| {
+            (d.message.contains("Перем") || d.message.contains("НедостижимаяПеременная")) &&
+            (d.message.contains("после") || d.message.contains("исполняемого"))
+        })
+        .collect();
+
+    assert!(
+        !var_position_errors.is_empty(),
+        "Перем после Return должен генерировать ошибку. \
+         Все диагностики: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }

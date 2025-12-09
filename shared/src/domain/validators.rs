@@ -84,6 +84,18 @@ pub enum TypeErrorKind {
         /// Индекс параметра (1-based)
         param_index: Option<usize>,
     },
+    /// Объявление переменной (Перем) после исполняемого кода
+    VarDeclarationAfterExecutable {
+        /// Имя переменной
+        variable_name: String,
+        /// Имя функции/процедуры
+        function_name: String,
+    },
+    /// Использование неинициализированной переменной
+    UninitializedVariableUsage {
+        /// Имя переменной
+        variable_name: String,
+    },
 }
 
 
@@ -219,6 +231,18 @@ impl TypeErrorKind {
                     format!("Необъявленная переменная '{}'", variable_name)
                 }
             }
+            TypeErrorKind::VarDeclarationAfterExecutable { variable_name, function_name } => {
+                format!(
+                    "Объявление переменной '{}' после исполняемого кода в '{}'",
+                    variable_name, function_name
+                )
+            }
+            TypeErrorKind::UninitializedVariableUsage { variable_name } => {
+                format!(
+                    "Использование неинициализированной переменной '{}'",
+                    variable_name
+                )
+            }
         }
     }
 
@@ -337,6 +361,10 @@ impl TypeErrorKind {
             TypeErrorKind::UnknownTypeAccess { .. } => self.format_brief(),
             // UndeclaredVariable: Standard формат совпадает с Brief
             TypeErrorKind::UndeclaredVariable { .. } => self.format_brief(),
+            // VarDeclarationAfterExecutable: Standard формат совпадает с Brief
+            TypeErrorKind::VarDeclarationAfterExecutable { .. } => self.format_brief(),
+            // UninitializedVariableUsage: Standard формат совпадает с Brief
+            TypeErrorKind::UninitializedVariableUsage { .. } => self.format_brief(),
         }
     }
 
@@ -469,6 +497,24 @@ impl TypeErrorKind {
                 format!(
                     "💡 Подсказка: Переменная '{}' не объявлена в текущей области видимости. \
                     Объявите переменную с помощью 'Перем {}' или присвойте ей значение перед использованием.",
+                    variable_name, variable_name
+                )
+            }
+            TypeErrorKind::VarDeclarationAfterExecutable {
+                variable_name,
+                ..
+            } => {
+                format!(
+                    "💡 Подсказка: В 1С объявления переменных (Перем) должны располагаться \
+                    в начале функции/процедуры, до любого исполняемого кода. \
+                    Переместите 'Перем {}' в начало тела функции.",
+                    variable_name
+                )
+            }
+            TypeErrorKind::UninitializedVariableUsage { variable_name } => {
+                format!(
+                    "💡 Подсказка: Переменная '{}' объявлена, но не инициализирована. \
+                    Присвойте значение переменной перед использованием: {} = <значение>;",
                     variable_name, variable_name
                 )
             }

@@ -34,6 +34,7 @@ pub use null_safety::{NullSafetyAnalyzer, NullSafetyResult, NullSafetyWarning, N
 pub use repository::{CompletionItem, CompletionKind, TypeRepository};
 pub use resolver::{ConstructorResolution, TypeResolver, ValidationResult, ValidationResultV2};
 pub use signature_index::{
+    ConstructorSignature, ContextRequirements as SignatureContextRequirements,
     MethodSignature, SignatureIndex, SignatureMismatch, SignatureSource, SignatureValidationResult,
 };
 pub use types::{RawTypeData, TypeCompatibility, TypeRef, TypeResolution};

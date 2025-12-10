@@ -1,0 +1,952 @@
+//! BSL Language Server implementation
+//!
+//! Contains the main server struct and LanguageServer trait implementation.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{mpsc, RwLock};
+use tower_lsp::jsonrpc::Result as JsonRpcResult;
+use tower_lsp::lsp_types::*;
+use tower_lsp::{Client, LanguageServer};
+use tracing::{debug, error, info, warn};
+
+use bsl_backend::application::TypeSystemService;
+use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
+use bsl_backend::system::SystemCoordinator;
+
+use crate::config::{BslSettings, LspConfig};
+use crate::converters::{semantic_error_to_diagnostic, syntax_errors_to_diagnostics};
+use crate::handlers::{
+    self, apply_text_edit, find_containing_function_in_dto, handle_completion,
+    handle_goto_definition, handle_hover, handle_signature_help, CurrentContextResponse,
+};
+use crate::commands::{
+    handle_parse_configuration, handle_query_type, handle_search_types,
+    handle_get_type_repository_stats, handle_get_semantic_tree, handle_get_semantic_html,
+    ParseConfigurationParams, QueryTypeParams, SearchTypesRequest,
+};
+use crate::types::{
+    GetCurrentContextParams, ServerStatus, ServerStatusParams,
+};
+use crate::progress::log_progress_to_file;
+
+use bsl_shared::api::semantic_dtos::{GetSemanticHtmlRequest, GetSemanticTreeRequest};
+
+/// BSL Language Server backend - CLEAN ARCHITECTURE
+#[derive(Clone)]
+pub struct BslLanguageServer {
+    pub client: Client,
+    pub documents: Arc<RwLock<HashMap<Url, String>>>,
+    pub config: Arc<RwLock<Option<LspConfig>>>,
+    pub settings: Arc<RwLock<BslSettings>>,
+    pub coordinator: Arc<SystemCoordinator>,
+}
+
+impl BslLanguageServer {
+    pub fn new(client: Client, coordinator: Arc<SystemCoordinator>) -> Self {
+        Self {
+            client,
+            documents: Arc::new(RwLock::new(HashMap::new())),
+            config: Arc::new(RwLock::new(None)),
+            settings: Arc::new(RwLock::new(BslSettings::default())),
+            coordinator,
+        }
+    }
+
+    /// Get current TypeSystemService (always fresh after reload)
+    pub fn get_type_service(&self) -> Option<Arc<TypeSystemService>> {
+        self.coordinator.type_service()
+    }
+
+    /// Get document content from cache
+    pub async fn get_document_content(&self, uri: &Url) -> Result<String, String> {
+        let documents = self.documents.read().await;
+        documents
+            .get(uri)
+            .cloned()
+            .ok_or_else(|| format!("Document not found: {}", uri))
+    }
+
+    /// Revalidate document (used after platform types loading)
+    pub async fn revalidate_document(&self, uri: &Url, text: &str) -> Result<(), String> {
+        let mut diagnostics = Vec::new();
+
+        // PHASE 1: Syntax validation
+        if let Some(type_service) = self.get_type_service() {
+            match type_service.parse_and_validate(text) {
+                Ok(errors) => {
+                    if !errors.is_empty() {
+                        info!(
+                            "Found {} syntax errors in {} (revalidation)",
+                            errors.len(),
+                            uri
+                        );
+                        diagnostics.extend(syntax_errors_to_diagnostics(&errors));
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Syntax validation failed for {} (revalidation): {}",
+                        uri, e
+                    );
+                }
+            }
+        }
+
+        // PHASE 2: Semantic validation
+        if let Some(type_service) = self.get_type_service() {
+            let settings = self.settings.read().await;
+            let detail_level =
+                bsl_shared::formatting::DetailLevel::parse(&settings.diagnostics.detail_level);
+
+            match type_service
+                .validate_semantics(text, Some(detail_level))
+                .await
+            {
+                Ok(semantic_errors) => {
+                    if !semantic_errors.is_empty() {
+                        info!(
+                            "Found {} semantic errors in {} (revalidation)",
+                            semantic_errors.len(),
+                            uri
+                        );
+                        for error in semantic_errors {
+                            diagnostics.push(semantic_error_to_diagnostic(&error));
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Semantic validation failed for {} (revalidation): {}",
+                        uri, e
+                    );
+                }
+            }
+        }
+
+        // Send updated diagnostics
+        self.client
+            .publish_diagnostics(uri.clone(), diagnostics, None)
+            .await;
+
+        Ok(())
+    }
+}
+
+#[tower_lsp::async_trait]
+impl LanguageServer for BslLanguageServer {
+    async fn initialize(&self, params: InitializeParams) -> JsonRpcResult<InitializeResult> {
+        info!("Initializing BSL Language Server");
+
+        // DEBUG: Log ClientCapabilities
+        debug!(
+            "[JSON-RPC] initialize: ClientCapabilities.window.workDoneProgress = {:?}",
+            params
+                .capabilities
+                .window
+                .as_ref()
+                .and_then(|w| w.work_done_progress)
+        );
+
+        // MILESTONE 2.10: Read initializationOptions from Extension
+        if let Some(options) = params.initialization_options {
+            match serde_json::from_value::<LspConfig>(options.clone()) {
+                Ok(config) => {
+                    info!("LSP Config received: {:?}", config);
+                    *self.config.write().await = Some(config.clone());
+                    info!("Configuration saved, will reload types in initialized()");
+                }
+                Err(e) => {
+                    error!("Failed to parse LSP config: {}", e);
+                    error!("Raw options: {:?}", options);
+                }
+            }
+        } else {
+            info!("No initializationOptions provided - using defaults (4 basic types only)");
+        }
+
+        // Version info for LSP Protocol
+        let version = env!("CARGO_PKG_VERSION");
+        let build_timestamp = env!("BUILD_TIMESTAMP");
+        let git_hash = env!("GIT_HASH");
+
+        Ok(InitializeResult {
+            capabilities: ServerCapabilities {
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::INCREMENTAL),
+                        will_save: Some(false),
+                        will_save_wait_until: Some(false),
+                        save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                            include_text: Some(false),
+                        })),
+                    },
+                )),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec![".".to_string(), " ".to_string()]),
+                    ..Default::default()
+                }),
+                diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
+                    DiagnosticOptions {
+                        identifier: Some("bsl-gradual-types".to_string()),
+                        inter_file_dependencies: true,
+                        workspace_diagnostics: false,
+                        work_done_progress_options: WorkDoneProgressOptions::default(),
+                    },
+                )),
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec![
+                        "bsl.getSemanticHtml".to_string(),
+                        "bsl.getSemanticTree".to_string(),
+                        "bsl.searchTypes".to_string(),
+                        "bsl.getCurrentContext".to_string(),
+                        "bsl.getTypeRepositoryStats".to_string(),
+                        "bsl.parseConfiguration".to_string(),
+                    ],
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                }),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    retrigger_characters: Some(vec![")".to_string()]),
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: Some(false),
+                    },
+                }),
+                ..Default::default()
+            },
+            server_info: Some(ServerInfo {
+                name: "BSL Language Server".to_string(),
+                version: Some(format!(
+                    "{} (build: {}, git: {})",
+                    version, build_timestamp, git_hash
+                )),
+            }),
+        })
+    }
+
+    async fn initialized(&self, _: InitializedParams) {
+        self.client
+            .log_message(MessageType::INFO, "BSL Language Server initialized!")
+            .await;
+
+        // MILESTONE 2.10: Reload types with config from initializationOptions
+        let config = self.config.read().await;
+        if let Some(ref cfg) = *config {
+            if let Some(ref platform_docs) = cfg.platform_docs_archive {
+                info!("Reloading types with platformDocsArchive: {}", platform_docs);
+
+                // Create channels for progress and result
+                let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressUpdate>();
+                let (result_tx, result_rx) =
+                    tokio::sync::oneshot::channel::<Result<(), String>>();
+
+                // Generate unique token for Work Done Progress
+                let token = ProgressToken::String(format!(
+                    "bsl-load-types-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis()
+                ));
+
+                // Create progress token
+                if let Err(e) = self
+                    .client
+                    .send_request::<tower_lsp::lsp_types::request::WorkDoneProgressCreate>(
+                        WorkDoneProgressCreateParams {
+                            token: token.clone(),
+                        },
+                    )
+                    .await
+                {
+                    error!("Failed to create work done progress token: {}", e);
+                }
+
+                // Send bsl/serverStatus (loading: true)
+                info!("[LSP->Extension] Sending bsl/serverStatus: loading=true");
+                let _ = self
+                    .client
+                    .send_notification::<ServerStatus>(ServerStatusParams::loading(
+                        "Loading types...",
+                    ))
+                    .await;
+
+                // Send WorkDoneProgressBegin
+                let title = if cfg.configuration_path.is_some() {
+                    "Loading platform and configuration types".to_string()
+                } else {
+                    "Loading platform types".to_string()
+                };
+
+                let _ = self
+                    .client
+                    .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                        ProgressParams {
+                            token: token.clone(),
+                            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
+                                WorkDoneProgressBegin {
+                                    title,
+                                    message: Some("Initializing...".to_string()),
+                                    percentage: Some(0),
+                                    cancellable: Some(false),
+                                },
+                            )),
+                        },
+                    )
+                    .await;
+
+                log_progress_to_file("[LSP->Extension] SEND WorkDoneProgressBegin");
+
+                // Spawn task to handle progress
+                let client_clone = self.client.clone();
+                let token_clone = token.clone();
+                let start_time = std::time::Instant::now();
+                let self_clone = self.clone();
+
+                tokio::spawn(async move {
+                    let mut last_report: Option<std::time::Instant> = None;
+                    let throttle_interval = std::time::Duration::from_millis(50);
+
+                    // PHASE 1: Process progress updates
+                    while let Some(update) = progress_rx.recv().await {
+                        let now = std::time::Instant::now();
+
+                        debug!(
+                            "[RECV] {:?} {:.1}% ({}/{}) - {}",
+                            update.phase,
+                            update.percentage,
+                            update.current,
+                            update.total,
+                            update.message.as_deref().unwrap_or("")
+                        );
+
+                        // Throttling
+                        let should_skip = if let Some(last) = last_report {
+                            now.duration_since(last) < throttle_interval
+                                && update.percentage < 100.0
+                        } else {
+                            false
+                        };
+
+                        if should_skip {
+                            continue;
+                        }
+
+                        last_report = Some(now);
+
+                        // Calculate ETA
+                        let elapsed = start_time.elapsed().as_secs_f32();
+                        let eta = if update.percentage > 5.0 {
+                            Some(((elapsed * 100.0 / update.percentage) - elapsed) as u32)
+                        } else {
+                            None
+                        };
+
+                        // Format message
+                        let message = match update.phase {
+                            IndexingPhase::ParsingFiles => {
+                                format!(
+                                    "Type {}/{}{}",
+                                    update.current,
+                                    update.total,
+                                    update
+                                        .message
+                                        .as_ref()
+                                        .map(|m| format!(" - {}", m))
+                                        .unwrap_or_default()
+                                )
+                            }
+                            IndexingPhase::ConfigurationParsing => update.message.clone().unwrap_or_else(|| {
+                                format!(
+                                    "{} | {}/{}",
+                                    update.phase.display_name(),
+                                    update.current,
+                                    update.total
+                                )
+                            }),
+                            _ => {
+                                format!(
+                                    "{} | {}/{}",
+                                    update.phase.display_name(),
+                                    update.current,
+                                    update.total
+                                )
+                            }
+                        };
+
+                        let message_with_eta = if let Some(eta_secs) = eta {
+                            format!("{} - ETA: {}s", message, eta_secs)
+                        } else {
+                            message
+                        };
+
+                        let _ = client_clone
+                            .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                                ProgressParams {
+                                    token: token_clone.clone(),
+                                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
+                                        WorkDoneProgressReport {
+                                            message: Some(message_with_eta),
+                                            percentage: Some(update.percentage as u32),
+                                            cancellable: Some(false),
+                                        },
+                                    )),
+                                },
+                            )
+                            .await;
+                    }
+
+                    // PHASE 2: Channel closed, wait for result
+                    match result_rx.await {
+                        Ok(Ok(())) => {
+                            // SUCCESS: Send WorkDoneProgressEnd
+                            let _ = client_clone
+                                .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                                    ProgressParams {
+                                        token: token_clone.clone(),
+                                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
+                                            WorkDoneProgressEnd {
+                                                message: Some(
+                                                    "Platform types loaded successfully".to_string(),
+                                                ),
+                                            },
+                                        )),
+                                    },
+                                )
+                                .await;
+
+                            let _ = client_clone
+                                .send_notification::<ServerStatus>(ServerStatusParams::ready())
+                                .await;
+
+                            // Revalidate all open documents
+                            info!("Revalidating all open documents with full platform types...");
+                            let documents_to_revalidate: Vec<_> = {
+                                let docs = self_clone.documents.read().await;
+                                docs.iter()
+                                    .map(|(uri, text)| (uri.clone(), text.clone()))
+                                    .collect()
+                            };
+
+                            for (uri, text) in documents_to_revalidate {
+                                if let Err(e) = self_clone.revalidate_document(&uri, &text).await {
+                                    warn!("Failed to revalidate {}: {}", uri, e);
+                                }
+                            }
+
+                            // Clear IR cache
+                            let ir_cache = self_clone.coordinator.ir_cache();
+                            ir_cache.clear().await;
+                        }
+                        Ok(Err(error_msg)) => {
+                            // ERROR: Send WorkDoneProgressEnd with error
+                            let _ = client_clone
+                                .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                                    ProgressParams {
+                                        token: token_clone.clone(),
+                                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
+                                            WorkDoneProgressEnd {
+                                                message: Some(format!("Error: {}", error_msg)),
+                                            },
+                                        )),
+                                    },
+                                )
+                                .await;
+
+                            let _ = client_clone
+                                .send_notification::<ServerStatus>(ServerStatusParams::ready())
+                                .await;
+                        }
+                        Err(_) => {
+                            warn!("Result channel closed unexpectedly");
+                        }
+                    }
+                });
+
+                // Load types
+                let syntax_path = std::path::Path::new(platform_docs);
+                let config_path_ref = cfg
+                    .configuration_path
+                    .as_ref()
+                    .map(|s| std::path::Path::new(s.as_str()));
+
+                let result = self
+                    .coordinator
+                    .start_with_paths(Some(syntax_path), config_path_ref, Some(progress_tx))
+                    .await;
+
+                match result {
+                    Ok(()) => {
+                        info!("Platform types loaded successfully");
+                        let _ = result_tx.send(Ok(()));
+                        self.client
+                            .log_message(
+                                MessageType::INFO,
+                                format!("Platform documentation loaded from: {}", platform_docs),
+                            )
+                            .await;
+                    }
+                    Err(e) => {
+                        error!("Failed to load platform types: {}", e);
+                        let _ = result_tx.send(Err(e.to_string()));
+                        self.client
+                            .log_message(
+                                MessageType::ERROR,
+                                format!("Failed to load platform documentation: {}", e),
+                            )
+                            .await;
+                    }
+                }
+            } else {
+                info!("platformDocsArchive not provided - using basic types only");
+            }
+        }
+    }
+
+    async fn shutdown(&self) -> JsonRpcResult<()> {
+        info!("Shutting down BSL Language Server");
+        Ok(())
+    }
+
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        info!("Received didChangeConfiguration");
+
+        if let Some(settings_value) = params.settings.as_object() {
+            if let Some(bsl_value) = settings_value.get("bsl") {
+                match serde_json::from_value::<BslSettings>(bsl_value.clone()) {
+                    Ok(new_settings) => {
+                        info!(
+                            "Parsed BslSettings: hover.detailLevel={}, diagnostics.detailLevel={}",
+                            new_settings.hover.detail_level, new_settings.diagnostics.detail_level
+                        );
+                        *self.settings.write().await = new_settings;
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse BslSettings: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let text = params.text_document.text.clone();
+        let version = params.text_document.version;
+
+        // Cache text
+        self.documents
+            .write()
+            .await
+            .insert(uri.clone(), text.clone());
+
+        // Preheat IR cache
+        if let Some(service) = self.get_type_service() {
+            match service.get_hover_info(&text, 0, 0, None).await {
+                Ok(_) => info!("IR cache preheated for {}", uri),
+                Err(e) => error!("Failed to preheat IR cache for {}: {}", uri, e),
+            }
+        }
+
+        // Get diagnostics
+        let settings = self.settings.read().await.clone();
+        let diagnostics =
+            handlers::handle_did_open(&uri, &text, version, self.get_type_service(), &settings)
+                .await;
+
+        self.client
+            .publish_diagnostics(uri.clone(), diagnostics, Some(version))
+            .await;
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!("Opened and analyzed document: {}", uri),
+            )
+            .await;
+    }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let version = params.text_document.version;
+        let changes = params.content_changes;
+
+        // Apply changes
+        let updated_text = if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
+            full_change.text.clone()
+        } else {
+            let existing_text = self
+                .documents
+                .read()
+                .await
+                .get(&uri)
+                .cloned()
+                .unwrap_or_default();
+
+            let mut current_text = existing_text;
+            for change in &changes {
+                if let Some(range) = change.range {
+                    current_text = apply_text_edit(&current_text, range, &change.text);
+                }
+            }
+            current_text
+        };
+
+        // Cache text
+        self.documents
+            .write()
+            .await
+            .insert(uri.clone(), updated_text.clone());
+
+        // Get diagnostics
+        let settings = self.settings.read().await.clone();
+        let diagnostics = handlers::handle_did_change(
+            &uri,
+            &updated_text,
+            &changes,
+            self.get_type_service(),
+            &settings,
+        )
+        .await;
+
+        self.client
+            .publish_diagnostics(uri.clone(), diagnostics, Some(version))
+            .await;
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+        self.documents.write().await.remove(&uri);
+
+        // Clear diagnostics
+        self.client
+            .publish_diagnostics(uri.clone(), vec![], None)
+            .await;
+
+        self.client
+            .log_message(MessageType::INFO, format!("Closed document: {}", uri))
+            .await;
+    }
+
+    async fn completion(
+        &self,
+        params: CompletionParams,
+    ) -> JsonRpcResult<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let file_content = match self.documents.read().await.get(&uri) {
+            Some(content) => content.clone(),
+            None => match uri.to_file_path() {
+                Ok(path) => match std::fs::read_to_string(&path) {
+                    Ok(content) => content,
+                    Err(e) => {
+                        error!("Failed to read file for completion: {}", e);
+                        return Ok(Some(CompletionResponse::Array(vec![])));
+                    }
+                },
+                Err(_) => return Ok(Some(CompletionResponse::Array(vec![]))),
+            },
+        };
+
+        Ok(handle_completion(&file_content, position, self.get_type_service()).await)
+    }
+
+    async fn hover(&self, params: HoverParams) -> JsonRpcResult<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        info!(
+            "Hover requested at {}:{}",
+            position.line, position.character
+        );
+
+        let file_content = match self.documents.read().await.get(&uri) {
+            Some(content) => content.clone(),
+            None => match uri.to_file_path() {
+                Ok(path) => match std::fs::read_to_string(&path) {
+                    Ok(content) => content,
+                    Err(e) => {
+                        error!("Failed to read file for hover: {}", e);
+                        return Ok(None);
+                    }
+                },
+                Err(_) => return Ok(None),
+            },
+        };
+
+        let settings = self.settings.read().await;
+        Ok(handle_hover(
+            &file_content,
+            position,
+            self.get_type_service(),
+            &settings.hover,
+        )
+        .await)
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> JsonRpcResult<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let file_content = match self.documents.read().await.get(&uri) {
+            Some(content) => content.clone(),
+            None => match uri.to_file_path() {
+                Ok(path) => match std::fs::read_to_string(&path) {
+                    Ok(content) => content,
+                    Err(e) => {
+                        error!("Failed to read file for definition: {}", e);
+                        return Ok(None);
+                    }
+                },
+                Err(_) => return Ok(None),
+            },
+        };
+
+        Ok(handle_goto_definition(&file_content, position, self.get_type_service()).await)
+    }
+
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> JsonRpcResult<Option<serde_json::Value>> {
+        info!(
+            "Execute command: {} with {} arguments",
+            params.command,
+            params.arguments.len()
+        );
+
+        match params.command.as_str() {
+            "bsl.getSemanticHtml" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing request parameters",
+                    ));
+                }
+
+                let request: GetSemanticHtmlRequest =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
+
+                let documents = self.documents.clone();
+                let result = handle_get_semantic_html(
+                    request,
+                    self.get_type_service(),
+                    |uri| {
+                        // This is a sync closure, so we need to use try_read
+                        documents.try_read().ok().and_then(|docs| docs.get(uri).cloned())
+                    },
+                )
+                .await
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
+            "bsl.getSemanticTree" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing request parameters",
+                    ));
+                }
+
+                let request: GetSemanticTreeRequest =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
+
+                let documents = self.documents.clone();
+                let result = handle_get_semantic_tree(
+                    request,
+                    self.get_type_service(),
+                    |uri| {
+                        documents.try_read().ok().and_then(|docs| docs.get(uri).cloned())
+                    },
+                )
+                .await
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
+            "bsl.searchTypes" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing search query",
+                    ));
+                }
+
+                let request: SearchTypesRequest =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
+
+                let result = handle_search_types(request, self.coordinator.get_analysis_engine());
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
+            "bsl.getCurrentContext" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing parameters",
+                    ));
+                }
+
+                let request: GetCurrentContextParams =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
+
+                let result = self.handle_get_current_context(request).await?;
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
+            "bsl.queryType" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing type name",
+                    ));
+                }
+
+                let request: QueryTypeParams =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
+
+                let result = handle_query_type(request, self.coordinator.get_analysis_engine());
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
+            "bsl.getTypeRepositoryStats" => {
+                let result = handle_get_type_repository_stats(self.coordinator.clone());
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
+            "bsl.parseConfiguration" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing configuration path",
+                    ));
+                }
+
+                let request: ParseConfigurationParams =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
+
+                let result = handle_parse_configuration(
+                    request,
+                    self.coordinator.get_analysis_engine(),
+                    self.client.clone(),
+                )
+                .await;
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
+            _ => {
+                warn!("Unknown command: {}", params.command);
+                Err(tower_lsp::jsonrpc::Error::method_not_found())
+            }
+        }
+    }
+
+    async fn signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> JsonRpcResult<Option<SignatureHelp>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let file_content = match self.get_document_content(&uri).await {
+            Ok(content) => content,
+            Err(e) => {
+                warn!("Failed to get document content: {}", e);
+                return Ok(None);
+            }
+        };
+
+        Ok(handle_signature_help(
+            &file_content,
+            position,
+            self.coordinator.get_analysis_engine(),
+        )
+        .await)
+    }
+}
+
+impl BslLanguageServer {
+    /// Handle bsl.getCurrentContext command
+    async fn handle_get_current_context(
+        &self,
+        params: GetCurrentContextParams,
+    ) -> JsonRpcResult<CurrentContextResponse> {
+        info!(
+            "Custom command: bsl.getCurrentContext - {}:{}:{}",
+            params.uri, params.line, params.character
+        );
+
+        let uri = Url::parse(&params.uri).map_err(|e| {
+            tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e))
+        })?;
+
+        let file_content = match self.documents.read().await.get(&uri) {
+            Some(content) => content.clone(),
+            None => match uri.to_file_path() {
+                Ok(path) => std::fs::read_to_string(&path).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?,
+                Err(_) => return Ok(CurrentContextResponse::empty()),
+            },
+        };
+
+        let file_path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| std::path::PathBuf::from("untitled"))
+            .to_string_lossy()
+            .to_string();
+
+        if let Some(service) = self.get_type_service() {
+            match service.get_semantic_tree(&file_content, &file_path).await {
+                Ok(semantic_tree_dto) => {
+                    match find_containing_function_in_dto(
+                        &semantic_tree_dto,
+                        params.line,
+                        params.character,
+                    ) {
+                        Some((name, kind, params_list, return_type)) => Ok(CurrentContextResponse {
+                            function_name: Some(name),
+                            function_kind: kind,
+                            params: Some(params_list),
+                            return_type,
+                        }),
+                        None => Ok(CurrentContextResponse::empty()),
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get semantic tree: {}", e);
+                    Err(tower_lsp::jsonrpc::Error::internal_error())
+                }
+            }
+        } else {
+            Ok(CurrentContextResponse::empty())
+        }
+    }
+}

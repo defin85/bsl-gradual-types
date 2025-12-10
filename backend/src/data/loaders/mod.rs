@@ -14,7 +14,7 @@ pub mod syntax_helper_parser;
 pub use config_metadata_parser::{
     ConfigurationDiscovery, UniversalMetadataObject, UniversalMetadataParser,
 };
-pub use syntax_helper_parser::SyntaxHelperParser;
+pub use syntax_helper_parser::{ParsingStats, SyntaxHelperParser};
 
 pub use syntax_helper::{
     CategoryInfo, CodeExample, ConstructorInfo, GlobalFunctionInfo, MethodInfo,

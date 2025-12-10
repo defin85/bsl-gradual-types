@@ -1,0 +1,447 @@
+//! Вывод типов выражений
+//!
+//! Модуль содержит методы для вывода типов выражений из AST.
+//! Включает как простой строковый вывод (`infer_expression_type`),
+//! так и полный вывод с TypeResolution (`infer_type_resolution`).
+
+use crate::parsing::bsl::ast::Expression;
+use bsl_shared::domain::is_configuration_type_pattern;
+use bsl_shared::domain::signature_index::SignatureIndex;
+use bsl_shared::domain::types::{ResolutionResult, TypeResolution};
+
+use super::converter::AstToIrConverter;
+use super::global_collections::{is_global_collection, lookup_global_collection};
+
+impl AstToIrConverter {
+    /// Вывод типа выражения (простая эвристика)
+    pub(crate) fn infer_expression_type(&self, expr: &Expression) -> String {
+        match expr {
+            Expression::Number { .. } => "Число".to_string(),
+            Expression::String { .. } => "Строка".to_string(),
+            Expression::Boolean { .. } => "Булево".to_string(),
+            Expression::Date { .. } => "Дата".to_string(),
+            Expression::Identifier { name, .. } => {
+                // MILESTONE 3.11 Phase 2: tree-sitter может парсить "Справочники.X" как один Identifier
+                // Проверяем и трансформируем в Manager facet
+                if let Some(dot_pos) = name.find('.') {
+                    let collection = &name[..dot_pos];
+                    let object_name = &name[dot_pos + 1..];
+
+                    // Используем lookup_global_collection для унифицированного поиска
+                    if let Some(info) = lookup_global_collection(collection) {
+                        return format!("{}.{}", info.item_manager_type, object_name);
+                    }
+
+                    // Не глобальная коллекция - поиск переменной
+                    return self.lookup_variable_type(name)
+                        .unwrap_or_else(|| name.clone());
+                }
+
+                // Поиск переменной в текущем scope
+                self.lookup_variable_type(name)
+                    .unwrap_or_else(|| name.clone())
+            }
+            Expression::New { type_name, .. } => type_name.clone(),
+            Expression::PropertyAccess {
+                object, property, ..
+            } => {
+                let base_type = self.infer_expression_type(object);
+
+                // MILESTONE 3.11 Phase 2: PropertyAccess для глобальных коллекций -> Manager facet
+                // Используем lookup_global_collection для унифицированного поиска
+                if let Some(info) = lookup_global_collection(&base_type) {
+                    format!("{}.{}", info.item_manager_type, property)
+                } else {
+                    format!("{}.{}", base_type, property)
+                }
+            }
+            Expression::Call { function, .. } => {
+                // Тип результата вызова функции
+                match function.as_ref() {
+                    // 1. Метод объекта: object.Method()
+                    Expression::PropertyAccess { object, property, .. } => {
+                        let object_type = self.infer_expression_type(object);
+
+                        // Убираем Generic параметры для поиска: "Массив<Строка>" -> "Массив"
+                        let clean_type = if let Some(idx) = object_type.find('<') {
+                            &object_type[..idx]
+                        } else {
+                            &object_type
+                        };
+
+                        // ИСПРАВЛЕНИЕ: Для фасетных типов нужно использовать базовый тип
+                        // "СправочникМенеджер.Контрагенты" -> "СправочникМенеджер" (поиск)
+                        // Но сохранить исходный тип для подстановки имени объекта
+                        let search_type = if let Some(base_type) = SignatureIndex::extract_base_facet_type(clean_type) {
+                            base_type
+                        } else {
+                            clean_type
+                        };
+
+                        // Поиск метода в SignatureIndex (платформенные методы)
+                        // MILESTONE 3.11 Phase 2: Facet switching с подстановкой имени объекта
+                        if let Some(method) = self.signature_index.find_method(search_type, property) {
+                            // Получаем return_type метода
+                            if let Some(return_type) = &method.return_type {
+                                // Извлекаем имя объекта из исходного типа
+                                // "СправочникМенеджер.Контрагенты" -> "Контрагенты"
+                                if let Some(metadata_name) = SignatureIndex::extract_metadata_name(&object_type) {
+                                    // Подставляем имя в return_type
+                                    // "СправочникСсылка" + "Контрагенты" -> "СправочникСсылка.Контрагенты"
+                                    return SignatureIndex::substitute_type_name(return_type, metadata_name);
+                                }
+
+                                // Fallback: возвращаем return_type как есть
+                                return return_type.clone();
+                            }
+
+                            return "Неопределено".to_string();
+                        }
+
+                        // MILESTONE 3.11 FIX: Метод не найден - возвращаем Dynamic
+                        // Ранее возвращался object_type для "graceful degradation",
+                        // но это приводило к неправильным ошибкам в цепочках:
+                        // М.НеСуществующийМетод().ПолучитьОбъект() показывало ошибку
+                        // на ПолучитьОбъект вместо НеСуществующийМетод
+                        "Dynamic".to_string()
+                    },
+
+                    // 2. Глобальная функция: ТипЗнч()
+                    Expression::Identifier { name: func_name, .. } => {
+                        // SignatureIndex для платформенных функций
+                        if let Some(sig) = self.signature_index.find_global_function(func_name) {
+                            return sig.return_type.clone().unwrap_or_else(|| "Неопределено".to_string());
+                        }
+
+                        // Fallback: пользовательские функции из SymbolTable
+                        // Phase 3: return_type теперь Option<TypeResolution>
+                        if let Some(sig) = self.symbol_table.find_function(func_name) {
+                            return sig
+                                .return_type
+                                .as_ref()
+                                .map(|r| r.type_name())
+                                .unwrap_or_else(|| "Dynamic".to_string());
+                        }
+
+                        "Dynamic".to_string()
+                    },
+
+                    _ => "Dynamic".to_string()
+                }
+            }
+            _ => "Dynamic".to_string(),
+        }
+    }
+
+    /// Поиск типа переменной в scope hierarchy
+    pub(crate) fn lookup_variable_type(&self, name: &str) -> Option<String> {
+        // Используем публичный API вместо прямого доступа к scopes
+        self.symbol_table
+            .lookup_variable_in_hierarchy(self.current_scope, name)
+            .map(|(_, resolution)| resolution.type_name())
+    }
+
+    /// Phase 3: Вывод типа с полной информацией TypeResolution
+    ///
+    /// В отличие от `infer_expression_type()`, возвращает TypeResolution
+    /// с Certainty и ResolutionSource для точного отслеживания происхождения типа.
+    ///
+    /// # Milestone 3.17: TypeResolver DI
+    /// Использует TypeResolver для резолюции конфигурационных типов с корректным active_facet.
+    /// Это критично для валидации методов фасетных типов (СправочникМенеджер.СоздатьЭлемент()).
+    pub(crate) fn infer_type_resolution(&self, expr: &Expression) -> TypeResolution {
+        match expr {
+            // Примитивные литералы - высокая уверенность
+            Expression::Number { .. } => TypeResolution::primitive("Число"),
+            Expression::String { .. } => TypeResolution::primitive("Строка"),
+            Expression::Boolean { .. } => TypeResolution::primitive("Булево"),
+            Expression::Date { .. } => TypeResolution::primitive("Дата"),
+
+            // Идентификаторы - поиск в SymbolTable
+            Expression::Identifier { name, .. } => {
+                // Проверяем на Неопределено/Null (парсятся как идентификаторы)
+                let name_lower = name.to_lowercase();
+                if name_lower == "неопределено" || name_lower == "undefined" {
+                    return TypeResolution::primitive("Неопределено");
+                }
+                if name_lower == "null" {
+                    return TypeResolution::primitive("Null");
+                }
+
+                // MILESTONE 5.3: Глобальные коллекции (Справочники, Документы и т.д.)
+                // возвращают своё имя как тип для корректной работы с PropertyAccess
+                // Используем is_global_collection для унифицированного поиска
+                if is_global_collection(name).is_some() {
+                    return TypeResolution::inferred(name, 1.0);
+                }
+
+                // Сначала ищем в SymbolTable
+                if let Some(resolution) = self
+                    .symbol_table
+                    .get_variable_type(self.current_scope, name)
+                {
+                    // Milestone 3.17: Если active_facet отсутствует, но это конфигурационный тип,
+                    // пробуем обогатить через TypeResolver
+                    if resolution.active_facet.is_none() {
+                        let type_name = resolution.type_name();
+                        if is_configuration_type_pattern(&type_name) {
+                            if let Some(ref resolver) = self.resolver {
+                                let enriched = resolver.resolve_expression_sync(&type_name);
+                                if enriched.active_facet.is_some() {
+                                    return enriched;
+                                }
+                            }
+                        }
+                    }
+                    return resolution.clone();
+                }
+
+                // Переменная не найдена в scope - возвращаем undeclared
+                // MILESTONE 5.1: Это важно для диагностики необъявленных переменных
+                TypeResolution::undeclared_variable(name)
+            }
+
+            // Новые конструкции (Новый Тип())
+            Expression::New { type_name, .. } => {
+                // Очищаем скобки если tree-sitter включил их
+                let clean_type_name = type_name.trim().trim_end_matches("()").trim();
+                TypeResolution::explicit(clean_type_name)
+            }
+
+            // Доступ к свойству (object.property) - критично для конфигурационных типов
+            // MILESTONE 3.17: Используем TypeResolver для установки active_facet
+            Expression::PropertyAccess { object, property, .. } => {
+                let base = self.infer_type_resolution(object);
+
+                // Phase 4: Если base - undeclared variable, пробрасываем эту информацию
+                // Это позволяет детектировать `необъявленная.Свойство` как ошибку
+                if let Some(var_name) = base.is_undeclared_variable() {
+                    return TypeResolution::undeclared_variable(&var_name);
+                }
+
+                let type_str = format!("{}.{}", base.type_name(), property);
+
+                // Проверяем, является ли это конфигурационным типом (Справочники.X, Документы.X, etc.)
+                let is_config = is_configuration_type_pattern(&type_str);
+                let has_resolver = self.resolver.is_some();
+                tracing::info!(
+                    "PropertyAccess: type_str='{}', is_config={}, has_resolver={}",
+                    type_str, is_config, has_resolver
+                );
+
+                if is_config {
+                    // Используем TypeResolver для корректной резолюции с active_facet
+                    if let Some(ref resolver) = self.resolver {
+                        let resolution = resolver.resolve_expression_sync(&type_str);
+                        tracing::info!(
+                            "Resolver result: type='{}', active_facet={:?}",
+                            resolution.type_name(), resolution.active_facet
+                        );
+                        return resolution;
+                    }
+                }
+
+                // Fallback для обычных типов
+                TypeResolution::inferred(&type_str, 0.7)
+            }
+
+            // Вызов функции/метода
+            Expression::Call { function, .. } => {
+                // Phase 4: Проверяем function expression на undeclared
+                // Если это вызов на необъявленной переменной: `необъявленная.Метод()`
+                let func_type = self.infer_type_resolution(function);
+                if let Some(var_name) = func_type.is_undeclared_variable() {
+                    return TypeResolution::undeclared_variable(&var_name);
+                }
+
+                let type_str = self.infer_expression_type(expr);
+
+                // Milestone 3.X: Если результат вызова метода - конфигурационный тип,
+                // используем TypeResolver для корректной резолюции с active_facet
+                if is_configuration_type_pattern(&type_str) {
+                    if let Some(ref resolver) = self.resolver {
+                        return resolver.resolve_expression_sync(&type_str);
+                    }
+                }
+
+                TypeResolution::inferred(&type_str, 0.6)
+            }
+
+            // Бинарные/унарные операции
+            Expression::Binary { .. } | Expression::Unary { .. } => {
+                let type_str = self.infer_expression_type(expr);
+                TypeResolution::inferred(&type_str, 0.8)
+            }
+
+            // Остальные случаи - используем fallback
+            _ => {
+                let type_str = self.infer_expression_type(expr);
+                if type_str.is_empty() || type_str == "Unknown" || type_str == "Dynamic" {
+                    TypeResolution::unknown()
+                } else {
+                    TypeResolution::inferred(&type_str, 0.5)
+                }
+            }
+        }
+    }
+
+    /// Попытка вывести Generic тип из вызова метода коллекции
+    ///
+    /// # Примеры
+    ///
+    /// ```ignore
+    /// МассивСтрок = Новый Массив();      // Generic<Массив, [?]>
+    /// МассивСтрок.Добавить("текст");     // -> Generic<Массив, ["Строка"]>
+    /// ```
+    pub(crate) fn try_infer_generic_from_method_call(
+        &mut self,
+        receiver: &str,
+        method_name: &str,
+        arguments: &[String],
+    ) {
+        use tracing::debug;
+
+        // Получаем текущий тип receiver из SymbolTable
+        let current_resolution = match self
+            .symbol_table
+            .get_variable_type(self.current_scope, receiver)
+        {
+            Some(resolution) => resolution,
+            None => {
+                debug!(
+                    "try_infer_generic: переменная {} не найдена в scope",
+                    receiver
+                );
+                return;
+            }
+        };
+
+        // Проверяем, что это Generic тип
+        let base_type = match &current_resolution.result {
+            ResolutionResult::Generic(gen) => gen.base_type.clone(),
+            _ => {
+                debug!(
+                    "try_infer_generic: {} не Generic тип, пропускаем inference",
+                    receiver
+                );
+                return;
+            }
+        };
+
+        // Проверяем, есть ли GenericInfo для базового типа
+        let type_data = match self.repository.find_type(&base_type) {
+            Some(data) => data,
+            None => {
+                debug!(
+                    "try_infer_generic: тип {} не найден в TypeRepository",
+                    base_type
+                );
+                return;
+            }
+        };
+
+        let generic_info = match &type_data.generic_info {
+            Some(info) => info,
+            None => {
+                debug!("try_infer_generic: тип {} не имеет GenericInfo", base_type);
+                return;
+            }
+        };
+
+        // Ищем метод в inference_methods
+        for inference_method in &generic_info.inference_methods {
+            if method_name != inference_method.method_name {
+                continue;
+            }
+
+            debug!(
+                "try_infer_generic: найден inference метод {}.{}",
+                base_type, method_name
+            );
+
+            // Для каждого параметра, который определяет Generic тип
+            for (i, &param_idx) in inference_method.param_indices.iter().enumerate() {
+                if let Some(arg_type) = arguments.get(param_idx) {
+                    // Получаем индекс Generic параметра (0 для T в Массив<T>, 0 и 1 для K,V в Соответствие<K,V>)
+                    let type_param_idx = inference_method
+                        .inferred_type_params
+                        .get(i)
+                        .copied()
+                        .unwrap_or(0);
+
+                    // Обновляем Generic параметр
+                    let success = self.symbol_table.update_generic_param(
+                        self.current_scope,
+                        receiver,
+                        type_param_idx,
+                        arg_type.clone(),
+                    );
+
+                    if success {
+                        debug!(
+                            "Generic inference: {}.{}() -> type_param[{}] = {}",
+                            receiver, method_name, type_param_idx, arg_type
+                        );
+                    } else {
+                        debug!(
+                            "Generic inference failed: не удалось обновить {} type_param[{}]",
+                            receiver, type_param_idx
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Резолвит тип свойства для MemberAccess
+    ///
+    /// Стратегия поиска:
+    /// 1. Ищем свойство в TypeRepository (платформенные и конфигурационные типы)
+    /// 2. Для фасетных типов (СправочникОбъект.Контрагенты) ищем по базовому типу
+    /// 3. Fallback: TypeResolution::unknown()
+    ///
+    /// # Arguments
+    /// * `object_type` - Тип объекта (из infer_type_resolution)
+    /// * `member_name` - Имя свойства
+    ///
+    /// # Returns
+    /// TypeResolution для свойства или unknown() если свойство не найдено
+    pub(crate) fn resolve_member_type(&self, object_type: &TypeResolution, member_name: &str) -> TypeResolution {
+        let type_name = object_type.type_name();
+
+        // Пустой или unknown тип - не можем резолвить
+        if type_name.is_empty() || type_name == "?" {
+            return TypeResolution::unknown();
+        }
+
+        let member_name_lower = member_name.to_lowercase();
+
+        // 1. Ищем в TypeRepository (свойства платформенных и конфигурационных типов)
+        if let Some(type_data) = self.repository.find_type(&type_name) {
+            // Ищем свойство по имени (регистронезависимо)
+            for prop in &type_data.properties {
+                if prop.name.to_lowercase() == member_name_lower {
+                    if !prop.prop_type.is_empty() {
+                        return TypeResolution::explicit(&prop.prop_type);
+                    }
+                }
+            }
+        }
+
+        // 2. Для фасетных типов (СправочникОбъект.Контрагенты) ищем по базовому типу
+        if let Some(base_type) = SignatureIndex::extract_base_facet_type(&type_name) {
+            if let Some(type_data) = self.repository.find_type(base_type) {
+                for prop in &type_data.properties {
+                    if prop.name.to_lowercase() == member_name_lower {
+                        if !prop.prop_type.is_empty() {
+                            return TypeResolution::explicit(&prop.prop_type);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Fallback: свойство не найдено
+        TypeResolution::unknown()
+    }
+}

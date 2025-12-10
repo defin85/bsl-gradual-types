@@ -21,7 +21,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "bsl-lsp-server"
-path = "src/bin/lsp_server.rs"
+path = "src/bin/lsp_server/main.rs"
 
 [dependencies]
 bsl-shared = { workspace = true }

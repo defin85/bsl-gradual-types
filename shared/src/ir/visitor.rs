@@ -2,6 +2,8 @@
 //!
 //! Позволяет выполнять различные анализы над IR без изменения самой структуры.
 
+use std::collections::HashMap;
+
 use super::*;
 use crate::domain::types::TypeResolution;
 

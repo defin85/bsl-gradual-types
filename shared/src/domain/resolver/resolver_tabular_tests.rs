@@ -1,7 +1,7 @@
 //! Тесты для резолюции табличных частей через Generic типы
 
 use super::*;
-use crate::domain::repository::InMemoryTypeRepository;
+use crate::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use crate::domain::types::*;
 use std::sync::Arc;
 

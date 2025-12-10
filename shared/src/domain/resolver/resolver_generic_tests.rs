@@ -1,7 +1,7 @@
 //! Тесты для Generic Types в TypeResolver (Milestone 2.3 Task 3)
 
 use crate::domain::repository::InMemoryTypeRepository;
-use crate::domain::resolver::TypeResolver;
+use crate::domain::resolver::{GenericStrategy, TypeResolver};
 use crate::domain::types::{Certainty, GenericType, ResolutionResult};
 use std::sync::Arc;
 
@@ -62,27 +62,21 @@ mod tests {
 
     #[test]
     fn test_parse_generic_syntax_simple() {
-        let resolver = create_test_resolver();
-
-        let result = resolver.parse_generic_syntax("Массив<Строка>");
+        let result = GenericStrategy::parse_syntax("Массив<Строка>");
 
         assert_eq!(result, Some(("Массив", "Строка")));
     }
 
     #[test]
     fn test_parse_generic_syntax_multiple_params() {
-        let resolver = create_test_resolver();
-
-        let result = resolver.parse_generic_syntax("Соответствие<Строка, Число>");
+        let result = GenericStrategy::parse_syntax("Соответствие<Строка, Число>");
 
         assert_eq!(result, Some(("Соответствие", "Строка, Число")));
     }
 
     #[test]
     fn test_parse_generic_syntax_with_spaces() {
-        let resolver = create_test_resolver();
-
-        let result = resolver.parse_generic_syntax("  Массив < Строка >  ");
+        let result = GenericStrategy::parse_syntax("  Массив < Строка >  ");
 
         assert!(result.is_some());
         let (base, params) = result.unwrap();
@@ -92,18 +86,14 @@ mod tests {
 
     #[test]
     fn test_parse_generic_syntax_invalid_no_close() {
-        let resolver = create_test_resolver();
-
-        let result = resolver.parse_generic_syntax("Массив<Строка");
+        let result = GenericStrategy::parse_syntax("Массив<Строка");
 
         assert!(result.is_none(), "Should return None for unclosed bracket");
     }
 
     #[test]
     fn test_parse_generic_syntax_invalid_empty_params() {
-        let resolver = create_test_resolver();
-
-        let result = resolver.parse_generic_syntax("Массив<>");
+        let result = GenericStrategy::parse_syntax("Массив<>");
 
         assert!(result.is_none(), "Should return None for empty parameters");
     }

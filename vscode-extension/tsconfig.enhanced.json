@@ -1,0 +1,36 @@
+{
+    "compilerOptions": {
+        "module": "commonjs",
+        "target": "ES2020",
+        "outDir": "out-enhanced",
+        "rootDir": "src",
+        "lib": ["ES2020"],
+        "sourceMap": true,
+        "strict": true,
+        "skipLibCheck": true,
+        "esModuleInterop": true,
+        "forceConsistentCasingInFileNames": true,
+        "resolveJsonModule": true,
+        "declaration": true,
+        "declarationMap": true,
+        "moduleResolution": "node",
+        "allowSyntheticDefaultImports": true,
+        "noEmit": true
+    },
+    "include": [
+        "src/extension-enhanced.ts",
+        "src/setup/**/*",
+        "src/providers/type-hints-simple.ts",
+        "src/providers/code-actions-simple.ts",
+        "src/providers/enhanced-diagnostics-simple.ts",
+        "src/utils/performance-monitor.ts",
+        "src/lsp/enhanced-client.ts",
+        "src/config/**/*",
+        "src/utils/binaryPath.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "out",
+        "out-enhanced"
+    ]
+}

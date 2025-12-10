@@ -421,6 +421,23 @@ pub struct SymbolTable {
     pub global_procedures: HashMap<String, FunctionSignature>,
 }
 
+/// Тип области видимости (scope)
+///
+/// Определяет семантику scope для корректной регистрации переменных:
+/// - `Global` - корневой scope (root)
+/// - `Function` - тело функции/процедуры (переменные видны во всём теле)
+/// - `Block` - блоки if/while/for (НЕ создают отдельную область видимости для переменных в BSL)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ScopeKind {
+    /// Корневой scope (root)
+    #[default]
+    Global,
+    /// Тело функции/процедуры — переменные регистрируются здесь
+    Function,
+    /// Блоки if/while/for — НЕ создают отдельную область видимости для переменных
+    Block,
+}
+
 /// Область видимости (scope)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scope {
@@ -435,6 +452,10 @@ pub struct Scope {
 
     /// Дочерние scope-ы
     pub children: Vec<ScopeId>,
+
+    /// Тип scope (для определения куда регистрировать переменные)
+    #[serde(default)]
+    pub kind: ScopeKind,
 }
 
 /// Идентификатор scope
@@ -850,6 +871,7 @@ impl SymbolTable {
                 parent: None,
                 variables: HashMap::new(),
                 children: Vec::new(),
+                kind: ScopeKind::Global,
             },
         );
 
@@ -861,7 +883,7 @@ impl SymbolTable {
         }
     }
 
-    /// Создать новый дочерний scope
+    /// Создать новый дочерний scope с типом Block (по умолчанию)
     ///
     /// # Примеры
     ///
@@ -871,12 +893,31 @@ impl SymbolTable {
     /// let child_scope = table.create_scope(table.root_scope);
     /// ```
     pub fn create_scope(&mut self, parent: ScopeId) -> ScopeId {
+        self.create_scope_with_kind(parent, ScopeKind::Block)
+    }
+
+    /// Создать новый дочерний scope с указанным типом
+    ///
+    /// # Параметры
+    ///
+    /// - `parent` - родительский scope
+    /// - `kind` - тип scope (Global, Function, Block)
+    ///
+    /// # Примеры
+    ///
+    /// ```
+    /// # use bsl_shared::ir::{SymbolTable, ScopeId, ScopeKind};
+    /// let mut table = SymbolTable::new();
+    /// let func_scope = table.create_scope_with_kind(table.root_scope, ScopeKind::Function);
+    /// ```
+    pub fn create_scope_with_kind(&mut self, parent: ScopeId, kind: ScopeKind) -> ScopeId {
         let id = ScopeId(self.scopes.len());
         let scope = Scope {
             id,
             parent: Some(parent),
             variables: HashMap::new(),
             children: Vec::new(),
+            kind,
         };
         self.scopes.insert(id, scope);
 
@@ -886,6 +927,96 @@ impl SymbolTable {
         }
 
         id
+    }
+
+    /// Найти ближайший function scope (или global) для данного scope
+    ///
+    /// В BSL переменные видны во всём теле функции, а не только в локальном блоке.
+    /// Этот метод находит правильный scope для регистрации переменных.
+    ///
+    /// # Возвращает
+    ///
+    /// - `ScopeId` ближайшего Function или Global scope
+    /// - Если не найден — возвращает переданный scope_id
+    ///
+    /// # Примеры
+    ///
+    /// ```
+    /// # use bsl_shared::ir::{SymbolTable, ScopeKind};
+    /// let mut table = SymbolTable::new();
+    /// let func_scope = table.create_scope_with_kind(table.root_scope, ScopeKind::Function);
+    /// let block_scope = table.create_scope_with_kind(func_scope, ScopeKind::Block);
+    /// // Из Block scope найдём Function scope
+    /// assert_eq!(table.find_enclosing_function_scope(block_scope), func_scope);
+    /// ```
+    pub fn find_enclosing_function_scope(&self, scope_id: ScopeId) -> ScopeId {
+        let mut current = scope_id;
+
+        loop {
+            if let Some(scope) = self.scopes.get(&current) {
+                // Function или Global — это "владеющие" scopes для переменных
+                if matches!(scope.kind, ScopeKind::Function | ScopeKind::Global) {
+                    return current;
+                }
+                // Иначе поднимаемся к родителю
+                if let Some(parent) = scope.parent {
+                    current = parent;
+                } else {
+                    // Достигли root без Function — вернуть текущий
+                    return current;
+                }
+            } else {
+                // Scope не найден — вернуть исходный
+                return scope_id;
+            }
+        }
+    }
+
+    /// Зарегистрировать переменную в function scope (не в текущем block scope)
+    ///
+    /// В BSL переменные объявленные внутри if/while/for видны во всей функции.
+    /// Этот метод автоматически находит правильный scope для регистрации.
+    ///
+    /// # Параметры
+    ///
+    /// - `current_scope` - текущий scope (может быть Block внутри функции)
+    /// - `name` - имя переменной
+    /// - `resolution` - тип переменной
+    /// - `span` - позиция в коде
+    ///
+    /// # Примеры
+    ///
+    /// ```text
+    /// Процедура Тест()
+    ///     Если Истина Тогда
+    ///         Х = 1;  // Х регистрируется в scope Тест(), не в scope Если
+    ///     КонецЕсли;
+    ///     // Х доступен здесь!
+    /// КонецПроцедуры
+    /// ```
+    pub fn register_variable_in_function_scope(
+        &mut self,
+        current_scope: ScopeId,
+        name: String,
+        resolution: TypeResolution,
+        span: Span,
+    ) {
+        let function_scope = self.find_enclosing_function_scope(current_scope);
+        self.register_variable(function_scope, name, resolution, span);
+    }
+
+    /// Зарегистрировать переменную без инициализации в function scope (Перем X;)
+    ///
+    /// Аналогично `register_variable_in_function_scope`, но для объявлений через `Перем`.
+    pub fn register_variable_declared_in_function_scope(
+        &mut self,
+        current_scope: ScopeId,
+        name: String,
+        resolution: TypeResolution,
+        span: Span,
+    ) {
+        let function_scope = self.find_enclosing_function_scope(current_scope);
+        self.register_variable_declared(function_scope, name, resolution, span);
     }
 
     /// Зарегистрировать переменную в scope
@@ -2728,5 +2859,79 @@ mod tests {
 
         let vars = table.variables_in_scope(ScopeId(9999));
         assert!(vars.is_none());
+    }
+
+    // =========================================================================
+    // Тесты для find_enclosing_function_scope (Phase 3: BSL Function Scope)
+    // =========================================================================
+
+    #[test]
+    fn test_find_enclosing_function_scope_from_deeply_nested_block() {
+        let mut table = SymbolTable::new();
+        let func_scope = table.create_scope_with_kind(table.root_scope, ScopeKind::Function);
+        let block1 = table.create_scope(func_scope); // Block
+        let block2 = table.create_scope(block1); // Block
+        let block3 = table.create_scope(block2); // Block
+
+        assert_eq!(table.find_enclosing_function_scope(block3), func_scope);
+        assert_eq!(table.find_enclosing_function_scope(block2), func_scope);
+        assert_eq!(table.find_enclosing_function_scope(block1), func_scope);
+    }
+
+    #[test]
+    fn test_find_enclosing_function_scope_from_function_returns_self() {
+        let mut table = SymbolTable::new();
+        let func_scope = table.create_scope_with_kind(table.root_scope, ScopeKind::Function);
+
+        assert_eq!(table.find_enclosing_function_scope(func_scope), func_scope);
+    }
+
+    #[test]
+    fn test_find_enclosing_function_scope_from_global_returns_global() {
+        let table = SymbolTable::new();
+
+        assert_eq!(
+            table.find_enclosing_function_scope(table.root_scope),
+            table.root_scope
+        );
+    }
+
+    #[test]
+    fn test_find_enclosing_function_scope_nested_functions() {
+        let mut table = SymbolTable::new();
+        // Внешняя функция
+        let outer_func = table.create_scope_with_kind(table.root_scope, ScopeKind::Function);
+        // Внутренняя функция (вложенная)
+        let inner_func = table.create_scope_with_kind(outer_func, ScopeKind::Function);
+        // Блок внутри внутренней функции
+        let block = table.create_scope(inner_func);
+
+        // Из блока должны найти inner_func, не outer_func
+        assert_eq!(table.find_enclosing_function_scope(block), inner_func);
+        assert_eq!(table.find_enclosing_function_scope(inner_func), inner_func);
+        assert_eq!(table.find_enclosing_function_scope(outer_func), outer_func);
+    }
+
+    #[test]
+    fn test_scope_kind_default_is_global() {
+        // Проверяем что ScopeKind::default() = Global (для serde совместимости)
+        assert_eq!(ScopeKind::default(), ScopeKind::Global);
+    }
+
+    #[test]
+    fn test_create_scope_uses_block_kind() {
+        let mut table = SymbolTable::new();
+        let child = table.create_scope(table.root_scope);
+
+        let scope = table.scopes.get(&child).unwrap();
+        assert_eq!(scope.kind, ScopeKind::Block);
+    }
+
+    #[test]
+    fn test_root_scope_has_global_kind() {
+        let table = SymbolTable::new();
+
+        let root = table.scopes.get(&table.root_scope).unwrap();
+        assert_eq!(root.kind, ScopeKind::Global);
     }
 }

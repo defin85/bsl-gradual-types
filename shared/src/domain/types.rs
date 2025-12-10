@@ -3095,7 +3095,7 @@ mod type_resolution_constructors_tests {
         );
         assert_eq!(t.certainty, Certainty::Known);
         assert_eq!(t.active_facet, Some(FacetKind::Manager));
-        assert_eq!(t.type_name(), "Справочники.Контрагенты");
+        assert_eq!(t.type_name(), "СправочникМенеджер.Контрагенты");
     }
 
     #[test]
@@ -3106,7 +3106,7 @@ mod type_resolution_constructors_tests {
             Some(FacetKind::Object),
         );
         assert_eq!(t.active_facet, Some(FacetKind::Object));
-        assert_eq!(t.type_name(), "Документы.ЗаказПокупателя");
+        assert_eq!(t.type_name(), "ДокументОбъект.ЗаказПокупателя");
     }
 
     #[test]

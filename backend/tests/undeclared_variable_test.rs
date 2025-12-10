@@ -85,7 +85,6 @@ async fn test_declared_variable_no_error() {
 }
 
 #[tokio::test]
-#[ignore = "TODO: Параметры функций не регистрируются в symbol_table при AST-to-IR конвертации"]
 async fn test_function_parameter_is_declared() {
     let service = create_test_service();
     let code = r#"
@@ -424,7 +423,6 @@ async fn test_global_collection_in_argument() {
 // ============================================================================
 
 #[tokio::test]
-#[ignore = "TODO: Member access на необъявленной переменной не отлавливается, т.к. property access обрабатывается иначе"]
 async fn test_nested_method_calls_with_undeclared() {
     let service = create_test_service();
     let code = r#"
@@ -454,7 +452,6 @@ async fn test_nested_method_calls_with_undeclared() {
 }
 
 #[tokio::test]
-#[ignore = "TODO: Цепочки вызовов на необъявленных переменных не отлавливаются, т.к. property/method access обрабатывается иначе"]
 async fn test_undeclared_in_chain_call() {
     let service = create_test_service();
     let code = r#"
@@ -483,7 +480,6 @@ async fn test_undeclared_in_chain_call() {
 // ============================================================================
 
 #[tokio::test]
-#[ignore = "TODO: BSL не имеет block scope, переменные должны быть видны в пределах всей функции"]
 async fn test_variable_declared_in_if_branch() {
     let service = create_test_service();
     let code = r#"
@@ -515,7 +511,6 @@ async fn test_variable_declared_in_if_branch() {
 }
 
 #[tokio::test]
-#[ignore = "TODO: BSL не имеет block scope, переменные должны быть видны в пределах всей функции"]
 async fn test_variable_declared_in_loop() {
     let service = create_test_service();
     let code = r#"
@@ -577,7 +572,6 @@ async fn test_loop_counter_is_declared() {
 // ============================================================================
 
 #[tokio::test]
-#[ignore = "TODO: Параметр КодПоиска не регистрируется в symbol_table"]
 async fn test_real_scenario_catalog_search() {
     let service = create_test_service();
     let code = r#"

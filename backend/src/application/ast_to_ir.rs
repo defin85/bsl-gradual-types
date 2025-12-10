@@ -355,11 +355,12 @@ impl AstToIrConverter {
                     scope_id: self.current_scope,
                 };
 
-                // Регистрируем переменную в текущем scope БЕЗ инициализации
+                // Регистрируем переменную в function scope БЕЗ инициализации
                 // VarDeclaration - это "Перем X;" без присваивания значения
+                // В BSL переменные видны во всём теле функции, не только в текущем блоке
                 let resolution = type_hint_resolution.unwrap_or_else(TypeResolution::unknown);
                 self.symbol_table
-                    .register_variable_declared(self.current_scope, name, resolution, span);
+                    .register_variable_declared_in_function_scope(self.current_scope, name, resolution, span);
 
                 self.nodes.push(node);
                 Ok(Some(self.nodes.len() - 1))
@@ -428,12 +429,13 @@ impl AstToIrConverter {
 
                     if !variable_exists {
                         // Переменная не объявлена через VarDeclaration → регистрируем её
+                        // В BSL переменные видны во всём теле функции (function scope)
                         use tracing::debug;
                         debug!(
                             "Assignment declares new variable: {} with type {:?}",
                             var_name, type_resolution
                         );
-                        self.symbol_table.register_variable(
+                        self.symbol_table.register_variable_in_function_scope(
                             self.current_scope,
                             var_name.clone(),
                             type_resolution,
@@ -773,7 +775,8 @@ impl AstToIrConverter {
                 span: ast_span,
             } => {
                 let span = self.ast_span_to_ir_span(ast_span);
-                let body_scope = self.symbol_table.create_scope(self.current_scope);
+                // Function scope для корректной регистрации переменных (видны во всём теле функции)
+                let body_scope = self.symbol_table.create_scope_with_kind(self.current_scope, ScopeKind::Function);
 
                 // Phase 3: Parameter.type_hint теперь Option<TypeResolution>
                 let params_vec: Vec<Parameter> = params
@@ -836,7 +839,8 @@ impl AstToIrConverter {
                 span: ast_span,
             } => {
                 let span = self.ast_span_to_ir_span(ast_span);
-                let body_scope = self.symbol_table.create_scope(self.current_scope);
+                // Function scope для корректной регистрации переменных (видны во всём теле процедуры)
+                let body_scope = self.symbol_table.create_scope_with_kind(self.current_scope, ScopeKind::Function);
 
                 // Phase 3: Parameter.type_hint теперь Option<TypeResolution>
                 let params_vec: Vec<Parameter> = params
@@ -1325,6 +1329,13 @@ impl AstToIrConverter {
             // MILESTONE 3.17: Используем TypeResolver для установки active_facet
             Expression::PropertyAccess { object, property, .. } => {
                 let base = self.infer_type_resolution(object);
+
+                // Phase 4: Если base — undeclared variable, пробрасываем эту информацию
+                // Это позволяет детектировать `необъявленная.Свойство` как ошибку
+                if let Some(var_name) = base.is_undeclared_variable() {
+                    return TypeResolution::undeclared_variable(&var_name);
+                }
+
                 let type_str = format!("{}.{}", base.type_name(), property);
 
                 // Проверяем, является ли это конфигурационным типом (Справочники.X, Документы.X, etc.)
@@ -1352,7 +1363,14 @@ impl AstToIrConverter {
             }
 
             // Вызов функции/метода
-            Expression::Call { .. } => {
+            Expression::Call { function, .. } => {
+                // Phase 4: Проверяем function expression на undeclared
+                // Если это вызов на необъявленной переменной: `необъявленная.Метод()`
+                let func_type = self.infer_type_resolution(function);
+                if let Some(var_name) = func_type.is_undeclared_variable() {
+                    return TypeResolution::undeclared_variable(&var_name);
+                }
+
                 let type_str = self.infer_expression_type(expr);
 
                 // Milestone 3.X: Если результат вызова метода — конфигурационный тип,

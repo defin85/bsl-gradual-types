@@ -429,6 +429,19 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     }
                 }
 
+                // Phase 4: Проверяем undeclared variable в object_type
+                // Для цепочек вызовов: `необъявленная.Метод1().Метод2()`
+                if let Some(var_name) = obj_type.is_undeclared_variable() {
+                    let error_kind = TypeErrorKind::UndeclaredVariable {
+                        variable_name: var_name.to_string(),
+                        method_name: Some(function_name.clone()),
+                        param_index: None,
+                    };
+                    let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                    self.errors.push(diagnostic);
+                    return; // Нет смысла продолжать валидацию
+                }
+
                 // Проверяем неинициализированные переменные (Warning, не Error)
                 if let Some(error_kind) = self.check_uninitialized_variable(object_name, context) {
                     let diagnostic = error_kind.to_diagnostic_with_severity(

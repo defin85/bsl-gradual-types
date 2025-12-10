@@ -1,9 +1,9 @@
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use bsl_backend::data::loaders::syntax_helper::SyntaxHelperLoader;
 
 fn main() {
-    println!("🔍 Тестируем парсинг типа 'Массив' через SyntaxHelperParser\n");
+    println!("🔍 Тестируем парсинг типа 'Массив' через SyntaxHelperLoader\n");
 
-    let mut parser = SyntaxHelperParser::new();
+    let mut parser = SyntaxHelperLoader::new();
 
     println!("📂 Парсим синтаксис-помощник из examples/syntax_helper...");
     match parser.parse_syntax_helper("examples/syntax_helper") {

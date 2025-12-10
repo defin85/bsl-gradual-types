@@ -1,7 +1,7 @@
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use bsl_backend::data::loaders::syntax_helper::SyntaxHelperLoader;
 
 fn main() {
-    let mut parser = SyntaxHelperParser::new();
+    let mut parser = SyntaxHelperLoader::new();
 
     // Парсим оба каталога
     println!("🚀 Парсинг Синтаксис-помощника...");

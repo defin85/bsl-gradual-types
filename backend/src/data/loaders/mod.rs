@@ -8,13 +8,18 @@ pub mod platform_types;
 pub mod progress;
 pub mod signature_sources;
 pub mod syntax_helper;
-pub mod syntax_helper_parser;
 
 // Re-exports для удобства использования
 pub use config_metadata_parser::{
     ConfigurationDiscovery, UniversalMetadataObject, UniversalMetadataParser,
 };
-pub use syntax_helper_parser::{ParsingStats, SyntaxHelperParser};
+
+// Новые реэкспорты из syntax_helper
+pub use syntax_helper::{ParsingStats, SyntaxHelperLoader};
+
+/// Deprecated: используйте SyntaxHelperLoader вместо SyntaxHelperParser
+#[deprecated(since = "0.5.0", note = "Use SyntaxHelperLoader instead")]
+pub type SyntaxHelperParser = SyntaxHelperLoader;
 
 pub use syntax_helper::{
     CategoryInfo, CodeExample, ConstructorInfo, GlobalFunctionInfo, MethodInfo,

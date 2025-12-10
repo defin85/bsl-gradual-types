@@ -1,4 +1,4 @@
-//! Пример использования SyntaxHelperParser с progress callback
+//! Пример использования SyntaxHelperLoader с progress callback
 //!
 //! Демонстрирует 4 фазы парсинга:
 //! - Collecting Files (0-10%)
@@ -12,8 +12,7 @@
 //! ```
 
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
-use bsl_backend::data::loaders::syntax_helper::types::OptimizationSettings;
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use bsl_backend::data::loaders::syntax_helper::{OptimizationSettings, SyntaxHelperLoader};
 
 fn main() {
     // Настройка логирования
@@ -32,7 +31,7 @@ fn main() {
         ..Default::default()
     };
 
-    let mut parser = SyntaxHelperParser::with_settings(settings);
+    let mut parser = SyntaxHelperLoader::with_settings(settings);
 
     // Создаём callback для отслеживания прогресса
     let progress_callback = |update: ProgressUpdate| {

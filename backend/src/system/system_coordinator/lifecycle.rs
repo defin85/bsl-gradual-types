@@ -13,7 +13,7 @@ use bsl_shared::domain::types::{RawDataSource, RawTypeData};
 use bsl_shared::engine::AnalysisEngine;
 
 use crate::data::adapters::convert_syntax_helper_to_raw;
-use crate::data::loaders::{hbk_recovery, progress::ProgressUpdate, SyntaxHelperParser};
+use crate::data::loaders::{hbk_recovery, progress::ProgressUpdate, SyntaxHelperLoader};
 use crate::system::parser_coordinator::ParserCoordinator;
 
 use super::coordinator::SystemCoordinator;
@@ -104,7 +104,7 @@ impl SystemCoordinator {
 
         // 1. Создаем Infrastructure компоненты (Data Layer)
         info!("SystemCoordinator: инициализация Data Layer loaders...");
-        let mut syntax_parser = SyntaxHelperParser::new();
+        let mut syntax_parser = SyntaxHelperLoader::new();
 
         // 2. Загружаем синтаксис-помощник если путь указан
         if let Some(syntax_path) = syntax_helper_path {
@@ -199,7 +199,7 @@ impl SystemCoordinator {
     /// Загрузка синтаксис-помощника с HBK recovery
     fn load_syntax_helper(
         &self,
-        syntax_parser: &mut SyntaxHelperParser,
+        syntax_parser: &mut SyntaxHelperLoader,
         syntax_path: &Path,
         progress_tx: &Option<mpsc::UnboundedSender<ProgressUpdate>>,
     ) -> Result<(), StartupError> {

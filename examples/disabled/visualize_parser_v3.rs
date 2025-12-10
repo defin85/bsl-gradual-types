@@ -3,8 +3,8 @@
 //! Создаёт интерактивный HTML отчёт с иерархией типов, индексами и фасетами
 
 use anyhow::Result;
-use bsl_gradual_types::data::loaders::syntax_helper_parser::{
-    OptimizationSettings, SyntaxHelperParser, SyntaxNode, TypeInfo,
+use bsl_gradual_types::data::loaders::syntax_helper::{
+    OptimizationSettings, SyntaxHelperLoader, SyntaxNode, TypeInfo,
 };
 use bsl_gradual_types::domain::types::FacetKind;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
         show_progress: true,
         ..Default::default()
     };
-    let mut parser = SyntaxHelperParser::with_settings(settings);
+    let mut parser = SyntaxHelperLoader::with_settings(settings);
 
     // Парсим данные
     if syntax_helper_path.exists() {
@@ -118,7 +118,7 @@ struct Statistics {
     facet_index_size: usize,
 }
 
-fn collect_statistics(parser: &SyntaxHelperParser) -> Statistics {
+fn collect_statistics(parser: &SyntaxHelperLoader) -> Statistics {
     let mut stats = Statistics {
         total_nodes: 0,
         types_count: 0,
@@ -159,7 +159,7 @@ fn collect_statistics(parser: &SyntaxHelperParser) -> Statistics {
     stats
 }
 
-fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
+fn generate_tree(parser: &SyntaxHelperLoader) -> (String, String) {
     use bsl_gradual_types::data::loaders::syntax_helper_parser::CategoryInfo;
     let mut html = String::new();
 
@@ -366,7 +366,7 @@ fn generate_tree(parser: &SyntaxHelperParser) -> (String, String) {
     (html, types_data_json)
 }
 
-fn generate_global_functions_table(parser: &SyntaxHelperParser) -> String {
+fn generate_global_functions_table(parser: &SyntaxHelperLoader) -> String {
     let mut html = String::new();
     let database = parser.export_database();
 
@@ -550,7 +550,7 @@ fn generate_global_functions_table(parser: &SyntaxHelperParser) -> String {
     html
 }
 
-fn generate_facets_info(parser: &SyntaxHelperParser) -> String {
+fn generate_facets_info(parser: &SyntaxHelperLoader) -> String {
     let mut html = String::new();
 
     // Собираем статистику по фасетам
@@ -603,7 +603,7 @@ fn generate_facets_info(parser: &SyntaxHelperParser) -> String {
     html
 }
 
-fn create_demo_data(parser: &mut SyntaxHelperParser) -> Result<()> {
+fn create_demo_data(parser: &mut SyntaxHelperLoader) -> Result<()> {
     // Создаём временную структуру для демонстрации
     use tempfile::TempDir;
 
@@ -959,7 +959,7 @@ fn generate_stats_html(stats: &Statistics) -> String {
     )
 }
 
-fn generate_tree_html(parser: &SyntaxHelperParser) -> String {
+fn generate_tree_html(parser: &SyntaxHelperLoader) -> String {
     let mut html = String::new();
 
     // Генерируем дерево для левой панели и данные о типах
@@ -1002,7 +1002,7 @@ fn generate_tree_html(parser: &SyntaxHelperParser) -> String {
     html
 }
 
-fn generate_types_table_html(_parser: &SyntaxHelperParser) -> String {
+fn generate_types_table_html(_parser: &SyntaxHelperLoader) -> String {
     // Вместо вывода всех типов показываем приглашение
     r#"
                         </tbody>
@@ -1014,7 +1014,7 @@ fn generate_types_table_html(_parser: &SyntaxHelperParser) -> String {
                 </div>"#.to_string()
 }
 
-fn generate_indices_and_facets_html(parser: &SyntaxHelperParser, stats: &Statistics) -> String {
+fn generate_indices_and_facets_html(parser: &SyntaxHelperLoader, stats: &Statistics) -> String {
     let mut html = String::new();
 
     // Индексы
@@ -1066,7 +1066,7 @@ fn generate_indices_and_facets_html(parser: &SyntaxHelperParser, stats: &Statist
     html
 }
 
-fn generate_html_footer(parser: &SyntaxHelperParser) -> String {
+fn generate_html_footer(parser: &SyntaxHelperLoader) -> String {
     // Генерируем данные о типах
     let (_, types_data) = generate_tree(parser);
 

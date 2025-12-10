@@ -4,7 +4,7 @@
 //! на реальных данных платформы 1С
 
 use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use bsl_backend::data::loaders::syntax_helper::SyntaxHelperLoader;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::types::{
     Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult, ResolutionSource,
@@ -19,7 +19,7 @@ fn main() {
 
     // 1. Парсим синтаксис-помощник
     println!("📚 Загружаем типы платформы 1С...");
-    let mut parser = SyntaxHelperParser::new();
+    let mut parser = SyntaxHelperLoader::new();
     parser
         .parse_directory("examples/syntax_helper", None::<fn(_)>)
         .expect("Failed to parse syntax helper");

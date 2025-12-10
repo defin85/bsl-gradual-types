@@ -1,19 +1,22 @@
-//! Обработчики файлов и батчей для парсера синтакс-помощника
+//! Обработчики файлов и батчей для загрузчика синтакс-помощника
 
 use anyhow::{Context, Result};
 use indicatif::ProgressBar;
 use rayon::prelude::*;
 use scraper::Html;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use tracing::debug;
 
 use super::super::progress::{IndexingPhase, ProgressUpdate};
-use super::super::syntax_helper::*;
-use super::SyntaxHelperParser;
+use super::loader::SyntaxHelperLoader;
+use super::types::{CategoryInfo, SyntaxNode};
+use super::utils;
+use super::utils::FileType;
 
-impl SyntaxHelperParser {
+impl SyntaxHelperLoader {
     /// Собирает все HTML файлы рекурсивно (параллельно)
     pub(crate) fn collect_html_files(&self, base_path: &Path) -> Result<Vec<PathBuf>> {
         use walkdir::WalkDir;
@@ -41,13 +44,19 @@ impl SyntaxHelperParser {
                             // Обычные .html файлы
                             Some(path.to_path_buf())
                         } else if extension.is_none() {
-                            // Файлы без расширения - проверяем, содержат ли HTML
-                            if let Ok(first_line) = std::fs::read_to_string(path)
-                                .map(|content| content.lines().next().unwrap_or("").to_lowercase())
-                            {
-                                if first_line.contains("<html") || first_line.contains("<!doctype")
-                                {
-                                    Some(path.to_path_buf())
+                            // Файлы без расширения - проверяем первую строку на HTML
+                            if let Ok(file) = std::fs::File::open(path) {
+                                let mut reader = BufReader::new(file);
+                                let mut first_line = String::new();
+                                if reader.read_line(&mut first_line).is_ok() {
+                                    let first_line_lower = first_line.to_lowercase();
+                                    if first_line_lower.contains("<!doctype html")
+                                        || first_line_lower.contains("<html")
+                                    {
+                                        Some(path.to_path_buf())
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     None
                                 }

@@ -9,7 +9,7 @@
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
 use bsl_backend::data::loaders::progress::ProgressUpdate;
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use bsl_backend::data::loaders::syntax_helper::SyntaxHelperLoader;
 use bsl_backend::data::loaders::SyntaxHelperSource;
 use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
@@ -45,7 +45,7 @@ pub fn get_test_repository() -> Arc<InMemoryTypeRepository> {
 /// Вызывается ОДИН раз через LazyLock.
 fn create_test_service_internal() -> TypeSystemService {
     // 1. Парсим синтаксис-помощник
-    let mut parser = SyntaxHelperParser::new();
+    let mut parser = SyntaxHelperLoader::new();
     parser
         .parse_directory("../examples/syntax_helper", None::<fn(ProgressUpdate)>)
         .expect("Failed to parse syntax helper");
@@ -94,7 +94,7 @@ fn create_test_service_internal() -> TypeSystemService {
 
 /// Внутренняя функция создания repository.
 fn create_repository_internal() -> Arc<InMemoryTypeRepository> {
-    let mut parser = SyntaxHelperParser::new();
+    let mut parser = SyntaxHelperLoader::new();
     parser
         .parse_directory("../examples/syntax_helper", None::<fn(ProgressUpdate)>)
         .expect("Failed to parse syntax helper");

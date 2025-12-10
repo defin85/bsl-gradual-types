@@ -1,5 +1,5 @@
 use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use bsl_backend::data::loaders::syntax_helper::SyntaxHelperLoader;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use std::sync::Arc;
 
@@ -7,7 +7,7 @@ fn main() {
     println!("🚀 Тест: Примитивные типы в Repository\n");
 
     // 1. Парсим синтаксис-помощник
-    let mut parser = SyntaxHelperParser::new();
+    let mut parser = SyntaxHelperLoader::new();
     parser
         .parse_syntax_helper("../examples/syntax_helper")
         .unwrap();

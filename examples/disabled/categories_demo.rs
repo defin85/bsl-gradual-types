@@ -1,8 +1,8 @@
 //! Демонстрация парсинга категорий и группировки типов
 
 use anyhow::Result;
-use bsl_gradual_types::data::loaders::syntax_helper_parser::{
-    OptimizationSettings, SyntaxHelperParser, SyntaxNode,
+use bsl_gradual_types::data::loaders::syntax_helper::{
+    OptimizationSettings, SyntaxHelperLoader, SyntaxNode,
 };
 use std::path::Path;
 
@@ -16,7 +16,7 @@ fn main() -> Result<()> {
         show_progress: false,
         ..Default::default()
     };
-    let mut parser = SyntaxHelperParser::with_settings(settings);
+    let mut parser = SyntaxHelperLoader::with_settings(settings);
 
     // Парсим директорию
     println!("📂 Парсинг директории: {}", syntax_helper_path.display());

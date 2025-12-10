@@ -1,6 +1,6 @@
-//! Основной парсер синтакс-помощника 1С
+//! Основной загрузчик синтакс-помощника 1С
 //!
-//! Единственная актуальная версия парсера с поддержкой:
+//! Единственная актуальная версия загрузчика с поддержкой:
 //! - Многопоточной обработки через rayon
 //! - Lock-free структур данных через DashMap
 //! - Полной информации о типах, методах, свойствах
@@ -8,6 +8,9 @@
 //! - Построения индексов для быстрого поиска
 
 use anyhow::Result;
+
+/// Ключ для основного индекса типов
+const MAIN_INDEX_KEY: &str = "main";
 use dashmap::DashMap;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -18,8 +21,17 @@ use std::sync::{
 };
 use tracing::{info, warn};
 
-// Импорт модулей парсера
-use super::super::syntax_helper::*;
+// Импорт модулей syntax_helper
+use super::document_parsers::DocumentParser;
+use super::indexing::IndexBuilder;
+use super::types::{
+    CategoryInfo, MethodInfo, OptimizationSettings, PropertyInfo, SyntaxHelperDatabase, SyntaxNode,
+    TypeIndex, TypeInfo,
+};
+
+#[cfg(test)]
+use super::types::{TypeDocumentation, TypeIdentity, TypeMetadata, TypeStructure};
+use super::stats::ParsingStats;
 
 // Импорт типов из shared
 use bsl_shared::domain::types::FacetKind;
@@ -27,11 +39,8 @@ use bsl_shared::domain::types::FacetKind;
 // Импорт структур прогресса
 use super::super::progress::{IndexingPhase, ProgressUpdate};
 
-// Импорт локальных типов
-use super::types::ParsingStats;
-
-/// Парсер синтакс-помощника с поддержкой многопоточности
-pub struct SyntaxHelperParser {
+/// Загрузчик синтакс-помощника с поддержкой многопоточности
+pub struct SyntaxHelperLoader {
     /// База данных с узлами (lock-free concurrent hashmap)
     pub(crate) nodes: Arc<DashMap<String, SyntaxNode>>,
     /// Методы (lock-free)
@@ -58,20 +67,22 @@ pub struct SyntaxHelperParser {
     pub(crate) total_files: Arc<AtomicUsize>,
 }
 
-impl SyntaxHelperParser {
-    /// Создаёт новый оптимизированный парсер
+impl SyntaxHelperLoader {
+    /// Создаёт новый оптимизированный загрузчик
     pub fn new() -> Self {
         Self::with_settings(OptimizationSettings::default())
     }
 
-    /// Создаёт парсер с настройками
+    /// Создаёт загрузчик с настройками
     pub fn with_settings(settings: OptimizationSettings) -> Self {
         // Настраиваем rayon thread pool
         if let Some(threads) = settings.max_threads {
-            rayon::ThreadPoolBuilder::new()
+            if let Err(e) = rayon::ThreadPoolBuilder::new()
                 .num_threads(threads)
                 .build_global()
-                .ok();
+            {
+                tracing::debug!("Thread pool already initialized: {}", e);
+            }
         }
 
         Self {
@@ -275,7 +286,7 @@ impl SyntaxHelperParser {
         } else {
             IndexBuilder::build_indexes(&self.nodes)
         };
-        self.type_index.insert("main".to_string(), index);
+        self.type_index.insert(MAIN_INDEX_KEY.to_string(), index);
 
         info!("Индексы построены за {:?}", index_start.elapsed());
 
@@ -314,13 +325,13 @@ impl SyntaxHelperParser {
     ///
     /// # Example
     /// ```no_run
-    /// use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+    /// use bsl_backend::data::loaders::syntax_helper::SyntaxHelperLoader;
     /// use bsl_backend::data::loaders::progress::ProgressUpdate;
     /// use std::path::Path;
     ///
-    /// let mut parser = SyntaxHelperParser::new();
+    /// let mut loader = SyntaxHelperLoader::new();
     /// let path = Path::new("examples/syntax_helper");
-    /// parser.parse_with_progress(path, |update: ProgressUpdate| {
+    /// loader.parse_with_progress(path, |update: ProgressUpdate| {
     ///     println!("[{:?}] {:.1}%", update.phase, update.percentage);
     /// }).unwrap();
     /// ```
@@ -400,7 +411,7 @@ impl SyntaxHelperParser {
             categories_count: self.categories.len(),
             index_size: self
                 .type_index
-                .get("main")
+                .get(MAIN_INDEX_KEY)
                 .map(|idx| idx.by_russian.len() + idx.by_english.len())
                 .unwrap_or(0),
         }
@@ -439,15 +450,15 @@ impl SyntaxHelperParser {
     /// Экспортировать индексы
     pub fn export_index(&self) -> TypeIndex {
         self.type_index
-            .get("main")
-            .map(|idx| idx.clone())
+            .get(MAIN_INDEX_KEY)
+            .map(|idx| idx.value().clone())
             .unwrap_or_default()
     }
 
     /// Поиск типа по имени
     pub fn find_type(&self, name: &str) -> Option<TypeInfo> {
         // Сначала ищем в индексе
-        if let Some(index) = self.type_index.get("main") {
+        if let Some(index) = self.type_index.get(MAIN_INDEX_KEY) {
             // Ищем по русскому имени
             if let Some(path) = index.by_russian.get(name) {
                 if let Some(node) = self.nodes.get(path) {
@@ -474,7 +485,7 @@ impl SyntaxHelperParser {
     pub fn get_types_by_facet(&self, facet: FacetKind) -> Vec<TypeInfo> {
         let mut types = Vec::new();
 
-        if let Some(index) = self.type_index.get("main") {
+        if let Some(index) = self.type_index.get(MAIN_INDEX_KEY) {
             if let Some(paths) = index.by_facet.get(&facet) {
                 for path in paths {
                     if let Some(node) = self.nodes.get(path) {
@@ -490,8 +501,238 @@ impl SyntaxHelperParser {
     }
 }
 
-impl Default for SyntaxHelperParser {
+impl Default for SyntaxHelperLoader {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::loaders::progress::{IndexingPhase, ProgressUpdate};
+    use std::fs;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_parallel_parsing() {
+        // Создаём временную директорию с тестовыми HTML файлами
+        let temp_dir = TempDir::new().unwrap();
+        let test_dir = temp_dir.path().join("test");
+        fs::create_dir(&test_dir).unwrap();
+
+        // Создаём несколько тестовых HTML файлов
+        for i in 0..10 {
+            let html = format!(
+                r#"
+                <html>
+                <body>
+                    <h1 class="V8SH_pagetitle">TestType{} (TestType{})</h1>
+                    <p>Test description {}</p>
+                </body>
+                </html>
+            "#,
+                i, i, i
+            );
+
+            let file_path = test_dir.join(format!("type_{}.html", i));
+            fs::write(file_path, html).unwrap();
+        }
+
+        // Парсим с многопоточностью
+        let settings = OptimizationSettings {
+            max_threads: Some(4),
+            batch_size: 2,
+            show_progress: false,
+            ..Default::default()
+        };
+
+        let mut parser = SyntaxHelperLoader::with_settings(settings);
+        parser
+            .parse_directory(&test_dir, None::<fn(ProgressUpdate)>)
+            .unwrap();
+
+        // Проверяем результаты
+        let stats = parser.get_stats();
+        assert_eq!(stats.processed_files, 10);
+        assert_eq!(stats.types_count, 10);
+        assert_eq!(stats.error_count, 0);
+    }
+
+    #[test]
+    fn test_concurrent_access() {
+        use std::thread;
+
+        let parser = Arc::new(SyntaxHelperLoader::new());
+        let mut handles = vec![];
+
+        // Создаём несколько потоков для одновременного доступа
+        for i in 0..10 {
+            let parser_clone = Arc::clone(&parser);
+            let handle = thread::spawn(move || {
+                // Симулируем сохранение узла
+                let type_info = TypeInfo {
+                    identity: TypeIdentity {
+                        russian_name: format!("Тип{}", i),
+                        english_name: format!("Type{}", i),
+                        catalog_path: format!("path_{}", i),
+                        category_path: String::new(),
+                        aliases: Vec::new(),
+                    },
+                    documentation: TypeDocumentation {
+                        category_description: None,
+                        type_description: format!("Description {}", i),
+                        examples: Vec::new(),
+                        availability: vec!["Сервер".to_string()],
+                        since_version: "8.3.0".to_string(),
+                    },
+                    structure: TypeStructure {
+                        collection_element: None,
+                        methods: Vec::new(),
+                        properties: Vec::new(),
+                        constructors: Vec::new(),
+                        iterable: false,
+                        indexable: false,
+                        enum_values: Vec::new(),
+                    },
+                    metadata: TypeMetadata {
+                        available_facets: vec![],
+                        default_facet: None,
+                        serializable: true,
+                        exchangeable: true,
+                        xdto_namespace: None,
+                        xdto_type: None,
+                    },
+                };
+
+                parser_clone.save_node(SyntaxNode::Type(type_info));
+            });
+
+            handles.push(handle);
+        }
+
+        // Ждём завершения всех потоков
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Проверяем, что все узлы сохранены
+        assert_eq!(parser.nodes.len(), 10);
+    }
+
+    #[test]
+    fn test_parse_with_progress_callback() {
+        use std::sync::Mutex;
+
+        // Создаём небольшую тестовую директорию
+        let temp_dir = TempDir::new().unwrap();
+        let test_dir = temp_dir.path().join("test");
+        fs::create_dir(&test_dir).unwrap();
+
+        // Создаём несколько HTML файлов для теста
+        for i in 0..15 {
+            let html = format!(
+                r#"
+                <html>
+                <head><title>TestType{} (TestType{})</title></head>
+                <body>
+                    <h1 class="V8SH_pagetitle">TestType{} (TestType{})</h1>
+                    <p>Test description {}</p>
+                </body>
+                </html>
+            "#,
+                i, i, i, i, i
+            );
+
+            let file_path = test_dir.join(format!("type_{}.html", i));
+            fs::write(file_path, html).unwrap();
+        }
+
+        // Собираем прогресс в вектор
+        let progress_updates = Arc::new(Mutex::new(Vec::new()));
+        let progress_clone = progress_updates.clone();
+
+        let callback = move |update: ProgressUpdate| {
+            progress_clone.lock().unwrap().push(update);
+        };
+
+        // Парсим с callback
+        let settings = OptimizationSettings {
+            max_threads: Some(2),
+            batch_size: 5,
+            show_progress: false,
+            ..Default::default()
+        };
+
+        let mut parser = SyntaxHelperLoader::with_settings(settings);
+        parser.parse_directory(&test_dir, Some(callback)).unwrap();
+
+        // Проверяем что прогресс был отправлен
+        let updates = progress_updates.lock().unwrap();
+
+        // Должны быть обновления для всех 4 фаз
+        let phases: Vec<IndexingPhase> = updates.iter().map(|u| u.phase).collect();
+        assert!(
+            phases.contains(&IndexingPhase::CollectingFiles),
+            "Нет фазы CollectingFiles"
+        );
+        assert!(
+            phases.contains(&IndexingPhase::ParsingFiles),
+            "Нет фазы ParsingFiles"
+        );
+        assert!(
+            phases.contains(&IndexingPhase::LinkingCategories),
+            "Нет фазы LinkingCategories"
+        );
+        assert!(
+            phases.contains(&IndexingPhase::BuildingIndexes),
+            "Нет фазы BuildingIndexes"
+        );
+
+        // Проверяем что последнее обновление - 100%
+        let last = updates.last().unwrap();
+        assert_eq!(last.percentage, 100.0, "Последний процент должен быть 100%");
+        assert_eq!(
+            last.phase,
+            IndexingPhase::BuildingIndexes,
+            "Последняя фаза должна быть BuildingIndexes"
+        );
+    }
+
+    #[test]
+    fn test_parse_without_callback_still_works() {
+        // Проверяем что парсинг без callback продолжает работать
+        let temp_dir = TempDir::new().unwrap();
+        let test_dir = temp_dir.path().join("test");
+        fs::create_dir(&test_dir).unwrap();
+
+        // Создаём тестовый файл
+        let html = r#"
+            <html>
+            <head><title>TestType (TestType)</title></head>
+            <body>
+                <h1 class="V8SH_pagetitle">TestType (TestType)</h1>
+                <p>Test description</p>
+            </body>
+            </html>
+        "#;
+        fs::write(test_dir.join("test.html"), html).unwrap();
+
+        // Парсим БЕЗ callback (старый API)
+        let settings = OptimizationSettings {
+            show_progress: false,
+            ..Default::default()
+        };
+
+        let mut parser = SyntaxHelperLoader::with_settings(settings);
+        let result = parser.parse_directory(&test_dir, None::<fn(ProgressUpdate)>);
+
+        // Должно работать без ошибок
+        assert!(result.is_ok(), "Парсинг без callback должен работать");
+
+        // Проверяем что файл обработан
+        let stats = parser.get_stats();
+        assert_eq!(stats.processed_files, 1, "Должен быть обработан 1 файл");
     }
 }

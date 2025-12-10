@@ -11,8 +11,7 @@
 #![allow(clippy::useless_vec)]
 
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
-use bsl_backend::data::loaders::syntax_helper::types::OptimizationSettings;
-use bsl_backend::data::loaders::syntax_helper_parser::SyntaxHelperParser;
+use bsl_backend::data::loaders::syntax_helper::{OptimizationSettings, SyntaxHelperLoader};
 use std::fs;
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
@@ -80,7 +79,7 @@ fn test_progress_percentage_calculation_all_phases() {
 }
 
 // ============================================================================
-// Тест 2: SyntaxHelperParser вызывает callback каждые 10 файлов
+// Тест 2: SyntaxHelperLoader вызывает callback каждые 10 файлов
 // ============================================================================
 
 #[test]
@@ -125,7 +124,7 @@ fn test_progress_callback_invoked_every_10_files() {
         ..Default::default()
     };
 
-    let mut parser = SyntaxHelperParser::with_settings(settings);
+    let mut parser = SyntaxHelperLoader::with_settings(settings);
     let result = parser.parse_directory(&test_dir, Some(callback));
 
     assert!(result.is_ok(), "Парсинг должен пройти успешно");
@@ -364,7 +363,7 @@ fn test_full_parsing_cycle_with_progress() {
         ..Default::default()
     };
 
-    let mut parser = SyntaxHelperParser::with_settings(settings);
+    let mut parser = SyntaxHelperLoader::with_settings(settings);
     parser.parse_directory(&test_dir, Some(callback)).unwrap();
 
     let updates = all_updates.lock().unwrap();

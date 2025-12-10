@@ -8,7 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::application::type_system_service::TypeSystemService;
+use crate::application::TypeSystemService;
 use crate::presentation::semantic_html_generator::{generate_semantic_html, RenderOptions, Theme};
 
 /// Query параметры для semantic API

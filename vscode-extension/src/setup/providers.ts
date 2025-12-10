@@ -6,9 +6,9 @@
 
 import * as vscode from 'vscode';
 import { EnhancedLspClient } from '../lsp/enhanced-client';
-import { TypeHintsProvider } from '../providers/type-hints-simple';
-import { CodeActionsProvider } from '../providers/code-actions-simple';
-import { EnhancedDiagnosticsProvider } from '../providers/enhanced-diagnostics-simple';
+import { TypeHintsProvider } from '../providers/typeHintsProvider';
+import { CodeActionsProvider } from '../providers/codeActionsProvider';
+import { EnhancedDiagnosticsProvider } from '../providers/enhancedDiagnosticsProvider';
 
 export interface ProvidersResult {
     typeHintsProvider: TypeHintsProvider;

@@ -5,7 +5,7 @@
 use std::sync::{Arc, RwLock};
 use tracing::warn;
 
-use crate::application::type_system_service::TypeSystemService;
+use crate::application::TypeSystemService;
 use crate::system::basic_observability::BasicObservability;
 use crate::system::ir_cache::IrCache;
 use crate::system::parser_coordinator::ParserCoordinator;

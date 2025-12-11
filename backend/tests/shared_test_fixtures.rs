@@ -11,6 +11,7 @@ use bsl_backend::data::adapters::converters::convert_syntax_helper_to_raw;
 use bsl_backend::data::loaders::progress::ProgressUpdate;
 use bsl_backend::data::loaders::syntax_helper::SyntaxHelperLoader;
 use bsl_backend::data::loaders::SyntaxHelperSource;
+use bsl_backend::system::system_coordinator::SystemCoordinator;
 use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::SignatureSourceRegistry;
@@ -29,6 +30,24 @@ pub static SHARED_TEST_SERVICE: LazyLock<TypeSystemService> = LazyLock::new(|| {
 pub static SHARED_REPOSITORY: LazyLock<Arc<InMemoryTypeRepository>> = LazyLock::new(|| {
     create_repository_internal()
 });
+
+/// Shared SystemCoordinator с конфигурацией для тестов табличных частей.
+/// Инициализируется ОДИН раз при первом доступе (LazyLock).
+/// Использует синхронную инициализацию (start_with_paths_blocking) чтобы
+/// избежать конфликта с tokio runtime в async тестах.
+pub static SHARED_CONFIG_COORDINATOR: LazyLock<SystemCoordinator> = LazyLock::new(|| {
+    let coordinator = SystemCoordinator::new();
+    let config_path = std::path::Path::new("../examples/conf/conf_test");
+    coordinator
+        .start_with_paths_blocking(None, Some(config_path), None)
+        .expect("Failed to start coordinator with config");
+    coordinator
+});
+
+/// Получить shared SystemCoordinator с конфигурацией для тестов.
+pub fn get_config_coordinator() -> &'static SystemCoordinator {
+    &SHARED_CONFIG_COORDINATOR
+}
 
 /// Получить shared TypeSystemService для тестов.
 /// Использует LazyLock - инициализация происходит только при первом вызове.

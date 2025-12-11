@@ -16,7 +16,7 @@ pub struct CliArgs {
 
     /// Output format (table, json, plain)
     #[arg(short, long, default_value = "table", global = true)]
-    pub format: OutputFormat,
+    pub format: CliOutputFormat,
 
     /// Subcommands
     #[command(subcommand)]
@@ -83,7 +83,7 @@ pub enum Commands {
 
 /// Output format options
 #[derive(Debug, Clone, clap::ValueEnum)]
-pub enum OutputFormat {
+pub enum CliOutputFormat {
     Table,
     Json,
     Plain,

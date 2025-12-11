@@ -29,6 +29,8 @@
 //! assert!(!facet_utils::is_known_facet_prefix("Массив"));
 //! ```
 
+use super::types::FacetKind;
+
 /// Извлечь базовый фасетный тип из полного имени типа
 ///
 /// # Параметры
@@ -239,6 +241,86 @@ pub fn extract_placeholder_base_type(type_name: &str) -> Option<&str> {
     }
 
     None
+}
+
+/// Получить FacetKind из фасетного префикса по суффиксу
+///
+/// # Примеры
+/// - "СправочникМенеджер" -> Some(FacetKind::Manager)
+/// - "ДокументОбъект" -> Some(FacetKind::Object)
+/// - "ПеречислениеСсылка" -> Some(FacetKind::Reference)
+/// - "Массив" -> None (не фасетный тип)
+pub fn get_facet_kind_from_prefix(prefix: &str) -> Option<FacetKind> {
+    // Порядок проверки важен: сначала длинные суффиксы!
+    if prefix.ends_with("НаборЗаписей") {
+        return Some(FacetKind::Collection); // Набор записей регистра - коллекция
+    }
+    if prefix.ends_with("МенеджерЗаписи") {
+        return Some(FacetKind::Manager); // РегистрСведенийМенеджерЗаписи
+    }
+    if prefix.ends_with("Менеджер") {
+        return Some(FacetKind::Manager);
+    }
+    if prefix.ends_with("Объект") {
+        return Some(FacetKind::Object);
+    }
+    if prefix.ends_with("Ссылка") {
+        return Some(FacetKind::Reference);
+    }
+    if prefix.ends_with("Выборка") {
+        return Some(FacetKind::Selection);
+    }
+    if prefix.ends_with("Список") {
+        return Some(FacetKind::List);
+    }
+    if prefix.ends_with("Запись") {
+        return Some(FacetKind::Object); // Запись регистра - объект
+    }
+    None
+}
+
+/// Подставить реальное имя объекта в return type вместо placeholder
+///
+/// # Примеры
+/// - ("СправочникОбъект", "Контрагенты") -> "СправочникОбъект.Контрагенты"
+/// - ("СправочникОбъект.<Имя справочника>", "Контрагенты") -> "СправочникОбъект.Контрагенты"
+/// - ("СправочникСсылка", "Номенклатура") -> "СправочникСсылка.Номенклатура"
+/// - ("Неопределено", "Контрагенты") -> "Неопределено" (не фасетный тип)
+pub fn substitute_type_name(return_type: &str, actual_name: &str) -> String {
+    // 1. Если return_type содержит placeholder с точкой (FacetPrefix.<placeholder>)
+    //    Примеры: "СправочникОбъект.<Имя справочника>", "ДокументОбъект.&lt;Имя документа&gt;"
+    if let Some(dot_pos) = return_type.find('.') {
+        let prefix = &return_type[..dot_pos];
+        if is_known_facet_prefix(prefix) {
+            // Заменяем placeholder на actual_name
+            return format!("{}.{}", prefix, actual_name);
+        }
+    }
+
+    // 2. Если return_type - базовый фасетный тип (без точки), добавляем имя
+    if is_known_facet_prefix(return_type) {
+        format!("{}.{}", return_type, actual_name)
+    } else {
+        // Не фасетный тип - возвращаем как есть
+        return_type.to_string()
+    }
+}
+
+/// Извлечь имя объекта метаданных из фасетного типа
+///
+/// # Примеры
+/// - "СправочникМенеджер.Контрагенты" -> Some("Контрагенты")
+/// - "ДокументОбъект.ЗаказКлиента" -> Some("ЗаказКлиента")
+/// - "Массив" -> None
+pub fn extract_metadata_name(type_name: &str) -> Option<&str> {
+    let dot_pos = type_name.find('.')?;
+    let prefix = &type_name[..dot_pos];
+
+    if is_known_facet_prefix(prefix) {
+        Some(&type_name[dot_pos + 1..])
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -553,5 +635,144 @@ mod tests {
     #[test]
     fn test_extract_base_facet_type_universal_empty() {
         assert_eq!(extract_base_facet_type_universal(""), None);
+    }
+
+    // ================= get_facet_kind_from_prefix tests =================
+
+    #[test]
+    fn test_get_facet_kind_from_prefix_manager() {
+        assert_eq!(
+            get_facet_kind_from_prefix("СправочникМенеджер"),
+            Some(FacetKind::Manager)
+        );
+        assert_eq!(
+            get_facet_kind_from_prefix("ДокументМенеджер"),
+            Some(FacetKind::Manager)
+        );
+        assert_eq!(
+            get_facet_kind_from_prefix("РегистрСведенийМенеджерЗаписи"),
+            Some(FacetKind::Manager)
+        );
+    }
+
+    #[test]
+    fn test_get_facet_kind_from_prefix_object() {
+        assert_eq!(
+            get_facet_kind_from_prefix("СправочникОбъект"),
+            Some(FacetKind::Object)
+        );
+        assert_eq!(
+            get_facet_kind_from_prefix("ДокументОбъект"),
+            Some(FacetKind::Object)
+        );
+        assert_eq!(
+            get_facet_kind_from_prefix("РегистрСведенийЗапись"),
+            Some(FacetKind::Object)
+        );
+    }
+
+    #[test]
+    fn test_get_facet_kind_from_prefix_reference() {
+        assert_eq!(
+            get_facet_kind_from_prefix("СправочникСсылка"),
+            Some(FacetKind::Reference)
+        );
+        assert_eq!(
+            get_facet_kind_from_prefix("ПеречислениеСсылка"),
+            Some(FacetKind::Reference)
+        );
+    }
+
+    #[test]
+    fn test_get_facet_kind_from_prefix_selection() {
+        assert_eq!(
+            get_facet_kind_from_prefix("СправочникВыборка"),
+            Some(FacetKind::Selection)
+        );
+        assert_eq!(
+            get_facet_kind_from_prefix("ДокументВыборка"),
+            Some(FacetKind::Selection)
+        );
+    }
+
+    #[test]
+    fn test_get_facet_kind_from_prefix_list() {
+        assert_eq!(
+            get_facet_kind_from_prefix("СправочникСписок"),
+            Some(FacetKind::List)
+        );
+    }
+
+    #[test]
+    fn test_get_facet_kind_from_prefix_collection() {
+        assert_eq!(
+            get_facet_kind_from_prefix("РегистрСведенийНаборЗаписей"),
+            Some(FacetKind::Collection)
+        );
+        assert_eq!(
+            get_facet_kind_from_prefix("РегистрНакопленияНаборЗаписей"),
+            Some(FacetKind::Collection)
+        );
+    }
+
+    #[test]
+    fn test_get_facet_kind_from_prefix_non_facet() {
+        assert_eq!(get_facet_kind_from_prefix("Массив"), None);
+        assert_eq!(get_facet_kind_from_prefix("ТаблицаЗначений"), None);
+    }
+
+    // ================= substitute_type_name tests =================
+
+    #[test]
+    fn test_substitute_type_name_base_facet() {
+        assert_eq!(
+            substitute_type_name("СправочникОбъект", "Контрагенты"),
+            "СправочникОбъект.Контрагенты"
+        );
+        assert_eq!(
+            substitute_type_name("ДокументСсылка", "ЗаказКлиента"),
+            "ДокументСсылка.ЗаказКлиента"
+        );
+    }
+
+    #[test]
+    fn test_substitute_type_name_with_placeholder() {
+        assert_eq!(
+            substitute_type_name("СправочникОбъект.<Имя справочника>", "Контрагенты"),
+            "СправочникОбъект.Контрагенты"
+        );
+        assert_eq!(
+            substitute_type_name("ДокументОбъект.&lt;Имя документа&gt;", "ЗаказКлиента"),
+            "ДокументОбъект.ЗаказКлиента"
+        );
+    }
+
+    #[test]
+    fn test_substitute_type_name_non_facet() {
+        assert_eq!(
+            substitute_type_name("Неопределено", "Контрагенты"),
+            "Неопределено"
+        );
+        assert_eq!(substitute_type_name("Массив", "Тест"), "Массив");
+    }
+
+    // ================= extract_metadata_name tests =================
+
+    #[test]
+    fn test_extract_metadata_name_success() {
+        assert_eq!(
+            extract_metadata_name("СправочникМенеджер.Контрагенты"),
+            Some("Контрагенты")
+        );
+        assert_eq!(
+            extract_metadata_name("ДокументОбъект.ЗаказКлиента"),
+            Some("ЗаказКлиента")
+        );
+    }
+
+    #[test]
+    fn test_extract_metadata_name_non_facet() {
+        assert_eq!(extract_metadata_name("Массив"), None);
+        assert_eq!(extract_metadata_name("Файл.Существует"), None);
     }
 }

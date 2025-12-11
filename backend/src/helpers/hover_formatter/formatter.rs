@@ -8,7 +8,7 @@ use bsl_shared::domain::types::{Certainty, ResolutionResult, TypeResolution};
 use bsl_shared::formatting::DetailLevel;
 
 use super::builder::HoverBuilder;
-use super::config::{HoverFormatConfig, OutputFormat, LOW_CONFIDENCE_THRESHOLD};
+use super::config::{HoverFormatConfig, HoverOutputFormat, LOW_CONFIDENCE_THRESHOLD};
 
 /// Главный компонент для форматирования hover responses
 ///
@@ -149,7 +149,7 @@ impl HoverFormatter {
         let kind_name = kind.to_russian_name();
 
         match self.config.output_format {
-            OutputFormat::Markdown => {
+            HoverOutputFormat::Markdown => {
                 let mut result = format!(
                     "## {} \"{}\" не найден\n\n\
                      Объект не существует в загруженной конфигурации.",
@@ -168,7 +168,7 @@ impl HoverFormatter {
 
                 result
             }
-            OutputFormat::PlainText => {
+            HoverOutputFormat::PlainText => {
                 let mut result = format!(
                     "{} \"{}\" не найден\n\
                      Объект не существует в загруженной конфигурации.",

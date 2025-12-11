@@ -62,7 +62,7 @@ impl SignatureIndex {
         let method_name_lower = method.name.to_lowercase();
         if let Some(existing) = methods.iter_mut().find(|m| m.name.to_lowercase() == method_name_lower) {
             // Обновляем return_type если у существующего None/пустой
-            if existing.return_type.as_ref().map_or(true, |s| s.is_empty()) {
+            if existing.return_type.as_ref().is_none_or(|s| s.is_empty()) {
                 if let Some(ref new_return_type) = method.return_type {
                     tracing::debug!(
                         "Merge {}.{}: return_type updated to '{}'",

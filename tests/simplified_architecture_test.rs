@@ -30,7 +30,7 @@ async fn test_system_coordinator_startup() {
 
 #[test]
 fn test_analysis_cache_basic_operations() {
-    use bsl_backend::system::simple_cache::{AnalysisCache, AnalysisResult, FileHash};
+    use bsl_backend::system::simple_cache::{AnalysisCache, CacheAnalysisResult, FileHash};
     use std::collections::HashMap;
     use std::time::Instant;
 
@@ -38,7 +38,7 @@ fn test_analysis_cache_basic_operations() {
 
     // Создаем тестовые данные
     let file_hash = FileHash::from_content("test.bsl", "Функция Тест() КонецФункции");
-    let analysis_result = AnalysisResult {
+    let analysis_result = CacheAnalysisResult {
         file_path: "test.bsl".to_string(),
         type_resolutions: HashMap::new(),
         analysis_duration_ms: 42,

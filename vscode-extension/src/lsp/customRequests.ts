@@ -284,7 +284,7 @@ export async function searchTypes(
 }
 
 // ============================================================================
-// MILESTONE 2.20.4: Type Repository Statistics
+// MILESTONE 2.20.4: Type Repository Statistics & Get All Types
 // ============================================================================
 
 /**
@@ -295,6 +295,76 @@ export interface TypeRepositoryStats {
     platformTypes: number;
     configurationTypes: number;
     lastUpdateTime?: string;  // ISO 8601 timestamp
+}
+
+/**
+ * Параметры запроса всех типов
+ */
+export interface GetAllTypesRequest {
+    limit?: number;
+    offset?: number;
+    category?: string;
+}
+
+/**
+ * Детальная информация о типе (соответствует TypeDto из Rust)
+ */
+export interface TypeDto {
+    name: string;
+    englishName?: string;
+    description?: string;
+    category: string;
+    source: string;  // "Platform" | "Configuration"
+    methods: MethodDto[];
+    properties: string[];
+    tabularSections?: TabularSectionDto[];
+}
+
+/**
+ * Информация о методе (соответствует MethodDto из Rust)
+ */
+export interface MethodDto {
+    name: string;
+    englishName?: string;
+    returnType: string;
+    parameters: ParameterDto[];
+    description?: string;
+}
+
+/**
+ * Информация о параметре (соответствует ParameterDto из Rust)
+ */
+export interface ParameterDto {
+    name: string;
+    typeName: string;
+    isOptional: boolean;
+    defaultValue?: string;
+}
+
+/**
+ * Информация о табличной части (соответствует TabularSectionDto из Rust)
+ */
+export interface TabularSectionDto {
+    name: string;
+    attributes: string[];
+}
+
+/**
+ * Информация о категории типов
+ */
+export interface CategoryDto {
+    name: string;
+    displayName: string;
+    count: number;
+}
+
+/**
+ * Ответ на запрос всех типов
+ */
+export interface GetAllTypesResponse {
+    types: TypeDto[];
+    categories: Record<string, CategoryDto>;
+    totalCount: number;
 }
 
 /**
@@ -317,6 +387,31 @@ export async function getTypeRepositoryStats(): Promise<TypeRepositoryStats | nu
         return result as TypeRepositoryStats || null;
     } catch (error) {
         logger.error('Failed to get type repository stats', error);
+        return null;
+    }
+}
+
+/**
+ * Получить все типы из TypeRepository через LSP Server
+ *
+ * @param params - Параметры запроса (limit, offset, category)
+ * @returns Список типов с метаданными или null если LSP недоступен
+ */
+export async function getAllTypes(params?: GetAllTypesRequest): Promise<GetAllTypesResponse | null> {
+    const client = (await import('./client')).getLanguageClient();
+    if (!client) {
+        logger.warn('[Get All Types] LSP client not available');
+        return null;
+    }
+
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.getAllTypes',
+            arguments: params ? [params] : []
+        });
+        return result as GetAllTypesResponse || null;
+    } catch (error) {
+        logger.error('Failed to get all types', error);
         return null;
     }
 }

@@ -1,4 +1,6 @@
 //! MILESTONE 3.6 Phase 1: Форматирование hover с настраиваемыми уровнями детализации
+//!
+//! Общие типы форматирования используемые в backend и presentation слоях.
 
 /// Уровень детализации hover информации
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +24,19 @@ impl DetailLevel {
             _ => Self::Full, // default
         }
     }
+}
+
+/// Тема оформления для форматирования
+///
+/// Унифицированный тип для использования во всех модулях форматирования.
+/// Используется в hover_formatter, semantic_html_generator и других компонентах.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum Theme {
+    /// Тёмная тема (по умолчанию для VSCode)
+    #[default]
+    Dark,
+    /// Светлая тема
+    Light,
 }
 
 #[cfg(test)]

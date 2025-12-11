@@ -20,12 +20,20 @@ export class HierarchicalTypeIndexProvider implements vscode.TreeDataProvider<Hi
     constructor(outputChannel?: vscode.OutputChannel) {
         this.outputChannel = outputChannel;
         this.treeBuilder = new TypeTreeBuilder(outputChannel);
-        this.treeBuilder.loadTypes();
+        // Запускаем загрузку типов асинхронно
+        this.initializeTypes();
+    }
+
+    private async initializeTypes(): Promise<void> {
+        await this.treeBuilder.loadTypes();
+        this._onDidChangeTreeData.fire();
     }
 
     refresh(): void {
-        this.treeBuilder.loadTypes();
-        this._onDidChangeTreeData.fire();
+        // Асинхронная перезагрузка типов
+        this.treeBuilder.loadTypes().then(() => {
+            this._onDidChangeTreeData.fire();
+        });
     }
 
     getTreeItem(element: HierarchicalTypeItem): vscode.TreeItem {
@@ -58,47 +66,39 @@ export class HierarchicalTypeIndexProvider implements vscode.TreeDataProvider<Hi
         );
         const items: HierarchicalTypeItem[] = [];
 
-        // TODO Milestone 2.10: Показывать типы из LSP через Custom Request
-        // ВРЕМЕННО: показываем заглушку вместо Type Index
-        const stubItem = new HierarchicalTypeItem(
-            'Type Index',
-            vscode.TreeItemCollapsibleState.None,
-            'type-index-disabled',
-            'empty'
-        );
-        stubItem.tooltip =
-            'Type Index (Milestone 2.9).\n\n' +
-            'LSP hover.\n\n' +
-            'Milestone 2.10 Type Index LSP Server\n' +
-            'Custom Request (bsl/getAllTypes) JSONL.\n\n' +
-            '.';
-        items.push(stubItem);
+        // Platform types group
+        if (this.treeBuilder.platformTypesCount > 0) {
+            const platformGroup = new HierarchicalTypeItem(
+                `🏗️ Platform 1C (${this.treeBuilder.platformTypesCount})`,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                'Platform types from syntax helper',
+                'platform-group'
+            );
+            items.push(platformGroup);
+        }
 
-        // СТАРЫЙ КОД (закомментирован) - будет восстановлен в Milestone 2.10
-        // const configPath = BslAnalyzerConfig.configurationPath;
-        // const platformDocs = BslAnalyzerConfig.platformDocsArchive;
-        //
-        // // Platform types group
-        // if (this.treeBuilder.platformTypesCount > 0) {
-        //     const platformGroup = new HierarchicalTypeItem(
-        //         `Platform 1C (${this.treeBuilder.platformTypesCount})`,
-        //         vscode.TreeItemCollapsibleState.Collapsed,
-        //         '',
-        //         'platform-group'
-        //     );
-        //     items.push(platformGroup);
-        // }
-        //
-        // // Configuration types group
-        // if (this.treeBuilder.configTypesCount > 0) {
-        //     const configGroup = new HierarchicalTypeItem(
-        //         `Configuration (${this.treeBuilder.configTypesCount})`,
-        //         vscode.TreeItemCollapsibleState.Collapsed,
-        //         '',
-        //         'config-group'
-        //     );
-        //     items.push(configGroup);
-        // }
+        // Configuration types group
+        if (this.treeBuilder.configTypesCount > 0) {
+            const configGroup = new HierarchicalTypeItem(
+                `📁 Configuration (${this.treeBuilder.configTypesCount})`,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                'Types from configuration metadata',
+                'config-group'
+            );
+            items.push(configGroup);
+        }
+
+        // Если типов нет - показываем информационный узел
+        if (items.length === 0) {
+            const infoItem = new HierarchicalTypeItem(
+                '⏳ Loading types...',
+                vscode.TreeItemCollapsibleState.None,
+                'Types are being loaded from LSP server',
+                'loading'
+            );
+            infoItem.tooltip = 'Types will appear after LSP server starts.\nMake sure LSP server is running.';
+            items.push(infoItem);
+        }
 
         return items;
     }

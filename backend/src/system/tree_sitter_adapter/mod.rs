@@ -11,7 +11,7 @@
 //! ├── span.rs                 - Конвертация позиций UTF-8 -> UTF-16
 //! ├── directives.rs           - Парсинг директив компилятора
 //! ├── expression_converter.rs - Конвертация выражений
-//! ├── statement_converter.rs  - Конвертация statements
+//! ├── statement_converter/    - Конвертация statements (модуль)
 //! └── syntax_errors.rs        - Сбор синтаксических ошибок
 //! ```
 //!

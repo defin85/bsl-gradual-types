@@ -57,6 +57,16 @@ impl Span {
     }
 }
 
+impl std::fmt::Display for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}:{}-{}:{}",
+            self.start_line, self.start_column, self.end_line, self.end_column
+        )
+    }
+}
+
 /// Информация об исходном файле
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceInfo {

@@ -12,19 +12,18 @@ pub const LOW_CONFIDENCE_THRESHOLD: f32 = 0.6;
 
 /// Формат вывода hover информации
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OutputFormat {
+pub enum HoverOutputFormat {
     /// Markdown для LSP hover
     Markdown,
     /// Plain text для CLI
     PlainText,
 }
 
-/// Тема оформления (для будущего использования с темами VSCode)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Theme {
-    Dark,
-    Light,
-}
+/// Backward compatible re-export of Theme
+///
+/// Используйте `bsl_shared::formatting::Theme` напрямую для нового кода.
+#[deprecated(since = "0.5.0", note = "Use bsl_shared::formatting::Theme instead")]
+pub use bsl_shared::formatting::Theme;
 
 /// Локаль для текстовых сообщений
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +45,7 @@ pub struct HoverFormatConfig {
     /// MILESTONE 3.6 Phase 2 - Task 2.3: Путь к Syntax Helper для документации
     pub syntax_helper_path: Option<std::path::PathBuf>,
     /// Формат вывода
-    pub output_format: OutputFormat,
+    pub output_format: HoverOutputFormat,
     /// Тема оформления
     pub theme: Theme,
     /// Локаль
@@ -61,7 +60,7 @@ impl Default for HoverFormatConfig {
             detail_level: DetailLevel::Detailed,
             show_certainty: true,
             syntax_helper_path: None,
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             theme: Theme::Dark,
             locale: Locale::Ru,
         }

@@ -2,7 +2,7 @@
 //!
 //! Согласно архитектурной диаграмме: CLI Tool (Presentation Layer)
 
-use crate::args::OutputFormat;
+use crate::args::CliOutputFormat;
 use bsl_shared::domain::types::{Certainty, ResolutionResult, TypeResolution};
 use bsl_shared::engine::CliAnalysisResult;
 use colored::*;
@@ -14,31 +14,31 @@ impl CliFormatter {
     /// Форматировать результат анализа
     pub fn format_analysis(
         result: &CliAnalysisResult,
-        format: &OutputFormat,
+        format: &CliOutputFormat,
         verbose: bool,
         errors_only: bool,
     ) -> String {
         match format {
-            OutputFormat::Table => Self::format_table(result, verbose, errors_only),
-            OutputFormat::Json => Self::format_json(result),
-            OutputFormat::Plain => Self::format_plain(result, verbose, errors_only),
+            CliOutputFormat::Table => Self::format_table(result, verbose, errors_only),
+            CliOutputFormat::Json => Self::format_json(result),
+            CliOutputFormat::Plain => Self::format_plain(result, verbose, errors_only),
         }
     }
 
     /// Форматировать автодополнения
     pub fn format_completions(
         completions: &[bsl_shared::domain::repository::CompletionItem],
-        format: &OutputFormat,
+        format: &CliOutputFormat,
         limit: usize,
     ) -> String {
         let limited_completions: Vec<_> = completions.iter().take(limit).collect();
 
         match format {
-            OutputFormat::Table => Self::format_completions_table(&limited_completions),
-            OutputFormat::Json => {
+            CliOutputFormat::Table => Self::format_completions_table(&limited_completions),
+            CliOutputFormat::Json => {
                 serde_json::to_string_pretty(&limited_completions).unwrap_or_default()
             }
-            OutputFormat::Plain => Self::format_completions_plain(&limited_completions),
+            CliOutputFormat::Plain => Self::format_completions_plain(&limited_completions),
         }
     }
 
@@ -231,10 +231,10 @@ impl CliFormatter {
     pub fn format_type_info(
         expression: &str,
         resolution: &TypeResolution,
-        format: &OutputFormat,
+        format: &CliOutputFormat,
     ) -> String {
         match format {
-            OutputFormat::Table | OutputFormat::Plain => {
+            CliOutputFormat::Table | CliOutputFormat::Plain => {
                 let mut output = String::new();
                 output.push_str(&format!("🔍 {}\n", expression.bold()));
                 output.push_str(&format!(
@@ -255,7 +255,7 @@ impl CliFormatter {
 
                 output
             }
-            OutputFormat::Json => {
+            CliOutputFormat::Json => {
                 let info = serde_json::json!({
                     "expression": expression,
                     "type": resolution.result,

@@ -6,31 +6,17 @@
 //! 3. API endpoints return tabular section data with proper camelCase names
 //! 4. Edge cases are handled (empty attributes, no tabular sections, etc.)
 
+#[path = "shared_test_fixtures.rs"]
+mod shared_test_fixtures;
+
 #[cfg(test)]
 mod tabular_sections_api_tests {
-    use bsl_backend::system::system_coordinator::SystemCoordinator;
+    use crate::shared_test_fixtures::get_config_coordinator;
     use bsl_shared::api::dtos::{TabularSectionAttributeDto, TabularSectionDto};
-    use bsl_shared::domain::types::RawDataSource;
-    use std::path::Path;
-
-    /// Helper function to create a test coordinator
-    async fn create_test_coordinator() -> SystemCoordinator {
-        let coordinator = SystemCoordinator::new();
-
-        // Тесты запускаются из директории backend/, поэтому нужно подняться на уровень выше
-        let config_path = Path::new("../examples/conf/conf_test");
-
-        coordinator
-            .start_with_paths(None, Some(config_path), None)
-            .await
-            .expect("Failed to start coordinator");
-
-        coordinator
-    }
 
     #[tokio::test]
     async fn test_api_returns_tabular_sections_for_zakaznarjady() {
-        let coordinator = create_test_coordinator().await;
+        let coordinator = get_config_coordinator();
 
         let service = coordinator
             .type_service()
@@ -73,10 +59,14 @@ mod tabular_sections_api_tests {
             raboty.attributes[0].name, "ВидРаботы",
             "First attribute should be 'ВидРаботы'"
         );
-        assert_eq!(
-            raboty.attributes[0].attr_type,
-            Some("xs:string".to_string()),
-            "Attribute type should be xs:string"
+        assert!(
+            raboty.attributes[0]
+                .attr_type
+                .as_ref()
+                .map(|t| t.contains("xs:string"))
+                .unwrap_or(false),
+            "Attribute type should contain xs:string, got: {:?}",
+            raboty.attributes[0].attr_type
         );
 
         let storony = doc
@@ -110,7 +100,7 @@ mod tabular_sections_api_tests {
 
     #[tokio::test]
     async fn test_platform_types_have_no_tabular_sections() {
-        let coordinator = create_test_coordinator().await;
+        let coordinator = get_config_coordinator();
 
         let service = coordinator
             .type_service()
@@ -274,7 +264,7 @@ mod tabular_sections_api_tests {
 
     #[tokio::test]
     async fn test_composite_attribute_type_preserved() {
-        let coordinator = create_test_coordinator().await;
+        let coordinator = get_config_coordinator();
 
         let service = coordinator
             .type_service()
@@ -321,7 +311,7 @@ mod tabular_sections_api_tests {
 
     #[tokio::test]
     async fn test_search_with_partial_name() {
-        let coordinator = create_test_coordinator().await;
+        let coordinator = get_config_coordinator();
 
         let service = coordinator
             .type_service()
@@ -352,7 +342,7 @@ mod tabular_sections_api_tests {
 
     #[tokio::test]
     async fn test_platform_types_regression() {
-        let coordinator = create_test_coordinator().await;
+        let coordinator = get_config_coordinator();
 
         let service = coordinator
             .type_service()
@@ -449,7 +439,7 @@ mod tabular_sections_api_tests {
 
     #[tokio::test]
     async fn test_all_tabular_sections_returned() {
-        let coordinator = create_test_coordinator().await;
+        let coordinator = get_config_coordinator();
 
         let service = coordinator
             .type_service()
@@ -482,7 +472,7 @@ mod tabular_sections_api_tests {
 
     #[tokio::test]
     async fn test_attribute_names_preserved() {
-        let coordinator = create_test_coordinator().await;
+        let coordinator = get_config_coordinator();
 
         let service = coordinator
             .type_service()

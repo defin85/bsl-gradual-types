@@ -331,9 +331,13 @@ impl TypeMetadataLookup {
                     Some(platform.name.clone())
                 }
                 ConcreteType::Configuration(config) => {
-                    // Для конфигурации формируем полное имя
-                    // Например: "Справочники.Контрагенты"
-                    Some(format!("{}.{}", config.kind.to_prefix(), config.name))
+                    // Если name уже содержит префикс (точку), возвращаем как есть
+                    // Это предотвращает двойной префикс: "Документы.Документы.ЗаказНаряды"
+                    if config.name.contains('.') {
+                        Some(config.name.clone())
+                    } else {
+                        Some(format!("{}.{}", config.kind.to_prefix(), config.name))
+                    }
                 }
                 // Primitive и Special типы не имеют RawTypeData в repository
                 ConcreteType::Primitive(_) | ConcreteType::Special(_) => None,

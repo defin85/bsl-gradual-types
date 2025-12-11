@@ -1,140 +1,41 @@
-//! BSL Language Server implementation
+//! LanguageServer trait implementation for BslLanguageServer
 //!
-//! Contains the main server struct and LanguageServer trait implementation.
+//! This module contains the complete implementation of the tower_lsp::LanguageServer trait.
+//! All LSP protocol methods are implemented here:
+//! - Lifecycle: initialize, initialized, shutdown
+//! - Configuration: did_change_configuration
+//! - File management: did_open, did_change, did_close
+//! - Features: completion, hover, goto_definition, signature_help
+//! - Commands: execute_command
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer};
+use tower_lsp::LanguageServer;
 use tracing::{debug, error, info, warn};
 
-use bsl_backend::application::TypeSystemService;
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
-use bsl_backend::system::SystemCoordinator;
-
-use crate::config::{BslSettings, LspConfig};
-use crate::converters::{semantic_error_to_diagnostic, syntax_errors_to_diagnostics};
-use crate::handlers::{
-    self, apply_text_edit, find_containing_function_in_dto, handle_completion,
-    handle_goto_definition, handle_hover, handle_signature_help, CurrentContextResponse,
-};
-use crate::commands::{
-    handle_parse_configuration, handle_query_type, handle_search_types,
-    handle_get_type_repository_stats, handle_get_semantic_tree, handle_get_semantic_html,
-    ParseConfigurationParams, QueryTypeParams, SearchTypesRequest,
-};
-use crate::types::{
-    GetCurrentContextParams, ServerStatus, ServerStatusParams,
-};
-use crate::progress::log_progress_to_file;
-
 use bsl_shared::api::semantic_dtos::{GetSemanticHtmlRequest, GetSemanticTreeRequest};
 
-/// BSL Language Server backend - CLEAN ARCHITECTURE
-#[derive(Clone)]
-pub struct BslLanguageServer {
-    pub client: Client,
-    pub documents: Arc<RwLock<HashMap<Url, String>>>,
-    pub config: Arc<RwLock<Option<LspConfig>>>,
-    pub settings: Arc<RwLock<BslSettings>>,
-    pub coordinator: Arc<SystemCoordinator>,
-}
+use crate::commands::{
+    handle_get_all_types, handle_get_semantic_html, handle_get_semantic_tree,
+    handle_get_type_repository_stats, handle_parse_configuration, handle_query_type,
+    handle_search_types, GetAllTypesRequest, ParseConfigurationParams, QueryTypeParams,
+    SearchTypesRequest,
+};
+use crate::config::{BslSettings, LspConfig};
+use crate::handlers::{self, apply_text_edit, handle_completion, handle_goto_definition, handle_hover, handle_signature_help};
+use crate::progress::log_progress_to_file;
+use crate::types::{GetCurrentContextParams, ServerStatus, ServerStatusParams};
 
-impl BslLanguageServer {
-    pub fn new(client: Client, coordinator: Arc<SystemCoordinator>) -> Self {
-        Self {
-            client,
-            documents: Arc::new(RwLock::new(HashMap::new())),
-            config: Arc::new(RwLock::new(None)),
-            settings: Arc::new(RwLock::new(BslSettings::default())),
-            coordinator,
-        }
-    }
-
-    /// Get current TypeSystemService (always fresh after reload)
-    pub fn get_type_service(&self) -> Option<Arc<TypeSystemService>> {
-        self.coordinator.type_service()
-    }
-
-    /// Get document content from cache
-    pub async fn get_document_content(&self, uri: &Url) -> Result<String, String> {
-        let documents = self.documents.read().await;
-        documents
-            .get(uri)
-            .cloned()
-            .ok_or_else(|| format!("Document not found: {}", uri))
-    }
-
-    /// Revalidate document (used after platform types loading)
-    pub async fn revalidate_document(&self, uri: &Url, text: &str) -> Result<(), String> {
-        let mut diagnostics = Vec::new();
-
-        // PHASE 1: Syntax validation
-        if let Some(type_service) = self.get_type_service() {
-            match type_service.parse_and_validate(text) {
-                Ok(errors) => {
-                    if !errors.is_empty() {
-                        info!(
-                            "Found {} syntax errors in {} (revalidation)",
-                            errors.len(),
-                            uri
-                        );
-                        diagnostics.extend(syntax_errors_to_diagnostics(&errors));
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        "Syntax validation failed for {} (revalidation): {}",
-                        uri, e
-                    );
-                }
-            }
-        }
-
-        // PHASE 2: Semantic validation
-        if let Some(type_service) = self.get_type_service() {
-            let settings = self.settings.read().await;
-            let detail_level =
-                bsl_shared::formatting::DetailLevel::parse(&settings.diagnostics.detail_level);
-
-            match type_service
-                .validate_semantics(text, Some(detail_level))
-                .await
-            {
-                Ok(semantic_errors) => {
-                    if !semantic_errors.is_empty() {
-                        info!(
-                            "Found {} semantic errors in {} (revalidation)",
-                            semantic_errors.len(),
-                            uri
-                        );
-                        for error in semantic_errors {
-                            diagnostics.push(semantic_error_to_diagnostic(&error));
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        "Semantic validation failed for {} (revalidation): {}",
-                        uri, e
-                    );
-                }
-            }
-        }
-
-        // Send updated diagnostics
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, None)
-            .await;
-
-        Ok(())
-    }
-}
+use super::BslLanguageServer;
 
 #[tower_lsp::async_trait]
 impl LanguageServer for BslLanguageServer {
+    // ========================================================================
+    // LIFECYCLE METHODS
+    // ========================================================================
+
     async fn initialize(&self, params: InitializeParams) -> JsonRpcResult<InitializeResult> {
         info!("Initializing BSL Language Server");
 
@@ -199,6 +100,7 @@ impl LanguageServer for BslLanguageServer {
                 )),
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: vec![
+                        "bsl.getAllTypes".to_string(),
                         "bsl.getSemanticHtml".to_string(),
                         "bsl.getSemanticTree".to_string(),
                         "bsl.searchTypes".to_string(),
@@ -227,6 +129,8 @@ impl LanguageServer for BslLanguageServer {
         })
     }
 
+    // TODO: Consider splitting initialized() into smaller functions in future refactoring
+    // This method is 278 lines but handles complex async progress reporting that's hard to split
     async fn initialized(&self, _: InitializedParams) {
         self.client
             .log_message(MessageType::INFO, "BSL Language Server initialized!")
@@ -511,6 +415,10 @@ impl LanguageServer for BslLanguageServer {
         Ok(())
     }
 
+    // ========================================================================
+    // CONFIGURATION
+    // ========================================================================
+
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         info!("Received didChangeConfiguration");
 
@@ -531,6 +439,10 @@ impl LanguageServer for BslLanguageServer {
             }
         }
     }
+
+    // ========================================================================
+    // FILE MANAGEMENT
+    // ========================================================================
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
@@ -631,6 +543,10 @@ impl LanguageServer for BslLanguageServer {
             .await;
     }
 
+    // ========================================================================
+    // LSP FEATURES
+    // ========================================================================
+
     async fn completion(
         &self,
         params: CompletionParams,
@@ -711,6 +627,33 @@ impl LanguageServer for BslLanguageServer {
 
         Ok(handle_goto_definition(&file_content, position, self.get_type_service()).await)
     }
+
+    async fn signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> JsonRpcResult<Option<SignatureHelp>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let file_content = match self.get_document_content(&uri).await {
+            Ok(content) => content,
+            Err(e) => {
+                warn!("Failed to get document content: {}", e);
+                return Ok(None);
+            }
+        };
+
+        Ok(handle_signature_help(
+            &file_content,
+            position,
+            self.coordinator.get_analysis_engine(),
+        )
+        .await)
+    }
+
+    // ========================================================================
+    // COMMAND EXECUTION
+    // ========================================================================
 
     async fn execute_command(
         &self,
@@ -798,6 +741,26 @@ impl LanguageServer for BslLanguageServer {
                 let result = handle_search_types(request, self.coordinator.get_analysis_engine());
                 Ok(Some(serde_json::to_value(result).unwrap()))
             }
+            "bsl.getAllTypes" => {
+                // Parameters are optional - use defaults if not provided
+                let request: GetAllTypesRequest = if params.arguments.is_empty() {
+                    GetAllTypesRequest {
+                        limit: 1000,
+                        offset: 0,
+                        category: None,
+                    }
+                } else {
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?
+                };
+
+                let result = handle_get_all_types(request, self.coordinator.type_service());
+                Ok(Some(serde_json::to_value(result).unwrap()))
+            }
             "bsl.getCurrentContext" => {
                 if params.arguments.is_empty() {
                     return Err(tower_lsp::jsonrpc::Error::invalid_params(
@@ -865,88 +828,6 @@ impl LanguageServer for BslLanguageServer {
                 warn!("Unknown command: {}", params.command);
                 Err(tower_lsp::jsonrpc::Error::method_not_found())
             }
-        }
-    }
-
-    async fn signature_help(
-        &self,
-        params: SignatureHelpParams,
-    ) -> JsonRpcResult<Option<SignatureHelp>> {
-        let uri = params.text_document_position_params.text_document.uri;
-        let position = params.text_document_position_params.position;
-
-        let file_content = match self.get_document_content(&uri).await {
-            Ok(content) => content,
-            Err(e) => {
-                warn!("Failed to get document content: {}", e);
-                return Ok(None);
-            }
-        };
-
-        Ok(handle_signature_help(
-            &file_content,
-            position,
-            self.coordinator.get_analysis_engine(),
-        )
-        .await)
-    }
-}
-
-impl BslLanguageServer {
-    /// Handle bsl.getCurrentContext command
-    async fn handle_get_current_context(
-        &self,
-        params: GetCurrentContextParams,
-    ) -> JsonRpcResult<CurrentContextResponse> {
-        info!(
-            "Custom command: bsl.getCurrentContext - {}:{}:{}",
-            params.uri, params.line, params.character
-        );
-
-        let uri = Url::parse(&params.uri).map_err(|e| {
-            tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e))
-        })?;
-
-        let file_content = match self.documents.read().await.get(&uri) {
-            Some(content) => content.clone(),
-            None => match uri.to_file_path() {
-                Ok(path) => std::fs::read_to_string(&path).map_err(|_| {
-                    tower_lsp::jsonrpc::Error::internal_error()
-                })?,
-                Err(_) => return Ok(CurrentContextResponse::empty()),
-            },
-        };
-
-        let file_path = uri
-            .to_file_path()
-            .unwrap_or_else(|_| std::path::PathBuf::from("untitled"))
-            .to_string_lossy()
-            .to_string();
-
-        if let Some(service) = self.get_type_service() {
-            match service.get_semantic_tree(&file_content, &file_path).await {
-                Ok(semantic_tree_dto) => {
-                    match find_containing_function_in_dto(
-                        &semantic_tree_dto,
-                        params.line,
-                        params.character,
-                    ) {
-                        Some((name, kind, params_list, return_type)) => Ok(CurrentContextResponse {
-                            function_name: Some(name),
-                            function_kind: kind,
-                            params: Some(params_list),
-                            return_type,
-                        }),
-                        None => Ok(CurrentContextResponse::empty()),
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to get semantic tree: {}", e);
-                    Err(tower_lsp::jsonrpc::Error::internal_error())
-                }
-            }
-        } else {
-            Ok(CurrentContextResponse::empty())
         }
     }
 }

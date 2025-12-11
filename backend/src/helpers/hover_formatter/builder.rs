@@ -5,7 +5,7 @@
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::types::{Certainty, TypeResolution};
 
-use super::config::{HoverFormatConfig, OutputFormat};
+use super::config::{HoverFormatConfig, HoverOutputFormat};
 use super::sections;
 use super::type_display;
 
@@ -27,8 +27,8 @@ impl<'a> HoverBuilder<'a> {
     /// Добавляет заголовок (например: "Переменная: МассивДанных")
     pub fn add_header(mut self, label: &str, value: &str) -> Self {
         let section = match self.config.output_format {
-            OutputFormat::Markdown => format!("**{}:** {}", label, value),
-            OutputFormat::PlainText => format!("{}: {}", label, value),
+            HoverOutputFormat::Markdown => format!("**{}:** {}", label, value),
+            HoverOutputFormat::PlainText => format!("{}: {}", label, value),
         };
         self.sections.push(section);
         self
@@ -37,8 +37,8 @@ impl<'a> HoverBuilder<'a> {
     /// Добавляет произвольную секцию с меткой и значением
     pub fn add_section(mut self, label: &str, value: &str) -> Self {
         let section = match self.config.output_format {
-            OutputFormat::Markdown => format!("**{}:** {}", label, value),
-            OutputFormat::PlainText => format!("{}: {}", label, value),
+            HoverOutputFormat::Markdown => format!("**{}:** {}", label, value),
+            HoverOutputFormat::PlainText => format!("{}: {}", label, value),
         };
         self.sections.push(section);
         self

@@ -6,7 +6,7 @@ use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::types::{ResolutionResult, TypeResolution};
 use bsl_shared::formatting::DetailLevel;
 
-use super::config::{HoverFormatConfig, OutputFormat};
+use super::config::{HoverFormatConfig, HoverOutputFormat};
 
 /// Форматирует секцию методов
 pub fn format_methods_section(
@@ -17,6 +17,24 @@ pub fn format_methods_section(
     let methods = metadata_lookup.get_methods(resolution);
 
     if methods.is_empty() {
+        // Проверяем - если это тип-коллекция без методов, показываем warning
+        let type_name = resolution.type_name();
+        let collection_types = [
+            "Массив",
+            "Соответствие",
+            "СписокЗначений",
+            "Структура",
+            "ТаблицаЗначений",
+            "Array",
+            "Map",
+            "ValueList",
+            "Structure",
+            "ValueTable",
+        ];
+
+        if collection_types.iter().any(|t| type_name.contains(t)) {
+            return Some("*Методы недоступны. Укажите путь к syntax_helper.*".to_string());
+        }
         return None;
     }
 
@@ -91,8 +109,8 @@ fn format_multiline_method(
 ) -> String {
     let param_count = method.params.len();
     let mut result = match config.output_format {
-        OutputFormat::Markdown => format!("* **{}**(\n", method.name),
-        OutputFormat::PlainText => format!("  - {}(\n", method.name),
+        HoverOutputFormat::Markdown => format!("* **{}**(\n", method.name),
+        HoverOutputFormat::PlainText => format!("  - {}(\n", method.name),
     };
 
     for (i, param) in method.params.iter().enumerate() {
@@ -140,13 +158,13 @@ fn format_inline_method(
         .join(", ");
 
     match config.output_format {
-        OutputFormat::Markdown => {
+        HoverOutputFormat::Markdown => {
             format!(
                 "* **{}({})** -> {}{}",
                 method.name, params_str, return_str, context_badge
             )
         }
-        OutputFormat::PlainText => {
+        HoverOutputFormat::PlainText => {
             format!(
                 "  - {}({}) -> {}{}",
                 method.name, params_str, return_str, context_badge
@@ -182,10 +200,10 @@ pub fn format_properties_section(
 
     for property in properties.iter().take(display_count) {
         let line = match config.output_format {
-            OutputFormat::Markdown => {
+            HoverOutputFormat::Markdown => {
                 format!("* **{}**: {}", property.name, property.prop_type)
             }
-            OutputFormat::PlainText => {
+            HoverOutputFormat::PlainText => {
                 format!("  - {}: {}", property.name, property.prop_type)
             }
         };
@@ -230,10 +248,10 @@ pub fn format_tabular_sections_section(
     for section in sections.iter().take(display_count) {
         let attr_count = section.attributes.len();
         let line = match config.output_format {
-            OutputFormat::Markdown => {
+            HoverOutputFormat::Markdown => {
                 format!("* **{}** ({} колонок)", section.name, attr_count)
             }
-            OutputFormat::PlainText => {
+            HoverOutputFormat::PlainText => {
                 format!("  - {} ({} колонок)", section.name, attr_count)
             }
         };

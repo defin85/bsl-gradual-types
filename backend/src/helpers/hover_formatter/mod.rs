@@ -38,7 +38,7 @@
 //!
 //! # Структура модуля
 //!
-//! - `config` - типы конфигурации (OutputFormat, Theme, Locale, HoverFormatConfig)
+//! - `config` - типы конфигурации (HoverOutputFormat, Theme, Locale, HoverFormatConfig)
 //! - `formatter` - основной HoverFormatter
 //! - `builder` - HoverBuilder для построения hover content
 //! - `sections` - форматирование секций (методы, свойства, табличные части)
@@ -53,7 +53,7 @@ mod tests;
 mod type_display;
 
 // Публичный API модуля
-pub use config::{HoverFormatConfig, Locale, OutputFormat, Theme};
+pub use config::{HoverFormatConfig, HoverOutputFormat, Locale, Theme};
 pub use formatter::HoverFormatter;
 
 // Для внутреннего использования в тестах

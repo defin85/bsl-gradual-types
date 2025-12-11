@@ -9,7 +9,7 @@
 
 #[cfg(test)]
 mod detail_level_tests {
-    use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, OutputFormat};
+    use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
     use bsl_shared::domain::types::{
@@ -179,7 +179,7 @@ mod detail_level_tests {
         let config = HoverFormatConfig {
             detail_level: DetailLevel::Compact,
             show_certainty: false,
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
 
@@ -212,7 +212,7 @@ mod detail_level_tests {
             detail_level: DetailLevel::Full,
             max_methods: 10,
             show_certainty: false,
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
 
@@ -246,7 +246,7 @@ mod detail_level_tests {
             max_methods: 10,
             max_properties: 5,
             show_certainty: false,
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
 
@@ -380,7 +380,7 @@ mod detail_level_tests {
 
         let config = HoverFormatConfig {
             detail_level: DetailLevel::Full,
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
 
@@ -416,7 +416,7 @@ mod detail_level_tests {
 
         let config = HoverFormatConfig {
             detail_level: DetailLevel::Full,
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
 
@@ -452,7 +452,7 @@ mod detail_level_tests {
         let config = HoverFormatConfig {
             detail_level: DetailLevel::Compact,
             show_certainty: true, // ✅ Включено
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
 
@@ -475,7 +475,7 @@ mod detail_level_tests {
         let config = HoverFormatConfig {
             detail_level: DetailLevel::Compact,
             show_certainty: false, // ❌ Отключено
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
 
@@ -498,7 +498,7 @@ mod detail_level_tests {
         let config = HoverFormatConfig {
             detail_level: DetailLevel::Compact,
             show_certainty: true,
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
 
@@ -549,7 +549,7 @@ mod detail_level_tests {
         assert_eq!(config.max_properties, 5);
         assert_eq!(config.detail_level, DetailLevel::Full);
         assert_eq!(config.show_certainty, true);
-        assert_eq!(config.output_format, OutputFormat::Markdown);
+        assert_eq!(config.output_format, HoverOutputFormat::Markdown);
     }
 
     #[test]
@@ -559,7 +559,7 @@ mod detail_level_tests {
             max_properties: 3,
             detail_level: DetailLevel::Detailed,
             show_certainty: false,
-            output_format: OutputFormat::PlainText,
+            output_format: HoverOutputFormat::PlainText,
             ..Default::default()
         };
 
@@ -567,7 +567,7 @@ mod detail_level_tests {
         assert_eq!(config.max_properties, 3);
         assert_eq!(config.detail_level, DetailLevel::Detailed);
         assert_eq!(config.show_certainty, false);
-        assert_eq!(config.output_format, OutputFormat::PlainText);
+        assert_eq!(config.output_format, HoverOutputFormat::PlainText);
     }
 
     // ============================================================================
@@ -583,7 +583,7 @@ mod detail_level_tests {
         let config = HoverFormatConfig {
             detail_level: DetailLevel::Full,
             max_methods: 0, // Граничный случай: 0 методов
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
 
@@ -604,7 +604,7 @@ mod detail_level_tests {
         let config = HoverFormatConfig {
             detail_level: DetailLevel::Full,
             max_methods: 100, // Больше чем есть методов
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
 
@@ -628,7 +628,7 @@ mod detail_level_tests {
 
         let config = HoverFormatConfig {
             detail_level: DetailLevel::Full,
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
 

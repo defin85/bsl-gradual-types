@@ -5,7 +5,7 @@
 #[cfg(test)]
 mod tests {
     use crate::helpers::hover_formatter::builder::HoverBuilder;
-    use crate::helpers::hover_formatter::config::{HoverFormatConfig, OutputFormat};
+    use crate::helpers::hover_formatter::config::{HoverFormatConfig, HoverOutputFormat};
     use crate::helpers::hover_formatter::formatter::HoverFormatter;
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
@@ -21,7 +21,7 @@ mod tests {
         let config = HoverFormatConfig::default();
         assert_eq!(config.max_methods, 10);
         assert_eq!(config.max_properties, 5);
-        assert_eq!(config.output_format, OutputFormat::Markdown);
+        assert_eq!(config.output_format, HoverOutputFormat::Markdown);
     }
 
     #[test]
@@ -39,7 +39,7 @@ mod tests {
     fn test_output_format_markdown_vs_plaintext() {
         // Test Markdown format
         let config_md = HoverFormatConfig {
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
         let result_md = HoverBuilder::new(&config_md)
@@ -49,7 +49,7 @@ mod tests {
 
         // Test PlainText format
         let config_txt = HoverFormatConfig {
-            output_format: OutputFormat::PlainText,
+            output_format: HoverOutputFormat::PlainText,
             ..Default::default()
         };
         let result_txt = HoverBuilder::new(&config_txt)
@@ -253,7 +253,7 @@ mod tests {
         let metadata_lookup = TypeMetadataLookup::new(repo);
 
         let config = HoverFormatConfig {
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
 
@@ -284,7 +284,7 @@ mod tests {
         let metadata_lookup = TypeMetadataLookup::new(repo);
 
         let config = HoverFormatConfig {
-            output_format: OutputFormat::PlainText,
+            output_format: HoverOutputFormat::PlainText,
             ..Default::default()
         };
 

@@ -8,12 +8,11 @@ use super::renderers::{render_nodes, render_symbol_table};
 use super::styles::{generate_inline_css, ColorScheme};
 use super::utils::escape_html;
 
-/// Theme for HTML visualization
-#[derive(Debug, Clone, Copy)]
-pub enum Theme {
-    Dark,
-    Light,
-}
+/// Backward compatible re-export of Theme from shared
+///
+/// Используйте `bsl_shared::formatting::Theme` напрямую для нового кода.
+#[deprecated(since = "0.5.0", note = "Use bsl_shared::formatting::Theme instead")]
+pub use bsl_shared::formatting::Theme;
 
 /// Compact rendering mode
 #[derive(Debug, Clone, Copy)]

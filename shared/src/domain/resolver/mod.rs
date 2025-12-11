@@ -4,21 +4,29 @@
 //!
 //! ## Структура модуля
 //!
+//! - `type_resolver` - Основной TypeResolver struct и базовые методы
+//! - `narrowing` - Type narrowing (сужение типов)
+//! - `validation` - Валидация вызовов функций/методов
+//! - `constructor` - Резолюция конструкторов
+//! - `context_resolution` - Резолюция переменных с контекстом SymbolTable
 //! - `result_types` - Типы результатов резолюции и валидации
-//! - `resolver_core` - Основной TypeResolver struct и методы
 //! - `strategies` - Стратегии резолюции составных типов (Union, Intersection, Generic, Nullable)
 //! - `member_resolution` - Резолюция доступа к членам типов
 //! - `helpers` - Вспомогательные функции форматирования и сравнения
 
+mod constructor;
+mod context_resolution;
 mod helpers;
 mod member_resolution;
-mod resolver_core;
+mod narrowing;
 mod result_types;
 mod strategies;
+mod type_resolver;
+mod validation;
 
 // Re-exports for public API
-pub use resolver_core::TypeResolver;
 pub use result_types::{ConstructorResolution, ValidationResult, ValidationResultV2};
+pub use type_resolver::TypeResolver;
 
 // Re-export helpers for external use
 pub use helpers::{

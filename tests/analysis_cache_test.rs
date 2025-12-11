@@ -2,7 +2,7 @@
 //!
 //! Тестирование String-based API и hit rate tracking
 
-use bsl_backend::system::simple_cache::{AnalysisCache, AnalysisResult};
+use bsl_backend::system::simple_cache::{AnalysisCache, CacheAnalysisResult};
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -12,7 +12,7 @@ fn test_string_cache_get_and_store() {
     let cache = AnalysisCache::new(10);
 
     let key = "test.bsl:hash123";
-    let analysis = AnalysisResult {
+    let analysis = CacheAnalysisResult {
         file_path: "test.bsl".to_string(),
         type_resolutions: HashMap::new(),
         analysis_duration_ms: 42,
@@ -48,7 +48,7 @@ fn test_hit_rate_tracking() {
     // Arrange
     let cache = AnalysisCache::new(10);
 
-    let analysis = AnalysisResult {
+    let analysis = CacheAnalysisResult {
         file_path: "test.bsl".to_string(),
         type_resolutions: HashMap::new(),
         analysis_duration_ms: 100,
@@ -78,7 +78,7 @@ fn test_hit_rate_all_hits() {
     // Arrange
     let cache = AnalysisCache::new(10);
 
-    let analysis = AnalysisResult {
+    let analysis = CacheAnalysisResult {
         file_path: "test.bsl".to_string(),
         type_resolutions: HashMap::new(),
         analysis_duration_ms: 100,
@@ -137,14 +137,14 @@ fn test_string_cache_overwrite() {
     // Arrange
     let cache = AnalysisCache::new(10);
 
-    let analysis1 = AnalysisResult {
+    let analysis1 = CacheAnalysisResult {
         file_path: "test.bsl".to_string(),
         type_resolutions: HashMap::new(),
         analysis_duration_ms: 100,
         cached_at: Instant::now(),
     };
 
-    let analysis2 = AnalysisResult {
+    let analysis2 = CacheAnalysisResult {
         file_path: "test.bsl".to_string(),
         type_resolutions: HashMap::new(),
         analysis_duration_ms: 200,
@@ -168,7 +168,7 @@ fn test_string_cache_lru_eviction() {
     // Arrange: small cache
     let cache = AnalysisCache::new(3);
 
-    let make_analysis = |duration: u64| AnalysisResult {
+    let make_analysis = |duration: u64| CacheAnalysisResult {
         file_path: format!("test_{}.bsl", duration),
         type_resolutions: HashMap::new(),
         analysis_duration_ms: duration,
@@ -209,7 +209,7 @@ fn test_multiple_caches_independent_hit_rates() {
     let cache1 = AnalysisCache::new(10);
     let cache2 = AnalysisCache::new(10);
 
-    let analysis = AnalysisResult {
+    let analysis = CacheAnalysisResult {
         file_path: "test.bsl".to_string(),
         type_resolutions: HashMap::new(),
         analysis_duration_ms: 100,

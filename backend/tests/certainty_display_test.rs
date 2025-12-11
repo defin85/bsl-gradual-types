@@ -2,21 +2,8 @@
 //!
 //! Проверяет что certainty показывается для ВСЕХ переменных (даже без RawTypeData)
 
-use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::SystemCoordinator;
-use std::sync::Arc;
-
-/// Setup функция для создания TypeSystemService с загруженными типами платформы
-async fn setup_type_system_service() -> Arc<TypeSystemService> {
-    let coordinator = SystemCoordinator::new();
-    coordinator
-        .start()
-        .await
-        .expect("Failed to start SystemCoordinator");
-    coordinator
-        .type_service()
-        .expect("TypeSystemService should be initialized after start()")
-}
+#[path = "shared_test_fixtures.rs"]
+mod shared_test_fixtures;
 
 #[tokio::test]
 async fn test_certainty_shown_for_platform_types() {
@@ -28,7 +15,7 @@ async fn test_certainty_shown_for_platform_types() {
 КонецПроцедуры
 "#;
 
-    let service = setup_type_system_service().await;
+    let service = shared_test_fixtures::get_test_service();
 
     // Hover на "МойМассив"
     let hover1 = service
@@ -85,7 +72,7 @@ async fn test_certainty_shown_for_primitive_types() {
 КонецПроцедуры
 "#;
 
-    let service = setup_type_system_service().await;
+    let service = shared_test_fixtures::get_test_service();
 
     // Hover на "МояСтрока"
     let hover1 = service
@@ -146,7 +133,7 @@ async fn test_certainty_levels() {
 КонецПроцедуры
 "#;
 
-    let service = setup_type_system_service().await;
+    let service = shared_test_fixtures::get_test_service();
 
     // Hover на "Массив1"
     let hover1 = service
@@ -210,7 +197,7 @@ async fn test_certainty_before_raw_type_check() {
 КонецПроцедуры
 "#;
 
-    let service = setup_type_system_service().await;
+    let service = shared_test_fixtures::get_test_service();
 
     let hover = service
         .get_hover_info(code, 3, 5, None)
@@ -259,7 +246,7 @@ async fn test_regression_hover_still_shows_methods() {
 КонецПроцедуры
 "#;
 
-    let service = setup_type_system_service().await;
+    let service = shared_test_fixtures::get_test_service();
 
     let hover = service
         .get_hover_info(code, 2, 5, None)

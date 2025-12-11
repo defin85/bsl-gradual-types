@@ -9,7 +9,7 @@ use tracing::info;
 use bsl_shared::utils::hash::hash_content;
 
 use crate::application::TypeInferenceService;
-use crate::system::{AnalysisCache, AnalysisResult, ParserCoordinator};
+use crate::system::{AnalysisCache, CacheAnalysisResult, ParserCoordinator};
 use super::super::extractors::type_extractor::{
     extract_type_from_var_declaration, extract_var_name, extract_function_name, extract_return_type,
 };
@@ -21,11 +21,11 @@ use super::super::extractors::type_extractor::{
 /// * `path` - File path to analyze
 ///
 /// # Returns
-/// AnalysisResult with type resolutions
+/// CacheAnalysisResult with type resolutions
 pub async fn analyze_file(
     parser: &ParserCoordinator,
     path: &str,
-) -> Result<AnalysisResult> {
+) -> Result<CacheAnalysisResult> {
     info!("Analyzing file: {}", path);
 
     let file_content = std::fs::read_to_string(path)
@@ -35,7 +35,7 @@ pub async fn analyze_file(
         .parse(&file_content)
         .map_err(|e| anyhow::anyhow!("Parse error for file {}: {}", path, e))?;
 
-    let analysis_result = AnalysisResult {
+    let analysis_result = CacheAnalysisResult {
         file_path: path.to_string(),
         type_resolutions: HashMap::new(),
         analysis_duration_ms: 0,
@@ -56,14 +56,14 @@ pub async fn analyze_file(
 /// * `content` - File content to analyze
 ///
 /// # Returns
-/// AnalysisResult with type resolutions
+/// CacheAnalysisResult with type resolutions
 pub async fn analyze_file_content(
     parser: &ParserCoordinator,
     cache: &AnalysisCache,
     inference_service: &TypeInferenceService,
     file_path: &str,
     content: &str,
-) -> Result<AnalysisResult> {
+) -> Result<CacheAnalysisResult> {
     let start_time = std::time::Instant::now();
     info!("Analyzing file content: {}", file_path);
 
@@ -117,7 +117,7 @@ pub async fn analyze_file_content(
 
     let analysis_duration_ms = start_time.elapsed().as_millis();
 
-    let analysis_result = AnalysisResult {
+    let analysis_result = CacheAnalysisResult {
         file_path: file_path.to_string(),
         type_resolutions,
         analysis_duration_ms: analysis_duration_ms as u64,

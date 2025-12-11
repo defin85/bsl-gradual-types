@@ -1,6 +1,6 @@
 //! Тесты для проверки лимитов методов и свойств в HoverFormatter
 
-use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, OutputFormat};
+use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::types::{
@@ -265,7 +265,7 @@ fn test_markdown_vs_plaintext_formatting() {
     // Markdown
     let config_md = HoverFormatConfig {
         max_methods: 10,
-        output_format: OutputFormat::Markdown,
+        output_format: HoverOutputFormat::Markdown,
         ..Default::default()
     };
     let formatter_md = HoverFormatter::new(config_md, metadata_lookup_md);
@@ -275,7 +275,7 @@ fn test_markdown_vs_plaintext_formatting() {
     // PlainText
     let config_pt = HoverFormatConfig {
         max_methods: 10,
-        output_format: OutputFormat::PlainText,
+        output_format: HoverOutputFormat::PlainText,
         ..Default::default()
     };
     let formatter_pt = HoverFormatter::new(config_pt, metadata_lookup_pt);

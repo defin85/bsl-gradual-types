@@ -2,8 +2,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { BslAnalyzerConfig } from '../config/configHelper';
-import { BslEntity, TypeCategory, HierarchicalTypeItem } from './typeModels';
+import { BslEntity, TypeCategory, HierarchicalTypeItem, MethodInfo, PropertyInfo } from './typeModels';
 import { getCategoryIcon, getConfigCategoryName, PLATFORM_CATEGORIES, formatMethodTooltip, formatPropertyTooltip } from './typeFormatter';
+import { getAllTypes, TypeDto, GetAllTypesResponse } from '../lsp/customRequests';
 
 /**
  * Построитель дерева типов BSL
@@ -21,26 +22,90 @@ export class TypeTreeBuilder {
     }
 
     /**
-     * Загружает и категоризирует все типы
+     * Загружает и категоризирует все типы через LSP
      */
     async loadTypes(): Promise<void> {
         this.platformTypes.clear();
         this.configTypes.clear();
         this.typeCategories.clear();
 
-        // TODO Milestone 2.10: Запрашивать типы через LSP Custom Request (bsl/getAllTypes)
-        // ВРЕМЕННО ОТКЛЮЧЕНО (Milestone 2.9): Убираем дублирование кеша типов
-        // Теперь единственный источник истины - TypeRepository в LSP Server
-        // Extension будет запрашивать типы через LSP вместо прямого чтения JSONL
+        try {
+            // Загружаем типы через LSP Custom Request (bsl.getAllTypes)
+            const response = await getAllTypes({ limit: 5000 });
 
-        // Загружаем типы платформы
-        // await this.loadPlatformTypes(); // ВРЕМЕННО ОТКЛЮЧЕНО
+            if (!response || !response.types) {
+                this.outputChannel?.appendLine('TypeTreeBuilder: No types received from LSP');
+                return;
+            }
 
-        // Загружаем типы конфигурации
-        // await this.loadConfigurationTypes(); // ВРЕМЕННО ОТКЛЮЧЕНО
+            this.outputChannel?.appendLine(`TypeTreeBuilder: Received ${response.types.length} types from LSP`);
 
-        // Группируем типы по категориям
-        // this.categorizeTypes(); // ВРЕМЕННО ОТКЛЮЧЕНО
+            // Конвертируем TypeDto в BslEntity и распределяем по картам
+            for (const typeDto of response.types) {
+                const entity = this.convertTypeDtoToBslEntity(typeDto);
+
+                if (typeDto.source === 'Platform') {
+                    this.platformTypes.set(entity.qualified_name, entity);
+                } else {
+                    this.configTypes.set(entity.qualified_name, entity);
+                }
+            }
+
+            this.outputChannel?.appendLine(
+                `TypeTreeBuilder: Platform=${this.platformTypes.size}, Config=${this.configTypes.size}`
+            );
+
+            // Группируем типы по категориям
+            this.categorizeTypes();
+
+            this.outputChannel?.appendLine(
+                `TypeTreeBuilder: Categorized into ${this.typeCategories.size} categories`
+            );
+        } catch (error) {
+            this.outputChannel?.appendLine(`TypeTreeBuilder: Error loading types: ${error}`);
+        }
+    }
+
+    /**
+     * Конвертирует TypeDto из LSP в BslEntity для TreeView
+     */
+    private convertTypeDtoToBslEntity(dto: TypeDto): BslEntity {
+        const methods: Record<string, MethodInfo> = {};
+        const properties: Record<string, PropertyInfo> = {};
+
+        // Конвертируем методы
+        if (dto.methods) {
+            for (const method of dto.methods) {
+                methods[method.name] = {
+                    parameters: method.parameters,
+                    returns: method.returnType,
+                    documentation: method.description
+                };
+            }
+        }
+
+        // Конвертируем свойства
+        if (dto.properties) {
+            for (const propName of dto.properties) {
+                properties[propName] = {
+                    type: 'unknown',
+                    readonly: false
+                };
+            }
+        }
+
+        return {
+            id: dto.name,
+            qualified_name: dto.name,
+            display_name: dto.englishName || dto.name,
+            entity_type: dto.source === 'Platform' ? 'Platform' : 'Configuration',
+            entity_kind: dto.category,
+            interface: {
+                methods: Object.keys(methods).length > 0 ? methods : undefined,
+                properties: Object.keys(properties).length > 0 ? properties : undefined
+            },
+            documentation: dto.description
+        };
     }
 
     /**

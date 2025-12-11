@@ -19,7 +19,7 @@ impl FlowAnalyzer {
     }
 
     /// Анализировать программу и построить CFG с flow-sensitive типами
-    pub fn analyze_program(&self, program: &Program) -> AnalysisResult {
+    pub fn analyze_program(&self, program: &Program) -> FlowAnalysisResult {
         let mut context = FlowAnalysisContext::new();
         let mut cfg = ControlFlowGraph::new();
 
@@ -47,7 +47,7 @@ impl FlowAnalyzer {
         });
         cfg.add_edge(current_id, exit_id, EdgeKind::Unconditional);
 
-        AnalysisResult {
+        FlowAnalysisResult {
             context: context.clone(),
             cfg,
             variables: context.get_all_variables().clone(),
@@ -377,7 +377,7 @@ impl FlowAnalyzer {
 
 /// Результат flow-sensitive анализа
 #[derive(Debug, Clone)]
-pub struct AnalysisResult {
+pub struct FlowAnalysisResult {
     /// Финальный контекст с типами всех переменных
     pub context: FlowAnalysisContext,
 

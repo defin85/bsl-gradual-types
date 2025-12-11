@@ -6,22 +6,17 @@
 use super::code_location::CompilerDirective;
 
 /// Требования к контексту выполнения (для проверки вызовов методов)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum ContextRequirements {
     /// Только на сервере
     ServerOnly,
     /// Только на клиенте
     ClientOnly,
     /// Везде (универсальный код)
+    #[default]
     Universal,
     /// Везде, но предпочтительно на сервере (для оптимизации)
     ServerPreferred,
-}
-
-impl Default for ContextRequirements {
-    fn default() -> Self {
-        Self::Universal
-    }
 }
 
 impl ContextRequirements {

@@ -12,11 +12,11 @@ use bsl_shared::domain::types::TypeResolution;
 
 /// Простой анализ кеш с LRU eviction и TTL
 pub struct AnalysisCache {
-    storage: lru::LruCache<FileHash, AnalysisResult>,
+    storage: lru::LruCache<FileHash, CacheAnalysisResult>,
     ttl_tracker: HashMap<FileHash, Instant>,
     default_ttl: Duration,
     // Phase 4: Добавляем простой String-based кеш для упрощенного API
-    string_cache: std::sync::Mutex<lru::LruCache<String, AnalysisResult>>,
+    string_cache: std::sync::Mutex<lru::LruCache<String, CacheAnalysisResult>>,
     string_stats: std::sync::Mutex<(usize, usize)>, // (hits, misses)
 }
 
@@ -51,7 +51,7 @@ impl FileHash {
 
 /// Результат анализа для кеширования
 #[derive(Debug, Clone)]
-pub struct AnalysisResult {
+pub struct CacheAnalysisResult {
     pub file_path: String,
     pub type_resolutions: HashMap<String, TypeResolution>,
     pub analysis_duration_ms: u64,
@@ -73,7 +73,7 @@ impl AnalysisCache {
     }
 
     /// Получить из кеша с TTL проверкой
-    pub fn get(&mut self, file_hash: &FileHash) -> Option<AnalysisResult> {
+    pub fn get(&mut self, file_hash: &FileHash) -> Option<CacheAnalysisResult> {
         // Simple TTL check
         if let Some(timestamp) = self.ttl_tracker.get(file_hash) {
             if timestamp.elapsed() > self.default_ttl {
@@ -88,7 +88,7 @@ impl AnalysisCache {
     }
 
     /// Добавить в кеш с TTL
-    pub fn insert(&mut self, file_hash: FileHash, result: AnalysisResult) {
+    pub fn insert(&mut self, file_hash: FileHash, result: CacheAnalysisResult) {
         self.storage.put(file_hash.clone(), result);
         self.ttl_tracker.insert(file_hash, Instant::now());
     }
@@ -136,7 +136,7 @@ impl AnalysisCache {
     // === Phase 4: Simplified String-based API ===
 
     /// Получить результат анализа из кэша по строковому ключу
-    pub fn get_analysis(&self, key: &str) -> Option<AnalysisResult> {
+    pub fn get_analysis(&self, key: &str) -> Option<CacheAnalysisResult> {
         let mut cache = self.string_cache.lock().unwrap();
         if let Some(result) = cache.get(key) {
             let mut stats = self.string_stats.lock().unwrap();
@@ -149,7 +149,7 @@ impl AnalysisCache {
     }
 
     /// Сохранить результат анализа в кэш по строковому ключу
-    pub fn store_analysis(&self, key: String, result: AnalysisResult) {
+    pub fn store_analysis(&self, key: String, result: CacheAnalysisResult) {
         let mut cache = self.string_cache.lock().unwrap();
         cache.put(key, result);
     }

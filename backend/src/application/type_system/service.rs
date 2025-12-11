@@ -16,8 +16,8 @@ use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::formatting::DetailLevel;
 
 use crate::application::TypeInferenceService;
-use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, OutputFormat};
-use crate::system::{AnalysisCache, AnalysisResult, IrCache, IrCacheStats, ParserCoordinator};
+use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
+use crate::system::{AnalysisCache, CacheAnalysisResult, IrCache, IrCacheStats, ParserCoordinator};
 
 use super::services::{
     completion_service,
@@ -89,7 +89,7 @@ impl TypeSystemService {
         let hover_config = HoverFormatConfig {
             max_methods: 10,
             max_properties: 5,
-            output_format: OutputFormat::Markdown,
+            output_format: HoverOutputFormat::Markdown,
             ..Default::default()
         };
         let hover_formatter = HoverFormatter::new(hover_config, metadata_lookup.clone());
@@ -154,7 +154,7 @@ impl TypeSystemService {
     // ============================================================================
 
     /// CLI operations - file analysis
-    pub async fn analyze_file(&self, path: &str) -> Result<AnalysisResult> {
+    pub async fn analyze_file(&self, path: &str) -> Result<CacheAnalysisResult> {
         file_analysis_service::analyze_file(&self.parser, path).await
     }
 
@@ -173,7 +173,7 @@ impl TypeSystemService {
         &self,
         file_path: &str,
         content: &str,
-    ) -> Result<AnalysisResult> {
+    ) -> Result<CacheAnalysisResult> {
         file_analysis_service::analyze_file_content(
             &self.parser,
             &self.cache,

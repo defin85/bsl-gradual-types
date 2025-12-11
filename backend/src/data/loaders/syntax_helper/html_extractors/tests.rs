@@ -2,7 +2,7 @@
 
 use scraper::Html;
 
-use super::extractors::HtmlExtractor;
+use super::*;
 use crate::data::loaders::syntax_helper::type_parser::{TypeFragment, TypeParser};
 
 #[test]
@@ -111,18 +111,18 @@ fn test_extract_parameters_no_params_section() {
 }
 
 #[test]
-fn test_parse_bilingual_name() {
+fn test_parse_title() {
     let extractor = HtmlExtractor::new();
 
-    let (ru, en) = extractor.parse_bilingual_name("Добавить (Add)");
+    let (ru, en) = extractor.parse_title("Добавить (Add)");
     assert_eq!(ru, "Добавить");
     assert_eq!(en, "Add");
 
-    let (ru, en) = extractor.parse_bilingual_name("ВГраница (UBound)");
+    let (ru, en) = extractor.parse_title("ВГраница (UBound)");
     assert_eq!(ru, "ВГраница");
     assert_eq!(en, "UBound");
 
-    let (ru, _) = extractor.parse_bilingual_name("Метод без английского");
+    let (ru, _) = extractor.parse_title("Метод без английского");
     assert_eq!(ru, "Метод без английского");
 }
 

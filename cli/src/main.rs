@@ -10,7 +10,7 @@ use clap::Parser;
 use colored::*;
 use std::path::Path;
 
-use args::{CliArgs, Commands, OutputFormat};
+use args::{CliArgs, CliOutputFormat, Commands};
 use bsl_shared::engine::AnalysisEngine;
 use formatters::CliFormatter;
 
@@ -62,7 +62,7 @@ async fn main() {
 /// Команда анализа файлов
 async fn analyze_command(
     path: &str,
-    format: &OutputFormat,
+    format: &CliOutputFormat,
     verbose: bool,
     errors_only: bool,
     _show_inference: bool,
@@ -93,7 +93,7 @@ async fn analyze_command(
 /// Команда проверки типов
 async fn check_command(
     path: &str,
-    _format: &OutputFormat,
+    _format: &CliOutputFormat,
     verbose: bool,
     _strict: bool,
 ) -> anyhow::Result<()> {
@@ -135,7 +135,7 @@ async fn check_command(
     );
 
     if verbose && (errors > 0 || warnings > 0) {
-        let output = CliFormatter::format_analysis(&result, &OutputFormat::Table, true, true);
+        let output = CliFormatter::format_analysis(&result, &CliOutputFormat::Table, true, true);
         println!("\n{}", output);
     }
 
@@ -150,7 +150,7 @@ async fn check_command(
 /// Команда автодополнения
 async fn complete_command(
     expression: &str,
-    format: &OutputFormat,
+    format: &CliOutputFormat,
     limit: usize,
 ) -> anyhow::Result<()> {
     println!(
@@ -176,7 +176,7 @@ async fn complete_command(
 }
 
 /// Команда получения информации о типе
-async fn info_command(expression: &str, format: &OutputFormat) -> anyhow::Result<()> {
+async fn info_command(expression: &str, format: &CliOutputFormat) -> anyhow::Result<()> {
     println!(
         "{} {}",
         "ℹ️  Информация о типе:".blue().bold(),
@@ -205,7 +205,7 @@ async fn info_command(expression: &str, format: &OutputFormat) -> anyhow::Result
 /// Milestone 2.8: Команда IR-based анализа (Task 6.2)
 async fn analyze_ir_command(
     path: &str,
-    format: &OutputFormat,
+    format: &CliOutputFormat,
     verbose: bool,
     show_ir: bool,
     show_symbols: bool,
@@ -312,7 +312,7 @@ async fn analyze_ir_command(
     }
 
     // 7. Типовая информация (как в старом analyze)
-    if matches!(format, OutputFormat::Json) {
+    if matches!(format, CliOutputFormat::Json) {
         let json = serde_json::json!({
             "file": path,
             "nodes": ir_result.ir.nodes.len(),

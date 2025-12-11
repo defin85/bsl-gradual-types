@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::*;
 use tracing::{debug, error};
 
 use bsl_backend::application::TypeSystemService;
-use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, OutputFormat};
+use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverOutputFormat};
 use bsl_shared::formatting::DetailLevel;
 
 use crate::config::HoverSettings;
@@ -49,7 +49,7 @@ pub async fn handle_hover(
         detail_level,
         show_certainty: settings.show_certainty,
         syntax_helper_path,
-        output_format: OutputFormat::Markdown,
+        output_format: HoverOutputFormat::Markdown,
         ..Default::default()
     };
 

@@ -89,6 +89,61 @@ for arg in "$@"; do
 done
 
 # ============================================================================
+# Автоверсионирование
+# ============================================================================
+
+# Получить текущую версию из package.json
+get_current_version() {
+    grep '"version"' vscode-extension/package.json | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/'
+}
+
+# Инкрементировать patch версию (0.4.2 -> 0.4.3)
+increment_patch_version() {
+    local version="$1"
+    local major minor patch
+    IFS='.' read -r major minor patch <<< "$version"
+    patch=$((patch + 1))
+    echo "$major.$minor.$patch"
+}
+
+# Обновить версию во всех файлах
+update_version_in_files() {
+    local old_version="$1"
+    local new_version="$2"
+
+    echo -e "${CYAN}  📝 Обновление версии: $old_version -> $new_version${NC}" >&2
+
+    # package.json
+    sed -i "s/\"version\": \"$old_version\"/\"version\": \"$new_version\"/" vscode-extension/package.json
+
+    # Cargo.toml (workspace)
+    sed -i "s/^version = \"$old_version\"/version = \"$new_version\"/" Cargo.toml
+}
+
+# Автоверсионирование при наличии изменений
+auto_version() {
+    echo -e "${CYAN}\n🔢 Проверка версии...${NC}" >&2
+
+    local current_version=$(get_current_version)
+    echo -e "${CYAN}  Текущая версия: $current_version${NC}" >&2
+
+    # Проверяем есть ли изменения в tracked файлах (исключая untracked)
+    local changes=$(git diff --name-only 2>/dev/null | wc -l)
+    local staged=$(git diff --cached --name-only 2>/dev/null | wc -l)
+
+    if [ "$changes" -gt 0 ] || [ "$staged" -gt 0 ]; then
+        local new_version=$(increment_patch_version "$current_version")
+        echo -e "${YELLOW}  ⚠️  Обнаружены изменения ($changes файлов modified, $staged staged)${NC}" >&2
+        update_version_in_files "$current_version" "$new_version"
+        echo -e "${GREEN}  ✅ Версия обновлена: $new_version${NC}" >&2
+        echo "$new_version"
+    else
+        echo -e "${GREEN}  ✅ Изменений нет, версия актуальна: $current_version${NC}" >&2
+        echo "$current_version"
+    fi
+}
+
+# ============================================================================
 # Функции для логирования
 # ============================================================================
 
@@ -284,6 +339,7 @@ print_summary() {
     log_section "📊 ИТОГОВЫЙ ОТЧЁТ"
 
     echo ""
+    echo -e "${GREEN}🏷️  Версия: $BUILD_VERSION${NC}"
     echo -e "${CYAN}📦 Собранные компоненты:${NC}"
     echo ""
 
@@ -330,6 +386,9 @@ main() {
     log_info "Тесты: $([ "$SKIP_TESTS" = true ] && echo "пропущены" || echo "включены")"
 
     local total_start=$SECONDS
+
+    # Автоверсионирование
+    BUILD_VERSION=$(auto_version)
 
     # Этап 1: Rust
     if ! build_rust_binaries; then

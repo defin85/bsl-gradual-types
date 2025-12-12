@@ -127,6 +127,138 @@ mod tests {
         assert!(index.find_constructor("ФиксированныйМассив").is_some());
     }
 
+    #[test]
+    fn test_builtin_methods_tabular_section() {
+        let mut index = SignatureIndex::new();
+        index.initialize_builtin_methods();
+
+        // Проверяем что методы ТабличнаяЧасть добавлены
+        let vygruzit = index.find_method("ТабличнаяЧасть", "Выгрузить");
+        assert!(vygruzit.is_some(), "Метод Выгрузить должен быть добавлен");
+        assert_eq!(
+            vygruzit.unwrap().return_type,
+            Some("ТаблицаЗначений".to_string())
+        );
+
+        let dobavit = index.find_method("ТабличнаяЧасть", "Добавить");
+        assert!(dobavit.is_some(), "Метод Добавить должен быть добавлен");
+        assert_eq!(
+            dobavit.unwrap().return_type,
+            Some("СтрокаТабличнойЧасти".to_string())
+        );
+
+        let kolichestvo = index.find_method("ТабличнаяЧасть", "Количество");
+        assert!(
+            kolichestvo.is_some(),
+            "Метод Количество должен быть добавлен"
+        );
+        assert_eq!(kolichestvo.unwrap().return_type, Some("Число".to_string()));
+
+        let ochistit = index.find_method("ТабличнаяЧасть", "Очистить");
+        assert!(ochistit.is_some(), "Метод Очистить должен быть добавлен");
+        assert_eq!(ochistit.unwrap().return_type, None); // void
+
+        let udalit = index.find_method("ТабличнаяЧасть", "Удалить");
+        assert!(udalit.is_some(), "Метод Удалить должен быть добавлен");
+
+        let naiti = index.find_method("ТабличнаяЧасть", "Найти");
+        assert!(naiti.is_some(), "Метод Найти должен быть добавлен");
+        assert_eq!(
+            naiti.unwrap().return_type,
+            Some("СтрокаТабличнойЧасти".to_string())
+        );
+
+        let naiti_stroki = index.find_method("ТабличнаяЧасть", "НайтиСтроки");
+        assert!(
+            naiti_stroki.is_some(),
+            "Метод НайтиСтроки должен быть добавлен"
+        );
+        assert_eq!(
+            naiti_stroki.unwrap().return_type,
+            Some("Массив".to_string())
+        );
+
+        let poluchit = index.find_method("ТабличнаяЧасть", "Получить");
+        assert!(poluchit.is_some(), "Метод Получить должен быть добавлен");
+        assert_eq!(
+            poluchit.unwrap().return_type,
+            Some("СтрокаТабличнойЧасти".to_string())
+        );
+
+        let indeks = index.find_method("ТабличнаяЧасть", "Индекс");
+        assert!(indeks.is_some(), "Метод Индекс должен быть добавлен");
+        assert_eq!(indeks.unwrap().return_type, Some("Число".to_string()));
+
+        let itogo = index.find_method("ТабличнаяЧасть", "Итого");
+        assert!(itogo.is_some(), "Метод Итого должен быть добавлен");
+        assert_eq!(itogo.unwrap().return_type, Some("Число".to_string()));
+
+        let sdvinut = index.find_method("ТабличнаяЧасть", "Сдвинуть");
+        assert!(sdvinut.is_some(), "Метод Сдвинуть должен быть добавлен");
+
+        let zagruzit = index.find_method("ТабличнаяЧасть", "Загрузить");
+        assert!(zagruzit.is_some(), "Метод Загрузить должен быть добавлен");
+
+        let sortirovat = index.find_method("ТабличнаяЧасть", "Сортировать");
+        assert!(
+            sortirovat.is_some(),
+            "Метод Сортировать должен быть добавлен"
+        );
+
+        let vygruzit_kolonku = index.find_method("ТабличнаяЧасть", "ВыгрузитьКолонку");
+        assert!(
+            vygruzit_kolonku.is_some(),
+            "Метод ВыгрузитьКолонку должен быть добавлен"
+        );
+        assert_eq!(
+            vygruzit_kolonku.unwrap().return_type,
+            Some("Массив".to_string())
+        );
+
+        let zagruzit_kolonku = index.find_method("ТабличнаяЧасть", "ЗагрузитьКолонку");
+        assert!(
+            zagruzit_kolonku.is_some(),
+            "Метод ЗагрузитьКолонку должен быть добавлен"
+        );
+
+        let vstavit = index.find_method("ТабличнаяЧасть", "Вставить");
+        assert!(vstavit.is_some(), "Метод Вставить должен быть добавлен");
+        assert_eq!(
+            vstavit.unwrap().return_type,
+            Some("СтрокаТабличнойЧасти".to_string())
+        );
+    }
+
+    #[test]
+    fn test_tabular_section_method_params() {
+        let mut index = SignatureIndex::new();
+        index.initialize_builtin_methods();
+
+        // Проверяем параметры метода Выгрузить
+        let vygruzit = index
+            .find_method("ТабличнаяЧасть", "Выгрузить")
+            .expect("Метод Выгрузить должен существовать");
+        assert_eq!(vygruzit.params.len(), 2);
+        assert!(vygruzit.params[0].is_optional);
+        assert!(vygruzit.params[1].is_optional);
+
+        // Проверяем параметры метода Найти
+        let naiti = index
+            .find_method("ТабличнаяЧасть", "Найти")
+            .expect("Метод Найти должен существовать");
+        assert_eq!(naiti.params.len(), 2);
+        assert!(!naiti.params[0].is_optional); // Значение - обязательный
+        assert!(naiti.params[1].is_optional); // Колонки - опциональный
+
+        // Проверяем параметры метода Сдвинуть
+        let sdvinut = index
+            .find_method("ТабличнаяЧасть", "Сдвинуть")
+            .expect("Метод Сдвинуть должен существовать");
+        assert_eq!(sdvinut.params.len(), 2);
+        assert!(!sdvinut.params[0].is_optional);
+        assert!(!sdvinut.params[1].is_optional);
+    }
+
     // ================= Milestone 3.11 Phase 2: Faceted Type Support =================
 
     #[test]

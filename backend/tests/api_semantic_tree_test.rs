@@ -42,7 +42,7 @@ mod api_semantic_tree_tests {
 "#;
 
         let result = service
-            .get_semantic_tree(code, "test.bsl")
+            .get_semantic_tree(code, "test.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 
@@ -102,7 +102,7 @@ mod api_semantic_tree_tests {
 "#;
 
         let result = service
-            .get_semantic_tree(code, "test.bsl")
+            .get_semantic_tree(code, "test.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 
@@ -154,7 +154,7 @@ mod api_semantic_tree_tests {
 "#;
 
         let result = service
-            .get_semantic_tree(code, "test.bsl")
+            .get_semantic_tree(code, "test.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 
@@ -192,7 +192,7 @@ mod api_semantic_tree_tests {
 "#;
 
         let result = service
-            .get_semantic_tree(code, "test.bsl")
+            .get_semantic_tree(code, "test.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 
@@ -225,7 +225,7 @@ mod api_semantic_tree_tests {
         let code = "";
 
         let result = service
-            .get_semantic_tree(code, "empty.bsl")
+            .get_semantic_tree(code, "empty.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 
@@ -249,7 +249,7 @@ mod api_semantic_tree_tests {
         let code = "   \n\n  \t  \n  ";
 
         let result = service
-            .get_semantic_tree(code, "whitespace.bsl")
+            .get_semantic_tree(code, "whitespace.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 
@@ -273,7 +273,7 @@ mod api_semantic_tree_tests {
 "#;
 
         let result = service
-            .get_semantic_tree(code, "test.bsl")
+            .get_semantic_tree(code, "test.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 
@@ -314,7 +314,7 @@ mod api_semantic_tree_tests {
 "#;
 
         let result = service
-            .get_semantic_tree(code, "test.bsl")
+            .get_semantic_tree(code, "test.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 
@@ -350,7 +350,7 @@ mod api_semantic_tree_tests {
 "#;
 
         let result = service
-            .get_semantic_tree(code, "test.bsl")
+            .get_semantic_tree(code, "test.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 
@@ -376,7 +376,7 @@ mod api_semantic_tree_tests {
 "#;
 
         let result = service
-            .get_semantic_tree(code, "test.bsl")
+            .get_semantic_tree(code, "test.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 
@@ -411,7 +411,7 @@ mod api_semantic_tree_tests {
 "#;
 
         let result = service
-            .get_semantic_tree(code, "test.bsl")
+            .get_semantic_tree(code, "test.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 
@@ -454,7 +454,7 @@ mod api_semantic_tree_tests {
 "#;
 
         let result = service
-            .get_semantic_tree(code, "test.bsl")
+            .get_semantic_tree(code, "test.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 

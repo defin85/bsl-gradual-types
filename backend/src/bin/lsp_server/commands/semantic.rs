@@ -36,7 +36,7 @@ pub async fn handle_get_semantic_tree(
 
     let service = type_service.ok_or("TypeSystemService not initialized")?;
 
-    match service.get_semantic_tree(&file_content, &file_path_str).await {
+    match service.get_semantic_tree(&file_content, &file_path_str, false, true, true).await {
         Ok(dto) => {
             info!(
                 "Semantic tree generated: {} nodes, {} symbols",

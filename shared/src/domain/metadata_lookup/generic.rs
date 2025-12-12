@@ -15,7 +15,7 @@ impl TypeMetadataLookup {
     /// Метод: Добавить() -> T
     /// Результат: Добавить() -> СтрокаРаботы
     /// ```
-    pub(crate) fn get_methods_for_generic(&self, generic_type: &GenericType) -> Vec<RawMethodData> {
+    pub fn get_methods_for_generic(&self, generic_type: &GenericType) -> Vec<RawMethodData> {
         tracing::debug!(
             "Получение методов для Generic типа: {}",
             generic_type.base_type

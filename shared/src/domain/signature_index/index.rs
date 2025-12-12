@@ -200,7 +200,7 @@ impl SignatureIndex {
         None
     }
 
-    /// Внутренний поиск метода в HashMap'ах (без fallback)
+    /// Внутренний поиск метода в HashMap'ах с fallback для CamelCase типов
     fn find_method_in_maps(&self, type_name: &str, method_name_lower: &str) -> Option<&MethodSignature> {
         // Поиск в платформенных
         if let Some(methods) = self.platform_methods.get(type_name) {
@@ -209,6 +209,19 @@ impl SignatureIndex {
                 .find(|m| m.name.to_lowercase() == *method_name_lower)
             {
                 return Some(m);
+            }
+        }
+
+        // Fallback для CamelCase типов (ТабличнаяЧасть → Табличная часть)
+        let type_with_spaces = Self::camel_to_spaces(type_name);
+        if type_with_spaces != type_name {
+            if let Some(methods) = self.platform_methods.get(&type_with_spaces) {
+                if let Some(m) = methods
+                    .iter()
+                    .find(|m| m.name.to_lowercase() == *method_name_lower)
+                {
+                    return Some(m);
+                }
             }
         }
 
@@ -342,7 +355,7 @@ impl SignatureIndex {
         &self.metadata_patterns
     }
 
-    // ==================== Инициализация встроенных конструкторов ====================
+    // ==================== Инициализация встроенных конструкторов и методов ====================
 
     /// Инициализировать встроенные конструкторы коллекций
     pub fn initialize_builtin_constructors(&mut self) {
@@ -429,6 +442,361 @@ impl SignatureIndex {
         );
     }
 
+    /// Инициализация встроенных методов для типов без документации syntax_helper
+    ///
+    /// Вызывается для добавления hardcoded методов типов, которые отсутствуют
+    /// или неполно представлены в Syntax Helper.
+    pub fn initialize_builtin_methods(&mut self) {
+        self.add_tabular_section_methods();
+    }
+
+    /// Добавить методы ТабличнаяЧасть
+    ///
+    /// Табличная часть - коллекция строк в документах/справочниках.
+    /// Методы позволяют добавлять, удалять, искать и манипулировать строками.
+    fn add_tabular_section_methods(&mut self) {
+        let type_name = "ТабличнаяЧасть".to_string();
+
+        // Выгрузить() -> ТаблицаЗначений
+        // Параметры: СписокКолонок (опц), ОтборСтрок (опц)
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Выгрузить".to_string(),
+                Some(type_name.clone()),
+                vec![
+                    ParameterInfo {
+                        name: "СписокКолонок".to_string(),
+                        type_name: Some("Строка".to_string()),
+                        is_optional: true,
+                        default_value: None,
+                        description: Some("Список колонок для выгрузки".to_string()),
+                    },
+                    ParameterInfo {
+                        name: "ОтборСтрок".to_string(),
+                        type_name: Some("Структура".to_string()),
+                        is_optional: true,
+                        default_value: None,
+                        description: Some("Условия отбора строк".to_string()),
+                    },
+                ],
+                Some("ТаблицаЗначений".to_string()),
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // Добавить() -> СтрокаТабличнойЧасти
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Добавить".to_string(),
+                Some(type_name.clone()),
+                vec![],
+                Some("СтрокаТабличнойЧасти".to_string()),
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // Вставить(Индекс) -> СтрокаТабличнойЧасти
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Вставить".to_string(),
+                Some(type_name.clone()),
+                vec![ParameterInfo {
+                    name: "Индекс".to_string(),
+                    type_name: Some("Число".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: Some("Индекс позиции для вставки".to_string()),
+                }],
+                Some("СтрокаТабличнойЧасти".to_string()),
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // Количество() -> Число
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Количество".to_string(),
+                Some(type_name.clone()),
+                vec![],
+                Some("Число".to_string()),
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // Очистить() -> void
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Очистить".to_string(),
+                Some(type_name.clone()),
+                vec![],
+                None,
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // Удалить(Строка | Индекс) -> void
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Удалить".to_string(),
+                Some(type_name.clone()),
+                vec![ParameterInfo {
+                    name: "Строка".to_string(),
+                    type_name: Some("СтрокаТабличнойЧасти".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: Some("Строка или индекс для удаления".to_string()),
+                }],
+                None,
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // Найти(Значение, Колонки) -> СтрокаТабличнойЧасти | Неопределено
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Найти".to_string(),
+                Some(type_name.clone()),
+                vec![
+                    ParameterInfo {
+                        name: "Значение".to_string(),
+                        type_name: None, // Произвольный тип
+                        is_optional: false,
+                        default_value: None,
+                        description: Some("Искомое значение".to_string()),
+                    },
+                    ParameterInfo {
+                        name: "Колонки".to_string(),
+                        type_name: Some("Строка".to_string()),
+                        is_optional: true,
+                        default_value: None,
+                        description: Some("Список колонок для поиска".to_string()),
+                    },
+                ],
+                Some("СтрокаТабличнойЧасти".to_string()),
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // НайтиСтроки(Отбор) -> Массив
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "НайтиСтроки".to_string(),
+                Some(type_name.clone()),
+                vec![ParameterInfo {
+                    name: "Отбор".to_string(),
+                    type_name: Some("Структура".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: Some("Структура с условиями отбора".to_string()),
+                }],
+                Some("Массив".to_string()),
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // Получить(Индекс) -> СтрокаТабличнойЧасти
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Получить".to_string(),
+                Some(type_name.clone()),
+                vec![ParameterInfo {
+                    name: "Индекс".to_string(),
+                    type_name: Some("Число".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: Some("Индекс строки".to_string()),
+                }],
+                Some("СтрокаТабличнойЧасти".to_string()),
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // Индекс(Строка) -> Число
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Индекс".to_string(),
+                Some(type_name.clone()),
+                vec![ParameterInfo {
+                    name: "Строка".to_string(),
+                    type_name: Some("СтрокаТабличнойЧасти".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: Some("Строка табличной части".to_string()),
+                }],
+                Some("Число".to_string()),
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // Итого(Колонка) -> Число
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Итого".to_string(),
+                Some(type_name.clone()),
+                vec![ParameterInfo {
+                    name: "Колонка".to_string(),
+                    type_name: Some("Строка".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: Some("Имя числовой колонки".to_string()),
+                }],
+                Some("Число".to_string()),
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // Сдвинуть(Строка, Смещение) -> void
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Сдвинуть".to_string(),
+                Some(type_name.clone()),
+                vec![
+                    ParameterInfo {
+                        name: "Строка".to_string(),
+                        type_name: Some("СтрокаТабличнойЧасти".to_string()),
+                        is_optional: false,
+                        default_value: None,
+                        description: Some("Строка для сдвига".to_string()),
+                    },
+                    ParameterInfo {
+                        name: "Смещение".to_string(),
+                        type_name: Some("Число".to_string()),
+                        is_optional: false,
+                        default_value: None,
+                        description: Some("Количество позиций для сдвига".to_string()),
+                    },
+                ],
+                None,
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // Загрузить(ТаблицаЗначений) -> void
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Загрузить".to_string(),
+                Some(type_name.clone()),
+                vec![ParameterInfo {
+                    name: "ТаблицаЗначений".to_string(),
+                    type_name: Some("ТаблицаЗначений".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: Some("Таблица значений для загрузки".to_string()),
+                }],
+                None,
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // Сортировать(СтрокаСортировки) -> void
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "Сортировать".to_string(),
+                Some(type_name.clone()),
+                vec![ParameterInfo {
+                    name: "СтрокаСортировки".to_string(),
+                    type_name: Some("Строка".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: Some("Описание сортировки (например, 'Колонка1 Возр')".to_string()),
+                }],
+                None,
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // ВыгрузитьКолонку(Колонка) -> Массив
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "ВыгрузитьКолонку".to_string(),
+                Some(type_name.clone()),
+                vec![ParameterInfo {
+                    name: "Колонка".to_string(),
+                    type_name: Some("Строка".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: Some("Имя колонки для выгрузки".to_string()),
+                }],
+                Some("Массив".to_string()),
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+
+        // ЗагрузитьКолонку(Массив, Колонка) -> void
+        self.add_platform_method(
+            type_name.clone(),
+            MethodSignature::new(
+                "ЗагрузитьКолонку".to_string(),
+                Some(type_name.clone()),
+                vec![
+                    ParameterInfo {
+                        name: "Массив".to_string(),
+                        type_name: Some("Массив".to_string()),
+                        is_optional: false,
+                        default_value: None,
+                        description: Some("Массив значений для загрузки".to_string()),
+                    },
+                    ParameterInfo {
+                        name: "Колонка".to_string(),
+                        type_name: Some("Строка".to_string()),
+                        is_optional: false,
+                        default_value: None,
+                        description: Some("Имя колонки для загрузки".to_string()),
+                    },
+                ],
+                None,
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::Universal,
+            ),
+        );
+    }
+
     // ==================== Валидация сигнатур ====================
 
     /// Валидировать сигнатуру метода
@@ -501,5 +869,84 @@ impl SignatureIndex {
 impl Default for SignatureIndex {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ==================== Helper Functions ====================
+
+impl SignatureIndex {
+    /// Преобразует CamelCase в строку с пробелами (для кириллицы)
+    ///
+    /// # Примеры
+    /// - "ТабличнаяЧасть" -> "Табличная часть"
+    /// - "ТаблицаЗначений" -> "Таблица значений"
+    /// - "Массив" -> "Массив" (без изменений)
+    fn camel_to_spaces(s: &str) -> String {
+        let mut result = String::new();
+        let mut prev_lower = false;
+
+        for (i, c) in s.chars().enumerate() {
+            if i > 0 && c.is_uppercase() && prev_lower {
+                result.push(' ');
+                result.push(c.to_lowercase().next().unwrap_or(c));
+            } else {
+                result.push(c);
+            }
+            prev_lower = c.is_lowercase();
+        }
+
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_camel_to_spaces_fallback() {
+        let mut index = SignatureIndex::new();
+
+        // Добавим метод для типа "Табличная часть" (с пробелом)
+        let method = MethodSignature::new(
+            "Выгрузить".to_string(),
+            Some("Табличная часть".to_string()),
+            vec![],
+            Some("Массив".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+
+        index.add_platform_method("Табличная часть".to_string(), method);
+
+        // Поиск по CamelCase варианту должен работать через fallback
+        let result = index.find_method("ТабличнаяЧасть", "Выгрузить");
+        assert!(
+            result.is_some(),
+            "Метод должен быть найден через fallback CamelCase -> с пробелами"
+        );
+
+        let found_method = result.unwrap();
+        assert_eq!(found_method.name, "Выгрузить");
+        assert_eq!(found_method.return_type.as_deref(), Some("Массив"));
+    }
+
+    #[test]
+    fn test_camel_to_spaces_conversion() {
+        // Тестируем саму функцию преобразования
+        assert_eq!(
+            SignatureIndex::camel_to_spaces("ТабличнаяЧасть"),
+            "Табличная часть"
+        );
+        assert_eq!(
+            SignatureIndex::camel_to_spaces("ТаблицаЗначений"),
+            "Таблица значений"
+        );
+        assert_eq!(SignatureIndex::camel_to_spaces("Массив"), "Массив");
+        assert_eq!(
+            SignatureIndex::camel_to_spaces("СтрокаТаблицыЗначений"),
+            "Строка таблицы значений"
+        );
     }
 }

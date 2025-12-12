@@ -26,7 +26,7 @@ mod debug_semantic_tree {
 "#;
 
         let result = service
-            .get_semantic_tree(code, "test.bsl")
+            .get_semantic_tree(code, "test.bsl", false, true, true)
             .await
             .expect("Failed to get semantic tree");
 

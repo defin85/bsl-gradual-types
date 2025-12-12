@@ -43,7 +43,7 @@ impl BslLanguageServer {
             .to_string();
 
         if let Some(service) = self.get_type_service() {
-            match service.get_semantic_tree(&file_content, &file_path).await {
+            match service.get_semantic_tree(&file_content, &file_path, false, true, true).await {
                 Ok(semantic_tree_dto) => {
                     match find_containing_function_in_dto(
                         &semantic_tree_dto,

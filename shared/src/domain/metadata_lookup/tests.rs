@@ -561,7 +561,7 @@ fn test_get_methods_prefers_signature_index() {
 
     // 1. Создаём тип с методом БЕЗ return_type (как из syntax_helper)
     let manager_type = RawTypeData {
-        name: "СправочникМенеджер.<Имя справочника>".to_string(),
+        name: "СправочникМенеджер".to_string(),
         english_name: "CatalogManager".to_string(),
         description: "Менеджер справочника".to_string(),
         category: "Справочники".to_string(),
@@ -593,7 +593,7 @@ fn test_get_methods_prefers_signature_index() {
     repo.populate_signature_index(|index| {
         let sig = MethodSignature::new(
             "НайтиПоКоду".to_string(),
-            Some("СправочникМенеджер.<Имя справочника>".to_string()),
+            Some("СправочникМенеджер".to_string()),
             vec![ParameterInfo {
                 name: "Код".to_string(),
                 type_name: Some("Число | Строка".to_string()),
@@ -606,12 +606,12 @@ fn test_get_methods_prefers_signature_index() {
             Some(FacetKind::Reference),
             ContextRequirements::Universal,
         );
-        index.add_platform_method("СправочникМенеджер.<Имя справочника>".to_string(), sig);
+        index.add_platform_method("СправочникМенеджер".to_string(), sig);
     });
 
     // 3. Проверяем через TypeMetadataLookup
     let lookup = TypeMetadataLookup::new(repo.clone());
-    let resolution = create_test_resolution("СправочникМенеджер.<Имя справочника>");
+    let resolution = create_test_resolution("СправочникМенеджер");
 
     let methods = lookup.get_methods(&resolution);
 

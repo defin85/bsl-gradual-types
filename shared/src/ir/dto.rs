@@ -64,6 +64,37 @@ impl SemanticProgram {
         }
     }
 
+    /// Compact версия DTO без symbol_table и call_graph для уменьшения размера ответа
+    ///
+    /// Используется для быстрого просмотра структуры кода без детальной информации о символах.
+    pub fn to_compact_dto(&self) -> SemanticTreeDto {
+        let start_time = std::time::Instant::now();
+
+        // Конвертируем root-level узлы (только узлы в root scope!)
+        let root_nodes = self
+            .nodes
+            .iter()
+            .filter(|node| node.scope_id == self.symbols.root_scope)
+            .map(|node| self.node_to_dto(node, 0))
+            .collect();
+
+        // Вычисляем метрики
+        let metrics = self.calculate_metrics();
+        let analysis_time_ms = start_time.elapsed().as_millis() as u64;
+
+        SemanticTreeDto {
+            file_path: self.source_info.path.clone(),
+            root_nodes,
+            symbol_table: HashMap::new(), // Пустая в compact режиме
+            call_graph: Vec::new(),       // Пустой в compact режиме
+            metrics: SemanticMetricsDto {
+                analysis_time_ms,
+                ..metrics
+            },
+            timestamp: Some(chrono::Utc::now().to_rfc3339()),
+        }
+    }
+
     /// Конвертировать узел в DTO
     fn node_to_dto(&self, node: &SemanticNode, depth: usize) -> SemanticNodeDto {
         let (kind, name, attributes) = self.extract_node_info(&node.kind);

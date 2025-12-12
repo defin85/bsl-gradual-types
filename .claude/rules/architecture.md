@@ -152,4 +152,53 @@ TypeResolution → TypeMetadataLookup → TypeDto → JSON → Frontend
 СправочникСсылка.Контрагенты → Reference
 ```
 
+## Резолвинг типов и свойств
+
+### TypeResolution с active_facet
+
+```rust
+TypeResolution {
+    type_name: "ДокументСсылка.ЗаказНаряды",
+    active_facet: Some(Reference),  // Определяет доступные свойства!
+    available_facets: [Manager, Object, Reference],
+}
+```
+
+### Ключевые enum унификации
+
+| Enum | Назначение | Пример |
+|------|------------|--------|
+| `FacetKind` | Тип фасета | `Manager`, `Object`, `Reference`, `Selection`, `List` |
+| `MetadataKind` | Вид метаданных | `Catalog`, `Document`, `InformationRegister` |
+
+**Методы `FacetKind`:**
+- `shows_properties()` — Manager/Selection/List = `false`, Object/Reference = `true`
+- `platform_suffix()` — `"Менеджер"`, `"Объект"`, `"Ссылка"`
+
+### Flow резолвинга свойств
+
+```
+Код: Ссылка.Работы (где Ссылка: ДокументСсылка.ЗаказНаряды)
+              ↓
+resolve_member_type(object_type, "Работы")
+              ↓
+metadata_lookup.get_properties(object_type)
+              ↓
+active_facet = Reference → shows_properties() = true
+              ↓
+get_facet_properties() → платформенные + конфигурационные + табличные части
+              ↓
+Найдено: Работы: ТабличнаяЧасть<Работы>
+```
+
+### Хранение типов
+
+| Где | Формат | Пример |
+|-----|--------|--------|
+| SymbolTable (переменные) | Фасетный | `ДокументСсылка.ЗаказНаряды` |
+| TypeRepository | Коллекция | `Документы.ЗаказНаряды` |
+| SignatureIndex (методы) | Базовый фасет | `ДокументОбъект`, `ДокументСсылка` |
+
+**Конвертация:** `MetadataKind::Document.to_prefix()` → `"Документы"`
+
 **Подробнее:** [docs/architecture/type_system_architecture.md](../../docs/architecture/type_system_architecture.md)

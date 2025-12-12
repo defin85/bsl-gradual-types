@@ -4,6 +4,7 @@ use crate::domain::signature_index::{SignatureIndex, SignatureValidationResult};
 use crate::domain::types::{MetadataKind, RawDataSource, RawTypeData};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::SystemTime;
 
@@ -236,6 +237,9 @@ pub struct InMemoryTypeRepository {
     last_updated: RwLock<Option<SystemTime>>,
     /// Индекс сигнатур методов для валидации (thread-safe)
     signature_index: RwLock<SignatureIndex>,
+    /// Алиасы CamelCase -> оригинальное имя (для типов с пробелами)
+    /// Например: "ТабличнаяЧасть" -> "Табличная часть"
+    alias_index: RwLock<HashMap<String, String>>,
 }
 
 impl InMemoryTypeRepository {
@@ -244,7 +248,37 @@ impl InMemoryTypeRepository {
             types: RwLock::new(Vec::new()),
             last_updated: RwLock::new(None),
             signature_index: RwLock::new(SignatureIndex::new()),
+            alias_index: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Генерирует CamelCase алиас для типа с пробелами
+    /// "Табличная часть" -> "ТабличнаяЧасть"
+    /// "Таблица значений" -> "ТаблицаЗначений"
+    fn generate_camel_alias(name: &str) -> Option<String> {
+        // Только для типов с пробелами (без : и . — это метаданные)
+        if !name.contains(' ') || name.contains(':') || name.contains('.') {
+            return None;
+        }
+
+        let parts: Vec<&str> = name.split_whitespace().collect();
+        if parts.len() <= 1 {
+            return None;
+        }
+
+        // Собираем CamelCase: каждое слово с заглавной буквы
+        let camel: String = parts
+            .iter()
+            .map(|word| {
+                let mut chars = word.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                }
+            })
+            .collect();
+
+        Some(camel)
     }
 
     /// Получить мутабельный доступ к SignatureIndex для заполнения
@@ -292,6 +326,23 @@ impl Default for InMemoryTypeRepository {
 impl TypeRepository for InMemoryTypeRepository {
     fn load_types(&self, new_types: Vec<RawTypeData>) -> Result<()> {
         let mut types = self.types.write().unwrap();
+        let mut aliases = self.alias_index.write().unwrap();
+
+        // Генерируем алиасы для типов с пробелами
+        for type_data in &new_types {
+            if let Some(alias) = Self::generate_camel_alias(&type_data.name) {
+                // Не перезаписываем если алиас уже существует (приоритет первому)
+                if !aliases.contains_key(&alias) {
+                    tracing::debug!(
+                        "TypeRepository: alias '{}' -> '{}'",
+                        alias,
+                        type_data.name
+                    );
+                    aliases.insert(alias, type_data.name.clone());
+                }
+            }
+        }
+
         types.extend(new_types);
 
         // Обновляем timestamp
@@ -306,32 +357,60 @@ impl TypeRepository for InMemoryTypeRepository {
 
     fn find_type(&self, name: &str) -> Option<RawTypeData> {
         let types = self.types.read().unwrap();
+
+        // 0. Убираем generic параметры: "ТабличнаяЧасть<Работы>" -> "ТабличнаяЧасть"
+        let base_name = if let Some(idx) = name.find('<') {
+            &name[..idx]
+        } else {
+            name
+        };
+
+        // 1. Точный поиск по имени или english_name
         let result = types
             .iter()
-            .find(|t| t.name == name || t.english_name == name)
+            .find(|t| t.name == base_name || t.english_name == base_name)
             .cloned();
 
-        // DEBUG: Логируем поиск типа
-        if result.is_none() {
-            tracing::debug!(
-                "TypeRepository.find_type('{}') → NOT FOUND (total types: {})",
-                name,
-                types.len()
-            );
-            // Показываем первые 5 типов для отладки
-            if !types.is_empty() {
-                let sample: Vec<String> = types
-                    .iter()
-                    .take(5)
-                    .map(|t| format!("'{}' (en: '{}')", t.name, t.english_name))
-                    .collect();
-                tracing::debug!("Sample types in repository: {}", sample.join(", "));
-            }
-        } else {
-            tracing::debug!("TypeRepository.find_type('{}') → FOUND", name);
+        if result.is_some() {
+            tracing::debug!("TypeRepository.find_type('{}') -> FOUND (direct, base_name='{}')", name, base_name);
+            return result;
         }
 
-        result
+        // 2. Поиск через алиас (CamelCase -> оригинальное имя)
+        let aliases = self.alias_index.read().unwrap();
+        if let Some(original_name) = aliases.get(base_name) {
+            let result = types
+                .iter()
+                .find(|t| &t.name == original_name)
+                .cloned();
+            if result.is_some() {
+                tracing::debug!(
+                    "TypeRepository.find_type('{}') -> FOUND via alias '{}'",
+                    name,
+                    original_name
+                );
+                return result;
+            }
+        }
+
+        // DEBUG: Логируем неудачный поиск
+        tracing::debug!(
+            "TypeRepository.find_type('{}') -> NOT FOUND (total types: {}, aliases: {})",
+            name,
+            types.len(),
+            aliases.len()
+        );
+        // Показываем первые 5 типов для отладки
+        if !types.is_empty() {
+            let sample: Vec<String> = types
+                .iter()
+                .take(5)
+                .map(|t| format!("'{}' (en: '{}')", t.name, t.english_name))
+                .collect();
+            tracing::debug!("Sample types in repository: {}", sample.join(", "));
+        }
+
+        None
     }
 
     fn get_stats(&self) -> RepositoryStats {
@@ -519,5 +598,106 @@ impl TypeRepository for InMemoryTypeRepository {
             type_name
         );
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::types::RawDataSource;
+
+    #[test]
+    fn test_generate_camel_alias() {
+        // Типы с пробелами
+        assert_eq!(
+            InMemoryTypeRepository::generate_camel_alias("Табличная часть"),
+            Some("ТабличнаяЧасть".to_string())
+        );
+        assert_eq!(
+            InMemoryTypeRepository::generate_camel_alias("Таблица значений"),
+            Some("ТаблицаЗначений".to_string())
+        );
+        assert_eq!(
+            InMemoryTypeRepository::generate_camel_alias("Дерево значений"),
+            Some("ДеревоЗначений".to_string())
+        );
+
+        // Типы без пробелов - не генерируем алиас
+        assert_eq!(
+            InMemoryTypeRepository::generate_camel_alias("Массив"),
+            None
+        );
+        assert_eq!(
+            InMemoryTypeRepository::generate_camel_alias("Строка"),
+            None
+        );
+
+        // Типы с точками (метаданные) - не генерируем алиас
+        assert_eq!(
+            InMemoryTypeRepository::generate_camel_alias("Справочники.Контрагенты"),
+            None
+        );
+
+        // Типы с двоеточиями - не генерируем алиас
+        assert_eq!(
+            InMemoryTypeRepository::generate_camel_alias("Тип:Справочник"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_find_type_by_alias() {
+        let repo = InMemoryTypeRepository::new();
+
+        // Загружаем тип с пробелом в имени
+        let type_data = RawTypeData {
+            name: "Табличная часть".to_string(),
+            english_name: "TabularSection".to_string(),
+            source: RawDataSource::Platform,
+            ..Default::default()
+        };
+        repo.load_types(vec![type_data]).unwrap();
+
+        // Поиск по оригинальному имени
+        let found = repo.find_type("Табличная часть");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "Табличная часть");
+
+        // Поиск по CamelCase алиасу
+        let found = repo.find_type("ТабличнаяЧасть");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "Табличная часть");
+
+        // Поиск по английскому имени
+        let found = repo.find_type("TabularSection");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "Табличная часть");
+    }
+
+    #[test]
+    fn test_alias_not_overwrites_existing() {
+        let repo = InMemoryTypeRepository::new();
+
+        // Два типа генерируют одинаковый алиас (гипотетически)
+        let type1 = RawTypeData {
+            name: "Тест алиас".to_string(),
+            english_name: "TestAlias1".to_string(),
+            source: RawDataSource::Platform,
+            ..Default::default()
+        };
+        let type2 = RawTypeData {
+            name: "ТЕСТ АЛИАС".to_string(), // Другой регистр, но тот же алиас после capitalize
+            english_name: "TestAlias2".to_string(),
+            source: RawDataSource::Platform,
+            ..Default::default()
+        };
+
+        repo.load_types(vec![type1]).unwrap();
+        repo.load_types(vec![type2]).unwrap();
+
+        // Алиас "ТестАлиас" должен указывать на первый загруженный тип
+        let found = repo.find_type("ТестАлиас");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "Тест алиас");
     }
 }

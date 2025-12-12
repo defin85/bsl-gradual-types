@@ -59,7 +59,21 @@ impl AstToIrConverter {
 
                 // Метод объекта: объект.Метод()
                 // Phase 3: Используем infer_type_resolution для полной информации
-                let object_type = self.infer_type_resolution(&object);
+                // MILESTONE 5.6: Для цепочек вызовов берём object_type из result_type дочернего узла
+                // Это критично для: Ссылка.Работы.Выгрузить() где .Работы имеет result_type "ТабличнаяЧасть<Работы>"
+                let object_type = if let Some(child_idx) = object_node {
+                    if let Some(node) = self.nodes.get(child_idx) {
+                        match &node.kind {
+                            SemanticNodeKind::MemberAccess { result_type, .. } => result_type.clone(),
+                            SemanticNodeKind::FunctionCall { result_type, .. } => result_type.clone(),
+                            _ => self.infer_type_resolution(&object)
+                        }
+                    } else {
+                        self.infer_type_resolution(&object)
+                    }
+                } else {
+                    self.infer_type_resolution(&object)
+                };
 
                 // Для Generic inference всё ещё нужны String типы
                 let arg_types_str: Vec<String> = args
@@ -97,6 +111,10 @@ impl AstToIrConverter {
                     span // Для сложных выражений используем оригинальный span
                 };
 
+                // MILESTONE 5.6: Вычисляем result_type для FunctionCall через SignatureIndex
+                // Это критично для цепочек: Ссылка.Работы.Выгрузить() -> ТаблицаЗначений
+                let result_type = self.resolve_method_return_type(&object_type, &property);
+
                 let node = SemanticNode {
                     kind: SemanticNodeKind::FunctionCall {
                         function_name: property.clone(),
@@ -107,8 +125,8 @@ impl AstToIrConverter {
                         arg_types,
                         // MILESTONE 5.4: ссылка на вложенный узел для иерархии
                         object_node,
-                        // НОВОЕ: тип возвращаемого значения (TODO: resolve from method signature)
-                        result_type: TypeResolution::unknown(),
+                        // MILESTONE 5.6: тип возвращаемого значения из SignatureIndex
+                        result_type,
                     },
                     span: expanded_span, // Используем расширенный span
                     scope_id: self.current_scope,

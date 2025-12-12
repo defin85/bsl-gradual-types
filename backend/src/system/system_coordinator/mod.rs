@@ -66,9 +66,10 @@ mod tests {
 
         repo.load_types(platform_types).unwrap();
 
-        // Инициализируем SignatureIndex с конструкторами
+        // Инициализируем SignatureIndex с конструкторами и встроенными методами
         repo.populate_signature_index(|index| {
             index.initialize_builtin_constructors();
+            index.initialize_builtin_methods();
         });
 
         // Применяем GenericInfo

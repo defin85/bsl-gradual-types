@@ -21,6 +21,9 @@
 
    # Только platform types (без конфигурации):
    ./scripts/start-web-api.sh --no-config
+
+   # С пересборкой (после изменений кода):
+   ./scripts/start-web-api.sh --build
    ```
 
 2. **Claude тестирует через curl:**
@@ -31,20 +34,11 @@
 
 ## Шаблон для кириллицы (ОБЯЗАТЕЛЬНО)
 
-**ВАЖНО:** На Windows/GitBash используй `codecs` + локальный файл `test_api.json`:
+**ВАЖНО:** Используй `python3` + локальный файл `test_api.json`:
 
 ```bash
-# 1. Тест BSL файла
-cd /c/1CProject/bsl-gradual-types && python -c "
-import json, codecs
-with codecs.open('examples/bsl/ФАЙЛ.bsl', 'r', 'utf-8-sig') as f:
-    code = f.read()
-with codecs.open('test_api.json', 'w', 'utf-8') as f:
-    json.dump({'code': code}, f, ensure_ascii=False)
-" && curl -s -X POST http://localhost:3002/api/diagnostics -H "Content-Type: application/json" -d @test_api.json
-
-# 2. Тест inline кода
-cd /c/1CProject/bsl-gradual-types && python -c "
+# 1. Диагностика кода
+python3 -c "
 import json, codecs
 code = '''Процедура Тест()
     ТЗ = Новый ТаблицаЗначений;
@@ -52,32 +46,87 @@ code = '''Процедура Тест()
 КонецПроцедуры'''
 with codecs.open('test_api.json', 'w', 'utf-8') as f:
     json.dump({'code': code}, f, ensure_ascii=False)
-" && curl -s -X POST http://localhost:3002/api/diagnostics -H "Content-Type: application/json" -d @test_api.json
+" && curl -s -X POST http://localhost:3002/api/diagnostics \
+  -H "Content-Type: application/json" -d @test_api.json | python3 -m json.tool
 
-# 3. Hover
-cd /c/1CProject/bsl-gradual-types && python -c "
+# 2. Hover на позиции
+python3 -c "
 import json, codecs
 with codecs.open('test_api.json', 'w', 'utf-8') as f:
     json.dump({'code': 'ТЗ = Новый ТаблицаЗначений;', 'line': 1, 'column': 10}, f, ensure_ascii=False)
-" && curl -s -X POST http://localhost:3002/api/hover/enhanced -H "Content-Type: application/json" -d @test_api.json
+" && curl -s -X POST http://localhost:3002/api/hover/enhanced \
+  -H "Content-Type: application/json" -d @test_api.json | python3 -m json.tool
+
+# 3. Семантическое дерево (для анализа узлов)
+python3 -c "
+import json, codecs
+code = '''Процедура Тест()
+    Ссылка = Документы.ЗаказНаряды.НайтиПоНомеру(\"001\");
+    Ссылка.Работы.Выгрузить();
+КонецПроцедуры'''
+with codecs.open('test_api.json', 'w', 'utf-8') as f:
+    json.dump({'code': code, 'file_path': 'test.bsl'}, f, ensure_ascii=False)
+" && curl -s -X POST http://localhost:3002/api/semantic-tree \
+  -H "Content-Type: application/json" -d @test_api.json | python3 -m json.tool
 ```
 
 **Ключевые моменты:**
-- Используй `codecs.open(..., 'utf-8-sig')` для чтения (убирает BOM)
-- Используй `codecs.open(..., 'utf-8')` для записи
 - Файл `test_api.json` в корне проекта (НЕ в /tmp — разные файловые системы)
 - `ensure_ascii=False` обязательно
+- Используй `python3 -m json.tool` для форматирования вывода
 
 ## Доступные endpoints
 
+### Основные (для тестирования)
+
 | Endpoint | Метод | Описание |
 |----------|-------|----------|
-| `/api/health` | GET | Проверка работоспособности |
-| `/api/hover/enhanced` | POST | Детальная информация hover |
+| `/api/health` | GET | Проверка работоспособности + версия сборки |
 | `/api/diagnostics` | POST | Синтаксические + семантические ошибки |
-| `/api/debug/ast` | POST | AST дерево и symbol table |
-| `/api/types` | GET | Список всех типов |
+| `/api/hover/enhanced` | POST | Детальная информация hover с фасетами |
+| `/api/semantic-tree` | POST | **Семантическое дерево** (узлы, символы, типы) |
 
-**Тестовая конфигурация:** `C:\1CProject\conf` — содержит документы, справочники и другие объекты метаданных.
+### Debug endpoints
+
+| Endpoint | Метод | Описание |
+|----------|-------|----------|
+| `/api/debug/ast` | POST | AST дерево (только синтаксис, без типов) |
+| `/api/diagnostics/debug` | POST | Диагностика + debug info |
+
+### Справочные
+
+| Endpoint | Метод | Описание |
+|----------|-------|----------|
+| `/api/types` | GET | Список всех типов (с пагинацией) |
+| `/api/search?q=...` | GET | Поиск типов по имени |
+| `/api/version` | GET | Информация о версии |
+
+## Примеры request body
+
+### /api/diagnostics
+```json
+{"code": "Процедура Тест()\n    x = 1;\nКонецПроцедуры"}
+```
+
+### /api/hover/enhanced
+```json
+{"code": "ТЗ = Новый ТаблицаЗначений;", "line": 1, "column": 10}
+```
+
+### /api/semantic-tree
+```json
+{"code": "Процедура Тест()\n    x = 1;\nКонецПроцедуры", "file_path": "test.bsl"}
+```
+
+## Различия endpoints
+
+| Что нужно | Используй |
+|-----------|-----------|
+| Проверить ошибки в коде | `/api/diagnostics` |
+| Узнать тип переменной/выражения | `/api/hover/enhanced` |
+| Увидеть все узлы семантического дерева | `/api/semantic-tree` |
+| Отладить парсинг (только AST) | `/api/debug/ast` |
+
+**Тестовая конфигурация:** `examples/conf` (WSL) или `C:\1CProject\conf` (Windows)
 
 **Полная документация:** [docs/api/web-api-reference.md](docs/api/web-api-reference.md)

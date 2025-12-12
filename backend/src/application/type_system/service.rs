@@ -185,12 +185,29 @@ impl TypeSystemService {
     }
 
     /// MILESTONE 2.12: Get semantic tree for file
+    ///
+    /// # Arguments
+    /// * `file_content` - BSL code content
+    /// * `file_path` - File path for identification
+    /// * `compact` - If true, returns compact version without symbol_table and call_graph
+    /// * `include_call_graph` - Include call graph in response (default: true)
+    /// * `include_flow_sensitive` - Include flow-sensitive info in response (default: true)
     pub async fn get_semantic_tree(
         &self,
         file_content: &str,
         file_path: &str,
+        compact: bool,
+        include_call_graph: bool,
+        include_flow_sensitive: bool,
     ) -> Result<bsl_shared::api::semantic_dtos::SemanticTreeDto> {
-        file_analysis_service::get_semantic_tree(&self.parser, file_content, file_path).await
+        file_analysis_service::get_semantic_tree(
+            &self.parser,
+            file_content,
+            file_path,
+            compact,
+            include_call_graph,
+            include_flow_sensitive,
+        ).await
     }
 
     /// MILESTONE E2: Parse file content to SemanticProgram for visualization

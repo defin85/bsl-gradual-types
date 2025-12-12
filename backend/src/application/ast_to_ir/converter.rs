@@ -10,6 +10,7 @@
 //! ```
 
 use anyhow::Result;
+use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
@@ -46,6 +47,9 @@ pub struct AstToIrConverter {
 
     /// TypeResolver для резолюции типов с active_facet (DI Milestone 3.17)
     pub(crate) resolver: Option<Arc<TypeResolver>>,
+
+    /// TypeMetadataLookup для получения свойств фасетных типов (Milestone 3.18)
+    pub(crate) metadata_lookup: TypeMetadataLookup,
 }
 
 impl AstToIrConverter {
@@ -59,6 +63,8 @@ impl AstToIrConverter {
         let symbol_table = SymbolTable::new();
         let current_scope = symbol_table.root_scope;
 
+        let metadata_lookup = TypeMetadataLookup::new(repository.clone());
+
         Self {
             symbol_table,
             current_scope,
@@ -67,6 +73,7 @@ impl AstToIrConverter {
             repository,
             signature_index,
             resolver,
+            metadata_lookup,
         }
     }
 

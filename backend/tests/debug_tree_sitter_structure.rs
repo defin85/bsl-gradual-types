@@ -3,6 +3,7 @@
 use tree_sitter::Parser;
 
 #[test]
+#[ignore = "Debug test requires specific Windows file path"]
 fn debug_tree_sitter_ast_structure() {
     let code =
         std::fs::read_to_string("C:\\1CProject\\bsl-gradual-types\\test_hover_milestone_2_11.bsl")

@@ -142,6 +142,9 @@ pub async fn analyze_file_content(
 /// * `parser` - ParserCoordinator for parsing
 /// * `file_content` - File content
 /// * `file_path` - File path for identification
+/// * `compact` - If true, returns compact version without symbol_table and call_graph
+/// * `include_call_graph` - Include call graph in response (ignored if compact=true)
+/// * `include_flow_sensitive` - Include flow-sensitive info in response (ignored if compact=true)
 ///
 /// # Returns
 /// SemanticTreeDto with semantic information
@@ -149,8 +152,14 @@ pub async fn get_semantic_tree(
     parser: &ParserCoordinator,
     file_content: &str,
     file_path: &str,
+    compact: bool,
+    include_call_graph: bool,
+    include_flow_sensitive: bool,
 ) -> Result<bsl_shared::api::semantic_dtos::SemanticTreeDto> {
-    info!("Generating semantic tree for: {}", file_path);
+    info!(
+        "Generating semantic tree for: {} (compact: {}, call_graph: {}, flow_sensitive: {})",
+        file_path, compact, include_call_graph, include_flow_sensitive
+    );
 
     // 1. Parse file -> AST -> IR (using ready method from ParserCoordinator)
     let semantic_program = parser
@@ -158,10 +167,11 @@ pub async fn get_semantic_tree(
         .map_err(|e| anyhow::anyhow!("Failed to parse file: {}", e))?;
 
     // 2. Convert SemanticProgram -> SemanticTreeDto
-    let dto = semantic_program.to_dto(
-        true, // include_call_graph
-        true, // include_flow_sensitive
-    );
+    let dto = if compact {
+        semantic_program.to_compact_dto()
+    } else {
+        semantic_program.to_dto(include_call_graph, include_flow_sensitive)
+    };
 
     info!(
         "Semantic tree generated: {} root nodes, {} symbols, {} metrics: {:?}",

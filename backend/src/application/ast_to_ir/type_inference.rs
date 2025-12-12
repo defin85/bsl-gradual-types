@@ -6,13 +6,30 @@
 
 use crate::parsing::bsl::ast::Expression;
 use bsl_shared::domain::is_configuration_type_pattern;
+use bsl_shared::domain::resolver::GenericStrategy;
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::{ResolutionResult, TypeResolution};
+use bsl_shared::domain::types::{Certainty, ConcreteType, GenericType, PlatformType, ResolutionResult, TypeResolution};
 
 use super::converter::AstToIrConverter;
 use super::global_collections::{is_global_collection, lookup_global_collection};
 
 impl AstToIrConverter {
+    /// Резолвит конфигурационный тип через TypeResolver, если применимо
+    ///
+    /// Проверяет, является ли тип конфигурационным (Справочники.X, Документы.X, etc.)
+    /// и резолвит его через TypeResolver для получения корректного active_facet.
+    ///
+    /// # Returns
+    /// Some(TypeResolution) если тип конфигурационный и резолвер доступен, иначе None
+    fn try_resolve_configuration_type(&self, type_name: &str) -> Option<TypeResolution> {
+        if is_configuration_type_pattern(type_name) {
+            if let Some(ref resolver) = self.resolver {
+                return Some(resolver.resolve_expression_sync(type_name));
+            }
+        }
+        None
+    }
+
     /// Вывод типа выражения (простая эвристика)
     pub(crate) fn infer_expression_type(&self, expr: &Expression) -> String {
         match expr {
@@ -60,50 +77,19 @@ impl AstToIrConverter {
                 match function.as_ref() {
                     // 1. Метод объекта: object.Method()
                     Expression::PropertyAccess { object, property, .. } => {
-                        let object_type = self.infer_expression_type(object);
+                        // MILESTONE 5.7: Используем infer_type_resolution для корректной резолюции
+                        // цепочек вызовов типа Ссылка.ТабличнаяЧасть.Метод()
+                        // infer_type_resolution использует resolve_member_type, который корректно
+                        // резолвит .Работы -> ТабличнаяЧасть<Работы>
+                        let object_resolution = self.infer_type_resolution(object);
+                        let result = self.resolve_method_return_type(&object_resolution, property);
 
-                        // Убираем Generic параметры для поиска: "Массив<Строка>" -> "Массив"
-                        let clean_type = if let Some(idx) = object_type.find('<') {
-                            &object_type[..idx]
-                        } else {
-                            &object_type
-                        };
-
-                        // ИСПРАВЛЕНИЕ: Для фасетных типов нужно использовать базовый тип
-                        // "СправочникМенеджер.Контрагенты" -> "СправочникМенеджер" (поиск)
-                        // Но сохранить исходный тип для подстановки имени объекта
-                        let search_type = if let Some(base_type) = SignatureIndex::extract_base_facet_type(clean_type) {
-                            base_type
-                        } else {
-                            clean_type
-                        };
-
-                        // Поиск метода в SignatureIndex (платформенные методы)
-                        // MILESTONE 3.11 Phase 2: Facet switching с подстановкой имени объекта
-                        if let Some(method) = self.signature_index.find_method(search_type, property) {
-                            // Получаем return_type метода
-                            if let Some(return_type) = &method.return_type {
-                                // Извлекаем имя объекта из исходного типа
-                                // "СправочникМенеджер.Контрагенты" -> "Контрагенты"
-                                if let Some(metadata_name) = SignatureIndex::extract_metadata_name(&object_type) {
-                                    // Подставляем имя в return_type
-                                    // "СправочникСсылка" + "Контрагенты" -> "СправочникСсылка.Контрагенты"
-                                    return SignatureIndex::substitute_type_name(return_type, metadata_name);
-                                }
-
-                                // Fallback: возвращаем return_type как есть
-                                return return_type.clone();
-                            }
-
-                            return "Неопределено".to_string();
+                        if result.is_unknown() {
+                            // MILESTONE 3.11 FIX: Метод не найден - возвращаем Dynamic
+                            return "Dynamic".to_string();
                         }
 
-                        // MILESTONE 3.11 FIX: Метод не найден - возвращаем Dynamic
-                        // Ранее возвращался object_type для "graceful degradation",
-                        // но это приводило к неправильным ошибкам в цепочках:
-                        // М.НеСуществующийМетод().ПолучитьОбъект() показывало ошибку
-                        // на ПолучитьОбъект вместо НеСуществующийМетод
-                        "Dynamic".to_string()
+                        result.type_name()
                     },
 
                     // 2. Глобальная функция: ТипЗнч()
@@ -219,6 +205,20 @@ impl AstToIrConverter {
                     return TypeResolution::undeclared_variable(&var_name);
                 }
 
+                // MILESTONE 3.18: Сначала пробуем resolve_member_type для получения типа свойства
+                // Это критично для цепочки вызовов: Ссылка.ТабличнаяЧасть.Метод()
+                // где .ТабличнаяЧасть должен вернуть ТабличнаяЧасть<X>, а не строку
+                if !base.is_unknown() {
+                    let member_type = self.resolve_member_type(&base, property);
+                    if !member_type.is_unknown() {
+                        tracing::info!(
+                            "PropertyAccess via resolve_member_type: base='{}', property='{}' => '{}'",
+                            base.type_name(), property, member_type.type_name()
+                        );
+                        return member_type;
+                    }
+                }
+
                 let type_str = format!("{}.{}", base.type_name(), property);
 
                 // Проверяем, является ли это конфигурационным типом (Справочники.X, Документы.X, etc.)
@@ -248,20 +248,46 @@ impl AstToIrConverter {
             // Вызов функции/метода
             Expression::Call { function, .. } => {
                 // Phase 4: Проверяем function expression на undeclared
-                // Если это вызов на необъявленной переменной: `необъявленная.Метод()`
+                // Если это прямой вызов необъявленной переменной (например "необъявленная()"),
+                // а не вызов метода на ней ("объект.Метод()"), возвращаем undeclared.
+                // Случай "необъявленная.Метод()" обрабатывается рекурсивно через PropertyAccess,
+                // который также возвращает undeclared для необъявленного base.
                 let func_type = self.infer_type_resolution(function);
                 if let Some(var_name) = func_type.is_undeclared_variable() {
                     return TypeResolution::undeclared_variable(&var_name);
                 }
 
+                // Для вызовов методов используем resolve_method_return_type
+                // который ищет метод в SignatureIndex и возвращает Known если найден
+                if let Expression::PropertyAccess { object, property, .. } = function.as_ref() {
+                    let object_type = self.infer_type_resolution(object);
+                    let method_result = self.resolve_method_return_type(&object_type, property);
+
+                    // Если метод найден в SignatureIndex - certainty будет Known или Inferred с >0 уверенностью
+                    // Inferred(0.0) эквивалентен Unknown и должен быть пропущен
+                    let is_meaningful = match method_result.certainty {
+                        Certainty::Known => true,
+                        Certainty::Inferred(c) if c > 0.0 => true,
+                        _ => false,
+                    };
+
+                    if is_meaningful {
+                        let type_name = method_result.type_name();
+                        // Для конфигурационных типов - дополнительный резолвинг через TypeResolver
+                        if let Some(resolved) = self.try_resolve_configuration_type(&type_name) {
+                            return resolved;
+                        }
+                        return method_result;
+                    }
+                }
+
+                // Fallback для глобальных функций или ненайденных методов
                 let type_str = self.infer_expression_type(expr);
 
-                // Milestone 3.X: Если результат вызова метода - конфигурационный тип,
+                // Milestone 3.X: Если результат вызова - конфигурационный тип,
                 // используем TypeResolver для корректной резолюции с active_facet
-                if is_configuration_type_pattern(&type_str) {
-                    if let Some(ref resolver) = self.resolver {
-                        return resolver.resolve_expression_sync(&type_str);
-                    }
+                if let Some(resolved) = self.try_resolve_configuration_type(&type_str) {
+                    return resolved;
                 }
 
                 TypeResolution::inferred(&type_str, 0.6)
@@ -395,10 +421,17 @@ impl AstToIrConverter {
 
     /// Резолвит тип свойства для MemberAccess
     ///
-    /// Стратегия поиска:
-    /// 1. Ищем свойство в TypeRepository (платформенные и конфигурационные типы)
-    /// 2. Для фасетных типов (СправочникОбъект.Контрагенты) ищем по базовому типу
-    /// 3. Fallback: TypeResolution::unknown()
+    /// # Milestone 3.18: Интеграция TypeMetadataLookup
+    ///
+    /// Использует TypeMetadataLookup.get_properties() для корректного резолвинга
+    /// свойств с учётом active_facet. Это критично для:
+    /// - Object/Reference фасетов: платформенные + конфигурационные свойства + табличные части
+    /// - Manager фасета: shows_properties() = false → пустой список
+    ///
+    /// # Стратегия поиска
+    ///
+    /// 1. Новая логика: TypeMetadataLookup.get_properties() с учётом active_facet
+    /// 2. Legacy fallback: прямой поиск в TypeRepository (для типов без active_facet)
     ///
     /// # Arguments
     /// * `object_type` - Тип объекта (из infer_type_resolution)
@@ -416,21 +449,61 @@ impl AstToIrConverter {
 
         let member_name_lower = member_name.to_lowercase();
 
-        // 1. Ищем в TypeRepository (свойства платформенных и конфигурационных типов)
-        if let Some(type_data) = self.repository.find_type(&type_name) {
-            // Ищем свойство по имени (регистронезависимо)
-            for prop in &type_data.properties {
-                if prop.name.to_lowercase() == member_name_lower {
-                    if !prop.prop_type.is_empty() {
-                        return TypeResolution::explicit(&prop.prop_type);
+        // НОВАЯ ЛОГИКА: Используем TypeMetadataLookup для получения свойств с учётом active_facet
+        // Корректно обрабатывает:
+        // - Manager facet: пустой список (shows_properties() = false)
+        // - Object/Reference facet: платформенные + конфигурационные свойства + табличные части
+        let properties = self.metadata_lookup.get_properties(object_type);
+
+        for prop in &properties {
+            if prop.name.to_lowercase() == member_name_lower {
+                if !prop.prop_type.is_empty() {
+                    return TypeResolution::explicit(&prop.prop_type);
+                }
+            }
+        }
+
+        // Обработка Generic типов: ТабличнаяЧасть<Работы> → базовый тип + параметры
+        if type_name.contains('<') {
+            if let Some((base_type, params)) = GenericStrategy::parse_syntax(&type_name) {
+                // Создаём GenericType для получения методов
+                let generic_type = GenericType {
+                    base_type: base_type.to_string(),
+                    type_params: vec![ConcreteType::Platform(PlatformType {
+                        name: params.to_string(),
+                    })],
+                };
+
+                // Получаем методы с подстановкой типовых параметров
+                let methods = self.metadata_lookup.get_methods_for_generic(&generic_type);
+
+                for method in &methods {
+                    if method.name.to_lowercase() == member_name_lower {
+                        if !method.return_type.is_empty() {
+                            return TypeResolution::explicit(&method.return_type);
+                        }
+                        // Метод найден, но без return_type
+                        return TypeResolution::explicit("?");
+                    }
+                }
+
+                // Также ищем свойства в базовом типе (ТабличнаяЧасть без параметров)
+                if let Some(type_data) = self.repository.find_type(base_type) {
+                    for prop in &type_data.properties {
+                        if prop.name.to_lowercase() == member_name_lower {
+                            if !prop.prop_type.is_empty() {
+                                return TypeResolution::explicit(&prop.prop_type);
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // 2. Для фасетных типов (СправочникОбъект.Контрагенты) ищем по базовому типу
-        if let Some(base_type) = SignatureIndex::extract_base_facet_type(&type_name) {
-            if let Some(type_data) = self.repository.find_type(base_type) {
+        // LEGACY FALLBACK: Для типов без active_facet (платформенные типы)
+        if properties.is_empty() {
+            // 1. Ищем в TypeRepository напрямую
+            if let Some(type_data) = self.repository.find_type(&type_name) {
                 for prop in &type_data.properties {
                     if prop.name.to_lowercase() == member_name_lower {
                         if !prop.prop_type.is_empty() {
@@ -439,9 +512,84 @@ impl AstToIrConverter {
                     }
                 }
             }
+
+            // 2. Для фасетных типов по имени (СправочникОбъект.Контрагенты)
+            if let Some(base_type) = SignatureIndex::extract_base_facet_type(&type_name) {
+                if let Some(type_data) = self.repository.find_type(base_type) {
+                    for prop in &type_data.properties {
+                        if prop.name.to_lowercase() == member_name_lower {
+                            if !prop.prop_type.is_empty() {
+                                return TypeResolution::explicit(&prop.prop_type);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        // 3. Fallback: свойство не найдено
+        // Fallback: свойство не найдено
+        TypeResolution::unknown()
+    }
+
+    /// Резолвит return type метода для FunctionCall
+    ///
+    /// # Milestone 5.6: Вычисление result_type для цепочек вызовов
+    ///
+    /// Использует SignatureIndex для поиска сигнатуры метода и вычисления
+    /// возвращаемого типа с учётом:
+    /// - Фасетных типов (подстановка имени объекта метаданных)
+    /// - Generic типов (ТабличнаяЧасть<Работы>.Выгрузить() -> ТаблицаЗначений)
+    ///
+    /// # Arguments
+    /// * `object_type` - Тип объекта (из result_type дочернего узла или infer_type_resolution)
+    /// * `method_name` - Имя метода
+    ///
+    /// # Returns
+    /// TypeResolution для возвращаемого типа или unknown() если метод не найден
+    pub(crate) fn resolve_method_return_type(&self, object_type: &TypeResolution, method_name: &str) -> TypeResolution {
+        let type_name = object_type.type_name();
+
+        // Пустой или unknown тип - не можем резолвить
+        if type_name.is_empty() || type_name == "?" {
+            return TypeResolution::unknown();
+        }
+
+        // Убираем Generic параметры для поиска: "ТабличнаяЧасть<Работы>" -> "ТабличнаяЧасть"
+        let clean_type = if let Some(idx) = type_name.find('<') {
+            &type_name[..idx]
+        } else {
+            &type_name
+        };
+
+        // Для фасетных типов извлекаем базовый тип для поиска в SignatureIndex
+        // "СправочникМенеджер.Контрагенты" -> "СправочникМенеджер"
+        let search_type = if let Some(base_type) = SignatureIndex::extract_base_facet_type(clean_type) {
+            base_type
+        } else {
+            clean_type
+        };
+
+        // Поиск метода в SignatureIndex
+        if let Some(method) = self.signature_index.find_method(search_type, method_name) {
+            if let Some(return_type) = &method.return_type {
+                // Извлекаем имя объекта метаданных из исходного типа для подстановки
+                // "СправочникМенеджер.Контрагенты" -> "Контрагенты"
+                if let Some(metadata_name) = SignatureIndex::extract_metadata_name(&type_name) {
+                    // Подставляем имя в return_type
+                    // "СправочникСсылка" + "Контрагенты" -> "СправочникСсылка.Контрагенты"
+                    let substituted = SignatureIndex::substitute_type_name(return_type, metadata_name);
+                    return TypeResolution::explicit(&substituted);
+                }
+
+                // Fallback: возвращаем return_type как есть
+                return TypeResolution::explicit(return_type);
+            }
+
+            // Метод найден, но без return_type
+            return TypeResolution::explicit("Неопределено");
+        }
+
+        // Метод не найден - unknown
         TypeResolution::unknown()
     }
 }

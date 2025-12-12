@@ -347,10 +347,23 @@ pub struct SemanticTreeRequest {
     pub code: String,
     #[serde(default = "default_file_path")]
     pub file_path: String,
+    /// Compact режим: исключает symbol_table и call_graph для уменьшения размера ответа
+    #[serde(default)]
+    pub compact: bool,
+    /// Включить граф вызовов (по умолчанию: true)
+    #[serde(default = "default_true")]
+    pub include_call_graph: bool,
+    /// Включить flow-sensitive информацию (по умолчанию: true)
+    #[serde(default = "default_true")]
+    pub include_flow_sensitive: bool,
 }
 
 fn default_file_path() -> String {
     "inline.bsl".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Get semantic tree for code - показывает семантическое представление кода
@@ -368,7 +381,13 @@ pub async fn get_semantic_tree(
 
     match state
         .type_service
-        .get_semantic_tree(&req.code, &req.file_path)
+        .get_semantic_tree(
+            &req.code,
+            &req.file_path,
+            req.compact,
+            req.include_call_graph,
+            req.include_flow_sensitive,
+        )
         .await
     {
         Ok(tree) => {

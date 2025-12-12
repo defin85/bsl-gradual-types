@@ -2,9 +2,10 @@
 
 use super::TypeMetadataLookup;
 use crate::domain::signature_index::MethodSignature;
+use crate::domain::resolver::GenericStrategy;
 use crate::domain::types::{
-    ConcreteType, FacetKind, RawMethodData, RawParamData, RawPropertyData, RawTabularSectionData,
-    RawTypeData, ResolutionResult, TypeResolution,
+    ConcreteType, FacetKind, GenericType, PlatformType, RawMethodData, RawParamData,
+    RawPropertyData, RawTabularSectionData, RawTypeData, ResolutionResult, TypeResolution,
 };
 
 impl TypeMetadataLookup {
@@ -55,6 +56,27 @@ impl TypeMetadataLookup {
         // Специальная обработка для Generic типов (СОХРАНИТЬ существующую логику!)
         if let ResolutionResult::Generic(generic_type) = &resolution.result {
             return self.get_methods_for_generic(generic_type);
+        }
+
+        // Парсинг generic из type_name() для случаев когда result не Generic
+        // Это происходит когда тип создан через explicit("ТабличнаяЧасть<Работы>")
+        let type_name = resolution.type_name();
+        if type_name.contains('<') {
+            if let Some((base_type, params)) = GenericStrategy::parse_syntax(&type_name) {
+                let generic_type = GenericType {
+                    base_type: base_type.to_string(),
+                    type_params: vec![ConcreteType::Platform(PlatformType {
+                        name: params.to_string(),
+                    })],
+                };
+                tracing::debug!(
+                    "get_methods: parsed generic from string '{}' -> base='{}', param='{}'",
+                    type_name,
+                    base_type,
+                    params
+                );
+                return self.get_methods_for_generic(&generic_type);
+            }
         }
 
         // Приоритет 1 - Lazy lookup через active_facet (для конфигурационных типов)

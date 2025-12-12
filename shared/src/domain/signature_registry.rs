@@ -92,8 +92,9 @@ impl SignatureSourceRegistry {
             }
         }
 
-        // Инициализируем встроенные конструкторы
+        // Инициализируем встроенные конструкторы и методы
         index.initialize_builtin_constructors();
+        index.initialize_builtin_methods();
 
         index
     }

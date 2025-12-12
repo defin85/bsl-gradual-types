@@ -4,6 +4,7 @@ use bsl_backend::system::SystemCoordinator;
 use std::sync::Arc;
 
 #[tokio::test]
+#[ignore = "Debug test requires specific Windows file path"]
 async fn debug_test_hover_file_structure() {
     // Читаем реальный файл
     let code =
@@ -21,7 +22,7 @@ async fn debug_test_hover_file_structure() {
 
     // Получаем SemanticProgram через TypeSystemService
     let dto = type_service
-        .get_semantic_tree(&code, "test_hover_milestone_2_11.bsl")
+        .get_semantic_tree(&code, "test_hover_milestone_2_11.bsl", false, true, true)
         .await
         .expect("Failed to get semantic tree");
 

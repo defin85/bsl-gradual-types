@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { BslAnalyzerConfig } from '../config/configHelper';
 import { BslEntity, TypeCategory, HierarchicalTypeItem, MethodInfo, PropertyInfo } from './typeModels';
 import { getCategoryIcon, getConfigCategoryName, PLATFORM_CATEGORIES, formatMethodTooltip, formatPropertyTooltip } from './typeFormatter';
 import { getAllTypes, TypeDto, GetAllTypesResponse } from '../lsp/customRequests';
@@ -318,90 +317,7 @@ export class TypeTreeBuilder {
         });
     }
 
-    // ============ Приватные методы загрузки и категоризации ============
-
-    private async loadPlatformTypes(): Promise<void> {
-        try {
-            const homedir = require('os').homedir();
-            const platformVersion = BslAnalyzerConfig.platformVersion;
-            const platformCachePath = path.join(homedir, '.bsl_analyzer', 'platform_cache', `${platformVersion}.jsonl`);
-
-            if (fs.existsSync(platformCachePath)) {
-                const content = fs.readFileSync(platformCachePath, 'utf-8');
-                const lines = content.trim().split('\n');
-
-                for (const line of lines) {
-                    try {
-                        const entity: BslEntity = JSON.parse(line);
-                        if (entity.qualified_name) {
-                            this.platformTypes.set(entity.qualified_name, entity);
-                        }
-                    } catch (e) {
-                        // Игнорируем ошибки парсинга
-                    }
-                }
-
-                this.outputChannel?.appendLine(`Loaded ${this.platformTypes.size} platform types`);
-            }
-        } catch (error) {
-            this.outputChannel?.appendLine(`Error loading platform types: ${error}`);
-        }
-    }
-
-    private async loadConfigurationTypes(): Promise<void> {
-        try {
-            const configPath = BslAnalyzerConfig.configurationPath;
-            this.outputChannel?.appendLine(`Loading config types from: ${configPath || 'not set'}`);
-            if (!configPath) {
-                this.outputChannel?.appendLine('Configuration path not set, skipping config types');
-                return;
-            }
-
-            const homedir = require('os').homedir();
-            const platformVersion = BslAnalyzerConfig.platformVersion;
-
-            // Extract UUID from Configuration.xml to match Rust's approach
-            const projectId: string | null = this.extractUuidProjectId(configPath);
-            if (!projectId) {
-                this.outputChannel?.appendLine('UUID not found in Configuration.xml; configuration cache will not be located (no fallback by design)');
-                return; // прекращаем загрузку типов конфигурации
-            }
-
-            const projectCachePath = path.join(
-                homedir,
-                '.bsl_analyzer',
-                'project_indices',
-                projectId!,
-                platformVersion,
-                'config_entities.jsonl'
-            );
-
-            this.outputChannel?.appendLine(`Looking for config cache at: ${projectCachePath}`);
-
-            if (fs.existsSync(projectCachePath)) {
-                this.outputChannel?.appendLine('Config cache found, loading...');
-                const content = fs.readFileSync(projectCachePath, 'utf-8');
-                const lines = content.trim().split('\n');
-
-                for (const line of lines) {
-                    try {
-                        const entity: BslEntity = JSON.parse(line);
-                        if (entity.qualified_name) {
-                            this.configTypes.set(entity.qualified_name, entity);
-                        }
-                    } catch (e) {
-                        // Игнорируем ошибки парсинга
-                    }
-                }
-
-                this.outputChannel?.appendLine(`Loaded ${this.configTypes.size} configuration types`);
-            } else {
-                this.outputChannel?.appendLine('Config cache not found');
-            }
-        } catch (error) {
-            this.outputChannel?.appendLine(`Error loading configuration types: ${error}`);
-        }
-    }
+    // ============ Приватные методы категоризации ============
 
     private categorizeTypes(): void {
         // Создаем категории для платформенных типов

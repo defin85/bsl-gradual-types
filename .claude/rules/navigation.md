@@ -20,6 +20,7 @@
 | Документ | Описание |
 |----------|----------|
 | [docs/architecture/type_system_architecture.md](docs/architecture/type_system_architecture.md) | Система типов + визуальная диаграмма (Mermaid) |
+| [docs/architecture/dependency-diagrams.md](docs/architecture/dependency-diagrams.md) | Диаграммы зависимостей crates, DDD слои |
 | [docs/architecture/milestones-history.md](docs/architecture/milestones-history.md) | История Milestone 2.8-2.18 |
 | [docs/architecture/components-detailed.md](docs/architecture/components-detailed.md) | Детальные компоненты |
 
@@ -51,6 +52,7 @@ bsl-gradual-types/
 ├── .claude/
 │   ├── rules/                   # Правила для Claude (этот файл)
 │   │   ├── general.md
+│   │   ├── architecture.md      # Диаграмма архитектуры (Mermaid)
 │   │   ├── web-api-testing.md
 │   │   ├── mcp-debug.md
 │   │   ├── skills.md

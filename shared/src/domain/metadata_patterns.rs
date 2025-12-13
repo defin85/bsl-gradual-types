@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use super::types::MetadataKind;
+use crate::domain::type_id::TypeId;
 
 /// Паттерн извлечённый из Syntax Helper
 #[derive(Debug, Clone)]
@@ -21,8 +22,8 @@ pub struct ExtractedPattern {
 /// Реестр паттернов для определения MetadataKind из имени типа
 #[derive(Debug, Clone, Default)]
 pub struct MetadataPatternRegistry {
-    /// Извлечённые из Syntax Helper: русский префикс -> MetadataKind
-    extracted_prefixes: HashMap<String, MetadataKind>,
+    /// Извлечённые из Syntax Helper: русский префикс (TypeId) -> MetadataKind
+    extracted_prefixes: HashMap<TypeId, MetadataKind>,
 }
 
 impl MetadataPatternRegistry {
@@ -36,20 +37,22 @@ impl MetadataPatternRegistry {
     /// Обновить реестр данными из Syntax Helper
     pub fn update_from_patterns(&mut self, patterns: Vec<ExtractedPattern>) {
         for pattern in patterns {
-            self.extracted_prefixes.insert(pattern.prefix, pattern.kind);
+            self.extracted_prefixes.insert(TypeId::new(&pattern.prefix), pattern.kind);
         }
     }
 
     /// Определить MetadataKind из фасетного префикса
     /// Сначала ищет в извлечённых, затем в хардкоде
     pub fn get_metadata_kind(&self, prefix: &str) -> Option<MetadataKind> {
-        // 1. Поиск в автоизвлечённых паттернах (по точному совпадению или starts_with)
+        // 1. Поиск в автоизвлечённых паттернах на нормализованных строках
         // Сортируем по длине (длинные первыми) для корректного матчинга
-        let mut sorted_prefixes: Vec<_> = self.extracted_prefixes.iter().collect();
-        sorted_prefixes.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        let prefix_normalized = crate::domain::type_id::normalize(prefix);
 
-        for (extracted_prefix, kind) in sorted_prefixes {
-            if prefix.starts_with(extracted_prefix.as_str()) {
+        let mut sorted_prefixes: Vec<_> = self.extracted_prefixes.iter().collect();
+        sorted_prefixes.sort_by(|a, b| b.0.normalized().len().cmp(&a.0.normalized().len()));
+
+        for (extracted_type_id, kind) in sorted_prefixes {
+            if prefix_normalized.starts_with(extracted_type_id.normalized()) {
                 return Some(*kind);
             }
         }

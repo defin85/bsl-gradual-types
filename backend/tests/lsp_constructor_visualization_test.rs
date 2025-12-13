@@ -8,6 +8,7 @@
 use bsl_shared::api::dtos::{MethodDto, ParamDto};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::{ConstructorSignature, SignatureSource};
+use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::types::{
     FacetKind, ParameterInfo, RawDataSource, RawMethodData, RawTypeData,
 };
@@ -43,7 +44,7 @@ fn test_repository_populate_signature_index() {
             facet: Some("Object".to_string()),
             source: SignatureSource::Platform,
         };
-        index.add_constructor("Массив".to_string(), constructor);
+        index.add_constructor(TypeId::new("Массив"), constructor);
     });
 
     // Verify constructor was added
@@ -77,7 +78,7 @@ fn test_repository_constructor_type_handling() {
             facet: None,
             source: SignatureSource::Platform,
         };
-        index.add_constructor("СложныйТип".to_string(), constructor);
+        index.add_constructor(TypeId::new("СложныйТип"), constructor);
     });
 
     let constructor = repo.find_constructor("СложныйТип").unwrap();
@@ -248,7 +249,7 @@ fn test_builtin_collection_constructors() {
                 facet: Some("Object".to_string()),
                 source: SignatureSource::Platform,
             };
-            index.add_constructor(type_name.to_string(), constructor);
+            index.add_constructor(TypeId::new(type_name), constructor);
         }
     });
 
@@ -467,7 +468,7 @@ fn test_constructor_with_no_parameters() {
             facet: None,
             source: SignatureSource::Platform,
         };
-        index.add_constructor("НовыйТип".to_string(), constructor);
+        index.add_constructor(TypeId::new("НовыйТип"), constructor);
     });
 
     let constructor = repo.find_constructor("НовыйТип").unwrap();
@@ -516,7 +517,7 @@ fn test_constructor_with_optional_parameters() {
             facet: Some("Object".to_string()),
             source: SignatureSource::Platform,
         };
-        index.add_constructor("ТаблицаЗначений".to_string(), constructor);
+        index.add_constructor(TypeId::new("ТаблицаЗначений"), constructor);
     });
 
     let constructor = repo.find_constructor("ТаблицаЗначений").unwrap();

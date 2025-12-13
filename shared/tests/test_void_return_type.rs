@@ -5,6 +5,7 @@ use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::signature_index::{
     ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
 };
+use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::types::{
     Certainty, ConcreteType, ConfigurationType, FacetKind, MetadataKind, ParameterInfo,
     ResolutionMetadata, ResolutionResult, ResolutionSource, TypeResolution,
@@ -33,7 +34,7 @@ fn test_find_by_code_return_type_from_signature_index() {
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method("СправочникМенеджер.<Имя справочника>".to_string(), method);
+        index.add_platform_method(TypeId::new("СправочникМенеджер.<Имя справочника>"), method);
     });
     
     // 3. Создаём TypeResolution для Справочники.Контрагенты с Manager фасетом

@@ -8,6 +8,7 @@ mod tests {
         ConstructorSignature, ContextRequirements, MethodSignature, SignatureIndex,
         SignatureSource,
     };
+    use crate::domain::type_id::TypeId;
     use crate::domain::types::{FacetKind, MetadataKind, ParameterInfo, TypeResolution};
 
     #[test]
@@ -24,7 +25,7 @@ mod tests {
             ContextRequirements::default(),
         );
 
-        index.add_platform_method("Массив".to_string(), sig);
+        index.add_platform_method(TypeId::new("Массив"), sig);
 
         let found = index.find_method("Массив", "Добавить");
         assert!(found.is_some());
@@ -45,7 +46,7 @@ mod tests {
             ContextRequirements::default(),
         );
 
-        index.add_platform_method("Массив".to_string(), sig);
+        index.add_platform_method(TypeId::new("Массив"), sig);
 
         // Разный регистр должен работать
         let found = index.find_method("Массив", "добавить");
@@ -76,7 +77,7 @@ mod tests {
             generic_params_count: 1,
         };
 
-        index.add_constructor("Массив".to_string(), constructor);
+        index.add_constructor(TypeId::new("Массив"), constructor);
 
         let found = index.find_constructor("Массив");
         assert!(found.is_some());
@@ -385,7 +386,7 @@ mod tests {
             ContextRequirements::default(),
         );
 
-        index.add_platform_method("СправочникМенеджер".to_string(), sig);
+        index.add_platform_method(TypeId::new("СправочникМенеджер"), sig);
 
         // Поиск по точному имени (базовый тип) - должен найти
         let found_exact = index.find_method("СправочникМенеджер", "СоздатьЭлемент");
@@ -416,7 +417,7 @@ mod tests {
             ContextRequirements::default(),
         );
 
-        index.add_platform_method("ДокументОбъект".to_string(), sig);
+        index.add_platform_method(TypeId::new("ДокументОбъект"), sig);
 
         // Поиск через конкретизированный тип
         let found = index.find_method("ДокументОбъект.ЗаказКлиента", "Провести");
@@ -438,7 +439,7 @@ mod tests {
             ContextRequirements::default(),
         );
 
-        index.add_platform_method("Массив".to_string(), sig);
+        index.add_platform_method(TypeId::new("Массив"), sig);
 
         // Обычный поиск по не-фасетному типу должен работать как раньше
         let found = index.find_method("Массив", "Добавить");
@@ -920,7 +921,7 @@ mod tests {
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method("СправочникМенеджер".to_string(), sig_no_return);
+        index.add_platform_method(TypeId::new("СправочникМенеджер"), sig_no_return);
 
         // Добавляем метод С return_type (как из platform_types.rs)
         let sig_with_return = MethodSignature::new(
@@ -932,7 +933,7 @@ mod tests {
             Some(FacetKind::Reference),
             ContextRequirements::ServerOnly,
         );
-        index.add_platform_method("СправочникМенеджер".to_string(), sig_with_return);
+        index.add_platform_method(TypeId::new("СправочникМенеджер"), sig_with_return);
 
         // Проверяем что метод обновился
         let found = index.find_method("СправочникМенеджер", "НайтиПоКоду");
@@ -959,7 +960,7 @@ mod tests {
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method("Массив".to_string(), sig_with_return);
+        index.add_platform_method(TypeId::new("Массив"), sig_with_return);
 
         // Добавляем метод с ДРУГИМ return_type
         let sig_different_return = MethodSignature::new(
@@ -971,7 +972,7 @@ mod tests {
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method("Массив".to_string(), sig_different_return);
+        index.add_platform_method(TypeId::new("Массив"), sig_different_return);
 
         // Проверяем что оригинальный return_type сохранился
         let found = index.find_method("Массив", "Добавить");
@@ -994,7 +995,7 @@ mod tests {
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method("Массив".to_string(), sig_no_params);
+        index.add_platform_method(TypeId::new("Массив"), sig_no_params);
 
         // Добавляем метод С параметрами
         let param = ParameterInfo {
@@ -1013,7 +1014,7 @@ mod tests {
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method("Массив".to_string(), sig_with_params);
+        index.add_platform_method(TypeId::new("Массив"), sig_with_params);
 
         // Проверяем что параметры обновились
         let found = index.find_method("Массив", "Вставить");
@@ -1039,7 +1040,7 @@ mod tests {
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method("СправочникМенеджер".to_string(), sig_syntax_helper);
+        index.add_platform_method(TypeId::new("СправочникМенеджер"), sig_syntax_helper);
 
         // Шаг 2: platform_types добавляет тот же метод С return_type
         let sig_platform_types = MethodSignature::new(
@@ -1051,7 +1052,7 @@ mod tests {
             Some(FacetKind::Object),
             ContextRequirements::ServerOnly,
         );
-        index.add_platform_method("СправочникМенеджер".to_string(), sig_platform_types);
+        index.add_platform_method(TypeId::new("СправочникМенеджер"), sig_platform_types);
 
         // Проверяем результат merge
         let found = index.find_method("СправочникМенеджер", "СоздатьЭлемент");
@@ -1090,7 +1091,7 @@ mod tests {
             Some(FacetKind::Reference),
             ContextRequirements::ServerOnly,
         );
-        index.add_platform_method("СправочникМенеджер".to_string(), sig_platform_types);
+        index.add_platform_method(TypeId::new("СправочникМенеджер"), sig_platform_types);
 
         // Шаг 2: syntax_helper ВТОРЫМ добавляет тот же метод БЕЗ return_type
         let sig_syntax_helper = MethodSignature::new(
@@ -1102,7 +1103,7 @@ mod tests {
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method("СправочникМенеджер".to_string(), sig_syntax_helper);
+        index.add_platform_method(TypeId::new("СправочникМенеджер"), sig_syntax_helper);
 
         // Проверяем что оригинальный return_type сохранился
         let found = index.find_method("СправочникМенеджер", "НайтиПоКоду");
@@ -1141,7 +1142,7 @@ mod tests {
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method("Массив".to_string(), sig_first);
+        index.add_platform_method(TypeId::new("Массив"), sig_first);
 
         // Второй источник: return_type = "Строка" (конфликт!)
         let sig_second = MethodSignature::new(
@@ -1153,7 +1154,7 @@ mod tests {
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method("Массив".to_string(), sig_second);
+        index.add_platform_method(TypeId::new("Массив"), sig_second);
 
         // Первый return_type должен сохраниться
         let found = index.find_method("Массив", "Количество");
@@ -1180,7 +1181,7 @@ mod tests {
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method("Массив".to_string(), sig_lower);
+        index.add_platform_method(TypeId::new("Массив"), sig_lower);
 
         // Второй: имя в смешанном регистре с return_type
         let sig_mixed = MethodSignature::new(
@@ -1192,7 +1193,7 @@ mod tests {
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method("Массив".to_string(), sig_mixed);
+        index.add_platform_method(TypeId::new("Массив"), sig_mixed);
 
         // Проверяем что merge произошёл (поиск в любом регистре)
         let found_lower = index.find_method("Массив", "добавить");

@@ -3,6 +3,7 @@
 //! Анализатор для построения flow-sensitive типизации из AST
 
 use std::sync::Arc;
+use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::{FlowAnalysisContext, ControlFlowGraph, CfgNode, CfgNodeKind, EdgeKind};
 use bsl_shared::domain::TypeResolver;
 use bsl_shared::domain::types::TypeResolution;
@@ -384,8 +385,8 @@ pub struct FlowAnalysisResult {
     /// Граф потока управления
     pub cfg: ControlFlowGraph,
 
-    /// Типы переменных на выходе
-    pub variables: std::collections::HashMap<String, TypeResolution>,
+    /// Типы переменных на выходе (ключ: TypeId для регистронезависимого поиска)
+    pub variables: std::collections::HashMap<TypeId, TypeResolution>,
 }
 
 #[cfg(test)]
@@ -410,7 +411,7 @@ mod tests {
         };
 
         let result = analyzer.analyze_program(&program);
-        assert!(result.variables.contains_key("x"));
+        assert!(result.variables.contains_key(&TypeId::new("x")));
     }
 
     #[test]
@@ -440,10 +441,10 @@ mod tests {
         };
 
         let result = analyzer.analyze_program(&program);
-        assert!(result.variables.contains_key("x"));
+        assert!(result.variables.contains_key(&TypeId::new("x")));
 
         // Должен быть union type (Строка | Число)
-        if let Some(x_type) = result.variables.get("x") {
+        if let Some(x_type) = result.variables.get(&TypeId::new("x")) {
             assert!(matches!(x_type.result, crate::domain::types::ResolutionResult::Union(_)));
         }
     }

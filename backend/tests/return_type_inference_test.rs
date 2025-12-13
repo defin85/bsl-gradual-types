@@ -8,7 +8,7 @@ use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::{
     ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
 };
-use bsl_shared::domain::types::TypeResolution;
+use bsl_shared::domain::type_id::TypeId;
 use std::sync::Arc;
 
 /// Helper функция - создаёт TypeRepository
@@ -22,7 +22,7 @@ fn create_test_signature_index_with_methods() -> SignatureIndex {
 
     // Метод Массив.Количество() -> "Число"
     sig_idx.add_platform_method(
-        "Массив".to_string(),
+        TypeId::new("Массив"),
         MethodSignature::new(
             "Количество".to_string(),
             Some("Массив".to_string()),
@@ -36,7 +36,7 @@ fn create_test_signature_index_with_methods() -> SignatureIndex {
 
     // Метод ТаблицаЗначений.Количество() -> "Число"
     sig_idx.add_platform_method(
-        "ТаблицаЗначений".to_string(),
+        TypeId::new("ТаблицаЗначений"),
         MethodSignature::new(
             "Количество".to_string(),
             Some("ТаблицаЗначений".to_string()),
@@ -50,7 +50,7 @@ fn create_test_signature_index_with_methods() -> SignatureIndex {
 
     // Глобальная функция ТипЗнч() -> "Тип"
     sig_idx.add_global_function(
-        "ТипЗнч".to_string(),
+        TypeId::new("ТипЗнч"),
         MethodSignature::new(
             "ТипЗнч".to_string(),
             None,
@@ -64,7 +64,7 @@ fn create_test_signature_index_with_methods() -> SignatureIndex {
 
     // Void метод (процедура) Сообщить() -> None
     sig_idx.add_global_function(
-        "Сообщить".to_string(),
+        TypeId::new("Сообщить"),
         MethodSignature::new(
             "Сообщить".to_string(),
             None,

@@ -2,6 +2,7 @@
 //!
 //! Базовая реализация flow-sensitive анализа для текущей структуры AST
 
+use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::{FlowAnalysisContext, TypeResolver};
 use std::collections::HashMap;
@@ -126,8 +127,8 @@ impl SimpleFlowAnalyzer {
 /// Результат упрощённого flow-анализа
 #[derive(Debug, Clone)]
 pub struct FlowAnalysisResult {
-    /// Типы переменных
-    pub variables: HashMap<String, TypeResolution>,
+    /// Типы переменных (ключ: TypeId для регистронезависимого поиска)
+    pub variables: HashMap<TypeId, TypeResolution>,
 
     /// Контекст flow-анализа
     pub context: FlowAnalysisContext,
@@ -152,18 +153,18 @@ mod tests {
 
         let result = analyzer.analyze_code(code);
 
-        assert!(result.variables.contains_key("x"));
-        assert!(result.variables.contains_key("y"));
+        assert!(result.variables.contains_key(&TypeId::new("x")));
+        assert!(result.variables.contains_key(&TypeId::new("y")));
 
         // Проверяем тип x (Число)
-        if let Some(x_type) = result.variables.get("x") {
+        if let Some(x_type) = result.variables.get(&TypeId::new("x")) {
             if let ResolutionResult::Concrete(ConcreteType::Platform(pt)) = &x_type.result {
                 assert_eq!(pt.name, "Число");
             }
         }
 
         // Проверяем тип y (Строка)
-        if let Some(y_type) = result.variables.get("y") {
+        if let Some(y_type) = result.variables.get(&TypeId::new("y")) {
             if let ResolutionResult::Concrete(ConcreteType::Platform(pt)) = &y_type.result {
                 assert_eq!(pt.name, "Строка");
             }
@@ -182,9 +183,9 @@ mod tests {
 
         let result = analyzer.analyze_code(code);
 
-        assert!(result.variables.contains_key("массив"));
+        assert!(result.variables.contains_key(&TypeId::new("массив")));
 
-        if let Some(arr_type) = result.variables.get("массив") {
+        if let Some(arr_type) = result.variables.get(&TypeId::new("массив")) {
             if let ResolutionResult::Concrete(ConcreteType::Platform(pt)) = &arr_type.result {
                 assert_eq!(pt.name, "Массив");
             }

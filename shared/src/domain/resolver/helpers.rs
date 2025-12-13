@@ -2,16 +2,12 @@
 //!
 //! Вспомогательные функции для резолюции типов
 
+use crate::domain::type_id::normalize;
 use crate::domain::types::{ConcreteType, GenericType, WeightedType};
 
 /// Case-insensitive сравнение строк (работает с кириллицей и латиницей)
 pub fn names_equal_ignore_case(a: &str, b: &str) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.chars()
-        .zip(b.chars())
-        .all(|(ca, cb)| ca.to_lowercase().eq(cb.to_lowercase()))
+    normalize(a) == normalize(b)
 }
 
 /// Проверка совместимости типов для валидации параметров

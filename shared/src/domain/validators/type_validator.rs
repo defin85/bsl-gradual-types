@@ -6,6 +6,7 @@
 //! 3. Treating simple types as collections
 
 use crate::domain::metadata_lookup::TypeMetadataLookup;
+use crate::domain::resolver::names_equal_ignore_case;
 use crate::domain::types::{
     ConcreteType, MetadataKind, SpecialType, TypeResolution, UncertaintyReason,
 };
@@ -33,8 +34,8 @@ impl<'a> TypeValidator<'a> {
 
         // Проверяем есть ли метод с таким именем (case-insensitive для кириллицы и латиницы)
         let method_exists = methods.iter().any(|m| {
-            Self::names_equal_ignore_case(&m.name, method_name)
-                || Self::names_equal_ignore_case(&m.english_name, method_name)
+            names_equal_ignore_case(&m.name, method_name)
+                || names_equal_ignore_case(&m.english_name, method_name)
         });
 
         if !method_exists {
@@ -68,8 +69,8 @@ impl<'a> TypeValidator<'a> {
         );
 
         let method_exists = methods.iter().any(|m| {
-            Self::names_equal_ignore_case(&m.name, method_name)
-                || Self::names_equal_ignore_case(&m.english_name, method_name)
+            names_equal_ignore_case(&m.name, method_name)
+                || names_equal_ignore_case(&m.english_name, method_name)
         });
 
         if !method_exists {
@@ -101,7 +102,7 @@ impl<'a> TypeValidator<'a> {
         // Проверяем есть ли свойство с таким именем (case-insensitive)
         let property_exists = properties
             .iter()
-            .any(|p| Self::names_equal_ignore_case(&p.name, property_name));
+            .any(|p| names_equal_ignore_case(&p.name, property_name));
 
         if !property_exists {
             let type_name = Self::resolution_to_string(object_resolution);
@@ -126,7 +127,7 @@ impl<'a> TypeValidator<'a> {
 
         let property_exists = properties
             .iter()
-            .any(|p| Self::names_equal_ignore_case(&p.name, property_name));
+            .any(|p| names_equal_ignore_case(&p.name, property_name));
 
         if !property_exists {
             let type_name = Self::resolution_to_string(object_resolution);
@@ -138,16 +139,6 @@ impl<'a> TypeValidator<'a> {
         } else {
             None
         }
-    }
-
-    /// Case-insensitive сравнение строк (работает с кириллицей и латиницей)
-    fn names_equal_ignore_case(a: &str, b: &str) -> bool {
-        if a.len() != b.len() {
-            return false;
-        }
-        a.chars()
-            .zip(b.chars())
-            .all(|(ca, cb)| ca.to_lowercase().eq(cb.to_lowercase()))
     }
 
     /// MILESTONE 3.16: Валидация существования объекта метаданных

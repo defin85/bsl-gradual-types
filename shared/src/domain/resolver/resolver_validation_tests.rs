@@ -5,6 +5,7 @@ use crate::domain::repository::InMemoryTypeRepository;
 use crate::domain::signature_index::{
     ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
 };
+use crate::domain::type_id::TypeId;
 use crate::domain::types::ParameterInfo;
 use std::sync::Arc;
 
@@ -31,7 +32,7 @@ fn test_validate_call_success() {
         ContextRequirements::default(),
     );
 
-    index.add_platform_method("Массив".to_string(), sig);
+    index.add_platform_method(TypeId::new("Массив"), sig);
 
     let result =
         resolver.validate_call(Some("Массив"), "Добавить", &["Строка".to_string()], &index);
@@ -61,7 +62,7 @@ fn test_validate_call_missing_param() {
         ContextRequirements::default(),
     );
 
-    index.add_platform_method("ТестТип".to_string(), sig);
+    index.add_platform_method(TypeId::new("ТестТип"), sig);
 
     let result = resolver.validate_call(
         Some("ТестТип"),
@@ -104,7 +105,7 @@ fn test_validate_call_too_many_args() {
         ContextRequirements::default(),
     );
 
-    index.add_platform_method("Тип".to_string(), sig);
+    index.add_platform_method(TypeId::new("Тип"), sig);
 
     let result = resolver.validate_call(
         Some("Тип"),
@@ -164,7 +165,7 @@ fn test_validate_call_optional_params() {
         ContextRequirements::default(),
     );
 
-    index.add_platform_method("Тип".to_string(), sig);
+    index.add_platform_method(TypeId::new("Тип"), sig);
 
     // Вызов только с обязательным параметром
     let result = resolver.validate_call(Some("Тип"), "Метод", &["Строка".to_string()], &index);
@@ -205,7 +206,7 @@ fn test_validate_call_global_function() {
         ContextRequirements::default(),
     );
 
-    index.add_global_function("Сообщить".to_string(), sig);
+    index.add_global_function(TypeId::new("Сообщить"), sig);
 
     let result = resolver.validate_call(
         None, // None для глобальных функций
@@ -233,7 +234,7 @@ fn test_validate_call_case_insensitive() {
         ContextRequirements::default(),
     );
 
-    index.add_platform_method("Массив".to_string(), sig);
+    index.add_platform_method(TypeId::new("Массив"), sig);
 
     // Разные регистры должны работать благодаря SignatureIndex
     let result = resolver.validate_call(Some("Массив"), "добавить", &[], &index);
@@ -279,7 +280,7 @@ fn test_validate_call_type_mismatch() {
         ContextRequirements::default(),
     );
 
-    index.add_platform_method("Массив".to_string(), sig);
+    index.add_platform_method(TypeId::new("Массив"), sig);
 
     // ❌ Передаём Строка вместо Число
     let result = resolver.validate_call(
@@ -325,7 +326,7 @@ fn test_validate_call_gradual_typing() {
         ContextRequirements::default(),
     );
 
-    index.add_platform_method("Тип".to_string(), sig);
+    index.add_platform_method(TypeId::new("Тип"), sig);
 
     // ✅ Gradual typing: Unknown совместим со Строка
     let result = resolver.validate_call(
@@ -381,7 +382,7 @@ fn test_validate_call_proizvol_parameter_accepts_all() {
         ContextRequirements::default(),
     );
 
-    index.add_platform_method("Массив".to_string(), sig);
+    index.add_platform_method(TypeId::new("Массив"), sig);
 
     // ✅ Произвольный принимает Строка
     let result = resolver.validate_call(
@@ -436,7 +437,7 @@ fn test_validate_call_case_insensitive_types() {
         ContextRequirements::default(),
     );
 
-    index.add_platform_method("Тип".to_string(), sig);
+    index.add_platform_method(TypeId::new("Тип"), sig);
 
     // ✅ Case-insensitive: строка == Строка
     let result = resolver.validate_call(

@@ -6,6 +6,7 @@
 //! - Предупреждения о потенциальных NPE
 
 use crate::domain::flow_analysis::*;
+use crate::domain::type_id::TypeId;
 use std::collections::{HashMap, HashSet};
 
 /// Null safety analyzer
@@ -13,9 +14,9 @@ pub struct NullSafetyAnalyzer {
     /// CFG для анализа потока управления
     cfg: ControlFlowGraph,
     /// Nullable переменные в каждом узле CFG
-    nullable_vars: HashMap<usize, HashSet<String>>,
+    nullable_vars: HashMap<usize, HashSet<TypeId>>,
     /// Non-null переменные после проверок
-    non_null_vars: HashMap<usize, HashSet<String>>,
+    non_null_vars: HashMap<usize, HashSet<TypeId>>,
 }
 
 /// Результат null safety анализа
@@ -75,7 +76,7 @@ impl NullSafetyAnalyzer {
                             self.nullable_vars
                                 .entry(node_id)
                                 .or_default()
-                                .insert(variable.clone());
+                                .insert(TypeId::new(variable));
                         }
                     }
                 }
@@ -138,14 +139,15 @@ impl NullSafetyAnalyzer {
 
     /// Проверить, является ли переменная nullable в данном узле
     pub fn is_nullable_at(&self, node_id: usize, variable: &str) -> bool {
+        let type_id = TypeId::new(variable);
         if let Some(non_null) = self.non_null_vars.get(&node_id) {
-            if non_null.contains(variable) {
+            if non_null.contains(&type_id) {
                 return false; // Явно проверено на non-null
             }
         }
 
         if let Some(nullable) = self.nullable_vars.get(&node_id) {
-            nullable.contains(variable)
+            nullable.contains(&type_id)
         } else {
             false
         }
@@ -174,7 +176,7 @@ impl NullSafetyAnalyzer {
                 self.non_null_vars
                     .entry(edge.to)
                     .or_default()
-                    .insert(variable.to_string());
+                    .insert(TypeId::new(variable));
 
                 // Рекурсивно для всех последующих узлов в then-ветке
                 self.propagate_non_null(edge.to, variable);
@@ -207,7 +209,7 @@ impl NullSafetyAnalyzer {
             self.non_null_vars
                 .entry(successor)
                 .or_default()
-                .insert(variable.to_string());
+                .insert(TypeId::new(variable));
 
             // Рекурсивно
             self.propagate_non_null(successor, variable);
@@ -222,8 +224,9 @@ impl NullSafetyAnalyzer {
         context: &FlowAnalysisContext,
     ) -> bool {
         // Если явно помечена как non-null, то безопасно
+        let type_id = TypeId::new(variable);
         if let Some(non_null) = self.non_null_vars.get(&node_id) {
-            if non_null.contains(variable) {
+            if non_null.contains(&type_id) {
                 return false;
             }
         }
@@ -301,7 +304,7 @@ mod tests {
 
         // x = Null → nullable
         context.set_variable(
-            "x".to_string(),
+            "x",
             TypeResolution {
                 result: ResolutionResult::nullable(ConcreteType::string()),
                 certainty: Certainty::Known,
@@ -351,7 +354,7 @@ mod tests {
         let mut context = FlowAnalysisContext::new();
 
         context.set_variable(
-            "x".to_string(),
+            "x",
             TypeResolution {
                 result: ResolutionResult::nullable(ConcreteType::string()),
                 certainty: Certainty::Known,
@@ -404,7 +407,7 @@ mod tests {
 
         // x = "строка" → не nullable
         context.set_variable(
-            "x".to_string(),
+            "x",
             TypeResolution {
                 result: ResolutionResult::Concrete(ConcreteType::string()),
                 certainty: Certainty::Known,
@@ -439,7 +442,7 @@ mod tests {
         let mut context = FlowAnalysisContext::new();
 
         context.set_variable(
-            "obj".to_string(),
+            "obj",
             TypeResolution {
                 result: ResolutionResult::nullable(ConcreteType::Platform(PlatformType {
                     name: "Объект".to_string(),

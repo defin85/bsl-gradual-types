@@ -5,12 +5,13 @@
 //! - `map.Вставить("ключ", 123)` → `Соответствие<Строка, Число>`
 
 use crate::domain::types::*;
+use crate::domain::type_id::TypeId;
 use std::collections::HashMap;
 
 /// Generic type inference engine
 pub struct GenericInference {
     /// Отслеживание типов для переменных
-    variable_types: HashMap<String, GenericTypeInfo>,
+    variable_types: HashMap<TypeId, GenericTypeInfo>,
 }
 
 /// Информация о выведенном Generic типе
@@ -64,7 +65,7 @@ impl GenericInference {
 
         // Сохраняем информацию о типе
         self.variable_types.insert(
-            variable_name.to_string(),
+            TypeId::new(variable_name),
             GenericTypeInfo {
                 base_type: base_type.clone(),
                 inferred_params: type_params.clone(),
@@ -80,7 +81,7 @@ impl GenericInference {
 
     /// Получить выведенный тип переменной
     pub fn get_variable_type(&self, variable_name: &str) -> Option<&GenericTypeInfo> {
-        self.variable_types.get(variable_name)
+        self.variable_types.get(&TypeId::new(variable_name))
     }
 
     /// Обновить вывод типа на основе новой информации
@@ -90,7 +91,7 @@ impl GenericInference {
         new_param: ConcreteType,
         param_index: usize,
     ) {
-        if let Some(info) = self.variable_types.get_mut(variable_name) {
+        if let Some(info) = self.variable_types.get_mut(&TypeId::new(variable_name)) {
             if param_index < info.inferred_params.len() {
                 // Если типы разные, создаём Union
                 let existing = &info.inferred_params[param_index];

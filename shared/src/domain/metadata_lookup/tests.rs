@@ -2,6 +2,7 @@
 
 use super::TypeMetadataLookup;
 use crate::domain::repository::{InMemoryTypeRepository, TypeRepository};
+use crate::domain::type_id::TypeId;
 use crate::domain::types::{
     Certainty, ConcreteType, ConfigurationType, FacetKind, GenericType, MetadataKind,
     PlatformType, RawAttributeData, RawDataSource, RawMethodData, RawParamData,
@@ -606,7 +607,7 @@ fn test_get_methods_prefers_signature_index() {
             Some(FacetKind::Reference),
             ContextRequirements::Universal,
         );
-        index.add_platform_method("СправочникМенеджер".to_string(), sig);
+        index.add_platform_method(TypeId::new("СправочникМенеджер"), sig);
     });
 
     // 3. Проверяем через TypeMetadataLookup

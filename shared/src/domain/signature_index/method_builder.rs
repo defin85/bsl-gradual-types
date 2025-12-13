@@ -1,0 +1,554 @@
+//! Fluent builder для добавления методов в SignatureIndex
+//!
+//! Упрощает создание MethodSignature через цепочку вызовов вместо verbose конструкторов.
+//!
+//! # Example
+//! ```ignore
+//! use bsl_shared::domain::signature_index::MethodBuilder;
+//! use bsl_shared::domain::type_id::TypeId;
+//!
+//! let type_id = TypeId::new("ТабличнаяЧасть");
+//! let mut index = SignatureIndex::new();
+//!
+//! MethodBuilder::for_type(&type_id)
+//!     .method("Добавить")
+//!     .returns("СтрокаТабличнойЧасти")
+//!     .add_to(&mut index);
+//!
+//! // С параметрами:
+//! MethodBuilder::for_type(&type_id)
+//!     .method("Выгрузить")
+//!     .returns("ТаблицаЗначений")
+//!     .param("СписокКолонок", "Строка").optional().desc("Список колонок")
+//!     .param("ОтборСтрок", "Структура").optional().desc("Условия отбора")
+//!     .add_to(&mut index);
+//!
+//! // Void метод:
+//! MethodBuilder::for_type(&type_id)
+//!     .method("Очистить")
+//!     .void()
+//!     .add_to(&mut index);
+//! ```
+
+use super::super::runtime_context::ContextRequirements;
+use super::super::type_id::TypeId;
+use super::super::types::{FacetKind, ParameterInfo};
+use super::method::MethodSignature;
+use super::types::SignatureSource;
+use super::SignatureIndex;
+
+/// Builder для создания MethodSignature с fluent API
+///
+/// Параметры по умолчанию:
+/// - source: Platform
+/// - context: Universal
+/// - return_facet: None
+/// - params: required (не optional)
+pub struct MethodBuilder {
+    type_id: TypeId,
+    method_name: String,
+    return_type: Option<String>,
+    params: Vec<ParameterInfo>,
+    return_facet: Option<FacetKind>,
+    context: ContextRequirements,
+    source: SignatureSource,
+}
+
+/// Builder для параметра метода
+///
+/// Создается через `MethodBuilder::param()`.
+/// По умолчанию параметр обязательный (required).
+/// Возвращает MethodBuilder через методы настройки (ownership transfer pattern).
+pub struct ParamBuilder {
+    builder: MethodBuilder,
+    param_index: usize,
+}
+
+impl MethodBuilder {
+    /// Создать builder для указанного типа
+    ///
+    /// # Example
+    /// ```ignore
+    /// let builder = MethodBuilder::for_type(&TypeId::new("Массив"));
+    /// ```
+    pub fn for_type(type_id: &TypeId) -> Self {
+        Self {
+            type_id: type_id.clone(),
+            method_name: String::new(),
+            return_type: None,
+            params: Vec::new(),
+            return_facet: None,
+            context: ContextRequirements::Universal,
+            source: SignatureSource::Platform,
+        }
+    }
+
+    /// Установить имя метода
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.method("Добавить")
+    /// ```
+    pub fn method(mut self, name: &str) -> Self {
+        self.method_name = name.to_string();
+        self
+    }
+
+    /// Установить тип возвращаемого значения
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.returns("ТаблицаЗначений")
+    /// ```
+    pub fn returns(mut self, type_name: &str) -> Self {
+        self.return_type = Some(type_name.to_string());
+        self
+    }
+
+    /// Пометить метод как void (без возвращаемого значения)
+    ///
+    /// Эквивалентно процедуре в 1С.
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.void()
+    /// ```
+    pub fn void(mut self) -> Self {
+        self.return_type = None;
+        self
+    }
+
+    /// Добавить параметр и вернуть ParamBuilder для настройки
+    ///
+    /// По умолчанию параметр обязательный (required).
+    /// ParamBuilder возвращает MethodBuilder через ownership transfer.
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.param("Индекс", "Число").required().desc("Индекс элемента")
+    /// ```
+    pub fn param(mut self, name: &str, type_name: &str) -> ParamBuilder {
+        let param = ParameterInfo {
+            name: name.to_string(),
+            type_name: Some(type_name.to_string()),
+            is_optional: false, // По умолчанию required
+            default_value: None,
+            description: None,
+        };
+        self.params.push(param);
+        let index = self.params.len() - 1;
+        ParamBuilder {
+            builder: self,
+            param_index: index,
+        }
+    }
+
+    /// Добавить параметр без типа (произвольный тип)
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.param_any("Значение").required().desc("Любое значение")
+    /// ```
+    pub fn param_any(mut self, name: &str) -> ParamBuilder {
+        let param = ParameterInfo {
+            name: name.to_string(),
+            type_name: None, // Произвольный тип
+            is_optional: false,
+            default_value: None,
+            description: None,
+        };
+        self.params.push(param);
+        let index = self.params.len() - 1;
+        ParamBuilder {
+            builder: self,
+            param_index: index,
+        }
+    }
+
+    /// Установить facet возвращаемого типа
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.facet(FacetKind::Object)
+    /// ```
+    pub fn facet(mut self, facet: FacetKind) -> Self {
+        self.return_facet = Some(facet);
+        self
+    }
+
+    /// Установить требования к контексту выполнения
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.context(ContextRequirements::ServerOnly)
+    /// ```
+    pub fn context(mut self, context: ContextRequirements) -> Self {
+        self.context = context;
+        self
+    }
+
+    /// Установить источник сигнатуры
+    ///
+    /// По умолчанию: Platform
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.source(SignatureSource::Configuration)
+    /// ```
+    pub fn source(mut self, source: SignatureSource) -> Self {
+        self.source = source;
+        self
+    }
+
+    /// Добавить метод в SignatureIndex
+    ///
+    /// Финальный метод цепочки. Создает MethodSignature и добавляет в индекс.
+    ///
+    /// # Panics
+    /// Если имя метода не установлено (пустая строка).
+    ///
+    /// # Example
+    /// ```ignore
+    /// MethodBuilder::for_type(&type_id)
+    ///     .method("Добавить")
+    ///     .returns("СтрокаТабличнойЧасти")
+    ///     .add_to(&mut index);
+    /// ```
+    pub fn add_to(self, index: &mut SignatureIndex) {
+        assert!(
+            !self.method_name.is_empty(),
+            "Method name must be set before calling add_to()"
+        );
+
+        let signature = MethodSignature::new(
+            self.method_name,
+            Some(self.type_id.to_string()),
+            self.params,
+            self.return_type,
+            self.source,
+            self.return_facet,
+            self.context,
+        );
+
+        index.add_platform_method(self.type_id, signature);
+    }
+
+    /// Построить MethodSignature без добавления в индекс
+    ///
+    /// Полезно для тестирования или создания standalone сигнатур.
+    ///
+    /// # Panics
+    /// Если имя метода не установлено (пустая строка).
+    pub fn build(self) -> (TypeId, MethodSignature) {
+        assert!(
+            !self.method_name.is_empty(),
+            "Method name must be set before calling build()"
+        );
+
+        let signature = MethodSignature::new(
+            self.method_name,
+            Some(self.type_id.to_string()),
+            self.params,
+            self.return_type,
+            self.source,
+            self.return_facet,
+            self.context,
+        );
+
+        (self.type_id, signature)
+    }
+}
+
+impl ParamBuilder {
+    /// Пометить параметр как опциональный
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.param("Колонки", "Строка").optional()
+    /// ```
+    pub fn optional(mut self) -> Self {
+        self.builder.params[self.param_index].is_optional = true;
+        self
+    }
+
+    /// Пометить параметр как обязательный (по умолчанию)
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.param("Значение", "Строка").required()
+    /// ```
+    pub fn required(mut self) -> Self {
+        self.builder.params[self.param_index].is_optional = false;
+        self
+    }
+
+    /// Установить описание параметра
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.param("Индекс", "Число").desc("Индекс элемента")
+    /// ```
+    pub fn desc(mut self, description: &str) -> Self {
+        self.builder.params[self.param_index].description = Some(description.to_string());
+        self
+    }
+
+    /// Установить значение по умолчанию
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.param("Размер", "Число").default_value("0")
+    /// ```
+    pub fn default_value(mut self, value: &str) -> Self {
+        self.builder.params[self.param_index].default_value = Some(value.to_string());
+        self
+    }
+
+    // ==================== Forwarding методы к MethodBuilder ====================
+
+    /// Добавить ещё один параметр
+    pub fn param(self, name: &str, type_name: &str) -> ParamBuilder {
+        self.builder.param(name, type_name)
+    }
+
+    /// Добавить параметр без типа (произвольный тип)
+    pub fn param_any(self, name: &str) -> ParamBuilder {
+        self.builder.param_any(name)
+    }
+
+    /// Установить facet возвращаемого типа
+    pub fn facet(self, facet: FacetKind) -> MethodBuilder {
+        self.builder.facet(facet)
+    }
+
+    /// Установить требования к контексту выполнения
+    pub fn context(self, context: ContextRequirements) -> MethodBuilder {
+        self.builder.context(context)
+    }
+
+    /// Установить источник сигнатуры
+    pub fn source(self, source: SignatureSource) -> MethodBuilder {
+        self.builder.source(source)
+    }
+
+    /// Добавить метод в SignatureIndex (финальный метод)
+    pub fn add_to(self, index: &mut SignatureIndex) {
+        self.builder.add_to(index);
+    }
+
+    /// Построить MethodSignature без добавления в индекс
+    pub fn build(self) -> (TypeId, MethodSignature) {
+        self.builder.build()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_simple_method_without_params() {
+        let type_id = TypeId::new("ТестТип");
+        let mut index = SignatureIndex::new();
+
+        MethodBuilder::for_type(&type_id)
+            .method("Метод1")
+            .returns("Строка")
+            .add_to(&mut index);
+
+        let method = index.find_method("ТестТип", "Метод1");
+        assert!(method.is_some(), "Метод должен быть найден");
+
+        let found = method.unwrap();
+        assert_eq!(found.name, "Метод1");
+        assert_eq!(found.return_type, Some("Строка".to_string()));
+        assert!(found.params.is_empty());
+    }
+
+    #[test]
+    fn test_void_method() {
+        let type_id = TypeId::new("ТестТип");
+        let mut index = SignatureIndex::new();
+
+        MethodBuilder::for_type(&type_id)
+            .method("Очистить")
+            .void()
+            .add_to(&mut index);
+
+        let method = index.find_method("ТестТип", "Очистить");
+        assert!(method.is_some());
+
+        let found = method.unwrap();
+        assert_eq!(found.name, "Очистить");
+        assert_eq!(found.return_type, None);
+    }
+
+    #[test]
+    fn test_method_with_required_param() {
+        let type_id = TypeId::new("ТестТип");
+        let mut index = SignatureIndex::new();
+
+        MethodBuilder::for_type(&type_id)
+            .method("Получить")
+            .returns("Значение")
+            .param("Индекс", "Число")
+            .required()
+            .desc("Индекс элемента")
+            .add_to(&mut index);
+
+        let method = index.find_method("ТестТип", "Получить").unwrap();
+        assert_eq!(method.params.len(), 1);
+
+        let param = &method.params[0];
+        assert_eq!(param.name, "Индекс");
+        assert_eq!(param.type_name, Some("Число".to_string()));
+        assert!(!param.is_optional);
+        assert_eq!(param.description, Some("Индекс элемента".to_string()));
+    }
+
+    #[test]
+    fn test_method_with_optional_params() {
+        let type_id = TypeId::new("ТестТип");
+        let mut index = SignatureIndex::new();
+
+        MethodBuilder::for_type(&type_id)
+            .method("Выгрузить")
+            .returns("ТаблицаЗначений")
+            .param("Колонки", "Строка")
+            .optional()
+            .desc("Список колонок")
+            .param("Отбор", "Структура")
+            .optional()
+            .desc("Условия отбора")
+            .add_to(&mut index);
+
+        let method = index.find_method("ТестТип", "Выгрузить").unwrap();
+        assert_eq!(method.params.len(), 2);
+        assert_eq!(method.return_type, Some("ТаблицаЗначений".to_string()));
+
+        assert!(method.params[0].is_optional);
+        assert!(method.params[1].is_optional);
+        assert_eq!(method.params[0].name, "Колонки");
+        assert_eq!(method.params[1].name, "Отбор");
+    }
+
+    #[test]
+    fn test_method_with_mixed_params() {
+        let type_id = TypeId::new("ТестТип");
+        let mut index = SignatureIndex::new();
+
+        MethodBuilder::for_type(&type_id)
+            .method("Найти")
+            .returns("СтрокаТаблицы")
+            .param_any("Значение")
+            .required()
+            .desc("Искомое значение")
+            .param("Колонки", "Строка")
+            .optional()
+            .desc("Колонки для поиска")
+            .add_to(&mut index);
+
+        let method = index.find_method("ТестТип", "Найти").unwrap();
+        assert_eq!(method.params.len(), 2);
+
+        // Первый параметр - произвольный тип, обязательный
+        assert_eq!(method.params[0].type_name, None);
+        assert!(!method.params[0].is_optional);
+
+        // Второй параметр - строка, опциональный
+        assert_eq!(method.params[1].type_name, Some("Строка".to_string()));
+        assert!(method.params[1].is_optional);
+    }
+
+    #[test]
+    fn test_method_with_facet() {
+        let type_id = TypeId::new("СправочникМенеджер");
+        let mut index = SignatureIndex::new();
+
+        MethodBuilder::for_type(&type_id)
+            .method("СоздатьЭлемент")
+            .returns("СправочникОбъект")
+            .facet(FacetKind::Object)
+            .context(ContextRequirements::ServerOnly)
+            .add_to(&mut index);
+
+        let method = index.find_method("СправочникМенеджер", "СоздатьЭлемент").unwrap();
+        assert_eq!(method.return_facet, Some(FacetKind::Object));
+        assert_eq!(method.context_requirements, ContextRequirements::ServerOnly);
+    }
+
+    #[test]
+    fn test_build_without_adding_to_index() {
+        let type_id = TypeId::new("ТестТип");
+
+        let (built_type_id, signature) = MethodBuilder::for_type(&type_id)
+            .method("ТестМетод")
+            .returns("Число")
+            .build();
+
+        assert_eq!(built_type_id, type_id);
+        assert_eq!(signature.name, "ТестМетод");
+        assert_eq!(signature.return_type, Some("Число".to_string()));
+    }
+
+    #[test]
+    #[should_panic(expected = "Method name must be set")]
+    fn test_panic_without_method_name() {
+        let type_id = TypeId::new("ТестТип");
+        let mut index = SignatureIndex::new();
+
+        MethodBuilder::for_type(&type_id)
+            .returns("Строка")
+            .add_to(&mut index);
+    }
+
+    #[test]
+    fn test_default_values() {
+        let type_id = TypeId::new("ТестТип");
+        let mut index = SignatureIndex::new();
+
+        MethodBuilder::for_type(&type_id)
+            .method("Метод")
+            .returns("Число")
+            .param("Размер", "Число")
+            .default_value("10")
+            .add_to(&mut index);
+
+        let method = index.find_method("ТестТип", "Метод").unwrap();
+        assert_eq!(
+            method.params[0].default_value,
+            Some("10".to_string())
+        );
+    }
+
+    #[test]
+    fn test_chained_param_modifiers() {
+        let type_id = TypeId::new("ТестТип");
+        let mut index = SignatureIndex::new();
+
+        // Проверяем что можно вызывать несколько модификаторов подряд
+        MethodBuilder::for_type(&type_id)
+            .method("Тест")
+            .returns("Число")
+            .param("П1", "Строка")
+            .optional()
+            .desc("Описание 1")
+            .default_value("значение")
+            .param("П2", "Число")
+            .required()
+            .desc("Описание 2")
+            .add_to(&mut index);
+
+        let method = index.find_method("ТестТип", "Тест").unwrap();
+        assert_eq!(method.params.len(), 2);
+
+        let p1 = &method.params[0];
+        assert!(p1.is_optional);
+        assert_eq!(p1.description, Some("Описание 1".to_string()));
+        assert_eq!(p1.default_value, Some("значение".to_string()));
+
+        let p2 = &method.params[1];
+        assert!(!p2.is_optional);
+        assert_eq!(p2.description, Some("Описание 2".to_string()));
+    }
+}

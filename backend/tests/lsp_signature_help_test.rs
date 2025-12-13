@@ -15,6 +15,7 @@ mod lsp_signature_help_tests {
     use bsl_shared::domain::signature_index::{
         ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
     };
+    use bsl_shared::domain::type_id::TypeId;
     use bsl_shared::domain::types::ParameterInfo;
     use tower_lsp::lsp_types::Position;
 
@@ -465,7 +466,7 @@ mod lsp_signature_help_tests {
             ContextRequirements::default(),
         );
 
-        index.add_platform_method("Массив".to_string(), sig);
+        index.add_platform_method(TypeId::new("Массив"), sig);
 
         let found = index.find_method("Массив", "Добавить");
         assert!(found.is_some());
@@ -486,7 +487,7 @@ mod lsp_signature_help_tests {
             ContextRequirements::default(),
         );
 
-        index.add_platform_method("Массив".to_string(), sig);
+        index.add_platform_method(TypeId::new("Массив"), sig);
 
         assert!(index.find_method("Массив", "добавить").is_some());
         assert!(index.find_method("Массив", "ДОБАВИТЬ").is_some());
@@ -513,7 +514,7 @@ mod lsp_signature_help_tests {
             ContextRequirements::default(),
         );
 
-        index.add_global_function("Сообщить".to_string(), sig);
+        index.add_global_function(TypeId::new("Сообщить"), sig);
 
         let found = index.find_global_function("Сообщить");
         assert!(found.is_some());
@@ -534,7 +535,7 @@ mod lsp_signature_help_tests {
             ContextRequirements::default(),
         );
 
-        index.add_global_function("Сообщить".to_string(), sig);
+        index.add_global_function(TypeId::new("Сообщить"), sig);
 
         assert!(index.find_global_function("сообщить").is_some());
         assert!(index.find_global_function("СООБЩИТЬ").is_some());

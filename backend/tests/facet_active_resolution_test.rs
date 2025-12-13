@@ -13,8 +13,9 @@ use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::{
     ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
 };
-use bsl_shared::domain::{TypeResolver};
+use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::types::{FacetKind, TypeResolution};
+use bsl_shared::domain::TypeResolver;
 use bsl_shared::ir::ScopeId;
 use std::sync::Arc;
 
@@ -29,7 +30,7 @@ fn create_signature_index_with_facet_methods() -> SignatureIndex {
 
     // СправочникМенеджер.СоздатьЭлемент() → СправочникОбъект (Object facet)
     sig_idx.add_platform_method(
-        "СправочникМенеджер".to_string(),
+        TypeId::new("СправочникМенеджер"),
         MethodSignature::new(
             "СоздатьЭлемент".to_string(),
             Some("СправочникМенеджер".to_string()),
@@ -43,7 +44,7 @@ fn create_signature_index_with_facet_methods() -> SignatureIndex {
 
     // СправочникМенеджер.НайтиПоКоду() → СправочникСсылка (Reference facet)
     sig_idx.add_platform_method(
-        "СправочникМенеджер".to_string(),
+        TypeId::new("СправочникМенеджер"),
         MethodSignature::new(
             "НайтиПоКоду".to_string(),
             Some("СправочникМенеджер".to_string()),
@@ -57,7 +58,7 @@ fn create_signature_index_with_facet_methods() -> SignatureIndex {
 
     // СправочникМенеджер.Выбрать() → СправочникВыборка (Selection facet)
     sig_idx.add_platform_method(
-        "СправочникМенеджер".to_string(),
+        TypeId::new("СправочникМенеджер"),
         MethodSignature::new(
             "Выбрать".to_string(),
             Some("СправочникМенеджер".to_string()),
@@ -71,7 +72,7 @@ fn create_signature_index_with_facet_methods() -> SignatureIndex {
 
     // ДокументМенеджер.СоздатьДокумент() → ДокументОбъект (Object facet)
     sig_idx.add_platform_method(
-        "ДокументМенеджер".to_string(),
+        TypeId::new("ДокументМенеджер"),
         MethodSignature::new(
             "СоздатьДокумент".to_string(),
             Some("ДокументМенеджер".to_string()),
@@ -85,7 +86,7 @@ fn create_signature_index_with_facet_methods() -> SignatureIndex {
 
     // ДокументМенеджер.НайтиПоНомеру() → ДокументСсылка (Reference facet)
     sig_idx.add_platform_method(
-        "ДокументМенеджер".to_string(),
+        TypeId::new("ДокументМенеджер"),
         MethodSignature::new(
             "НайтиПоНомеру".to_string(),
             Some("ДокументМенеджер".to_string()),

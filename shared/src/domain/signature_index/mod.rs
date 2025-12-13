@@ -15,6 +15,7 @@
 mod facet_helpers;
 mod index;
 mod method;
+mod method_builder;
 #[cfg(test)]
 mod tests;
 mod types;
@@ -24,6 +25,7 @@ mod types;
 // Основные типы
 pub use index::SignatureIndex;
 pub use method::MethodSignature;
+pub use method_builder::MethodBuilder;
 pub use types::{ConstructorSignature, SignatureMismatch, SignatureSource, SignatureValidationResult};
 
 // ContextRequirements для обратной совместимости

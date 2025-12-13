@@ -4,6 +4,7 @@
 //! Milestone 3.x: Рефакторинг для предотвращения забытых источников.
 
 use super::signature_index::SignatureIndex;
+use super::type_id::TypeId;
 use super::types::RawTypeData;
 
 /// Источник данных для SignatureIndex
@@ -82,11 +83,12 @@ impl SignatureSourceRegistry {
                         continue;
                     }
                     let signature = raw_method_to_signature(method, &platform_type.name);
-                    index.add_platform_method(platform_type.name.clone(), signature.clone());
+                    let type_id = TypeId::new(&platform_type.name);
+                    index.add_platform_method(type_id, signature.clone());
 
                     // Также добавляем под базовым именем для фасетных типов с placeholder
                     if let Some(base_type) = super::facet_utils::extract_placeholder_base_type(&platform_type.name) {
-                        index.add_platform_method(base_type.to_string(), signature);
+                        index.add_platform_method(TypeId::new(base_type), signature);
                     }
                 }
             }

@@ -8,7 +8,7 @@ use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::{
     ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
 };
-use bsl_shared::domain::types::TypeResolution;
+use bsl_shared::domain::type_id::TypeId;
 use std::sync::Arc;
 
 fn create_test_repository() -> Arc<dyn TypeRepository> {
@@ -20,7 +20,7 @@ fn create_test_signature_index() -> SignatureIndex {
 
     // Массив.Количество() -> Число
     sig_idx.add_platform_method(
-        "Массив".to_string(),
+        TypeId::new("Массив"),
         MethodSignature::new(
             "Количество".to_string(),
             Some("Массив".to_string()),
@@ -34,7 +34,7 @@ fn create_test_signature_index() -> SignatureIndex {
 
     // ТаблицаЗначений.Количество() -> Число
     sig_idx.add_platform_method(
-        "ТаблицаЗначений".to_string(),
+        TypeId::new("ТаблицаЗначений"),
         MethodSignature::new(
             "Количество".to_string(),
             Some("ТаблицаЗначений".to_string()),
@@ -48,7 +48,7 @@ fn create_test_signature_index() -> SignatureIndex {
 
     // Строка.Длина() -> Число
     sig_idx.add_platform_method(
-        "Строка".to_string(),
+        TypeId::new("Строка"),
         MethodSignature::new(
             "Длина".to_string(),
             Some("Строка".to_string()),

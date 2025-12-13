@@ -10,9 +10,9 @@ use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::{
     ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
 };
+use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::types::FacetKind;
 use bsl_shared::ir::ScopeId;
-use bsl_shared::domain::types::TypeResolution;
 use std::sync::Arc;
 
 /// Helper функция - создаёт TypeRepository
@@ -27,7 +27,7 @@ fn create_catalog_signature_index() -> SignatureIndex {
     // СправочникМенеджер.СоздатьЭлемент() → СправочникОбъект
     // Методы хранятся под БАЗОВЫМ типом "СправочникМенеджер"
     sig_idx.add_platform_method(
-        "СправочникМенеджер".to_string(),
+        TypeId::new("СправочникМенеджер"),
         MethodSignature::new(
             "СоздатьЭлемент".to_string(),
             Some("СправочникМенеджер".to_string()),
@@ -41,7 +41,7 @@ fn create_catalog_signature_index() -> SignatureIndex {
 
     // СправочникМенеджер.НайтиПоКоду() → СправочникСсылка
     sig_idx.add_platform_method(
-        "СправочникМенеджер".to_string(),
+        TypeId::new("СправочникМенеджер"),
         MethodSignature::new(
             "НайтиПоКоду".to_string(),
             Some("СправочникМенеджер".to_string()),
@@ -55,7 +55,7 @@ fn create_catalog_signature_index() -> SignatureIndex {
 
     // СправочникМенеджер.Выбрать() → СправочникВыборка
     sig_idx.add_platform_method(
-        "СправочникМенеджер".to_string(),
+        TypeId::new("СправочникМенеджер"),
         MethodSignature::new(
             "Выбрать".to_string(),
             Some("СправочникМенеджер".to_string()),

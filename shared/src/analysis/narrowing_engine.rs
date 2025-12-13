@@ -6,14 +6,15 @@
 
 use crate::analysis::type_guards::{detect_type_guards, TypeGuard};
 use crate::domain::flow_analysis::{ControlFlowGraph, FlowAnalysisContext};
+use crate::domain::type_id::TypeId;
 use crate::domain::types::TypeResolution;
 use std::collections::HashMap;
 
 /// Контекст сужения типов для конкретного блока CFG
 #[derive(Debug, Clone)]
 pub struct NarrowingContext {
-    /// Узауженные типы переменных в текущем блоке
-    pub narrowed_types: HashMap<String, TypeResolution>,
+    /// Сузуженные типы переменных в текущем блоке
+    pub narrowed_types: HashMap<TypeId, TypeResolution>,
 
     /// Type guards, активные в текущем блоке
     pub active_guards: Vec<TypeGuard>,
@@ -43,8 +44,10 @@ impl NarrowingContext {
 
     /// Получить тип переменной с учётом сужения
     pub fn get_type(&self, variable: &str) -> Option<&TypeResolution> {
+        let type_id = TypeId::new(variable);
+
         // Сначала ищем в текущем контексте
-        if let Some(ty) = self.narrowed_types.get(variable) {
+        if let Some(ty) = self.narrowed_types.get(&type_id) {
             return Some(ty);
         }
 
@@ -56,17 +59,18 @@ impl NarrowingContext {
         None
     }
 
-    /// Установить узауженный тип переменной
-    pub fn set_type(&mut self, variable: String, resolution: TypeResolution) {
-        self.narrowed_types.insert(variable, resolution);
+    /// Установить сузуженный тип переменной
+    pub fn set_type(&mut self, variable: &str, resolution: TypeResolution) {
+        self.narrowed_types.insert(TypeId::new(variable), resolution);
     }
 
     /// Применить type guard к переменной
     pub fn apply_guard(&mut self, guard: TypeGuard, current_type: &TypeResolution) {
-        let variable = guard.variable_name().to_string();
+        let variable = guard.variable_name();
         let narrowed = guard.apply_narrowing(current_type);
 
-        self.narrowed_types.insert(variable, narrowed);
+        self.narrowed_types
+            .insert(TypeId::new(variable), narrowed);
         self.active_guards.push(guard);
     }
 
@@ -78,43 +82,44 @@ impl NarrowingContext {
     /// Объединить с другим контекстом (для merge после if-then-else)
     pub fn merge(&mut self, other: &NarrowingContext, flow_ctx: &mut FlowAnalysisContext) {
         // Для каждой переменной из обоих контекстов
-        let mut all_vars: Vec<String> = self
+        let mut all_vars: Vec<TypeId> = self
             .narrowed_types
             .keys()
             .chain(other.narrowed_types.keys())
             .cloned()
             .collect();
-        all_vars.sort();
+        all_vars.sort_by(|a, b| a.normalized().cmp(b.normalized()));
         all_vars.dedup();
 
-        for var in all_vars {
+        for var_id in all_vars {
             match (
-                self.narrowed_types.get(&var),
-                other.narrowed_types.get(&var),
+                self.narrowed_types.get(&var_id),
+                other.narrowed_types.get(&var_id),
             ) {
                 (Some(self_type), Some(other_type)) => {
                     // Переменная есть в обоих контекстах — создаём union
                     let mut self_ctx = FlowAnalysisContext::new();
                     let mut other_ctx = FlowAnalysisContext::new();
 
-                    self_ctx.set_variable(var.clone(), self_type.clone());
-                    other_ctx.set_variable(var.clone(), other_type.clone());
+                    self_ctx.set_variable(var_id.display(), self_type.clone());
+                    other_ctx.set_variable(var_id.display(), other_type.clone());
 
                     self_ctx.merge(&other_ctx);
 
-                    if let Some(merged) = self_ctx.get_variable(&var) {
-                        self.narrowed_types.insert(var.clone(), merged.clone());
-                        flow_ctx.set_variable(var, merged.clone());
+                    if let Some(merged) = self_ctx.get_variable(var_id.display()) {
+                        self.narrowed_types.insert(var_id.clone(), merged.clone());
+                        flow_ctx.set_variable(var_id.display(), merged.clone());
                     }
                 }
                 (Some(self_type), None) => {
                     // Только в self — оставляем как есть
-                    flow_ctx.set_variable(var, self_type.clone());
+                    flow_ctx.set_variable(var_id.display(), self_type.clone());
                 }
                 (None, Some(other_type)) => {
                     // Только в other — добавляем
-                    self.narrowed_types.insert(var.clone(), other_type.clone());
-                    flow_ctx.set_variable(var, other_type.clone());
+                    self.narrowed_types
+                        .insert(var_id.clone(), other_type.clone());
+                    flow_ctx.set_variable(var_id.display(), other_type.clone());
                 }
                 (None, None) => unreachable!(),
             }
@@ -187,8 +192,8 @@ impl NarrowingEngine {
             let mut ctx = NarrowingContext::new();
 
             // Копируем начальные типы переменных из FlowAnalysisContext
-            for (var, resolution) in initial_context.get_all_variables() {
-                ctx.set_type(var.clone(), resolution.clone());
+            for (var_id, resolution) in initial_context.get_all_variables() {
+                ctx.set_type(var_id.display(), resolution.clone());
             }
 
             self.contexts.insert(entry_node.id, ctx);
@@ -293,7 +298,7 @@ mod tests {
             name: "Строка".to_string(),
         }));
 
-        ctx.set_type("x".to_string(), resolution.clone());
+        ctx.set_type("x", resolution.clone());
         assert!(ctx.get_type("x").is_some());
     }
 
@@ -304,7 +309,7 @@ mod tests {
             name: "Число".to_string(),
         }));
 
-        parent.set_type("x".to_string(), resolution.clone());
+        parent.set_type("x", resolution.clone());
 
         let child = parent.child();
         assert!(child.get_type("x").is_some()); // Должен найти в parent
@@ -392,7 +397,7 @@ mod tests {
 
         let mut initial_ctx = FlowAnalysisContext::new();
         initial_ctx.set_variable(
-            "x".to_string(),
+            "x",
             TypeResolution::unknown(), // Any
         );
 
@@ -423,14 +428,14 @@ mod tests {
         let mut ctx2 = NarrowingContext::new();
 
         ctx1.set_type(
-            "x".to_string(),
+            "x",
             TypeResolution::known(ConcreteType::Platform(PlatformType {
                 name: "Строка".to_string(),
             })),
         );
 
         ctx2.set_type(
-            "x".to_string(),
+            "x",
             TypeResolution::known(ConcreteType::Platform(PlatformType {
                 name: "Число".to_string(),
             })),

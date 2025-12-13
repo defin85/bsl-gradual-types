@@ -3,6 +3,7 @@
 //! Отслеживание изменений типов переменных в процессе выполнения кода
 //! с учётом потока управления (control flow)
 
+use crate::domain::type_id::TypeId;
 use crate::domain::types::TypeResolution;
 use std::collections::HashMap;
 
@@ -11,8 +12,8 @@ use std::collections::HashMap;
 /// Отслеживает типы переменных на разных этапах выполнения кода
 #[derive(Debug, Clone)]
 pub struct FlowAnalysisContext {
-    /// Текущее состояние типов переменных
-    variables: HashMap<String, TypeResolution>,
+    /// Текущее состояние типов переменных (ключ: TypeId для регистронезависимого поиска)
+    variables: HashMap<TypeId, TypeResolution>,
 
     /// История изменений типов (для отладки и анализа)
     history: Vec<FlowEvent>,
@@ -31,18 +32,21 @@ impl FlowAnalysisContext {
     }
 
     /// Установить тип переменной в текущем контексте
-    pub fn set_variable(&mut self, name: String, resolution: TypeResolution) {
+    pub fn set_variable(&mut self, name: impl Into<String>, resolution: TypeResolution) {
+        let name_str = name.into();
+        let type_id = TypeId::new(&name_str);
         self.history.push(FlowEvent::Assignment {
-            variable: name.clone(),
+            variable: name_str, // История остаётся String
             resolution: resolution.clone(),
             scope_depth: self.scope_depth,
         });
-        self.variables.insert(name, resolution);
+        self.variables.insert(type_id, resolution);
     }
 
     /// Получить текущий тип переменной
     pub fn get_variable(&self, name: &str) -> Option<&TypeResolution> {
-        self.variables.get(name)
+        let type_id = TypeId::new(name);
+        self.variables.get(&type_id)
     }
 
     /// Войти в новый блок кода (if/while/for)
@@ -80,13 +84,11 @@ impl FlowAnalysisContext {
             Certainty, ConcreteType, PlatformType, ResolutionResult, WeightedType,
         };
 
-        for (var_name, other_resolution) in &other.variables {
-            match self.variables.get(var_name) {
+        for (var_id, other_resolution) in &other.variables {
+            match self.variables.get(var_id) {
                 Some(self_resolution) => {
-                    // Переменная изменялась в обеих ветках
-                    if format!("{:?}", self_resolution.result)
-                        != format!("{:?}", other_resolution.result)
-                    {
+                    // Переменная изменялась в обеих ветках — создаём union type
+                    if self_resolution.result != other_resolution.result {
                         // Извлекаем ConcreteType из ResolutionResult
                         let self_concrete = match &self_resolution.result {
                             ResolutionResult::Concrete(t) => t.clone(),
@@ -167,7 +169,7 @@ impl FlowAnalysisContext {
                                 column: None,
                                 notes: vec![format!(
                                     "Union type from conditional branches for variable: {}",
-                                    var_name
+                                    var_id.display()
                                 )],
                                 uncertainty_reason: None,
                             },
@@ -175,24 +177,28 @@ impl FlowAnalysisContext {
                             available_facets: vec![],
                         };
 
-                        self.variables.insert(var_name.clone(), merged_resolution);
+                        self.variables.insert(var_id.clone(), merged_resolution);
                     }
                 }
                 None => {
                     // Переменная появилась только в другой ветке
                     self.variables
-                        .insert(var_name.clone(), other_resolution.clone());
+                        .insert(var_id.clone(), other_resolution.clone());
                 }
             }
         }
 
         self.history.push(FlowEvent::MergeContexts {
-            merged_variables: other.variables.keys().cloned().collect(),
+            merged_variables: other
+                .variables
+                .keys()
+                .map(|id| id.display().to_string())
+                .collect(),
         });
     }
 
     /// Получить все текущие переменные
-    pub fn get_all_variables(&self) -> &HashMap<String, TypeResolution> {
+    pub fn get_all_variables(&self) -> &HashMap<TypeId, TypeResolution> {
         &self.variables
     }
 

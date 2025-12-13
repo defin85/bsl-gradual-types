@@ -2,6 +2,7 @@
 //!
 //! Type compatibility checking system (Milestone 3.13).
 
+use crate::domain::type_id::normalize;
 use super::super::compatibility::TypeCompatibility;
 use super::super::concrete::ConcreteType;
 use super::super::facets::FacetKind;
@@ -108,7 +109,7 @@ impl TypeResolution {
 
             // Configuration types - consider facets!
             (ConcreteType::Configuration(cfg1), ConcreteType::Configuration(cfg2)) => {
-                if cfg1.kind != cfg2.kind || !Self::names_equal(&cfg1.name, &cfg2.name) {
+                if cfg1.kind != cfg2.kind || normalize(&cfg1.name) != normalize(&cfg2.name) {
                     return TypeCompatibility::Incompatible {
                         reason: format!(
                             "Разные типы конфигурации: {}.{} vs {}.{}",
@@ -124,7 +125,7 @@ impl TypeResolution {
 
             // Platform types - case-insensitive name comparison
             (ConcreteType::Platform(pt1), ConcreteType::Platform(pt2)) => {
-                if Self::names_equal(&pt1.name, &pt2.name) {
+                if normalize(&pt1.name) == normalize(&pt2.name) {
                     TypeCompatibility::Compatible
                 } else {
                     TypeCompatibility::Incompatible {
@@ -149,8 +150,8 @@ impl TypeResolution {
 
             // TabularRow - compare by parent_type and tabular_section_name
             (ConcreteType::TabularRow(tr1), ConcreteType::TabularRow(tr2)) => {
-                if Self::names_equal(&tr1.parent_type, &tr2.parent_type)
-                    && Self::names_equal(&tr1.tabular_section_name, &tr2.tabular_section_name)
+                if normalize(&tr1.parent_type) == normalize(&tr2.parent_type)
+                    && normalize(&tr1.tabular_section_name) == normalize(&tr2.tabular_section_name)
                 {
                     TypeCompatibility::Compatible
                 } else {
@@ -166,7 +167,7 @@ impl TypeResolution {
 
             // GlobalFunction - functions as types are incompatible with each other
             (ConcreteType::GlobalFunction(f1), ConcreteType::GlobalFunction(f2)) => {
-                if Self::names_equal(&f1.name, &f2.name) {
+                if normalize(&f1.name) == normalize(&f2.name) {
                     TypeCompatibility::Compatible
                 } else {
                     TypeCompatibility::Incompatible {
@@ -210,7 +211,7 @@ impl TypeResolution {
     /// Check generic type compatibility
     fn check_generic_compatibility(g1: &GenericType, g2: &GenericType) -> TypeCompatibility {
         // Check base type
-        if !Self::names_equal(&g1.base_type, &g2.base_type) {
+        if normalize(&g1.base_type) != normalize(&g2.base_type) {
             return TypeCompatibility::Incompatible {
                 reason: format!(
                     "Несовместимые базовые типы: {} vs {}",
@@ -237,9 +238,5 @@ impl TypeResolution {
         }
 
         TypeCompatibility::Compatible
-    }
-
-    fn names_equal(a: &str, b: &str) -> bool {
-        a.to_lowercase() == b.to_lowercase()
     }
 }

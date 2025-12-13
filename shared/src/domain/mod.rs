@@ -15,6 +15,7 @@ pub mod signature_index; // Function signature validation system (Milestone 2.20
 pub mod signature_registry; // Registry pattern for SignatureIndex data sources
 pub mod runtime_context; // Runtime execution context tracking (Milestone 3.11 Phase 2)
 pub mod type_definition_location; // Go To Definition location types (Milestone 3.14)
+pub mod type_id; // TypeId infrastructure for type-safe identifiers (R1)
 pub mod types;
 pub mod validators; // Type validation rules from Balyuk & Popova (2021)
 
@@ -49,3 +50,4 @@ pub use metadata_patterns::{ExtractedPattern, MetadataPatternRegistry};
 pub use signature_registry::{SignatureDataSource, SignatureSourceRegistry};
 pub use type_definition_location::{ModulePaths, TypeDefinitionLocation};
 pub use facet_utils::{extract_base_facet_type, extract_base_facet_type_universal, extract_placeholder_base_type, is_known_facet_prefix};
+pub use type_id::{TypeId, normalize, camel_to_spaced, spaced_to_camel};

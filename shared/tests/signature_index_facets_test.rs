@@ -9,6 +9,7 @@
 use bsl_shared::domain::signature_index::{
     ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
 };
+use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::types::{FacetKind, ParameterInfo};
 
 // ============================================================================
@@ -182,7 +183,7 @@ fn test_signature_index_add_facet_method() {
         ContextRequirements::ServerOnly,
     );
 
-    index.add_platform_method("СправочникМенеджер.Номенклатура".to_string(), sig);
+    index.add_platform_method(TypeId::new("СправочникМенеджер.Номенклатура"), sig);
 
     let found = index.find_method("СправочникМенеджер.Номенклатура", "СоздатьЭлемент");
     assert!(found.is_some());
@@ -199,7 +200,7 @@ fn test_signature_index_multiple_facet_methods() {
 
     // Добавляем метод Manager facet
     index.add_platform_method(
-        "СправочникМенеджер".to_string(),
+        TypeId::new("СправочникМенеджер"),
         MethodSignature::new(
             "СоздатьЭлемент".to_string(),
             Some("СправочникМенеджер".to_string()),
@@ -213,7 +214,7 @@ fn test_signature_index_multiple_facet_methods() {
 
     // Добавляем метод Object facet
     index.add_platform_method(
-        "СправочникОбъект".to_string(),
+        TypeId::new("СправочникОбъект"),
         MethodSignature::new(
             "Записать".to_string(),
             Some("СправочникОбъект".to_string()),
@@ -239,7 +240,7 @@ fn test_signature_index_facet_method_case_insensitive() {
     let mut index = SignatureIndex::new();
 
     index.add_platform_method(
-        "СправочникМенеджер".to_string(),
+        TypeId::new("СправочникМенеджер"),
         MethodSignature::new(
             "СоздатьЭлемент".to_string(),
             Some("СправочникМенеджер".to_string()),
@@ -275,7 +276,7 @@ fn test_signature_index_backward_compatibility() {
         ContextRequirements::default(),
     );
 
-    index.add_platform_method("Массив".to_string(), sig);
+    index.add_platform_method(TypeId::new("Массив"), sig);
 
     let found = index.find_method("Массив", "Добавить");
     assert!(found.is_some());

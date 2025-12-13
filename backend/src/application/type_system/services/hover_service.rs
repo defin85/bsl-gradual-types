@@ -34,6 +34,7 @@ use super::super::formatters::hover_formatters::format_semantic_node_info;
 ///
 /// # Returns
 /// Formatted markdown hover content or None
+#[allow(clippy::too_many_arguments)]
 pub async fn get_hover_info(
     parser: &ParserCoordinator,
     analysis_engine: &AnalysisEngine,
@@ -184,7 +185,7 @@ pub async fn get_hover_info(
 
     // MILESTONE 2.13: Periodic cache stats output (every 100 hovers)
     let current_count = hover_count.fetch_add(1, Ordering::Relaxed);
-    if current_count % 100 == 0 {
+    if current_count.is_multiple_of(100) {
         let stats = ir_cache.get_stats().await;
         let hit_rate = ir_cache.get_hit_rate().await;
         info!(
@@ -275,19 +276,21 @@ pub async fn get_type_at_position(
 
         // Extract type from node depending on its kind
         match &node.kind {
-            SemanticNodeKind::VariableDeclaration { type_hint, .. } => {
+            SemanticNodeKind::VariableDeclaration {
+                type_hint: Some(resolution),
+                ..
+            } => {
                 // Phase 3: type_hint is now Option<TypeResolution>
-                if let Some(resolution) = type_hint {
-                    let resolver = analysis_engine.get_resolver();
-                    return Ok(Some(resolver.resolve_expression_sync(&resolution.type_name())));
-                }
+                let resolver = analysis_engine.get_resolver();
+                return Ok(Some(resolver.resolve_expression_sync(&resolution.type_name())));
             }
-            SemanticNodeKind::FunctionCall { object_type, .. } => {
+            SemanticNodeKind::FunctionCall {
+                object_type: Some(type_resolution),
+                ..
+            } => {
                 // Phase 3: object_type is now Option<TypeResolution>
-                if let Some(type_resolution) = object_type {
-                    let resolver = analysis_engine.get_resolver();
-                    return Ok(Some(resolver.resolve_expression_sync(&type_resolution.type_name())));
-                }
+                let resolver = analysis_engine.get_resolver();
+                return Ok(Some(resolver.resolve_expression_sync(&type_resolution.type_name())));
             }
             SemanticNodeKind::MemberAccess { object_type, .. } => {
                 // Phase 3: object_type is now TypeResolution

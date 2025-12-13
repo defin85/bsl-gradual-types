@@ -95,7 +95,7 @@ impl SyntaxHelperLoader {
 
                     // Отправляем прогресс каждые 10 файлов
                     if let Some(ref callback) = progress_callback {
-                        if count % 10 == 0 {
+                        if count.is_multiple_of(10) {
                             let total = self.total_files.load(Ordering::Relaxed);
 
                             // Извлекаем имя типа из узла

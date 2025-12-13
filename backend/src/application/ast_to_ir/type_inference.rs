@@ -202,7 +202,7 @@ impl AstToIrConverter {
                 // Phase 4: Если base - undeclared variable, пробрасываем эту информацию
                 // Это позволяет детектировать `необъявленная.Свойство` как ошибку
                 if let Some(var_name) = base.is_undeclared_variable() {
-                    return TypeResolution::undeclared_variable(&var_name);
+                    return TypeResolution::undeclared_variable(var_name);
                 }
 
                 // MILESTONE 3.18: Сначала пробуем resolve_member_type для получения типа свойства
@@ -254,7 +254,7 @@ impl AstToIrConverter {
                 // который также возвращает undeclared для необъявленного base.
                 let func_type = self.infer_type_resolution(function);
                 if let Some(var_name) = func_type.is_undeclared_variable() {
-                    return TypeResolution::undeclared_variable(&var_name);
+                    return TypeResolution::undeclared_variable(var_name);
                 }
 
                 // Для вызовов методов используем resolve_method_return_type
@@ -456,11 +456,10 @@ impl AstToIrConverter {
         let properties = self.metadata_lookup.get_properties(object_type);
 
         for prop in &properties {
-            if prop.name.to_lowercase() == member_name_lower {
-                if !prop.prop_type.is_empty() {
+            if prop.name.to_lowercase() == member_name_lower
+                && !prop.prop_type.is_empty() {
                     return TypeResolution::explicit(&prop.prop_type);
                 }
-            }
         }
 
         // Обработка Generic типов: ТабличнаяЧасть<Работы> → базовый тип + параметры
@@ -490,11 +489,10 @@ impl AstToIrConverter {
                 // Также ищем свойства в базовом типе (ТабличнаяЧасть без параметров)
                 if let Some(type_data) = self.repository.find_type(base_type) {
                     for prop in &type_data.properties {
-                        if prop.name.to_lowercase() == member_name_lower {
-                            if !prop.prop_type.is_empty() {
+                        if prop.name.to_lowercase() == member_name_lower
+                            && !prop.prop_type.is_empty() {
                                 return TypeResolution::explicit(&prop.prop_type);
                             }
-                        }
                     }
                 }
             }
@@ -505,11 +503,10 @@ impl AstToIrConverter {
             // 1. Ищем в TypeRepository напрямую
             if let Some(type_data) = self.repository.find_type(&type_name) {
                 for prop in &type_data.properties {
-                    if prop.name.to_lowercase() == member_name_lower {
-                        if !prop.prop_type.is_empty() {
+                    if prop.name.to_lowercase() == member_name_lower
+                        && !prop.prop_type.is_empty() {
                             return TypeResolution::explicit(&prop.prop_type);
                         }
-                    }
                 }
             }
 
@@ -517,11 +514,10 @@ impl AstToIrConverter {
             if let Some(base_type) = SignatureIndex::extract_base_facet_type(&type_name) {
                 if let Some(type_data) = self.repository.find_type(base_type) {
                     for prop in &type_data.properties {
-                        if prop.name.to_lowercase() == member_name_lower {
-                            if !prop.prop_type.is_empty() {
+                        if prop.name.to_lowercase() == member_name_lower
+                            && !prop.prop_type.is_empty() {
                                 return TypeResolution::explicit(&prop.prop_type);
                             }
-                        }
                     }
                 }
             }

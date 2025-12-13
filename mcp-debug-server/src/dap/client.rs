@@ -40,7 +40,7 @@ impl DapClient {
         let mut command = Command::new(adapter_command);
 
         if let Some(parent_dir) = std::path::Path::new(adapter_command).parent() {
-            if parent_dir.as_os_str().len() > 0 {
+            if !parent_dir.as_os_str().is_empty() {
                 tracing::debug!("Setting adapter working directory: {:?}", parent_dir);
                 command.current_dir(parent_dir);
             }

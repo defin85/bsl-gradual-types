@@ -112,16 +112,14 @@ impl FormParser {
                         in_attribute = true;
 
                         // Извлечь id и name из атрибутов тега
-                        for attr in e.attributes() {
-                            if let Ok(attr) = attr {
-                                let key = String::from_utf8_lossy(attr.key.as_ref());
-                                let value = String::from_utf8_lossy(&attr.value);
+                        for attr in e.attributes().flatten() {
+                            let key = String::from_utf8_lossy(attr.key.as_ref());
+                            let value = String::from_utf8_lossy(&attr.value);
 
-                                if key == "name" {
-                                    current_attr_name = value.to_string();
-                                } else if key == "id" {
-                                    current_attr_id = value.parse().unwrap_or(0);
-                                }
+                            if key == "name" {
+                                current_attr_name = value.to_string();
+                            } else if key == "id" {
+                                current_attr_id = value.parse().unwrap_or(0);
                             }
                         }
                         trace!("    → Found attribute: {} (id={})", current_attr_name, current_attr_id);
@@ -227,13 +225,11 @@ impl FormParser {
                         trace!("  → Entered <Events> section");
                     } else if tag_name == "Event" && in_events_section {
                         // Извлекаем атрибут name
-                        for attr in e.attributes() {
-                            if let Ok(attr) = attr {
-                                let key = String::from_utf8_lossy(attr.key.as_ref());
-                                if key == "name" {
-                                    current_event_name = String::from_utf8_lossy(&attr.value).to_string();
-                                    trace!("    → Event: {}", current_event_name);
-                                }
+                        for attr in e.attributes().flatten() {
+                            let key = String::from_utf8_lossy(attr.key.as_ref());
+                            if key == "name" {
+                                current_event_name = String::from_utf8_lossy(&attr.value).to_string();
+                                trace!("    → Event: {}", current_event_name);
                             }
                         }
                     }

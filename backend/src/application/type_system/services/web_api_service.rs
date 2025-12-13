@@ -168,6 +168,7 @@ pub async fn get_type_completions(
 ///
 /// # Returns
 /// AnalysisResultDto with paginated types
+#[allow(clippy::too_many_arguments)]
 pub fn get_all_types_as_dto(
     inference_service: &TypeInferenceService,
     metadata_lookup: &TypeMetadataLookup,

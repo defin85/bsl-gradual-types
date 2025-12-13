@@ -27,7 +27,7 @@
 //! ```
 
 pub mod normalization;
-mod type_id;
+mod core;
 
+pub use core::TypeId;
 pub use normalization::{camel_to_spaced, normalize, spaced_to_camel};
-pub use type_id::TypeId;

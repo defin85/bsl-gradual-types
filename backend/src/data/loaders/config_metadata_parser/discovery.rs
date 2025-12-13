@@ -425,7 +425,7 @@ impl ConfigurationDiscovery {
                         // Обновляем терминальный прогресс-бар (thread-safe)
                         if let Some(ref pb) = terminal_progress {
                             pb.inc(1);
-                            pb.set_message(format!("{}", object_name));
+                            pb.set_message(object_name.to_string());
                         }
 
                         tracing::trace!(
@@ -477,7 +477,7 @@ impl ConfigurationDiscovery {
                         }
 
                         // Throttling: отправляем прогресс каждые 5 объектов или на последнем
-                        if count % 5 == 0 || count == total_objects {
+                        if count.is_multiple_of(5) || count == total_objects {
                             progress_callback(ProgressUpdate::new(
                                 IndexingPhase::ConfigurationParsing,
                                 count,

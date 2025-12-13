@@ -104,10 +104,7 @@ impl<'a> SemanticValidationVisitor<'a> {
         }
 
         // Get metadata kind
-        let kind = match collection_name_to_metadata_kind(object_type) {
-            Some(k) => k,
-            None => return None,
-        };
+        let kind = collection_name_to_metadata_kind(object_type)?;
 
         // Use method from TypeValidator for validation
         self.validator.validate_metadata_object_exists(kind, member_name, variable_name)

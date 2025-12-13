@@ -23,20 +23,13 @@ pub struct LspConfig {
 
 /// MILESTONE 3.6 Phase 1+3: BSL Settings (from workspace/didChangeConfiguration)
 #[derive(Debug, Clone, Deserialize)]
+#[derive(Default)]
 pub struct BslSettings {
     pub hover: HoverSettings,
     #[serde(default)]
     pub diagnostics: DiagnosticsSettings,
 }
 
-impl Default for BslSettings {
-    fn default() -> Self {
-        Self {
-            hover: HoverSettings::default(),
-            diagnostics: DiagnosticsSettings::default(),
-        }
-    }
-}
 
 /// MILESTONE 3.6 Phase 1: Hover Settings
 #[derive(Debug, Clone, Deserialize)]
@@ -71,7 +64,9 @@ pub struct DiagnosticsSettings {
     #[serde(rename = "detailLevel")]
     pub detail_level: String, // "brief" | "standard" | "detailed"
 
+    /// Reserved for future use - will control hint-level diagnostics
     #[serde(rename = "showHints")]
+    #[allow(dead_code)]
     pub show_hints: bool,
 }
 

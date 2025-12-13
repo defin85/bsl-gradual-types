@@ -201,9 +201,8 @@ pub struct CommonModuleProperties {
     pub return_values_reuse: ReturnValuesReuse,
 }
 
-impl CommonModuleProperties {
-    /// Создать свойства общего модуля по умолчанию
-    pub fn default() -> Self {
+impl Default for CommonModuleProperties {
+    fn default() -> Self {
         Self {
             server: false,
             client_managed_application: false,
@@ -216,7 +215,9 @@ impl CommonModuleProperties {
             return_values_reuse: ReturnValuesReuse::DontUse,
         }
     }
+}
 
+impl CommonModuleProperties {
     /// Получить список контекстов выполнения на основе свойств модуля
     ///
     /// Возвращает вектор контекстов, в которых доступен данный модуль

@@ -59,14 +59,10 @@ pub async fn handle_hover(
             .await
         {
             Ok(hover_info) => {
-                if let Some(info) = hover_info {
-                    Some(Hover {
+                hover_info.map(|info| Hover {
                         contents: HoverContents::Scalar(MarkedString::String(info)),
                         range: None,
                     })
-                } else {
-                    None
-                }
             }
             Err(e) => {
                 error!("Failed to get hover info: {}", e);

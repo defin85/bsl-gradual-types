@@ -124,13 +124,17 @@ pub struct ExtractPlatformDocsResponse {
 }
 
 /// Custom request: bsl/renderTypeHtml - render HTML for type (uses TypeVisualization)
+/// Reserved for future implementation
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct RenderTypeHtmlParams {
     pub type_name: String,
     pub theme: Option<String>, // "light", "dark", "high-contrast"
 }
 
+/// Reserved for future implementation
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct RenderTypeHtmlResponse {
     pub html: String,
     pub success: bool,

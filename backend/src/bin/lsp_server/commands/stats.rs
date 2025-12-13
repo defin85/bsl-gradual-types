@@ -8,7 +8,9 @@ use tracing::debug;
 use bsl_backend::system::SystemCoordinator;
 
 /// Request for bsl.getTypeRepositoryStats (empty, no parameters)
+/// Used by serde for deserialization even though fields are empty
 #[derive(Debug, Clone, serde::Deserialize)]
+#[allow(dead_code)]
 pub struct GetTypeRepositoryStatsParams {}
 
 /// Response for bsl.getTypeRepositoryStats

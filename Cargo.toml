@@ -1,6 +1,6 @@
 [package]
 name = "bsl-gradual-types"
-version = "0.4.5"
+version = "0.4.6"
 edition = "2021"
 authors = ["BSL Type System Team"]
 description = "Gradual type system for 1C:Enterprise BSL with evolutionary architecture"
@@ -21,7 +21,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.4.5"
+version = "0.4.6"
 edition = "2021"
 authors = ["BSL Type System Team"]
 license = "MIT"

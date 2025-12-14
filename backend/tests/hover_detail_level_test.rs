@@ -517,13 +517,24 @@ mod detail_level_tests {
 
         // Тест Inferred
         let resolution_inferred = TypeResolution {
-            certainty: Certainty::Inferred(0.85),
+            certainty: Certainty::Inferred,
             ..create_test_resolution()
         };
         let hover_inferred = formatter.format_variable("ТЗ", &resolution_inferred);
         assert!(
             hover_inferred.contains("Inferred") || hover_inferred.contains("🟡"),
             "Should show Inferred certainty"
+        );
+
+        // Тест InferredWeak
+        let resolution_inferred_weak = TypeResolution {
+            certainty: Certainty::InferredWeak,
+            ..create_test_resolution()
+        };
+        let hover_inferred_weak = formatter.format_variable("ТЗ", &resolution_inferred_weak);
+        assert!(
+            hover_inferred_weak.contains("InferredWeak") || hover_inferred_weak.contains("🟠"),
+            "Should show InferredWeak certainty"
         );
 
         // Тест Unknown

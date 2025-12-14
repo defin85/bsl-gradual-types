@@ -233,10 +233,11 @@ impl AstToIrConverter {
                 let clean_type_name = type_name.trim().trim_end_matches("()").trim();
 
                 // Для Generic коллекций (Массив, Соответствие, Список)
+                use bsl_shared::domain::types::Certainty;
                 match clean_type_name {
-                    "Массив" => TypeResolution::generic("Массив", &["?"], 0.0),
-                    "Соответствие" => TypeResolution::generic("Соответствие", &["?", "?"], 0.0),
-                    "Список" => TypeResolution::generic("Список", &["?"], 0.0),
+                    "Массив" => TypeResolution::generic("Массив", &["?"], Certainty::InferredWeak),
+                    "Соответствие" => TypeResolution::generic("Соответствие", &["?", "?"], Certainty::InferredWeak),
+                    "Список" => TypeResolution::generic("Список", &["?"], Certainty::InferredWeak),
                     _ => {
                         // ИСПРАВЛЕНИЕ: ДЛЯ ВСЕХ ОСТАЛЬНЫХ ТИПОВ создаём Explicit!
                         TypeResolution::explicit(clean_type_name)

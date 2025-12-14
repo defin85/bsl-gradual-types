@@ -124,11 +124,11 @@ fn test_tabular_section_not_found() {
     let resolution =
         resolver.resolve_expression_sync("Документы.ЗаказНаряды.НесуществующаяТабличнаяЧасть");
 
-    // Должен вернуться Inferred (найден тип, но не найдена табличная часть)
+    // Должен вернуться Inferred/InferredWeak (найден тип, но не найдена табличная часть)
     // или Unknown, если считаем это несуществующим членом
     assert!(matches!(
         resolution.certainty,
-        Certainty::Inferred(_) | Certainty::Unknown
+        Certainty::Inferred | Certainty::InferredWeak | Certainty::Unknown
     ));
 }
 

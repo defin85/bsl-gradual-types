@@ -428,22 +428,24 @@ impl SemanticProgram {
 
         let (category, certainty_str, certainty_percent) = match &resolution.certainty {
             Certainty::Known => ("Platform".to_string(), "Known".to_string(), 100u8),
-            Certainty::Inferred(conf) => {
-                let percent = (*conf * 100.0) as u8;
-                (
-                    if matches!(resolution.result, ResolutionResult::Generic(_)) {
-                        "Generic".to_string()
-                    } else {
-                        "Inferred".to_string()
-                    },
-                    if *conf > 0.8 {
-                        "Known".to_string()
-                    } else {
-                        "Inferred".to_string()
-                    },
-                    percent,
-                )
-            }
+            Certainty::Inferred => (
+                if matches!(resolution.result, ResolutionResult::Generic(_)) {
+                    "Generic".to_string()
+                } else {
+                    "Inferred".to_string()
+                },
+                "Inferred".to_string(),
+                80u8,
+            ),
+            Certainty::InferredWeak => (
+                if matches!(resolution.result, ResolutionResult::Generic(_)) {
+                    "Generic".to_string()
+                } else {
+                    "Inferred".to_string()
+                },
+                "InferredWeak".to_string(),
+                50u8,
+            ),
             Certainty::Unknown => return None,
         };
 
@@ -491,13 +493,8 @@ impl SemanticProgram {
             for var_state in scope.variables.values() {
                 match &var_state.resolution.certainty {
                     Certainty::Known => known_types += 1,
-                    Certainty::Inferred(conf) => {
-                        if *conf > 0.8 {
-                            known_types += 1;
-                        } else {
-                            inferred_types += 1;
-                        }
-                    }
+                    Certainty::Inferred => known_types += 1,
+                    Certainty::InferredWeak => inferred_types += 1,
                     Certainty::Unknown => unknown_types += 1,
                 }
             }
@@ -505,7 +502,8 @@ impl SemanticProgram {
 
         let total_types = known_types + inferred_types + unknown_types;
         let average_certainty = if total_types > 0 {
-            (known_types as f32 + inferred_types as f32 * 0.75) / total_types as f32
+            // InferredWeak = 50%, поэтому коэффициент 0.5
+            (known_types as f32 + inferred_types as f32 * 0.5) / total_types as f32
         } else {
             0.0
         };

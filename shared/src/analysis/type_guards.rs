@@ -90,7 +90,7 @@ impl TypeGuard {
                         } else if !filtered.is_empty() {
                             // Остался union без Неопределено
                             TypeResolution {
-                                certainty: Certainty::Inferred(0.8),
+                                certainty: Certainty::Inferred,
                                 result: ResolutionResult::Union(filtered),
                                 source: ResolutionSource::Inferred,
                                 metadata: current.metadata.clone(),
@@ -129,7 +129,7 @@ impl TypeGuard {
 
                         if !filtered.is_empty() {
                             TypeResolution {
-                                certainty: Certainty::Inferred(0.8),
+                                certainty: Certainty::Inferred,
                                 result: ResolutionResult::Union(filtered),
                                 source: ResolutionSource::Inferred,
                                 metadata: current.metadata.clone(),
@@ -471,7 +471,7 @@ mod tests {
 
         // Union: Строка | Неопределено
         let current = TypeResolution {
-            certainty: Certainty::Inferred(0.7),
+            certainty: Certainty::Inferred,
             result: ResolutionResult::Union(vec![
                 WeightedType {
                     type_: ConcreteType::Platform(PlatformType {

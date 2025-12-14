@@ -100,10 +100,23 @@ impl TypeResolution {
         }
     }
 
-    /// Inferred type with confidence level (0.0 - 1.0)
-    pub fn inferred(type_name: &str, confidence: f32) -> Self {
+    /// Inferred type with confident inference (80% certainty)
+    ///
+    /// Use for strong inference from context, method returns, constructors.
+    /// For weak inference, use `inferred_weak()`.
+    pub fn inferred(type_name: &str) -> Self {
         let mut resolution = Self::primitive(type_name);
-        resolution.certainty = Certainty::Inferred(confidence);
+        resolution.certainty = Certainty::Inferred;
+        resolution.source = ResolutionSource::Inferred;
+        resolution
+    }
+
+    /// Weakly inferred type (50% certainty)
+    ///
+    /// Use for fallback inference, configuration not loaded, uncertain context.
+    pub fn inferred_weak(type_name: &str) -> Self {
+        let mut resolution = Self::primitive(type_name);
+        resolution.certainty = Certainty::InferredWeak;
         resolution.source = ResolutionSource::Inferred;
         resolution
     }
@@ -140,7 +153,12 @@ impl TypeResolution {
     }
 
     /// Generic type with parameters (Array<String>, Map<String, Number>)
-    pub fn generic(base_type: &str, type_params: &[&str], certainty: f32) -> Self {
+    ///
+    /// # Arguments
+    /// * `base_type` - Base type name (e.g., "Массив", "Соответствие")
+    /// * `type_params` - Type parameters (use "?" for unknown)
+    /// * `certainty` - Certainty level for the generic type
+    pub fn generic(base_type: &str, type_params: &[&str], certainty: Certainty) -> Self {
         let params: Vec<ConcreteType> = type_params
             .iter()
             .map(|p| {
@@ -152,14 +170,8 @@ impl TypeResolution {
             })
             .collect();
 
-        let cert = if certainty >= 1.0 {
-            Certainty::Known
-        } else {
-            Certainty::Inferred(certainty)
-        };
-
         Self {
-            certainty: cert,
+            certainty,
             result: ResolutionResult::Generic(GenericType {
                 base_type: base_type.to_string(),
                 type_params: params,

@@ -84,11 +84,12 @@ fn test_resolve_generic_from_hint_basic() {
     let mut symbol_table = create_test_symbol_table();
 
     // Регистрируем переменную с Generic типом
+    use bsl_shared::domain::types::Certainty;
     let scope_id = symbol_table.root_scope;
     symbol_table.register_variable(
         scope_id,
         "МассивСтрок".to_string(),
-        TypeResolution::generic("Массив", &["Строка"], 1.0),
+        TypeResolution::generic("Массив", &["Строка"], Certainty::Known),
         bsl_shared::ir::Span::stub(),
     );
 

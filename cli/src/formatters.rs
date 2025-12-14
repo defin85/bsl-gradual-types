@@ -220,9 +220,8 @@ impl CliFormatter {
     fn format_certainty(certainty: &Certainty) -> String {
         match certainty {
             Certainty::Known => "Known".green().to_string(),
-            Certainty::Inferred(confidence) => {
-                format!("Inferred({:.2})", confidence).yellow().to_string()
-            }
+            Certainty::Inferred => "Inferred".yellow().to_string(),
+            Certainty::InferredWeak => "InferredWeak".yellow().to_string(),
             Certainty::Unknown => "Unknown".red().to_string(),
         }
     }

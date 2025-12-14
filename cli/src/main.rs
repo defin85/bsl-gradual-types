@@ -109,9 +109,7 @@ async fn check_command(
     for (_, resolution) in &result.type_resolutions {
         match resolution.certainty {
             bsl_shared::domain::types::Certainty::Unknown => errors += 1,
-            bsl_shared::domain::types::Certainty::Inferred(confidence) if confidence < 0.7 => {
-                warnings += 1
-            }
+            bsl_shared::domain::types::Certainty::InferredWeak => warnings += 1,
             _ => {}
         }
     }

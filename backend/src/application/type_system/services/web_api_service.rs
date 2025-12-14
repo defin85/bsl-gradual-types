@@ -337,7 +337,7 @@ pub fn get_metrics_summary(inference_service: &TypeInferenceService) -> serde_js
     for res in all_types.values() {
         match res.certainty {
             Certainty::Known => known += 1,
-            Certainty::Inferred(_) => inferred += 1,
+            Certainty::Inferred | Certainty::InferredWeak => inferred += 1,
             Certainty::Unknown => unknown += 1,
         }
     }
@@ -391,7 +391,7 @@ fn determine_flow_sensitivity(res: &TypeResolution) -> bool {
     }
 
     // 2. Certainty is inferred (not static)
-    if matches!(res.certainty, Certainty::Inferred(_)) {
+    if matches!(res.certainty, Certainty::Inferred | Certainty::InferredWeak) {
         return true;
     }
 
@@ -455,8 +455,9 @@ where
     // Calculate certainty
     let certainty_val = match res.certainty {
         Certainty::Known => 100,
-        Certainty::Inferred(val) => (val * 100.0) as u8,
-        Certainty::Unknown => 30,
+        Certainty::Inferred => 80,
+        Certainty::InferredWeak => 50,
+        Certainty::Unknown => 0,
     };
 
     // Extract union types

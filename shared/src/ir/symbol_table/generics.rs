@@ -20,7 +20,7 @@ impl SymbolTable {
     /// assert!(resolution.is_some());
     /// let res = resolution.unwrap();
     /// assert_eq!(res.type_name(), "Массив<Неопределено>");
-    /// assert!(matches!(res.certainty, Certainty::Inferred(c) if c == 0.0));
+    /// assert!(matches!(res.certainty, Certainty::InferredWeak));
     /// ```
     pub fn initialize_as_generic(
         &mut self,
@@ -32,8 +32,8 @@ impl SymbolTable {
         // Создаём пустые параметры (неизвестные типы = "?")
         let type_params: Vec<&str> = vec!["?"; type_param_count];
 
-        // Используем TypeResolution::generic() с certainty = 0.0 (параметры неизвестны)
-        let resolution = TypeResolution::generic(&base_type, &type_params, 0.0);
+        // Используем TypeResolution::generic() с InferredWeak (параметры неизвестны)
+        let resolution = TypeResolution::generic(&base_type, &type_params, Certainty::InferredWeak);
 
         // Регистрируем или обновляем переменную
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
@@ -97,7 +97,7 @@ impl SymbolTable {
                         var_state.resolution.certainty = if all_known {
                             Certainty::Known
                         } else {
-                            Certainty::Inferred(0.5)
+                            Certainty::InferredWeak
                         };
 
                         return true;

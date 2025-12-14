@@ -145,14 +145,9 @@ fn test_type_compatibility_reason() {
     let incompatible = TypeCompatibility::Incompatible {
         reason: "Test reason".to_string(),
     };
-    let partial = TypeCompatibility::PartiallyCompatible {
-        certainty: 0.7,
-        reason: "Partial reason".to_string(),
-    };
 
     assert_eq!(compatible.reason(), "");
     assert_eq!(incompatible.reason(), "Test reason");
-    assert_eq!(partial.reason(), "Partial reason");
 }
 
 #[test]
@@ -487,12 +482,12 @@ fn test_list_facet_incompatible_with_object() {
 }
 
 #[test]
-fn test_partial_compatibility_is_compatible() {
-    let partial = TypeCompatibility::PartiallyCompatible {
-        certainty: 0.8,
-        reason: "Gradual typing".to_string(),
+fn test_compatibility_is_compatible() {
+    let compatible = TypeCompatibility::Compatible;
+    let incompatible = TypeCompatibility::Incompatible {
+        reason: "Type mismatch".to_string(),
     };
 
-    assert!(partial.is_compatible());
-    assert_eq!(partial.reason(), "Gradual typing");
+    assert!(compatible.is_compatible());
+    assert!(!incompatible.is_compatible());
 }

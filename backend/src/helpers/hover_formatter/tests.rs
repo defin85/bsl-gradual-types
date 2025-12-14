@@ -73,10 +73,20 @@ mod tests {
     fn test_certainty_formatting_inferred() {
         let config = HoverFormatConfig::default();
         let result = HoverBuilder::new(&config)
-            .add_certainty(&Certainty::Inferred(0.85))
+            .add_certainty(&Certainty::Inferred)
             .build();
 
-        assert!(result.contains("Inferred (85%)"));
+        assert!(result.contains("Inferred (80%)"));
+    }
+
+    #[test]
+    fn test_certainty_formatting_inferred_weak() {
+        let config = HoverFormatConfig::default();
+        let result = HoverBuilder::new(&config)
+            .add_certainty(&Certainty::InferredWeak)
+            .build();
+
+        assert!(result.contains("InferredWeak (50%)"));
     }
 
     #[test]
@@ -390,7 +400,7 @@ mod tests {
             result: ResolutionResult::Concrete(ConcreteType::Platform(PlatformType {
                 name: "Массив".to_string(),
             })),
-            certainty: Certainty::Inferred(0.5),
+            certainty: Certainty::InferredWeak,
             source: ResolutionSource::Static,
             metadata: ResolutionMetadata::default(),
             active_facet: None,
@@ -418,7 +428,7 @@ mod tests {
                 attributes: vec![],
                 tabular_sections: vec![],
             })),
-            certainty: Certainty::Inferred(0.5),
+            certainty: Certainty::InferredWeak,
             source: ResolutionSource::Static,
             metadata: ResolutionMetadata::default(),
             active_facet: None,
@@ -464,7 +474,7 @@ mod tests {
                 attributes: vec![],
                 tabular_sections: vec![],
             })),
-            certainty: Certainty::Inferred(0.5),
+            certainty: Certainty::InferredWeak,
             source: ResolutionSource::Static,
             metadata: ResolutionMetadata::default(),
             active_facet: None,

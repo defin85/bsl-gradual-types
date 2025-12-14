@@ -190,7 +190,8 @@ fn format_assignment_hover(
     // Always show certainty
     let certainty_text = match resolution.certainty {
         Certainty::Known => "🟢 Known (100%)".to_string(),
-        Certainty::Inferred(val) => format!("🟡 Inferred ({:.0}%)", val * 100.0),
+        Certainty::Inferred => "🟡 Inferred (80%)".to_string(),
+        Certainty::InferredWeak => "🟠 InferredWeak (50%)".to_string(),
         Certainty::Unknown => "⚪ Unknown (0%)".to_string(),
     };
     output.push_str(&format!("*Уверенность:* {}\n\n", certainty_text));
@@ -324,7 +325,8 @@ pub fn format_variable_hover(
     // ALWAYS show certainty (KEY: BEFORE raw_type check)
     let certainty_text = match resolution.certainty {
         Certainty::Known => "🟢 Known (100%)".to_string(),
-        Certainty::Inferred(val) => format!("🟡 Inferred ({:.0}%)", val * 100.0),
+        Certainty::Inferred => "🟡 Inferred (80%)".to_string(),
+        Certainty::InferredWeak => "🟠 InferredWeak (50%)".to_string(),
         Certainty::Unknown => "⚪ Unknown (0%)".to_string(),
     };
     output.push_str(&format!("*Уверенность:* {}\n\n", certainty_text));
@@ -437,7 +439,8 @@ pub fn format_generic_hover(
     // Certainty
     let certainty_text = match resolution.certainty {
         Certainty::Known => "🟢 Known (100%)".to_string(),
-        Certainty::Inferred(val) => format!("🟡 Inferred ({:.0}%)", val * 100.0),
+        Certainty::Inferred => "🟡 Inferred (80%)".to_string(),
+        Certainty::InferredWeak => "🟠 InferredWeak (50%)".to_string(),
         Certainty::Unknown => "⚪ Unknown (0%)".to_string(),
     };
     output.push_str(&format!("*Уверенность:* {}\n\n", certainty_text));

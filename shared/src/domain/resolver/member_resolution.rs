@@ -121,7 +121,7 @@ impl<'a> MemberResolver<'a> {
             ),
             // Case 2: Configuration not loaded - graceful degradation
             (false, false) => (
-                Certainty::Inferred(0.5),
+                Certainty::InferredWeak,
                 ResolutionSource::Inferred,
                 Some(UncertaintyReason::ConfigurationNotLoaded),
                 format!(

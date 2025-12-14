@@ -27,8 +27,8 @@ fn test_initialize_as_generic() {
         panic!("Expected Generic resolution, got {:?}", res.result);
     }
 
-    // Проверяем certainty = Inferred(0.0) (параметры неизвестны)
-    assert!(matches!(res.certainty, Certainty::Inferred(c) if (c - 0.0).abs() < 0.001));
+    // Проверяем certainty = InferredWeak (параметры неизвестны)
+    assert!(matches!(res.certainty, Certainty::InferredWeak));
 }
 
 #[test]
@@ -116,11 +116,12 @@ fn test_partial_generic_params() {
         "МойКонтейнер<Строка, Неопределено, Неопределено>"
     );
 
-    // Проверяем certainty - промежуточная уверенность (не все параметры заполнены)
-    match &res.certainty {
-        Certainty::Inferred(c) => assert!((*c - 0.5).abs() < 0.01),
-        _ => panic!("Expected Inferred certainty for partial generic"),
-    }
+    // Проверяем certainty - InferredWeak (не все параметры заполнены)
+    assert!(
+        matches!(res.certainty, Certainty::InferredWeak),
+        "Expected InferredWeak certainty for partial generic, got {:?}",
+        res.certainty
+    );
 }
 
 #[test]

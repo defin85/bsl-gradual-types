@@ -49,10 +49,8 @@ pub fn format_certainty(certainty: &bsl_shared::domain::types::Certainty) -> Str
 
     match certainty {
         Certainty::Known => "🟢 Known (100%)".to_string(),
-        Certainty::Inferred(conf) => {
-            let percentage = (conf * 100.0) as u8;
-            format!("🟡 Inferred ({}%)", percentage)
-        }
+        Certainty::Inferred => "🟡 Inferred (80%)".to_string(),
+        Certainty::InferredWeak => "🟠 InferredWeak (50%)".to_string(),
         Certainty::Unknown => "⚪ Unknown (0%)".to_string(),
     }
 }

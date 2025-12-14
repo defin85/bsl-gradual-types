@@ -1,6 +1,6 @@
 //! Тест для проверки правильности certainty уровней после исправления в TypeResolver
 //!
-//! Проверяет, что конфигурационные типы БЕЗ метаданных показывают Inferred (50%) вместо Inferred (80%)
+//! Проверяет, что конфигурационные типы БЕЗ метаданных показывают InferredWeak (50%) вместо Inferred (80%)
 
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::system::SystemCoordinator;
@@ -44,10 +44,10 @@ async fn test_config_types_without_metadata_show_inferred_50() {
     if let Some(hover_text) = hover_справочник {
         println!("Hover text:\n{}", hover_text);
 
-        // ✅ НОВОЕ ОЖИДАНИЕ: Inferred (50%) вместо Inferred (80%)
+        // ✅ R-3: InferredWeak (50%) вместо Inferred(0.5)
         assert!(
-            hover_text.contains("🟡 Inferred (50%)"),
-            "Expected '🟡 Inferred (50%)' for Справочники.Контрагенты, got:\n{}",
+            hover_text.contains("🟠 InferredWeak (50%)"),
+            "Expected '🟠 InferredWeak (50%)' for Справочники.Контрагенты, got:\n{}",
             hover_text
         );
 
@@ -58,7 +58,7 @@ async fn test_config_types_without_metadata_show_inferred_50() {
             hover_text
         );
 
-        println!("✅ Справочник1: Inferred (50%) - ПРАВИЛЬНО");
+        println!("✅ Справочник1: InferredWeak (50%) - ПРАВИЛЬНО");
     } else {
         panic!("Hover для Справочник1 не вернул информацию");
     }
@@ -74,8 +74,8 @@ async fn test_config_types_without_metadata_show_inferred_50() {
         println!("Hover text:\n{}", hover_text);
 
         assert!(
-            hover_text.contains("🟡 Inferred (50%)"),
-            "Expected '🟡 Inferred (50%)' for Документы.РеализацияТоваровУслуг, got:\n{}",
+            hover_text.contains("🟠 InferredWeak (50%)"),
+            "Expected '🟠 InferredWeak (50%)' for Документы.РеализацияТоваровУслуг, got:\n{}",
             hover_text
         );
 
@@ -85,7 +85,7 @@ async fn test_config_types_without_metadata_show_inferred_50() {
             hover_text
         );
 
-        println!("✅ Документ1: Inferred (50%) - ПРАВИЛЬНО");
+        println!("✅ Документ1: InferredWeak (50%) - ПРАВИЛЬНО");
     }
 
     // Тест 3: Перечисления.СтавкиНДС
@@ -99,8 +99,8 @@ async fn test_config_types_without_metadata_show_inferred_50() {
         println!("Hover text:\n{}", hover_text);
 
         assert!(
-            hover_text.contains("🟡 Inferred (50%)"),
-            "Expected '🟡 Inferred (50%)' for Перечисления.СтавкиНДС, got:\n{}",
+            hover_text.contains("🟠 InferredWeak (50%)"),
+            "Expected '🟠 InferredWeak (50%)' for Перечисления.СтавкиНДС, got:\n{}",
             hover_text
         );
 
@@ -110,7 +110,7 @@ async fn test_config_types_without_metadata_show_inferred_50() {
             hover_text
         );
 
-        println!("✅ Перечисление1: Inferred (50%) - ПРАВИЛЬНО");
+        println!("✅ Перечисление1: InferredWeak (50%) - ПРАВИЛЬНО");
     }
 
     // Тест 4: РегистрыСведений.КурсыВалют
@@ -124,8 +124,8 @@ async fn test_config_types_without_metadata_show_inferred_50() {
         println!("Hover text:\n{}", hover_text);
 
         assert!(
-            hover_text.contains("🟡 Inferred (50%)"),
-            "Expected '🟡 Inferred (50%)' for РегистрыСведений.КурсыВалют, got:\n{}",
+            hover_text.contains("🟠 InferredWeak (50%)"),
+            "Expected '🟠 InferredWeak (50%)' for РегистрыСведений.КурсыВалют, got:\n{}",
             hover_text
         );
 
@@ -135,10 +135,10 @@ async fn test_config_types_without_metadata_show_inferred_50() {
             hover_text
         );
 
-        println!("✅ РегистрСведений1: Inferred (50%) - ПРАВИЛЬНО");
+        println!("✅ РегистрСведений1: InferredWeak (50%) - ПРАВИЛЬНО");
     }
 
-    println!("\n✅ ВСЕ ПРОВЕРКИ ПРОШЛИ: Конфигурационные типы без метаданных → Inferred (50%)");
+    println!("\n✅ ВСЕ ПРОВЕРКИ ПРОШЛИ: Конфигурационные типы без метаданных → InferredWeak (50%)");
 }
 
 #[tokio::test]
@@ -238,15 +238,15 @@ async fn test_resolver_direct_certainty_check() {
     println!("Hover для Справочники.Контрагенты:");
     println!("{}", hover);
 
-    // Детальная проверка
+    // Детальная проверка - R-3: InferredWeak вместо Inferred(0.5)
     assert!(
-        hover.contains("Inferred (50%)"),
-        "Certainty должен быть Inferred (50%)"
+        hover.contains("InferredWeak (50%)"),
+        "Certainty должен быть InferredWeak (50%)"
     );
     assert!(
         hover.contains("Справочник"),
         "Должен упоминаться Справочник"
     );
 
-    println!("\n✅ TypeResolver возвращает Inferred (50%) для конфигурационных типов");
+    println!("\n✅ TypeResolver возвращает InferredWeak (50%) для конфигурационных типов");
 }

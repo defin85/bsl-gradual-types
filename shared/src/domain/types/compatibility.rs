@@ -40,17 +40,12 @@ pub enum TypeCompatibility {
     Compatible,
     /// Incompatible with reason
     Incompatible { reason: String },
-    /// Partially compatible (gradual typing)
-    PartiallyCompatible { certainty: f32, reason: String },
 }
 
 impl TypeCompatibility {
-    /// Check if types are compatible (fully or partially)
+    /// Check if types are compatible
     pub fn is_compatible(&self) -> bool {
-        matches!(
-            self,
-            TypeCompatibility::Compatible | TypeCompatibility::PartiallyCompatible { .. }
-        )
+        matches!(self, TypeCompatibility::Compatible)
     }
 
     /// Get the reason string (empty for Compatible)
@@ -58,7 +53,6 @@ impl TypeCompatibility {
         match self {
             TypeCompatibility::Compatible => String::new(),
             TypeCompatibility::Incompatible { reason } => reason.clone(),
-            TypeCompatibility::PartiallyCompatible { reason, .. } => reason.clone(),
         }
     }
 }

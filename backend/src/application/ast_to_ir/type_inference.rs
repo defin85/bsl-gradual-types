@@ -158,7 +158,7 @@ impl AstToIrConverter {
                 // возвращают своё имя как тип для корректной работы с PropertyAccess
                 // Используем is_global_collection для унифицированного поиска
                 if is_global_collection(name).is_some() {
-                    return TypeResolution::inferred(name, 1.0);
+                    return TypeResolution::inferred(name);
                 }
 
                 // Сначала ищем в SymbolTable
@@ -205,6 +205,25 @@ impl AstToIrConverter {
                     return TypeResolution::undeclared_variable(var_name);
                 }
 
+                // MILESTONE 3.11 Phase 2 FIX: Конвертация глобальных коллекций в Manager facet
+                // Справочники.Контрагенты → СправочникМенеджер.Контрагенты
+                // Документы.ЗаказНаряды → ДокументМенеджер.ЗаказНаряды
+                let base_type_name = base.type_name();
+                if let Some(info) = lookup_global_collection(&base_type_name) {
+                    let manager_type = format!("{}.{}", info.item_manager_type, property);
+                    // Резолвим через TypeResolver для получения active_facet
+                    if let Some(ref resolver) = self.resolver {
+                        let resolved = resolver.resolve_expression_sync(&manager_type);
+                        // Если TypeResolver вернул не-unknown результат, используем его
+                        // Иначе fallback на inferred_weak (для типов без метаданных конфигурации)
+                        if !resolved.is_unknown() {
+                            return resolved;
+                        }
+                    }
+                    // Тип не найден в метаданных — используем weak inference (50%)
+                    return TypeResolution::inferred_weak(&manager_type);
+                }
+
                 // MILESTONE 3.18: Сначала пробуем resolve_member_type для получения типа свойства
                 // Это критично для цепочки вызовов: Ссылка.ТабличнаяЧасть.Метод()
                 // где .ТабличнаяЧасть должен вернуть ТабличнаяЧасть<X>, а не строку
@@ -242,7 +261,7 @@ impl AstToIrConverter {
                 }
 
                 // Fallback для обычных типов
-                TypeResolution::inferred(&type_str, 0.7)
+                TypeResolution::inferred(&type_str)
             }
 
             // Вызов функции/метода
@@ -263,12 +282,11 @@ impl AstToIrConverter {
                     let object_type = self.infer_type_resolution(object);
                     let method_result = self.resolve_method_return_type(&object_type, property);
 
-                    // Если метод найден в SignatureIndex - certainty будет Known или Inferred с >0 уверенностью
-                    // Inferred(0.0) эквивалентен Unknown и должен быть пропущен
+                    // Если метод найден в SignatureIndex - certainty будет Known или Inferred
+                    // Unknown должен быть пропущен
                     let is_meaningful = match method_result.certainty {
-                        Certainty::Known => true,
-                        Certainty::Inferred(c) if c > 0.0 => true,
-                        _ => false,
+                        Certainty::Known | Certainty::Inferred | Certainty::InferredWeak => true,
+                        Certainty::Unknown => false,
                     };
 
                     if is_meaningful {
@@ -290,13 +308,13 @@ impl AstToIrConverter {
                     return resolved;
                 }
 
-                TypeResolution::inferred(&type_str, 0.6)
+                TypeResolution::inferred_weak(&type_str)
             }
 
             // Бинарные/унарные операции
             Expression::Binary { .. } | Expression::Unary { .. } => {
                 let type_str = self.infer_expression_type(expr);
-                TypeResolution::inferred(&type_str, 0.8)
+                TypeResolution::inferred(&type_str)
             }
 
             // Остальные случаи - используем fallback
@@ -305,7 +323,7 @@ impl AstToIrConverter {
                 if type_str.is_empty() || type_str == "Unknown" || type_str == "Dynamic" {
                     TypeResolution::unknown()
                 } else {
-                    TypeResolution::inferred(&type_str, 0.5)
+                    TypeResolution::inferred_weak(&type_str)
                 }
             }
         }

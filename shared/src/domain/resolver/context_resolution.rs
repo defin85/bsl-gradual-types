@@ -3,7 +3,7 @@
 //! Direction 2: Generic Collections Inference - Integration
 
 use super::type_resolver::TypeResolver;
-use crate::domain::types::TypeResolution;
+use crate::domain::types::{Certainty, TypeResolution};
 
 impl TypeResolver {
     /// Резолюция переменной с использованием SymbolTable контекста
@@ -40,16 +40,11 @@ impl TypeResolver {
                             temp.type_name()
                         })
                         .collect();
-                    let certainty = match resolution.certainty {
-                        Certainty::Known => 1.0,
-                        Certainty::Inferred(c) => c,
-                        Certainty::Unknown => 0.0,
-                    };
                     debug!(
                         "  -> Generic: base={}, params={:?}",
                         gen.base_type, type_params
                     );
-                    return self.resolve_generic_from_hint(&gen.base_type, &type_params, certainty);
+                    return self.resolve_generic_from_hint(&gen.base_type, &type_params, resolution.certainty);
                 }
                 _ => {
                     let type_name = resolution.type_name();
@@ -73,10 +68,10 @@ impl TypeResolver {
         &self,
         base_type: &str,
         type_params: &[String],
-        certainty: f32,
+        certainty: Certainty,
     ) -> TypeResolution {
         use crate::domain::types::{
-            Certainty, ConcreteType, FacetKind, GenericType, ResolutionResult, ResolutionSource,
+            ConcreteType, FacetKind, GenericType, ResolutionResult, ResolutionSource,
         };
 
         // Конвертируем строки типов в ConcreteType
@@ -103,27 +98,23 @@ impl TypeResolver {
             type_params: concrete_params,
         };
 
-        // Определяем уровень certainty
-        let certainty_level = if certainty > 0.9 {
-            Certainty::Known
-        } else if certainty > 0.5 {
-            Certainty::Inferred(certainty)
-        } else {
-            Certainty::Inferred(0.5)
+        // Certainty note for debug
+        let certainty_note = match certainty {
+            Certainty::Known => "Generic type from known source (100%)",
+            Certainty::Inferred => "Generic type inferred from flow-sensitive analysis (80%)",
+            Certainty::InferredWeak => "Generic type weakly inferred (50%)",
+            Certainty::Unknown => "Generic type with unknown certainty",
         };
 
         TypeResolution {
             result: ResolutionResult::Generic(generic_type),
-            certainty: certainty_level,
+            certainty,
             source: ResolutionSource::Inferred,
             metadata: crate::domain::types::ResolutionMetadata {
                 file: None,
                 line: None,
                 column: None,
-                notes: vec![format!(
-                    "Generic type inferred from flow-sensitive analysis (certainty: {:.0}%)",
-                    certainty * 100.0
-                )],
+                notes: vec![certainty_note.to_string()],
                 uncertainty_reason: None,
             },
             active_facet: Some(FacetKind::Collection),

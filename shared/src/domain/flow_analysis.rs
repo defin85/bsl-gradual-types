@@ -160,7 +160,7 @@ impl FlowAnalysisContext {
                         ];
 
                         let merged_resolution = TypeResolution {
-                            certainty: Certainty::Inferred(0.6),
+                            certainty: Certainty::InferredWeak,
                             result: ResolutionResult::Union(union),
                             source: crate::domain::types::ResolutionSource::Inferred,
                             metadata: crate::domain::types::ResolutionMetadata {

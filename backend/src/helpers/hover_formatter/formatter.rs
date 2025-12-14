@@ -8,7 +8,7 @@ use bsl_shared::domain::types::{Certainty, ResolutionResult, TypeResolution};
 use bsl_shared::formatting::DetailLevel;
 
 use super::builder::HoverBuilder;
-use super::config::{HoverFormatConfig, HoverOutputFormat, LOW_CONFIDENCE_THRESHOLD};
+use super::config::{HoverFormatConfig, HoverOutputFormat};
 
 /// Главный компонент для форматирования hover responses
 ///
@@ -198,21 +198,19 @@ impl HoverFormatter {
     ) -> Option<(bsl_shared::domain::types::MetadataKind, String)> {
         use bsl_shared::domain::types::ConcreteType;
 
-        // Проверяем что это Configuration тип с низкой уверенностью (50%)
+        // Проверяем что это Configuration тип с низкой уверенностью (InferredWeak)
         if let ResolutionResult::Concrete(ConcreteType::Configuration(config)) = &resolution.result
         {
-            // Certainty должна быть Inferred с низким значением (около 0.5)
-            if let Certainty::Inferred(conf) = resolution.certainty {
-                if conf <= LOW_CONFIDENCE_THRESHOLD {
-                    // Проверяем загружена ли конфигурация
-                    if self.metadata_lookup.is_configuration_loaded() {
-                        // Проверяем существует ли объект
-                        if !self
-                            .metadata_lookup
-                            .exists_metadata_object(config.kind, &config.name)
-                        {
-                            return Some((config.kind, config.name.clone()));
-                        }
+            // Certainty должна быть InferredWeak (бывший Inferred с низким значением)
+            if matches!(resolution.certainty, Certainty::InferredWeak) {
+                // Проверяем загружена ли конфигурация
+                if self.metadata_lookup.is_configuration_loaded() {
+                    // Проверяем существует ли объект
+                    if !self
+                        .metadata_lookup
+                        .exists_metadata_object(config.kind, &config.name)
+                    {
+                        return Some((config.kind, config.name.clone()));
                     }
                 }
             }

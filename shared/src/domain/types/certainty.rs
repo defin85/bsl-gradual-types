@@ -11,13 +11,27 @@ use serde::{Deserialize, Serialize};
 use super::metadata::MetadataKind;
 
 /// Certainty level of type resolution
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+///
+/// # R-3: Simplified Certainty Enum
+///
+/// Replaced `Inferred(f32)` with discrete levels:
+/// - `Known` (100%) - from metadata, explicit annotations
+/// - `Inferred` (80%) - confident inference (former >= 0.7)
+/// - `InferredWeak` (50%) - weak inference (former < 0.7)
+/// - `Unknown` (0%) - type cannot be determined
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Certainty {
     /// Type is definitively known (100% confidence)
+    /// From metadata, explicit type annotations, or platform types
     Known,
-    /// Type is inferred with given confidence (0.0 - 1.0)
-    Inferred(f32),
-    /// Type is unknown
+    /// Type is confidently inferred (80% confidence)
+    /// Strong inference from context, method returns, constructors
+    Inferred,
+    /// Type is weakly inferred (50% confidence)
+    /// Fallback inference, configuration not loaded, uncertain context
+    InferredWeak,
+    /// Type is unknown (0% confidence)
+    /// Cannot be determined from available information
     Unknown,
 }
 

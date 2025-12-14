@@ -4,12 +4,6 @@
 
 use bsl_shared::formatting::DetailLevel;
 
-/// Порог уверенности, ниже которого тип считается "низкой уверенности"
-/// и проверяется существование объекта метаданных.
-/// Используется в check_unknown_metadata_object() для определения,
-/// нужно ли показывать hover с ошибкой вместо стандартного hover.
-pub const LOW_CONFIDENCE_THRESHOLD: f32 = 0.6;
-
 /// Формат вывода hover информации
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HoverOutputFormat {

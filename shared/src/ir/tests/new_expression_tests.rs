@@ -99,10 +99,11 @@ fn test_new_expression_with_generics() {
 
     // Generic конструктор: Новый Массив<Число>
     // Phase 3: result_type теперь TypeResolution::generic
+    use crate::domain::types::Certainty;
     program.nodes.push(SemanticNode {
         kind: SemanticNodeKind::NewExpression {
             type_name: "Массив".to_string(),
-            result_type: TypeResolution::generic("Массив", &["Число"], 1.0),
+            result_type: TypeResolution::generic("Массив", &["Число"], Certainty::Known),
             arg_types: vec![],
             generic_params: Some(vec!["Число".to_string()]),
             is_dynamic: false,

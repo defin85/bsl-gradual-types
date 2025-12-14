@@ -126,7 +126,7 @@ fn test_certainty_config_loaded_type_found_is_known() {
 /// Сценарий:
 /// - Репозиторий ПУСТ (только платформенные типы)
 /// - Резолвим "Документы.ЛюбойДок"
-/// - Проверяем: Certainty::Inferred(0.5), uncertainty_reason = ConfigurationNotLoaded
+/// - Проверяем: Certainty::InferredWeak, uncertainty_reason = ConfigurationNotLoaded
 #[test]
 fn test_certainty_config_not_loaded_is_inferred() {
     let repo = create_empty_repository();
@@ -137,10 +137,10 @@ fn test_certainty_config_not_loaded_is_inferred() {
     // Резолвим несуществующий тип (но конфигурация не загружена)
     let resolution = resolver.resolve_expression_sync("Документы.ЛюбойДок");
 
-    // Проверяем Certainty::Inferred(0.5)
+    // Проверяем Certainty::InferredWeak
     assert_eq!(
-        resolution.certainty, Certainty::Inferred(0.5),
-        "Expected Certainty::Inferred(0.5) when configuration is not loaded"
+        resolution.certainty, Certainty::InferredWeak,
+        "Expected Certainty::InferredWeak when configuration is not loaded"
     );
 
     // Проверяем uncertainty_reason = ConfigurationNotLoaded
@@ -267,10 +267,10 @@ fn test_graceful_degradation_multiple_types() {
     for type_expr in test_cases {
         let resolution = resolver.resolve_expression_sync(type_expr);
 
-        // Все должны быть Inferred
+        // Все должны быть InferredWeak
         assert_eq!(
-            resolution.certainty, Certainty::Inferred(0.5),
-            "Expected Inferred for {} when config not loaded",
+            resolution.certainty, Certainty::InferredWeak,
+            "Expected InferredWeak for {} when config not loaded",
             type_expr
         );
 
@@ -318,8 +318,8 @@ fn test_difference_between_inferred_and_unknown() {
 
     // Проверяем что certainty отличается
     assert_eq!(
-        resolution_empty.certainty, Certainty::Inferred(0.5),
-        "Empty repo should produce Inferred"
+        resolution_empty.certainty, Certainty::InferredWeak,
+        "Empty repo should produce InferredWeak"
     );
     assert_eq!(
         resolution_with_config.certainty, Certainty::Unknown,

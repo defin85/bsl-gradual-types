@@ -38,7 +38,7 @@ fn test_resolver_narrow_type_with_not_undefined() {
 
     // Union: Строка | Неопределено
     let current = TypeResolution {
-        certainty: bsl_shared::domain::types::Certainty::Inferred(0.7),
+        certainty: bsl_shared::domain::types::Certainty::Inferred,
         result: ResolutionResult::Union(vec![
             WeightedType {
                 type_: ConcreteType::Platform(PlatformType {

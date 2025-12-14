@@ -103,35 +103,36 @@ fn test_primitive_source_is_static() {
 // === inferred() tests ===
 
 #[test]
-fn test_inferred_with_confidence() {
-    let t = TypeResolution::inferred("Число", 0.75);
-    assert_eq!(t.certainty, Certainty::Inferred(0.75));
+fn test_inferred_certainty() {
+    let t = TypeResolution::inferred("Число");
+    assert_eq!(t.certainty, Certainty::Inferred);
     assert_eq!(t.type_name(), "Число");
 }
 
 #[test]
 fn test_inferred_source_is_inferred() {
-    let t = TypeResolution::inferred("Строка", 0.5);
+    let t = TypeResolution::inferred("Строка");
     assert_eq!(t.source, ResolutionSource::Inferred);
 }
 
 #[test]
-fn test_inferred_with_zero_confidence() {
-    let t = TypeResolution::inferred("Булево", 0.0);
-    assert_eq!(t.certainty, Certainty::Inferred(0.0));
+fn test_inferred_weak_certainty() {
+    let t = TypeResolution::inferred_weak("Булево");
+    assert_eq!(t.certainty, Certainty::InferredWeak);
+    assert_eq!(t.type_name(), "Булево");
 }
 
 #[test]
-fn test_inferred_with_full_confidence() {
-    let t = TypeResolution::inferred("Дата", 1.0);
-    assert_eq!(t.certainty, Certainty::Inferred(1.0));
+fn test_inferred_weak_source_is_inferred() {
+    let t = TypeResolution::inferred_weak("Дата");
+    assert_eq!(t.source, ResolutionSource::Inferred);
 }
 
 #[test]
 fn test_inferred_unknown_type() {
     // Unrecognized type also creates Platform
-    let t = TypeResolution::inferred("ТаблицаЗначений", 0.8);
-    assert_eq!(t.certainty, Certainty::Inferred(0.8));
+    let t = TypeResolution::inferred("ТаблицаЗначений");
+    assert_eq!(t.certainty, Certainty::Inferred);
     assert_eq!(t.type_name(), "ТаблицаЗначений");
 }
 
@@ -222,7 +223,13 @@ fn test_is_unknown_false_for_known() {
 
 #[test]
 fn test_is_unknown_false_for_inferred() {
-    let t = TypeResolution::inferred("Число", 0.5);
+    let t = TypeResolution::inferred("Число");
+    assert!(!t.is_unknown());
+}
+
+#[test]
+fn test_is_unknown_false_for_inferred_weak() {
+    let t = TypeResolution::inferred_weak("Число");
     assert!(!t.is_unknown());
 }
 

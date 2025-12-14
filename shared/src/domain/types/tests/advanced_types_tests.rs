@@ -17,50 +17,50 @@ fn test_explicit_constructor() {
 
 #[test]
 fn test_generic_constructor_with_known_type() {
-    let array = TypeResolution::generic("Массив", &["Строка"], 1.0);
+    let array = TypeResolution::generic("Массив", &["Строка"], Certainty::Known);
     assert_eq!(array.type_name(), "Массив<Строка>");
     assert!(matches!(array.certainty, Certainty::Known));
 }
 
 #[test]
 fn test_generic_constructor_with_inferred_certainty() {
-    let array = TypeResolution::generic("Массив", &["Число"], 0.8);
+    let array = TypeResolution::generic("Массив", &["Число"], Certainty::Inferred);
     assert_eq!(array.type_name(), "Массив<Число>");
-    assert!(matches!(array.certainty, Certainty::Inferred(c) if (c - 0.8).abs() < 0.001));
+    assert!(matches!(array.certainty, Certainty::Inferred));
 }
 
 #[test]
 fn test_generic_constructor_with_unknown_param() {
-    let array = TypeResolution::generic("Массив", &["?"], 0.0);
+    let array = TypeResolution::generic("Массив", &["?"], Certainty::InferredWeak);
     assert_eq!(array.type_name(), "Массив<Неопределено>");
-    assert!(matches!(array.certainty, Certainty::Inferred(c) if (c - 0.0).abs() < 0.001));
+    assert!(matches!(array.certainty, Certainty::InferredWeak));
 }
 
 #[test]
 fn test_generic_constructor_with_two_params() {
-    let map = TypeResolution::generic("Соответствие", &["Строка", "Число"], 0.9);
+    let map = TypeResolution::generic("Соответствие", &["Строка", "Число"], Certainty::Inferred);
     assert_eq!(map.type_name(), "Соответствие<Строка, Число>");
 }
 
 #[test]
 fn test_string_to_concrete_primitives() {
     // Test via generic constructor
-    let array_str = TypeResolution::generic("Массив", &["String"], 1.0);
+    let array_str = TypeResolution::generic("Массив", &["String"], Certainty::Known);
     assert_eq!(array_str.type_name(), "Массив<Строка>");
 
-    let array_num = TypeResolution::generic("Массив", &["Number"], 1.0);
+    let array_num = TypeResolution::generic("Массив", &["Number"], Certainty::Known);
     assert_eq!(array_num.type_name(), "Массив<Число>");
 
-    let array_bool = TypeResolution::generic("Массив", &["Boolean"], 1.0);
+    let array_bool = TypeResolution::generic("Массив", &["Boolean"], Certainty::Known);
     assert_eq!(array_bool.type_name(), "Массив<Булево>");
 
-    let array_date = TypeResolution::generic("Массив", &["Date"], 1.0);
+    let array_date = TypeResolution::generic("Массив", &["Date"], Certainty::Known);
     assert_eq!(array_date.type_name(), "Массив<Дата>");
 }
 
 #[test]
 fn test_string_to_concrete_platform_type() {
-    let array = TypeResolution::generic("Массив", &["ТаблицаЗначений"], 1.0);
+    let array = TypeResolution::generic("Массив", &["ТаблицаЗначений"], Certainty::Known);
     assert_eq!(array.type_name(), "Массив<ТаблицаЗначений>");
 }
 

@@ -64,7 +64,8 @@ impl From<&TypeResolution> for SerializableTypeResolution {
 
         let certainty = match resolution.certainty {
             Certainty::Known => 1.0,
-            Certainty::Inferred(c) => c,
+            Certainty::Inferred => 0.8,
+            Certainty::InferredWeak => 0.5,
             Certainty::Unknown => 0.0,
         };
 

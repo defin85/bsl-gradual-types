@@ -80,9 +80,9 @@ fn test_assignment_declares_variable_in_symbol_table() {
     // Проверить тип: должен быть Generic<Массив, [?]>
     let res = var_type.unwrap();
     assert_eq!(res.type_name(), "Массив<Неопределено>");
-    // Certainty 0.0 for unresolved generic
+    // InferredWeak for unresolved generic
     match &res.certainty {
-        Certainty::Inferred(c) => assert!((*c - 0.0).abs() < 0.01),
+        Certainty::InferredWeak => {}
         Certainty::Unknown => {} // Also acceptable for unresolved
         other => panic!("❌ FAILED: Unexpected certainty {:?}", other),
     }

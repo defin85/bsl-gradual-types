@@ -1,6 +1,17 @@
 //! Domain Layer: Type Resolver
 //!
-//! Чистая бизнес-логика разрешения типов без Application concerns
+//! Чистая бизнес-логика разрешения типов без Application concerns.
+//!
+//! ## Порядок резолвинга (R-5 документация)
+//!
+//! `resolve_expression_sync()` использует строгий порядок проверок:
+//!
+//! 1. **Direct lookup** — прямой поиск в TypeRepository
+//! 2. **Member access** — составные имена (Справочники.Контрагенты)
+//! 3. **Composite types** — Union | Intersection | Generic | Nullable
+//! 4. **Primitives fallback** — базовые типы (Строка, Число, etc.)
+//!
+//! Порядок критичен: более специфичные проверки идут раньше.
 
 use super::helpers::is_type_compatible;
 use super::member_resolution::MemberResolver;
@@ -22,43 +33,63 @@ impl TypeResolver {
     // Note: is_configuration_loaded() is handled in MemberResolver
 
     /// Синхронное разрешение выражения (чистая Domain логика)
+    ///
+    /// ## Порядок резолвинга
+    ///
+    /// 1. Direct lookup — прямой поиск в TypeRepository
+    /// 2. Member access — составные имена (Справочники.Контрагенты)
+    /// 3. Composite types — Union | Intersection | Generic | Nullable
+    /// 4. Primitives fallback — базовые типы
+    ///
+    /// Порядок критичен: более специфичные проверки идут раньше.
     pub fn resolve_expression_sync(&self, expression: &str) -> TypeResolution {
-        // 1. Прямой поиск в repository
+        // 1. Direct lookup — прямой поиск в repository
         if let Some(raw_type) = self.repository.find_type(expression) {
             return self.create_resolution_from_raw(&raw_type);
         }
 
-        // 2. Парсинг и разрешение составных имен (Справочники.Контрагенты)
+        // 2. Member access — составные имена (Справочники.Контрагенты)
         if let Some((base, member)) = MemberResolver::parse_member_access(expression) {
             return self.resolve_member_access(&base, &member);
         }
 
-        // 3. Union types: "Строка | Число" (Milestone 2.3)
+        // 3. Composite types — Union | Intersection | Generic | Nullable
+        if let Some(resolution) = self.try_composite_type(expression) {
+            return resolution;
+        }
+
+        // 4. Primitives fallback — базовые типы (когда repository пуст)
+        self.try_resolve_primitive(expression)
+            .map(TypeResolution::known)
+            .unwrap_or_else(TypeResolution::unknown)
+    }
+
+    /// Попытка разрешить composite type (Union, Intersection, Generic, Nullable)
+    ///
+    /// Порядок проверок внутри группы не критичен — типы взаимоисключающие
+    /// по синтаксису (| vs & vs <> vs ?).
+    fn try_composite_type(&self, expression: &str) -> Option<TypeResolution> {
+        // Union: "Строка | Число"
         if expression.contains('|') {
-            return self.resolve_union(expression);
+            return Some(self.resolve_union(expression));
         }
 
-        // 4. Intersection types: "TypeA & TypeB" (Milestone 2.3 Task 2)
+        // Intersection: "TypeA & TypeB"
         if expression.contains('&') {
-            return self.resolve_intersection(expression);
+            return Some(self.resolve_intersection(expression));
         }
 
-        // 5. Generic types: "Массив<Строка>" (Milestone 2.3 Task 3)
+        // Generic: "Массив<Строка>"
         if expression.contains('<') && expression.contains('>') {
-            return self.resolve_generic(expression);
+            return Some(self.resolve_generic(expression));
         }
 
-        // 6. Nullable types: "Строка?" (Milestone 2.3 Task 4)
+        // Nullable: "Строка?"
         if expression.ends_with('?') {
-            return self.resolve_nullable(expression);
+            return Some(self.resolve_nullable(expression));
         }
 
-        // 7. Fallback для примитивных типов (когда repository пуст)
-        if let Some(primitive_type) = self.try_resolve_primitive(expression) {
-            return TypeResolution::known(primitive_type);
-        }
-
-        TypeResolution::unknown()
+        None
     }
 
     /// Преобразование RawTypeData в TypeResolution (чистая логика)

@@ -2,8 +2,9 @@
 
 **Дата создания:** 2025-12-13
 **Обновлено:** 2025-12-14
-**Статус:** В РАБОТЕ
+**Статус:** ✅ ЗАВЕРШЁН
 **Приоритет:** HIGH (понижен с CRITICAL после аудита)
+**Затрачено времени:** ~1.25 часа (вместо оценочных ~3.5 недель)
 
 ## Контекст
 
@@ -202,128 +203,107 @@ pub enum Certainty {
 
 ---
 
-## Milestone R-4: Удаление мёртвых фасетов
+## Milestone R-4: ~~Удаление мёртвых фасетов~~ ЗАКРЫТ — НЕ ТРЕБУЕТСЯ
 
-**Приоритет:** 🟡 MEDIUM
-**Оценка:** 1.5 часа
-**Риск текущего состояния:** 2/10 (низкий, но cleanup нужен)
+**Статус:** ✅ ЗАКРЫТ — НЕ ТРЕБУЕТСЯ
+**Дата закрытия:** 2025-12-14
+**Причина:** Аудит показал, что фасеты активно используются
 
-### Проблема
+### Результаты аудита (2025-12-14)
+
+#### Изначальная гипотеза (ОПРОВЕРГНУТА)
+
+```
+❌ ПРЕДПОЛАГАЛОСЬ: 4 мёртвых фасета с 0 использований
+- Metadata     — 0 использований
+- Constructor  — дублирует Manager
+- Collection   — дублирует List
+- Singleton    — 0 использований
+```
+
+#### Реальное состояние (ФАСЕТЫ ИСПОЛЬЗУЮТСЯ)
+
+| Фасет | Использований | Где используется |
+|-------|---------------|------------------|
+| **Collection** | 25+ | `facet_utils`, `member_resolution`, `context_resolution` — табличные части, регистры |
+| **Metadata** | 5+ | `config_metadata_parser` — ExchangePlan и др. |
+| **Constructor** | 5+ | `property_detector` — парсинг Syntax Helper |
+| **Singleton** | 3+ | `config_metadata_parser` — CommonModule |
+
+#### Критичные зависимости
 
 ```rust
-pub enum FacetKind {
-    Manager,      // ✅ Активно используется
-    Object,       // ✅ Активно используется
-    Reference,    // ✅ Активно используется
-    Selection,    // ✅ Используется
-    List,         // ✅ Используется
-    Metadata,     // ❌ 0 использований
-    Constructor,  // ❌ Дублирует Manager
-    Collection,   // ❌ Дублирует List
-    Singleton,    // ❌ 0 использований
+// Collection влияет на логику shows_properties()!
+pub fn shows_properties(&self) -> bool {
+    matches!(self, FacetKind::Object | FacetKind::Reference | FacetKind::Collection)
 }
 ```
 
-### Решение
+**Удаление Collection сломает отображение свойств для табличных частей и регистров.**
 
-```rust
-pub enum FacetKind {
-    Manager,    // Создание, поиск (Справочники.X)
-    Object,     // Изменяемый объект (СправочникОбъект.X)
-    Reference,  // Ссылка, read-only (СправочникСсылка.X)
-    Selection,  // Выборка (СправочникВыборка.X)
-    List,       // Список в форме (СправочникСписок.X)
-}
-```
+#### Выводы
 
-### Задачи
+1. **Collection** — НЕЛЬЗЯ удалять, влияет на `shows_properties()`
+2. **Metadata/Constructor/Singleton** — используются в парсерах и конфигурации
+3. Гипотеза о "мёртвых фасетах" была основана на неполном анализе
 
-- [ ] **R-4.1:** Grep использования Metadata, Constructor, Collection, Singleton
-- [ ] **R-4.2:** Удалить из enum
-- [ ] **R-4.3:** Обновить `shows_properties()`, `platform_suffix()`
-- [ ] **R-4.4:** Обновить тесты
-- [ ] **R-4.5:** Проверка компиляции
-
-### Критерии успеха
-
-- [ ] 5 фасетов вместо 9
-- [ ] Все тесты проходят
-- [ ] -30% complexity в фасетной системе
+**Рефакторинг не требуется. Все 9 фасетов имеют реальное применение.**
 
 ---
 
-## Milestone R-5: Рефакторинг 8-шаговой стратегии TypeResolver
+## Milestone R-5: ~~Рефакторинг~~ ЗАВЕРШЁН — TypeResolver группировка
 
-**Приоритет:** 🟢 LOW
-**Оценка:** 35 минут
-**Риск текущего состояния:** 7/10 (порядок критичен, не документирован)
+**Статус:** ✅ ЗАВЕРШЁН
+**Дата завершения:** 2025-12-14
+**Фактическое время:** ~15 минут
 
-### Проблема
+### Проблема (была)
+
+7 последовательных if'ов без документации порядка.
+
+### Решение (реализовано)
 
 ```rust
-// 8 последовательных if'ов, порядок критичен!
+/// ## Порядок резолвинга
+///
+/// 1. Direct lookup — прямой поиск в TypeRepository
+/// 2. Member access — составные имена (Справочники.Контрагенты)
+/// 3. Composite types — Union | Intersection | Generic | Nullable
+/// 4. Primitives fallback — базовые типы
 pub fn resolve_expression_sync(&self, expression: &str) -> TypeResolution {
     // 1. Direct lookup
     if let Some(raw_type) = self.repository.find_type(expression) { ... }
+
     // 2. Member access
-    if let Some((base, member)) = ... { ... }
-    // 3. Union
-    if expression.contains('|') { ... }
-    // 4. Intersection
-    if expression.contains('&') { ... }
-    // 5. Generic
-    if expression.contains('<') && expression.contains('>') { ... }
-    // 6. Nullable
-    if expression.ends_with('?') { ... }
-    // 7. Primitives
-    // 8. Fallback
-}
-```
+    if let Some((base, member)) = MemberResolver::parse_member_access(expression) { ... }
 
-### Решение: Группировка composite types
-
-```rust
-pub fn resolve_expression_sync(&self, expression: &str) -> TypeResolution {
-    // 1. Direct lookup
-    if let Some(res) = self.try_direct_lookup(expression) {
-        return res;
-    }
-
-    // 2. Member access (Base.Member)
-    if let Some(res) = self.try_member_access(expression) {
-        return res;
-    }
-
-    // 3. Composite types (Union | Intersection | Generic | Nullable)
-    if let Some(res) = self.try_composite_type(expression) {
-        return res;
+    // 3. Composite types — Union | Intersection | Generic | Nullable
+    if let Some(resolution) = self.try_composite_type(expression) {
+        return resolution;
     }
 
     // 4. Primitives fallback
-    self.try_primitive(expression).unwrap_or_else(TypeResolution::unknown)
+    self.try_resolve_primitive(expression)
+        .map(TypeResolution::known)
+        .unwrap_or_else(TypeResolution::unknown)
 }
 
-fn try_composite_type(&self, expr: &str) -> Option<TypeResolution> {
-    if expr.contains('|') { return Some(self.resolve_union(expr)); }
-    if expr.contains('&') { return Some(self.resolve_intersection(expr)); }
-    if expr.contains('<') && expr.contains('>') { return Some(self.resolve_generic(expr)); }
-    if expr.ends_with('?') { return Some(self.resolve_nullable(expr)); }
-    None
-}
+/// Попытка разрешить composite type (Union, Intersection, Generic, Nullable)
+fn try_composite_type(&self, expression: &str) -> Option<TypeResolution> { ... }
 ```
 
 ### Задачи
 
-- [ ] **R-5.1:** Создать `try_composite_type()` метод
-- [ ] **R-5.2:** Рефакторинг `resolve_expression_sync()`
-- [ ] **R-5.3:** Добавить документацию порядка
-- [ ] **R-5.4:** Проверить тесты
+- [x] **R-5.1:** Создать `try_composite_type()` метод ✅
+- [x] **R-5.2:** Рефакторинг `resolve_expression_sync()` ✅
+- [x] **R-5.3:** Добавить документацию порядка (module-level + method-level) ✅
+- [x] **R-5.4:** Проверить тесты — 76+ resolver тестов проходят ✅
 
 ### Критерии успеха
 
-- [ ] 4 логические группы вместо 8 if'ов
-- [ ] Документация порядка в коде
-- [ ] Все тесты проходят
+- [x] 4 логические группы вместо 7 if'ов ✅
+- [x] Документация порядка в коде ✅
+- [x] Все тесты проходят ✅
 
 ---
 
@@ -333,45 +313,44 @@ fn try_composite_type(&self, expr: &str) -> Option<TypeResolution> {
 ✅ R-1: ЗАКРЫТ (архитектура корректна, делегация работает)
 ✅ R-2: ЗАКРЫТ (нет дублирования, DDD слои правильные)
 ✅ R-3: ЗАВЕРШЁН (Certainty без f32, добавлен InferredWeak)
+✅ R-4: ЗАКРЫТ (фасеты используются, удаление не требуется)
+✅ R-5: ЗАВЕРШЁН (TypeResolver группировка + документация)
 
-Осталось: R-4, R-5 (Quick wins) — ~2 часа
-├── R-4: Мёртвые фасеты (1.5 часа)
-└── R-5: TypeResolver группировка (35 минут)
+🎉 ВСЕ MILESTONES ЗАВЕРШЕНЫ!
 ```
 
-## Суммарная оценка (обновлена)
+## Суммарная оценка (финальная)
 
 | Milestone | Время | Сложность | Риск до | Риск после | Статус |
 |-----------|-------|-----------|---------|------------|--------|
 | **R-1** | ~~7-10 дней~~ | — | ~~9/10~~ | — | ✅ ЗАКРЫТ |
 | **R-2** | ~~3-5 дней~~ | — | ~~8/10~~ | — | ✅ ЗАКРЫТ |
 | **R-3** | ~1 час | LOW | 7/10 | 1/10 | ✅ ЗАВЕРШЁН |
-| **R-4** | 1.5 часа | LOW | 2/10 | 1/10 | ⏳ Quick win |
-| **R-5** | 35 мин | LOW | 7/10 | 2/10 | ⏳ Quick win |
-| **ИТОГО** | **~2 часа** | — | — | — | — |
+| **R-4** | ~~1.5 часа~~ | — | ~~2/10~~ | — | ✅ ЗАКРЫТ |
+| **R-5** | ~15 мин | LOW | 7/10 | 2/10 | ✅ ЗАВЕРШЁН |
+| **ИТОГО** | **~1.25 часа** | — | — | — | ✅ ГОТОВО |
 
-**Экономия времени:** ~2.5 недели (R-1 + R-2 не требуются)
+**Экономия времени:** ~2.5 недели (R-1, R-2, R-4 не требовались после аудита)
 
 ## Ожидаемые результаты
 
-После завершения:
+Все цели достигнуты:
 - ~~✅ Один путь резолвинга~~ → **УЖЕ ЕСТЬ** (подтверждено аудитом R-1)
 - ~~✅ Одно место для фасетной логики~~ → **УЖЕ ЕСТЬ** (подтверждено аудитом R-2)
-- ~~✅ Упрощённый Certainty (readability)~~ → **ГОТОВО** (R-3 завершён, добавлен InferredWeak)
-- ✅ 5 фасетов вместо 9 (simplicity) — R-4
-- ✅ Документированный порядок резолвинга — R-5
+- ~~✅ Упрощённый Certainty (readability)~~ → **ГОТОВО** (R-3: `Inferred` + `InferredWeak`)
+- ~~✅ 5 фасетов вместо 9~~ → **НЕ ТРЕБУЕТСЯ** (R-4: все 9 фасетов используются)
+- ~~✅ Документированный порядок резолвинга~~ → **ГОТОВО** (R-5: `try_composite_type()`)
 
-## Зависимости (обновлены)
+## Зависимости (финальные)
 
 ```
 ✅ R-1: ЗАКРЫТ
 ✅ R-2: ЗАКРЫТ
 ✅ R-3: ЗАВЕРШЁН
+✅ R-4: ЗАКРЫТ
+✅ R-5: ЗАВЕРШЁН
 
-R-4 (мёртвые фасеты) ◄── независим
-R-5 (TypeResolver) ◄── независим
-
-Оба можно делать параллельно или в любом порядке.
+🎉 Type System Refactoring v4.0 ЗАВЕРШЁН!
 ```
 
-**Приоритет:** R-5 (наибольшая польза для readability). R-4 — cleanup.
+**Итог:** Из 5 milestones — 2 реализованы (R-3, R-5), 3 закрыты после аудита (R-1, R-2, R-4).

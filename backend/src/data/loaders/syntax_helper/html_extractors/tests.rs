@@ -651,3 +651,21 @@ fn test_extract_method_overloads_tabular_section_unload() {
     assert_eq!(overloads[1].parameters[0].type_name.as_deref(), Some("Структура"));
     assert_eq!(overloads[1].parameters[1].type_name.as_deref(), Some("Строка"));
 }
+
+#[test]
+fn test_extract_property_type_value_table_columns() {
+    let html_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("examples/syntax_helper/rebuilt.shcntx_ru/objects/catalog234/catalog236/ValueTable/properties/Columns1030.html");
+    let content =
+        std::fs::read_to_string(&html_path).expect("failed to read Columns1030.html");
+    let document = Html::parse_document(&content);
+
+    let extractor = HtmlExtractor::new();
+    let prop_type = extractor.extract_property_type(&document);
+    assert_eq!(
+        prop_type.as_deref(),
+        Some("КоллекцияКолонокТаблицыЗначений"),
+        "ValueTable.Columns should be typed as ValueTableColumnCollection"
+    );
+}

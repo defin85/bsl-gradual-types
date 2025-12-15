@@ -141,14 +141,46 @@ fn convert_type_info_to_raw(type_info: &TypeInfo, db: &SyntaxHelperDatabase) -> 
         })
         .collect();
 
-    // Конвертируем свойства с сохранением двуязычных имён (если будут)
+    // Конвертируем свойства, подтягивая тип/readonly из db.properties (если есть)
     let properties = type_info
         .structure
         .properties
         .iter()
-        .map(|(russian, _english)| RawPropertyData {
-            name: russian.clone(),
-            ..Default::default()
+        .map(|(russian, _english)| {
+            let property_info = {
+                let type_qualified_key =
+                    format!("property_{}.{}", type_info.identity.russian_name, russian);
+                db.properties
+                    .get(&type_qualified_key)
+                    .or_else(|| {
+                        let simple_key = format!("property_{}", russian);
+                        db.properties.get(&simple_key)
+                    })
+                    .or_else(|| {
+                        db.properties.values().find(|prop| {
+                            prop.name
+                                .starts_with(&format!("{}.", type_info.identity.russian_name))
+                                && prop.name.ends_with(&format!(".{}", russian))
+                        })
+                    })
+            };
+
+            if let Some(property_info) = property_info {
+                RawPropertyData {
+                    name: russian.clone(),
+                    prop_type: property_info.property_type.clone().unwrap_or_default(),
+                    is_readonly: property_info.is_readonly,
+                }
+            } else {
+                warn!(
+                    "⚠️ Property {} not found in database for type {}",
+                    russian, type_info.identity.russian_name
+                );
+                RawPropertyData {
+                    name: russian.clone(),
+                    ..Default::default()
+                }
+            }
         })
         .collect();
 

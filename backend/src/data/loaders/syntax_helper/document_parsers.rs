@@ -165,7 +165,8 @@ impl DocumentParser {
 
     /// Парсит свойство из документа
     pub fn parse_property(&self, document: &Html) -> Result<PropertyInfo> {
-        let name = self.html_extractor.extract_title(document);
+        let title = self.html_extractor.extract_title(document);
+        let (name, _english_from_title) = self.html_extractor.parse_title(&title);
         let description = self.html_extractor.extract_description(document);
         let property_type = self.html_extractor.extract_property_type(document);
         let is_readonly = self.html_extractor.is_readonly(document);

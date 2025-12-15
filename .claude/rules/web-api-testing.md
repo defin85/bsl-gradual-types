@@ -34,6 +34,16 @@
    curl -s http://localhost:3002/api/health
    ```
 
+## Координаты (ВАЖНО)
+
+Во всех endpoints, где передаются `line`/`column` (например, `POST /api/hover/enhanced`):
+
+- `line` — **0-based** (первая строка файла = `0`)
+- `column` — **0-based** (первый символ строки = `0`)
+
+Если ты смотришь строку в редакторе/через `nl -ba` (обычно 1-based), то для Web API нужно делать:
+- `api_line = file_line - 1`
+
 ## Шаблон для кириллицы (ОБЯЗАТЕЛЬНО)
 
 **ВАЖНО:** Используй `python3` + локальный файл `test_api.json`:
@@ -55,7 +65,7 @@ with codecs.open('test_api.json', 'w', 'utf-8') as f:
 python3 -c "
 import json, codecs
 with codecs.open('test_api.json', 'w', 'utf-8') as f:
-    json.dump({'code': 'ТЗ = Новый ТаблицаЗначений;', 'line': 1, 'column': 10}, f, ensure_ascii=False)
+    json.dump({'code': 'ТЗ = Новый ТаблицаЗначений;', 'line': 0, 'column': 10}, f, ensure_ascii=False)
 " && curl -s -X POST http://localhost:3002/api/hover/enhanced \
   -H "Content-Type: application/json" -d @test_api.json | python3 -m json.tool
 
@@ -112,7 +122,7 @@ with codecs.open('test_api.json', 'w', 'utf-8') as f:
 
 ### /api/hover/enhanced
 ```json
-{"code": "ТЗ = Новый ТаблицаЗначений;", "line": 1, "column": 10}
+{"code": "ТЗ = Новый ТаблицаЗначений;", "line": 0, "column": 10}
 ```
 
 ### /api/semantic-tree

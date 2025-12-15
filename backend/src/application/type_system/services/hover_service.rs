@@ -109,6 +109,74 @@ pub async fn get_hover_info(
     // Milestone 2.11 Task B1: DEBUG logs for node search
     debug!("Looking for node at position {}:{}", line, column);
 
+    // Специальный кейс: hover на имени свойства (obj.Property) должен показывать тип свойства,
+    // а не тип переменной-объекта слева от точки.
+    if let Some(node) = ir_program.find_node_at_position(line, column) {
+        if let SemanticNodeKind::MemberAccess {
+            object_name,
+            object_type,
+            member_name,
+            access_kind,
+            result_type,
+            ..
+        } = &node.kind
+        {
+            if access_kind.is_property() {
+                if let Some(word_under_cursor) = extract_word_at_position(file_content, line, column)
+                {
+                    if word_under_cursor.eq_ignore_ascii_case(member_name) {
+                        let resolver = analysis_engine.get_resolver();
+
+                        // 1) Тип объекта-владельца (flow-sensitive, если объект - переменная)
+                        let owner_resolution = if let Some(obj_name) = object_name.as_deref() {
+                            if let Some(flow_type) =
+                                find_variable_type_at_position(&ir_program, obj_name, node.scope_id, line)
+                            {
+                                flow_type
+                            } else {
+                                resolver.resolve_variable_with_context(
+                                    obj_name,
+                                    &ir_program.symbols,
+                                    node.scope_id,
+                                )
+                            }
+                        } else {
+                            object_type.clone()
+                        };
+
+                        // 2) Тип свойства из метаданных (если есть), иначе fallback на result_type узла
+                        let (prop_type, is_readonly) = metadata_lookup
+                            .get_properties(&owner_resolution)
+                            .into_iter()
+                            .find(|p| p.name.eq_ignore_ascii_case(member_name))
+                            .map(|p| (p.prop_type, Some(p.is_readonly)))
+                            .unwrap_or_else(|| (String::new(), None));
+
+                        let property_resolution = if !prop_type.trim().is_empty() {
+                            resolver.resolve_expression_sync(&prop_type)
+                        } else {
+                            resolver.resolve_expression_sync(&result_type.type_name())
+                        };
+
+                        let formatter = if let Some(config) = hover_config.clone() {
+                            HoverFormatter::new(config, metadata_lookup.clone())
+                        } else {
+                            hover_formatter.clone()
+                        };
+
+                        return Ok(Some(formatter.format_property(
+                            object_name.as_deref(),
+                            &owner_resolution,
+                            member_name,
+                            &property_resolution,
+                            is_readonly,
+                        )));
+                    }
+                }
+            }
+        }
+    }
+
     // Direction 2: Use find_variable_with_scope() for Generic inference
     let result = if let Some((var_name, _type_hint, scope_id)) =
         ir_program.find_variable_with_scope(line, column)

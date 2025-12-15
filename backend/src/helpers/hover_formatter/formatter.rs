@@ -127,6 +127,52 @@ impl HoverFormatter {
         }
     }
 
+    /// Форматировать hover для свойства (obj.Property)
+    ///
+    /// Показывает информацию о свойстве (имя, readonly) и тип значения свойства,
+    /// включая методы/свойства самого типа (как у обычной переменной).
+    pub fn format_property(
+        &self,
+        owner_name: Option<&str>,
+        owner_resolution: &TypeResolution,
+        property_name: &str,
+        property_resolution: &TypeResolution,
+        is_readonly: Option<bool>,
+    ) -> String {
+        let display_name = if let Some(owner) = owner_name {
+            format!("{}.{}", owner, property_name)
+        } else {
+            property_name.to_string()
+        };
+
+        let readonly_str = is_readonly
+            .map(|v| if v { "Да" } else { "Нет" })
+            .unwrap_or("?");
+
+        match self.config.detail_level {
+            DetailLevel::Compact => HoverBuilder::new(&self.config)
+                .add_header("Свойство", &display_name)
+                .add_section("Владелец", &owner_resolution.type_name())
+                .add_section("Только чтение", readonly_str)
+                .add_type_info(property_resolution)
+                .add_certainty(&property_resolution.certainty)
+                .build(),
+            DetailLevel::Full | DetailLevel::Detailed => HoverBuilder::new(&self.config)
+                .add_header("Свойство", &display_name)
+                .add_section("Владелец", &owner_resolution.type_name())
+                .add_section("Только чтение", readonly_str)
+                .add_type_info(property_resolution)
+                .add_certainty(&property_resolution.certainty)
+                .add_facet_info(property_resolution)
+                .add_generic_info(property_resolution)
+                .add_properties(property_resolution, &self.metadata_lookup)
+                .add_tabular_sections(property_resolution, &self.metadata_lookup)
+                .add_methods(property_resolution, &self.metadata_lookup)
+                .add_documentation_links(property_resolution)
+                .build(),
+        }
+    }
+
     /// Форматировать hover для функции
     pub fn format_function(&self, name: &str, signature: &str) -> String {
         HoverBuilder::new(&self.config)

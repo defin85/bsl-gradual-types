@@ -4,10 +4,78 @@
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::helpers::hover_formatter::HoverFormatConfig;
 use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
-use bsl_shared::domain::repository::InMemoryTypeRepository;
+use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::SignatureSourceRegistry;
+use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawTypeData};
 use bsl_shared::engine::AnalysisEngine;
 use std::sync::Arc;
+
+fn seed_minimal_platform_types(repository: &Arc<InMemoryTypeRepository>) {
+    // Минимальный набор типов + сигнатур, чтобы inference мог вывести return type для Количество()
+    // без загрузки полного syntax_helper.
+    let types = vec![
+        RawTypeData {
+            name: "ТаблицаЗначений".to_string(),
+            english_name: "ValueTable".to_string(),
+            description: "Минимальный тип для тестов".to_string(),
+            category: "Platform".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![RawMethodData {
+                name: "Количество".to_string(),
+                english_name: "Count".to_string(),
+                return_type: "Число".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        RawTypeData {
+            name: "Массив".to_string(),
+            english_name: "Array".to_string(),
+            description: "Минимальный тип для тестов".to_string(),
+            category: "Platform".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![RawMethodData {
+                name: "Количество".to_string(),
+                english_name: "Count".to_string(),
+                return_type: "Число".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        RawTypeData {
+            name: "Число".to_string(),
+            english_name: "Number".to_string(),
+            description: "Минимальный тип для тестов".to_string(),
+            category: "Platform".to_string(),
+            source: RawDataSource::Platform,
+            // Упростим: считаем что есть метод Строка() -> Строка (нужно для цепочки в тесте)
+            methods: vec![RawMethodData {
+                name: "Строка".to_string(),
+                english_name: "String".to_string(),
+                return_type: "Строка".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        RawTypeData {
+            name: "Строка".to_string(),
+            english_name: "String".to_string(),
+            description: "Минимальный тип для тестов".to_string(),
+            category: "Platform".to_string(),
+            source: RawDataSource::Platform,
+            ..Default::default()
+        },
+    ];
+
+    repository.load_types(types.clone()).unwrap();
+
+    // SignatureIndex: строим из тех же типов, чтобы resolve_method_return_type работал.
+    let index = SignatureSourceRegistry::new()
+        .register(bsl_backend::data::loaders::SyntaxHelperSource::new(types))
+        .build();
+    repository.set_signature_index(index);
+}
 
 #[tokio::test]
 async fn test_implicit_variable_type_inference() {
@@ -19,6 +87,7 @@ async fn test_implicit_variable_type_inference() {
 
     // Создаём необходимые компоненты
     let repository = Arc::new(InMemoryTypeRepository::new());
+    seed_minimal_platform_types(&repository);
     let resolver = Arc::new(TypeResolver::new(repository.clone()));
     let analysis_engine = Arc::new(AnalysisEngine::new(resolver, repository.clone()));
     let cache = Arc::new(AnalysisCache::new(100));
@@ -65,6 +134,7 @@ async fn test_explicit_vs_implicit_variables() {
 
     // Создаём необходимые компоненты
     let repository = Arc::new(InMemoryTypeRepository::new());
+    seed_minimal_platform_types(&repository);
     let resolver = Arc::new(TypeResolver::new(repository.clone()));
     let analysis_engine = Arc::new(AnalysisEngine::new(resolver, repository.clone()));
     let cache = Arc::new(AnalysisCache::new(100));
@@ -106,6 +176,7 @@ async fn test_implicit_variable_with_method_chain() {
 
     // Создаём необходимые компоненты
     let repository = Arc::new(InMemoryTypeRepository::new());
+    seed_minimal_platform_types(&repository);
     let resolver = Arc::new(TypeResolver::new(repository.clone()));
     let analysis_engine = Arc::new(AnalysisEngine::new(resolver, repository.clone()));
     let cache = Arc::new(AnalysisCache::new(100));

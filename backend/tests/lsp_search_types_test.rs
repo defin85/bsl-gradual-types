@@ -89,17 +89,8 @@ fn create_coordinator_with_basic_types() -> Arc<SystemCoordinator> {
     let engine = coordinator.get_analysis_engine().unwrap();
     let repo = engine.get_repository();
 
-    // Добавляем базовые типы для тестирования (в дополнение к fallback типам)
+    // Добавляем базовые типы для тестирования (которых НЕТ в fallback типах)
     let test_types = vec![
-        RawTypeData {
-            name: "Массив".to_string(),
-            english_name: "Array".to_string(),
-            facets: vec![FacetKind::Object],
-            properties: vec![],
-            methods: vec![],
-            description: "Динамический массив".to_string(),
-            ..Default::default()
-        },
         RawTypeData {
             name: "Структура".to_string(),
             english_name: "Structure".to_string(),
@@ -116,24 +107,6 @@ fn create_coordinator_with_basic_types() -> Arc<SystemCoordinator> {
             properties: vec![],
             methods: vec![],
             description: "Таблица со строками и колонками".to_string(),
-            ..Default::default()
-        },
-        RawTypeData {
-            name: "Строка".to_string(),
-            english_name: "String".to_string(),
-            facets: vec![FacetKind::Object],
-            properties: vec![],
-            methods: vec![],
-            description: "Строковый тип".to_string(),
-            ..Default::default()
-        },
-        RawTypeData {
-            name: "Число".to_string(),
-            english_name: "Number".to_string(),
-            facets: vec![FacetKind::Object],
-            properties: vec![],
-            methods: vec![],
-            description: "Числовой тип".to_string(),
             ..Default::default()
         },
     ];
@@ -226,7 +199,7 @@ fn test_search_types_partial_match() {
     // ARRANGE
     let coordinator = create_coordinator_with_basic_types();
     let request = SearchTypesRequest {
-        query: "Табл".to_string(), // Частичное совпадение
+        query: "ТаблицаЗнач".to_string(), // Частичное совпадение (без пересечения с "ТабличнаяЧасть")
         limit: 15,
     };
 

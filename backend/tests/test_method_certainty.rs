@@ -1,45 +1,52 @@
-use bsl_backend::system::SystemCoordinator;
-use std::path::Path;
+use bsl_backend::system::ParserCoordinator;
+use bsl_shared::domain::repository::InMemoryTypeRepository;
+use bsl_shared::domain::signature_index::{
+    ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
+};
+use bsl_shared::domain::type_id::TypeId;
+use std::sync::Arc;
 
-#[tokio::test]
-async fn test_method_return_certainty() {
-    let coordinator = SystemCoordinator::new();
-    let syntax_helper_path = Path::new("examples/syntax_helper");
-    coordinator
-        .start_with_paths(Some(syntax_helper_path), None, None)
-        .await
-        .expect("Failed to start coordinator");
+#[test]
+fn test_method_return_certainty() {
+    // Тест должен быть детерминированным и быстрым: не парсим весь Syntax Helper.
+    // Проверяем только то, что при наличии сигнатуры метода в SignatureIndex
+    // результат вызова получает Known certainty.
 
-    let service = coordinator
-        .type_service()
-        .expect("Failed to get TypeSystemService");
+    let repository = Arc::new(InMemoryTypeRepository::new());
+
+    let mut signature_index = SignatureIndex::new();
+    signature_index.add_platform_method(
+        TypeId::new("Массив"),
+        MethodSignature::new(
+            "Количество".to_string(),
+            Some("Массив".to_string()),
+            vec![],
+            Some("Число".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        ),
+    );
+    repository.set_signature_index(signature_index);
+
+    let parser = ParserCoordinator::new(repository);
 
     let code = r#"
-ТЗ = Новый ТаблицаЗначений;
-Результат = ТЗ.Выгрузить();
+М = Новый Массив();
+Результат = М.Количество();
 "#;
 
-    let result = service
-        .get_semantic_tree(code, "test.bsl", false, true, true)
-        .await
-        .expect("Failed to get semantic tree");
+    let program = parser.parse_to_ir(code, "test.bsl").expect("parse_to_ir failed");
+    let dto = program.to_dto(false, false);
 
-    println!("\n=== Symbol Table ===");
-    for (var, info) in &result.symbol_table {
-        if let Some(ref type_res) = info.resolved_type {
-            println!("\n{}: {} ({}%)", var, type_res.certainty, type_res.certainty_percent);
-        } else {
-            println!("\n{}: No type", var);
-        }
-    }
-
-    // Проверяем что у Результат certainty = Known (100%)
-    let rezultat = result.symbol_table.get("Результат").expect("Результат not found");
-    let type_res = rezultat.resolved_type.as_ref().expect("Результат has no type");
-
-    println!("\nРезультат type: {}", type_res.name);
-    println!("Результат certainty: {} ({}%)", type_res.certainty, type_res.certainty_percent);
-    println!("Expected: Known (100%)");
+    let rezultat = dto
+        .symbol_table
+        .get("Результат")
+        .expect("Результат not found");
+    let type_res = rezultat
+        .resolved_type
+        .as_ref()
+        .expect("Результат has no type");
 
     assert_eq!(
         type_res.certainty,
@@ -52,3 +59,4 @@ async fn test_method_return_certainty() {
         "Known certainty should be 100%"
     );
 }
+

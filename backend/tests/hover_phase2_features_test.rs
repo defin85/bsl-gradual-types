@@ -98,13 +98,13 @@ mod phase2_features_tests {
 
         // Should display Reference facet
         assert!(
-            hover.contains("Фасет:") && hover.contains("Reference"),
+            hover.contains("Фасет") && hover.contains("Ссылка"),
             "Should show active facet Reference"
         );
 
         // Should display all available facets
         assert!(
-            hover.contains("Manager") && hover.contains("Object") && hover.contains("Selection"),
+            hover.contains("Менеджер") && hover.contains("Объект") && hover.contains("Выборка"),
             "Should show all available facets"
         );
     }
@@ -138,13 +138,13 @@ mod phase2_features_tests {
 
         // Should display Object facet
         assert!(
-            hover.contains("Object"),
+            hover.contains("Фасет") && hover.contains("Объект"),
             "Should show active facet Object"
         );
 
         // Should display correct available facets
         assert!(
-            hover.contains("Manager"),
+            hover.contains("Менеджер"),
             "Should show available facet Manager"
         );
     }

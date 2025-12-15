@@ -7,6 +7,7 @@ use bsl_shared::domain::types::{
     Certainty, ConcreteType, PlatformType, RawDataSource, RawMethodData, RawPropertyData,
     RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource, TypeResolution,
 };
+use bsl_shared::formatting::DetailLevel;
 use std::sync::Arc;
 
 fn create_test_repository_with_n_methods(method_count: usize) -> Arc<InMemoryTypeRepository> {
@@ -104,6 +105,7 @@ fn test_methods_limit_respected() {
 
     let config = HoverFormatConfig {
         max_methods: 10,
+        detail_level: DetailLevel::Full,
         ..Default::default()
     };
 
@@ -148,6 +150,8 @@ fn test_properties_limit_respected() {
 
     let config = HoverFormatConfig {
         max_properties: 5,
+        // Свойства отображаются только в Detailed, и там лимиты намеренно не применяются
+        detail_level: DetailLevel::Detailed,
         ..Default::default()
     };
 
@@ -155,31 +159,21 @@ fn test_properties_limit_respected() {
     let resolution = create_test_resolution();
     let hover = formatter.format_variable("Переменная", &resolution);
 
-    // Проверка 1: Hover содержит "показано 5 из 20"
+    // Проверка 1: Hover содержит "показано 20 из 20" (в Detailed показываем всё)
     assert!(
-        hover.contains("показано 5 из 20"),
+        hover.contains("показано 20 из 20"),
         "Hover должен содержать информацию о лимите свойств: {}",
         hover
     );
 
-    // Проверка 2: Показаны первые 5 свойств
+    // Проверка 2: Показаны свойства
     assert!(hover.contains("Свойство0"), "Должно быть Свойство0");
-    assert!(hover.contains("Свойство4"), "Должно быть Свойство4");
+    assert!(hover.contains("Свойство19"), "Должно быть Свойство19");
 
-    // Проверка 3: НЕ показаны свойства за пределами лимита
+    // Проверка 3: В Detailed не должно быть сообщения "и ещё"
     assert!(
-        !hover.contains("Свойство5"),
-        "Свойство5 не должно отображаться (за пределами лимита)"
-    );
-    assert!(
-        !hover.contains("Свойство19"),
-        "Свойство19 не должно отображаться (за пределами лимита)"
-    );
-
-    // Проверка 4: Есть сообщение "... и ещё N свойств"
-    assert!(
-        hover.contains("... и ещё 15 свойств"),
-        "Должно быть сообщение о дополнительных свойствах: {}",
+        !hover.contains("и ещё"),
+        "Не должно быть сообщения 'и ещё' в Detailed: {}",
         hover
     );
 }
@@ -194,6 +188,7 @@ fn test_no_limit_message_when_below_threshold_methods() {
 
     let config = HoverFormatConfig {
         max_methods: 10,
+        detail_level: DetailLevel::Full,
         ..Default::default()
     };
 
@@ -265,6 +260,7 @@ fn test_markdown_vs_plaintext_formatting() {
     // Markdown
     let config_md = HoverFormatConfig {
         max_methods: 10,
+        detail_level: DetailLevel::Full,
         output_format: HoverOutputFormat::Markdown,
         ..Default::default()
     };
@@ -275,6 +271,7 @@ fn test_markdown_vs_plaintext_formatting() {
     // PlainText
     let config_pt = HoverFormatConfig {
         max_methods: 10,
+        detail_level: DetailLevel::Full,
         output_format: HoverOutputFormat::PlainText,
         ..Default::default()
     };
@@ -292,8 +289,9 @@ fn test_markdown_vs_plaintext_formatting() {
         "Markdown должен содержать emoji для certainty"
     );
     assert!(
-        hover_md.contains("•"),
-        "Markdown должен использовать • для списков"
+        hover_md.contains("* **"),
+        "Markdown должен использовать markdown-списки для методов: {}",
+        hover_md
     );
 
     // PlainText форматирование
@@ -308,8 +306,9 @@ fn test_markdown_vs_plaintext_formatting() {
         hover_pt
     );
     assert!(
-        hover_pt.contains("-"),
-        "PlainText должен использовать - для списков"
+        hover_pt.contains("  - "),
+        "PlainText должен использовать - для списков: {}",
+        hover_pt
     );
 }
 

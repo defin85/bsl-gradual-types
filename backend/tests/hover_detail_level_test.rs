@@ -558,7 +558,7 @@ mod detail_level_tests {
         let config = HoverFormatConfig::default();
         assert_eq!(config.max_methods, 10);
         assert_eq!(config.max_properties, 5);
-        assert_eq!(config.detail_level, DetailLevel::Full);
+        assert_eq!(config.detail_level, DetailLevel::Detailed);
         assert_eq!(config.show_certainty, true);
         assert_eq!(config.output_format, HoverOutputFormat::Markdown);
     }
@@ -649,8 +649,8 @@ mod detail_level_tests {
         // ✅ Должно корректно обработать отсутствие методов
         assert!(hover.contains("ТаблицаЗначений"));
         assert!(
-            !hover.contains("Методы"),
-            "Не должно быть секции методов если их нет"
+            hover.contains("Методы недоступны"),
+            "Должно быть предупреждение про отсутствие методов без syntax_helper"
         );
     }
 

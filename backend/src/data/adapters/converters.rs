@@ -26,7 +26,7 @@ fn convert_type_info_to_raw(type_info: &TypeInfo, db: &SyntaxHelperDatabase) -> 
         .structure
         .methods
         .iter()
-        .map(|(russian, english)| {
+        .flat_map(|(russian, english)| {
             // Ищем метод несколькими способами в порядке приоритета:
             // 1. По полному ключу с типом: "method_ТипДанных.МетодИмя"
             // 2. По простому ключу: "method_МетодИмя"
@@ -53,12 +53,59 @@ fn convert_type_info_to_raw(type_info: &TypeInfo, db: &SyntaxHelperDatabase) -> 
             };
 
             if let Some(method_info) = method_info {
-                RawMethodData {
+                let english_name = method_info
+                    .english_name
+                    .clone()
+                    .unwrap_or_else(|| english.clone());
+
+                // Если в документации есть варианты синтаксиса — разворачиваем в overload'ы.
+                if !method_info.overloads.is_empty() {
+                    return method_info
+                        .overloads
+                        .iter()
+                        .map(|ov| {
+                            let description = match (&method_info.description, &ov.variant_name) {
+                                (Some(base), Some(variant)) if !variant.is_empty() => {
+                                    Some(format!("{} (вариант: {})", base, variant))
+                                }
+                                (Some(base), _) => Some(base.clone()),
+                                (None, Some(variant)) if !variant.is_empty() => {
+                                    Some(format!("Вариант: {}", variant))
+                                }
+                                (None, _) => None,
+                            };
+
+                            RawMethodData {
+                                name: russian.clone(),
+                                english_name: english_name.clone(),
+                                return_type: method_info.return_type.clone().unwrap_or_default(),
+                                params: ov
+                                    .parameters
+                                    .iter()
+                                    .map(|p| RawParamData {
+                                        name: p.name.clone(),
+                                        param_type: p
+                                            .type_name
+                                            .clone()
+                                            .unwrap_or_else(|| "Произвольный".to_string()),
+                                        is_optional: p.is_optional,
+                                        default_value: p.default_value.clone(),
+                                    })
+                                    .collect(),
+                                description,
+                                is_deprecated: false,
+                                is_constructor: method_info.name.starts_with("Новый")
+                                    || method_info.name.starts_with("New"),
+                                context_requirements: None, // TODO: Извлечь из Syntax Helper
+                                return_facet: None, // TODO: Извлечь из Syntax Helper
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                }
+
+                vec![RawMethodData {
                     name: russian.clone(),
-                    english_name: method_info
-                        .english_name
-                        .clone()
-                        .unwrap_or_else(|| english.clone()),
+                    english_name,
                     return_type: method_info.return_type.clone().unwrap_or_default(),
                     params: method_info
                         .parameters
@@ -79,17 +126,17 @@ fn convert_type_info_to_raw(type_info: &TypeInfo, db: &SyntaxHelperDatabase) -> 
                         || method_info.name.starts_with("New"),
                     context_requirements: None, // TODO: Извлечь из Syntax Helper
                     return_facet: None, // TODO: Извлечь из Syntax Helper
-                }
+                }]
             } else {
                 warn!(
                     "⚠️ Method {} not found in database for type {}",
                     russian, type_info.identity.russian_name
                 );
-                RawMethodData {
+                vec![RawMethodData {
                     name: russian.clone(),
                     english_name: english.clone(),
                     ..Default::default()
-                }
+                }]
             }
         })
         .collect();

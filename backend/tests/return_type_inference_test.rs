@@ -125,6 +125,10 @@ fn test_method_return_type_basic() {
 
     let repository = create_test_repository();
     let signature_index = create_test_signature_index_with_methods();
+    assert!(
+        signature_index.find_global_function("ТипЗнч").is_some(),
+        "Тестовый SignatureIndex должен содержать глобальную функцию ТипЗнч"
+    );
     let ir = AstToIrConverter::convert(
         ast,
         source.to_string(),

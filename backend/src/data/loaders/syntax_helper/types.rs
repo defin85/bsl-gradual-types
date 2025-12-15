@@ -108,9 +108,26 @@ pub struct MethodInfo {
     pub name: String,
     pub english_name: Option<String>,
     pub description: Option<String>,
+    /// Варианты синтаксиса (overloads) для методов 1С.
+    ///
+    /// В документации 1С один метод часто описывается несколькими "Вариант синтаксиса".
+    /// Этот список хранит параметры для каждого варианта отдельно.
+    #[serde(default)]
+    pub overloads: Vec<MethodOverloadInfo>,
     pub parameters: Vec<ParameterInfo>,
     pub return_type: Option<String>,
     pub return_description: Option<String>,
+}
+
+/// Один вариант синтаксиса (overload) метода.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MethodOverloadInfo {
+    /// Заголовок варианта (после "Вариант синтаксиса:"), если есть.
+    pub variant_name: Option<String>,
+    /// Параметры конкретного варианта.
+    pub parameters: Vec<ParameterInfo>,
+    /// Описание конкретного варианта, если извлечено.
+    pub description: Option<String>,
 }
 
 /// Информация о свойстве

@@ -432,8 +432,8 @@ impl TypeRepository for InMemoryTypeRepository {
 
         let index = self.signature_index.read().unwrap();
 
-        // Ищем метод в индексе
-        let expected_signature = index.find_method(owner_type, method_name);
+        // Ищем все overload'ы метода в индексе
+        let expected_overloads = index.find_methods(owner_type, method_name);
 
         // Создаём актуальную сигнатуру
         let actual_signature = MethodSignature::new(
@@ -447,7 +447,7 @@ impl TypeRepository for InMemoryTypeRepository {
         );
 
         // Валидируем
-        index.validate_signature(expected_signature, &actual_signature)
+        index.validate_overloaded_signature(&expected_overloads, &actual_signature)
     }
 
     fn find_method_signature(

@@ -26,6 +26,7 @@ use scraper::Html;
 use std::path::Path;
 
 use super::types::{CodeExample, ParameterInfo};
+use super::types::MethodOverloadInfo;
 use bsl_shared::domain::types::FacetKind;
 
 /// Фасад для всех HTML экстракторов
@@ -105,6 +106,13 @@ impl HtmlExtractor {
 
     pub fn extract_parameters(&self, document: &Html) -> Vec<ParameterInfo> {
         ParameterExtractor::extract_parameters(document)
+    }
+
+    /// Извлечь варианты синтаксиса (overloads) для метода.
+    ///
+    /// Для методов без "Вариант синтаксиса" вернёт 0 или 1 вариант в зависимости от наличия секции параметров.
+    pub fn extract_method_overloads(&self, document: &Html) -> Vec<MethodOverloadInfo> {
+        ParameterExtractor::extract_method_overloads(document)
     }
 
     // =========================================================================

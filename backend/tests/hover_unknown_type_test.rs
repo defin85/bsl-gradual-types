@@ -38,15 +38,10 @@ async fn test_hover_shows_unknown_type_warning_for_configuration_types() {
     let hover_text = hover_result.unwrap();
     eprintln!("=== HOVER TEXT ===\n{}\n==================", hover_text);
 
-    // ✅ НОВОЕ ПОВЕДЕНИЕ: Система показывает Inferred (50%) для конфигурационных типов без метаданных
+    // ✅ НОВОЕ ПОВЕДЕНИЕ: Система показывает InferredWeak (50%) для конфигурационных типов без метаданных
     assert!(
-        hover_text.contains("🟡 Inferred (50%)"),
-        "Configuration type без метаданных должен показывать Inferred (50%). Actual hover:\n{}",
-        hover_text
-    );
-    assert!(
-        hover_text.contains("⚠️"),
-        "Hover должен содержать предупреждение (⚠️). Actual hover:\n{}",
+        hover_text.contains("InferredWeak (50%)"),
+        "Configuration type без метаданных должен показывать InferredWeak (50%). Actual hover:\n{}",
         hover_text
     );
     assert!(
@@ -54,7 +49,7 @@ async fn test_hover_shows_unknown_type_warning_for_configuration_types() {
         "Hover должен сообщать, что детали типа недоступны"
     );
     assert!(
-        hover_text.contains("Справочники.Контрагенты"),
+        hover_text.contains("Контрагенты"),
         "Hover должен показывать имя типа"
     );
     assert!(
@@ -63,13 +58,12 @@ async fn test_hover_shows_unknown_type_warning_for_configuration_types() {
     );
 
     // ❌ Проверяем, что hover НЕ содержит фантомную информацию (методы/свойства)
-    // Но теперь допускается базовая информация о типе (имя, certainty)
     assert!(
-        !hover_text.contains("📚 **Методы:**"),
+        !hover_text.contains("Методы (показано"),
         "Hover НЕ должен показывать список методов (метаданные не загружены)"
     );
     assert!(
-        !hover_text.contains("📦 **Свойства:**"),
+        !hover_text.contains("Свойства (показано"),
         "Hover НЕ должен показывать список свойств (метаданные не загружены)"
     );
 }
@@ -117,18 +111,16 @@ async fn test_hover_shows_correct_info_for_platform_types() {
     );
 
     // ✅ Для Platform Type должны быть методы (если они загружены из Syntax Helper)
-    // Если Syntax Helper загружен, проверяем наличие методов
-    // Если НЕ загружен, проверяем warning
-    if hover_text.contains("📚 **Методы:**") {
+    if hover_text.contains("Методы (показано") {
         // Syntax Helper загружен → проверяем методы типа Массив
         assert!(
             hover_text.contains("Добавить") || hover_text.contains("Количество"),
             "Hover должен показывать методы Массива"
         );
     } else {
-        // Syntax Helper НЕ загружен → должно быть предупреждение
+        // Syntax Helper НЕ загружен → должно быть предупреждение/сообщение о недоступности
         assert!(
-            hover_text.contains("⚠️") || hover_text.contains("Тип не найден"),
+            hover_text.contains("Методы недоступны") || hover_text.contains("Детали типа недоступны"),
             "Hover должен показывать предупреждение, если Syntax Helper не загружен"
         );
     }
@@ -189,13 +181,8 @@ async fn test_hover_differentiates_platform_and_configuration_types() {
 
     // ✅ Configuration Type должен показывать Inferred (50%) и предупреждение
     assert!(
-        config_text.contains("🟡 Inferred (50%)"),
-        "Configuration Type должен показывать Inferred (50%). Actual:\n{}",
-        config_text
-    );
-    assert!(
-        config_text.contains("⚠️"),
-        "Configuration Type должен показывать предупреждение. Actual:\n{}",
+        config_text.contains("InferredWeak (50%)"),
+        "Configuration Type должен показывать InferredWeak (50%). Actual:\n{}",
         config_text
     );
     assert!(

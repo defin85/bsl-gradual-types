@@ -266,6 +266,14 @@ impl AstToIrConverter {
 
             // Вызов функции/метода
             Expression::Call { function, .. } => {
+                // Глобальная функция: если известна в SignatureIndex, НЕ считаем её "undeclared variable"
+                if let Expression::Identifier { name: func_name, .. } = function.as_ref() {
+                    let resolved = self.resolve_global_function_return_type(func_name);
+                    if !resolved.is_unknown() {
+                        return resolved;
+                    }
+                }
+
                 // Phase 4: Проверяем function expression на undeclared
                 // Если это прямой вызов необъявленной переменной (например "необъявленная()"),
                 // а не вызов метода на ней ("объект.Метод()"), возвращаем undeclared.
@@ -604,6 +612,23 @@ impl AstToIrConverter {
         }
 
         // Метод не найден - unknown
+        TypeResolution::unknown()
+    }
+
+    /// Резолвит return type глобальной функции для FunctionCall.
+    ///
+    /// Использует SignatureIndex (global_functions) и возвращает:
+    /// - `explicit(return_type)` если тип известен
+    /// - `explicit("Неопределено")` если функция найдена, но return_type отсутствует (процедура)
+    /// - `unknown()` если функция не найдена
+    pub(crate) fn resolve_global_function_return_type(&self, function_name: &str) -> TypeResolution {
+        if let Some(sig) = self.signature_index.find_global_function(function_name) {
+            if let Some(return_type) = &sig.return_type {
+                return TypeResolution::explicit(return_type);
+            }
+            return TypeResolution::explicit("Неопределено");
+        }
+
         TypeResolution::unknown()
     }
 }

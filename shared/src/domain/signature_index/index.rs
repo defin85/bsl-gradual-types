@@ -48,15 +48,15 @@ impl SignatureIndex {
 
     // ==================== Методы добавления ====================
 
-    /// Добавить платформенный метод с поддержкой merge
+    /// Добавить платформенный метод с поддержкой merge и overload'ов
     ///
-    /// Если метод с таким именем уже существует, обновляет его поля если:
+    /// Если overload с такой же сигнатурой уже существует, обновляет его поля если:
     /// - return_type у существующего None, а у нового Some
     /// - return_facet у существующего None, а у нового Some
     /// - context_requirements у существующего Universal, а у нового более специфичные
     ///
-    /// Это позволяет "обогащать" методы из syntax_helper (без return types)
-    /// данными из platform_types.rs (с return types).
+    /// Это позволяет "обогащать" методы из syntax_helper данными из других источников,
+    /// не теряя overload'ы (несколько вариантов синтаксиса одного метода).
     pub fn add_platform_method(&mut self, type_id: TypeId, method: MethodSignature) {
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
@@ -68,9 +68,8 @@ impl SignatureIndex {
 
         let methods = self.platform_methods.entry(type_id.clone()).or_default();
 
-        // Ищем существующий метод с таким же именем (регистронезависимо)
-        let method_name_lower = method.name.to_lowercase();
-        if let Some(existing) = methods.iter_mut().find(|m| m.name.to_lowercase() == method_name_lower) {
+        // Ищем существующий overload с такой же сигнатурой (регистронезависимо)
+        if let Some(existing) = methods.iter_mut().find(|m| Self::same_overload(m, &method)) {
             // Обновляем return_type если у существующего None/пустой
             if existing.return_type.as_ref().is_none_or(|s| s.is_empty()) {
                 if let Some(ref new_return_type) = method.return_type {
@@ -116,15 +115,45 @@ impl SignatureIndex {
                 existing.context_requirements = method.context_requirements;
             }
 
-            // Обновляем params если у существующего пусто
+            // Обновляем params:
+            // - если у существующего пусто -> берём целиком
+            // - иначе "обогащаем" поэлементно (тип/имя/default), не меняя shape overload'а
             if existing.params.is_empty() && !method.params.is_empty() {
                 tracing::debug!(
                     type_id = %type_id,
                     method_name = %method.name,
                     param_count = method.params.len(),
-                    "SignatureIndex: merged params"
+                    "SignatureIndex: merged params (filled empty)"
                 );
                 existing.params = method.params;
+            } else if !existing.params.is_empty() && existing.params.len() == method.params.len() {
+                for (existing_param, new_param) in
+                    existing.params.iter_mut().zip(method.params.iter())
+                {
+                    if existing_param.name.is_empty() && !new_param.name.is_empty() {
+                        existing_param.name = new_param.name.clone();
+                    }
+
+                    let existing_type = existing_param.type_name.as_deref().unwrap_or("").trim();
+                    let new_type = new_param.type_name.as_deref().unwrap_or("").trim();
+                    let existing_is_unknown = existing_type.is_empty()
+                        || existing_type.eq_ignore_ascii_case("произвольный");
+                    let new_is_unknown =
+                        new_type.is_empty() || new_type.eq_ignore_ascii_case("произвольный");
+                    if existing_is_unknown && !new_is_unknown {
+                        existing_param.type_name = new_param.type_name.clone();
+                    }
+
+                    if existing_param.default_value.is_none()
+                        && new_param.default_value.is_some()
+                    {
+                        existing_param.default_value = new_param.default_value.clone();
+                    }
+
+                    if existing_param.description.is_none() && new_param.description.is_some() {
+                        existing_param.description = new_param.description.clone();
+                    }
+                }
             }
         } else {
             // Метод не найден - добавляем новый
@@ -138,6 +167,30 @@ impl SignatureIndex {
             }
             methods.push(method);
         }
+    }
+
+    fn same_overload(a: &MethodSignature, b: &MethodSignature) -> bool {
+        if a.name.to_lowercase() != b.name.to_lowercase() {
+            return false;
+        }
+        if a.params.len() != b.params.len() {
+            return false;
+        }
+
+        // Overload matching policy:
+        // - required/optional shape must match
+        // - если тип параметра известен у ОБОИХ и различается -> это разные overload'ы
+        // - если тип неизвестен хотя бы у одного -> считаем совместимыми (можно merge'ить)
+        a.params.iter().zip(b.params.iter()).all(|(ap, bp)| {
+            if ap.is_optional != bp.is_optional {
+                return false;
+            }
+
+            match (&ap.type_name, &bp.type_name) {
+                (Some(a_ty), Some(b_ty)) => a_ty.to_lowercase() == b_ty.to_lowercase(),
+                _ => true,
+            }
+        })
     }
 
     /// Добавить конфигурационный метод
@@ -214,6 +267,12 @@ impl SignatureIndex {
         self.find_method_by_type_id(&type_id, method_name)
     }
 
+    /// Найти все overload'ы метода по имени типа и имени метода.
+    pub fn find_methods(&self, type_name: &str, method_name: &str) -> Vec<&MethodSignature> {
+        let type_id = TypeId::new(type_name);
+        self.find_methods_by_type_id(&type_id, method_name)
+    }
+
     /// Внутренний поиск метода по TypeId с поддержкой fallback на базовый тип
     fn find_method_by_type_id(&self, type_id: &TypeId, method_name: &str) -> Option<&MethodSignature> {
         let method_name_lower = method_name.to_lowercase();
@@ -274,6 +333,35 @@ impl SignatureIndex {
         }
 
         None
+    }
+
+    fn find_methods_by_type_id<'a>(&'a self, type_id: &TypeId, method_name: &str) -> Vec<&'a MethodSignature> {
+        let method_name_lower = method_name.to_lowercase();
+
+        // 1) точный тип
+        let mut out = Vec::new();
+        if let Some(methods) = self.platform_methods.get(type_id) {
+            out.extend(methods.iter().filter(|m| m.name.to_lowercase() == method_name_lower));
+        }
+        if let Some(methods) = self.config_methods.get(type_id) {
+            out.extend(methods.iter().filter(|m| m.name.to_lowercase() == method_name_lower));
+        }
+        if !out.is_empty() {
+            return out;
+        }
+
+        // 2) fallback на базовый фасетный тип
+        if let Some(base) = facet_helpers::extract_base_facet_type(type_id.display()) {
+            let base_id = TypeId::new(base);
+            if let Some(methods) = self.platform_methods.get(&base_id) {
+                out.extend(methods.iter().filter(|m| m.name.to_lowercase() == method_name_lower));
+            }
+            if let Some(methods) = self.config_methods.get(&base_id) {
+                out.extend(methods.iter().filter(|m| m.name.to_lowercase() == method_name_lower));
+            }
+        }
+
+        out
     }
 
     /// Получить все методы для указанного типа (Milestone 3.15: Pre-warm Cache)
@@ -675,6 +763,34 @@ impl SignatureIndex {
         } else {
             SignatureValidationResult::Invalid(mismatches)
         }
+    }
+
+    /// Валидировать сигнатуру вызова по набору overload'ов.
+    ///
+    /// Считается валидным, если совпал хотя бы один overload.
+    pub fn validate_overloaded_signature(
+        &self,
+        expected: &[&MethodSignature],
+        actual: &MethodSignature,
+    ) -> SignatureValidationResult {
+        if expected.is_empty() {
+            return SignatureValidationResult::Valid;
+        }
+
+        let mut best_mismatches: Option<Vec<SignatureMismatch>> = None;
+
+        for sig in expected {
+            match self.validate_signature(Some(sig), actual) {
+                SignatureValidationResult::Valid => return SignatureValidationResult::Valid,
+                SignatureValidationResult::Invalid(m) => {
+                    if best_mismatches.as_ref().is_none_or(|best| m.len() < best.len()) {
+                        best_mismatches = Some(m);
+                    }
+                }
+            }
+        }
+
+        SignatureValidationResult::Invalid(best_mismatches.unwrap_or_default())
     }
 }
 

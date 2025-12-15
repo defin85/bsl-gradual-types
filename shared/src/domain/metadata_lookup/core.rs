@@ -86,6 +86,34 @@ impl TypeMetadataLookup {
             }
         }
 
+        let sig_methods_to_raw = |type_name: &str, sig_methods: Vec<MethodSignature>| -> Vec<RawMethodData> {
+            // SignatureIndex не хранит english_name, поэтому подтягиваем его из RawTypeData (если есть).
+            let english_map = self
+                .repository
+                .find_type(type_name)
+                .map(|t| {
+                    t.methods
+                        .into_iter()
+                        .filter(|m| !m.english_name.is_empty())
+                        .map(|m| (m.name.to_lowercase(), m.english_name))
+                        .collect::<std::collections::HashMap<_, _>>()
+                })
+                .unwrap_or_default();
+
+            sig_methods
+                .into_iter()
+                .map(|sig| {
+                    let mut raw = Self::method_signature_to_raw(sig);
+                    if raw.english_name.is_empty() {
+                        if let Some(en) = english_map.get(&raw.name.to_lowercase()) {
+                            raw.english_name = en.clone();
+                        }
+                    }
+                    raw
+                })
+                .collect()
+        };
+
         // Приоритет 2 - Нормализованное имя типа через SignatureIndex
         if let Some(name) = self.normalize_type_name(resolution) {
             let sig_methods = self.repository.get_methods_from_signature_index(&name);
@@ -95,10 +123,7 @@ impl TypeMetadataLookup {
                     name,
                     sig_methods.len()
                 );
-                return sig_methods
-                    .into_iter()
-                    .map(Self::method_signature_to_raw)
-                    .collect();
+                return sig_methods_to_raw(&name, sig_methods);
             }
         }
 
@@ -112,10 +137,7 @@ impl TypeMetadataLookup {
                     name,
                     sig_methods.len()
                 );
-                return sig_methods
-                    .into_iter()
-                    .map(Self::method_signature_to_raw)
-                    .collect();
+                return sig_methods_to_raw(&name, sig_methods);
             }
 
             // Fallback: для типов не в SignatureIndex (примитивные, тестовые)

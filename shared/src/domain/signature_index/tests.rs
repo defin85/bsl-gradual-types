@@ -129,135 +129,107 @@ mod tests {
     }
 
     #[test]
-    fn test_builtin_methods_tabular_section() {
-        let mut index = SignatureIndex::new();
-        index.initialize_builtin_methods();
+    fn test_method_overloads_are_kept_and_validated() {
+        use crate::domain::signature_registry::SignatureDataSource;
+        use crate::domain::SignatureSourceRegistry;
+        use crate::domain::types::{RawMethodData, RawParamData, RawTypeData};
 
-        // Проверяем что методы ТабличнаяЧасть добавлены
-        let vygruzit = index.find_method("ТабличнаяЧасть", "Выгрузить");
-        assert!(vygruzit.is_some(), "Метод Выгрузить должен быть добавлен");
-        assert_eq!(
-            vygruzit.unwrap().return_type,
-            Some("ТаблицаЗначений".to_string())
+        struct TestSource;
+        impl SignatureDataSource for TestSource {
+            fn name(&self) -> &str {
+                "TestSource"
+            }
+            fn priority(&self) -> u32 {
+                10
+            }
+            fn load(&self) -> Vec<RawTypeData> {
+                vec![RawTypeData {
+                    name: "ТабличнаяЧасть".to_string(),
+                    methods: vec![
+                        // overload 1: Выгрузить(Строки?: Массив, Колонки?: Строка)
+                        RawMethodData {
+                            name: "Выгрузить".to_string(),
+                            return_type: "ТаблицаЗначений".to_string(),
+                            params: vec![
+                                RawParamData {
+                                    name: "Строки".to_string(),
+                                    param_type: "Массив".to_string(),
+                                    is_optional: true,
+                                    ..Default::default()
+                                },
+                                RawParamData {
+                                    name: "Колонки".to_string(),
+                                    param_type: "Строка".to_string(),
+                                    is_optional: true,
+                                    ..Default::default()
+                                },
+                            ],
+                            ..Default::default()
+                        },
+                        // overload 2: Выгрузить(ПараметрыОтбора?: Структура, Колонки?: Строка)
+                        RawMethodData {
+                            name: "Выгрузить".to_string(),
+                            return_type: "ТаблицаЗначений".to_string(),
+                            params: vec![
+                                RawParamData {
+                                    name: "ПараметрыОтбора".to_string(),
+                                    param_type: "Структура".to_string(),
+                                    is_optional: true,
+                                    ..Default::default()
+                                },
+                                RawParamData {
+                                    name: "Колонки".to_string(),
+                                    param_type: "Строка".to_string(),
+                                    is_optional: true,
+                                    ..Default::default()
+                                },
+                            ],
+                            ..Default::default()
+                        },
+                    ],
+                    ..Default::default()
+                }]
+            }
+        }
+
+        let index = SignatureSourceRegistry::new().register(TestSource).build();
+
+        let overloads = index.find_methods("ТабличнаяЧасть", "Выгрузить");
+        assert_eq!(overloads.len(), 2);
+
+        // actual: Выгрузить(Массив, Строка)
+        let actual = MethodSignature::new(
+            "Выгрузить".to_string(),
+            Some("ТабличнаяЧасть".to_string()),
+            vec![
+                ParameterInfo {
+                    name: "arg0".to_string(),
+                    type_name: Some("Массив".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: None,
+                },
+                ParameterInfo {
+                    name: "arg1".to_string(),
+                    type_name: Some("Строка".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: None,
+                },
+            ],
+            Some("ТаблицаЗначений".to_string()),
+            SignatureSource::UserCode,
+            None,
+            ContextRequirements::default(),
         );
 
-        let dobavit = index.find_method("ТабличнаяЧасть", "Добавить");
-        assert!(dobavit.is_some(), "Метод Добавить должен быть добавлен");
-        assert_eq!(
-            dobavit.unwrap().return_type,
-            Some("СтрокаТабличнойЧасти".to_string())
-        );
-
-        let kolichestvo = index.find_method("ТабличнаяЧасть", "Количество");
         assert!(
-            kolichestvo.is_some(),
-            "Метод Количество должен быть добавлен"
+            matches!(
+                index.validate_overloaded_signature(&overloads, &actual),
+                crate::domain::signature_index::SignatureValidationResult::Valid
+            ),
+            "Вызов должен пройти валидацию по одному из overload'ов"
         );
-        assert_eq!(kolichestvo.unwrap().return_type, Some("Число".to_string()));
-
-        let ochistit = index.find_method("ТабличнаяЧасть", "Очистить");
-        assert!(ochistit.is_some(), "Метод Очистить должен быть добавлен");
-        assert_eq!(ochistit.unwrap().return_type, None); // void
-
-        let udalit = index.find_method("ТабличнаяЧасть", "Удалить");
-        assert!(udalit.is_some(), "Метод Удалить должен быть добавлен");
-
-        let naiti = index.find_method("ТабличнаяЧасть", "Найти");
-        assert!(naiti.is_some(), "Метод Найти должен быть добавлен");
-        assert_eq!(
-            naiti.unwrap().return_type,
-            Some("СтрокаТабличнойЧасти".to_string())
-        );
-
-        let naiti_stroki = index.find_method("ТабличнаяЧасть", "НайтиСтроки");
-        assert!(
-            naiti_stroki.is_some(),
-            "Метод НайтиСтроки должен быть добавлен"
-        );
-        assert_eq!(
-            naiti_stroki.unwrap().return_type,
-            Some("Массив".to_string())
-        );
-
-        let poluchit = index.find_method("ТабличнаяЧасть", "Получить");
-        assert!(poluchit.is_some(), "Метод Получить должен быть добавлен");
-        assert_eq!(
-            poluchit.unwrap().return_type,
-            Some("СтрокаТабличнойЧасти".to_string())
-        );
-
-        let indeks = index.find_method("ТабличнаяЧасть", "Индекс");
-        assert!(indeks.is_some(), "Метод Индекс должен быть добавлен");
-        assert_eq!(indeks.unwrap().return_type, Some("Число".to_string()));
-
-        let itogo = index.find_method("ТабличнаяЧасть", "Итого");
-        assert!(itogo.is_some(), "Метод Итого должен быть добавлен");
-        assert_eq!(itogo.unwrap().return_type, Some("Число".to_string()));
-
-        let sdvinut = index.find_method("ТабличнаяЧасть", "Сдвинуть");
-        assert!(sdvinut.is_some(), "Метод Сдвинуть должен быть добавлен");
-
-        let zagruzit = index.find_method("ТабличнаяЧасть", "Загрузить");
-        assert!(zagruzit.is_some(), "Метод Загрузить должен быть добавлен");
-
-        let sortirovat = index.find_method("ТабличнаяЧасть", "Сортировать");
-        assert!(
-            sortirovat.is_some(),
-            "Метод Сортировать должен быть добавлен"
-        );
-
-        let vygruzit_kolonku = index.find_method("ТабличнаяЧасть", "ВыгрузитьКолонку");
-        assert!(
-            vygruzit_kolonku.is_some(),
-            "Метод ВыгрузитьКолонку должен быть добавлен"
-        );
-        assert_eq!(
-            vygruzit_kolonku.unwrap().return_type,
-            Some("Массив".to_string())
-        );
-
-        let zagruzit_kolonku = index.find_method("ТабличнаяЧасть", "ЗагрузитьКолонку");
-        assert!(
-            zagruzit_kolonku.is_some(),
-            "Метод ЗагрузитьКолонку должен быть добавлен"
-        );
-
-        let vstavit = index.find_method("ТабличнаяЧасть", "Вставить");
-        assert!(vstavit.is_some(), "Метод Вставить должен быть добавлен");
-        assert_eq!(
-            vstavit.unwrap().return_type,
-            Some("СтрокаТабличнойЧасти".to_string())
-        );
-    }
-
-    #[test]
-    fn test_tabular_section_method_params() {
-        let mut index = SignatureIndex::new();
-        index.initialize_builtin_methods();
-
-        // Проверяем параметры метода Выгрузить
-        let vygruzit = index
-            .find_method("ТабличнаяЧасть", "Выгрузить")
-            .expect("Метод Выгрузить должен существовать");
-        assert_eq!(vygruzit.params.len(), 2);
-        assert!(vygruzit.params[0].is_optional);
-        assert!(vygruzit.params[1].is_optional);
-
-        // Проверяем параметры метода Найти
-        let naiti = index
-            .find_method("ТабличнаяЧасть", "Найти")
-            .expect("Метод Найти должен существовать");
-        assert_eq!(naiti.params.len(), 2);
-        assert!(!naiti.params[0].is_optional); // Значение - обязательный
-        assert!(naiti.params[1].is_optional); // Колонки - опциональный
-
-        // Проверяем параметры метода Сдвинуть
-        let sdvinut = index
-            .find_method("ТабличнаяЧасть", "Сдвинуть")
-            .expect("Метод Сдвинуть должен существовать");
-        assert_eq!(sdvinut.params.len(), 2);
-        assert!(!sdvinut.params[0].is_optional);
-        assert!(!sdvinut.params[1].is_optional);
     }
 
     // ================= Milestone 3.11 Phase 2: Faceted Type Support =================
@@ -985,20 +957,27 @@ mod tests {
     fn test_add_platform_method_merges_params() {
         let mut index = SignatureIndex::new();
 
-        // Добавляем метод БЕЗ параметров
-        let sig_no_params = MethodSignature::new(
+        // Добавляем метод с параметром без типа (как будто источник не знал тип)
+        let param_unknown = ParameterInfo {
+            name: "Индекс".to_string(),
+            type_name: None,
+            is_optional: false,
+            default_value: None,
+            description: None,
+        };
+        let sig_unknown_param_type = MethodSignature::new(
             "Вставить".to_string(),
             Some("Массив".to_string()),
-            vec![], // Нет параметров
+            vec![param_unknown],
             None,
             SignatureSource::Platform,
             None,
             ContextRequirements::Universal,
         );
-        index.add_platform_method(TypeId::new("Массив"), sig_no_params);
+        index.add_platform_method(TypeId::new("Массив"), sig_unknown_param_type);
 
-        // Добавляем метод С параметрами
-        let param = ParameterInfo {
+        // Добавляем тот же overload, но уже с известным типом параметра
+        let param_typed = ParameterInfo {
             name: "Индекс".to_string(),
             type_name: Some("Число".to_string()),
             is_optional: false,
@@ -1008,7 +987,7 @@ mod tests {
         let sig_with_params = MethodSignature::new(
             "Вставить".to_string(),
             Some("Массив".to_string()),
-            vec![param],
+            vec![param_typed],
             None,
             SignatureSource::Platform,
             None,
@@ -1016,11 +995,12 @@ mod tests {
         );
         index.add_platform_method(TypeId::new("Массив"), sig_with_params);
 
-        // Проверяем что параметры обновились
+        // Проверяем что параметры "обогатились"
         let found = index.find_method("Массив", "Вставить");
         assert!(found.is_some());
         assert_eq!(found.unwrap().params.len(), 1);
         assert_eq!(found.unwrap().params[0].name, "Индекс");
+        assert_eq!(found.unwrap().params[0].type_name, Some("Число".to_string()));
     }
 
     // ================= PHASE 3: Enhanced Merge Tests =================

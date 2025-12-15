@@ -144,6 +144,9 @@ impl AstToIrConverter {
             .map(|arg| self.infer_type_resolution(arg))
             .collect();
 
+        // MILESTONE 5.6: тип возвращаемого значения из SignatureIndex (глобальные функции)
+        let result_type = self.resolve_global_function_return_type(&function_name);
+
         let node = SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name,
@@ -152,8 +155,7 @@ impl AstToIrConverter {
                 // Phase 3: arg_types теперь Vec<TypeResolution>
                 arg_types,
                 object_node: None, // Нет вложенного узла для обычных функций
-                // НОВОЕ: тип возвращаемого значения (TODO: resolve from function signature)
-                result_type: TypeResolution::unknown(),
+                result_type,
             },
             span,
             scope_id: self.current_scope,

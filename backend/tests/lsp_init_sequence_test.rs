@@ -13,7 +13,8 @@ async fn test_lsp_server_init_sequence_with_double_start() {
     let coordinator = SystemCoordinator::new();
 
     // ✅ ШАГ 1: Эмулируем вызов из main() → coordinator.start()
-    // Создаёт TypeRepository с базовыми типами (4 типа: Строка, Число, Булево, Дата)
+    // Создаёт TypeRepository с fallback типами платформы (включая коллекции вроде Массив),
+    // но без методов/документации из Syntax Helper.
     println!("📍 ШАГ 1: coordinator.start() - базовые типы");
     coordinator
         .start()
@@ -40,20 +41,25 @@ async fn test_lsp_server_init_sequence_with_double_start() {
         .await
         .expect("get_hover_info failed");
 
-    // На этом этапе Массив НЕ должен быть найден (только 4 базовых типа)
+    // На этом этапе Массив ДОЛЖЕН быть найден (fallback types),
+    // но методы должны быть недоступны без Syntax Helper.
     if let Some(hover_text) = hover_v1 {
         println!("🔍 Hover после start(): {}", hover_text);
-        // Ожидаем предупреждение "Тип не найден"
         assert!(
-            hover_text.contains("⚠️") && hover_text.contains("Тип не найден"),
-            "После start() Массив НЕ должен быть найден (только базовые типы). Actual:\n{}",
+            hover_text.contains("**Тип:**") && hover_text.contains("Массив"),
+            "После start() Массив должен резолвиться из fallback types. Actual:\n{}",
+            hover_text
+        );
+        assert!(
+            hover_text.contains("Методы недоступны") || hover_text.contains("Детали типа недоступны"),
+            "После start() должны быть недоступны методы/документация без Syntax Helper. Actual:\n{}",
             hover_text
         );
     } else {
         panic!("Hover не вернул информацию после start()");
     }
 
-    println!("✅ ШАГ 1 завершён: Массив не найден (ожидаемо)");
+    println!("✅ ШАГ 1 завершён: Массив найден через fallback (ожидаемо)");
 
     // ✅ ШАГ 2: Эмулируем вызов из initialized() → coordinator.start_with_paths()
     // Создаёт НОВЫЙ TypeRepository с полными типами из Syntax Helper (3927 типов)

@@ -1,6 +1,7 @@
 //! Тесты для HTML экстракторов
 
 use scraper::Html;
+use std::path::Path;
 
 use super::*;
 use crate::data::loaders::syntax_helper::type_parser::{TypeFragment, TypeParser};
@@ -623,4 +624,30 @@ fn test_extract_return_info_various_placeholders() {
             placeholder
         );
     }
+}
+
+#[test]
+fn test_extract_method_overloads_tabular_section_unload() {
+    // Реальный HTML из syntax_helper: "Табличная часть.Выгрузить" содержит 2 "Вариант синтаксиса"
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let html_path = root.join(
+        "examples/syntax_helper/rebuilt.shcntx_ru/objects/catalog125/catalog177/catalog270/Tabular section/methods/Unload846.html",
+    );
+    let content = std::fs::read_to_string(html_path).expect("failed to read Unload846.html");
+    let document = Html::parse_document(&content);
+
+    let extractor = HtmlExtractor::new();
+    let overloads = extractor.extract_method_overloads(&document);
+
+    assert_eq!(overloads.len(), 2, "Должны извлечь 2 overload'а");
+
+    // overload 1: Выгрузить(<Строки?: Массив>, <Колонки?: Строка>)
+    assert_eq!(overloads[0].parameters.len(), 2);
+    assert_eq!(overloads[0].parameters[0].type_name.as_deref(), Some("Массив"));
+    assert_eq!(overloads[0].parameters[1].type_name.as_deref(), Some("Строка"));
+
+    // overload 2: Выгрузить(<ПараметрыОтбора?: Структура>, <Колонки?: Строка>)
+    assert_eq!(overloads[1].parameters.len(), 2);
+    assert_eq!(overloads[1].parameters[0].type_name.as_deref(), Some("Структура"));
+    assert_eq!(overloads[1].parameters[1].type_name.as_deref(), Some("Строка"));
 }

@@ -7,7 +7,7 @@ use scraper::Html;
 use tracing::debug;
 
 use super::super::type_parser::UNION_SEPARATOR;
-use super::super::types::ParameterInfo;
+use super::super::types::{MethodOverloadInfo, ParameterInfo};
 
 /// Экстрактор параметров методов
 pub struct ParameterExtractor;
@@ -172,6 +172,116 @@ impl ParameterExtractor {
         parameters
     }
 
+    /// Извлекает варианты синтаксиса (overloads) метода.
+    ///
+    /// В документации 1С часто встречается структура:
+    /// - "Вариант синтаксиса: ..."
+    /// - "Синтаксис:"
+    /// - "Параметры:"
+    /// ... и так несколько раз в одном HTML.
+    ///
+    /// Этот метод возвращает параметры отдельно для каждого варианта, чтобы не "склеивать"
+    /// несколько секций `Параметры:` в один список.
+    pub fn extract_method_overloads(document: &Html) -> Vec<MethodOverloadInfo> {
+        let html_text = document.html();
+
+        // Быстрый путь: нет вариантов — возвращаем пусто или единичный вариант (если параметры есть).
+        if !html_text.contains("Вариант синтаксиса:") && !html_text.contains("Syntax variant:") {
+            let params = Self::extract_parameters(document);
+            if params.is_empty() {
+                return vec![];
+            }
+            return vec![MethodOverloadInfo {
+                variant_name: None,
+                parameters: params,
+                description: None,
+            }];
+        }
+
+        Self::extract_overloads_from_html(&html_text)
+    }
+
+    fn extract_overloads_from_html(html_text: &str) -> Vec<MethodOverloadInfo> {
+        const RU_VARIANT: &str = "Вариант синтаксиса:";
+        const EN_VARIANT: &str = "Syntax variant:";
+
+        let mut overloads = Vec::new();
+        let mut cursor = 0usize;
+
+        while cursor < html_text.len() {
+            let (variant_pos, marker_len) = html_text[cursor..]
+                .find(RU_VARIANT)
+                .map(|p| (cursor + p, RU_VARIANT.len()))
+                .or_else(|| html_text[cursor..].find(EN_VARIANT).map(|p| (cursor + p, EN_VARIANT.len())))
+                .unwrap_or((usize::MAX, 0));
+
+            if marker_len == 0 {
+                break;
+            }
+
+            // Имя варианта: текст после маркера до следующего тега/закрытия </p>
+            let after_marker = variant_pos + marker_len;
+            let tail = &html_text[after_marker..];
+            let end = tail
+                .find("</p>")
+                .or_else(|| tail.find("<p"))
+                .or_else(|| tail.find("<"))
+                .unwrap_or(tail.len());
+            let variant_name = tail[..end]
+                .replace("&nbsp;", " ")
+                .trim()
+                .trim_end_matches(':')
+                .trim()
+                .to_string();
+            let variant_name = if variant_name.is_empty() {
+                None
+            } else {
+                Some(variant_name)
+            };
+
+            // Ищем секцию параметров после этого варианта
+            let slice_after_variant = &html_text[after_marker..];
+            let params_marker = slice_after_variant
+                .find("Параметры:</p>")
+                .or_else(|| slice_after_variant.find("Parameters:</p>"));
+
+            if let Some(params_rel) = params_marker {
+                let params_start = after_marker + params_rel;
+
+                // Границы варианта: до следующего варианта или до "Возвращаемое значение"
+                let rest = &html_text[params_start..];
+                let next_variant_rel = rest.find(RU_VARIANT).or_else(|| rest.find(EN_VARIANT));
+                let return_rel = rest
+                    .find("Возвращаемое значение:")
+                    .or_else(|| rest.find("Return value:"));
+
+                let end_rel = match (next_variant_rel, return_rel) {
+                    (Some(a), Some(b)) => a.min(b),
+                    (Some(a), None) => a,
+                    (None, Some(b)) => b,
+                    (None, None) => rest.len(),
+                };
+
+                // Вытаскиваем параметры ТОЛЬКО из этого варианта
+                let section = &rest[..end_rel];
+                let params_section = Self::extract_parameters_section(section);
+                let parameters = Self::extract_parameters_from_section(&params_section);
+
+                if !parameters.is_empty() {
+                    overloads.push(MethodOverloadInfo {
+                        variant_name,
+                        parameters,
+                        description: None,
+                    });
+                }
+            }
+
+            cursor = after_marker;
+        }
+
+        overloads
+    }
+
     /// Извлекает секцию "Параметры:" из HTML до следующей секции
     fn extract_parameters_section(html_text: &str) -> String {
         const RU_PARAMS: &str = "Параметры:</p>";
@@ -198,6 +308,107 @@ impl ParameterExtractor {
             .unwrap_or(remaining.len());
 
         remaining[..section_end].to_string()
+    }
+
+    fn extract_parameters_from_section(params_section: &str) -> Vec<ParameterInfo> {
+        let mut parameters = Vec::new();
+
+        let param_regex = match Regex::new(
+            r#"<div class="V8SH_rubric">[^<]*<p[^>]*>&lt;([^>]+)&gt;\s*\(([^)]+)\)(?:</p>)?</div>"#,
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                debug!("Failed to compile param regex: {}", e);
+                return parameters;
+            }
+        };
+
+        let type_link_regex = match Regex::new(r#"<a[^>]*>([^<]+)</a>"#) {
+            Ok(r) => r,
+            Err(e) => {
+                debug!("Failed to compile type link regex: {}", e);
+                return parameters;
+            }
+        };
+
+        for cap in param_regex.captures_iter(params_section) {
+            let name = cap
+                .get(1)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
+            let optional_text = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+
+            if name.is_empty() {
+                continue;
+            }
+
+            let match_end = cap.get(0).map(|m| m.end()).unwrap_or(0);
+            let remaining = if match_end < params_section.len() {
+                &params_section[match_end..]
+            } else {
+                ""
+            };
+
+            const RU_TYPE: &str = "Тип:";
+            const EN_TYPE: &str = "Type:";
+            let mut param_type = String::new();
+            let (type_pos, type_marker_len) = remaining
+                .find(RU_TYPE)
+                .map(|p| (p, RU_TYPE.len()))
+                .or_else(|| remaining.find(EN_TYPE).map(|p| (p, EN_TYPE.len())))
+                .unwrap_or((0, 0));
+
+            if type_marker_len > 0 {
+                let type_section_start = type_pos + type_marker_len;
+                let type_section_end = remaining[type_section_start..]
+                    .find("<br")
+                    .or_else(|| remaining[type_section_start..].find("<div"))
+                    .map(|p| type_section_start + p)
+                    .unwrap_or_else(|| std::cmp::min(type_section_start + 500, remaining.len()));
+
+                let type_section = &remaining[type_section_start..type_section_end];
+
+                let types: Vec<String> = type_link_regex
+                    .captures_iter(type_section)
+                    .filter_map(|c| c.get(1).map(|m| m.as_str().trim().to_string()))
+                    .filter(|t| !t.is_empty())
+                    .collect();
+
+                if !types.is_empty() {
+                    param_type = types.join(UNION_SEPARATOR);
+                } else {
+                    let clean_text = type_section
+                        .replace("&nbsp;", " ")
+                        .trim()
+                        .trim_end_matches('.')
+                        .to_string();
+                    if !clean_text.is_empty() {
+                        param_type = clean_text;
+                    }
+                }
+            }
+
+            if param_type.ends_with('.') {
+                param_type.pop();
+            }
+            param_type = param_type.trim().to_string();
+
+            let is_optional = optional_text.contains("необязательный")
+                || optional_text.contains("optional")
+                || optional_text.to_lowercase().contains("optional");
+
+            let description = Self::extract_parameter_description(remaining);
+
+            parameters.push(ParameterInfo {
+                name: name.clone(),
+                type_name: Some(param_type.clone()),
+                is_optional,
+                default_value: None,
+                description,
+            });
+        }
+
+        parameters
     }
 
     /// Извлекает описание параметра из оставшегося текста

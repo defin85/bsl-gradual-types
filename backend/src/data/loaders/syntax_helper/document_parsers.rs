@@ -74,15 +74,21 @@ impl DocumentParser {
 
     /// Парсит метод из документа
     pub fn parse_method(&self, document: &Html) -> Result<MethodInfo> {
-        let name = self.html_extractor.extract_title(document);
+        let title = self.html_extractor.extract_title(document);
+        let (name, _english_from_title) = self.html_extractor.parse_title(&title);
         let description = self.html_extractor.extract_description(document);
-        let parameters = self.html_extractor.extract_parameters(document);
         let (return_type, return_description) = self.html_extractor.extract_return_info(document);
+        let overloads = self.html_extractor.extract_method_overloads(document);
+        let parameters = overloads
+            .first()
+            .map(|o| o.parameters.clone())
+            .unwrap_or_else(|| self.html_extractor.extract_parameters(document));
 
         Ok(MethodInfo {
             name: name.clone(),
             english_name: self.html_extractor.extract_english_name(document),
             description: Some(description),
+            overloads,
             parameters,
             return_type,
             return_description,

@@ -69,3 +69,7 @@ mod resolver_tabular_tests;
 // Milestone 2.21: Constructor Resolution tests
 #[cfg(test)]
 mod resolver_constructor_tests;
+
+// R6: Type Inference Flow integration tests
+#[cfg(test)]
+mod resolver_inference_flow_tests;

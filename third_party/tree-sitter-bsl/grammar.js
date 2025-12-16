@@ -18,7 +18,10 @@ const PREC = {
 // Важно: keywords должны выигрывать у identifier в лексическом конфликте.
 // Иначе в конструкциях вида `x = Новый` parser может "спасти" дерево,
 // распознав `Новый` как identifier, и синтаксическая ошибка не всплывёт.
-const keyword = (...words) => token(prec(1, choice(...words.map(caseInsensitive))));
+//
+// NOTE: tree-sitter regex не поддерживает lookahead/lookbehind, поэтому
+// решаем задачу именно приоритетом токенов.
+const keyword = (...words) => token(prec(10, choice(...words.map(caseInsensitive))));
 const caseInsensitive = (word) => new RegExp(word, 'i');
 
 const CORE_KEYWORDS = [
@@ -534,9 +537,9 @@ module.exports = grammar({
         ),
         '"',
       ),
-    // Делаем identifier менее приоритетным, чтобы зарезервированные слова
-    // всегда лексились как *_KEYWORD токены.
-    identifier: ($) => token(prec(-1, /[\wа-я_][\wа-я_0-9]*/i)),
+    // Делаем identifier заметно менее приоритетным, чтобы зарезервированные слова
+    // всегда лексились как *_KEYWORD токены (включая неполные выражения в IDE).
+    identifier: ($) => token(prec(-10, /[\wа-я_][\wа-я_0-9]*/i)),
 
     line_comment: ($) => seq('//', /.*/),
   },

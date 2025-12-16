@@ -88,6 +88,10 @@ impl TreeSitterAdapter {
         let semicolon_errors = syntax_errors::check_missing_semicolons(&root, source, &lines);
         syntax_errors.extend(semicolon_errors);
 
+        // Проверяем незавершённые `Новый` без типа/аргументов (IDE-friendly)
+        let new_errors = syntax_errors::check_incomplete_new_expressions(source, &lines);
+        syntax_errors.extend(new_errors);
+
         // Пытаемся извлечь statements даже при наличии ошибок (partial recovery)
         let statements =
             statement_converter::convert_source_file_cached(&root, source, &lines)?;

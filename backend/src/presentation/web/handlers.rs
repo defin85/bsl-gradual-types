@@ -14,7 +14,7 @@ use std::time::Instant;
 use crate::application::TypeSystemService;
 use crate::system::SystemCoordinator;
 use bsl_shared::api::{
-    DiagnosticsResponseDto, DebugAstResponseDto, SemanticErrorDto,
+    DiagnosticsResponseDto, DebugAstResponseDto, SemanticErrorDto, SyntaxErrorDto,
     EnhancedHoverResponse, AstNodeDto,
 };
 
@@ -189,12 +189,34 @@ pub async fn get_diagnostics(
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    // Use full semantic validation (Phase 5: Unknown type, method/property existence)
-    match state
-        .type_service
-        .validate_semantics(&payload.code, None)
-        .await
-    {
+    // 1) Сначала синтаксис: если есть синтаксические ошибки — семантика бессмысленна
+    let syntax = match state.type_service.parse_and_validate(&payload.code) {
+        Ok(errors) => errors,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+
+    let syntax_errors: Vec<SyntaxErrorDto> = syntax
+        .into_iter()
+        .map(|e| SyntaxErrorDto {
+            message: e.message,
+            line: e.span.start_line,
+            column: e.span.start_column,
+        })
+        .collect();
+
+    if !syntax_errors.is_empty() {
+        let duration_ms = start.elapsed().as_millis();
+        let response = DiagnosticsResponseDto {
+            total_errors: syntax_errors.len(),
+            syntax_errors,
+            semantic_errors: vec![],
+            duration_ms,
+        };
+        return Json(response).into_response();
+    }
+
+    // 2) Семантика (Phase 5: Unknown type, method/property existence)
+    match state.type_service.validate_semantics(&payload.code, None).await {
         Ok(diagnostics) => {
             let semantic_errors: Vec<SemanticErrorDto> = diagnostics
                 .iter()
@@ -208,13 +230,11 @@ pub async fn get_diagnostics(
                 })
                 .collect();
 
-            let total_errors = semantic_errors.len();
             let duration_ms = start.elapsed().as_millis();
-
             let response = DiagnosticsResponseDto {
                 syntax_errors: vec![],
+                total_errors: semantic_errors.len(),
                 semantic_errors,
-                total_errors,
                 duration_ms,
             };
 
@@ -231,12 +251,33 @@ pub async fn get_diagnostics_debug(
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    // Собираем debug info через validate_semantics_debug
-    match state
-        .type_service
-        .validate_semantics_debug(&payload.code)
-        .await
-    {
+    let syntax = match state.type_service.parse_and_validate(&payload.code) {
+        Ok(errors) => errors,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+
+    let syntax_errors: Vec<SyntaxErrorDto> = syntax
+        .into_iter()
+        .map(|e| SyntaxErrorDto {
+            message: e.message,
+            line: e.span.start_line,
+            column: e.span.start_column,
+        })
+        .collect();
+
+    if !syntax_errors.is_empty() {
+        let duration_ms = start.elapsed().as_millis();
+        return Json(serde_json::json!({
+            "syntaxErrors": syntax_errors,
+            "semanticErrors": [],
+            "totalErrors": syntax_errors.len(),
+            "durationMs": duration_ms,
+            "debug": { "note": "semantic validation skipped due to syntax errors" }
+        }))
+        .into_response();
+    }
+
+    match state.type_service.validate_semantics_debug(&payload.code).await {
         Ok((diagnostics, debug_info)) => {
             let semantic_errors: Vec<SemanticErrorDto> = diagnostics
                 .iter()
@@ -258,7 +299,8 @@ pub async fn get_diagnostics_debug(
                 "totalErrors": semantic_errors.len(),
                 "durationMs": duration_ms,
                 "debug": debug_info
-            })).into_response()
+            }))
+            .into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }

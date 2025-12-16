@@ -9,7 +9,7 @@ use bsl_shared::domain::types::{ErrorType, ParseError};
 use bsl_shared::ir::Span;
 use tree_sitter::Node;
 
-use super::span::node_to_span_cached;
+use super::span::{byte_offset_to_utf16, node_to_span_cached};
 
 /// Собрать все ERROR узлы из дерева (рекурсивный обход)
 ///
@@ -152,6 +152,55 @@ fn check_function_body_semicolons(
         }
     }
 
+    errors
+}
+
+/// Проверить незавершённые выражения `Новый` без типа/аргументов.
+///
+/// Tree-sitter в некоторых случаях может "вылечить" `x = Новый` за счёт
+/// захвата следующего идентификатора на следующей строке (потому что newline
+/// — whitespace), и тогда ERROR/missing узлы не появляются.
+///
+/// Для IDE это плохо: hover/completion начинают работать по сломанной структуре.
+/// Поэтому добавляем явную проверку по тексту.
+pub fn check_incomplete_new_expressions(source: &str, lines: &[String]) -> Vec<ParseError> {
+    let mut errors = Vec::new();
+
+    for (row, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_end();
+
+        // Игнорируем комментарии и пустые строки.
+        if trimmed.is_empty() || trimmed.trim_start().starts_with("//") {
+            continue;
+        }
+
+        let (kw, kw_len) = if trimmed.ends_with("Новый") {
+            ("Новый", "Новый".len())
+        } else if trimmed.to_ascii_lowercase().ends_with("new") {
+            ("new", 3)
+        } else {
+            continue;
+        };
+
+        // Минимальная эвристика: обычно это assignment (`=` где-то раньше).
+        if !trimmed.contains('=') {
+            continue;
+        }
+
+        // Находим позицию в UTF-16.
+        let byte_pos = trimmed.rfind(kw).unwrap_or(trimmed.len().saturating_sub(kw_len));
+        let col_utf16 = byte_offset_to_utf16(trimmed, byte_pos + kw_len);
+        let row_u32 = row as u32;
+
+        errors.push(ParseError {
+            message: "Отсутствует тип после 'Новый'".to_string(),
+            span: Span::from_positions((row_u32, col_utf16), (row_u32, col_utf16)),
+            error_type: ErrorType::MissingToken,
+        });
+    }
+
+    // suppress unused warning for `source` if we later expand the heuristic
+    let _ = source;
     errors
 }
 

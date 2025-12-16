@@ -960,7 +960,7 @@
               "type": "TOKEN",
               "content": {
                 "type": "PREC",
-                "value": 1,
+                "value": 10,
                 "content": {
                   "type": "CHOICE",
                   "members": [
@@ -1003,7 +1003,7 @@
               "type": "TOKEN",
               "content": {
                 "type": "PREC",
-                "value": 1,
+                "value": 10,
                 "content": {
                   "type": "CHOICE",
                   "members": [
@@ -1913,7 +1913,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -1935,7 +1935,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -1957,7 +1957,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -1979,7 +1979,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2001,7 +2001,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2023,7 +2023,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2045,7 +2045,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2067,7 +2067,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2089,7 +2089,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2111,7 +2111,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2133,7 +2133,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2155,7 +2155,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2177,7 +2177,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2199,7 +2199,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2221,7 +2221,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2243,7 +2243,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2265,7 +2265,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2287,7 +2287,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2309,7 +2309,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2331,7 +2331,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2353,7 +2353,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2375,7 +2375,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2397,7 +2397,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2419,7 +2419,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2441,7 +2441,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2463,7 +2463,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2485,7 +2485,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2507,7 +2507,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2529,7 +2529,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2551,7 +2551,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2573,7 +2573,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2595,7 +2595,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2617,7 +2617,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2639,7 +2639,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2661,7 +2661,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2683,7 +2683,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2705,7 +2705,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2727,7 +2727,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2749,7 +2749,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2771,7 +2771,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2793,7 +2793,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2815,7 +2815,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2837,7 +2837,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -2859,7 +2859,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": 1,
+        "value": 10,
         "content": {
           "type": "CHOICE",
           "members": [
@@ -3576,7 +3576,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PREC",
-        "value": -1,
+        "value": -10,
         "content": {
           "type": "PATTERN",
           "value": "[\\wа-я_][\\wа-я_0-9]*",

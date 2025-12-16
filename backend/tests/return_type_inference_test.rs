@@ -143,7 +143,8 @@ fn test_method_return_type_basic() {
     let kol_type = ir.symbols.get_variable_type(root_scope, "Кол");
 
     match kol_type {
-        Some(res) => { let type_name = res.type_name();
+        Some(res) => {
+            let type_name = res.type_name();
             assert_eq!(type_name, "Число", "Тип должен быть Число");
         }
         other => panic!("Expected Inferred(Число), got {:?}", other),
@@ -209,7 +210,8 @@ fn test_global_function_return_type() {
     let tip_type = ir.symbols.get_variable_type(root_scope, "Тип");
 
     match tip_type {
-        Some(res) => { let type_name = res.type_name();
+        Some(res) => {
+            let type_name = res.type_name();
             assert_eq!(type_name, "Тип", "Тип должен быть Тип");
         }
         other => panic!("Expected Inferred(Тип), got {:?}", other),
@@ -313,8 +315,12 @@ fn test_nonexistent_method_fallback() {
     let result_type = ir.symbols.get_variable_type(root_scope, "Результат");
 
     match result_type {
-        Some(res) => { let type_name = res.type_name();
-            assert_eq!(type_name, "Dynamic", "Несуществующий метод должен возвращать Dynamic");
+        Some(res) => {
+            let type_name = res.type_name();
+            assert_eq!(
+                type_name, "Dynamic",
+                "Несуществующий метод должен возвращать Dynamic"
+            );
         }
         other => panic!("Expected Inferred(Dynamic), got {:?}", other),
     }
@@ -380,7 +386,8 @@ fn test_case_insensitive_method_lookup() {
     let kol_type = ir.symbols.get_variable_type(root_scope, "Кол");
 
     match kol_type {
-        Some(res) => { let type_name = res.type_name();
+        Some(res) => {
+            let type_name = res.type_name();
             assert_eq!(type_name, "Число", "Case-insensitive поиск должен работать");
         }
         other => panic!("Expected Inferred(Число), got {:?}", other),

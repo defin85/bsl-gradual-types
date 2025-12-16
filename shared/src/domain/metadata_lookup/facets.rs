@@ -94,7 +94,10 @@ impl TypeMetadataLookup {
     /// * `Some(MetadataKind)` - для конфигурационных типов (Документы, Справочники)
     /// * `None` - для примитивных и других не-конфигурационных типов
     ///
-    pub(crate) fn extract_metadata_kind(&self, resolution: &TypeResolution) -> Option<MetadataKind> {
+    pub(crate) fn extract_metadata_kind(
+        &self,
+        resolution: &TypeResolution,
+    ) -> Option<MetadataKind> {
         match &resolution.result {
             ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) => Some(cfg.kind),
             _ => None,
@@ -245,7 +248,9 @@ impl TypeMetadataLookup {
                 }
                 // Fallback на базовый тип (без placeholder)
                 else if let Some(base_name) =
-                    crate::domain::facet_utils::extract_base_facet_type_universal(platform_type_name)
+                    crate::domain::facet_utils::extract_base_facet_type_universal(
+                        platform_type_name,
+                    )
                 {
                     if let Some(platform_type) = self.repository.find_type(base_name) {
                         combined_properties.extend(platform_type.properties.clone());

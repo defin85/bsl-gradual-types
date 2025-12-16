@@ -83,9 +83,7 @@ pub fn load_configuration_types(
         batch.push(raw_type);
 
         if batch.len() >= BATCH_SIZE {
-            analysis_engine
-                .get_repository()
-                .load_types(batch.clone())?;
+            analysis_engine.get_repository().load_types(batch.clone())?;
             loaded += batch.len();
             batch.clear();
         }
@@ -93,9 +91,7 @@ pub fn load_configuration_types(
 
     // Load remainder
     if !batch.is_empty() {
-        analysis_engine
-            .get_repository()
-            .load_types(batch.clone())?;
+        analysis_engine.get_repository().load_types(batch.clone())?;
         loaded += batch.len();
     }
 

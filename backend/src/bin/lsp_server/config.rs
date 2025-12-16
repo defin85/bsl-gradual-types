@@ -22,14 +22,12 @@ pub struct LspConfig {
 }
 
 /// MILESTONE 3.6 Phase 1+3: BSL Settings (from workspace/didChangeConfiguration)
-#[derive(Debug, Clone, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct BslSettings {
     pub hover: HoverSettings,
     #[serde(default)]
     pub diagnostics: DiagnosticsSettings,
 }
-
 
 /// MILESTONE 3.6 Phase 1: Hover Settings
 #[derive(Debug, Clone, Deserialize)]

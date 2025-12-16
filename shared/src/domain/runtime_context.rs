@@ -35,7 +35,10 @@ impl ContextRequirements {
 
     /// Проверяет, разрешено ли выполнение на клиенте
     pub fn allows_client(&self) -> bool {
-        matches!(self, Self::ClientOnly | Self::Universal | Self::ServerPreferred)
+        matches!(
+            self,
+            Self::ClientOnly | Self::Universal | Self::ServerPreferred
+        )
     }
 }
 
@@ -102,7 +105,10 @@ impl RuntimeExecutionContext {
                 false
             }
             (CompilerDirective::OnClientOnServerNoContext, ContextRequirements::Universal) => true,
-            (CompilerDirective::OnClientOnServerNoContext, ContextRequirements::ServerPreferred) => true,
+            (
+                CompilerDirective::OnClientOnServerNoContext,
+                ContextRequirements::ServerPreferred,
+            ) => true,
 
             // Unknown - не блокируем
             (CompilerDirective::Unknown, _) => true,

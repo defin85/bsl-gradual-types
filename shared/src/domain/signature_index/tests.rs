@@ -5,8 +5,7 @@
 #[cfg(test)]
 mod tests {
     use crate::domain::signature_index::{
-        ConstructorSignature, ContextRequirements, MethodSignature, SignatureIndex,
-        SignatureSource,
+        ConstructorSignature, ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
     };
     use crate::domain::type_id::TypeId;
     use crate::domain::types::{FacetKind, MetadataKind, ParameterInfo, TypeResolution};
@@ -131,8 +130,8 @@ mod tests {
     #[test]
     fn test_method_overloads_are_kept_and_validated() {
         use crate::domain::signature_registry::SignatureDataSource;
-        use crate::domain::SignatureSourceRegistry;
         use crate::domain::types::{RawMethodData, RawParamData, RawTypeData};
+        use crate::domain::SignatureSourceRegistry;
 
         struct TestSource;
         impl SignatureDataSource for TestSource {
@@ -365,8 +364,7 @@ mod tests {
         assert!(found_exact.is_some());
 
         // Поиск по конкретизированному типу (fallback к базовому) - тоже должен найти
-        let found_fallback =
-            index.find_method("СправочникМенеджер.Контрагенты", "СоздатьЭлемент");
+        let found_fallback = index.find_method("СправочникМенеджер.Контрагенты", "СоздатьЭлемент");
         assert!(found_fallback.is_some());
         assert_eq!(found_fallback.unwrap().name, "СоздатьЭлемент");
         assert_eq!(
@@ -1000,7 +998,10 @@ mod tests {
         assert!(found.is_some());
         assert_eq!(found.unwrap().params.len(), 1);
         assert_eq!(found.unwrap().params[0].name, "Индекс");
-        assert_eq!(found.unwrap().params[0].type_name, Some("Число".to_string()));
+        assert_eq!(
+            found.unwrap().params[0].type_name,
+            Some("Число".to_string())
+        );
     }
 
     // ================= PHASE 3: Enhanced Merge Tests =================

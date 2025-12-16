@@ -26,8 +26,8 @@
 //! assert!(types.contains_key(&id2));
 //! ```
 
-pub mod normalization;
 mod core;
+pub mod normalization;
 
 pub use core::TypeId;
 pub use normalization::{camel_to_spaced, normalize, spaced_to_camel};

@@ -22,7 +22,9 @@ use crate::domain::repository::TypeRepository;
 use std::sync::Arc;
 
 // Re-export key types
-pub use crate::domain::types::{RawMethodData, RawPropertyData, RawTabularSectionData, RawTypeData};
+pub use crate::domain::types::{
+    RawMethodData, RawPropertyData, RawTabularSectionData, RawTypeData,
+};
 
 /// Сервис для получения метаданных типа по TypeResolution
 ///

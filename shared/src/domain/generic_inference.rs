@@ -4,8 +4,8 @@
 //! - `arr.Добавить("текст")` → `Массив<Строка>`
 //! - `map.Вставить("ключ", 123)` → `Соответствие<Строка, Число>`
 
-use crate::domain::types::*;
 use crate::domain::type_id::TypeId;
+use crate::domain::types::*;
 use std::collections::HashMap;
 
 /// Generic type inference engine

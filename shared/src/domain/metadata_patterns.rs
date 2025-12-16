@@ -4,9 +4,9 @@
 //! 1. Автоизвлечённые из Syntax Helper при загрузке
 //! 2. Хардкод fallback для случаев без Syntax Helper
 
-use std::collections::HashMap;
 use super::types::MetadataKind;
 use crate::domain::type_id::TypeId;
+use std::collections::HashMap;
 
 /// Паттерн извлечённый из Syntax Helper
 #[derive(Debug, Clone)]
@@ -37,7 +37,8 @@ impl MetadataPatternRegistry {
     /// Обновить реестр данными из Syntax Helper
     pub fn update_from_patterns(&mut self, patterns: Vec<ExtractedPattern>) {
         for pattern in patterns {
-            self.extracted_prefixes.insert(TypeId::new(&pattern.prefix), pattern.kind);
+            self.extracted_prefixes
+                .insert(TypeId::new(&pattern.prefix), pattern.kind);
         }
     }
 
@@ -126,15 +127,18 @@ impl MetadataPatternRegistry {
     /// - "Массив" -> None (не фасетный тип)
     pub fn extract_pattern_from_type_name(type_name: &str) -> Option<ExtractedPattern> {
         // Ищем placeholder в формате ".<Имя ...>" или ".&lt;Имя ...&gt;"
-        let dot_pos = type_name.find(".<")
-            .or_else(|| type_name.find(".&lt;"))?;
+        let dot_pos = type_name.find(".<").or_else(|| type_name.find(".&lt;"))?;
 
         let full_prefix = &type_name[..dot_pos];
 
         // Извлекаем текст placeholder для определения MetadataKind
-        let placeholder_start = dot_pos + if type_name[dot_pos..].starts_with(".&lt;") { 5 } else { 2 };
-        let placeholder_end = type_name.find('>')
-            .or_else(|| type_name.find("&gt;"))?;
+        let placeholder_start = dot_pos
+            + if type_name[dot_pos..].starts_with(".&lt;") {
+                5
+            } else {
+                2
+            };
+        let placeholder_end = type_name.find('>').or_else(|| type_name.find("&gt;"))?;
         let placeholder_text = &type_name[placeholder_start..placeholder_end];
         let placeholder_lower = placeholder_text.to_lowercase();
 
@@ -187,7 +191,8 @@ impl MetadataPatternRegistry {
         if placeholder.contains("плана обмена") {
             return Some(MetadataKind::ExchangePlan);
         }
-        if placeholder.contains("бизнес-процесса") || placeholder.contains("бизнеспроцесса") {
+        if placeholder.contains("бизнес-процесса") || placeholder.contains("бизнеспроцесса")
+        {
             return Some(MetadataKind::BusinessProcess);
         }
         if placeholder.contains("задачи") {
@@ -201,8 +206,14 @@ impl MetadataPatternRegistry {
     /// "РегистрСведенийНаборЗаписей" -> "РегистрСведений"
     pub fn strip_facet_suffix(prefix: &str) -> &str {
         const FACET_SUFFIXES: &[&str] = &[
-            "НаборЗаписей", "МенеджерЗаписи", "Менеджер", "Объект",
-            "Ссылка", "Выборка", "Список", "Запись"
+            "НаборЗаписей",
+            "МенеджерЗаписи",
+            "Менеджер",
+            "Объект",
+            "Ссылка",
+            "Выборка",
+            "Список",
+            "Запись",
         ];
 
         for suffix in FACET_SUFFIXES {
@@ -221,7 +232,7 @@ mod tests {
     #[test]
     fn test_extract_pattern_catalog_manager() {
         let pattern = MetadataPatternRegistry::extract_pattern_from_type_name(
-            "СправочникМенеджер.<Имя справочника>"
+            "СправочникМенеджер.<Имя справочника>",
         );
         assert!(pattern.is_some());
         let p = pattern.unwrap();
@@ -232,7 +243,7 @@ mod tests {
     #[test]
     fn test_extract_pattern_document_object() {
         let pattern = MetadataPatternRegistry::extract_pattern_from_type_name(
-            "ДокументОбъект.<Имя документа>"
+            "ДокументОбъект.<Имя документа>",
         );
         assert!(pattern.is_some());
         let p = pattern.unwrap();
@@ -243,7 +254,7 @@ mod tests {
     #[test]
     fn test_extract_pattern_info_register_recordset() {
         let pattern = MetadataPatternRegistry::extract_pattern_from_type_name(
-            "РегистрСведенийНаборЗаписей.<Имя регистра сведений>"
+            "РегистрСведенийНаборЗаписей.<Имя регистра сведений>",
         );
         assert!(pattern.is_some());
         let p = pattern.unwrap();
@@ -254,7 +265,7 @@ mod tests {
     #[test]
     fn test_extract_pattern_exchange_plan() {
         let pattern = MetadataPatternRegistry::extract_pattern_from_type_name(
-            "ПланОбменаМенеджер.<Имя плана обмена>"
+            "ПланОбменаМенеджер.<Имя плана обмена>",
         );
         assert!(pattern.is_some());
         let p = pattern.unwrap();
@@ -271,35 +282,63 @@ mod tests {
     #[test]
     fn test_registry_fallback() {
         let registry = MetadataPatternRegistry::new();
-        assert_eq!(registry.get_metadata_kind("СправочникМенеджер"), Some(MetadataKind::Catalog));
-        assert_eq!(registry.get_metadata_kind("ДокументОбъект"), Some(MetadataKind::Document));
-        assert_eq!(registry.get_metadata_kind("РегистрСведенийНаборЗаписей"), Some(MetadataKind::InformationRegister));
-        assert_eq!(registry.get_metadata_kind("ПланОбменаОбъект"), Some(MetadataKind::ExchangePlan));
+        assert_eq!(
+            registry.get_metadata_kind("СправочникМенеджер"),
+            Some(MetadataKind::Catalog)
+        );
+        assert_eq!(
+            registry.get_metadata_kind("ДокументОбъект"),
+            Some(MetadataKind::Document)
+        );
+        assert_eq!(
+            registry.get_metadata_kind("РегистрСведенийНаборЗаписей"),
+            Some(MetadataKind::InformationRegister)
+        );
+        assert_eq!(
+            registry.get_metadata_kind("ПланОбменаОбъект"),
+            Some(MetadataKind::ExchangePlan)
+        );
     }
 
     #[test]
     fn test_registry_with_extracted_patterns() {
         let mut registry = MetadataPatternRegistry::new();
-        registry.update_from_patterns(vec![
-            ExtractedPattern {
-                prefix: "Справочник".to_string(),
-                kind: MetadataKind::Catalog,
-                placeholder_suffix: Some("справочника".to_string()),
-            },
-        ]);
+        registry.update_from_patterns(vec![ExtractedPattern {
+            prefix: "Справочник".to_string(),
+            kind: MetadataKind::Catalog,
+            placeholder_suffix: Some("справочника".to_string()),
+        }]);
 
         assert!(registry.has_extracted_patterns());
         assert_eq!(registry.extracted_count(), 1);
-        assert_eq!(registry.get_metadata_kind("СправочникМенеджер"), Some(MetadataKind::Catalog));
+        assert_eq!(
+            registry.get_metadata_kind("СправочникМенеджер"),
+            Some(MetadataKind::Catalog)
+        );
     }
 
     #[test]
     fn test_strip_facet_suffix() {
-        assert_eq!(MetadataPatternRegistry::strip_facet_suffix("СправочникМенеджер"), "Справочник");
-        assert_eq!(MetadataPatternRegistry::strip_facet_suffix("ДокументОбъект"), "Документ");
-        assert_eq!(MetadataPatternRegistry::strip_facet_suffix("РегистрСведенийНаборЗаписей"), "РегистрСведений");
-        assert_eq!(MetadataPatternRegistry::strip_facet_suffix("Массив"), "Массив");
-        assert_eq!(MetadataPatternRegistry::strip_facet_suffix("ПланОбменаСсылка"), "ПланОбмена");
+        assert_eq!(
+            MetadataPatternRegistry::strip_facet_suffix("СправочникМенеджер"),
+            "Справочник"
+        );
+        assert_eq!(
+            MetadataPatternRegistry::strip_facet_suffix("ДокументОбъект"),
+            "Документ"
+        );
+        assert_eq!(
+            MetadataPatternRegistry::strip_facet_suffix("РегистрСведенийНаборЗаписей"),
+            "РегистрСведений"
+        );
+        assert_eq!(
+            MetadataPatternRegistry::strip_facet_suffix("Массив"),
+            "Массив"
+        );
+        assert_eq!(
+            MetadataPatternRegistry::strip_facet_suffix("ПланОбменаСсылка"),
+            "ПланОбмена"
+        );
     }
 
     #[test]
@@ -308,16 +347,17 @@ mod tests {
         let mut registry = MetadataPatternRegistry::new();
 
         // Добавляем кастомный паттерн
-        registry.update_from_patterns(vec![
-            ExtractedPattern {
-                prefix: "Справочник".to_string(),
-                kind: MetadataKind::Catalog,
-                placeholder_suffix: Some("справочника".to_string()),
-            },
-        ]);
+        registry.update_from_patterns(vec![ExtractedPattern {
+            prefix: "Справочник".to_string(),
+            kind: MetadataKind::Catalog,
+            placeholder_suffix: Some("справочника".to_string()),
+        }]);
 
         // Извлечённый паттерн должен матчить
-        assert_eq!(registry.get_metadata_kind("СправочникОбъект"), Some(MetadataKind::Catalog));
+        assert_eq!(
+            registry.get_metadata_kind("СправочникОбъект"),
+            Some(MetadataKind::Catalog)
+        );
     }
 
     #[test]
@@ -326,8 +366,14 @@ mod tests {
 
         // Без extracted паттернов, используется fallback
         assert!(!registry.has_extracted_patterns());
-        assert_eq!(registry.get_metadata_kind("БизнесПроцессОбъект"), Some(MetadataKind::BusinessProcess));
-        assert_eq!(registry.get_metadata_kind("ЗадачаМенеджер"), Some(MetadataKind::Task));
+        assert_eq!(
+            registry.get_metadata_kind("БизнесПроцессОбъект"),
+            Some(MetadataKind::BusinessProcess)
+        );
+        assert_eq!(
+            registry.get_metadata_kind("ЗадачаМенеджер"),
+            Some(MetadataKind::Task)
+        );
     }
 
     #[test]
@@ -356,7 +402,7 @@ mod tests {
     fn test_extract_pattern_with_html_entities() {
         // Тест для HTML-encoded placeholder (некоторые источники могут кодировать)
         let pattern = MetadataPatternRegistry::extract_pattern_from_type_name(
-            "СправочникОбъект.&lt;Имя справочника&gt;"
+            "СправочникОбъект.&lt;Имя справочника&gt;",
         );
         // Должен распознать
         assert!(pattern.is_some());

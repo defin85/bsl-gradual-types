@@ -2,12 +2,12 @@
 //!
 //! Методы для загрузки метаданных из базовых конфигураций и расширений
 
-use std::path::Path;
 use anyhow::Result;
+use std::path::Path;
 use tracing::info;
 
-use bsl_shared::domain::types::RawTypeData;
 use crate::data::loaders::progress::ProgressUpdate;
+use bsl_shared::domain::types::RawTypeData;
 
 use super::coordinator::SystemCoordinator;
 use super::types::LoadMetadataResult;
@@ -43,10 +43,7 @@ impl SystemCoordinator {
             .discover_all_metadata(None::<fn(crate::data::loaders::progress::ProgressUpdate)>)
             .map_err(|e| anyhow::anyhow!("Не удалось обнаружить метаданные: {}", e))?;
 
-        info!(
-            "Обнаружено {} объектов метаданных",
-            metadata_objects.len()
-        );
+        info!("Обнаружено {} объектов метаданных", metadata_objects.len());
 
         // Получаем текущий AnalysisEngine или создаём новый
         let engine = self.analysis_engine().ok_or_else(|| {

@@ -50,7 +50,10 @@ mod debug_semantic_tree {
         println!("\n=== SYMBOL TABLE ===");
         println!("Symbol count: {}", result.symbol_table.len());
         for (name, symbol) in result.symbol_table.iter() {
-            println!("  Symbol '{}': kind={}, scope={}", name, symbol.kind, symbol.scope);
+            println!(
+                "  Symbol '{}': kind={}, scope={}",
+                name, symbol.kind, symbol.scope
+            );
         }
 
         println!("\n=== METRICS ===");

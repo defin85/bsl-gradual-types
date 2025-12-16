@@ -98,10 +98,7 @@ impl HbkRecovery {
                             recovered_size: 0,   // Неизвестно из кеша
                         });
                     } else {
-                        warn!(
-                            "⚠️ Кеш {:?} пустой, пересоздаём",
-                            extract_dir
-                        );
+                        warn!("⚠️ Кеш {:?} пустой, пересоздаём", extract_dir);
                     }
                 }
                 Err(e) => {
@@ -170,8 +167,12 @@ impl HbkRecovery {
             // Добавляем префикс "rebuilt." для совместимости с SyntaxHelperParser
             let extract_dir = output_dir.join(format!("rebuilt.{}", file_stem.to_string_lossy()));
 
-            extractor::unpack_zip_with_progress(&repaired_zip_path, &extract_dir, progress_callback.clone())
-                .context("Распаковка ZIP архива")?;
+            extractor::unpack_zip_with_progress(
+                &repaired_zip_path,
+                &extract_dir,
+                progress_callback.clone(),
+            )
+            .context("Распаковка ZIP архива")?;
 
             info!("✅ Архив распакован в: {:?}", extract_dir);
 
@@ -241,10 +242,7 @@ impl HbkRecovery {
     /// )?;
     /// # Ok::<(), anyhow::Error>(())
     /// ```
-    pub fn clear_cache(
-        hbk_path: &Path,
-        output_dir: Option<&Path>,
-    ) -> Result<()> {
+    pub fn clear_cache(hbk_path: &Path, output_dir: Option<&Path>) -> Result<()> {
         // Определяем директорию для вывода
         let output_dir = match output_dir {
             Some(dir) => dir.to_path_buf(),

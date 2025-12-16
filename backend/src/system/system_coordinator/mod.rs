@@ -10,9 +10,9 @@
 //! - `config_loader` - загрузка метаданных конфигураций
 //! - `types` - вспомогательные типы (ошибки, результаты)
 
+mod config_loader;
 mod coordinator;
 mod lifecycle;
-mod config_loader;
 mod types;
 
 // Реэкспорты публичного API

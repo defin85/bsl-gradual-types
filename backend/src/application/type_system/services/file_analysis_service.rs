@@ -8,11 +8,11 @@ use tracing::info;
 
 use bsl_shared::utils::hash::hash_content;
 
+use super::super::extractors::type_extractor::{
+    extract_function_name, extract_return_type, extract_type_from_var_declaration, extract_var_name,
+};
 use crate::application::TypeInferenceService;
 use crate::system::{AnalysisCache, CacheAnalysisResult, ParserCoordinator};
-use super::super::extractors::type_extractor::{
-    extract_type_from_var_declaration, extract_var_name, extract_function_name, extract_return_type,
-};
 
 /// CLI operations - file analysis
 ///
@@ -22,10 +22,7 @@ use super::super::extractors::type_extractor::{
 ///
 /// # Returns
 /// CacheAnalysisResult with type resolutions
-pub async fn analyze_file(
-    parser: &ParserCoordinator,
-    path: &str,
-) -> Result<CacheAnalysisResult> {
+pub async fn analyze_file(parser: &ParserCoordinator, path: &str) -> Result<CacheAnalysisResult> {
     info!("Analyzing file: {}", path);
 
     let file_content = std::fs::read_to_string(path)
@@ -95,15 +92,14 @@ pub async fn analyze_file_content(
                 let var_name = extract_var_name(line).unwrap_or("unknown".to_string());
 
                 // Use TypeInferenceService to resolve type
-                let resolution = inference_service
-                    .resolve_expression_async(&type_hint)
-                    .await;
+                let resolution = inference_service.resolve_expression_async(&type_hint).await;
                 type_resolutions.insert(var_name, resolution);
             }
         }
 
         // Pattern: Функция ИмяФункции() Возврат Тип;
-        if line.trim().starts_with("Функция ") || line.trim().starts_with("Процедура ") {
+        if line.trim().starts_with("Функция ") || line.trim().starts_with("Процедура ")
+        {
             if let Some(return_type) = extract_return_type(line) {
                 let func_name = extract_function_name(line).unwrap_or("unknown".to_string());
 

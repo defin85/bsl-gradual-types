@@ -155,11 +155,7 @@ impl ParameterExtractor {
                 "Extracted parameter: {} : {} ({})",
                 name,
                 param_type,
-                if is_optional {
-                    "optional"
-                } else {
-                    "required"
-                }
+                if is_optional { "optional" } else { "required" }
             );
         }
 
@@ -186,7 +182,8 @@ impl ParameterExtractor {
         let html_text = document.html();
 
         // Быстрый путь: нет вариантов — возвращаем пусто или единичный вариант (если параметры есть).
-        if !html_text.contains("Вариант синтаксиса:") && !html_text.contains("Syntax variant:") {
+        if !html_text.contains("Вариант синтаксиса:") && !html_text.contains("Syntax variant:")
+        {
             let params = Self::extract_parameters(document);
             if params.is_empty() {
                 return vec![];
@@ -212,7 +209,11 @@ impl ParameterExtractor {
             let (variant_pos, marker_len) = html_text[cursor..]
                 .find(RU_VARIANT)
                 .map(|p| (cursor + p, RU_VARIANT.len()))
-                .or_else(|| html_text[cursor..].find(EN_VARIANT).map(|p| (cursor + p, EN_VARIANT.len())))
+                .or_else(|| {
+                    html_text[cursor..]
+                        .find(EN_VARIANT)
+                        .map(|p| (cursor + p, EN_VARIANT.len()))
+                })
                 .unwrap_or((usize::MAX, 0));
 
             if marker_len == 0 {

@@ -46,9 +46,7 @@ pub(crate) fn convert_if_statement_cached(
                 let elseif_statements = convert_clause_body_cached(&child, source, lines)?;
                 else_body = Some(elseif_statements);
             }
-            kind if in_then
-                && (kind.ends_with("_statement") || kind.ends_with("_definition")) =>
-            {
+            kind if in_then && (kind.ends_with("_statement") || kind.ends_with("_definition")) => {
                 if let Some(stmt) = super::dispatch_statement_cached(&child, source, lines)? {
                     then_body.push(stmt);
                 }

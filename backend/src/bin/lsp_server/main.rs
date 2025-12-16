@@ -85,7 +85,9 @@ async fn main() -> Result<()> {
 
     // Initialize coordinator with fallback types
     // Real types will be loaded in initialized() via start_with_paths()
-    info!("Initializing coordinator with fallback types (real types will be loaded in initialized())");
+    info!(
+        "Initializing coordinator with fallback types (real types will be loaded in initialized())"
+    );
     coordinator
         .start()
         .await

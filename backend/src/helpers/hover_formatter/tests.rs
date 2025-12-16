@@ -302,8 +302,11 @@ mod tests {
 
         let formatter = HoverFormatter::new(config, metadata_lookup);
 
-        let result =
-            formatter.format_unknown_metadata_object(MetadataKind::Document, "ЗаказПокупателя", &[]);
+        let result = formatter.format_unknown_metadata_object(
+            MetadataKind::Document,
+            "ЗаказПокупателя",
+            &[],
+        );
 
         assert!(result.contains("Документ \"ЗаказПокупателя\" не найден"));
         assert!(!result.contains("##"));
@@ -387,7 +390,9 @@ mod tests {
             available_facets: vec![],
         };
 
-        assert!(formatter.check_unknown_metadata_object(&resolution).is_none());
+        assert!(formatter
+            .check_unknown_metadata_object(&resolution)
+            .is_none());
     }
 
     #[test]
@@ -409,7 +414,9 @@ mod tests {
             available_facets: vec![],
         };
 
-        assert!(formatter.check_unknown_metadata_object(&resolution).is_none());
+        assert!(formatter
+            .check_unknown_metadata_object(&resolution)
+            .is_none());
     }
 
     #[test]
@@ -437,7 +444,9 @@ mod tests {
             available_facets: vec![],
         };
 
-        assert!(formatter.check_unknown_metadata_object(&resolution).is_none());
+        assert!(formatter
+            .check_unknown_metadata_object(&resolution)
+            .is_none());
     }
 
     #[test]

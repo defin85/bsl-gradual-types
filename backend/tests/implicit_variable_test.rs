@@ -6,8 +6,8 @@ use bsl_backend::helpers::hover_formatter::HoverFormatConfig;
 use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
-use bsl_shared::domain::SignatureSourceRegistry;
 use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawTypeData};
+use bsl_shared::domain::SignatureSourceRegistry;
 use bsl_shared::engine::AnalysisEngine;
 use std::sync::Arc;
 
@@ -108,18 +108,27 @@ async fn test_implicit_variable_type_inference() {
         .await
         .unwrap();
 
-    assert!(hover_info.is_some(), "Должна быть информация о hover для переменной Кол");
+    assert!(
+        hover_info.is_some(),
+        "Должна быть информация о hover для переменной Кол"
+    );
 
     let info = hover_info.unwrap();
     println!("Hover info: {}", info);
 
     // Проверяем, что тип НЕ "Неопределено"
-    assert!(!info.contains("Тип: Неопределено"),
-        "Переменная Кол не должна иметь тип Неопределено. Актуальная информация: {}", info);
+    assert!(
+        !info.contains("Тип: Неопределено"),
+        "Переменная Кол не должна иметь тип Неопределено. Актуальная информация: {}",
+        info
+    );
 
     // Проверяем, что тип "Число" (результат метода Количество)
-    assert!(info.contains("Число"),
-        "Переменная Кол должна иметь тип Число (от метода Количество). Актуальная информация: {}", info);
+    assert!(
+        info.contains("Число"),
+        "Переменная Кол должна иметь тип Число (от метода Количество). Актуальная информация: {}",
+        info
+    );
 }
 
 #[tokio::test]
@@ -144,25 +153,25 @@ async fn test_explicit_vs_implicit_variables() {
     let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
 
     // Проверка явной переменной (строка 2, колонка 0)
-    let explicit_hover = service
-        .get_hover_info(code, 2, 0, None)
-        .await
-        .unwrap();
+    let explicit_hover = service.get_hover_info(code, 2, 0, None).await.unwrap();
 
     assert!(explicit_hover.is_some());
     let explicit_info = explicit_hover.unwrap();
-    assert!(explicit_info.contains("Число"), "Явная переменная должна получить тип Число");
+    assert!(
+        explicit_info.contains("Число"),
+        "Явная переменная должна получить тип Число"
+    );
 
     // Проверка неявной переменной (строка 4, колонка 0)
-    let implicit_hover = service
-        .get_hover_info(code, 4, 0, None)
-        .await
-        .unwrap();
+    let implicit_hover = service.get_hover_info(code, 4, 0, None).await.unwrap();
 
     assert!(implicit_hover.is_some());
     let implicit_info = implicit_hover.unwrap();
-    assert!(implicit_info.contains("Число"),
-        "Неявная переменная должна получить тип Число. Актуально: {}", implicit_info);
+    assert!(
+        implicit_info.contains("Число"),
+        "Неявная переменная должна получить тип Число. Актуально: {}",
+        implicit_info
+    );
 }
 
 #[tokio::test]
@@ -186,13 +195,13 @@ async fn test_implicit_variable_with_method_chain() {
     let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
 
     // Проверка переменной "Результат" (строка 2, колонка 0)
-    let result_hover = service
-        .get_hover_info(code, 2, 0, None)
-        .await
-        .unwrap();
+    let result_hover = service.get_hover_info(code, 2, 0, None).await.unwrap();
 
     assert!(result_hover.is_some());
     let result_info = result_hover.unwrap();
-    assert!(result_info.contains("Число"),
-        "Переменная Результат должна иметь тип Число. Актуально: {}", result_info);
+    assert!(
+        result_info.contains("Число"),
+        "Переменная Результат должна иметь тип Число. Актуально: {}",
+        result_info
+    );
 }

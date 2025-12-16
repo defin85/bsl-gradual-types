@@ -53,9 +53,7 @@ pub fn format_semantic_node_info(
             variable,
             value_type,
             ..
-        } => {
-            format_assignment_hover(node, variable, value_type, metadata_lookup)
-        }
+        } => format_assignment_hover(node, variable, value_type, metadata_lookup),
         SemanticNodeKind::FunctionDeclaration {
             name,
             params,
@@ -201,10 +199,7 @@ fn format_assignment_hover(
         output.push_str("⚠️ **Детали типа недоступны**\n\n");
         output.push_str(&format!(
             "📍 Позиция: {}:{}-{}:{}\n",
-            node.span.start_line,
-            node.span.start_column,
-            node.span.end_line,
-            node.span.end_column
+            node.span.start_line, node.span.start_column, node.span.end_line, node.span.end_column
         ));
         return output;
     }
@@ -214,10 +209,7 @@ fn format_assignment_hover(
         output.push_str("⚠️ **Тип не распознан системой**\n\n");
         output.push_str(&format!(
             "📍 Позиция: {}:{}-{}:{}\n",
-            node.span.start_line,
-            node.span.start_column,
-            node.span.end_line,
-            node.span.end_column
+            node.span.start_line, node.span.start_column, node.span.end_line, node.span.end_column
         ));
         return output;
     }
@@ -275,10 +267,7 @@ fn format_assignment_hover(
 
     output.push_str(&format!(
         "📍 Позиция: {}:{}-{}:{}\n",
-        node.span.start_line,
-        node.span.start_column,
-        node.span.end_line,
-        node.span.end_column
+        node.span.start_line, node.span.start_column, node.span.end_line, node.span.end_column
     ));
 
     output

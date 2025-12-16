@@ -13,8 +13,9 @@ use tower_http::{
 };
 
 use super::handlers::{
-    get_hover, get_metrics, get_types, health_check, search_types, validate_code, AppState,
-    get_diagnostics, get_diagnostics_debug, get_debug_ast, get_enhanced_hover, get_semantic_tree, get_version,
+    get_debug_ast, get_diagnostics, get_diagnostics_debug, get_enhanced_hover, get_hover,
+    get_metrics, get_semantic_tree, get_types, get_version, health_check, search_types,
+    validate_code, AppState,
 };
 
 /// Handler for favicon.ico - returns 204 No Content to avoid 404 errors

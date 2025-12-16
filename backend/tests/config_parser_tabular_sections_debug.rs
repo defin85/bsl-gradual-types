@@ -18,11 +18,7 @@ mod parser_debug_tests {
 
         let result = UniversalMetadataParser::parse_any_object(xml_path);
 
-        assert!(
-            result.is_ok(),
-            "Парсинг не удался: {:?}",
-            result.err()
-        );
+        assert!(result.is_ok(), "Парсинг не удался: {:?}", result.err());
 
         let metadata = result.unwrap();
 
@@ -31,7 +27,10 @@ mod parser_debug_tests {
         println!("UUID: {}", metadata.uuid);
         println!("Object type: {:?}", metadata.object_type);
         println!("Attributes count: {}", metadata.attributes.len());
-        println!("Tabular sections count: {}", metadata.tabular_sections.len());
+        println!(
+            "Tabular sections count: {}",
+            metadata.tabular_sections.len()
+        );
 
         println!("\n===== TABULAR SECTIONS =====");
         for ts in &metadata.tabular_sections {
@@ -47,10 +46,7 @@ mod parser_debug_tests {
         }
 
         // ASSERTIONS
-        assert_eq!(
-            metadata.name, "ЗаказНаряды",
-            "Неверное имя документа"
-        );
+        assert_eq!(metadata.name, "ЗаказНаряды", "Неверное имя документа");
 
         assert_eq!(
             metadata.tabular_sections.len(),

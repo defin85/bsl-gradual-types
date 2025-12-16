@@ -33,7 +33,8 @@ impl MethodExtractor {
             for chapter in document.select(&chapter_selector) {
                 let chapter_text = chapter.text().collect::<String>().trim().to_string();
 
-                if chapter_text == "Значения" || chapter_text.starts_with("Значения") {
+                if chapter_text == "Значения" || chapter_text.starts_with("Значения")
+                {
                     found_values_section = true;
                     current_chapter = Some(chapter);
                     debug!("Found 'Значения' section in HTML");
@@ -141,7 +142,8 @@ impl MethodExtractor {
                                     let link_text =
                                         elem.text().collect::<String>().trim().to_string();
                                     if !link_text.is_empty() {
-                                        let (russian, english) = Self::parse_bilingual_name(&link_text);
+                                        let (russian, english) =
+                                            Self::parse_bilingual_name(&link_text);
                                         items.push((russian, english));
                                         debug!(
                                             "Extracted from '{}': {} ({})",

@@ -2,12 +2,12 @@
 //!
 //! Type compatibility checking system (Milestone 3.13).
 
-use crate::domain::type_id::normalize;
 use super::super::compatibility::TypeCompatibility;
 use super::super::concrete::ConcreteType;
 use super::super::facets::FacetKind;
 use super::super::generics::GenericType;
 use super::super::resolution::{ResolutionResult, TypeResolution};
+use crate::domain::type_id::normalize;
 
 impl TypeResolution {
     // ============================================================================
@@ -158,8 +158,10 @@ impl TypeResolution {
                     TypeCompatibility::Incompatible {
                         reason: format!(
                             "Разные строки табличных частей: {}.{} vs {}.{}",
-                            tr1.parent_type, tr1.tabular_section_name,
-                            tr2.parent_type, tr2.tabular_section_name
+                            tr1.parent_type,
+                            tr1.tabular_section_name,
+                            tr2.parent_type,
+                            tr2.tabular_section_name
                         ),
                     }
                 }

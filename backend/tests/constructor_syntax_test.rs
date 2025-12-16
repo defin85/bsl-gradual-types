@@ -5,7 +5,6 @@
 /// - `Новый ТаблицаЗначений()` (со скобками)
 ///
 /// Проверяем что оба варианта корректно парсятся и сохраняют TypeResolution.
-
 mod shared_test_fixtures;
 
 use bsl_backend::application::TypeSystemService;

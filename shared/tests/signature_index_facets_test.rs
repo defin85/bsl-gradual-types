@@ -230,9 +230,7 @@ fn test_signature_index_multiple_facet_methods() {
     assert!(index
         .find_method("СправочникМенеджер", "СоздатьЭлемент")
         .is_some());
-    assert!(index
-        .find_method("СправочникОбъект", "Записать")
-        .is_some());
+    assert!(index.find_method("СправочникОбъект", "Записать").is_some());
 }
 
 #[test]

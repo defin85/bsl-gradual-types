@@ -25,14 +25,14 @@
 //!     └── configuration_loader.rs # 1C configuration loading
 //! ```
 
+mod extractors;
+mod formatters;
+mod loaders;
 mod service;
 mod services;
-mod formatters;
-mod extractors;
-mod loaders;
 
 // Main re-export
-pub use service::{TypeSystemService, CompletionContext};
+pub use service::{CompletionContext, TypeSystemService};
 
 // Re-export completion context for external usage
 pub use services::completion_service::CompletionContext as CompletionContextDetails;

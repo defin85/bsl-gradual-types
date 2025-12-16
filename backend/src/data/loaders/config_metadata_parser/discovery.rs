@@ -366,7 +366,9 @@ impl ConfigurationDiscovery {
             let pb = ProgressBar::new(total_objects as u64);
             pb.set_style(
                 ProgressStyle::default_bar()
-                    .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]")
+                    .template(
+                        "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]",
+                    )
                     .unwrap()
                     .progress_chars("##-"),
             );
@@ -764,10 +766,11 @@ impl ConfigurationDiscovery {
     /// ```
     pub fn discover_object_modules(
         &self,
-        object_type: &str,  // "Documents", "Catalogs"
-        object_name: &str,  // "ЗаказНаряды", "Контрагенты"
+        object_type: &str, // "Documents", "Catalogs"
+        object_name: &str, // "ЗаказНаряды", "Контрагенты"
     ) -> (Option<PathBuf>, Option<PathBuf>, Option<PathBuf>) {
-        let base_dir = self.base_path
+        let base_dir = self
+            .base_path
             .join(object_type)
             .join(object_name)
             .join("Ext");
@@ -823,10 +826,11 @@ impl ConfigurationDiscovery {
     /// Возвращает ошибку при проблемах с чтением файловой системы
     pub fn discover_forms(
         &self,
-        object_type: &str,  // "Documents", "Catalogs"
-        object_name: &str,  // "ЗаказНаряды", "Контрагенты"
+        object_type: &str, // "Documents", "Catalogs"
+        object_name: &str, // "ЗаказНаряды", "Контрагенты"
     ) -> Result<Vec<FormMetadata>> {
-        let forms_dir = self.base_path
+        let forms_dir = self
+            .base_path
             .join(object_type)
             .join(object_name)
             .join("Forms");
@@ -865,7 +869,12 @@ impl ConfigurationDiscovery {
         }
 
         if !forms.is_empty() {
-            tracing::debug!("📋 Discovered {} forms for {}.{}", forms.len(), object_type, object_name);
+            tracing::debug!(
+                "📋 Discovered {} forms for {}.{}",
+                forms.len(),
+                object_type,
+                object_name
+            );
         }
 
         Ok(forms)

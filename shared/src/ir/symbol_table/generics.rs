@@ -1,7 +1,9 @@
 //! Generic-специфичная логика для SymbolTable
 
 use super::{ScopeId, SymbolTable};
-use crate::domain::types::{Certainty, ConcreteType, ResolutionResult, SpecialType, TypeResolution};
+use crate::domain::types::{
+    Certainty, ConcreteType, ResolutionResult, SpecialType, TypeResolution,
+};
 use crate::ir::span::Span;
 use crate::ir::types::VariableState;
 
@@ -44,10 +46,9 @@ impl SymbolTable {
                 .map(|vs| (vs.declaration_span, vs.initialized))
                 .unwrap_or_else(|| (Span::stub(), true));
 
-            scope.variables.insert(
-                var_name,
-                VariableState::new(resolution, span, initialized),
-            );
+            scope
+                .variables
+                .insert(var_name, VariableState::new(resolution, span, initialized));
         }
     }
 
@@ -91,9 +92,10 @@ impl SymbolTable {
 
                         // Вычисляем новую уверенность
                         // Если ВСЕ параметры известны (не Undefined), то certainty = Known
-                        let all_known = gen.type_params.iter().all(|p| {
-                            !matches!(p, ConcreteType::Special(SpecialType::Undefined))
-                        });
+                        let all_known = gen
+                            .type_params
+                            .iter()
+                            .all(|p| !matches!(p, ConcreteType::Special(SpecialType::Undefined)));
                         var_state.resolution.certainty = if all_known {
                             Certainty::Known
                         } else {

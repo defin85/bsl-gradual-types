@@ -34,7 +34,11 @@ async fn test_e2e_array_generic_type() {
     "#;
 
     // Hover на переменной "МассивДанных"
-    let hover = service.get_hover_info(code, 2, 5, None).await.ok().flatten();
+    let hover = service
+        .get_hover_info(code, 2, 5, None)
+        .await
+        .ok()
+        .flatten();
 
     if let Some(hover_text) = hover {
         println!("✓ Hover на 'МассивДанных':\n{}", hover_text);
@@ -63,7 +67,11 @@ async fn test_e2e_structure_type() {
     "#;
 
     // Hover на переменной "НоваяСтруктура"
-    let hover = service.get_hover_info(code, 2, 5, None).await.ok().flatten();
+    let hover = service
+        .get_hover_info(code, 2, 5, None)
+        .await
+        .ok()
+        .flatten();
 
     if let Some(hover_text) = hover {
         println!("✓ Hover на 'НоваяСтруктура':\n{}", hover_text);
@@ -89,7 +97,11 @@ async fn test_e2e_tabular_value_table() {
     "#;
 
     // Hover на переменной "ТЗ"
-    let hover = service.get_hover_info(code, 2, 5, None).await.ok().flatten();
+    let hover = service
+        .get_hover_info(code, 2, 5, None)
+        .await
+        .ok()
+        .flatten();
 
     if let Some(hover_text) = hover {
         println!("✓ Hover на 'ТЗ' (ТаблицаЗначений):\n{}", hover_text);
@@ -109,7 +121,11 @@ async fn test_e2e_unicode_handling() {
     "#;
 
     // Hover на длинной кириллической переменной
-    let hover = service.get_hover_info(code, 2, 5, None).await.ok().flatten();
+    let hover = service
+        .get_hover_info(code, 2, 5, None)
+        .await
+        .ok()
+        .flatten();
 
     if let Some(hover_text) = hover {
         println!("✓ Unicode hover:\n{}", hover_text);
@@ -139,9 +155,21 @@ async fn test_e2e_multiple_variables_in_scope() {
     "#;
 
     // Hover на каждой переменной - все должны возвращать разную информацию
-    let hover1 = service.get_hover_info(code, 2, 5, None).await.ok().flatten();
-    let hover2 = service.get_hover_info(code, 3, 5, None).await.ok().flatten();
-    let hover3 = service.get_hover_info(code, 4, 5, None).await.ok().flatten();
+    let hover1 = service
+        .get_hover_info(code, 2, 5, None)
+        .await
+        .ok()
+        .flatten();
+    let hover2 = service
+        .get_hover_info(code, 3, 5, None)
+        .await
+        .ok()
+        .flatten();
+    let hover3 = service
+        .get_hover_info(code, 4, 5, None)
+        .await
+        .ok()
+        .flatten();
 
     if let (Some(h1), Some(h2), Some(h3)) = (hover1, hover2, hover3) {
         println!("✓ Hover на Переменная1:\n{}", h1);
@@ -236,7 +264,11 @@ async fn test_e2e_very_long_code() {
     println!("Размер тестового кода: {} символов", code.len());
 
     // Hover на переменной в середине файла
-    let hover = service.get_hover_info(&code, 250, 10, None).await.ok().flatten();
+    let hover = service
+        .get_hover_info(&code, 250, 10, None)
+        .await
+        .ok()
+        .flatten();
 
     if let Some(hover_text) = hover {
         println!(
@@ -271,7 +303,11 @@ async fn test_e2e_nested_constructions() {
     "#;
 
     // Hover на переменной внутри вложенных конструкций
-    let hover = service.get_hover_info(code, 6, 25, None).await.ok().flatten();
+    let hover = service
+        .get_hover_info(code, 6, 25, None)
+        .await
+        .ok()
+        .flatten();
 
     if let Some(hover_text) = hover {
         println!("✓ Hover для вложенных конструкций:\n{}", hover_text);
@@ -291,7 +327,11 @@ async fn test_e2e_comments_handling() {
     "#;
 
     // Hover на переменной должен игнорировать комментарии
-    let hover = service.get_hover_info(code, 4, 5, None).await.ok().flatten();
+    let hover = service
+        .get_hover_info(code, 4, 5, None)
+        .await
+        .ok()
+        .flatten();
 
     if let Some(hover_text) = hover {
         println!("✓ Hover с комментариями:\n{}", hover_text);
@@ -318,7 +358,11 @@ async fn test_service_reusability() {
             i
         );
 
-        let hover = service.get_hover_info(&code, 2, 5, None).await.ok().flatten();
+        let hover = service
+            .get_hover_info(&code, 2, 5, None)
+            .await
+            .ok()
+            .flatten();
 
         assert!(
             hover.is_some() || hover.is_none(),

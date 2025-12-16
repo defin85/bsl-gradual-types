@@ -253,7 +253,9 @@ impl<'a> IrTypeResolverVisitor<'a> {
                 // Phase 3: type_hint теперь Option<TypeResolution>
                 if let Some(hint_resolution) = type_hint {
                     // Резолвим тип через resolver для дополнительной информации
-                    let res = self.resolver.resolve_expression_sync(&hint_resolution.type_name());
+                    let res = self
+                        .resolver
+                        .resolve_expression_sync(&hint_resolution.type_name());
                     // Обновляем тип переменной в контексте
                     context.update_variable_type(name.clone(), hint_resolution.clone());
                     res
@@ -295,12 +297,14 @@ impl<'a> IrTypeResolverVisitor<'a> {
             | SemanticNodeKind::WhileLoop { condition_type, .. } => {
                 // Phase 3: condition_type теперь TypeResolution
                 // Условия должны быть Boolean
-                self.resolver.resolve_expression_sync(&condition_type.type_name())
+                self.resolver
+                    .resolve_expression_sync(&condition_type.type_name())
             }
 
             SemanticNodeKind::ForLoop { range_type, .. } => {
                 // Phase 3: range_type теперь TypeResolution
-                self.resolver.resolve_expression_sync(&range_type.type_name())
+                self.resolver
+                    .resolve_expression_sync(&range_type.type_name())
             }
 
             _ => {

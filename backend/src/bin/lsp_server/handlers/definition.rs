@@ -116,7 +116,10 @@ pub async fn handle_goto_definition(
             }
         },
 
-        TypeDefinitionLocation::Platform { type_name, docs_uri } => {
+        TypeDefinitionLocation::Platform {
+            type_name,
+            docs_uri,
+        } => {
             info!(
                 "Platform type '{}' has no navigable definition, docs: {:?}",
                 type_name, docs_uri

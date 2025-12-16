@@ -620,7 +620,10 @@ mod tests {
     #[test]
     fn test_extract_base_facet_type_universal_already_base() {
         // Уже базовый тип — возвращает None
-        assert_eq!(extract_base_facet_type_universal("СправочникМенеджер"), None);
+        assert_eq!(
+            extract_base_facet_type_universal("СправочникМенеджер"),
+            None
+        );
         assert_eq!(extract_base_facet_type_universal("ДокументОбъект"), None);
     }
 

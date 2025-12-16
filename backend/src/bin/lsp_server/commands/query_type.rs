@@ -70,10 +70,7 @@ pub fn handle_query_type(
         Some(e) => e,
         None => {
             warn!("AnalysisEngine not available");
-            return QueryTypeResponse::not_found(
-                params.type_name,
-                "AnalysisEngine not available",
-            );
+            return QueryTypeResponse::not_found(params.type_name, "AnalysisEngine not available");
         }
     };
 
@@ -131,10 +128,7 @@ pub fn handle_query_type(
                         .iter()
                         .map(|p| ParamDto {
                             name: p.name.clone(),
-                            param_type: p
-                                .type_name
-                                .clone()
-                                .unwrap_or_else(|| "Any".to_string()),
+                            param_type: p.type_name.clone().unwrap_or_else(|| "Any".to_string()),
                             is_optional: p.is_optional,
                             default_value: p.default_value.clone(),
                         })
@@ -175,13 +169,12 @@ pub fn handle_query_type(
                 .collect();
 
             // Format facets as strings
-            let facets: Vec<String> = raw_type
-                .facets
-                .iter()
-                .map(|f| format!("{:?}", f))
-                .collect();
+            let facets: Vec<String> = raw_type.facets.iter().map(|f| format!("{:?}", f)).collect();
 
-            let main_facet = facets.first().cloned().or_else(|| Some("Object".to_string()));
+            let main_facet = facets
+                .first()
+                .cloned()
+                .or_else(|| Some("Object".to_string()));
 
             QueryTypeResponse {
                 type_name: params.type_name.clone(),

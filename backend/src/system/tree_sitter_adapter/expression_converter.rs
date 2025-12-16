@@ -253,21 +253,15 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
             }))
         }
         // Случай 2: access содержит property -> это PropertyAccess
-        (None, Some(obj), Some(prop)) => {
-            Ok(Some(Expression::PropertyAccess {
-                object: Box::new(obj),
-                property: prop,
-                span,
-            }))
-        }
+        (None, Some(obj), Some(prop)) => Ok(Some(Expression::PropertyAccess {
+            object: Box::new(obj),
+            property: prop,
+            span,
+        })),
         // Случай 3: только объект (leaf node)
-        (None, Some(obj), None) => {
-            Ok(Some(obj))
-        }
+        (None, Some(obj), None) => Ok(Some(obj)),
         // method_call без объекта - ошибка
-        (Some(_), None, _) => {
-            Err("access with method_call but no object".to_string())
-        }
+        (Some(_), None, _) => Err("access with method_call but no object".to_string()),
         // Ничего не распознано
         (None, None, _) => {
             debug!("access: couldn't parse structure, returning None");

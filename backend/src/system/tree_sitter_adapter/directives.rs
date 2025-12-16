@@ -34,10 +34,7 @@ pub fn find_preceding_directive(node: &Node, source: &str) -> Option<CompilerDir
         match sibling.kind() {
             "preprocessor" => {
                 let text = node_text(&sibling, source);
-                debug!(
-                    "Found preprocessor before function/procedure: '{}'",
-                    text
-                );
+                debug!("Found preprocessor before function/procedure: '{}'", text);
                 return parse_directive(&text);
             }
             // Пропускаем комментарии между директивой и функцией
@@ -75,8 +72,7 @@ pub fn parse_directive(text: &str) -> Option<CompilerDirective> {
         return Some(CompilerDirective::OnClientOnServerNoContext);
     }
 
-    if directive.starts_with("насерверебезконтекста")
-        || directive.starts_with("atservernocontext")
+    if directive.starts_with("насерверебезконтекста") || directive.starts_with("atservernocontext")
     {
         return Some(CompilerDirective::OnServerNoContext);
     }

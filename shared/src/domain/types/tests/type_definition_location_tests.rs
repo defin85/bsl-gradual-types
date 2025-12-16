@@ -20,7 +20,11 @@ fn test_platform_definition_location() {
     let loc = array.get_definition_location();
 
     assert!(loc.is_some());
-    if let Some(TypeDefinitionLocation::Platform { type_name, docs_uri }) = loc {
+    if let Some(TypeDefinitionLocation::Platform {
+        type_name,
+        docs_uri,
+    }) = loc
+    {
         assert_eq!(type_name, "Массив");
         assert!(docs_uri.is_some());
     } else {
@@ -366,7 +370,9 @@ fn test_tabular_row_with_module_paths() {
     }));
 
     let module_paths = ModulePaths {
-        object_module: Some(PathBuf::from("Documents/ЗаказПокупателя/Ext/ObjectModule.bsl")),
+        object_module: Some(PathBuf::from(
+            "Documents/ЗаказПокупателя/Ext/ObjectModule.bsl",
+        )),
         manager_module: None,
         recordset_module: None,
     };

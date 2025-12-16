@@ -36,7 +36,10 @@ mod tabular_sections_api_tests {
         let doc = &result.types[0];
 
         println!("DEBUG: Найден документ: {}", doc.name);
-        println!("DEBUG: Количество табличных частей: {}", doc.tabular_sections.len());
+        println!(
+            "DEBUG: Количество табличных частей: {}",
+            doc.tabular_sections.len()
+        );
         for ts in &doc.tabular_sections {
             println!("  - ТЧ: {} (атрибутов: {})", ts.name, ts.attributes.len());
         }
@@ -45,7 +48,10 @@ mod tabular_sections_api_tests {
             doc.tabular_sections.len(),
             2,
             "Document should have 2 tabular sections. Found: {:?}",
-            doc.tabular_sections.iter().map(|ts| &ts.name).collect::<Vec<_>>()
+            doc.tabular_sections
+                .iter()
+                .map(|ts| &ts.name)
+                .collect::<Vec<_>>()
         );
 
         let raboty = doc

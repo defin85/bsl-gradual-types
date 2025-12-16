@@ -12,7 +12,9 @@ use super::super::types::{FacetKind, MetadataKind, ParameterInfo};
 use super::facet_helpers;
 use super::method::MethodSignature;
 use super::method_builder::MethodBuilder;
-use super::types::{ConstructorSignature, SignatureMismatch, SignatureSource, SignatureValidationResult};
+use super::types::{
+    ConstructorSignature, SignatureMismatch, SignatureSource, SignatureValidationResult,
+};
 use std::collections::HashMap;
 
 // Re-export ContextRequirements для обратной совместимости
@@ -105,7 +107,8 @@ impl SignatureIndex {
 
             // Обновляем context_requirements если у существующего Universal
             if existing.context_requirements == ContextRequirements::Universal
-               && method.context_requirements != ContextRequirements::Universal {
+                && method.context_requirements != ContextRequirements::Universal
+            {
                 tracing::debug!(
                     type_id = %type_id,
                     method_name = %method.name,
@@ -144,9 +147,7 @@ impl SignatureIndex {
                         existing_param.type_name = new_param.type_name.clone();
                     }
 
-                    if existing_param.default_value.is_none()
-                        && new_param.default_value.is_some()
-                    {
+                    if existing_param.default_value.is_none() && new_param.default_value.is_some() {
                         existing_param.default_value = new_param.default_value.clone();
                     }
 
@@ -195,10 +196,7 @@ impl SignatureIndex {
 
     /// Добавить конфигурационный метод
     pub fn add_config_method(&mut self, type_id: TypeId, method: MethodSignature) {
-        self.config_methods
-            .entry(type_id)
-            .or_default()
-            .push(method);
+        self.config_methods.entry(type_id).or_default().push(method);
     }
 
     /// Добавить глобальную функцию
@@ -274,7 +272,11 @@ impl SignatureIndex {
     }
 
     /// Внутренний поиск метода по TypeId с поддержкой fallback на базовый тип
-    fn find_method_by_type_id(&self, type_id: &TypeId, method_name: &str) -> Option<&MethodSignature> {
+    fn find_method_by_type_id(
+        &self,
+        type_id: &TypeId,
+        method_name: &str,
+    ) -> Option<&MethodSignature> {
         let method_name_lower = method_name.to_lowercase();
 
         // Поиск в platform_methods
@@ -335,16 +337,28 @@ impl SignatureIndex {
         None
     }
 
-    fn find_methods_by_type_id<'a>(&'a self, type_id: &TypeId, method_name: &str) -> Vec<&'a MethodSignature> {
+    fn find_methods_by_type_id<'a>(
+        &'a self,
+        type_id: &TypeId,
+        method_name: &str,
+    ) -> Vec<&'a MethodSignature> {
         let method_name_lower = method_name.to_lowercase();
 
         // 1) точный тип
         let mut out = Vec::new();
         if let Some(methods) = self.platform_methods.get(type_id) {
-            out.extend(methods.iter().filter(|m| m.name.to_lowercase() == method_name_lower));
+            out.extend(
+                methods
+                    .iter()
+                    .filter(|m| m.name.to_lowercase() == method_name_lower),
+            );
         }
         if let Some(methods) = self.config_methods.get(type_id) {
-            out.extend(methods.iter().filter(|m| m.name.to_lowercase() == method_name_lower));
+            out.extend(
+                methods
+                    .iter()
+                    .filter(|m| m.name.to_lowercase() == method_name_lower),
+            );
         }
         if !out.is_empty() {
             return out;
@@ -354,10 +368,18 @@ impl SignatureIndex {
         if let Some(base) = facet_helpers::extract_base_facet_type(type_id.display()) {
             let base_id = TypeId::new(base);
             if let Some(methods) = self.platform_methods.get(&base_id) {
-                out.extend(methods.iter().filter(|m| m.name.to_lowercase() == method_name_lower));
+                out.extend(
+                    methods
+                        .iter()
+                        .filter(|m| m.name.to_lowercase() == method_name_lower),
+                );
             }
             if let Some(methods) = self.config_methods.get(&base_id) {
-                out.extend(methods.iter().filter(|m| m.name.to_lowercase() == method_name_lower));
+                out.extend(
+                    methods
+                        .iter()
+                        .filter(|m| m.name.to_lowercase() == method_name_lower),
+                );
             }
         }
 
@@ -587,8 +609,12 @@ impl SignatureIndex {
         MethodBuilder::for_type(&type_id)
             .method("Выгрузить")
             .returns("ТаблицаЗначений")
-            .param("СписокКолонок", "Строка").optional().desc("Список колонок для выгрузки")
-            .param("ОтборСтрок", "Структура").optional().desc("Условия отбора строк")
+            .param("СписокКолонок", "Строка")
+            .optional()
+            .desc("Список колонок для выгрузки")
+            .param("ОтборСтрок", "Структура")
+            .optional()
+            .desc("Условия отбора строк")
             .add_to(self);
 
         // Добавить() -> СтрокаТабличнойЧасти
@@ -601,7 +627,9 @@ impl SignatureIndex {
         MethodBuilder::for_type(&type_id)
             .method("Вставить")
             .returns("СтрокаТабличнойЧасти")
-            .param("Индекс", "Число").required().desc("Индекс позиции для вставки")
+            .param("Индекс", "Число")
+            .required()
+            .desc("Индекс позиции для вставки")
             .add_to(self);
 
         // Количество() -> Число
@@ -620,80 +648,108 @@ impl SignatureIndex {
         MethodBuilder::for_type(&type_id)
             .method("Удалить")
             .void()
-            .param("Строка", "СтрокаТабличнойЧасти").required().desc("Строка или индекс для удаления")
+            .param("Строка", "СтрокаТабличнойЧасти")
+            .required()
+            .desc("Строка или индекс для удаления")
             .add_to(self);
 
         // Найти(Значение, Колонки?) -> СтрокаТабличнойЧасти | Неопределено
         MethodBuilder::for_type(&type_id)
             .method("Найти")
             .returns("СтрокаТабличнойЧасти")
-            .param_any("Значение").required().desc("Искомое значение")
-            .param("Колонки", "Строка").optional().desc("Список колонок для поиска")
+            .param_any("Значение")
+            .required()
+            .desc("Искомое значение")
+            .param("Колонки", "Строка")
+            .optional()
+            .desc("Список колонок для поиска")
             .add_to(self);
 
         // НайтиСтроки(Отбор) -> Массив
         MethodBuilder::for_type(&type_id)
             .method("НайтиСтроки")
             .returns("Массив")
-            .param("Отбор", "Структура").required().desc("Структура с условиями отбора")
+            .param("Отбор", "Структура")
+            .required()
+            .desc("Структура с условиями отбора")
             .add_to(self);
 
         // Получить(Индекс) -> СтрокаТабличнойЧасти
         MethodBuilder::for_type(&type_id)
             .method("Получить")
             .returns("СтрокаТабличнойЧасти")
-            .param("Индекс", "Число").required().desc("Индекс строки")
+            .param("Индекс", "Число")
+            .required()
+            .desc("Индекс строки")
             .add_to(self);
 
         // Индекс(Строка) -> Число
         MethodBuilder::for_type(&type_id)
             .method("Индекс")
             .returns("Число")
-            .param("Строка", "СтрокаТабличнойЧасти").required().desc("Строка табличной части")
+            .param("Строка", "СтрокаТабличнойЧасти")
+            .required()
+            .desc("Строка табличной части")
             .add_to(self);
 
         // Итого(Колонка) -> Число
         MethodBuilder::for_type(&type_id)
             .method("Итого")
             .returns("Число")
-            .param("Колонка", "Строка").required().desc("Имя числовой колонки")
+            .param("Колонка", "Строка")
+            .required()
+            .desc("Имя числовой колонки")
             .add_to(self);
 
         // Сдвинуть(Строка, Смещение) -> void
         MethodBuilder::for_type(&type_id)
             .method("Сдвинуть")
             .void()
-            .param("Строка", "СтрокаТабличнойЧасти").required().desc("Строка для сдвига")
-            .param("Смещение", "Число").required().desc("Количество позиций для сдвига")
+            .param("Строка", "СтрокаТабличнойЧасти")
+            .required()
+            .desc("Строка для сдвига")
+            .param("Смещение", "Число")
+            .required()
+            .desc("Количество позиций для сдвига")
             .add_to(self);
 
         // Загрузить(ТаблицаЗначений) -> void
         MethodBuilder::for_type(&type_id)
             .method("Загрузить")
             .void()
-            .param("ТаблицаЗначений", "ТаблицаЗначений").required().desc("Таблица значений для загрузки")
+            .param("ТаблицаЗначений", "ТаблицаЗначений")
+            .required()
+            .desc("Таблица значений для загрузки")
             .add_to(self);
 
         // Сортировать(СтрокаСортировки) -> void
         MethodBuilder::for_type(&type_id)
             .method("Сортировать")
             .void()
-            .param("СтрокаСортировки", "Строка").required().desc("Описание сортировки (например, 'Колонка1 Возр')")
+            .param("СтрокаСортировки", "Строка")
+            .required()
+            .desc("Описание сортировки (например, 'Колонка1 Возр')")
             .add_to(self);
 
         // ВыгрузитьКолонку(Колонка) -> Массив
         MethodBuilder::for_type(&type_id)
             .method("ВыгрузитьКолонку")
             .returns("Массив")
-            .param("Колонка", "Строка").required().desc("Имя колонки для выгрузки")
+            .param("Колонка", "Строка")
+            .required()
+            .desc("Имя колонки для выгрузки")
             .add_to(self);
 
         // ЗагрузитьКолонку(Массив, Колонка) -> void
         MethodBuilder::for_type(&type_id)
             .method("ЗагрузитьКолонку")
             .void()
-            .param("Массив", "Массив").required().desc("Массив значений для загрузки")
-            .param("Колонка", "Строка").required().desc("Имя колонки для загрузки")
+            .param("Массив", "Массив")
+            .required()
+            .desc("Массив значений для загрузки")
+            .param("Колонка", "Строка")
+            .required()
+            .desc("Имя колонки для загрузки")
             .add_to(self);
     }
 
@@ -783,7 +839,10 @@ impl SignatureIndex {
             match self.validate_signature(Some(sig), actual) {
                 SignatureValidationResult::Valid => return SignatureValidationResult::Valid,
                 SignatureValidationResult::Invalid(m) => {
-                    if best_mismatches.as_ref().is_none_or(|best| m.len() < best.len()) {
+                    if best_mismatches
+                        .as_ref()
+                        .is_none_or(|best| m.len() < best.len())
+                    {
                         best_mismatches = Some(m);
                     }
                 }
@@ -839,7 +898,10 @@ mod tests {
         // TypeId("ТабличнаяЧасть") == TypeId("Табличная часть")
         let id1 = TypeId::new("ТабличнаяЧасть");
         let id2 = TypeId::new("Табличная часть");
-        assert_eq!(id1, id2, "TypeId должен нормализовать CamelCase и варианты с пробелами");
+        assert_eq!(
+            id1, id2,
+            "TypeId должен нормализовать CamelCase и варианты с пробелами"
+        );
 
         // Проверяем lowercase нормализацию
         let id3 = TypeId::new("МАССИВ");

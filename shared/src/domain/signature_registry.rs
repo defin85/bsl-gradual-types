@@ -73,7 +73,11 @@ impl SignatureSourceRegistry {
         sorted.sort_by_key(|s| s.priority());
 
         for source in sorted {
-            tracing::debug!("Loading SignatureIndex source: {} (priority={})", source.name(), source.priority());
+            tracing::debug!(
+                "Loading SignatureIndex source: {} (priority={})",
+                source.name(),
+                source.priority()
+            );
             let types = source.load();
 
             // Заполняем методами из типов
@@ -87,7 +91,9 @@ impl SignatureSourceRegistry {
                     index.add_platform_method(type_id, signature.clone());
 
                     // Также добавляем под базовым именем для фасетных типов с placeholder
-                    if let Some(base_type) = super::facet_utils::extract_placeholder_base_type(&platform_type.name) {
+                    if let Some(base_type) =
+                        super::facet_utils::extract_placeholder_base_type(&platform_type.name)
+                    {
                         index.add_platform_method(TypeId::new(base_type), signature);
                     }
                 }

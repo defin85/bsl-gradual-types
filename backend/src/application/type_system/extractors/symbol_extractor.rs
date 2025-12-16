@@ -35,11 +35,7 @@ pub fn utf16_to_byte_offset(line: &str, utf16_offset: u32) -> usize {
 ///
 /// # Returns
 /// The word under cursor or None if no valid identifier found
-pub fn extract_word_at_position(
-    file_content: &str,
-    line: u32,
-    column: u32,
-) -> Option<String> {
+pub fn extract_word_at_position(file_content: &str, line: u32, column: u32) -> Option<String> {
     let lines: Vec<&str> = file_content.lines().collect();
     let current_line = lines.get(line as usize)?;
 

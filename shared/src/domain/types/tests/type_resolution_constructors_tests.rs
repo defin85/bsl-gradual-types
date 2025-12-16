@@ -181,11 +181,8 @@ fn test_metadata_type_with_reference() {
 
 #[test]
 fn test_metadata_type_available_facets() {
-    let t = TypeResolution::metadata_type(
-        MetadataKind::Catalog,
-        "Валюты",
-        Some(FacetKind::Selection),
-    );
+    let t =
+        TypeResolution::metadata_type(MetadataKind::Catalog, "Валюты", Some(FacetKind::Selection));
     assert!(t.available_facets.contains(&FacetKind::Selection));
 }
 

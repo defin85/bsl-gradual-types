@@ -38,10 +38,7 @@ impl TypeMetadataLookup {
             // Форматируем имя типового параметра
             let param_type_name = self.format_concrete_type(param_type);
 
-            tracing::trace!(
-                "  Подстановка типового параметра: T -> {}",
-                param_type_name
-            );
+            tracing::trace!("  Подстановка типового параметра: T -> {}", param_type_name);
 
             // 3. Подставляем конкретный тип вместо "T" в методах
             base_methods
@@ -61,8 +58,7 @@ impl TypeMetadataLookup {
                     // параметризуем его: ItemType -> ItemType<T>
                     if let Some(ref item_type) = collection_item_type {
                         if method.return_type == *item_type {
-                            method.return_type =
-                                format!("{}<{}>", item_type, param_type_name);
+                            method.return_type = format!("{}<{}>", item_type, param_type_name);
                         }
                     }
 

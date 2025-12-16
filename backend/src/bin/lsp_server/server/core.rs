@@ -57,10 +57,7 @@ impl BslLanguageServer {
                     }
                 }
                 Err(e) => {
-                    warn!(
-                        "Syntax validation failed for {} (revalidation): {}",
-                        uri, e
-                    );
+                    warn!("Syntax validation failed for {} (revalidation): {}", uri, e);
                 }
             }
         }

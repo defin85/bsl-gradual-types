@@ -13,7 +13,9 @@ fn test_property_access() {
     println!("\n=== Property access (без скобок) ===\n{}\n", code);
 
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).unwrap();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .unwrap();
     let tree = parser.parse(code, None).unwrap();
     let ast_result = TreeSitterAdapter::convert_tree(&tree, code).unwrap();
 
@@ -25,7 +27,8 @@ fn test_property_access() {
         "test.bsl".to_string(),
         repository,
         signature_index,
-    ).unwrap();
+    )
+    .unwrap();
 
     println!("IR nodes: {}", ir.nodes.len());
     for (i, node) in ir.nodes.iter().enumerate() {
@@ -33,10 +36,16 @@ fn test_property_access() {
     }
 
     let has_member_access = ir.nodes.iter().any(|n| {
-        matches!(n.kind, bsl_shared::ir::SemanticNodeKind::MemberAccess { .. })
+        matches!(
+            n.kind,
+            bsl_shared::ir::SemanticNodeKind::MemberAccess { .. }
+        )
     });
     let has_function_call = ir.nodes.iter().any(|n| {
-        matches!(n.kind, bsl_shared::ir::SemanticNodeKind::FunctionCall { .. })
+        matches!(
+            n.kind,
+            bsl_shared::ir::SemanticNodeKind::FunctionCall { .. }
+        )
     });
 
     println!("\nHas MemberAccess: {}", has_member_access);
@@ -50,7 +59,9 @@ fn test_method_call() {
     println!("\n=== Method call (со скобками) ===\n{}\n", code);
 
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).unwrap();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .unwrap();
     let tree = parser.parse(code, None).unwrap();
     let ast_result = TreeSitterAdapter::convert_tree(&tree, code).unwrap();
 
@@ -62,7 +73,8 @@ fn test_method_call() {
         "test.bsl".to_string(),
         repository,
         signature_index,
-    ).unwrap();
+    )
+    .unwrap();
 
     println!("IR nodes: {}", ir.nodes.len());
     for (i, node) in ir.nodes.iter().enumerate() {
@@ -70,10 +82,16 @@ fn test_method_call() {
     }
 
     let has_member_access = ir.nodes.iter().any(|n| {
-        matches!(n.kind, bsl_shared::ir::SemanticNodeKind::MemberAccess { .. })
+        matches!(
+            n.kind,
+            bsl_shared::ir::SemanticNodeKind::MemberAccess { .. }
+        )
     });
     let has_function_call = ir.nodes.iter().any(|n| {
-        matches!(n.kind, bsl_shared::ir::SemanticNodeKind::FunctionCall { .. })
+        matches!(
+            n.kind,
+            bsl_shared::ir::SemanticNodeKind::FunctionCall { .. }
+        )
     });
 
     println!("\nHas MemberAccess: {}", has_member_access);
@@ -84,10 +102,15 @@ fn test_method_call() {
 fn test_statement_property_access() {
     let code = "ТЗ = Новый ТаблицаЗначений;\nТЗ.Колонки;";
 
-    println!("\n=== Statement property access (свойство как statement) ===\n{}\n", code);
+    println!(
+        "\n=== Statement property access (свойство как statement) ===\n{}\n",
+        code
+    );
 
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).unwrap();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .unwrap();
     let tree = parser.parse(code, None).unwrap();
     let ast_result = TreeSitterAdapter::convert_tree(&tree, code).unwrap();
 
@@ -99,7 +122,8 @@ fn test_statement_property_access() {
         "test.bsl".to_string(),
         repository,
         signature_index,
-    ).unwrap();
+    )
+    .unwrap();
 
     println!("IR nodes: {}", ir.nodes.len());
     for (i, node) in ir.nodes.iter().enumerate() {
@@ -107,7 +131,10 @@ fn test_statement_property_access() {
     }
 
     let has_member_access = ir.nodes.iter().any(|n| {
-        matches!(n.kind, bsl_shared::ir::SemanticNodeKind::MemberAccess { .. })
+        matches!(
+            n.kind,
+            bsl_shared::ir::SemanticNodeKind::MemberAccess { .. }
+        )
     });
 
     println!("\nHas MemberAccess: {}", has_member_access);

@@ -81,8 +81,7 @@ impl TreeSitterAdapter {
         let lines: Vec<String> = source.lines().map(|s| s.to_string()).collect();
 
         // Собираем синтаксические ошибки из дерева с использованием кеша строк
-        let mut syntax_errors =
-            syntax_errors::collect_syntax_errors_cached(&root, source, &lines);
+        let mut syntax_errors = syntax_errors::collect_syntax_errors_cached(&root, source, &lines);
 
         // Проверяем отсутствующие точки с запятой (BSL linter)
         let semicolon_errors = syntax_errors::check_missing_semicolons(&root, source, &lines);
@@ -93,8 +92,7 @@ impl TreeSitterAdapter {
         syntax_errors.extend(new_errors);
 
         // Пытаемся извлечь statements даже при наличии ошибок (partial recovery)
-        let statements =
-            statement_converter::convert_source_file_cached(&root, source, &lines)?;
+        let statements = statement_converter::convert_source_file_cached(&root, source, &lines)?;
         let program = Program { statements };
 
         // Возвращаем ParseResult с программой и ошибками

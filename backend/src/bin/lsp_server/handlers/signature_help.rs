@@ -244,11 +244,7 @@ fn build_signature_help_response(signature: MethodSignature, active_param: u32) 
         .params
         .iter()
         .map(|p| {
-            let param_label = format!(
-                "{}: {}",
-                p.name,
-                p.type_name.as_deref().unwrap_or("Any")
-            );
+            let param_label = format!("{}: {}", p.name, p.type_name.as_deref().unwrap_or("Any"));
 
             ParameterInformation {
                 label: ParameterLabel::Simple(param_label),

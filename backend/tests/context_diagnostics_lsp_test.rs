@@ -28,7 +28,10 @@ fn assert_no_context_warnings(diagnostics: &[bsl_shared::domain::types::TypeDiag
     assert!(
         context_warnings.is_empty(),
         "Не должно быть context warnings, но получено: {:?}",
-        context_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        context_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -408,7 +411,9 @@ async fn test_no_false_positives_for_custom_methods() {
 
     // Не должно быть warnings для кастомных методов
     assert!(
-        diagnostics.iter().all(|d| !d.message.contains("МойКастомныйМетод")),
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("МойКастомныйМетод")),
         "Не должно быть warnings для пользовательских методов"
     );
 }

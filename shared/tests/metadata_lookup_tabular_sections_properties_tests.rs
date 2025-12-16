@@ -156,8 +156,13 @@ fn create_test_repository_with_tabular_sections_and_properties() -> Arc<InMemory
         module_paths: None,
     };
 
-    repo.load_types(vec![document, document_object, document_reference, document_manager])
-        .expect("Failed to load types");
+    repo.load_types(vec![
+        document,
+        document_object,
+        document_reference,
+        document_manager,
+    ])
+    .expect("Failed to load types");
     repo
 }
 
@@ -345,8 +350,11 @@ fn test_reference_facet_properties_are_readonly() {
         .filter(|p| {
             // Платформенные свойства начинаются с заглавной буквы
             // Конфигурационные свойства и табличные части - с заглавной на кириллице
-            p.name == "Номер" || p.name == "Дата" || p.name == "Организация"
-                || p.name == "Работы" || p.name == "Стороны"
+            p.name == "Номер"
+                || p.name == "Дата"
+                || p.name == "Организация"
+                || p.name == "Работы"
+                || p.name == "Стороны"
         })
         .collect();
 
@@ -514,7 +522,9 @@ fn test_document_without_tabular_sections_still_works() {
         "Должно быть обычное свойство 'Номер'"
     );
     assert!(
-        !properties.iter().any(|p| p.prop_type.starts_with("ТабличнаяЧасть<")),
+        !properties
+            .iter()
+            .any(|p| p.prop_type.starts_with("ТабличнаяЧасть<")),
         "Не должно быть табличных частей"
     );
 }

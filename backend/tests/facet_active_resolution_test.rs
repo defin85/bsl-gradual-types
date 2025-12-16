@@ -576,10 +576,7 @@ fn test_chained_method_calls_different_facets() {
         .map(|(_, r)| r.clone());
     assert!(obj_resolution.is_some(), "Объект should be in symbol table");
     let obj_resolution = obj_resolution.unwrap();
-    assert_eq!(
-        obj_resolution.type_name(),
-        "СправочникОбъект.Контрагенты"
-    );
+    assert_eq!(obj_resolution.type_name(), "СправочникОбъект.Контрагенты");
     assert_eq!(
         obj_resolution.active_facet,
         Some(FacetKind::Object),
@@ -593,10 +590,7 @@ fn test_chained_method_calls_different_facets() {
         .map(|(_, r)| r.clone());
     assert!(ref_resolution.is_some(), "Ссылка should be in symbol table");
     let ref_resolution = ref_resolution.unwrap();
-    assert_eq!(
-        ref_resolution.type_name(),
-        "СправочникСсылка.Контрагенты"
-    );
+    assert_eq!(ref_resolution.type_name(), "СправочникСсылка.Контрагенты");
     assert_eq!(
         ref_resolution.active_facet,
         Some(FacetKind::Reference),
@@ -608,12 +602,12 @@ fn test_chained_method_calls_different_facets() {
         .symbols
         .lookup_variable_in_hierarchy(ScopeId(0), "Выборка")
         .map(|(_, r)| r.clone());
-    assert!(sel_resolution.is_some(), "Выборка should be in symbol table");
-    let sel_resolution = sel_resolution.unwrap();
-    assert_eq!(
-        sel_resolution.type_name(),
-        "СправочникВыборка.Контрагенты"
+    assert!(
+        sel_resolution.is_some(),
+        "Выборка should be in symbol table"
     );
+    let sel_resolution = sel_resolution.unwrap();
+    assert_eq!(sel_resolution.type_name(), "СправочникВыборка.Контрагенты");
     assert_eq!(
         sel_resolution.active_facet,
         Some(FacetKind::Selection),

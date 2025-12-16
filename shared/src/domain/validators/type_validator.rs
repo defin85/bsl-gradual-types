@@ -44,7 +44,7 @@ impl<'a> TypeValidator<'a> {
             Some(TypeErrorKind::NonExistentMethod {
                 object_type: type_name,
                 method_name: method_name.to_string(),
-                variable_name: None,  // MILESTONE 3.6 Phase 3: will be passed from visitor
+                variable_name: None, // MILESTONE 3.6 Phase 3: will be passed from visitor
             })
         } else {
             None
@@ -109,7 +109,7 @@ impl<'a> TypeValidator<'a> {
             Some(TypeErrorKind::NonExistentProperty {
                 object_type: type_name,
                 property_name: property_name.to_string(),
-                variable_name: None,  // MILESTONE 3.6 Phase 3: will be passed from visitor
+                variable_name: None, // MILESTONE 3.6 Phase 3: will be passed from visitor
             })
         } else {
             None
@@ -236,14 +236,15 @@ impl<'a> TypeValidator<'a> {
                     // Other reasons don't generate validation errors
                     None
                 }
-                UncertaintyReason::UndeclaredVariable { name } => {
+                UncertaintyReason::TypeNotFound { name } => Some(TypeErrorKind::UnknownType {
+                    type_name: name.clone(),
+                    variable_name: None,
+                }),
+                UncertaintyReason::UndeclaredVariable { .. } => {
                     // Undeclared variable errors are handled separately in visitor
-                    // to provide better context (method name, param index)
-                    Some(TypeErrorKind::UndeclaredVariable {
-                        variable_name: name.clone(),
-                        method_name: None,
-                        param_index: None,
-                    })
+                    // to provide better context (method name, param index) and to avoid
+                    // false positives for user-defined functions/procedures.
+                    None
                 }
             }
         } else {
@@ -264,7 +265,7 @@ impl<'a> TypeValidator<'a> {
                 Some(TypeErrorKind::SimpleTypeAsCollection {
                     type_name: prim.display_name().to_string(),
                     operation: operation.to_string(),
-                    variable_name: None,  // MILESTONE 3.6 Phase 3: will be passed from visitor
+                    variable_name: None, // MILESTONE 3.6 Phase 3: will be passed from visitor
                 })
             }
             ResolutionResult::Concrete(ConcreteType::Special(SpecialType::Undefined))
@@ -272,7 +273,7 @@ impl<'a> TypeValidator<'a> {
                 Some(TypeErrorKind::SimpleTypeAsCollection {
                     type_name: "Неопределено".to_string(),
                     operation: operation.to_string(),
-                    variable_name: None,  // MILESTONE 3.6 Phase 3: will be passed from visitor
+                    variable_name: None, // MILESTONE 3.6 Phase 3: will be passed from visitor
                 })
             }
             _ => None,

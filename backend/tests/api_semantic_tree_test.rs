@@ -68,14 +68,8 @@ mod api_semantic_tree_tests {
         );
 
         // Verify metrics
-        assert_eq!(
-            result.metrics.procedure_count, 1,
-            "Should have 1 procedure"
-        );
-        assert_eq!(
-            result.metrics.function_count, 0,
-            "Should have 0 functions"
-        );
+        assert_eq!(result.metrics.procedure_count, 1, "Should have 1 procedure");
+        assert_eq!(result.metrics.function_count, 0, "Should have 0 functions");
         assert!(
             result.metrics.node_count > 0,
             "Should have at least one node"
@@ -164,11 +158,7 @@ mod api_semantic_tree_tests {
             "Should have 2 procedures"
         );
         assert_eq!(result.metrics.function_count, 1, "Should have 1 function");
-        assert_eq!(
-            result.root_nodes.len(),
-            3,
-            "Should have 3 root nodes"
-        );
+        assert_eq!(result.root_nodes.len(), 3, "Should have 3 root nodes");
 
         println!("✓ Test 3 PASSED: Multiple procedures and functions");
         println!("  Procedures: {}", result.metrics.procedure_count);

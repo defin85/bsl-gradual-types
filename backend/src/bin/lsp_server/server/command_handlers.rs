@@ -29,9 +29,8 @@ impl BslLanguageServer {
         let file_content = match self.documents.read().await.get(&uri) {
             Some(content) => content.clone(),
             None => match uri.to_file_path() {
-                Ok(path) => std::fs::read_to_string(&path).map_err(|_| {
-                    tower_lsp::jsonrpc::Error::internal_error()
-                })?,
+                Ok(path) => std::fs::read_to_string(&path)
+                    .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
                 Err(_) => return Ok(CurrentContextResponse::empty()),
             },
         };
@@ -43,19 +42,24 @@ impl BslLanguageServer {
             .to_string();
 
         if let Some(service) = self.get_type_service() {
-            match service.get_semantic_tree(&file_content, &file_path, false, true, true).await {
+            match service
+                .get_semantic_tree(&file_content, &file_path, false, true, true)
+                .await
+            {
                 Ok(semantic_tree_dto) => {
                     match find_containing_function_in_dto(
                         &semantic_tree_dto,
                         params.line,
                         params.character,
                     ) {
-                        Some((name, kind, params_list, return_type)) => Ok(CurrentContextResponse {
-                            function_name: Some(name),
-                            function_kind: kind,
-                            params: Some(params_list),
-                            return_type,
-                        }),
+                        Some((name, kind, params_list, return_type)) => {
+                            Ok(CurrentContextResponse {
+                                function_name: Some(name),
+                                function_kind: kind,
+                                params: Some(params_list),
+                                return_type,
+                            })
+                        }
                         None => Ok(CurrentContextResponse::empty()),
                     }
                 }

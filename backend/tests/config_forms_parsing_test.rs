@@ -6,19 +6,18 @@
 //! - Контексты выполнения модуля формы
 //! - Интеграция с discovery
 
-use bsl_backend::data::loaders::config_metadata_parser::{
-    ConfigurationDiscovery, FormParser,
-};
+use bsl_backend::data::loaders::config_metadata_parser::{ConfigurationDiscovery, FormParser};
 use std::path::PathBuf;
 
 /// Путь к тестовой конфигурации с реальными примерами форм
 fn test_config_path() -> PathBuf {
     // Тесты запускаются из backend/, поднимаемся на уровень workspace
     let backend_root = std::env::current_dir().expect("Failed to get current dir");
-    let workspace_root = backend_root
-        .parent()
-        .expect("Failed to get workspace root");
-    workspace_root.join("examples").join("conf").join("conf_test")
+    let workspace_root = backend_root.parent().expect("Failed to get workspace root");
+    workspace_root
+        .join("examples")
+        .join("conf")
+        .join("conf_test")
 }
 
 #[test]
@@ -31,11 +30,7 @@ fn test_parse_document_form_from_real_example() {
         .join("Ext")
         .join("Form.xml");
 
-    assert!(
-        form_xml.exists(),
-        "Form.xml should exist at {:?}",
-        form_xml
-    );
+    assert!(form_xml.exists(), "Form.xml should exist at {:?}", form_xml);
 
     let form = FormParser::parse_form_xml(&form_xml, "Document.ЗаказНаряды", "ФормаДокумента")
         .expect("Failed to parse form");
@@ -52,7 +47,10 @@ fn test_parse_document_form_from_real_example() {
         .expect("Form should have a main attribute");
 
     assert_eq!(main_attr.name, "Объект");
-    assert!(main_attr.saved_data, "Main attribute should have SavedData=true");
+    assert!(
+        main_attr.saved_data,
+        "Main attribute should have SavedData=true"
+    );
     assert!(
         !main_attr.type_description.types.is_empty(),
         "Main attribute should have types"
@@ -60,7 +58,11 @@ fn test_parse_document_form_from_real_example() {
 
     // Проверяем, что тип содержит ссылку на DocumentObject
     assert!(
-        main_attr.type_description.types.iter().any(|t| t.contains("DocumentObject.ЗаказНаряды")),
+        main_attr
+            .type_description
+            .types
+            .iter()
+            .any(|t| t.contains("DocumentObject.ЗаказНаряды")),
         "Main attribute should have DocumentObject type, got: {:?}",
         main_attr.type_description.types
     );
@@ -113,10 +115,7 @@ fn test_parse_form_module_contexts() {
     let form = FormParser::parse_form_xml(&form_xml, "Document.ЗаказНаряды", "ФормаДокумента")
         .expect("Failed to parse form");
 
-    assert!(
-        form.module_path.is_some(),
-        "Form should have module_path"
-    );
+    assert!(form.module_path.is_some(), "Form should have module_path");
 
     // Проверяем, что Module.bsl существует
     let module_path = form.module_path.unwrap();
@@ -148,7 +147,11 @@ fn test_discover_all_forms_for_document() {
         .discover_forms("Documents", "ЗаказНаряды")
         .expect("Failed to discover forms");
 
-    assert_eq!(forms.len(), 1, "Should discover 1 form for Document.ЗаказНаряды");
+    assert_eq!(
+        forms.len(),
+        1,
+        "Should discover 1 form for Document.ЗаказНаряды"
+    );
     assert_eq!(forms[0].name, "ФормаДокумента");
     assert_eq!(forms[0].owner_type, "Document.ЗаказНаряды");
 }
@@ -203,7 +206,10 @@ fn test_form_metadata_integration_with_discovery() {
         .discover_all_configurations()
         .expect("Failed to discover configurations");
 
-    assert!(!configurations.is_empty(), "Should find at least one configuration");
+    assert!(
+        !configurations.is_empty(),
+        "Should find at least one configuration"
+    );
 
     // Парсим метаданные первой конфигурации
     let first_config = &configurations[0];
@@ -218,11 +224,7 @@ fn test_form_metadata_integration_with_discovery() {
         .expect("Should find Document.ЗаказНаряды");
 
     // Проверяем, что формы распарсены
-    assert_eq!(
-        doc.forms.len(),
-        1,
-        "Document should have 1 form parsed"
-    );
+    assert_eq!(doc.forms.len(), 1, "Document should have 1 form parsed");
 
     let form = &doc.forms[0];
     assert_eq!(form.name, "ФормаДокумента");
@@ -301,8 +303,8 @@ fn test_parse_form_tables_and_bindings_from_real_example() {
 
 #[test]
 fn test_form_parser_graceful_degradation_no_module() {
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     // Создаём временную директорию с Form.xml БЕЗ Module.bsl
     let temp_dir = TempDir::new().unwrap();
@@ -347,8 +349,8 @@ fn test_form_parser_graceful_degradation_no_module() {
 
 #[test]
 fn test_form_with_multiple_types() {
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
     let form_dir = temp_dir.path().join("Ext");
@@ -419,10 +421,23 @@ fn test_form_synthetic_types_loaded_into_repository() {
     let form_type = repo
         .find_type("Формы.Документы.ЗаказНаряды.ФормаДокумента")
         .expect("Form type should exist in repository");
-    let form_props: Vec<_> = form_type.properties.iter().map(|p| p.name.as_str()).collect();
-    assert!(form_props.contains(&"Объект"), "Form type should have property 'Объект'");
-    assert!(form_props.contains(&"Работы"), "Form type should have property 'Работы'");
-    assert!(form_props.contains(&"Стороны"), "Form type should have property 'Стороны'");
+    let form_props: Vec<_> = form_type
+        .properties
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert!(
+        form_props.contains(&"Объект"),
+        "Form type should have property 'Объект'"
+    );
+    assert!(
+        form_props.contains(&"Работы"),
+        "Form type should have property 'Работы'"
+    );
+    assert!(
+        form_props.contains(&"Стороны"),
+        "Form type should have property 'Стороны'"
+    );
 
     let form_object_type = repo
         .find_type("ДанныеФормыОбъект.Документы.ЗаказНаряды")
@@ -433,8 +448,7 @@ fn test_form_synthetic_types_loaded_into_repository() {
         .find(|p| p.name == "Работы")
         .expect("Form object should have property 'Работы'");
     assert_eq!(
-        works.prop_type,
-        "ДанныеФормыКоллекция<СтрокаРаботы>",
+        works.prop_type, "ДанныеФормыКоллекция<СтрокаРаботы>",
         "Tabular section 'Работы' should be a data forms collection"
     );
 
@@ -456,8 +470,7 @@ fn test_form_synthetic_types_loaded_into_repository() {
         .find(|p| p.name == "Работы")
         .expect("Elements container should have 'Работы'");
     assert_eq!(
-        works.prop_type,
-        "ТаблицаФормы",
+        works.prop_type, "ТаблицаФормы",
         "Элементы.Работы should be ТаблицаФормы"
     );
 
@@ -467,8 +480,7 @@ fn test_form_synthetic_types_loaded_into_repository() {
         .find(|p| p.name == "РаботыНомерСтроки")
         .expect("Elements container should have 'РаботыНомерСтроки'");
     assert_eq!(
-        works_line_number.prop_type,
-        "ПолеФормы",
+        works_line_number.prop_type, "ПолеФормы",
         "Элементы.РаботыНомерСтроки should be ПолеФормы"
     );
 
@@ -478,8 +490,7 @@ fn test_form_synthetic_types_loaded_into_repository() {
         .find(|p| p.name == "РаботыВидРаботы")
         .expect("Elements container should have 'РаботыВидРаботы'");
     assert_eq!(
-        works_work_kind.prop_type,
-        "ПолеФормы",
+        works_work_kind.prop_type, "ПолеФормы",
         "Элементы.РаботыВидРаботы should be ПолеФормы"
     );
 }

@@ -19,14 +19,10 @@ use crate::application::TypeInferenceService;
 use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
 use crate::system::{AnalysisCache, CacheAnalysisResult, IrCache, IrCacheStats, ParserCoordinator};
 
-use super::services::{
-    completion_service,
-    file_analysis_service,
-    hover_service,
-    validation_service,
-    web_api_service,
-};
 use super::loaders::configuration_loader;
+use super::services::{
+    completion_service, file_analysis_service, hover_service, validation_service, web_api_service,
+};
 
 /// Unified Type System Service for Application Layer
 ///
@@ -207,7 +203,8 @@ impl TypeSystemService {
             compact,
             include_call_graph,
             include_flow_sensitive,
-        ).await
+        )
+        .await
     }
 
     /// MILESTONE E2: Parse file content to SemanticProgram for visualization

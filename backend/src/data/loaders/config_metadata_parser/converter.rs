@@ -43,8 +43,7 @@ impl UniversalMetadataObject {
 
         // Типы формы и контейнера элементов — по каждой форме
         for form in &self.forms {
-            let form_type_name =
-                format!("Формы.{}.{}.{}", collection, object_name, form.name);
+            let form_type_name = format!("Формы.{}.{}.{}", collection, object_name, form.name);
             out.push(self.build_form_type(
                 &form_type_name,
                 &form_object_type_name,
@@ -55,7 +54,10 @@ impl UniversalMetadataObject {
 
             let elements_type_name =
                 format!("ЭлементыФормы.{}.{}.{}", collection, object_name, form.name);
-            out.push(Self::build_form_elements_container_type(&elements_type_name, form));
+            out.push(Self::build_form_elements_container_type(
+                &elements_type_name,
+                form,
+            ));
         }
 
         out
@@ -98,7 +100,7 @@ impl UniversalMetadataObject {
             enum_values: Vec::new(), // Для перечислений будет заполнено отдельно
             generic_info: None,      // Конфигурационные типы не имеют Generic метаданных (пока)
             collection_item_type: None,
-            module_paths,            // Milestone 3.14: пути к модулям для Go To Definition
+            module_paths, // Milestone 3.14: пути к модулям для Go To Definition
         }
     }
 
@@ -106,7 +108,9 @@ impl UniversalMetadataObject {
     ///
     /// Конвертирует пути из UniversalMetadataObject в структуру ModulePaths
     /// для использования в Go To Definition навигации.
-    fn build_module_paths(&self) -> Option<bsl_shared::domain::type_definition_location::ModulePaths> {
+    fn build_module_paths(
+        &self,
+    ) -> Option<bsl_shared::domain::type_definition_location::ModulePaths> {
         // Если нет ни одного пути к модулю - возвращаем None
         if self.object_module_path.is_none()
             && self.manager_module_path.is_none()
@@ -294,8 +298,8 @@ impl UniversalMetadataObject {
         fn walk(nodes: &[super::form_types::FormElementBinding], name: &str) -> bool {
             let expected = format!("Объект.{}", name);
             for n in nodes {
-                let is_match =
-                    n.name.as_deref() == Some(name) && n.data_path.as_deref() == Some(expected.as_str());
+                let is_match = n.name.as_deref() == Some(name)
+                    && n.data_path.as_deref() == Some(expected.as_str());
                 if is_match {
                     return true;
                 }

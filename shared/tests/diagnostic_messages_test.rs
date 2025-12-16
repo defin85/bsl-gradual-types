@@ -41,7 +41,9 @@ fn test_nonexistent_method_compact_format_no_variable_name() {
 
 #[test]
 fn test_nonexistent_method_compact_format_with_variable_name() {
-    println!("\n=== TEST 2.1.2: NonExistentMethod - Compact with variable_name (should ignore) ===");
+    println!(
+        "\n=== TEST 2.1.2: NonExistentMethod - Compact with variable_name (should ignore) ==="
+    );
 
     let error = TypeErrorKind::NonExistentMethod {
         object_type: "Массив".to_string(),
@@ -108,7 +110,9 @@ fn test_nonexistent_method_standard_format_with_variable_name() {
 
     // Standard ДОЛЖЕН показывать имя переменной
     assert!(diagnostic.message.contains("списокИмен"));
-    assert!(diagnostic.message.contains("переменной") || diagnostic.message.contains("'списокИмен'"));
+    assert!(
+        diagnostic.message.contains("переменной") || diagnostic.message.contains("'списокИмен'")
+    );
     assert!(diagnostic.message.contains("'Массив'"));
     assert!(!diagnostic.message.contains("💡")); // НЕ должна быть подсказка
 
@@ -399,10 +403,14 @@ fn test_messages_are_russian_and_readable() {
     println!("Message:\n{}\n", diagnostic.message);
 
     // Message должно содержать русские буквы
-    assert!(diagnostic.message.chars().any(|c| c as u32 >= 0x0400 && c as u32 <= 0x04FF));
+    assert!(diagnostic
+        .message
+        .chars()
+        .any(|c| c as u32 >= 0x0400 && c as u32 <= 0x04FF));
     // Message должно содержать русские слова
     assert!(
-        diagnostic.message.contains("не") || diagnostic.message.contains("Не")
+        diagnostic.message.contains("не")
+            || diagnostic.message.contains("Не")
             || diagnostic.message.contains("Проверьте")
     );
 
@@ -449,8 +457,10 @@ fn test_method_validator_with_variable_contextual() {
         variable_name: None,
     };
 
-    let diag_with = error_with_var.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Full);
-    let diag_without = error_without_var.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Full);
+    let diag_with =
+        error_with_var.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Full);
+    let diag_without =
+        error_without_var.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Full);
 
     println!("With variable: {}", diag_with.message);
     println!("Without variable: {}", diag_without.message);

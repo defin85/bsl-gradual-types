@@ -25,9 +25,7 @@ mod full_flow_tests {
             .expect("Failed to get TypeSystemService");
 
         // 4. Получаем ПРЯМО из репозитория
-        let engine = coordinator
-            .analysis_engine()
-            .expect("No analysis engine");
+        let engine = coordinator.analysis_engine().expect("No analysis engine");
 
         let repository = engine.get_repository();
 
@@ -38,7 +36,8 @@ mod full_flow_tests {
         println!("Всего типов в репозитории: {}", all_types.len());
 
         // Показать документы
-        let documents: Vec<_> = all_types.iter()
+        let documents: Vec<_> = all_types
+            .iter()
             .filter(|t| t.name.starts_with("Документы"))
             .collect();
         println!("Документов: {}", documents.len());
@@ -54,7 +53,11 @@ mod full_flow_tests {
             println!("   Табличных частей: {}", raw_type.tabular_sections.len());
 
             for ts in &raw_type.tabular_sections {
-                println!("     - ТЧ '{}' (атрибутов: {})", ts.name, ts.attributes.len());
+                println!(
+                    "     - ТЧ '{}' (атрибутов: {})",
+                    ts.name,
+                    ts.attributes.len()
+                );
             }
         } else {
             println!("\n❌ НЕ НАЙДЕН в репозитории: Документы.ЗаказНаряды");
@@ -80,14 +83,15 @@ mod full_flow_tests {
         println!("   Tabular sections count: {}", doc.tabular_sections.len());
 
         for ts in &doc.tabular_sections {
-            println!("     - ТЧ '{}' (атрибутов: {})", ts.name, ts.attributes.len());
+            println!(
+                "     - ТЧ '{}' (атрибутов: {})",
+                ts.name,
+                ts.attributes.len()
+            );
         }
 
         // ASSERTIONS
-        assert!(
-            raw_type_opt.is_some(),
-            "Тип должен быть в репозитории"
-        );
+        assert!(raw_type_opt.is_some(), "Тип должен быть в репозитории");
 
         let raw_type = raw_type_opt.unwrap();
         assert_eq!(

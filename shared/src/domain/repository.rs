@@ -261,7 +261,9 @@ impl InMemoryTypeRepository {
         F: FnOnce(&mut SignatureIndex),
     {
         let mut index = self.signature_index.write().unwrap_or_else(|poisoned| {
-            tracing::warn!("SignatureIndex RwLock poisoned in populate_signature_index, recovering");
+            tracing::warn!(
+                "SignatureIndex RwLock poisoned in populate_signature_index, recovering"
+            );
             poisoned.into_inner()
         });
         populate_fn(&mut index);
@@ -458,7 +460,9 @@ impl TypeRepository for InMemoryTypeRepository {
         let index = match self.signature_index.read() {
             Ok(idx) => idx,
             Err(poisoned) => {
-                tracing::warn!("SignatureIndex RwLock poisoned in find_method_signature, recovering");
+                tracing::warn!(
+                    "SignatureIndex RwLock poisoned in find_method_signature, recovering"
+                );
                 poisoned.into_inner()
             }
         };

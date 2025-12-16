@@ -50,8 +50,7 @@ mod types;
 
 // Публичный API
 pub use batch::{
-    auto_recover_directory,
-    auto_recover_directory_with_options,
+    auto_recover_directory, auto_recover_directory_with_options,
     auto_recover_directory_with_progress,
 };
 pub use recovery::{recover_hbk_file, HbkRecovery};
@@ -377,13 +376,21 @@ mod tests {
 
         let callback_invocations = std::cell::RefCell::new(0);
         let result = recovery
-            .recover_with_progress(&test_file_path, Some(temp_dir.path()), Some(|_update| {
-                *callback_invocations.borrow_mut() += 1;
-            }))
+            .recover_with_progress(
+                &test_file_path,
+                Some(temp_dir.path()),
+                Some(|_update| {
+                    *callback_invocations.borrow_mut() += 1;
+                }),
+            )
             .unwrap();
 
         // Проверяем что callback не вызывался (т.к. auto_extract = false)
-        assert_eq!(*callback_invocations.borrow(), 0, "Callback не должен быть вызван при auto_extract = false");
+        assert_eq!(
+            *callback_invocations.borrow(),
+            0,
+            "Callback не должен быть вызван при auto_extract = false"
+        );
 
         // Проверяем результат
         assert_eq!(result.signature_offset, junk_offset);
@@ -438,11 +445,16 @@ mod tests {
             auto_extract: false, // НЕ распаковываем для упрощения теста
             max_file_size: 10 * 1024 * 1024,
         });
-        let result1 = recovery.recover(&test_file_path, Some(temp_dir.path())).unwrap();
+        let result1 = recovery
+            .recover(&test_file_path, Some(temp_dir.path()))
+            .unwrap();
 
         assert!(result1.extracted_dir.is_none(), "extract = false -> None");
         // Первый вызов должен найти реальный offset
-        assert_eq!(result1.signature_offset, junk_offset, "Первый вызов должен найти signature");
+        assert_eq!(
+            result1.signature_offset, junk_offset,
+            "Первый вызов должен найти signature"
+        );
 
         // Вручную создаём кеш директорию
         let extract_dir = temp_dir.path().join("rebuilt.test");
@@ -455,7 +467,9 @@ mod tests {
 
         // Второй вызов - должен использовать кеш
         let mut recovery = HbkRecovery::new();
-        let result2 = recovery.recover(&test_file_path, Some(temp_dir.path())).unwrap();
+        let result2 = recovery
+            .recover(&test_file_path, Some(temp_dir.path()))
+            .unwrap();
 
         // При использовании кеша signature_offset = 0 (не искали в файле)
         assert_eq!(

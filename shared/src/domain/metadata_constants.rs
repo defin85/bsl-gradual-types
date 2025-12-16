@@ -16,14 +16,46 @@ pub const METADATA_COLLECTIONS: &[(&str, &str, MetadataKind)] = &[
     ("Справочники", "Catalogs", MetadataKind::Catalog),
     ("Документы", "Documents", MetadataKind::Document),
     ("Перечисления", "Enums", MetadataKind::Enum),
-    ("РегистрыСведений", "InformationRegisters", MetadataKind::InformationRegister),
-    ("РегистрыНакопления", "AccumulationRegisters", MetadataKind::AccumulationRegister),
-    ("РегистрыБухгалтерии", "AccountingRegisters", MetadataKind::AccountingRegister),
-    ("РегистрыРасчета", "CalculationRegisters", MetadataKind::CalculationRegister),
-    ("ПланыВидовХарактеристик", "ChartsOfCharacteristicTypes", MetadataKind::ChartOfCharacteristicTypes),
-    ("ПланыСчетов", "ChartsOfAccounts", MetadataKind::ChartOfAccounts),
-    ("ПланыВидовРасчета", "ChartsOfCalculationTypes", MetadataKind::ChartOfCalculationTypes),
-    ("БизнесПроцессы", "BusinessProcesses", MetadataKind::BusinessProcess),
+    (
+        "РегистрыСведений",
+        "InformationRegisters",
+        MetadataKind::InformationRegister,
+    ),
+    (
+        "РегистрыНакопления",
+        "AccumulationRegisters",
+        MetadataKind::AccumulationRegister,
+    ),
+    (
+        "РегистрыБухгалтерии",
+        "AccountingRegisters",
+        MetadataKind::AccountingRegister,
+    ),
+    (
+        "РегистрыРасчета",
+        "CalculationRegisters",
+        MetadataKind::CalculationRegister,
+    ),
+    (
+        "ПланыВидовХарактеристик",
+        "ChartsOfCharacteristicTypes",
+        MetadataKind::ChartOfCharacteristicTypes,
+    ),
+    (
+        "ПланыСчетов",
+        "ChartsOfAccounts",
+        MetadataKind::ChartOfAccounts,
+    ),
+    (
+        "ПланыВидовРасчета",
+        "ChartsOfCalculationTypes",
+        MetadataKind::ChartOfCalculationTypes,
+    ),
+    (
+        "БизнесПроцессы",
+        "BusinessProcesses",
+        MetadataKind::BusinessProcess,
+    ),
     ("Задачи", "Tasks", MetadataKind::Task),
     ("ПланыОбмена", "ExchangePlans", MetadataKind::ExchangePlan),
 ];
@@ -36,48 +68,181 @@ pub const METADATA_COLLECTIONS: &[(&str, &str, MetadataKind)] = &[
 /// Формат: (русское_имя, английское_имя, MetadataKind, FacetKind)
 pub const FACETED_TYPES: &[(&str, &str, MetadataKind, FacetKind)] = &[
     // Справочники
-    ("СправочникМенеджер", "CatalogManager", MetadataKind::Catalog, FacetKind::Manager),
-    ("СправочникОбъект", "CatalogObject", MetadataKind::Catalog, FacetKind::Object),
-    ("СправочникСсылка", "CatalogRef", MetadataKind::Catalog, FacetKind::Reference),
-    ("СправочникВыборка", "CatalogSelection", MetadataKind::Catalog, FacetKind::Selection),
-    ("СправочникСписок", "CatalogList", MetadataKind::Catalog, FacetKind::List),
-
+    (
+        "СправочникМенеджер",
+        "CatalogManager",
+        MetadataKind::Catalog,
+        FacetKind::Manager,
+    ),
+    (
+        "СправочникОбъект",
+        "CatalogObject",
+        MetadataKind::Catalog,
+        FacetKind::Object,
+    ),
+    (
+        "СправочникСсылка",
+        "CatalogRef",
+        MetadataKind::Catalog,
+        FacetKind::Reference,
+    ),
+    (
+        "СправочникВыборка",
+        "CatalogSelection",
+        MetadataKind::Catalog,
+        FacetKind::Selection,
+    ),
+    (
+        "СправочникСписок",
+        "CatalogList",
+        MetadataKind::Catalog,
+        FacetKind::List,
+    ),
     // Документы
-    ("ДокументМенеджер", "DocumentManager", MetadataKind::Document, FacetKind::Manager),
-    ("ДокументОбъект", "DocumentObject", MetadataKind::Document, FacetKind::Object),
-    ("ДокументСсылка", "DocumentRef", MetadataKind::Document, FacetKind::Reference),
-    ("ДокументВыборка", "DocumentSelection", MetadataKind::Document, FacetKind::Selection),
-    ("ДокументСписок", "DocumentList", MetadataKind::Document, FacetKind::List),
-
+    (
+        "ДокументМенеджер",
+        "DocumentManager",
+        MetadataKind::Document,
+        FacetKind::Manager,
+    ),
+    (
+        "ДокументОбъект",
+        "DocumentObject",
+        MetadataKind::Document,
+        FacetKind::Object,
+    ),
+    (
+        "ДокументСсылка",
+        "DocumentRef",
+        MetadataKind::Document,
+        FacetKind::Reference,
+    ),
+    (
+        "ДокументВыборка",
+        "DocumentSelection",
+        MetadataKind::Document,
+        FacetKind::Selection,
+    ),
+    (
+        "ДокументСписок",
+        "DocumentList",
+        MetadataKind::Document,
+        FacetKind::List,
+    ),
     // Регистры сведений
-    ("РегистрСведенийМенеджер", "InformationRegisterManager", MetadataKind::InformationRegister, FacetKind::Manager),
-    ("РегистрСведенийНаборЗаписей", "InformationRegisterRecordSet", MetadataKind::InformationRegister, FacetKind::Object),
-    ("РегистрСведенийВыборка", "InformationRegisterSelection", MetadataKind::InformationRegister, FacetKind::Selection),
-
+    (
+        "РегистрСведенийМенеджер",
+        "InformationRegisterManager",
+        MetadataKind::InformationRegister,
+        FacetKind::Manager,
+    ),
+    (
+        "РегистрСведенийНаборЗаписей",
+        "InformationRegisterRecordSet",
+        MetadataKind::InformationRegister,
+        FacetKind::Object,
+    ),
+    (
+        "РегистрСведенийВыборка",
+        "InformationRegisterSelection",
+        MetadataKind::InformationRegister,
+        FacetKind::Selection,
+    ),
     // Регистры накопления
-    ("РегистрНакопленияМенеджер", "AccumulationRegisterManager", MetadataKind::AccumulationRegister, FacetKind::Manager),
-    ("РегистрНакопленияНаборЗаписей", "AccumulationRegisterRecordSet", MetadataKind::AccumulationRegister, FacetKind::Object),
-    ("РегистрНакопленияВыборка", "AccumulationRegisterSelection", MetadataKind::AccumulationRegister, FacetKind::Selection),
-
+    (
+        "РегистрНакопленияМенеджер",
+        "AccumulationRegisterManager",
+        MetadataKind::AccumulationRegister,
+        FacetKind::Manager,
+    ),
+    (
+        "РегистрНакопленияНаборЗаписей",
+        "AccumulationRegisterRecordSet",
+        MetadataKind::AccumulationRegister,
+        FacetKind::Object,
+    ),
+    (
+        "РегистрНакопленияВыборка",
+        "AccumulationRegisterSelection",
+        MetadataKind::AccumulationRegister,
+        FacetKind::Selection,
+    ),
     // Планы видов характеристик
-    ("ПланВидовХарактеристикМенеджер", "ChartOfCharacteristicTypesManager", MetadataKind::ChartOfCharacteristicTypes, FacetKind::Manager),
-    ("ПланВидовХарактеристикОбъект", "ChartOfCharacteristicTypesObject", MetadataKind::ChartOfCharacteristicTypes, FacetKind::Object),
-    ("ПланВидовХарактеристикСсылка", "ChartOfCharacteristicTypesRef", MetadataKind::ChartOfCharacteristicTypes, FacetKind::Reference),
-
+    (
+        "ПланВидовХарактеристикМенеджер",
+        "ChartOfCharacteristicTypesManager",
+        MetadataKind::ChartOfCharacteristicTypes,
+        FacetKind::Manager,
+    ),
+    (
+        "ПланВидовХарактеристикОбъект",
+        "ChartOfCharacteristicTypesObject",
+        MetadataKind::ChartOfCharacteristicTypes,
+        FacetKind::Object,
+    ),
+    (
+        "ПланВидовХарактеристикСсылка",
+        "ChartOfCharacteristicTypesRef",
+        MetadataKind::ChartOfCharacteristicTypes,
+        FacetKind::Reference,
+    ),
     // Планы счетов
-    ("ПланСчетовМенеджер", "ChartOfAccountsManager", MetadataKind::ChartOfAccounts, FacetKind::Manager),
-    ("ПланСчетовОбъект", "ChartOfAccountsObject", MetadataKind::ChartOfAccounts, FacetKind::Object),
-    ("ПланСчетовСсылка", "ChartOfAccountsRef", MetadataKind::ChartOfAccounts, FacetKind::Reference),
-
+    (
+        "ПланСчетовМенеджер",
+        "ChartOfAccountsManager",
+        MetadataKind::ChartOfAccounts,
+        FacetKind::Manager,
+    ),
+    (
+        "ПланСчетовОбъект",
+        "ChartOfAccountsObject",
+        MetadataKind::ChartOfAccounts,
+        FacetKind::Object,
+    ),
+    (
+        "ПланСчетовСсылка",
+        "ChartOfAccountsRef",
+        MetadataKind::ChartOfAccounts,
+        FacetKind::Reference,
+    ),
     // Бизнес-процессы
-    ("БизнесПроцессМенеджер", "BusinessProcessManager", MetadataKind::BusinessProcess, FacetKind::Manager),
-    ("БизнесПроцессОбъект", "BusinessProcessObject", MetadataKind::BusinessProcess, FacetKind::Object),
-    ("БизнесПроцессСсылка", "BusinessProcessRef", MetadataKind::BusinessProcess, FacetKind::Reference),
-
+    (
+        "БизнесПроцессМенеджер",
+        "BusinessProcessManager",
+        MetadataKind::BusinessProcess,
+        FacetKind::Manager,
+    ),
+    (
+        "БизнесПроцессОбъект",
+        "BusinessProcessObject",
+        MetadataKind::BusinessProcess,
+        FacetKind::Object,
+    ),
+    (
+        "БизнесПроцессСсылка",
+        "BusinessProcessRef",
+        MetadataKind::BusinessProcess,
+        FacetKind::Reference,
+    ),
     // Задачи
-    ("ЗадачаМенеджер", "TaskManager", MetadataKind::Task, FacetKind::Manager),
-    ("ЗадачаОбъект", "TaskObject", MetadataKind::Task, FacetKind::Object),
-    ("ЗадачаСсылка", "TaskRef", MetadataKind::Task, FacetKind::Reference),
+    (
+        "ЗадачаМенеджер",
+        "TaskManager",
+        MetadataKind::Task,
+        FacetKind::Manager,
+    ),
+    (
+        "ЗадачаОбъект",
+        "TaskObject",
+        MetadataKind::Task,
+        FacetKind::Object,
+    ),
+    (
+        "ЗадачаСсылка",
+        "TaskRef",
+        MetadataKind::Task,
+        FacetKind::Reference,
+    ),
 ];
 
 // =============================================================================
@@ -170,7 +335,7 @@ mod tests {
         assert!(is_metadata_collection("catalogs"));
 
         // Кириллица регистрозависима
-        assert!(!is_metadata_collection("справочники"));  // lowercase не работает
+        assert!(!is_metadata_collection("справочники")); // lowercase не работает
 
         // Не коллекции
         assert!(!is_metadata_collection("СправочникМенеджер"));
@@ -195,9 +360,15 @@ mod tests {
 
     #[test]
     fn test_get_collection_kind() {
-        assert_eq!(get_collection_kind("Справочники"), Some(MetadataKind::Catalog));
+        assert_eq!(
+            get_collection_kind("Справочники"),
+            Some(MetadataKind::Catalog)
+        );
         assert_eq!(get_collection_kind("Catalogs"), Some(MetadataKind::Catalog));
-        assert_eq!(get_collection_kind("Документы"), Some(MetadataKind::Document));
+        assert_eq!(
+            get_collection_kind("Документы"),
+            Some(MetadataKind::Document)
+        );
         assert_eq!(get_collection_kind("Unknown"), None);
     }
 
@@ -234,7 +405,9 @@ mod tests {
         // Паттерны с точкой
         assert!(is_configuration_type_pattern("Справочники.Контрагенты"));
         assert!(is_configuration_type_pattern("Catalogs.Counterparties"));
-        assert!(is_configuration_type_pattern("СправочникМенеджер.Контрагенты"));
+        assert!(is_configuration_type_pattern(
+            "СправочникМенеджер.Контрагенты"
+        ));
 
         // Без точки - сами коллекции/фасеты
         assert!(is_configuration_type_pattern("Справочники"));

@@ -77,7 +77,9 @@ pub async fn search_types_as_dto(
                 2
             } else if name_lower.starts_with(&query_lower) {
                 3
-            } else if name_lower.ends_with(&format!(".{}", query_lower)) || name_lower.ends_with(&query_lower) {
+            } else if name_lower.ends_with(&format!(".{}", query_lower))
+                || name_lower.ends_with(&query_lower)
+            {
                 4
             } else {
                 5
@@ -215,9 +217,7 @@ pub fn get_all_types_as_dto(
     let all_type_dtos: Vec<TypeDto> = all_types
         .iter()
         .map(|(name, res)| {
-            type_resolution_to_dto(name, res, metadata_lookup, |r| {
-                generate_type_description(r)
-            })
+            type_resolution_to_dto(name, res, metadata_lookup, |r| generate_type_description(r))
         })
         .collect();
 
@@ -436,25 +436,15 @@ fn generate_type_description(resolution: &TypeResolution) -> String {
         }
         ResolutionResult::Union(types) => {
             // Show union type variants
-            let type_names: Vec<String> = types
-                .iter()
-                .map(|wt| format!("{}", wt.type_))
-                .collect();
+            let type_names: Vec<String> = types.iter().map(|wt| format!("{}", wt.type_)).collect();
             format!("Union тип: {}", type_names.join(" | "))
         }
         ResolutionResult::Intersection(types) => {
-            let type_names: Vec<String> = types
-                .iter()
-                .map(|t| format!("{}", t))
-                .collect();
+            let type_names: Vec<String> = types.iter().map(|t| format!("{}", t)).collect();
             format!("Intersection тип: {}", type_names.join(" & "))
         }
         ResolutionResult::Generic(gen) => {
-            let params: Vec<String> = gen
-                .type_params
-                .iter()
-                .map(|t| format!("{}", t))
-                .collect();
+            let params: Vec<String> = gen.type_params.iter().map(|t| format!("{}", t)).collect();
             if params.is_empty() {
                 format!("Generic тип: {}", gen.base_type)
             } else {

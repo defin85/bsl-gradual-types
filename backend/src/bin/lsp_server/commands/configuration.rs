@@ -109,14 +109,12 @@ pub async fn handle_parse_configuration(
     let _ = client
         .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
             token: token.clone(),
-            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
-                WorkDoneProgressBegin {
-                    title: "Parsing configuration".to_string(),
-                    message: Some("Initializing...".to_string()),
-                    percentage: Some(0),
-                    cancellable: Some(false),
-                },
-            )),
+            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(WorkDoneProgressBegin {
+                title: "Parsing configuration".to_string(),
+                message: Some("Initializing...".to_string()),
+                percentage: Some(0),
+                cancellable: Some(false),
+            })),
         })
         .await;
 
@@ -154,38 +152,35 @@ pub async fn handle_parse_configuration(
     // Create progress callback
     let client_clone = client.clone();
     let token_clone = token.clone();
-    let progress_callback =
-        move |update: bsl_backend::data::loaders::progress::ProgressUpdate| {
-            let client = client_clone.clone();
-            let token = token_clone.clone();
+    let progress_callback = move |update: bsl_backend::data::loaders::progress::ProgressUpdate| {
+        let client = client_clone.clone();
+        let token = token_clone.clone();
 
-            let percentage = update.percentage as u32;
-            let message = update.message.unwrap_or_else(|| {
-                format!(
-                    "{}: {}/{}",
-                    update.phase.display_name(),
-                    update.current,
-                    update.total
-                )
-            });
+        let percentage = update.percentage as u32;
+        let message = update.message.unwrap_or_else(|| {
+            format!(
+                "{}: {}/{}",
+                update.phase.display_name(),
+                update.current,
+                update.total
+            )
+        });
 
-            tokio::spawn(async move {
-                let _ = client
-                    .send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                        ProgressParams {
-                            token,
-                            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                                WorkDoneProgressReport {
-                                    message: Some(message),
-                                    percentage: Some(percentage),
-                                    cancellable: Some(false),
-                                },
-                            )),
+        tokio::spawn(async move {
+            let _ = client
+                .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
+                    token,
+                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
+                        WorkDoneProgressReport {
+                            message: Some(message),
+                            percentage: Some(percentage),
+                            cancellable: Some(false),
                         },
-                    )
-                    .await;
-            });
-        };
+                    )),
+                })
+                .await;
+        });
+    };
 
     // Convert Result to avoid Send issues
     let discovery_result = discovery
@@ -217,7 +212,10 @@ pub async fn handle_parse_configuration(
     };
 
     let total_objects = metadata.len();
-    info!("Discovered {} metadata objects from configuration", total_objects);
+    info!(
+        "Discovered {} metadata objects from configuration",
+        total_objects
+    );
 
     const BATCH_SIZE: usize = 100;
     const PROGRESS_REPORT_INTERVAL: usize = 10;
@@ -294,6 +292,9 @@ pub async fn handle_parse_configuration(
     ParseConfigurationResponse {
         success: true,
         loaded_types: loaded,
-        message: Some(format!("Configuration loaded successfully: {} types", loaded)),
+        message: Some(format!(
+            "Configuration loaded successfully: {} types",
+            loaded
+        )),
     }
 }

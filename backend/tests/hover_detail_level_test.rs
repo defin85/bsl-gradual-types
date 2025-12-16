@@ -9,7 +9,9 @@
 
 #[cfg(test)]
 mod detail_level_tests {
-    use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
+    use bsl_backend::helpers::hover_formatter::{
+        HoverFormatConfig, HoverFormatter, HoverOutputFormat,
+    };
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
     use bsl_shared::domain::types::{
@@ -189,7 +191,10 @@ mod detail_level_tests {
         let hover = formatter.format_variable("ТЗ", &resolution);
 
         // ✅ Compact должен содержать тип
-        assert!(hover.contains("ТаблицаЗначений"), "Compact должен показывать тип");
+        assert!(
+            hover.contains("ТаблицаЗначений"),
+            "Compact должен показывать тип"
+        );
 
         // ❌ Compact НЕ должен содержать методы
         assert!(
@@ -222,13 +227,13 @@ mod detail_level_tests {
         let hover = formatter.format_variable("ТЗ", &resolution);
 
         // ✅ Full должен содержать тип
-        assert!(hover.contains("ТаблицаЗначений"), "Full должен показывать тип");
+        assert!(
+            hover.contains("ТаблицаЗначений"),
+            "Full должен показывать тип"
+        );
 
         // ✅ Full ДОЛЖЕН содержать методы
-        assert!(
-            hover.contains("Методы"),
-            "Full ДОЛЖЕН показывать методы"
-        );
+        assert!(hover.contains("Методы"), "Full ДОЛЖЕН показывать методы");
 
         // ❌ Full НЕ должен содержать свойства
         assert!(
@@ -279,7 +284,7 @@ mod detail_level_tests {
     // ============================================================================
 
     fn create_repository_with_multiline_methods() -> Arc<InMemoryTypeRepository> {
-        use bsl_shared::domain::types::{RawParamData};
+        use bsl_shared::domain::types::RawParamData;
 
         let repo = Arc::new(InMemoryTypeRepository::new());
 
@@ -311,8 +316,8 @@ mod detail_level_tests {
             description: None,
             is_deprecated: false,
             is_constructor: false,
-                context_requirements: None,
-                return_facet: None,
+            context_requirements: None,
+            return_facet: None,
         };
 
         // Метод с 4 параметрами (multiline)
@@ -349,8 +354,8 @@ mod detail_level_tests {
             description: None,
             is_deprecated: false,
             is_constructor: false,
-                context_requirements: None,
-                return_facet: None,
+            context_requirements: None,
+            return_facet: None,
         };
 
         let test_type = RawTypeData {
@@ -487,8 +492,7 @@ mod detail_level_tests {
 
         // ❌ НЕ должна быть строка с уверенностью
         assert!(
-            !hover.contains("Уверенность") && !hover.contains("Known")
-                && !hover.contains("🟢"),
+            !hover.contains("Уверенность") && !hover.contains("Known") && !hover.contains("🟢"),
             "НЕ должна показывать уверенность когда show_certainty=false"
         );
     }
@@ -688,10 +692,7 @@ mod detail_level_tests {
         let hover = formatter.format_variable("ТЗ", &resolution);
 
         // ✅ Должен показывать активный фасет
-        assert!(
-            hover.contains("Фасет:"),
-            "Detailed должен показывать фасет"
-        );
+        assert!(hover.contains("Фасет:"), "Detailed должен показывать фасет");
         assert!(
             hover.contains("Объект"),
             "Должен показывать активный фасет Объект"
@@ -836,7 +837,7 @@ mod detail_level_tests {
 
         let config = HoverFormatConfig {
             detail_level: DetailLevel::Detailed, // Только в Detailed
-            syntax_helper_path: None, // Без локальной документации
+            syntax_helper_path: None,            // Без локальной документации
             ..Default::default()
         };
 

@@ -38,22 +38,22 @@ impl AstToIrConverter {
                         function: inner_function,
                         args: inner_args,
                         span: inner_span,
-                    } => {
-                        self.convert_call_expression(
-                            *inner_function.clone(),
-                            inner_args.clone(),
-                            *inner_span,
-                        )?
-                    }
+                    } => self.convert_call_expression(
+                        *inner_function.clone(),
+                        inner_args.clone(),
+                        *inner_span,
+                    )?,
                     // PropertyAccess: Справочники.Контрагенты.НайтиПоКоду()
                     // MILESTONE 5.5: Используем convert_property_access_expression для GlobalPropertyAccess
                     Expression::PropertyAccess {
                         object: inner_object,
                         property: inner_property,
                         span: inner_span,
-                    } => {
-                        self.convert_property_access_expression(inner_object, inner_property, *inner_span)?
-                    }
+                    } => self.convert_property_access_expression(
+                        inner_object,
+                        inner_property,
+                        *inner_span,
+                    )?,
                     _ => None,
                 };
 
@@ -64,9 +64,13 @@ impl AstToIrConverter {
                 let object_type = if let Some(child_idx) = object_node {
                     if let Some(node) = self.nodes.get(child_idx) {
                         match &node.kind {
-                            SemanticNodeKind::MemberAccess { result_type, .. } => result_type.clone(),
-                            SemanticNodeKind::FunctionCall { result_type, .. } => result_type.clone(),
-                            _ => self.infer_type_resolution(&object)
+                            SemanticNodeKind::MemberAccess { result_type, .. } => {
+                                result_type.clone()
+                            }
+                            SemanticNodeKind::FunctionCall { result_type, .. } => {
+                                result_type.clone()
+                            }
+                            _ => self.infer_type_resolution(&object),
                         }
                     } else {
                         self.infer_type_resolution(&object)
@@ -99,7 +103,8 @@ impl AstToIrConverter {
 
                 // MILESTONE 2.11: Расширяем span FunctionCall узла, чтобы включить объект
                 // Это позволит hover правильно работать на объекте в вызове метода
-                let expanded_span = if let Expression::Identifier { span: obj_span, .. } = &*object {
+                let expanded_span = if let Expression::Identifier { span: obj_span, .. } = &*object
+                {
                     // Объединяем span объекта (ТаблицаТип) и span вызова (Количество())
                     Span {
                         start_line: obj_span.start_line,
@@ -187,7 +192,11 @@ impl AstToIrConverter {
         let span = self.ast_span_to_ir_span(ast_span);
 
         // Проверяем, является ли object глобальной коллекцией (Справочники, Документы и т.д.)
-        if let Expression::Identifier { name, span: obj_span } = object {
+        if let Expression::Identifier {
+            name,
+            span: obj_span,
+        } = object
+        {
             if let Some(collection_manager_type) = is_global_collection(name) {
                 // MILESTONE 5.5: Создаём GlobalPropertyAccess узел
                 let global_node = SemanticNode {
@@ -203,7 +212,8 @@ impl AstToIrConverter {
 
                 // Вычисляем result_type для MemberAccess
                 // Для Справочники.Контрагенты -> СправочникМенеджер.Контрагенты
-                let result_type = TypeResolution::explicit(&get_manager_type_for_metadata(name, property));
+                let result_type =
+                    TypeResolution::explicit(&get_manager_type_for_metadata(name, property));
 
                 // Создаём MemberAccess с object_node указывающим на GlobalPropertyAccess
                 let member_node = SemanticNode {

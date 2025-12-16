@@ -321,7 +321,9 @@ fn test_progress_monotonic_increase() {
 
     println!(
         "📊 Прогресс: первый {:.1}% -> последний {:.1}% ({} обновлений)",
-        first.percentage, last.percentage, updates.len()
+        first.percentage,
+        last.percentage,
+        updates.len()
     );
 
     assert!(

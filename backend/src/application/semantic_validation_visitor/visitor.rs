@@ -6,7 +6,7 @@
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::{DiagnosticSeverity, TypeDiagnostic};
-use bsl_shared::domain::validators::{TypeValidator, TypeErrorKind};
+use bsl_shared::domain::validators::{TypeErrorKind, TypeValidator};
 use bsl_shared::domain::RuntimeExecutionContext;
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::{
@@ -49,7 +49,7 @@ impl<'a> SemanticValidationVisitor<'a> {
             signature_index,
             errors: Vec::new(),
             program,
-            detail_level: DetailLevel::Full,  // Default for backward compatibility
+            detail_level: DetailLevel::Full, // Default for backward compatibility
             current_execution_context: RuntimeExecutionContext::new(),
         }
     }
@@ -107,7 +107,8 @@ impl<'a> SemanticValidationVisitor<'a> {
         let kind = collection_name_to_metadata_kind(object_type)?;
 
         // Use method from TypeValidator for validation
-        self.validator.validate_metadata_object_exists(kind, member_name, variable_name)
+        self.validator
+            .validate_metadata_object_exists(kind, member_name, variable_name)
     }
 
     /// Validates variable declaration position (Var) in function/procedure body
@@ -129,7 +130,8 @@ impl<'a> SemanticValidationVisitor<'a> {
                             variable_name: name.clone(),
                             function_name: function_name.to_string(),
                         };
-                        let diagnostic = error.to_diagnostic_with_detail(node.span, self.detail_level);
+                        let diagnostic =
+                            error.to_diagnostic_with_detail(node.span, self.detail_level);
                         self.errors.push(diagnostic);
                     }
                 }
@@ -197,39 +199,72 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
     fn visit_node(&mut self, node: &SemanticNode, context: &mut FlowContext) {
         match &node.kind {
             // Context-Aware validation: update directive when entering function/procedure
-            SemanticNodeKind::FunctionDeclaration { compiler_directive, name, body, .. } => {
+            SemanticNodeKind::FunctionDeclaration {
+                compiler_directive,
+                name,
+                body,
+                ..
+            } => {
                 // Update runtime context based on directive from AST
                 tracing::debug!(
                     "FunctionDeclaration '{}': compiler_directive = {:?}",
-                    name, compiler_directive
+                    name,
+                    compiler_directive
                 );
                 if let Some(directive) = compiler_directive {
                     self.current_execution_context.current_directive = *directive;
                     self.current_execution_context.in_function = Some(name.clone());
                 } else {
                     // No directive = Unknown context
-                    self.current_execution_context.current_directive = bsl_shared::domain::CompilerDirective::Unknown;
+                    self.current_execution_context.current_directive =
+                        bsl_shared::domain::CompilerDirective::Unknown;
                     self.current_execution_context.in_function = Some(name.clone());
                 }
                 // Validate variable declaration positions
                 self.validate_var_declaration_position(body, name);
             }
-            SemanticNodeKind::ProcedureDeclaration { compiler_directive, name, body, .. } => {
+            SemanticNodeKind::ProcedureDeclaration {
+                compiler_directive,
+                name,
+                body,
+                ..
+            } => {
                 // Update runtime context based on directive from AST
                 tracing::debug!(
                     "ProcedureDeclaration '{}': compiler_directive = {:?}",
-                    name, compiler_directive
+                    name,
+                    compiler_directive
                 );
                 if let Some(directive) = compiler_directive {
                     self.current_execution_context.current_directive = *directive;
                     self.current_execution_context.in_function = Some(name.clone());
                 } else {
                     // No directive = Unknown context
-                    self.current_execution_context.current_directive = bsl_shared::domain::CompilerDirective::Unknown;
+                    self.current_execution_context.current_directive =
+                        bsl_shared::domain::CompilerDirective::Unknown;
                     self.current_execution_context.in_function = Some(name.clone());
                 }
                 // Validate variable declaration positions
                 self.validate_var_declaration_position(body, name);
+            }
+            SemanticNodeKind::Assignment {
+                variable,
+                value_type,
+                ..
+            } => {
+                // Если тип значения помечен как Unknown с конкретной причиной (например, TypeNotFound),
+                // генерируем диагностическую ошибку на месте присваивания.
+                if let Some(mut kind) = self.validator.validate_from_resolution(value_type) {
+                    if let TypeErrorKind::UnknownType {
+                        ref mut variable_name,
+                        ..
+                    } = kind
+                    {
+                        *variable_name = Some(variable.clone());
+                    }
+                    let diagnostic = kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                    self.errors.push(diagnostic);
+                }
             }
             SemanticNodeKind::FunctionCall {
                 function_name,
@@ -247,7 +282,8 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                             method_name: Some(function_name.clone()),
                             param_index: Some(idx + 1),
                         };
-                        let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                        let diagnostic =
+                            error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                         self.errors.push(diagnostic);
                     }
                 }
@@ -260,7 +296,8 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                         method_name: Some(function_name.clone()),
                         param_index: None,
                     };
-                    let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                    let diagnostic =
+                        error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                     self.errors.push(diagnostic);
                     return; // No point continuing validation
                 }
@@ -270,7 +307,7 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     let diagnostic = error_kind.to_diagnostic_with_severity(
                         node.span,
                         self.detail_level,
-                        DiagnosticSeverity::Warning
+                        DiagnosticSeverity::Warning,
                     );
                     self.errors.push(diagnostic);
                     // DO NOT return - continue validation (Unknown type will be handled below)
@@ -282,7 +319,8 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                         variable_name: object_name.clone(),
                         member_name: function_name.clone(),
                     };
-                    let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                    let diagnostic =
+                        error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                     self.errors.push(diagnostic);
                     return;
                 }
@@ -299,15 +337,13 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 // metadata_lookup.get_methods() already handles Generic and facets correctly
 
                 // 1. MILESTONE 3.6 Phase 3: Check method existence with variable_name
-                if let Some(error_kind) = self
-                    .validator
-                    .validate_method_exists_with_variable(
-                        obj_type,  // Phase 4: Direct use of TypeResolution
-                        function_name,
-                        object_name.clone(),  // Pass variable name
-                    )
-                {
-                    let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                if let Some(error_kind) = self.validator.validate_method_exists_with_variable(
+                    obj_type, // Phase 4: Direct use of TypeResolution
+                    function_name,
+                    object_name.clone(), // Pass variable name
+                ) {
+                    let diagnostic =
+                        error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                     self.errors.push(diagnostic);
                     return; // No point checking parameters if method doesn't exist
                 }
@@ -326,7 +362,7 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     let diagnostic = error_kind.to_diagnostic_with_severity(
                         node.span,
                         self.detail_level,
-                        DiagnosticSeverity::Warning
+                        DiagnosticSeverity::Warning,
                     );
                     self.errors.push(diagnostic);
                     // DO NOT return - continue parameter checking
@@ -334,9 +370,8 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
 
                 // 2. MILESTONE 3.13: Check parameter types with object comparison (v2)
                 // Phase 3: Convert Vec<TypeResolution> -> Vec<String> for validate_call_v2
-                let arg_types_str: Vec<String> = arg_types.iter()
-                    .map(|tr| tr.type_name())
-                    .collect();
+                let arg_types_str: Vec<String> =
+                    arg_types.iter().map(|tr| tr.type_name()).collect();
 
                 let validation_result = self.resolver.validate_call_v2(
                     Some(&obj_type.type_name()),
@@ -346,12 +381,14 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 );
 
                 // Convert ValidationResultV2 to TypeDiagnostic
-                if let Some(diagnostic) = validation_result_v2_to_diagnostic(&validation_result, node.span) {
+                if let Some(diagnostic) =
+                    validation_result_v2_to_diagnostic(&validation_result, node.span)
+                {
                     self.errors.push(diagnostic);
                 }
             }
             SemanticNodeKind::MemberAccess {
-                object_node,  // MILESTONE 5.5: added for extracting name from GlobalPropertyAccess
+                object_node, // MILESTONE 5.5: added for extracting name from GlobalPropertyAccess
                 object_name,
                 object_type,
                 member_name,
@@ -359,15 +396,22 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 ..
             } => {
                 // MILESTONE 5.5 Fix: Extract collection name considering object_node
-                let collection_name = self.extract_collection_name_for_metadata(object_name, *object_node);
+                let collection_name =
+                    self.extract_collection_name_for_metadata(object_name, *object_node);
 
                 tracing::debug!(
                     "MemberAccess: collection_name={:?}, object_type={}, member_name={}",
-                    collection_name, object_type.type_name(), member_name
+                    collection_name,
+                    object_type.type_name(),
+                    member_name
                 );
 
                 if let Some(ref name) = collection_name {
-                    tracing::debug!("Checking if '{}' is metadata collection: {}", name, is_metadata_collection_name(name));
+                    tracing::debug!(
+                        "Checking if '{}' is metadata collection: {}",
+                        name,
+                        is_metadata_collection_name(name)
+                    );
                     if is_metadata_collection_name(name) {
                         // This is access to metadata collection - validate object
                         if let Some(error_kind) = self.validate_metadata_member_access(
@@ -375,7 +419,8 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                             member_name,
                             collection_name.clone(),
                         ) {
-                            let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                            let diagnostic =
+                                error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                             self.errors.push(diagnostic);
                         }
                         // Regardless of result, don't check properties for metadata collections
@@ -392,7 +437,7 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     let diagnostic = error_kind.to_diagnostic_with_severity(
                         node.span,
                         self.detail_level,
-                        DiagnosticSeverity::Warning
+                        DiagnosticSeverity::Warning,
                     );
                     self.errors.push(diagnostic);
                     // DO NOT return - continue validation (Unknown type will be handled below)
@@ -404,21 +449,20 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                         variable_name: object_name.clone(),
                         member_name: member_name.clone(),
                     };
-                    let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                    let diagnostic =
+                        error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                     self.errors.push(diagnostic);
                     return;
                 }
 
                 // MILESTONE 3.6 Phase 3: Pass variable name
-                if let Some(error_kind) = self
-                    .validator
-                    .validate_property_exists_with_variable(
-                        object_type,  // Phase 4: Direct use of TypeResolution
-                        member_name,
-                        object_name.clone(),  // Pass variable name
-                    )
-                {
-                    let diagnostic = error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                if let Some(error_kind) = self.validator.validate_property_exists_with_variable(
+                    object_type, // Phase 4: Direct use of TypeResolution
+                    member_name,
+                    object_name.clone(), // Pass variable name
+                ) {
+                    let diagnostic =
+                        error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                     self.errors.push(diagnostic);
                 }
             }
@@ -431,14 +475,14 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
 mod tests {
     use super::*;
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
-    use bsl_shared::domain::repository::TypeRepository;  // MILESTONE 3.16: Import trait for load_types
-    use bsl_shared::domain::types::FacetKind;  // Phase 4: Moved from main imports (used only in tests)
+    use bsl_shared::domain::repository::TypeRepository; // MILESTONE 3.16: Import trait for load_types
+    use bsl_shared::domain::types::FacetKind; // Phase 4: Moved from main imports (used only in tests)
     use bsl_shared::ir::{SemanticNode, SemanticNodeKind, Span};
 
     #[test]
     fn test_visitor_detects_nonexistent_method() {
-        use std::sync::Arc;
         use bsl_shared::domain::types::TypeResolution;
+        use std::sync::Arc;
         let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
         let metadata = TypeMetadataLookup::new(repository.clone());
         let validator = TypeValidator::new(&metadata);
@@ -461,7 +505,8 @@ mod tests {
             scope_id: program.symbols.root_scope,
         });
 
-        let mut visitor = SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 
@@ -475,8 +520,8 @@ mod tests {
 
     #[test]
     fn test_visitor_detects_nonexistent_property() {
-        use std::sync::Arc;
         use bsl_shared::domain::types::TypeResolution;
+        use std::sync::Arc;
         let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
         let metadata = TypeMetadataLookup::new(repository.clone());
         let validator = TypeValidator::new(&metadata);
@@ -498,7 +543,8 @@ mod tests {
             scope_id: program.symbols.root_scope,
         });
 
-        let mut visitor = SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 
@@ -514,9 +560,9 @@ mod tests {
 
     #[test]
     fn test_visitor_validates_metadata_object_when_config_loaded() {
-        use std::sync::Arc;
         use bsl_shared::domain::repository::InMemoryTypeRepository;
-        use bsl_shared::domain::types::{RawTypeData, RawDataSource, TypeResolution, MetadataKind};
+        use bsl_shared::domain::types::{MetadataKind, RawDataSource, RawTypeData, TypeResolution};
+        use std::sync::Arc;
 
         // Create repository with configuration types
         let repository = Arc::new(InMemoryTypeRepository::new());
@@ -564,7 +610,8 @@ mod tests {
             scope_id: program.symbols.root_scope,
         });
 
-        let mut visitor = SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 
@@ -579,9 +626,9 @@ mod tests {
 
     #[test]
     fn test_visitor_no_error_for_existing_metadata_object() {
-        use std::sync::Arc;
         use bsl_shared::domain::repository::InMemoryTypeRepository;
-        use bsl_shared::domain::types::{RawTypeData, RawDataSource, TypeResolution, MetadataKind};
+        use bsl_shared::domain::types::{MetadataKind, RawDataSource, RawTypeData, TypeResolution};
+        use std::sync::Arc;
 
         let repository = Arc::new(InMemoryTypeRepository::new());
 
@@ -628,7 +675,8 @@ mod tests {
             scope_id: program.symbols.root_scope,
         });
 
-        let mut visitor = SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 
@@ -641,9 +689,9 @@ mod tests {
 
     #[test]
     fn test_visitor_no_error_when_config_not_loaded() {
-        use std::sync::Arc;
         use bsl_shared::domain::repository::InMemoryTypeRepository;
         use bsl_shared::domain::types::TypeResolution;
+        use std::sync::Arc;
 
         // Repository WITHOUT configuration types
         let repository = Arc::new(InMemoryTypeRepository::new());
@@ -670,7 +718,8 @@ mod tests {
             scope_id: program.symbols.root_scope,
         });
 
-        let mut visitor = SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 

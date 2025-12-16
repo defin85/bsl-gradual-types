@@ -29,7 +29,11 @@ impl TypeErrorKind {
     }
 
     /// MILESTONE 3.6 Phase 3: to_diagnostic with configurable detail level
-    pub fn to_diagnostic_with_detail(&self, span: Span, detail_level: DetailLevel) -> TypeDiagnostic {
+    pub fn to_diagnostic_with_detail(
+        &self,
+        span: Span,
+        detail_level: DetailLevel,
+    ) -> TypeDiagnostic {
         let message = match detail_level {
             DetailLevel::Compact => self.format_brief(),
             DetailLevel::Full => self.format_standard(),
@@ -48,7 +52,12 @@ impl TypeErrorKind {
 
     /// MILESTONE 3.11 Phase 3: Create diagnostic with custom severity
     /// Used for context warnings (Warning instead of Error)
-    pub fn to_diagnostic_with_severity(&self, span: Span, detail_level: DetailLevel, severity: DiagnosticSeverity) -> TypeDiagnostic {
+    pub fn to_diagnostic_with_severity(
+        &self,
+        span: Span,
+        detail_level: DetailLevel,
+        severity: DiagnosticSeverity,
+    ) -> TypeDiagnostic {
         let message = match detail_level {
             DetailLevel::Compact => self.format_brief(),
             DetailLevel::Full => self.format_standard(),
@@ -114,13 +123,10 @@ impl TypeErrorKind {
                 "Метод '{}' недоступен в контексте {:?}. Требуется: {:?}",
                 method_name, current_context, required_context
             ),
-            TypeErrorKind::UnknownMetadataObject {
-                kind,
-                name,
-                ..
-            } => format!(
+            TypeErrorKind::UnknownMetadataObject { kind, name, .. } => format!(
                 "{} \"{}\" не найден в конфигурации",
-                kind.to_russian_name(), name
+                kind.to_russian_name(),
+                name
             ),
             TypeErrorKind::UnknownTypeAccess {
                 variable_name,
@@ -138,14 +144,24 @@ impl TypeErrorKind {
                     )
                 }
             }
-            TypeErrorKind::UndeclaredVariable { variable_name, method_name, param_index } => {
+            TypeErrorKind::UndeclaredVariable {
+                variable_name,
+                method_name,
+                param_index,
+            } => {
                 if let (Some(method), Some(idx)) = (method_name, param_index) {
-                    format!("Необъявленная переменная '{}' в параметре #{} метода '{}'", variable_name, idx, method)
+                    format!(
+                        "Необъявленная переменная '{}' в параметре #{} метода '{}'",
+                        variable_name, idx, method
+                    )
                 } else {
                     format!("Необъявленная переменная '{}'", variable_name)
                 }
             }
-            TypeErrorKind::VarDeclarationAfterExecutable { variable_name, function_name } => {
+            TypeErrorKind::VarDeclarationAfterExecutable {
+                variable_name,
+                function_name,
+            } => {
                 format!(
                     "Объявление переменной '{}' после исполняемого кода в '{}'",
                     variable_name, function_name
@@ -156,6 +172,9 @@ impl TypeErrorKind {
                     "Использование неинициализированной переменной '{}'",
                     variable_name
                 )
+            }
+            TypeErrorKind::UnknownType { type_name, .. } => {
+                format!("Тип '{}' не найден", type_name)
             }
         }
     }
@@ -266,7 +285,10 @@ impl TypeErrorKind {
                 }
 
                 if !suggestions.is_empty() {
-                    msg.push_str(&format!(". Возможно, вы имели в виду: {}", suggestions.join(", ")));
+                    msg.push_str(&format!(
+                        ". Возможно, вы имели в виду: {}",
+                        suggestions.join(", ")
+                    ));
                 }
 
                 msg
@@ -279,6 +301,7 @@ impl TypeErrorKind {
             TypeErrorKind::VarDeclarationAfterExecutable { .. } => self.format_brief(),
             // UninitializedVariableUsage: Standard format matches Brief
             TypeErrorKind::UninitializedVariableUsage { .. } => self.format_brief(),
+            TypeErrorKind::UnknownType { .. } => self.format_brief(),
         }
     }
 
@@ -310,9 +333,7 @@ impl TypeErrorKind {
                 )
             }
             TypeErrorKind::IncorrectParameterType {
-                expected,
-                actual,
-                ..
+                expected, actual, ..
             } => {
                 format!(
                     "\u{1F4A1} Подсказка: Ожидается {}, но передано {}. \
@@ -370,9 +391,7 @@ impl TypeErrorKind {
                 }
             }
             TypeErrorKind::UnknownMetadataObject {
-                kind,
-                suggestions,
-                ..
+                kind, suggestions, ..
             } => {
                 let kind_name = kind.to_russian_name();
                 if suggestions.is_empty() {
@@ -387,10 +406,7 @@ impl TypeErrorKind {
                         Используйте команду VSCode: BSL: Parse Configuration для загрузки метаданных.".to_string()
                 }
             }
-            TypeErrorKind::UnknownTypeAccess {
-                variable_name,
-                ..
-            } => {
+            TypeErrorKind::UnknownTypeAccess { variable_name, .. } => {
                 if let Some(var_name) = variable_name {
                     format!(
                         "\u{1F4A1} Подсказка: Переменная '{}' не была инициализирована. \
@@ -399,23 +415,18 @@ impl TypeErrorKind {
                     )
                 } else {
                     "\u{1F4A1} Подсказка: Переменная не была инициализирована. \
-                        Присвойте значение переменной перед обращением к её членам.".to_string()
+                        Присвойте значение переменной перед обращением к её членам."
+                        .to_string()
                 }
             }
-            TypeErrorKind::UndeclaredVariable {
-                variable_name,
-                ..
-            } => {
+            TypeErrorKind::UndeclaredVariable { variable_name, .. } => {
                 format!(
                     "\u{1F4A1} Подсказка: Переменная '{}' не объявлена в текущей области видимости. \
                     Объявите переменную с помощью 'Перем {}' или присвойте ей значение перед использованием.",
                     variable_name, variable_name
                 )
             }
-            TypeErrorKind::VarDeclarationAfterExecutable {
-                variable_name,
-                ..
-            } => {
+            TypeErrorKind::VarDeclarationAfterExecutable { variable_name, .. } => {
                 format!(
                     "\u{1F4A1} Подсказка: В 1С объявления переменных (Перем) должны располагаться \
                     в начале функции/процедуры, до любого исполняемого кода. \
@@ -429,6 +440,24 @@ impl TypeErrorKind {
                     Присвойте значение переменной перед использованием: {} = <значение>;",
                     variable_name, variable_name
                 )
+            }
+            TypeErrorKind::UnknownType {
+                type_name,
+                variable_name,
+            } => {
+                if let Some(var) = variable_name {
+                    format!(
+                        "\u{1F4A1} Подсказка: Тип '{}' указан в '{}' но отсутствует в TypeRepository. \
+                        Проверьте опечатку или убедитесь, что тип загружен из Syntax Helper/конфигурации.",
+                        type_name, var
+                    )
+                } else {
+                    format!(
+                        "\u{1F4A1} Подсказка: Тип '{}' отсутствует в TypeRepository. \
+                        Проверьте опечатку или убедитесь, что тип загружен из Syntax Helper/конфигурации.",
+                        type_name
+                    )
+                }
             }
         }
     }

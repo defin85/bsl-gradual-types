@@ -68,7 +68,6 @@ pub struct MethodSignature {
     pub context_requirements: ContextRequirements,
 
     // ==================== Lazy Resolution Cache ====================
-
     /// Кэш резолвленного типа возврата (lazy, thread-safe)
     ///
     /// Заполняется при первом вызове `get_resolved_return_type()`.

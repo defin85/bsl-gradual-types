@@ -67,7 +67,9 @@ impl<'a> HoverBuilder<'a> {
         resolution: &TypeResolution,
         metadata_lookup: &TypeMetadataLookup,
     ) -> Self {
-        if let Some(section) = sections::format_methods_section(self.config, resolution, metadata_lookup) {
+        if let Some(section) =
+            sections::format_methods_section(self.config, resolution, metadata_lookup)
+        {
             self.sections.push(section);
         }
         self
@@ -79,7 +81,9 @@ impl<'a> HoverBuilder<'a> {
         resolution: &TypeResolution,
         metadata_lookup: &TypeMetadataLookup,
     ) -> Self {
-        if let Some(section) = sections::format_properties_section(self.config, resolution, metadata_lookup) {
+        if let Some(section) =
+            sections::format_properties_section(self.config, resolution, metadata_lookup)
+        {
             self.sections.push(section);
         }
         self
@@ -91,7 +95,9 @@ impl<'a> HoverBuilder<'a> {
         resolution: &TypeResolution,
         metadata_lookup: &TypeMetadataLookup,
     ) -> Self {
-        if let Some(section) = sections::format_tabular_sections_section(self.config, resolution, metadata_lookup) {
+        if let Some(section) =
+            sections::format_tabular_sections_section(self.config, resolution, metadata_lookup)
+        {
             self.sections.push(section);
         }
         self

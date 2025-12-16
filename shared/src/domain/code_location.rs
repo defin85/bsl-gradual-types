@@ -22,8 +22,8 @@
 //! assert!(location.can_call_database_methods(None));
 //! ```
 
-use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Result};
+use std::path::{Path, PathBuf};
 
 /// Контекст выполнения кода в 1С (из types.rs)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

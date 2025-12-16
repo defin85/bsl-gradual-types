@@ -22,14 +22,12 @@ use std::sync::{Arc, LazyLock};
 /// Shared TypeSystemService для всех тестов.
 /// Инициализируется ОДИН раз при первом доступе (LazyLock).
 /// Thread-safe: LazyLock гарантирует однократную инициализацию.
-pub static SHARED_TEST_SERVICE: LazyLock<TypeSystemService> = LazyLock::new(|| {
-    create_test_service_internal()
-});
+pub static SHARED_TEST_SERVICE: LazyLock<TypeSystemService> =
+    LazyLock::new(|| create_test_service_internal());
 
 /// Shared repository для тестов, которым нужен доступ к репозиторию напрямую.
-pub static SHARED_REPOSITORY: LazyLock<Arc<InMemoryTypeRepository>> = LazyLock::new(|| {
-    create_repository_internal()
-});
+pub static SHARED_REPOSITORY: LazyLock<Arc<InMemoryTypeRepository>> =
+    LazyLock::new(|| create_repository_internal());
 
 /// Shared SystemCoordinator с конфигурацией для тестов табличных частей.
 /// Инициализируется ОДИН раз при первом доступе (LazyLock).
@@ -101,7 +99,10 @@ fn create_test_service_internal() -> TypeSystemService {
     let analysis_engine = Arc::new(AnalysisEngine::new(resolver.clone(), repository.clone()));
     let cache = Arc::new(AnalysisCache::new(100));
     let ir_cache = Arc::new(IrCache::new(50));
-    let parser = Arc::new(ParserCoordinator::new_with_resolver(repository.clone(), resolver));
+    let parser = Arc::new(ParserCoordinator::new_with_resolver(
+        repository.clone(),
+        resolver,
+    ));
 
     let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
 
@@ -157,6 +158,9 @@ mod tests {
         // Проверяем что shared repository инициализируется
         let repo = get_test_repository();
         // Если дошли сюда без паники - всё работает
-        assert!(repo.get_signature_index_clone().find_method("Массив", "Добавить").is_some());
+        assert!(repo
+            .get_signature_index_clone()
+            .find_method("Массив", "Добавить")
+            .is_some());
     }
 }

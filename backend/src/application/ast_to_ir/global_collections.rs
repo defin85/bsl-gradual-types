@@ -115,9 +115,9 @@ pub const GLOBAL_COLLECTIONS_INFO: &[GlobalCollectionInfo] = &[
 /// Сравнение case-insensitive для латиницы (eq_ignore_ascii_case).
 /// Для кириллицы используется точное сравнение, т.к. 1С всегда использует корректный регистр.
 pub fn lookup_global_collection(name: &str) -> Option<&'static GlobalCollectionInfo> {
-    GLOBAL_COLLECTIONS_INFO.iter().find(|info| {
-        info.name_ru == name || info.name_en.eq_ignore_ascii_case(name)
-    })
+    GLOBAL_COLLECTIONS_INFO
+        .iter()
+        .find(|info| info.name_ru == name || info.name_en.eq_ignore_ascii_case(name))
 }
 
 /// Проверяет, является ли имя глобальной коллекцией метаданных.
@@ -142,28 +142,70 @@ mod tests {
     #[test]
     fn test_is_global_collection() {
         // Проверяем русские имена (точное совпадение)
-        assert_eq!(is_global_collection("Справочники"), Some("СправочникиМенеджер"));
+        assert_eq!(
+            is_global_collection("Справочники"),
+            Some("СправочникиМенеджер")
+        );
         assert_eq!(is_global_collection("Документы"), Some("ДокументыМенеджер"));
-        assert_eq!(is_global_collection("РегистрыСведений"), Some("РегистрСведенийМенеджерКоллекция"));
-        assert_eq!(is_global_collection("РегистрыНакопления"), Some("РегистрНакопленияМенеджерКоллекция"));
-        assert_eq!(is_global_collection("РегистрыБухгалтерии"), Some("РегистрБухгалтерииМенеджерКоллекция"));
-        assert_eq!(is_global_collection("РегистрыРасчета"), Some("РегистрРасчетаМенеджерКоллекция"));
-        assert_eq!(is_global_collection("Перечисления"), Some("ПеречисленияМенеджер"));
+        assert_eq!(
+            is_global_collection("РегистрыСведений"),
+            Some("РегистрСведенийМенеджерКоллекция")
+        );
+        assert_eq!(
+            is_global_collection("РегистрыНакопления"),
+            Some("РегистрНакопленияМенеджерКоллекция")
+        );
+        assert_eq!(
+            is_global_collection("РегистрыБухгалтерии"),
+            Some("РегистрБухгалтерииМенеджерКоллекция")
+        );
+        assert_eq!(
+            is_global_collection("РегистрыРасчета"),
+            Some("РегистрРасчетаМенеджерКоллекция")
+        );
+        assert_eq!(
+            is_global_collection("Перечисления"),
+            Some("ПеречисленияМенеджер")
+        );
         assert_eq!(is_global_collection("Константы"), Some("КонстантыМенеджер"));
 
         // Проверяем английские имена
-        assert_eq!(is_global_collection("Catalogs"), Some("СправочникиМенеджер"));
+        assert_eq!(
+            is_global_collection("Catalogs"),
+            Some("СправочникиМенеджер")
+        );
         assert_eq!(is_global_collection("Documents"), Some("ДокументыМенеджер"));
-        assert_eq!(is_global_collection("InformationRegisters"), Some("РегистрСведенийМенеджерКоллекция"));
-        assert_eq!(is_global_collection("AccumulationRegisters"), Some("РегистрНакопленияМенеджерКоллекция"));
-        assert_eq!(is_global_collection("AccountingRegisters"), Some("РегистрБухгалтерииМенеджерКоллекция"));
-        assert_eq!(is_global_collection("CalculationRegisters"), Some("РегистрРасчетаМенеджерКоллекция"));
+        assert_eq!(
+            is_global_collection("InformationRegisters"),
+            Some("РегистрСведенийМенеджерКоллекция")
+        );
+        assert_eq!(
+            is_global_collection("AccumulationRegisters"),
+            Some("РегистрНакопленияМенеджерКоллекция")
+        );
+        assert_eq!(
+            is_global_collection("AccountingRegisters"),
+            Some("РегистрБухгалтерииМенеджерКоллекция")
+        );
+        assert_eq!(
+            is_global_collection("CalculationRegisters"),
+            Some("РегистрРасчетаМенеджерКоллекция")
+        );
 
         // Проверяем case-insensitive для латиницы
-        assert_eq!(is_global_collection("catalogs"), Some("СправочникиМенеджер"));
+        assert_eq!(
+            is_global_collection("catalogs"),
+            Some("СправочникиМенеджер")
+        );
         assert_eq!(is_global_collection("DOCUMENTS"), Some("ДокументыМенеджер"));
-        assert_eq!(is_global_collection("accountingregisters"), Some("РегистрБухгалтерииМенеджерКоллекция"));
-        assert_eq!(is_global_collection("CALCULATIONREGISTERS"), Some("РегистрРасчетаМенеджерКоллекция"));
+        assert_eq!(
+            is_global_collection("accountingregisters"),
+            Some("РегистрБухгалтерииМенеджерКоллекция")
+        );
+        assert_eq!(
+            is_global_collection("CALCULATIONREGISTERS"),
+            Some("РегистрРасчетаМенеджерКоллекция")
+        );
 
         // Кириллица с другим регистром НЕ совпадает (1С всегда использует корректный регистр)
         assert_eq!(is_global_collection("СПРАВОЧНИКИ"), None);
@@ -238,13 +280,19 @@ mod tests {
         let info = lookup_global_collection("AccountingRegisters").unwrap();
         assert_eq!(info.name_ru, "РегистрыБухгалтерии");
         assert_eq!(info.name_en, "AccountingRegisters");
-        assert_eq!(info.collection_manager_type, "РегистрБухгалтерииМенеджерКоллекция");
+        assert_eq!(
+            info.collection_manager_type,
+            "РегистрБухгалтерииМенеджерКоллекция"
+        );
         assert_eq!(info.item_manager_type, "РегистрБухгалтерииМенеджер");
 
         let info = lookup_global_collection("CalculationRegisters").unwrap();
         assert_eq!(info.name_ru, "РегистрыРасчета");
         assert_eq!(info.name_en, "CalculationRegisters");
-        assert_eq!(info.collection_manager_type, "РегистрРасчетаМенеджерКоллекция");
+        assert_eq!(
+            info.collection_manager_type,
+            "РегистрРасчетаМенеджерКоллекция"
+        );
         assert_eq!(info.item_manager_type, "РегистрРасчетаМенеджер");
 
         // Case-insensitive для английских имён

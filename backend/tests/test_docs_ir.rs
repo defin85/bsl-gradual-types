@@ -13,7 +13,9 @@ fn test_documents_property_access() {
     println!("\n=== Документы.ЗаказКлиента ===\n{}\n", code);
 
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).unwrap();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .unwrap();
     let tree = parser.parse(code, None).unwrap();
     let ast_result = TreeSitterAdapter::convert_tree(&tree, code).unwrap();
 
@@ -30,7 +32,8 @@ fn test_documents_property_access() {
         "test.bsl".to_string(),
         repository,
         signature_index,
-    ).unwrap();
+    )
+    .unwrap();
 
     println!("\n=== IR nodes: {} ===", ir.nodes.len());
     for (i, node) in ir.nodes.iter().enumerate() {
@@ -38,9 +41,15 @@ fn test_documents_property_access() {
     }
 
     let has_member_access = ir.nodes.iter().any(|n| {
-        matches!(n.kind, bsl_shared::ir::SemanticNodeKind::MemberAccess { .. })
+        matches!(
+            n.kind,
+            bsl_shared::ir::SemanticNodeKind::MemberAccess { .. }
+        )
     });
 
     println!("\nHas MemberAccess: {}", has_member_access);
-    assert!(has_member_access, "Should have MemberAccess for Документы.ЗаказКлиента");
+    assert!(
+        has_member_access,
+        "Should have MemberAccess for Документы.ЗаказКлиента"
+    );
 }

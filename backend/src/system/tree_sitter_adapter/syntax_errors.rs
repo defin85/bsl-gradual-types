@@ -188,7 +188,9 @@ pub fn check_incomplete_new_expressions(source: &str, lines: &[String]) -> Vec<P
         }
 
         // Находим позицию в UTF-16.
-        let byte_pos = trimmed.rfind(kw).unwrap_or(trimmed.len().saturating_sub(kw_len));
+        let byte_pos = trimmed
+            .rfind(kw)
+            .unwrap_or(trimmed.len().saturating_sub(kw_len));
         let col_utf16 = byte_offset_to_utf16(trimmed, byte_pos + kw_len);
         let row_u32 = row as u32;
 

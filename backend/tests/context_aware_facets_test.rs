@@ -21,7 +21,7 @@
 //! - Когда добавим публичный API для type inference в AstToIrConverter
 //! - Или когда реализуем unit тесты через compile-time type checking
 
-use bsl_shared::domain::{RuntimeExecutionContext, CompilerDirective, ContextRequirements};
+use bsl_shared::domain::{CompilerDirective, ContextRequirements, RuntimeExecutionContext};
 
 /// Helper: парсит код и возвращает тип переменной
 ///

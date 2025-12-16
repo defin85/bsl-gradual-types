@@ -56,7 +56,8 @@ impl TypeParser {
     ///   - `None` - если секция не найдена или тип пуст
     pub fn parse_return_type(html_text: &str) -> (Option<String>, Option<String>) {
         // Проверяем наличие раздела "Возвращаемое значение:"
-        if !html_text.contains("Возвращаемое значение:") && !html_text.contains("Return value:") {
+        if !html_text.contains("Возвращаемое значение:") && !html_text.contains("Return value:")
+        {
             return (None, None);
         }
 

@@ -15,4 +15,4 @@ pub use bsl_shared::domain::CompletionItem;
 pub use type_inference_service::TypeInferenceService;
 
 // Re-export from modular type_system module
-pub use type_system::{TypeSystemService, CompletionContext};
+pub use type_system::{CompletionContext, TypeSystemService};

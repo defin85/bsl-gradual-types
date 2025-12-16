@@ -127,8 +127,8 @@ impl SemanticProgram {
                     SemanticNodeKind::FunctionCall { .. } => 0, // Высший приоритет
                     SemanticNodeKind::MemberAccess { .. } => 1, // Высокий приоритет
                     SemanticNodeKind::VariableDeclaration { .. } => 2, // Средний приоритет
-                    SemanticNodeKind::Assignment { .. } => 10, // Низкий приоритет
-                    _ => 5,                                    // Остальные - средний приоритет
+                    SemanticNodeKind::Assignment { .. } => 10,  // Низкий приоритет
+                    _ => 5,                                     // Остальные - средний приоритет
                 };
 
                 // Сортировка: сначала по размеру span, затем по приоритету типа
@@ -167,7 +167,11 @@ impl SemanticProgram {
     /// Получить переменную в scope (с поиском в родительских scope)
     ///
     /// Поиск идёт от текущего scope вверх по иерархии до root
-    pub fn resolve_variable(&self, name: &str, scope_id: ScopeId) -> Option<(TypeResolution, Span)> {
+    pub fn resolve_variable(
+        &self,
+        name: &str,
+        scope_id: ScopeId,
+    ) -> Option<(TypeResolution, Span)> {
         let mut current_scope_id = Some(scope_id);
 
         while let Some(sid) = current_scope_id {

@@ -180,7 +180,9 @@ pub fn get_generic_info_registry() -> HashMap<String, GenericInfo> {
 /// # Returns
 ///
 /// Количество успешно применённых GenericInfo
-pub fn apply_generic_info_to_repository<R: bsl_shared::domain::repository::TypeRepository + ?Sized>(
+pub fn apply_generic_info_to_repository<
+    R: bsl_shared::domain::repository::TypeRepository + ?Sized,
+>(
     repository: &R,
 ) -> usize {
     let registry = get_generic_info_registry();
@@ -189,10 +191,7 @@ pub fn apply_generic_info_to_repository<R: bsl_shared::domain::repository::TypeR
     for (type_name, generic_info) in registry {
         if repository.set_generic_info(&type_name, generic_info) {
             applied_count += 1;
-            tracing::info!(
-                "✅ GenericInfo применён к типу '{}'",
-                type_name
-            );
+            tracing::info!("✅ GenericInfo применён к типу '{}'", type_name);
         } else {
             tracing::warn!(
                 "⚠️ Тип '{}' не найден в репозитории, GenericInfo не применён",
@@ -212,7 +211,9 @@ mod tests {
     fn test_generic_info_registry_contains_array() {
         let registry = get_generic_info_registry();
 
-        let array_info = registry.get("Массив").expect("Массив должен быть в реестре");
+        let array_info = registry
+            .get("Массив")
+            .expect("Массив должен быть в реестре");
         assert_eq!(array_info.base_type, "Массив");
         assert_eq!(array_info.type_param_count, 1);
         assert_eq!(array_info.inference_methods.len(), 3); // Добавить, Вставить, Найти
@@ -222,7 +223,9 @@ mod tests {
     fn test_generic_info_registry_contains_map() {
         let registry = get_generic_info_registry();
 
-        let map_info = registry.get("Соответствие").expect("Соответствие должен быть в реестре");
+        let map_info = registry
+            .get("Соответствие")
+            .expect("Соответствие должен быть в реестре");
         assert_eq!(map_info.base_type, "Соответствие");
         assert_eq!(map_info.type_param_count, 2); // K и V
         assert_eq!(map_info.inference_methods.len(), 4);
@@ -232,7 +235,9 @@ mod tests {
     fn test_generic_info_registry_contains_value_list() {
         let registry = get_generic_info_registry();
 
-        let list_info = registry.get("СписокЗначений").expect("СписокЗначений должен быть в реестре");
+        let list_info = registry
+            .get("СписокЗначений")
+            .expect("СписокЗначений должен быть в реестре");
         assert_eq!(list_info.base_type, "СписокЗначений");
         assert_eq!(list_info.type_param_count, 1);
         assert_eq!(list_info.inference_methods.len(), 1); // Добавить
@@ -242,7 +247,9 @@ mod tests {
     fn test_generic_info_registry_contains_tabular_section() {
         let registry = get_generic_info_registry();
 
-        let tab_info = registry.get("ТабличнаяЧасть").expect("ТабличнаяЧасть должен быть в реестре");
+        let tab_info = registry
+            .get("ТабличнаяЧасть")
+            .expect("ТабличнаяЧасть должен быть в реестре");
         assert_eq!(tab_info.base_type, "ТабличнаяЧасть");
         assert_eq!(tab_info.type_param_count, 1);
         assert_eq!(tab_info.inference_methods.len(), 6);

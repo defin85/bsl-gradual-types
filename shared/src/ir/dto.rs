@@ -204,11 +204,7 @@ impl SemanticProgram {
                     function_name.clone()
                 };
 
-                (
-                    "FunctionCall".to_string(),
-                    Some(display_name),
-                    attributes,
-                )
+                ("FunctionCall".to_string(), Some(display_name), attributes)
             }
             SemanticNodeKind::Return { .. } => ("Return".to_string(), None, attributes),
             SemanticNodeKind::TryExcept { .. } => ("TryExcept".to_string(), None, attributes),

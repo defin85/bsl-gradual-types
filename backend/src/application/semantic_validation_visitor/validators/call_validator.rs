@@ -29,8 +29,8 @@ pub fn validate_method_call_context(
                 method_name: method_name.to_string(),
                 object_type: receiver_type.to_string(),
                 variable_name,
-                current_context: current_execution_context.current_directive,  // Type-safe
-                required_context: signature.context_requirements,               // Type-safe
+                current_context: current_execution_context.current_directive, // Type-safe
+                required_context: signature.context_requirements,             // Type-safe
             });
         }
     }

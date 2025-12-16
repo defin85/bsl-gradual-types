@@ -4,10 +4,10 @@ use super::TypeMetadataLookup;
 use crate::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use crate::domain::type_id::TypeId;
 use crate::domain::types::{
-    Certainty, ConcreteType, ConfigurationType, FacetKind, GenericType, MetadataKind,
-    PlatformType, RawAttributeData, RawDataSource, RawMethodData, RawParamData,
-    RawTabularSectionData, RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource,
-    TabularRowType, TypeResolution,
+    Certainty, ConcreteType, ConfigurationType, FacetKind, GenericType, MetadataKind, PlatformType,
+    RawAttributeData, RawDataSource, RawMethodData, RawParamData, RawTabularSectionData,
+    RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource, TabularRowType,
+    TypeResolution,
 };
 use std::sync::Arc;
 
@@ -109,10 +109,7 @@ fn test_generic_collection_item_type_parameterized_in_return_type() {
         .iter()
         .find(|m| m.name == "Получить")
         .expect("Should have method Получить");
-    assert_eq!(
-        get.return_type,
-        "ДанныеФормыЭлементКоллекции<СтрокаРаботы>"
-    );
+    assert_eq!(get.return_type, "ДанныеФормыЭлементКоллекции<СтрокаРаботы>");
 }
 
 fn create_test_resolution(type_name: &str) -> TypeResolution {

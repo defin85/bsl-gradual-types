@@ -258,26 +258,22 @@ mod tests {
 
         // Только manager_module
         let paths1 = ModulePaths::new().with_manager_module(manager_module.clone());
-        let loc1 = TypeDefinitionLocation::configuration_with_modules(metadata_path.clone(), paths1);
+        let loc1 =
+            TypeDefinitionLocation::configuration_with_modules(metadata_path.clone(), paths1);
         assert_eq!(loc1.primary_path(), Some(&manager_module));
 
         // object_module + manager_module -> object_module имеет приоритет
         let paths2 = ModulePaths::new()
             .with_manager_module(manager_module.clone())
             .with_object_module(object_module.clone());
-        let loc2 = TypeDefinitionLocation::configuration_with_modules(metadata_path.clone(), paths2);
+        let loc2 =
+            TypeDefinitionLocation::configuration_with_modules(metadata_path.clone(), paths2);
         assert_eq!(loc2.primary_path(), Some(&object_module));
     }
 
     #[test]
     fn test_user_defined_position() {
-        let loc = TypeDefinitionLocation::user_defined(
-            PathBuf::from("test.bsl"),
-            10,
-            5,
-            15,
-            20,
-        );
+        let loc = TypeDefinitionLocation::user_defined(PathBuf::from("test.bsl"), 10, 5, 15, 20);
 
         if let TypeDefinitionLocation::UserDefined {
             file_path,

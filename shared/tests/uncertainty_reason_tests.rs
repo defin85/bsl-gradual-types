@@ -35,19 +35,17 @@ fn create_document_type(name: &str) -> RawTypeData {
         description: format!("Документ {}", name),
         category: "Document".to_string(),
         source: RawDataSource::Configuration,
-        methods: vec![
-            RawMethodData {
-                name: "Записать".to_string(),
-                english_name: "Write".to_string(),
-                return_type: "".to_string(),
-                params: vec![],
-                description: None,
-                is_deprecated: false,
-                is_constructor: false,
-                context_requirements: None,
-                return_facet: None,
-            },
-        ],
+        methods: vec![RawMethodData {
+            name: "Записать".to_string(),
+            english_name: "Write".to_string(),
+            return_type: "".to_string(),
+            params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+            context_requirements: None,
+            return_facet: None,
+        }],
         properties: vec![],
         facets: vec![],
         kind: Some(MetadataKind::Document),
@@ -104,7 +102,8 @@ fn test_certainty_config_loaded_type_found_is_known() {
 
     // Проверяем Certainty::Known
     assert_eq!(
-        resolution.certainty, Certainty::Known,
+        resolution.certainty,
+        Certainty::Known,
         "Expected Certainty::Known for existing type in loaded configuration"
     );
 
@@ -140,7 +139,8 @@ fn test_certainty_config_not_loaded_is_inferred() {
 
     // Проверяем Certainty::InferredWeak
     assert_eq!(
-        resolution.certainty, Certainty::InferredWeak,
+        resolution.certainty,
+        Certainty::InferredWeak,
         "Expected Certainty::InferredWeak when configuration is not loaded"
     );
 
@@ -177,7 +177,8 @@ fn test_certainty_config_loaded_type_not_found_is_unknown() {
 
     // Проверяем Certainty::Unknown
     assert_eq!(
-        resolution.certainty, Certainty::Unknown,
+        resolution.certainty,
+        Certainty::Unknown,
         "Expected Certainty::Unknown when configuration is loaded but type not found"
     );
 
@@ -231,11 +232,7 @@ fn test_validate_from_resolution_generates_error_for_unknown_metadata() {
     // Проверяем тип ошибки
     if let Some(error_kind) = error {
         match error_kind {
-            TypeErrorKind::UnknownMetadataObject {
-                kind,
-                name,
-                ..
-            } => {
+            TypeErrorKind::UnknownMetadataObject { kind, name, .. } => {
                 assert_eq!(kind, MetadataKind::Document);
                 assert_eq!(name, "НесуществующийДок");
             }
@@ -270,7 +267,8 @@ fn test_graceful_degradation_multiple_types() {
 
         // Все должны быть InferredWeak
         assert_eq!(
-            resolution.certainty, Certainty::InferredWeak,
+            resolution.certainty,
+            Certainty::InferredWeak,
             "Expected InferredWeak for {} when config not loaded",
             type_expr
         );
@@ -319,11 +317,13 @@ fn test_difference_between_inferred_and_unknown() {
 
     // Проверяем что certainty отличается
     assert_eq!(
-        resolution_empty.certainty, Certainty::InferredWeak,
+        resolution_empty.certainty,
+        Certainty::InferredWeak,
         "Empty repo should produce InferredWeak"
     );
     assert_eq!(
-        resolution_with_config.certainty, Certainty::Unknown,
+        resolution_with_config.certainty,
+        Certainty::Unknown,
         "Loaded repo should produce Unknown"
     );
 
@@ -375,7 +375,8 @@ fn test_resolution_metadata_contains_correct_data() {
 
     // Проверяем certainty для найденного типа
     assert_eq!(
-        resolution_found.certainty, Certainty::Known,
+        resolution_found.certainty,
+        Certainty::Known,
         "Expected Known certainty for found type"
     );
     assert_eq!(
@@ -385,7 +386,8 @@ fn test_resolution_metadata_contains_correct_data() {
 
     // Проверяем certainty для ненайденного типа
     assert_eq!(
-        resolution_not_found.certainty, Certainty::Unknown,
+        resolution_not_found.certainty,
+        Certainty::Unknown,
         "Expected Unknown certainty for not found type"
     );
     assert!(
@@ -416,7 +418,8 @@ fn test_primitive_types_always_known() {
 
         // Примитивные типы всегда Known
         assert_eq!(
-            resolution.certainty, Certainty::Known,
+            resolution.certainty,
+            Certainty::Known,
             "Expected Known for primitive type {}",
             type_name
         );
@@ -453,7 +456,9 @@ fn test_mixed_scenarios_with_repository() {
     let resolution_not_found = resolver.resolve_expression_sync("Документы.НесуществующийДок");
     assert_eq!(resolution_not_found.certainty, Certainty::Unknown);
     assert!(resolution_not_found.metadata.uncertainty_reason.is_some());
-    assert!(validator.validate_from_resolution(&resolution_not_found).is_some());
+    assert!(validator
+        .validate_from_resolution(&resolution_not_found)
+        .is_some());
 
     // Case 3: Примитивный тип → Known
     let resolution_primitive = resolver.resolve_expression_sync("Строка");

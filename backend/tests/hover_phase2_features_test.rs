@@ -13,8 +13,8 @@ mod phase2_features_tests {
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
     use bsl_shared::domain::types::{
         Certainty, ConcreteType, FacetKind, GenericType, PlatformType, PrimitiveType,
-        RawDataSource, RawTypeData, ResolutionMetadata, ResolutionResult,
-        ResolutionSource, TypeResolution,
+        RawDataSource, RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource,
+        TypeResolution,
     };
     use bsl_shared::formatting::DetailLevel;
     use std::path::PathBuf;
@@ -282,10 +282,7 @@ mod phase2_features_tests {
             "Should show Generic explanation"
         );
 
-        assert!(
-            hover.contains("Массив"),
-            "Should show base type Массив"
-        );
+        assert!(hover.contains("Массив"), "Should show base type Массив");
 
         assert!(
             hover.contains("Строка"),
@@ -371,10 +368,7 @@ mod phase2_features_tests {
             "Should show Generic explanation for ТаблицаЗначений"
         );
 
-        assert!(
-            hover.contains("Строка"),
-            "Should show type parameter"
-        );
+        assert!(hover.contains("Строка"), "Should show type parameter");
     }
 
     #[test]
@@ -469,8 +463,8 @@ mod phase2_features_tests {
         let formatter = HoverFormatter::new(full_config, metadata_lookup.clone());
         let hover_full = formatter.format_variable("Список", &resolution);
 
-        let has_generic_explanation = hover_full.contains("содержит элементы")
-            || hover_full.contains("представляет собой");
+        let has_generic_explanation =
+            hover_full.contains("содержит элементы") || hover_full.contains("представляет собой");
         assert!(
             !has_generic_explanation,
             "Full should NOT show Generic explanation"
@@ -500,10 +494,7 @@ mod phase2_features_tests {
 
     #[test]
     fn test_documentation_links_with_syntax_helper() {
-        let repo = create_test_repository_with_facets(
-            "ТаблицаЗначений",
-            vec![FacetKind::Object],
-        );
+        let repo = create_test_repository_with_facets("ТаблицаЗначений", vec![FacetKind::Object]);
         let metadata_lookup = TypeMetadataLookup::new(repo);
 
         let resolution = TypeResolution {
@@ -541,10 +532,7 @@ mod phase2_features_tests {
 
     #[test]
     fn test_documentation_links_without_syntax_helper() {
-        let repo = create_test_repository_with_facets(
-            "ТаблицаЗначений",
-            vec![FacetKind::Object],
-        );
+        let repo = create_test_repository_with_facets("ТаблицаЗначений", vec![FacetKind::Object]);
         let metadata_lookup = TypeMetadataLookup::new(repo);
 
         let resolution = TypeResolution {
@@ -663,10 +651,7 @@ mod phase2_features_tests {
 
     #[test]
     fn test_documentation_only_in_detailed_level() {
-        let repo = create_test_repository_with_facets(
-            "ТаблицаЗначений",
-            vec![FacetKind::Object],
-        );
+        let repo = create_test_repository_with_facets("ТаблицаЗначений", vec![FacetKind::Object]);
         let metadata_lookup = TypeMetadataLookup::new(repo);
 
         let resolution = TypeResolution {

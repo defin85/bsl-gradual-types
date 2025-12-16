@@ -16,7 +16,7 @@ use std::sync::Arc;
 fn test_find_by_code_return_type_from_signature_index() {
     // 1. Создаём репозиторий
     let repo = Arc::new(InMemoryTypeRepository::new());
-    
+
     // 2. Заполняем signature_index с методом НайтиПоКоду с правильным return_type
     repo.populate_signature_index(|index: &mut SignatureIndex| {
         let method = MethodSignature::new(
@@ -36,7 +36,7 @@ fn test_find_by_code_return_type_from_signature_index() {
         );
         index.add_platform_method(TypeId::new("СправочникМенеджер.<Имя справочника>"), method);
     });
-    
+
     // 3. Создаём TypeResolution для Справочники.Контрагенты с Manager фасетом
     let resolution = TypeResolution {
         result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
@@ -52,15 +52,18 @@ fn test_find_by_code_return_type_from_signature_index() {
         metadata: ResolutionMetadata::default(),
         available_facets: vec![FacetKind::Manager],
     };
-    
+
     // 4. Получаем методы через TypeMetadataLookup
     let lookup = TypeMetadataLookup::new(repo.clone());
     let methods = lookup.get_methods(&resolution);
-    
+
     // 5. Проверяем, что метод НайтиПоКоду найден с правильным return_type
     let find_by_code = methods.iter().find(|m| m.name == "НайтиПоКоду");
-    assert!(find_by_code.is_some(), "Метод НайтиПоКоду должен быть найден");
-    
+    assert!(
+        find_by_code.is_some(),
+        "Метод НайтиПоКоду должен быть найден"
+    );
+
     let method = find_by_code.unwrap();
     assert_eq!(
         method.return_type, "СправочникСсылка.<Имя справочника>",

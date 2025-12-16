@@ -364,14 +364,17 @@ async fn test_validate_property_not_exists() {
 
     // Ищем диагностику о свойстве
     let has_property_error = diagnostics.iter().any(|d| {
-        d.message.contains("свойство") ||
-        d.message.contains("Property") ||
-        d.message.contains("НесуществующееСвойство")
+        d.message.contains("свойство")
+            || d.message.contains("Property")
+            || d.message.contains("НесуществующееСвойство")
     });
 
     println!("\n Test Result:");
     println!("  BUG FIX VERIFIED: PropertyAccess now has access_kind: Property");
-    println!("  Property validation called: {}", has_property_error || diagnostics.is_empty());
+    println!(
+        "  Property validation called: {}",
+        has_property_error || diagnostics.is_empty()
+    );
 
     if diagnostics.is_empty() {
         println!("\n  No diagnostics returned (expected for types without explicit properties in metadata)");
@@ -432,7 +435,10 @@ async fn test_find_by_code_returns_reference_type() {
     // НЕ должно быть ошибки о методе, не существующем для Неопределено
     let undefined_errors: Vec<_> = diagnostics
         .iter()
-        .filter(|d| (d.message.contains("ПолучитьОбъект") && d.message.contains("не существует")) || d.message.contains("Неопределено"))
+        .filter(|d| {
+            (d.message.contains("ПолучитьОбъект") && d.message.contains("не существует"))
+                || d.message.contains("Неопределено")
+        })
         .collect();
 
     println!("\n✅ Test Diagnostic Summary:");
@@ -489,11 +495,11 @@ async fn test_validate_parameter_type_boolean_expected() {
     let type_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            d.message.contains("Булево") ||
-            d.message.contains("Boolean") ||
-            d.message.contains("Параметр") ||
-            d.message.contains("тип") ||
-            d.message.contains("несовместим")
+            d.message.contains("Булево")
+                || d.message.contains("Boolean")
+                || d.message.contains("Параметр")
+                || d.message.contains("тип")
+                || d.message.contains("несовместим")
         })
         .collect();
 
@@ -562,10 +568,10 @@ async fn test_validate_parameter_type_number_expected() {
     let type_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            d.message.contains("Число") ||
-            d.message.contains("Number") ||
-            d.message.contains("Параметр") ||
-            d.message.contains("Индекс")
+            d.message.contains("Число")
+                || d.message.contains("Number")
+                || d.message.contains("Параметр")
+                || d.message.contains("Индекс")
         })
         .collect();
 
@@ -634,11 +640,11 @@ async fn test_context_aware_server_only_in_client() {
     let context_warnings: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            d.message.contains("НаКлиенте") ||
-            d.message.contains("клиент") ||
-            d.message.contains("серверн") ||
-            d.message.contains("ServerOnly") ||
-            d.message.contains("контекст")
+            d.message.contains("НаКлиенте")
+                || d.message.contains("клиент")
+                || d.message.contains("серверн")
+                || d.message.contains("ServerOnly")
+                || d.message.contains("контекст")
         })
         .collect();
 
@@ -699,10 +705,10 @@ async fn test_context_aware_server_only_in_server_ok() {
     let context_warnings: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            d.message.contains("НаКлиенте") ||
-            d.message.contains("клиент") ||
-            d.message.contains("серверн") ||
-            d.message.contains("контекст")
+            d.message.contains("НаКлиенте")
+                || d.message.contains("клиент")
+                || d.message.contains("серверн")
+                || d.message.contains("контекст")
         })
         .collect();
 
@@ -760,9 +766,9 @@ async fn test_unknown_type_property_access() {
     let unknown_type_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            d.message.contains("не определён") ||
-            d.message.contains("Unknown") ||
-            d.message.contains("тип не определён")
+            d.message.contains("не определён")
+                || d.message.contains("Unknown")
+                || d.message.contains("тип не определён")
         })
         .collect();
 
@@ -811,9 +817,9 @@ async fn test_unknown_type_method_call() {
     let unknown_type_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            d.message.contains("не определён") ||
-            d.message.contains("Unknown") ||
-            d.message.contains("тип не определён")
+            d.message.contains("не определён")
+                || d.message.contains("Unknown")
+                || d.message.contains("тип не определён")
         })
         .collect();
 
@@ -855,17 +861,17 @@ async fn test_assigned_variable_no_unknown_error() {
     // НЕ должно быть ошибки про Unknown тип
     let unknown_type_errors: Vec<_> = diagnostics
         .iter()
-        .filter(|d| {
-            d.message.contains("не определён") ||
-            d.message.contains("Unknown")
-        })
+        .filter(|d| d.message.contains("не определён") || d.message.contains("Unknown"))
         .collect();
 
     assert!(
         unknown_type_errors.is_empty(),
         "Assigned variable should NOT generate Unknown type error. \
          Got errors: {:?}",
-        unknown_type_errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        unknown_type_errors
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -910,8 +916,7 @@ async fn test_nonexistent_method_on_known_type() {
     let method_not_found_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            d.message.contains("не существует") ||
-            d.message.contains("НесуществующийМетод")
+            d.message.contains("не существует") || d.message.contains("НесуществующийМетод")
         })
         .collect();
 
@@ -955,8 +960,7 @@ async fn test_nonexistent_method_on_catalog_manager() {
     let method_not_found_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            d.message.contains("не существует") ||
-            d.message.contains("НеСуществующийМетод")
+            d.message.contains("не существует") || d.message.contains("НеСуществующийМетод")
         })
         .collect();
 
@@ -1000,16 +1004,17 @@ async fn test_existing_method_no_error() {
     // НЕ должно быть ошибки о несуществующем методе "Добавить"
     let method_not_found_errors: Vec<_> = diagnostics
         .iter()
-        .filter(|d| {
-            d.message.contains("Добавить") && d.message.contains("не существует")
-        })
+        .filter(|d| d.message.contains("Добавить") && d.message.contains("не существует"))
         .collect();
 
     assert!(
         method_not_found_errors.is_empty(),
         "Existing method 'Добавить' should NOT generate error. \
          Got errors: {:?}",
-        method_not_found_errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        method_not_found_errors
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1051,9 +1056,9 @@ async fn test_nonexistent_property_on_value_table() {
     let property_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            d.message.contains("свойство") ||
-            d.message.contains("Property") ||
-            d.message.contains("НесуществующееСвойство")
+            d.message.contains("свойство")
+                || d.message.contains("Property")
+                || d.message.contains("НесуществующееСвойство")
         })
         .collect();
 
@@ -1112,22 +1117,27 @@ async fn test_direct_call_chain_type_resolution() {
     let method_not_found_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            (d.message.contains("ПолучитьОбъект") && d.message.contains("не существует")) ||
-            (d.message.contains("ПолучитьОбъект") && d.message.contains("не найден")) ||
-            d.message.contains("Unknown")
+            (d.message.contains("ПолучитьОбъект") && d.message.contains("не существует"))
+                || (d.message.contains("ПолучитьОбъект") && d.message.contains("не найден"))
+                || d.message.contains("Unknown")
         })
         .collect();
 
     println!("\n✅ Test Diagnostic Summary:");
     println!("  Total diagnostics: {}", diagnostics.len());
-    println!("  Method not found errors: {}", method_not_found_errors.len());
+    println!(
+        "  Method not found errors: {}",
+        method_not_found_errors.len()
+    );
 
     if !method_not_found_errors.is_empty() {
         println!("\n❌ FOUND ISSUES (chain type resolution broken):");
         for err in &method_not_found_errors {
             println!("  Line {}: {}", err.line, err.message);
         }
-        println!("\n  Root cause: Return type of НайтиПоКоду() not propagated to next chain element");
+        println!(
+            "\n  Root cause: Return type of НайтиПоКоду() not propagated to next chain element"
+        );
         println!("  Expected: СправочникСсылка.Контрагенты → ПолучитьОбъект() found");
         println!("  Actual: Unknown type → ПолучитьОбъект() not found");
     }
@@ -1174,7 +1184,8 @@ async fn test_chain_result_variable_type() {
     let write_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            d.message.contains("Записать") && (d.message.contains("не существует") || d.message.contains("не найден"))
+            d.message.contains("Записать")
+                && (d.message.contains("не существует") || d.message.contains("не найден"))
         })
         .collect();
 
@@ -1231,7 +1242,9 @@ async fn test_catalog_manager_create_element_no_error() {
         for err in &create_element_errors {
             println!("  Line {}: {}", err.line, err.message);
         }
-        println!("\n  Root cause: Method СоздатьЭлемент should be found for Справочники.Контрагенты");
+        println!(
+            "\n  Root cause: Method СоздатьЭлемент should be found for Справочники.Контрагенты"
+        );
         println!("  Expected type resolution: СправочникМенеджер.<Имя справочника> with active_facet=Manager");
     }
 
@@ -1278,9 +1291,9 @@ async fn test_uninitialized_variable_in_method_call() {
     let uninitialized_warnings: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            d.message.contains("неинициализирован") &&
-            d.message.contains("X") &&
-            matches!(d.severity, DiagnosticSeverity::Warning)
+            d.message.contains("неинициализирован")
+                && d.message.contains("X")
+                && matches!(d.severity, DiagnosticSeverity::Warning)
         })
         .collect();
 
@@ -1288,12 +1301,17 @@ async fn test_uninitialized_variable_in_method_call() {
         !uninitialized_warnings.is_empty(),
         "Expected Warning about uninitialized variable 'X'. \
          Got diagnostics: {:?}",
-        diagnostics.iter().map(|d| format!("{:?}: {}", d.severity, d.message)).collect::<Vec<_>>()
+        diagnostics
+            .iter()
+            .map(|d| format!("{:?}: {}", d.severity, d.message))
+            .collect::<Vec<_>>()
     );
 
     // Проверяем что это именно Warning, а не Error
     assert!(
-        uninitialized_warnings.iter().all(|d| matches!(d.severity, DiagnosticSeverity::Warning)),
+        uninitialized_warnings
+            .iter()
+            .all(|d| matches!(d.severity, DiagnosticSeverity::Warning)),
         "All uninitialized variable diagnostics should have severity Warning"
     );
 }
@@ -1332,7 +1350,10 @@ async fn test_initialized_on_declaration_no_warning() {
         uninitialized_warnings.is_empty(),
         "Variable initialized on declaration should NOT generate warnings. \
          Got warnings: {:?}",
-        uninitialized_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        uninitialized_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1370,7 +1391,10 @@ async fn test_initialized_before_use_no_warning() {
         uninitialized_warnings.is_empty(),
         "Variable initialized before use should NOT generate warnings. \
          Got warnings: {:?}",
-        uninitialized_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        uninitialized_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1407,7 +1431,10 @@ async fn test_function_parameter_always_initialized() {
         uninitialized_warnings.is_empty(),
         "Function parameter should always be initialized. \
          Got warnings: {:?}",
-        uninitialized_warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        uninitialized_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1601,8 +1628,8 @@ async fn test_var_declaration_after_assignment() {
     let var_position_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            (d.message.contains("Перем") || d.message.contains("ПоздняяПеременная")) &&
-            (d.message.contains("после") || d.message.contains("исполняемого"))
+            (d.message.contains("Перем") || d.message.contains("ПоздняяПеременная"))
+                && (d.message.contains("после") || d.message.contains("исполняемого"))
         })
         .collect();
 
@@ -1652,8 +1679,8 @@ async fn test_var_declaration_after_function_call() {
     let var_position_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            (d.message.contains("Перем") || d.message.contains("ПоздняяПеременная")) &&
-            (d.message.contains("после") || d.message.contains("исполняемого"))
+            (d.message.contains("Перем") || d.message.contains("ПоздняяПеременная"))
+                && (d.message.contains("после") || d.message.contains("исполняемого"))
         })
         .collect();
 
@@ -1693,8 +1720,8 @@ async fn test_var_declaration_after_executable_in_procedure() {
     let var_position_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            (d.message.contains("Перем") || d.message.contains("ПоздняяПеременная")) &&
-            (d.message.contains("после") || d.message.contains("исполняемого"))
+            (d.message.contains("Перем") || d.message.contains("ПоздняяПеременная"))
+                && (d.message.contains("после") || d.message.contains("исполняемого"))
         })
         .collect();
 
@@ -1743,8 +1770,8 @@ async fn test_var_declaration_after_return() {
     let var_position_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            (d.message.contains("Перем") || d.message.contains("НедостижимаяПеременная")) &&
-            (d.message.contains("после") || d.message.contains("исполняемого"))
+            (d.message.contains("Перем") || d.message.contains("НедостижимаяПеременная"))
+                && (d.message.contains("после") || d.message.contains("исполняемого"))
         })
         .collect();
 

@@ -472,7 +472,9 @@ mod tests {
             .context(ContextRequirements::ServerOnly)
             .add_to(&mut index);
 
-        let method = index.find_method("СправочникМенеджер", "СоздатьЭлемент").unwrap();
+        let method = index
+            .find_method("СправочникМенеджер", "СоздатьЭлемент")
+            .unwrap();
         assert_eq!(method.return_facet, Some(FacetKind::Object));
         assert_eq!(method.context_requirements, ContextRequirements::ServerOnly);
     }
@@ -515,10 +517,7 @@ mod tests {
             .add_to(&mut index);
 
         let method = index.find_method("ТестТип", "Метод").unwrap();
-        assert_eq!(
-            method.params[0].default_value,
-            Some("10".to_string())
-        );
+        assert_eq!(method.params[0].default_value, Some("10".to_string()));
     }
 
     #[test]

@@ -91,7 +91,10 @@ fn main() {
     println!("📖 Example MCP tool calls:");
     println!();
     println!("   // 1. Create session");
-    println!(r#"   debug_create_session("{}", "lldb")"#, test_program_path.display());
+    println!(
+        r#"   debug_create_session("{}", "lldb")"#,
+        test_program_path.display()
+    );
     println!();
     println!("   // 2. Set breakpoint");
     println!(r#"   debug_set_breakpoint(session_id, "examples/fixtures/test_program.rs", 17)"#);
@@ -115,7 +118,9 @@ fn main() {
     println!("   debug_step_out(session_id)");
     println!();
     println!("   // 8. Conditional breakpoint (may not work for Rust)");
-    println!(r#"   debug_set_conditional_breakpoint(session_id, "examples/fixtures/test_program.rs", 17, "i == 5")"#);
+    println!(
+        r#"   debug_set_conditional_breakpoint(session_id, "examples/fixtures/test_program.rs", 17, "i == 5")"#
+    );
     println!();
     println!("   // 9. Continue execution");
     println!("   debug_continue(session_id)");

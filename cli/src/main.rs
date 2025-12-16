@@ -267,7 +267,16 @@ async fn analyze_ir_command(
                 let params = sig
                     .params
                     .iter()
-                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_ref().map(|t| t.type_name()).unwrap_or_else(|| "?".to_string())))
+                    .map(|p| {
+                        format!(
+                            "{}: {}",
+                            p.name,
+                            p.type_hint
+                                .as_ref()
+                                .map(|t| t.type_name())
+                                .unwrap_or_else(|| "?".to_string())
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 println!("     - Функция {}({})", name.cyan(), params);
@@ -278,7 +287,16 @@ async fn analyze_ir_command(
                 let params = sig
                     .params
                     .iter()
-                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_ref().map(|t| t.type_name()).unwrap_or_else(|| "?".to_string())))
+                    .map(|p| {
+                        format!(
+                            "{}: {}",
+                            p.name,
+                            p.type_hint
+                                .as_ref()
+                                .map(|t| t.type_name())
+                                .unwrap_or_else(|| "?".to_string())
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 println!("     - Процедура {}({})", name.cyan(), params);

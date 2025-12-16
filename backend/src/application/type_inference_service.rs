@@ -40,11 +40,11 @@ impl TypeInferenceService {
             if raw_type.name.to_lowercase().contains(&query.to_lowercase()) {
                 // Создаём правильный тип на основе источника
                 let concrete_type = match raw_type.source {
-                    RawDataSource::Platform => ConcreteType::Platform(
-                        bsl_shared::domain::types::PlatformType {
+                    RawDataSource::Platform => {
+                        ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
                             name: raw_type.name.clone(),
-                        },
-                    ),
+                        })
+                    }
                     RawDataSource::Configuration => {
                         let attributes = Self::convert_raw_attributes(&raw_type.attributes);
                         let tabular_sections =
@@ -58,11 +58,11 @@ impl TypeInferenceService {
                             tabular_sections,
                         })
                     }
-                    RawDataSource::UserDefined => ConcreteType::Platform(
-                        bsl_shared::domain::types::PlatformType {
+                    RawDataSource::UserDefined => {
+                        ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
                             name: raw_type.name.clone(),
-                        },
-                    ),
+                        })
+                    }
                 };
 
                 let resolution = TypeResolution::known(concrete_type);
@@ -93,11 +93,11 @@ impl TypeInferenceService {
 
         for raw_type in raw_types {
             let concrete_type = match raw_type.source {
-                RawDataSource::Platform => ConcreteType::Platform(
-                    bsl_shared::domain::types::PlatformType {
+                RawDataSource::Platform => {
+                    ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
                         name: raw_type.name.clone(),
-                    },
-                ),
+                    })
+                }
                 RawDataSource::Configuration => {
                     // Конвертируем атрибуты и табличные части
                     let attributes = Self::convert_raw_attributes(&raw_type.attributes);

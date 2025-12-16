@@ -170,7 +170,11 @@ impl UniversalMetadataParser {
                         }
                     } else if tag_name == "TabularSection" {
                         if let Some(tab) = current_tabular.take() {
-                            tracing::trace!("  ✅ Табличная часть '{}' добавлена (атрибутов: {})", tab.name, tab.attributes.len());
+                            tracing::trace!(
+                                "  ✅ Табличная часть '{}' добавлена (атрибутов: {})",
+                                tab.name,
+                                tab.attributes.len()
+                            );
                             tabular_sections.push(tab);
                         }
                         in_tabular_attributes = false;
@@ -324,7 +328,10 @@ impl UniversalMetadataParser {
                                 "DuringRequest" => ReturnValuesReuse::DuringRequest,
                                 "DuringSession" => ReturnValuesReuse::DuringSession,
                                 _ => {
-                                    tracing::debug!("⚠️ Неизвестное значение ReturnValuesReuse: {}", text);
+                                    tracing::debug!(
+                                        "⚠️ Неизвестное значение ReturnValuesReuse: {}",
+                                        text
+                                    );
                                     ReturnValuesReuse::DontUse
                                 }
                             };

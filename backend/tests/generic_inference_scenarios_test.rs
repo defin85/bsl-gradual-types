@@ -64,11 +64,16 @@ fn test_array_empty_initialization() {
     let var_type = find_variable_in_any_scope(&ir.symbols, "МассивПустой");
 
     // Assert: Должен быть Generic тип с неопределённым параметром
-    if let Some(res) = var_type
-    {
-        assert!(res.type_name().starts_with("Массив"), "Base type должен быть Массив");
+    if let Some(res) = var_type {
+        assert!(
+            res.type_name().starts_with("Массив"),
+            "Base type должен быть Массив"
+        );
         // type_params.len() = 1: Должен быть 1 тип-параметр (checked by type_name format)
-        assert!(res.type_name().contains("Неопределено"), "Параметр должен быть неизвестен");
+        assert!(
+            res.type_name().contains("Неопределено"),
+            "Параметр должен быть неизвестен"
+        );
         // certainty = 0.0: Certainty должна быть 0 (неизвестно) (use res.certainty if needed)
     } else {
         panic!(
@@ -106,14 +111,16 @@ fn test_array_with_string_inference() {
     let var_type = find_variable_in_any_scope(&ir.symbols, "МассивСтрок");
 
     // Assert: Должен быть Generic<String>
-    if let Some(res) = var_type
-    {
+    if let Some(res) = var_type {
         assert!(res.type_name().starts_with("Массив"));
         // type_params.len() = 1 (checked by type_name format)
 
         // После инференса параметр должен быть "Строка"
         if !res.type_name().contains("Неопределено") {
-            assert!(res.type_name().contains("Строка"), "Должен вывести тип Строка");
+            assert!(
+                res.type_name().contains("Строка"),
+                "Должен вывести тип Строка"
+            );
             // certainty > 0.0: Certainty должна быть > 0 после инференса (use res.certainty if needed)
         } else {
             // Если инференс ещё не реализован - ожидаем "Неопределено"
@@ -152,8 +159,7 @@ fn test_array_with_number_inference() {
 
     let var_type = find_variable_in_any_scope(&ir.symbols, "МассивЧисел");
 
-    if let Some(res) = var_type
-    {
+    if let Some(res) = var_type {
         assert!(res.type_name().starts_with("Массив"));
 
         if !res.type_name().contains("Неопределено") {
@@ -192,8 +198,7 @@ fn test_map_initialization() {
     let var_type = find_variable_in_any_scope(&ir.symbols, "Словарь");
 
     // Assert: Соответствие должно иметь 2 параметра
-    if let Some(res) = var_type
-    {
+    if let Some(res) = var_type {
         assert!(res.type_name().starts_with("Соответствие"));
         // type_params.len() = 2: Соответствие должно иметь 2 параметра (ключ, значение) (checked by type_name format)
         assert!(res.type_name().contains("Неопределено"));
@@ -232,8 +237,7 @@ fn test_map_with_insert_inference() {
 
     let var_type = find_variable_in_any_scope(&ir.symbols, "Карта");
 
-    if let Some(res) = var_type
-    {
+    if let Some(res) = var_type {
         assert!(res.type_name().starts_with("Соответствие"));
         // type_params.len() = 2 (checked by type_name format)
 
@@ -316,11 +320,17 @@ fn test_multiple_arrays_independent() {
 
     // Assert: Оба должны быть Generic, но независимыми
     assert!(
-        var_a.as_ref().map(|r| r.type_name().contains("<")).unwrap_or(false),
+        var_a
+            .as_ref()
+            .map(|r| r.type_name().contains("<"))
+            .unwrap_or(false),
         "МассивA должен быть Generic"
     );
     assert!(
-        var_b.as_ref().map(|r| r.type_name().contains("<")).unwrap_or(false),
+        var_b
+            .as_ref()
+            .map(|r| r.type_name().contains("<"))
+            .unwrap_or(false),
         "МассивB должен быть Generic"
     );
 
@@ -328,7 +338,8 @@ fn test_multiple_arrays_independent() {
     if let (Some(res_a), Some(res_b)) = (var_a, var_b) {
         let name_a = res_a.type_name();
         let name_b = res_b.type_name();
-        if !name_a.contains("Неопределено") && !name_b.contains("Неопределено") {
+        if !name_a.contains("Неопределено") && !name_b.contains("Неопределено")
+        {
             assert!(name_a.contains("Строка"));
             assert!(name_b.contains("Число"));
             println!("✅ Инференс работает корректно: {}, {}", name_a, name_b);
@@ -370,9 +381,18 @@ fn test_empty_collections_scenario() {
     assert!(м2.is_some(), "М2 должна существовать");
     assert!(с.is_some(), "С должна существовать");
 
-    assert!(м1.as_ref().map(|r| r.type_name().contains("<")).unwrap_or(false));
-    assert!(м2.as_ref().map(|r| r.type_name().contains("<")).unwrap_or(false));
-    assert!(с.as_ref().map(|r| r.type_name().contains("<")).unwrap_or(false));
+    assert!(м1
+        .as_ref()
+        .map(|r| r.type_name().contains("<"))
+        .unwrap_or(false));
+    assert!(м2
+        .as_ref()
+        .map(|r| r.type_name().contains("<"))
+        .unwrap_or(false));
+    assert!(с
+        .as_ref()
+        .map(|r| r.type_name().contains("<"))
+        .unwrap_or(false));
 }
 
 #[test]
@@ -404,8 +424,7 @@ fn test_mixed_types_in_array() {
     let var_type = find_variable_in_any_scope(&ir.symbols, "МассивСмешанный");
 
     // Assert: Тип должен быть либо union, либо динамический
-    if let Some(res) = var_type
-    {
+    if let Some(res) = var_type {
         // Если инференс обрабатывает union
         if res.type_name().contains("|") {
             assert!(res.type_name().contains("Строка"));

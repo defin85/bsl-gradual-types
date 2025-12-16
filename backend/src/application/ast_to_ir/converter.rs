@@ -14,9 +14,9 @@ use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::types::TypeResolution;
+use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_shared::ir::*;
 use bsl_shared::utils::hash::hash_content;
 use std::path::Path;
@@ -160,7 +160,11 @@ impl AstToIrConverter {
             return;
         };
 
-        let ModuleType::FormModule { form_name, owner_type } = location.module_type else {
+        let ModuleType::FormModule {
+            form_name,
+            owner_type,
+        } = location.module_type
+        else {
             return;
         };
 
@@ -176,7 +180,8 @@ impl AstToIrConverter {
 
         let form_type_name = format!("Формы.{}.{}.{}", collection, object_name, form_name);
         let form_object_type_name = format!("ДанныеФормыОбъект.{}.{}", collection, object_name);
-        let elements_type_name = format!("ЭлементыФормы.{}.{}.{}", collection, object_name, form_name);
+        let elements_type_name =
+            format!("ЭлементыФормы.{}.{}.{}", collection, object_name, form_name);
 
         let span = Span::stub();
         let root = self.symbol_table.root_scope;
@@ -204,7 +209,8 @@ impl AstToIrConverter {
         // Реквизиты формы (из синтетического типа `Формы.*`)
         if let Some(form_type) = self.repository.find_type(&form_type_name) {
             for prop in form_type.properties {
-                if prop.name == "Объект" || prop.name == "Элементы" || prop.prop_type.is_empty() {
+                if prop.name == "Объект" || prop.name == "Элементы" || prop.prop_type.is_empty()
+                {
                     continue;
                 }
                 self.symbol_table.register_variable(
@@ -225,7 +231,12 @@ impl AstToIrConverter {
     /// - FunctionSignature.return_type = None (будет выведен из return statements)
     pub(crate) fn collect_global_symbols(&mut self, statement: &Statement) -> Result<()> {
         match statement {
-            Statement::FunctionDecl { name, params, compiler_directive: _, .. } => {
+            Statement::FunctionDecl {
+                name,
+                params,
+                compiler_directive: _,
+                ..
+            } => {
                 // Phase 3: Parameter.type_hint теперь Option<TypeResolution>
                 let params_vec: Vec<Parameter> = params
                     .iter()
@@ -245,7 +256,12 @@ impl AstToIrConverter {
                     is_export: false,
                 });
             }
-            Statement::ProcedureDecl { name, params, compiler_directive: _, .. } => {
+            Statement::ProcedureDecl {
+                name,
+                params,
+                compiler_directive: _,
+                ..
+            } => {
                 // Phase 3: Parameter.type_hint теперь Option<TypeResolution>
                 let params_vec: Vec<Parameter> = params
                     .iter()

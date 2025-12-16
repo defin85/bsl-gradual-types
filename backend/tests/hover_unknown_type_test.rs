@@ -120,7 +120,8 @@ async fn test_hover_shows_correct_info_for_platform_types() {
     } else {
         // Syntax Helper НЕ загружен → должно быть предупреждение/сообщение о недоступности
         assert!(
-            hover_text.contains("Методы недоступны") || hover_text.contains("Детали типа недоступны"),
+            hover_text.contains("Методы недоступны")
+                || hover_text.contains("Детали типа недоступны"),
             "Hover должен показывать предупреждение, если Syntax Helper не загружен"
         );
     }

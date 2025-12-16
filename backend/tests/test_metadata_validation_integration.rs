@@ -10,7 +10,7 @@ use bsl_backend::system::tree_sitter_adapter::TreeSitterAdapter;
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::{RawTypeData, MetadataKind, FacetKind, RawDataSource};
+use bsl_shared::domain::types::{FacetKind, MetadataKind, RawDataSource, RawTypeData};
 use bsl_shared::domain::validators::TypeValidator;
 use bsl_shared::ir::walk_program;
 use std::sync::Arc;
@@ -76,7 +76,9 @@ fn test_nonexistent_document_generates_error_when_config_loaded() {
 
     // 1. Парсинг
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).unwrap();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .unwrap();
     let tree = parser.parse(code, None).unwrap();
     let ast_result = TreeSitterAdapter::convert_tree(&tree, code).unwrap();
 
@@ -86,7 +88,10 @@ fn test_nonexistent_document_generates_error_when_config_loaded() {
     // Проверяем, что конфигурация "загружена"
     let stats = repository.get_stats();
     println!("Configuration types: {}", stats.configuration_types);
-    assert!(stats.configuration_types > 0, "Конфигурация должна быть загружена");
+    assert!(
+        stats.configuration_types > 0,
+        "Конфигурация должна быть загружена"
+    );
 
     // 3. Конвертация в IR
     let signature_index = SignatureIndex::new();
@@ -96,11 +101,15 @@ fn test_nonexistent_document_generates_error_when_config_loaded() {
         "test.bsl".to_string(),
         repository.clone(),
         signature_index.clone(),
-    ).unwrap();
+    )
+    .unwrap();
 
     // Проверяем наличие MemberAccess в IR
     let has_member_access = ir.nodes.iter().any(|n| {
-        matches!(n.kind, bsl_shared::ir::SemanticNodeKind::MemberAccess { .. })
+        matches!(
+            n.kind,
+            bsl_shared::ir::SemanticNodeKind::MemberAccess { .. }
+        )
     });
     println!("IR has MemberAccess: {}", has_member_access);
     assert!(has_member_access, "IR должен содержать MemberAccess");
@@ -109,8 +118,14 @@ fn test_nonexistent_document_generates_error_when_config_loaded() {
     let metadata_lookup = TypeMetadataLookup::new(repository.clone());
 
     // Проверяем is_configuration_loaded
-    println!("is_configuration_loaded: {}", metadata_lookup.is_configuration_loaded());
-    assert!(metadata_lookup.is_configuration_loaded(), "Конфигурация должна быть загружена");
+    println!(
+        "is_configuration_loaded: {}",
+        metadata_lookup.is_configuration_loaded()
+    );
+    assert!(
+        metadata_lookup.is_configuration_loaded(),
+        "Конфигурация должна быть загружена"
+    );
 
     let validator = TypeValidator::new(&metadata_lookup);
     let resolver = bsl_shared::domain::resolver::TypeResolver::new(repository);
@@ -132,10 +147,13 @@ fn test_nonexistent_document_generates_error_when_config_loaded() {
     );
 
     // Проверяем, что ошибка содержит имя документа
-    let has_doc_error = errors.iter().any(|e| {
-        e.message.contains("ЗаказКлиента") || e.message.contains("Документы")
-    });
-    assert!(has_doc_error, "Ошибка должна упоминать 'ЗаказКлиента' или 'Документы'");
+    let has_doc_error = errors
+        .iter()
+        .any(|e| e.message.contains("ЗаказКлиента") || e.message.contains("Документы"));
+    assert!(
+        has_doc_error,
+        "Ошибка должна упоминать 'ЗаказКлиента' или 'Документы'"
+    );
 }
 
 #[test]
@@ -147,7 +165,9 @@ fn test_existing_document_no_error() {
     println!("Код: {}", code);
 
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).unwrap();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .unwrap();
     let tree = parser.parse(code, None).unwrap();
     let ast_result = TreeSitterAdapter::convert_tree(&tree, code).unwrap();
 
@@ -159,7 +179,8 @@ fn test_existing_document_no_error() {
         "test.bsl".to_string(),
         repository.clone(),
         signature_index.clone(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let metadata_lookup = TypeMetadataLookup::new(repository.clone());
     let validator = TypeValidator::new(&metadata_lookup);
@@ -176,10 +197,13 @@ fn test_existing_document_no_error() {
     }
 
     // Не должно быть ошибки для существующего документа
-    let has_doc_error = errors.iter().any(|e| {
-        e.message.contains("РеализацияТоваров")
-    });
-    assert!(!has_doc_error, "НЕ должно быть ошибки для существующего документа");
+    let has_doc_error = errors
+        .iter()
+        .any(|e| e.message.contains("РеализацияТоваров"));
+    assert!(
+        !has_doc_error,
+        "НЕ должно быть ошибки для существующего документа"
+    );
 }
 
 #[test]
@@ -191,7 +215,9 @@ fn test_graceful_degradation_no_config() {
     println!("Код: {}", code);
 
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).unwrap();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .unwrap();
     let tree = parser.parse(code, None).unwrap();
     let ast_result = TreeSitterAdapter::convert_tree(&tree, code).unwrap();
 
@@ -201,7 +227,10 @@ fn test_graceful_degradation_no_config() {
     // Проверяем, что конфигурация НЕ загружена
     let stats = repository.get_stats();
     println!("Configuration types: {}", stats.configuration_types);
-    assert!(stats.configuration_types == 0, "Конфигурация НЕ должна быть загружена");
+    assert!(
+        stats.configuration_types == 0,
+        "Конфигурация НЕ должна быть загружена"
+    );
 
     let signature_index = SignatureIndex::new();
     let ir = AstToIrConverter::convert(
@@ -210,10 +239,14 @@ fn test_graceful_degradation_no_config() {
         "test.bsl".to_string(),
         repository.clone(),
         signature_index.clone(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let metadata_lookup = TypeMetadataLookup::new(repository.clone());
-    println!("is_configuration_loaded: {}", metadata_lookup.is_configuration_loaded());
+    println!(
+        "is_configuration_loaded: {}",
+        metadata_lookup.is_configuration_loaded()
+    );
 
     let validator = TypeValidator::new(&metadata_lookup);
     let resolver = bsl_shared::domain::resolver::TypeResolver::new(repository);
@@ -229,8 +262,11 @@ fn test_graceful_degradation_no_config() {
     }
 
     // НЕ должно быть ошибки (graceful degradation)
-    let has_metadata_error = errors.iter().any(|e| {
-        e.message.contains("ЗаказКлиента") || e.message.contains("не найден")
-    });
-    assert!(!has_metadata_error, "НЕ должно быть ошибки при отсутствии конфигурации (graceful degradation)");
+    let has_metadata_error = errors
+        .iter()
+        .any(|e| e.message.contains("ЗаказКлиента") || e.message.contains("не найден"));
+    assert!(
+        !has_metadata_error,
+        "НЕ должно быть ошибки при отсутствии конфигурации (graceful degradation)"
+    );
 }

@@ -2,17 +2,17 @@
 //!
 //! This module contains all LSP request and notification handlers.
 
-pub mod text_document;
-pub mod hover;
 pub mod completion;
-pub mod signature_help;
-pub mod definition;
 pub mod context;
+pub mod definition;
+pub mod hover;
+pub mod signature_help;
+pub mod text_document;
 
 // Re-export commonly used types
-pub use text_document::*;
-pub use hover::*;
 pub use completion::*;
-pub use signature_help::*;
-pub use definition::*;
 pub use context::*;
+pub use definition::*;
+pub use hover::*;
+pub use signature_help::*;
+pub use text_document::*;

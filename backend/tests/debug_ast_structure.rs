@@ -5,9 +5,8 @@ use tree_sitter::Parser;
 
 #[test]
 fn debug_ast_from_adapter() {
-    let code =
-        std::fs::read_to_string("../examples/bsl/test_hover_milestone_2_11.bsl")
-            .expect("Failed to read test file");
+    let code = std::fs::read_to_string("../examples/bsl/test_hover_milestone_2_11.bsl")
+        .expect("Failed to read test file");
 
     let mut parser = Parser::new();
     parser

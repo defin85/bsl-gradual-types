@@ -82,7 +82,8 @@ impl AnalysisPass for DeadCodePass {
         let lines: Vec<&str> = code.lines().collect();
         for (i, line) in lines.iter().enumerate() {
             if line.trim().starts_with("Возврат") {
-                if i + 1 < lines.len() && !lines[i + 1].trim().starts_with("КонецФункции") {
+                if i + 1 < lines.len() && !lines[i + 1].trim().starts_with("КонецФункции")
+                {
                     errors.push(AnalysisError {
                         pass_name: self.name().to_string(),
                         line: i + 2,
@@ -181,7 +182,10 @@ fn main() {
 
     println!("Найдено ошибок: {}\n", errors.len());
     for error in errors {
-        println!("[{}] Line {}: {}", error.pass_name, error.line, error.message);
+        println!(
+            "[{}] Line {}: {}",
+            error.pass_name, error.line, error.message
+        );
     }
 
     // Пример 2: Virtual Compiler (Type Inference)

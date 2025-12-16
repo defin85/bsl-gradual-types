@@ -9,10 +9,10 @@
 //! 2. Access to non-existent properties of objects
 //! 3. Treating simple types as collections
 
-mod error_kinds;
 mod error_formatting;
-mod type_validator;
+mod error_kinds;
 mod tests;
+mod type_validator;
 
 // Re-export public API
 pub use error_kinds::TypeErrorKind;

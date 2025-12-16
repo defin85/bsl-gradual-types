@@ -2,8 +2,8 @@
 //!
 //! Methods for querying type state and information.
 
-use super::super::resolution::{ResolutionResult, TypeResolution};
 use super::super::certainty::Certainty;
+use super::super::resolution::{ResolutionResult, TypeResolution};
 
 impl TypeResolution {
     /// Check if type is Unknown

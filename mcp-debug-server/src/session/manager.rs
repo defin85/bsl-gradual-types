@@ -79,7 +79,9 @@ impl DebugSession {
             let guard = self.current_thread_id.lock().await;
             *guard
         }
-        .ok_or_else(|| anyhow::anyhow!("No active thread. Process is not stopped or session not started."))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("No active thread. Process is not stopped or session not started.")
+        })?;
 
         // Шаг 3: Вызвать DAP stackTrace для получения frames
         let stack_result = self

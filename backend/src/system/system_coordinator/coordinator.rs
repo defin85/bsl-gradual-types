@@ -97,21 +97,19 @@ impl SystemCoordinator {
 
     /// Получить компоненты для создания TypeSystemService
     pub fn get_system_components(&self) -> (Arc<AnalysisCache>, Arc<ParserCoordinator>) {
-        let parser = self.parser.read()
-            .unwrap_or_else(|poisoned| {
-                warn!("Parser RwLock poisoned (read), recovering data.");
-                poisoned.into_inner()
-            });
+        let parser = self.parser.read().unwrap_or_else(|poisoned| {
+            warn!("Parser RwLock poisoned (read), recovering data.");
+            poisoned.into_inner()
+        });
         (self.cache.clone(), parser.clone())
     }
 
     /// Получить ParserCoordinator (Milestone 2.18: для синтаксических ошибок в LSP)
     pub fn parser_coordinator(&self) -> Option<Arc<ParserCoordinator>> {
-        let parser = self.parser.read()
-            .unwrap_or_else(|poisoned| {
-                warn!("Parser RwLock poisoned (read), recovering data.");
-                poisoned.into_inner()
-            });
+        let parser = self.parser.read().unwrap_or_else(|poisoned| {
+            warn!("Parser RwLock poisoned (read), recovering data.");
+            poisoned.into_inner()
+        });
         Some(parser.clone())
     }
 
@@ -165,11 +163,10 @@ impl SystemCoordinator {
             // TypeSystemService теперь использует AnalysisEngine вместо прямого доступа к Domain Layer
             // Milestone 3.17: Получаем ParserCoordinator через RwLock
             let parser = {
-                let parser_guard = self.parser.read()
-                    .unwrap_or_else(|poisoned| {
-                        warn!("Parser RwLock poisoned (read), recovering data.");
-                        poisoned.into_inner()
-                    });
+                let parser_guard = self.parser.read().unwrap_or_else(|poisoned| {
+                    warn!("Parser RwLock poisoned (read), recovering data.");
+                    poisoned.into_inner()
+                });
                 parser_guard.clone()
             };
 

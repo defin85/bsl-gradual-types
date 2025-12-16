@@ -1,9 +1,9 @@
 //! Типы данных для универсального парсера метаданных
 
+use super::form_types::FormMetadata;
 use bsl_shared::domain::types::{FacetKind, MetadataKind};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use super::form_types::FormMetadata;
 
 /// Информация об атрибуте объекта метаданных
 #[derive(Debug, Clone)]

@@ -14,7 +14,9 @@ fn test_ir_outside_function() {
 
     // Парсинг
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).unwrap();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .unwrap();
     let tree = parser.parse(code, None).unwrap();
 
     println!("Tree-sitter nodes: {}", tree.root_node().descendant_count());
@@ -35,11 +37,13 @@ fn test_ir_outside_function() {
         "test.bsl".to_string(),
         repository,
         signature_index,
-    ).unwrap();
+    )
+    .unwrap();
 
     println!("\nIR nodes: {}", ir.nodes.len());
     for (i, node) in ir.nodes.iter().enumerate() {
-        println!("  [{}] {:?} at [{},{}..{},{}]",
+        println!(
+            "  [{}] {:?} at [{},{}..{},{}]",
             i,
             node.kind,
             node.span.start_line,
@@ -51,7 +55,10 @@ fn test_ir_outside_function() {
 
     // Проверяем наличие MemberAccess
     let has_member_access = ir.nodes.iter().any(|n| {
-        matches!(n.kind, bsl_shared::ir::SemanticNodeKind::MemberAccess { .. })
+        matches!(
+            n.kind,
+            bsl_shared::ir::SemanticNodeKind::MemberAccess { .. }
+        )
     });
 
     println!("\nHas MemberAccess nodes: {}", has_member_access);
@@ -70,7 +77,9 @@ fn test_ir_inside_function() {
 
     // Парсинг
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_bsl::LANGUAGE.into()).unwrap();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .unwrap();
     let tree = parser.parse(code, None).unwrap();
 
     println!("Tree-sitter nodes: {}", tree.root_node().descendant_count());
@@ -87,11 +96,13 @@ fn test_ir_inside_function() {
         "test.bsl".to_string(),
         repository,
         signature_index,
-    ).unwrap();
+    )
+    .unwrap();
 
     println!("\nIR nodes: {}", ir.nodes.len());
     for (i, node) in ir.nodes.iter().enumerate() {
-        println!("  [{}] {:?} at [{},{}..{},{}]",
+        println!(
+            "  [{}] {:?} at [{},{}..{},{}]",
             i,
             node.kind,
             node.span.start_line,
@@ -103,7 +114,10 @@ fn test_ir_inside_function() {
 
     // Проверяем наличие MemberAccess
     let has_member_access = ir.nodes.iter().any(|n| {
-        matches!(n.kind, bsl_shared::ir::SemanticNodeKind::MemberAccess { .. })
+        matches!(
+            n.kind,
+            bsl_shared::ir::SemanticNodeKind::MemberAccess { .. }
+        )
     });
 
     println!("\nHas MemberAccess nodes: {}", has_member_access);

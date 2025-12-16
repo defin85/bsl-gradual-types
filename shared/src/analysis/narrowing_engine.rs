@@ -61,7 +61,8 @@ impl NarrowingContext {
 
     /// Установить сузуженный тип переменной
     pub fn set_type(&mut self, variable: &str, resolution: TypeResolution) {
-        self.narrowed_types.insert(TypeId::new(variable), resolution);
+        self.narrowed_types
+            .insert(TypeId::new(variable), resolution);
     }
 
     /// Применить type guard к переменной
@@ -69,8 +70,7 @@ impl NarrowingContext {
         let variable = guard.variable_name();
         let narrowed = guard.apply_narrowing(current_type);
 
-        self.narrowed_types
-            .insert(TypeId::new(variable), narrowed);
+        self.narrowed_types.insert(TypeId::new(variable), narrowed);
         self.active_guards.push(guard);
     }
 

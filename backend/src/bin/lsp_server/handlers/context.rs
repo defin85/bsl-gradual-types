@@ -2,7 +2,9 @@
 //!
 //! MILESTONE 2.20.3: Handles bsl.getCurrentContext command.
 
-use bsl_shared::api::semantic_dtos::{SemanticNodeDto, SemanticTreeDto, SourceLocationDto, SourceRangeDto};
+use bsl_shared::api::semantic_dtos::{
+    SemanticNodeDto, SemanticTreeDto, SourceLocationDto, SourceRangeDto,
+};
 
 /// Response for getCurrentContext command
 #[derive(Debug, Clone, serde::Serialize)]

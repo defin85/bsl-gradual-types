@@ -7,8 +7,8 @@ use tracing::info;
 
 use bsl_shared::domain::{CompletionItem, CompletionKind};
 
-use crate::system::ParserCoordinator;
 use super::super::extractors::symbol_extractor::{extract_word_at_position, utf16_to_byte_offset};
+use crate::system::ParserCoordinator;
 
 /// LSP operations - get completion at position
 ///
@@ -65,11 +65,7 @@ pub async fn get_completion(
 ///
 /// # Returns
 /// CompletionContext with analysis results
-pub fn analyze_completion_context(
-    content: &str,
-    line: u32,
-    column: u32,
-) -> CompletionContext {
+pub fn analyze_completion_context(content: &str, line: u32, column: u32) -> CompletionContext {
     let lines: Vec<&str> = content.lines().collect();
     let line_index = line as usize;
 
@@ -84,8 +80,7 @@ pub fn analyze_completion_context(
     };
 
     // Extract current word
-    let current_word = extract_word_at_position(content, line, column)
-        .unwrap_or_default();
+    let current_word = extract_word_at_position(content, line, column).unwrap_or_default();
 
     // Analyze context
     let line_trimmed = line_prefix.trim();
@@ -154,9 +149,7 @@ pub fn get_contextual_completions(context: &CompletionContext) -> Vec<Completion
                 label: "Строка".to_string(),
                 kind: CompletionKind::Type,
                 detail: Some("Тип данных: строка".to_string()),
-                documentation: Some(
-                    "Примитивный тип данных для текстовых значений".to_string(),
-                ),
+                documentation: Some("Примитивный тип данных для текстовых значений".to_string()),
                 insert_text: Some("Строка".to_string()),
                 filter_text: Some("Строка".to_string()),
                 sort_text: Some("Строка".to_string()),
@@ -168,9 +161,7 @@ pub fn get_contextual_completions(context: &CompletionContext) -> Vec<Completion
                 label: "ТипЗнч".to_string(),
                 kind: CompletionKind::Function,
                 detail: Some("Получить тип значения".to_string()),
-                documentation: Some(
-                    "Функция для получения типа переданного значения".to_string(),
-                ),
+                documentation: Some("Функция для получения типа переданного значения".to_string()),
                 insert_text: Some("ТипЗнч(${1:значение})".to_string()),
                 filter_text: Some("ТипЗнч".to_string()),
                 sort_text: Some("ТипЗнч".to_string()),
@@ -257,9 +248,7 @@ pub fn get_bsl_types() -> Vec<CompletionItem> {
             label: "Дата".to_string(),
             kind: CompletionKind::Type,
             detail: Some("Тип данных дата/время".to_string()),
-            documentation: Some(
-                "Примитивный тип данных для значений даты и времени".to_string(),
-            ),
+            documentation: Some("Примитивный тип данных для значений даты и времени".to_string()),
             insert_text: Some("Дата".to_string()),
             filter_text: Some("Дата".to_string()),
             sort_text: Some("Дата".to_string()),
@@ -274,9 +263,7 @@ pub fn get_builtin_functions() -> Vec<CompletionItem> {
             label: "Сообщить".to_string(),
             kind: CompletionKind::Function,
             detail: Some("Вывести сообщение пользователю".to_string()),
-            documentation: Some(
-                "Встроенная функция для вывода сообщения пользователю".to_string(),
-            ),
+            documentation: Some("Встроенная функция для вывода сообщения пользователю".to_string()),
             insert_text: Some("Сообщить(${1:\"текст\"})".to_string()),
             filter_text: Some("Сообщить".to_string()),
             sort_text: Some("Сообщить".to_string()),

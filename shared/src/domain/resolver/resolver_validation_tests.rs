@@ -329,32 +329,18 @@ fn test_validate_call_gradual_typing() {
     index.add_platform_method(TypeId::new("Тип"), sig);
 
     // ✅ Gradual typing: Unknown совместим со Строка
-    let result = resolver.validate_call(
-        Some("Тип"),
-        "Метод",
-        &["Unknown".to_string()],
-        &index,
-    );
+    let result = resolver.validate_call(Some("Тип"), "Метод", &["Unknown".to_string()], &index);
 
     assert_eq!(result, ValidationResult::Ok(None));
 
     // ✅ Dynamic совместим со Строка
-    let result = resolver.validate_call(
-        Some("Тип"),
-        "Метод",
-        &["Dynamic".to_string()],
-        &index,
-    );
+    let result = resolver.validate_call(Some("Тип"), "Метод", &["Dynamic".to_string()], &index);
 
     assert_eq!(result, ValidationResult::Ok(None));
 
     // ✅ Произвольный совместим со Строка
-    let result = resolver.validate_call(
-        Some("Тип"),
-        "Метод",
-        &["Произвольный".to_string()],
-        &index,
-    );
+    let result =
+        resolver.validate_call(Some("Тип"), "Метод", &["Произвольный".to_string()], &index);
 
     assert_eq!(result, ValidationResult::Ok(None));
 }
@@ -385,32 +371,19 @@ fn test_validate_call_proizvol_parameter_accepts_all() {
     index.add_platform_method(TypeId::new("Массив"), sig);
 
     // ✅ Произвольный принимает Строка
-    let result = resolver.validate_call(
-        Some("Массив"),
-        "Добавить",
-        &["Строка".to_string()],
-        &index,
-    );
+    let result =
+        resolver.validate_call(Some("Массив"), "Добавить", &["Строка".to_string()], &index);
 
     assert_eq!(result, ValidationResult::Ok(None));
 
     // ✅ Произвольный принимает Число
-    let result = resolver.validate_call(
-        Some("Массив"),
-        "Добавить",
-        &["Число".to_string()],
-        &index,
-    );
+    let result = resolver.validate_call(Some("Массив"), "Добавить", &["Число".to_string()], &index);
 
     assert_eq!(result, ValidationResult::Ok(None));
 
     // ✅ Произвольный принимает любой custom тип
-    let result = resolver.validate_call(
-        Some("Массив"),
-        "Добавить",
-        &["МойТип".to_string()],
-        &index,
-    );
+    let result =
+        resolver.validate_call(Some("Массив"), "Добавить", &["МойТип".to_string()], &index);
 
     assert_eq!(result, ValidationResult::Ok(None));
 }
@@ -440,22 +413,12 @@ fn test_validate_call_case_insensitive_types() {
     index.add_platform_method(TypeId::new("Тип"), sig);
 
     // ✅ Case-insensitive: строка == Строка
-    let result = resolver.validate_call(
-        Some("Тип"),
-        "Метод",
-        &["строка".to_string()],
-        &index,
-    );
+    let result = resolver.validate_call(Some("Тип"), "Метод", &["строка".to_string()], &index);
 
     assert_eq!(result, ValidationResult::Ok(None));
 
     // ✅ Case-insensitive: СТРОКА == Строка
-    let result = resolver.validate_call(
-        Some("Тип"),
-        "Метод",
-        &["СТРОКА".to_string()],
-        &index,
-    );
+    let result = resolver.validate_call(Some("Тип"), "Метод", &["СТРОКА".to_string()], &index);
 
     assert_eq!(result, ValidationResult::Ok(None));
 }

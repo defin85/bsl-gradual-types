@@ -6,8 +6,8 @@ use crate::domain::metadata_constants::get_base_type_info;
 use crate::domain::repository::TypeRepository;
 use crate::domain::types::{
     Certainty, ConcreteType, ConfigurationType, FacetKind, GenericType, MetadataKind,
-    RawTabularSectionData, ResolutionMetadata, ResolutionResult, ResolutionSource,
-    TypeResolution, UncertaintyReason,
+    RawTabularSectionData, ResolutionMetadata, ResolutionResult, ResolutionSource, TypeResolution,
+    UncertaintyReason,
 };
 use std::sync::Arc;
 
@@ -165,11 +165,7 @@ impl<'a> MemberResolver<'a> {
                 uncertainty_reason,
             },
             active_facet: Some(facet),
-            available_facets: vec![
-                FacetKind::Manager,
-                FacetKind::Object,
-                FacetKind::Reference,
-            ],
+            available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
         }
     }
 

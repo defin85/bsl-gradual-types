@@ -24,7 +24,10 @@ use crate::commands::{
     SearchTypesRequest,
 };
 use crate::config::{BslSettings, LspConfig};
-use crate::handlers::{self, apply_text_edit, handle_completion, handle_goto_definition, handle_hover, handle_signature_help};
+use crate::handlers::{
+    self, apply_text_edit, handle_completion, handle_goto_definition, handle_hover,
+    handle_signature_help,
+};
 use crate::progress::log_progress_to_file;
 use crate::types::{GetCurrentContextParams, ServerStatus, ServerStatusParams};
 
@@ -140,12 +143,14 @@ impl LanguageServer for BslLanguageServer {
         let config = self.config.read().await;
         if let Some(ref cfg) = *config {
             if let Some(ref platform_docs) = cfg.platform_docs_archive {
-                info!("Reloading types with platformDocsArchive: {}", platform_docs);
+                info!(
+                    "Reloading types with platformDocsArchive: {}",
+                    platform_docs
+                );
 
                 // Create channels for progress and result
                 let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressUpdate>();
-                let (result_tx, result_rx) =
-                    tokio::sync::oneshot::channel::<Result<(), String>>();
+                let (result_tx, result_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
                 // Generate unique token for Work Done Progress
                 let token = ProgressToken::String(format!(
@@ -263,14 +268,16 @@ impl LanguageServer for BslLanguageServer {
                                         .unwrap_or_default()
                                 )
                             }
-                            IndexingPhase::ConfigurationParsing => update.message.clone().unwrap_or_else(|| {
-                                format!(
-                                    "{} | {}/{}",
-                                    update.phase.display_name(),
-                                    update.current,
-                                    update.total
-                                )
-                            }),
+                            IndexingPhase::ConfigurationParsing => {
+                                update.message.clone().unwrap_or_else(|| {
+                                    format!(
+                                        "{} | {}/{}",
+                                        update.phase.display_name(),
+                                        update.current,
+                                        update.total
+                                    )
+                                })
+                            }
                             _ => {
                                 format!(
                                     "{} | {}/{}",
@@ -311,13 +318,14 @@ impl LanguageServer for BslLanguageServer {
                                 .send_notification::<tower_lsp::lsp_types::notification::Progress>(
                                     ProgressParams {
                                         token: token_clone.clone(),
-                                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                                            WorkDoneProgressEnd {
+                                        value: ProgressParamsValue::WorkDone(
+                                            WorkDoneProgress::End(WorkDoneProgressEnd {
                                                 message: Some(
-                                                    "Platform types loaded successfully".to_string(),
+                                                    "Platform types loaded successfully"
+                                                        .to_string(),
                                                 ),
-                                            },
-                                        )),
+                                            }),
+                                        ),
                                     },
                                 )
                                 .await;
@@ -351,11 +359,11 @@ impl LanguageServer for BslLanguageServer {
                                 .send_notification::<tower_lsp::lsp_types::notification::Progress>(
                                     ProgressParams {
                                         token: token_clone.clone(),
-                                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                                            WorkDoneProgressEnd {
+                                        value: ProgressParamsValue::WorkDone(
+                                            WorkDoneProgress::End(WorkDoneProgressEnd {
                                                 message: Some(format!("Error: {}", error_msg)),
-                                            },
-                                        )),
+                                            }),
+                                        ),
                                     },
                                 )
                                 .await;
@@ -682,14 +690,13 @@ impl LanguageServer for BslLanguageServer {
                     })?;
 
                 let documents = self.documents.clone();
-                let result = handle_get_semantic_html(
-                    request,
-                    self.get_type_service(),
-                    |uri| {
-                        // This is a sync closure, so we need to use try_read
-                        documents.try_read().ok().and_then(|docs| docs.get(uri).cloned())
-                    },
-                )
+                let result = handle_get_semantic_html(request, self.get_type_service(), |uri| {
+                    // This is a sync closure, so we need to use try_read
+                    documents
+                        .try_read()
+                        .ok()
+                        .and_then(|docs| docs.get(uri).cloned())
+                })
                 .await
                 .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
 
@@ -711,13 +718,12 @@ impl LanguageServer for BslLanguageServer {
                     })?;
 
                 let documents = self.documents.clone();
-                let result = handle_get_semantic_tree(
-                    request,
-                    self.get_type_service(),
-                    |uri| {
-                        documents.try_read().ok().and_then(|docs| docs.get(uri).cloned())
-                    },
-                )
+                let result = handle_get_semantic_tree(request, self.get_type_service(), |uri| {
+                    documents
+                        .try_read()
+                        .ok()
+                        .and_then(|docs| docs.get(uri).cloned())
+                })
                 .await
                 .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
 
@@ -786,8 +792,8 @@ impl LanguageServer for BslLanguageServer {
                     ));
                 }
 
-                let request: QueryTypeParams =
-                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                let request: QueryTypeParams = serde_json::from_value(params.arguments[0].clone())
+                    .map_err(|e| {
                         tower_lsp::jsonrpc::Error::invalid_params(format!(
                             "Invalid parameters: {}",
                             e

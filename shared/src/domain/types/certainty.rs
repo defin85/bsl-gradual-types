@@ -62,6 +62,14 @@ pub enum UncertaintyReason {
     /// Other reason for uncertainty
     Other(String),
 
+    /// Type name was explicitly specified in code, but not found in TypeRepository
+    ///
+    /// Example: `x = Новый Масив1;` (typo in platform type name)
+    TypeNotFound {
+        /// Type name that was not found
+        name: String,
+    },
+
     /// Variable not found in scope
     UndeclaredVariable {
         /// Variable name

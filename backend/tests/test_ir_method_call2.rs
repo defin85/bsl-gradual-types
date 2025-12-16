@@ -110,7 +110,9 @@ fn test_ir_nodes_for_method_call() {
             // Phase 3: value_type теперь TypeResolution, используем type_name()
             println!(
                 "    Assignment: {} = {} | value_node={:?}",
-                variable, value_type.type_name(), value_node
+                variable,
+                value_type.type_name(),
+                value_node
             );
         }
     }
@@ -172,7 +174,11 @@ fn test_assignment_declares_variable_in_symbol_table() {
 
     // Проверить тип: должен быть Generic<Массив, [?]>
     let res = var_type.unwrap();
-    assert_eq!(res.type_name(), "Массив<Неопределено>", "Type должен быть Массив<Неопределено>");
+    assert_eq!(
+        res.type_name(),
+        "Массив<Неопределено>",
+        "Type должен быть Массив<Неопределено>"
+    );
 
     println!("✅ PASSED: Переменная МассивСтрок добавлена в SymbolTable как Generic<Массив, [?]>");
 }
@@ -224,7 +230,11 @@ fn test_assignment_map_generic_type() {
     assert!(var_type.is_some(), "Переменная НЕ найдена в SymbolTable");
 
     let res = var_type.unwrap();
-    assert_eq!(res.type_name(), "Соответствие<Неопределено, Неопределено>", "Type должен быть Соответствие<Неопределено, Неопределено>");
+    assert_eq!(
+        res.type_name(),
+        "Соответствие<Неопределено, Неопределено>",
+        "Type должен быть Соответствие<Неопределено, Неопределено>"
+    );
 
     println!("✅ PASSED: Соответствие инициализировано как Generic<Соответствие, [?, ?]>");
 }

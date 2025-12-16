@@ -25,8 +25,8 @@ pub use title_extractor::TitleExtractor;
 use scraper::Html;
 use std::path::Path;
 
-use super::types::{CodeExample, ParameterInfo};
 use super::types::MethodOverloadInfo;
+use super::types::{CodeExample, ParameterInfo};
 use bsl_shared::domain::types::FacetKind;
 
 /// Фасад для всех HTML экстракторов

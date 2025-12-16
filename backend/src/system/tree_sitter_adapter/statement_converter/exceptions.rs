@@ -23,7 +23,8 @@ pub(crate) fn convert_try_statement_cached(
 
     for child in node.children(&mut cursor) {
         match child.kind() {
-            "TRY_KEYWORD" | "ПОПЫТКА_KEYWORD" | "ENDTRY_KEYWORD" | "КОНЕЦПОПЫТКИ_KEYWORD" => {}
+            "TRY_KEYWORD" | "ПОПЫТКА_KEYWORD" | "ENDTRY_KEYWORD" | "КОНЕЦПОПЫТКИ_KEYWORD" =>
+                {}
             "EXCEPT_KEYWORD" | "ИСКЛЮЧЕНИЕ_KEYWORD" => {
                 in_except = true;
             }

@@ -187,9 +187,13 @@ fn test_generic_type_compatibility() {
     };
 
     // Same generic types are compatible
-    assert!(array_string.is_compatible_with(&array_string2).is_compatible());
+    assert!(array_string
+        .is_compatible_with(&array_string2)
+        .is_compatible());
     // Different generic params are incompatible
-    assert!(!array_string.is_compatible_with(&array_number).is_compatible());
+    assert!(!array_string
+        .is_compatible_with(&array_number)
+        .is_compatible());
 }
 
 #[test]

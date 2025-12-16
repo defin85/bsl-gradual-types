@@ -91,7 +91,9 @@ impl DebugServerHandler {
     }
 
     /// Tool 8: Вычислить expression в текущем фрейме
-    #[tool(description = "Evaluate an expression in the current stack frame. Note: Variables may be unavailable after their lifetime ends (Rust DWARF behavior)")]
+    #[tool(
+        description = "Evaluate an expression in the current stack frame. Note: Variables may be unavailable after their lifetime ends (Rust DWARF behavior)"
+    )]
     async fn debug_eval(&self, Parameters(params): Parameters<EvalParams>) -> String {
         handlers::debug_handlers::eval(&self.session_manager, params).await
     }
@@ -103,7 +105,9 @@ impl DebugServerHandler {
     }
 
     /// Tool 10: Установить условный breakpoint
-    #[tool(description = "Set a conditional breakpoint (stops only if condition is true). WARNING: May not work for Rust programs in CodeLLDB. Use regular breakpoints + debug_eval as workaround")]
+    #[tool(
+        description = "Set a conditional breakpoint (stops only if condition is true). WARNING: May not work for Rust programs in CodeLLDB. Use regular breakpoints + debug_eval as workaround"
+    )]
     async fn debug_set_conditional_breakpoint(
         &self,
         Parameters(params): Parameters<ConditionalBreakpointParams>,
@@ -124,7 +128,9 @@ impl DebugServerHandler {
     }
 
     /// Tool 13: Выйти из текущей функции (step out)
-    #[tool(description = "Step out of the current function. Note: May timeout with compiler-inlined functions (release builds). Use debug builds for reliable stepping")]
+    #[tool(
+        description = "Step out of the current function. Note: May timeout with compiler-inlined functions (release builds). Use debug builds for reliable stepping"
+    )]
     async fn debug_step_out(&self, Parameters(params): Parameters<StepParams>) -> String {
         handlers::step_handlers::step_out(&self.session_manager, params).await
     }

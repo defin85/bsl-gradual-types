@@ -14,8 +14,8 @@ use std::time::Instant;
 use crate::application::TypeSystemService;
 use crate::system::SystemCoordinator;
 use bsl_shared::api::{
-    DiagnosticsResponseDto, DebugAstResponseDto, SemanticErrorDto, SyntaxErrorDto,
-    EnhancedHoverResponse, AstNodeDto,
+    AstNodeDto, DebugAstResponseDto, DiagnosticsResponseDto, EnhancedHoverResponse,
+    SemanticErrorDto, SyntaxErrorDto,
 };
 
 // --- СТАРЫЕ DTO УДАЛЕНЫ ---
@@ -216,7 +216,11 @@ pub async fn get_diagnostics(
     }
 
     // 2) Семантика (Phase 5: Unknown type, method/property existence)
-    match state.type_service.validate_semantics(&payload.code, None).await {
+    match state
+        .type_service
+        .validate_semantics(&payload.code, None)
+        .await
+    {
         Ok(diagnostics) => {
             let semantic_errors: Vec<SemanticErrorDto> = diagnostics
                 .iter()
@@ -277,7 +281,11 @@ pub async fn get_diagnostics_debug(
         .into_response();
     }
 
-    match state.type_service.validate_semantics_debug(&payload.code).await {
+    match state
+        .type_service
+        .validate_semantics_debug(&payload.code)
+        .await
+    {
         Ok((diagnostics, debug_info)) => {
             let semantic_errors: Vec<SemanticErrorDto> = diagnostics
                 .iter()
@@ -317,16 +325,14 @@ pub async fn get_debug_ast(
 
     // Stub implementation - returns minimal AST for testing
     let response = DebugAstResponseDto {
-        nodes: vec![
-            AstNodeDto {
-                kind: "Program".to_string(),
-                start_line: 1,
-                start_column: 1,
-                end_line: 1,
-                end_column: 1,
-                text: None,
-            },
-        ],
+        nodes: vec![AstNodeDto {
+            kind: "Program".to_string(),
+            start_line: 1,
+            start_column: 1,
+            end_line: 1,
+            end_column: 1,
+            text: None,
+        }],
         symbol_table: vec![],
         parse_errors: 0,
         duration_ms,
@@ -341,8 +347,8 @@ pub async fn get_enhanced_hover(
     State(state): State<AppState>,
     Json(req): Json<HoverRequest>,
 ) -> impl IntoResponse {
-    use bsl_shared::formatting::DetailLevel;
     use crate::helpers::hover_formatter::HoverFormatConfig;
+    use bsl_shared::formatting::DetailLevel;
 
     let start = Instant::now();
 
@@ -364,7 +370,8 @@ pub async fn get_enhanced_hover(
             let duration_ms = start.elapsed().as_millis();
 
             // Handle Option<String> from get_hover_info
-            let hover_text_str = hover_text.unwrap_or_else(|| "No information available".to_string());
+            let hover_text_str =
+                hover_text.unwrap_or_else(|| "No information available".to_string());
 
             let response = EnhancedHoverResponse {
                 hover_text: hover_text_str,

@@ -27,14 +27,11 @@ async fn test_value_table_columns_property_type_is_resolved() {
         .expect("КолонкиТаблЗнч should have resolved_type");
 
     assert_eq!(
-        resolved.name,
-        "КоллекцияКолонокТаблицыЗначений",
+        resolved.name, "КоллекцияКолонокТаблицыЗначений",
         "ТаблицаЗначений.Колонки должен иметь тип КоллекцияКолонокТаблицыЗначений"
     );
     assert_eq!(
-        resolved.certainty,
-        "Known",
+        resolved.certainty, "Known",
         "Тип свойства должен быть Known (из документации платформы)"
     );
 }
-

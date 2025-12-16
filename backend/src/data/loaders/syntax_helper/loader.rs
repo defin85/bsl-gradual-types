@@ -29,9 +29,9 @@ use super::types::{
     TypeIndex, TypeInfo,
 };
 
+use super::stats::ParsingStats;
 #[cfg(test)]
 use super::types::{TypeDocumentation, TypeIdentity, TypeMetadata, TypeStructure};
-use super::stats::ParsingStats;
 
 // Импорт типов из shared
 use bsl_shared::domain::types::FacetKind;

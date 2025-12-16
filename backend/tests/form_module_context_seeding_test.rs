@@ -18,7 +18,10 @@ use bsl_shared::ir::SemanticNodeKind;
 fn test_config_path() -> PathBuf {
     let backend_root = std::env::current_dir().expect("Failed to get current dir");
     let workspace_root = backend_root.parent().expect("Failed to get workspace root");
-    workspace_root.join("examples").join("conf").join("conf_test")
+    workspace_root
+        .join("examples")
+        .join("conf")
+        .join("conf_test")
 }
 
 #[test]
@@ -155,7 +158,12 @@ fn test_seed_form_module_symbols_into_ir() {
 
     let mut got = std::collections::HashMap::new();
     for node in &ir.nodes {
-        if let SemanticNodeKind::Assignment { variable, value_type, .. } = &node.kind {
+        if let SemanticNodeKind::Assignment {
+            variable,
+            value_type,
+            ..
+        } = &node.kind
+        {
             got.insert(variable.clone(), value_type.type_name().to_string());
         }
     }

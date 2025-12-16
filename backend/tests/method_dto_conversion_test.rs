@@ -386,8 +386,8 @@ fn test_method_name_edge_cases() {
             description: None,
             is_deprecated: false,
             is_constructor: false,
-        context_requirements: None,
-        return_facet: None,
+            context_requirements: None,
+            return_facet: None,
         };
 
         let dto = convert_to_method_dto(&raw_method);
@@ -503,8 +503,8 @@ fn test_return_type_edge_cases() {
             description: None,
             is_deprecated: false,
             is_constructor: false,
-        context_requirements: None,
-        return_facet: None,
+            context_requirements: None,
+            return_facet: None,
         };
 
         let dto = convert_to_method_dto(&raw_method);

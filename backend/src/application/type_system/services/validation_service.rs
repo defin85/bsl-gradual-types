@@ -38,14 +38,8 @@ pub async fn validate_code_fragment(
     let start = Instant::now();
 
     // Use validate_semantics with default detail_level
-    let diagnostics = validate_semantics(
-        parser,
-        analysis_engine,
-        metadata_lookup,
-        code,
-        None,
-    )
-    .await?;
+    let diagnostics =
+        validate_semantics(parser, analysis_engine, metadata_lookup, code, None).await?;
 
     // Convert TypeDiagnostic -> ValidationErrorDto
     let errors: Vec<ValidationErrorDto> = diagnostics
@@ -88,10 +82,7 @@ pub async fn validate_code_fragment(
 /// # Returns
 /// - `Ok(Vec<ParseError>)` - list of syntax errors (may be empty)
 /// - `Err(anyhow::Error)` - critical parser error
-pub fn parse_and_validate(
-    parser: &ParserCoordinator,
-    source: &str,
-) -> Result<Vec<ParseError>> {
+pub fn parse_and_validate(parser: &ParserCoordinator, source: &str) -> Result<Vec<ParseError>> {
     // Delegate to ParserCoordinator (System Layer)
     let parse_result = parser
         .parse(source)
@@ -149,7 +140,10 @@ pub async fn validate_semantics(
         signature_index.clone(),
         Some(resolver_arc.clone()),
     )?;
-    tracing::info!("validate_semantics: IR created with {} nodes", ir.nodes.len());
+    tracing::info!(
+        "validate_semantics: IR created with {} nodes",
+        ir.nodes.len()
+    );
 
     // 7. Create TypeValidator
     let validator = TypeValidator::new(metadata_lookup);
@@ -159,7 +153,13 @@ pub async fn validate_semantics(
 
     // 9. Create SemanticValidationVisitor with configurable detail_level (Milestone 3.6 Phase 3)
     let mut visitor = if let Some(level) = detail_level {
-        SemanticValidationVisitor::with_detail_level(&validator, &ir, resolver, &signature_index, level)
+        SemanticValidationVisitor::with_detail_level(
+            &validator,
+            &ir,
+            resolver,
+            &signature_index,
+            level,
+        )
     } else {
         SemanticValidationVisitor::new(&validator, &ir, resolver, &signature_index)
     };
@@ -198,11 +198,14 @@ pub async fn validate_semantics_debug(
         .parse(code)
         .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
 
-    debug_info["steps"].as_array_mut().unwrap().push(serde_json::json!({
-        "step": "parse",
-        "success": true,
-        "syntax_errors": parse_result.syntax_errors.len()
-    }));
+    debug_info["steps"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "step": "parse",
+            "success": true,
+            "syntax_errors": parse_result.syntax_errors.len()
+        }));
 
     if !parse_result.syntax_errors.is_empty() {
         return Ok((Vec::new(), debug_info));
@@ -225,11 +228,14 @@ pub async fn validate_semantics_debug(
         Some(resolver_arc.clone()),
     )?;
 
-    debug_info["steps"].as_array_mut().unwrap().push(serde_json::json!({
-        "step": "ast_to_ir",
-        "success": true,
-        "ir_nodes": ir.nodes.len()
-    }));
+    debug_info["steps"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "step": "ast_to_ir",
+            "success": true,
+            "ir_nodes": ir.nodes.len()
+        }));
 
     // 4. Add basic IR info
     debug_info["ir_info"] = serde_json::json!({
@@ -245,11 +251,14 @@ pub async fn validate_semantics_debug(
     walk_program(&ir, &mut visitor);
     let errors = visitor.into_errors();
 
-    debug_info["steps"].as_array_mut().unwrap().push(serde_json::json!({
-        "step": "semantic_validation",
-        "success": true,
-        "errors_found": errors.len()
-    }));
+    debug_info["steps"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "step": "semantic_validation",
+            "success": true,
+            "errors_found": errors.len()
+        }));
 
     Ok((errors, debug_info))
 }

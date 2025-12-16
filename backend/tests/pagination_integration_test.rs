@@ -21,7 +21,8 @@ mod pagination_integration_tests {
     }
 
     fn base_url() -> String {
-        std::env::var("BSL_WEB_API_BASE_URL").unwrap_or_else(|_| "http://localhost:3002".to_string())
+        std::env::var("BSL_WEB_API_BASE_URL")
+            .unwrap_or_else(|_| "http://localhost:3002".to_string())
     }
 
     /// Вспомогательная функция: выполнить GET запрос и вернуть JSON
@@ -46,7 +47,9 @@ mod pagination_integration_tests {
     #[tokio::test]
     async fn test_default_pagination() {
         // Запрос без параметров: должны использоваться значения по умолчанию
-        let Some(json) = fetch_json("/api/types?limit=10").await else { return; };
+        let Some(json) = fetch_json("/api/types?limit=10").await else {
+            return;
+        };
         let pagination = extract_pagination(&json).unwrap();
 
         assert_eq!(pagination["current_page"], 1);
@@ -56,7 +59,9 @@ mod pagination_integration_tests {
     #[tokio::test]
     async fn test_page_parameter() {
         // Запрос с page=2
-        let Some(json) = fetch_json("/api/types?page=2&limit=50").await else { return; };
+        let Some(json) = fetch_json("/api/types?page=2&limit=50").await else {
+            return;
+        };
         let pagination = extract_pagination(&json).unwrap();
 
         assert_eq!(pagination["current_page"], 2);
@@ -68,7 +73,9 @@ mod pagination_integration_tests {
     #[tokio::test]
     async fn test_page_zero_becomes_one() {
         // page=0 должна стать page=1
-        let Some(json) = fetch_json("/api/types?page=0&limit=20").await else { return; };
+        let Some(json) = fetch_json("/api/types?page=0&limit=20").await else {
+            return;
+        };
         let pagination = extract_pagination(&json).unwrap();
 
         assert_eq!(
@@ -82,7 +89,9 @@ mod pagination_integration_tests {
     #[tokio::test]
     async fn test_limit_zero_becomes_one() {
         // limit=0 должен стать limit=1
-        let Some(json) = fetch_json("/api/types?page=1&limit=0").await else { return; };
+        let Some(json) = fetch_json("/api/types?page=1&limit=0").await else {
+            return;
+        };
         let pagination = extract_pagination(&json).unwrap();
 
         assert_eq!(
@@ -94,7 +103,9 @@ mod pagination_integration_tests {
     #[tokio::test]
     async fn test_limit_exceeds_max() {
         // limit=5000 должен стать limit=1000
-        let Some(json) = fetch_json("/api/types?page=1&limit=5000").await else { return; };
+        let Some(json) = fetch_json("/api/types?page=1&limit=5000").await else {
+            return;
+        };
         let pagination = extract_pagination(&json).unwrap();
 
         assert_eq!(
@@ -108,7 +119,9 @@ mod pagination_integration_tests {
     #[tokio::test]
     async fn test_first_page_has_no_prev() {
         // Первая страница: has_prev=false
-        let Some(json) = fetch_json("/api/types?page=1&limit=10").await else { return; };
+        let Some(json) = fetch_json("/api/types?page=1&limit=10").await else {
+            return;
+        };
         let pagination = extract_pagination(&json).unwrap();
 
         assert_eq!(
@@ -120,7 +133,9 @@ mod pagination_integration_tests {
     #[tokio::test]
     async fn test_second_page_has_prev() {
         // Вторая страница: has_prev=true
-        let Some(json) = fetch_json("/api/types?page=2&limit=10").await else { return; };
+        let Some(json) = fetch_json("/api/types?page=2&limit=10").await else {
+            return;
+        };
         let pagination = extract_pagination(&json).unwrap();
 
         assert_eq!(
@@ -134,7 +149,9 @@ mod pagination_integration_tests {
     #[tokio::test]
     async fn test_pagination_dto_structure() {
         // Проверка наличия всех обязательных полей в PaginationDto
-        let Some(json) = fetch_json("/api/types?page=3&limit=50").await else { return; };
+        let Some(json) = fetch_json("/api/types?page=3&limit=50").await else {
+            return;
+        };
         let pagination = extract_pagination(&json).unwrap();
 
         assert!(
@@ -160,7 +177,9 @@ mod pagination_integration_tests {
     #[tokio::test]
     async fn test_items_array_length() {
         // Проверка, что количество элементов в items соответствует limit
-        let Some(json) = fetch_json("/api/types?page=1&limit=25").await else { return; };
+        let Some(json) = fetch_json("/api/types?page=1&limit=25").await else {
+            return;
+        };
         let items = json["items"].as_array().unwrap();
 
         // Количество элементов <= limit
@@ -175,7 +194,9 @@ mod pagination_integration_tests {
     #[tokio::test]
     async fn test_total_pages_calculation() {
         // total_pages = ceil(total_items / page_size)
-        let Some(json) = fetch_json("/api/types?page=1&limit=100").await else { return; };
+        let Some(json) = fetch_json("/api/types?page=1&limit=100").await else {
+            return;
+        };
         let pagination = extract_pagination(&json).unwrap();
 
         let total_items = pagination["total_items"].as_u64().unwrap() as f64;
@@ -195,7 +216,9 @@ mod pagination_integration_tests {
     async fn test_offset_parameter_ignored() {
         // Передаём offset=100, но он должен игнорироваться
         // Должна использоваться page=1 (значение по умолчанию)
-        let Some(json) = fetch_json("/api/types?offset=100&limit=10").await else { return; };
+        let Some(json) = fetch_json("/api/types?offset=100&limit=10").await else {
+            return;
+        };
         let pagination = extract_pagination(&json).unwrap();
 
         assert_eq!(
@@ -209,7 +232,9 @@ mod pagination_integration_tests {
     #[tokio::test]
     async fn test_pagination_consistency() {
         // Проверка математической консистентности pagination полей
-        let Some(json) = fetch_json("/api/types?page=5&limit=100").await else { return; };
+        let Some(json) = fetch_json("/api/types?page=5&limit=100").await else {
+            return;
+        };
         let pagination = extract_pagination(&json).unwrap();
 
         let current_page = pagination["current_page"].as_u64().unwrap();
@@ -246,7 +271,9 @@ mod pagination_integration_tests {
     #[tokio::test]
     async fn test_page_beyond_total_pages() {
         // page=999999 (заведомо больше total_pages)
-        let Some(json) = fetch_json("/api/types?page=999999&limit=10").await else { return; };
+        let Some(json) = fetch_json("/api/types?page=999999&limit=10").await else {
+            return;
+        };
         let items = json["items"].as_array().unwrap();
 
         // Должен вернуть пустой массив или последнюю страницу
@@ -265,7 +292,9 @@ mod pagination_integration_tests {
 
         for limit in limits {
             let endpoint = format!("/api/types?page=1&limit={}", limit);
-            let Some(json) = fetch_json(&endpoint).await else { return; };
+            let Some(json) = fetch_json(&endpoint).await else {
+                return;
+            };
             let pagination = extract_pagination(&json).unwrap();
 
             assert_eq!(

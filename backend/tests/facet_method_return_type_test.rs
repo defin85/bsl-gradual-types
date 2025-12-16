@@ -200,14 +200,27 @@ fn test_facet_method_call_return_type_inference() {
     println!("\nМ type: {:?}", m_type);
     assert!(m_type.is_some(), "Variable М should be in symbol table");
     let (_, m_hint) = m_type.unwrap();
-    assert_eq!(m_hint.type_name(), "СправочникМенеджер.Контрагенты", "М should be СправочникМенеджер.Контрагенты");
+    assert_eq!(
+        m_hint.type_name(),
+        "СправочникМенеджер.Контрагенты",
+        "М should be СправочникМенеджер.Контрагенты"
+    );
 
     // Проверяем тип Объект
-    let obj_type = ir.symbols.lookup_variable_in_hierarchy(ScopeId(0), "Объект");
+    let obj_type = ir
+        .symbols
+        .lookup_variable_in_hierarchy(ScopeId(0), "Объект");
     println!("Объект type: {:?}", obj_type);
-    assert!(obj_type.is_some(), "Variable Объект should be in symbol table");
+    assert!(
+        obj_type.is_some(),
+        "Variable Объект should be in symbol table"
+    );
     let (_, obj_hint) = obj_type.unwrap();
-    assert_eq!(obj_hint.type_name(), "СправочникОбъект.Контрагенты", "Объект should be СправочникОбъект.Контрагенты (facet switched with name substitution)");
+    assert_eq!(
+        obj_hint.type_name(),
+        "СправочникОбъект.Контрагенты",
+        "Объект should be СправочникОбъект.Контрагенты (facet switched with name substitution)"
+    );
 }
 
 #[test]
@@ -271,8 +284,17 @@ fn test_facet_method_call_reference_return() {
     )
     .unwrap();
 
-    let ref_type = ir.symbols.lookup_variable_in_hierarchy(ScopeId(0), "Ссылка");
-    assert!(ref_type.is_some(), "Variable Ссылка should be in symbol table");
+    let ref_type = ir
+        .symbols
+        .lookup_variable_in_hierarchy(ScopeId(0), "Ссылка");
+    assert!(
+        ref_type.is_some(),
+        "Variable Ссылка should be in symbol table"
+    );
     let (_, ref_hint) = ref_type.unwrap();
-    assert_eq!(ref_hint.type_name(), "СправочникСсылка.Номенклатура", "Ссылка should be СправочникСсылка.Номенклатура");
+    assert_eq!(
+        ref_hint.type_name(),
+        "СправочникСсылка.Номенклатура",
+        "Ссылка should be СправочникСсылка.Номенклатура"
+    );
 }

@@ -36,7 +36,10 @@ pub async fn handle_get_semantic_tree(
 
     let service = type_service.ok_or("TypeSystemService not initialized")?;
 
-    match service.get_semantic_tree(&file_content, &file_path_str, false, true, true).await {
+    match service
+        .get_semantic_tree(&file_content, &file_path_str, false, true, true)
+        .await
+    {
         Ok(dto) => {
             info!(
                 "Semantic tree generated: {} nodes, {} symbols",
@@ -71,7 +74,8 @@ pub async fn handle_get_semantic_html(
         max_depth: None,
     };
 
-    let semantic_tree = handle_get_semantic_tree(tree_request, type_service, get_document_content).await?;
+    let semantic_tree =
+        handle_get_semantic_tree(tree_request, type_service, get_document_content).await?;
 
     // Determine theme
     let theme_mode = match params.theme.as_deref() {

@@ -9,9 +9,9 @@ use tracing::{debug, error, info, warn};
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::system::parser_coordinator::TextEdit;
 
-use crate::converters::{semantic_error_to_diagnostic, syntax_errors_to_diagnostics};
 use crate::config::BslSettings;
 use crate::converters::position::utf16_to_byte_offset;
+use crate::converters::{semantic_error_to_diagnostic, syntax_errors_to_diagnostics};
 
 /// Handle textDocument/didOpen notification
 pub async fn handle_did_open(
@@ -183,7 +183,10 @@ pub async fn handle_did_change(
             let detail_level =
                 bsl_shared::formatting::DetailLevel::parse(&settings.diagnostics.detail_level);
 
-            match service.validate_semantics(updated_text, Some(detail_level)).await {
+            match service
+                .validate_semantics(updated_text, Some(detail_level))
+                .await
+            {
                 Ok(semantic_errors) => {
                     if !semantic_errors.is_empty() {
                         info!("Found {} semantic errors in {}", semantic_errors.len(), uri);

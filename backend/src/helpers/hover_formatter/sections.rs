@@ -269,7 +269,10 @@ pub fn format_tabular_sections_section(
 }
 
 /// Форматирует информацию о фасете
-pub fn format_facet_info(config: &HoverFormatConfig, resolution: &TypeResolution) -> Option<String> {
+pub fn format_facet_info(
+    config: &HoverFormatConfig,
+    resolution: &TypeResolution,
+) -> Option<String> {
     // Только для Detailed уровня
     if !matches!(config.detail_level, DetailLevel::Detailed) {
         return None;
@@ -317,7 +320,10 @@ pub fn format_facet_info(config: &HoverFormatConfig, resolution: &TypeResolution
 }
 
 /// Форматирует информацию о Generic типе
-pub fn format_generic_info(config: &HoverFormatConfig, resolution: &TypeResolution) -> Option<String> {
+pub fn format_generic_info(
+    config: &HoverFormatConfig,
+    resolution: &TypeResolution,
+) -> Option<String> {
     // Только для Detailed уровня
     if !matches!(config.detail_level, DetailLevel::Detailed) {
         return None;

@@ -199,11 +199,8 @@ fn test_update_variable_type_checked_invalid_scope() {
 
     let invalid_scope = ScopeId(9999);
 
-    let result = table.update_variable_type_checked(
-        invalid_scope,
-        "x",
-        TypeResolution::explicit("Число"),
-    );
+    let result =
+        table.update_variable_type_checked(invalid_scope, "x", TypeResolution::explicit("Число"));
 
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("Scope"));

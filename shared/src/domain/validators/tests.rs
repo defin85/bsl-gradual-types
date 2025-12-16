@@ -3,8 +3,8 @@
 #[cfg(test)]
 mod tests {
     use crate::domain::types::{
-        Certainty, ConcreteType, PrimitiveType, ResolutionMetadata, ResolutionResult, ResolutionSource,
-        TypeResolution,
+        Certainty, ConcreteType, PrimitiveType, ResolutionMetadata, ResolutionResult,
+        ResolutionSource, TypeResolution,
     };
     use crate::domain::validators::TypeValidator;
 

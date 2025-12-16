@@ -133,11 +133,10 @@ impl SystemCoordinator {
                 repository.clone(),
                 resolver.clone(),
             ));
-            let mut parser_guard = self.parser.write()
-                .unwrap_or_else(|poisoned| {
-                    warn!("Parser RwLock poisoned (write), recovering data.");
-                    poisoned.into_inner()
-                });
+            let mut parser_guard = self.parser.write().unwrap_or_else(|poisoned| {
+                warn!("Parser RwLock poisoned (write), recovering data.");
+                poisoned.into_inner()
+            });
             *parser_guard = new_parser;
             info!("ParserCoordinator обновлён с TypeResolver для Milestone 3.17");
         }
@@ -211,17 +210,25 @@ impl SystemCoordinator {
             let tx_clone = tx.clone();
             hbk_recovery::auto_recover_directory_with_progress(
                 syntax_path,
-                Some(move |update: crate::data::loaders::progress::ProgressUpdateType| {
-                    if let crate::data::loaders::progress::ProgressUpdateType::HbkExtraction { file_name, extracted_files, total_files, percentage } = update {
-                        let _ = tx_clone.send(crate::data::loaders::progress::ProgressUpdate {
-                            phase: crate::data::loaders::progress::IndexingPhase::HbkExtraction,
-                            current: extracted_files,
-                            total: total_files,
-                            percentage: percentage as f32,
-                            message: Some(format!("Извлекаем файлы из {}", file_name)),
-                        });
-                    }
-                }),
+                Some(
+                    move |update: crate::data::loaders::progress::ProgressUpdateType| {
+                        if let crate::data::loaders::progress::ProgressUpdateType::HbkExtraction {
+                            file_name,
+                            extracted_files,
+                            total_files,
+                            percentage,
+                        } = update
+                        {
+                            let _ = tx_clone.send(crate::data::loaders::progress::ProgressUpdate {
+                                phase: crate::data::loaders::progress::IndexingPhase::HbkExtraction,
+                                current: extracted_files,
+                                total: total_files,
+                                percentage: percentage as f32,
+                                message: Some(format!("Извлекаем файлы из {}", file_name)),
+                            });
+                        }
+                    },
+                ),
             )
         } else {
             hbk_recovery::auto_recover_directory(syntax_path)
@@ -245,7 +252,10 @@ impl SystemCoordinator {
                 info!(".hbk файлы не найдены (возможно уже распакованы)");
             }
             Err(e) => {
-                warn!("Ошибка восстановления .hbk файлов: {}. Продолжаем с существующими файлами...", e);
+                warn!(
+                    "Ошибка восстановления .hbk файлов: {}. Продолжаем с существующими файлами...",
+                    e
+                );
             }
         }
 
@@ -254,12 +264,9 @@ impl SystemCoordinator {
         // MILESTONE 2.20.2.3: Парсим с прогрессом если передан callback
         if let Some(ref tx) = progress_tx {
             let tx_clone = tx.clone();
-            match syntax_parser.parse_with_progress(
-                syntax_path,
-                move |update: ProgressUpdate| {
-                    let _ = tx_clone.send(update); // Отправляем в channel
-                },
-            ) {
+            match syntax_parser.parse_with_progress(syntax_path, move |update: ProgressUpdate| {
+                let _ = tx_clone.send(update); // Отправляем в channel
+            }) {
                 Ok(()) => {
                     info!("Парсинг синтаксис-помощника завершен успешно");
                 }
@@ -301,8 +308,8 @@ impl SystemCoordinator {
 
         // Заполняем SignatureIndex через Registry паттерн
         // Единственный источник данных - syntax_helper (документация 1С)
+        use crate::data::loaders::{apply_generic_info_to_repository, SyntaxHelperSource};
         use bsl_shared::domain::SignatureSourceRegistry;
-        use crate::data::loaders::{SyntaxHelperSource, apply_generic_info_to_repository};
 
         let index = SignatureSourceRegistry::new()
             .register(SyntaxHelperSource::new(platform_types_clone))
@@ -328,7 +335,9 @@ impl SystemCoordinator {
     /// Используется когда syntax_helper не доступен.
     /// Загружает только примитивные типы и типы-коллекции без методов.
     /// Методы будут недоступны, но GenericInfo для inference будет работать.
-    pub(crate) fn load_fallback_types(repository: &Arc<InMemoryTypeRepository>) -> Result<(), StartupError> {
+    pub(crate) fn load_fallback_types(
+        repository: &Arc<InMemoryTypeRepository>,
+    ) -> Result<(), StartupError> {
         info!("Загружаем базовые типы платформы 1С (fallback mode)...");
 
         // Примитивные типы
@@ -408,8 +417,8 @@ impl SystemCoordinator {
             .map_err(StartupError::PlatformTypesError)?;
 
         // Заполняем SignatureIndex (будет пустой в fallback mode)
+        use crate::data::loaders::{apply_generic_info_to_repository, SyntaxHelperSource};
         use bsl_shared::domain::SignatureSourceRegistry;
-        use crate::data::loaders::{SyntaxHelperSource, apply_generic_info_to_repository};
 
         let index = SignatureSourceRegistry::new()
             .register(SyntaxHelperSource::new(platform_types_clone))
@@ -419,7 +428,10 @@ impl SystemCoordinator {
         // Применяем GenericInfo для типов-коллекций
         let generic_count = apply_generic_info_to_repository(repository.as_ref());
 
-        info!("Базовые типы загружены: {} типов (fallback mode)", type_count);
+        info!(
+            "Базовые типы загружены: {} типов (fallback mode)",
+            type_count
+        );
         info!("GenericInfo применён к {} типам-коллекциям", generic_count);
         warn!("Методы недоступны в fallback mode. Укажите путь к syntax_helper для полной функциональности.");
         Ok(())

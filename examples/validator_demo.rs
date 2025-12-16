@@ -85,7 +85,12 @@ fn demonstrate_method_validation(validator: &TypeValidator) {
         None => println!("  ✅ Метод существует\n"),
         Some(err) => {
             use bsl_shared::ir::Span;
-            let span = Span { start_line: 10, start_column: 5, end_line: 10, end_column: 20 };
+            let span = Span {
+                start_line: 10,
+                start_column: 5,
+                end_line: 10,
+                end_column: 20,
+            };
             let diagnostic = err.to_diagnostic(span);
             println!("  ❌ ОШИБКА ВАЛИДАЦИИ:");
             println!("     {}", diagnostic.message);
@@ -132,7 +137,12 @@ fn demonstrate_property_validation(validator: &TypeValidator) {
         None => println!("  ✅ Свойство существует\n"),
         Some(err) => {
             use bsl_shared::ir::Span;
-            let span = Span { start_line: 15, start_column: 10, end_line: 15, end_column: 25 };
+            let span = Span {
+                start_line: 15,
+                start_column: 10,
+                end_line: 15,
+                end_column: 25,
+            };
             let diagnostic = err.to_diagnostic(span);
             println!("  ❌ ОШИБКА ВАЛИДАЦИИ:");
             println!("     {}", diagnostic.message);

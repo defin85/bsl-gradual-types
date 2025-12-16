@@ -8,7 +8,9 @@ use crate::parsing::bsl::ast::Expression;
 use bsl_shared::domain::is_configuration_type_pattern;
 use bsl_shared::domain::resolver::GenericStrategy;
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::{Certainty, ConcreteType, GenericType, PlatformType, ResolutionResult, TypeResolution};
+use bsl_shared::domain::types::{
+    Certainty, ConcreteType, GenericType, PlatformType, ResolutionResult, TypeResolution,
+};
 
 use super::converter::AstToIrConverter;
 use super::global_collections::{is_global_collection, lookup_global_collection};
@@ -50,7 +52,8 @@ impl AstToIrConverter {
                     }
 
                     // Не глобальная коллекция - поиск переменной
-                    return self.lookup_variable_type(name)
+                    return self
+                        .lookup_variable_type(name)
                         .unwrap_or_else(|| name.clone());
                 }
 
@@ -76,7 +79,9 @@ impl AstToIrConverter {
                 // Тип результата вызова функции
                 match function.as_ref() {
                     // 1. Метод объекта: object.Method()
-                    Expression::PropertyAccess { object, property, .. } => {
+                    Expression::PropertyAccess {
+                        object, property, ..
+                    } => {
                         // MILESTONE 5.7: Используем infer_type_resolution для корректной резолюции
                         // цепочек вызовов типа Ссылка.ТабличнаяЧасть.Метод()
                         // infer_type_resolution использует resolve_member_type, который корректно
@@ -90,13 +95,18 @@ impl AstToIrConverter {
                         }
 
                         result.type_name()
-                    },
+                    }
 
                     // 2. Глобальная функция: ТипЗнч()
-                    Expression::Identifier { name: func_name, .. } => {
+                    Expression::Identifier {
+                        name: func_name, ..
+                    } => {
                         // SignatureIndex для платформенных функций
                         if let Some(sig) = self.signature_index.find_global_function(func_name) {
-                            return sig.return_type.clone().unwrap_or_else(|| "Неопределено".to_string());
+                            return sig
+                                .return_type
+                                .clone()
+                                .unwrap_or_else(|| "Неопределено".to_string());
                         }
 
                         // Fallback: пользовательские функции из SymbolTable
@@ -110,9 +120,9 @@ impl AstToIrConverter {
                         }
 
                         "Dynamic".to_string()
-                    },
+                    }
 
-                    _ => "Dynamic".to_string()
+                    _ => "Dynamic".to_string(),
                 }
             }
             _ => "Dynamic".to_string(),
@@ -191,12 +201,24 @@ impl AstToIrConverter {
             Expression::New { type_name, .. } => {
                 // Очищаем скобки если tree-sitter включил их
                 let clean_type_name = type_name.trim().trim_end_matches("()").trim();
-                TypeResolution::explicit(clean_type_name)
+                if self.repository.find_type(clean_type_name).is_some() {
+                    TypeResolution::explicit(clean_type_name)
+                } else {
+                    let mut res = TypeResolution::primitive(clean_type_name);
+                    res.certainty = Certainty::Unknown;
+                    res.metadata.uncertainty_reason =
+                        Some(bsl_shared::domain::types::UncertaintyReason::TypeNotFound {
+                            name: clean_type_name.to_string(),
+                        });
+                    res
+                }
             }
 
             // Доступ к свойству (object.property) - критично для конфигурационных типов
             // MILESTONE 3.17: Используем TypeResolver для установки active_facet
-            Expression::PropertyAccess { object, property, .. } => {
+            Expression::PropertyAccess {
+                object, property, ..
+            } => {
                 let base = self.infer_type_resolution(object);
 
                 // Phase 4: Если base - undeclared variable, пробрасываем эту информацию
@@ -245,7 +267,9 @@ impl AstToIrConverter {
                 let has_resolver = self.resolver.is_some();
                 tracing::info!(
                     "PropertyAccess: type_str='{}', is_config={}, has_resolver={}",
-                    type_str, is_config, has_resolver
+                    type_str,
+                    is_config,
+                    has_resolver
                 );
 
                 if is_config {
@@ -254,7 +278,8 @@ impl AstToIrConverter {
                         let resolution = resolver.resolve_expression_sync(&type_str);
                         tracing::info!(
                             "Resolver result: type='{}', active_facet={:?}",
-                            resolution.type_name(), resolution.active_facet
+                            resolution.type_name(),
+                            resolution.active_facet
                         );
                         return resolution;
                     }
@@ -267,7 +292,10 @@ impl AstToIrConverter {
             // Вызов функции/метода
             Expression::Call { function, .. } => {
                 // Глобальная функция: если известна в SignatureIndex, НЕ считаем её "undeclared variable"
-                if let Expression::Identifier { name: func_name, .. } = function.as_ref() {
+                if let Expression::Identifier {
+                    name: func_name, ..
+                } = function.as_ref()
+                {
                     let resolved = self.resolve_global_function_return_type(func_name);
                     if !resolved.is_unknown() {
                         return resolved;
@@ -286,7 +314,10 @@ impl AstToIrConverter {
 
                 // Для вызовов методов используем resolve_method_return_type
                 // который ищет метод в SignatureIndex и возвращает Known если найден
-                if let Expression::PropertyAccess { object, property, .. } = function.as_ref() {
+                if let Expression::PropertyAccess {
+                    object, property, ..
+                } = function.as_ref()
+                {
                     let object_type = self.infer_type_resolution(object);
                     let method_result = self.resolve_method_return_type(&object_type, property);
 
@@ -465,7 +496,11 @@ impl AstToIrConverter {
     ///
     /// # Returns
     /// TypeResolution для свойства или unknown() если свойство не найдено
-    pub(crate) fn resolve_member_type(&self, object_type: &TypeResolution, member_name: &str) -> TypeResolution {
+    pub(crate) fn resolve_member_type(
+        &self,
+        object_type: &TypeResolution,
+        member_name: &str,
+    ) -> TypeResolution {
         let type_name = object_type.type_name();
 
         // Пустой или unknown тип - не можем резолвить
@@ -482,10 +517,9 @@ impl AstToIrConverter {
         let properties = self.metadata_lookup.get_properties(object_type);
 
         for prop in &properties {
-            if prop.name.to_lowercase() == member_name_lower
-                && !prop.prop_type.is_empty() {
-                    return TypeResolution::explicit(&prop.prop_type);
-                }
+            if prop.name.to_lowercase() == member_name_lower && !prop.prop_type.is_empty() {
+                return TypeResolution::explicit(&prop.prop_type);
+            }
         }
 
         // Обработка Generic типов: ТабличнаяЧасть<Работы> → базовый тип + параметры
@@ -516,9 +550,10 @@ impl AstToIrConverter {
                 if let Some(type_data) = self.repository.find_type(base_type) {
                     for prop in &type_data.properties {
                         if prop.name.to_lowercase() == member_name_lower
-                            && !prop.prop_type.is_empty() {
-                                return TypeResolution::explicit(&prop.prop_type);
-                            }
+                            && !prop.prop_type.is_empty()
+                        {
+                            return TypeResolution::explicit(&prop.prop_type);
+                        }
                     }
                 }
             }
@@ -529,10 +564,9 @@ impl AstToIrConverter {
             // 1. Ищем в TypeRepository напрямую
             if let Some(type_data) = self.repository.find_type(&type_name) {
                 for prop in &type_data.properties {
-                    if prop.name.to_lowercase() == member_name_lower
-                        && !prop.prop_type.is_empty() {
-                            return TypeResolution::explicit(&prop.prop_type);
-                        }
+                    if prop.name.to_lowercase() == member_name_lower && !prop.prop_type.is_empty() {
+                        return TypeResolution::explicit(&prop.prop_type);
+                    }
                 }
             }
 
@@ -541,9 +575,10 @@ impl AstToIrConverter {
                 if let Some(type_data) = self.repository.find_type(base_type) {
                     for prop in &type_data.properties {
                         if prop.name.to_lowercase() == member_name_lower
-                            && !prop.prop_type.is_empty() {
-                                return TypeResolution::explicit(&prop.prop_type);
-                            }
+                            && !prop.prop_type.is_empty()
+                        {
+                            return TypeResolution::explicit(&prop.prop_type);
+                        }
                     }
                 }
             }
@@ -568,7 +603,11 @@ impl AstToIrConverter {
     ///
     /// # Returns
     /// TypeResolution для возвращаемого типа или unknown() если метод не найден
-    pub(crate) fn resolve_method_return_type(&self, object_type: &TypeResolution, method_name: &str) -> TypeResolution {
+    pub(crate) fn resolve_method_return_type(
+        &self,
+        object_type: &TypeResolution,
+        method_name: &str,
+    ) -> TypeResolution {
         let type_name = object_type.type_name();
 
         // Пустой или unknown тип - не можем резолвить
@@ -585,11 +624,12 @@ impl AstToIrConverter {
 
         // Для фасетных типов извлекаем базовый тип для поиска в SignatureIndex
         // "СправочникМенеджер.Контрагенты" -> "СправочникМенеджер"
-        let search_type = if let Some(base_type) = SignatureIndex::extract_base_facet_type(clean_type) {
-            base_type
-        } else {
-            clean_type
-        };
+        let search_type =
+            if let Some(base_type) = SignatureIndex::extract_base_facet_type(clean_type) {
+                base_type
+            } else {
+                clean_type
+            };
 
         // Поиск метода в SignatureIndex
         if let Some(method) = self.signature_index.find_method(search_type, method_name) {
@@ -599,7 +639,8 @@ impl AstToIrConverter {
                 if let Some(metadata_name) = SignatureIndex::extract_metadata_name(&type_name) {
                     // Подставляем имя в return_type
                     // "СправочникСсылка" + "Контрагенты" -> "СправочникСсылка.Контрагенты"
-                    let substituted = SignatureIndex::substitute_type_name(return_type, metadata_name);
+                    let substituted =
+                        SignatureIndex::substitute_type_name(return_type, metadata_name);
                     return TypeResolution::explicit(&substituted);
                 }
 
@@ -621,7 +662,10 @@ impl AstToIrConverter {
     /// - `explicit(return_type)` если тип известен
     /// - `explicit("Неопределено")` если функция найдена, но return_type отсутствует (процедура)
     /// - `unknown()` если функция не найдена
-    pub(crate) fn resolve_global_function_return_type(&self, function_name: &str) -> TypeResolution {
+    pub(crate) fn resolve_global_function_return_type(
+        &self,
+        function_name: &str,
+    ) -> TypeResolution {
         if let Some(sig) = self.signature_index.find_global_function(function_name) {
             if let Some(return_type) = &sig.return_type {
                 return TypeResolution::explicit(return_type);

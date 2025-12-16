@@ -525,7 +525,10 @@ fn test_global_property_access_for_accounting_registers() {
     // Проверяем GlobalPropertyAccess
     if let SemanticNodeKind::GlobalPropertyAccess { name, result_type } = &ir.nodes[0].kind {
         assert_eq!(name, "РегистрыБухгалтерии");
-        assert_eq!(result_type.type_name(), "РегистрБухгалтерииМенеджерКоллекция");
+        assert_eq!(
+            result_type.type_name(),
+            "РегистрБухгалтерииМенеджерКоллекция"
+        );
     } else {
         panic!(
             "Expected GlobalPropertyAccess at nodes[0], got: {:?}",

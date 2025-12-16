@@ -45,7 +45,12 @@ impl AstToIrConverter {
                 // В BSL переменные видны во всём теле функции, не только в текущем блоке
                 let resolution = type_hint_resolution.unwrap_or_else(TypeResolution::unknown);
                 self.symbol_table
-                    .register_variable_declared_in_function_scope(self.current_scope, name, resolution, span);
+                    .register_variable_declared_in_function_scope(
+                        self.current_scope,
+                        name,
+                        resolution,
+                        span,
+                    );
 
                 self.nodes.push(node);
                 Ok(Some(self.nodes.len() - 1))
@@ -55,26 +60,20 @@ impl AstToIrConverter {
                 target,
                 value,
                 span: ast_span,
-            } => {
-                self.convert_assignment(target, value, ast_span)
-            }
+            } => self.convert_assignment(target, value, ast_span),
 
             Statement::If {
                 condition,
                 then_body,
                 else_body,
                 span: ast_span,
-            } => {
-                self.convert_if_statement(condition, then_body, else_body, ast_span)
-            }
+            } => self.convert_if_statement(condition, then_body, else_body, ast_span),
 
             Statement::While {
                 condition,
                 body,
                 span: ast_span,
-            } => {
-                self.convert_while_loop(condition, body, ast_span)
-            }
+            } => self.convert_while_loop(condition, body, ast_span),
 
             Statement::For {
                 variable,
@@ -82,18 +81,14 @@ impl AstToIrConverter {
                 end,
                 body,
                 span: ast_span,
-            } => {
-                self.convert_for_loop(variable, start, end, body, ast_span)
-            }
+            } => self.convert_for_loop(variable, start, end, body, ast_span),
 
             Statement::ForEach {
                 variable,
                 collection,
                 body,
                 span: ast_span,
-            } => {
-                self.convert_foreach_loop(variable, collection, body, ast_span)
-            }
+            } => self.convert_foreach_loop(variable, collection, body, ast_span),
 
             Statement::Return {
                 value,
@@ -117,9 +112,7 @@ impl AstToIrConverter {
                 try_body,
                 except_body,
                 span: ast_span,
-            } => {
-                self.convert_try_statement(try_body, except_body, ast_span)
-            }
+            } => self.convert_try_statement(try_body, except_body, ast_span),
 
             Statement::Call {
                 expression,
@@ -131,7 +124,9 @@ impl AstToIrConverter {
                 if let Expression::Call { function, args, .. } = expression {
                     return self.convert_call_expression(*function, args, span);
                 } else if let Expression::PropertyAccess {
-                    object, property, span: prop_span
+                    object,
+                    property,
+                    span: prop_span,
                 } = expression
                 {
                     // MILESTONE 5.5: Используем convert_property_access_expression для GlobalPropertyAccess
@@ -213,9 +208,7 @@ impl AstToIrConverter {
                     object,
                     property,
                     span: prop_span,
-                } => {
-                    self.convert_property_access_expression(object, property, *prop_span)?
-                }
+                } => self.convert_property_access_expression(object, property, *prop_span)?,
 
                 _ => None,
             };
@@ -235,12 +228,32 @@ impl AstToIrConverter {
                 // Для Generic коллекций (Массив, Соответствие, Список)
                 use bsl_shared::domain::types::Certainty;
                 match clean_type_name {
-                    "Массив" => TypeResolution::generic("Массив", &["?"], Certainty::InferredWeak),
-                    "Соответствие" => TypeResolution::generic("Соответствие", &["?", "?"], Certainty::InferredWeak),
-                    "Список" => TypeResolution::generic("Список", &["?"], Certainty::InferredWeak),
+                    "Массив" => {
+                        TypeResolution::generic("Массив", &["?"], Certainty::InferredWeak)
+                    }
+                    "Соответствие" => TypeResolution::generic(
+                        "Соответствие",
+                        &["?", "?"],
+                        Certainty::InferredWeak,
+                    ),
+                    "Список" => {
+                        TypeResolution::generic("Список", &["?"], Certainty::InferredWeak)
+                    }
                     _ => {
-                        // ИСПРАВЛЕНИЕ: ДЛЯ ВСЕХ ОСТАЛЬНЫХ ТИПОВ создаём Explicit!
-                        TypeResolution::explicit(clean_type_name)
+                        // Для остальных типов: если тип реально загружен — explicit (Known),
+                        // иначе помечаем как Unknown с причиной (не ломаем hover/diagnostics).
+                        if self.repository.find_type(clean_type_name).is_some() {
+                            TypeResolution::explicit(clean_type_name)
+                        } else {
+                            use bsl_shared::domain::types::UncertaintyReason;
+                            let mut res = TypeResolution::primitive(clean_type_name);
+                            res.certainty = Certainty::Unknown;
+                            res.metadata.uncertainty_reason =
+                                Some(UncertaintyReason::TypeNotFound {
+                                    name: clean_type_name.to_string(),
+                                });
+                            res
+                        }
                     }
                 }
             } else {
@@ -556,7 +569,9 @@ impl AstToIrConverter {
     ) -> Result<Option<usize>> {
         let span = self.ast_span_to_ir_span(ast_span);
         // Function scope для корректной регистрации переменных (видны во всём теле функции)
-        let body_scope = self.symbol_table.create_scope_with_kind(self.current_scope, ScopeKind::Function);
+        let body_scope = self
+            .symbol_table
+            .create_scope_with_kind(self.current_scope, ScopeKind::Function);
 
         // Phase 3: Parameter.type_hint теперь Option<TypeResolution>
         let params_vec: Vec<Parameter> = params
@@ -622,7 +637,9 @@ impl AstToIrConverter {
     ) -> Result<Option<usize>> {
         let span = self.ast_span_to_ir_span(ast_span);
         // Function scope для корректной регистрации переменных (видны во всём теле процедуры)
-        let body_scope = self.symbol_table.create_scope_with_kind(self.current_scope, ScopeKind::Function);
+        let body_scope = self
+            .symbol_table
+            .create_scope_with_kind(self.current_scope, ScopeKind::Function);
 
         // Phase 3: Parameter.type_hint теперь Option<TypeResolution>
         let params_vec: Vec<Parameter> = params

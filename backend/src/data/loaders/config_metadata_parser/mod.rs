@@ -21,10 +21,10 @@ pub mod types;
 
 // Re-export публичного API
 pub use discovery::ConfigurationDiscovery;
+pub use form_parser::FormParser;
+pub use form_types::{FormAttribute, FormElementBinding, FormEvent, FormMetadata, TypeDescription};
 pub use parser::UniversalMetadataParser;
 pub use types::{
     AttributeInfo, ConfigurationInfo, ConfigurationType, ExecutionContext, TabularSectionInfo,
     UniversalMetadataObject,
 };
-pub use form_parser::FormParser;
-pub use form_types::{FormAttribute, FormElementBinding, FormEvent, FormMetadata, TypeDescription};

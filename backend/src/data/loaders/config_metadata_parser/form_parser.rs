@@ -56,7 +56,7 @@ impl FormParser {
         // Form.xml находится в Ext/Form.xml
         // Module.bsl находится в Ext/Form/Module.bsl
         let module_path = form_xml_path
-            .parent()  // Получаем Ext/
+            .parent() // Получаем Ext/
             .map(|ext_dir| ext_dir.join("Form").join("Module.bsl"));
 
         // Парсим Module.bsl для определения ExecutionContext (если есть)
@@ -195,10 +195,7 @@ impl FormParser {
                         in_data_path = false;
                     } else if child_items_depth > 0 {
                         // Если закрывается элемент, который мы добавляли в stack
-                        let should_pop = stack
-                            .last()
-                            .map(|n| n.kind == tag_name)
-                            .unwrap_or(false);
+                        let should_pop = stack.last().map(|n| n.kind == tag_name).unwrap_or(false);
                         if should_pop {
                             let node = stack.pop().expect("checked above");
                             if let Some(parent) = stack.last_mut() {
@@ -267,7 +264,11 @@ impl FormParser {
                                 current_attr_id = value.parse().unwrap_or(0);
                             }
                         }
-                        trace!("    → Found attribute: {} (id={})", current_attr_name, current_attr_id);
+                        trace!(
+                            "    → Found attribute: {} (id={})",
+                            current_attr_name,
+                            current_attr_id
+                        );
                     } else if in_attribute && tag_name == "Type" {
                         in_type_tag = true;
                         trace!("      → Entered <Type>");
@@ -373,7 +374,8 @@ impl FormParser {
                         for attr in e.attributes().flatten() {
                             let key = String::from_utf8_lossy(attr.key.as_ref());
                             if key == "name" {
-                                current_event_name = String::from_utf8_lossy(&attr.value).to_string();
+                                current_event_name =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                                 trace!("    → Event: {}", current_event_name);
                             }
                         }
@@ -497,8 +499,8 @@ mod tests {
 
     #[test]
     fn test_parse_module_contexts_server_only() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "&НаСервере").unwrap();
@@ -513,8 +515,8 @@ mod tests {
 
     #[test]
     fn test_parse_module_contexts_no_directives() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "Процедура Тест()").unwrap();

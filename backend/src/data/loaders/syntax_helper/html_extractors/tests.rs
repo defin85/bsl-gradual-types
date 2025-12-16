@@ -201,21 +201,34 @@ fn test_extract_parameters_find_by_code_with_header_placeholder() {
     let params = extractor.extract_parameters(&document);
 
     // Должно быть 2 параметра (Код, ПоискПоПолномуКоду), а НЕ 3 или больше
-    assert_eq!(params.len(), 2, "Должно быть 2 параметра, placeholder 'Имя справочника' не должен парситься как параметр");
+    assert_eq!(
+        params.len(),
+        2,
+        "Должно быть 2 параметра, placeholder 'Имя справочника' не должен парситься как параметр"
+    );
 
     // Первый параметр: Код (обязательный) с union типом
-    assert_eq!(params[0].name, "Код", "Первый параметр должен быть 'Код', а не 'Имя справочника'");
+    assert_eq!(
+        params[0].name, "Код",
+        "Первый параметр должен быть 'Код', а не 'Имя справочника'"
+    );
     assert_eq!(
         params[0].type_name,
         Some("Число | Строка".to_string()),
         "Тип должен быть union 'Число | Строка'"
     );
-    assert!(!params[0].is_optional, "Параметр 'Код' должен быть обязательным");
+    assert!(
+        !params[0].is_optional,
+        "Параметр 'Код' должен быть обязательным"
+    );
 
     // Второй параметр: ПоискПоПолномуКоду (необязательный)
     assert_eq!(params[1].name, "ПоискПоПолномуКоду");
     assert_eq!(params[1].type_name, Some("Булево".to_string()));
-    assert!(params[1].is_optional, "Параметр 'ПоискПоПолномуКоду' должен быть необязательным");
+    assert!(
+        params[1].is_optional,
+        "Параметр 'ПоискПоПолномуКоду' должен быть необязательным"
+    );
 }
 
 /// Тест для проверки парсинга union типов
@@ -269,10 +282,7 @@ fn test_extract_return_info_faceted_type_with_placeholder() {
         Some("СправочникСсылка.<T> | Неопределено".to_string()),
         "Возвращаемый тип должен быть 'СправочникСсылка.<T> | Неопределено'"
     );
-    assert!(
-        return_desc.is_some(),
-        "Описание должно быть извлечено"
-    );
+    assert!(return_desc.is_some(), "Описание должно быть извлечено");
 }
 
 /// Тест парсинга простого union типа
@@ -295,10 +305,7 @@ fn test_extract_return_info_simple_union() {
         Some("Число | Строка".to_string()),
         "Возвращаемый тип должен быть union 'Число | Строка'"
     );
-    assert_eq!(
-        return_desc,
-        Some("Описание результата.".to_string())
-    );
+    assert_eq!(return_desc, Some("Описание результата.".to_string()));
 }
 
 /// Тест парсинга faceted типа для документа
@@ -331,10 +338,18 @@ fn test_parse_type_fragments() {
     let fragments = TypeParser::parse_type_fragments(type_line);
 
     // Должны быть: TypeName("СправочникСсылка."), GenericOpen, TypeName("Имя справочника"), GenericClose
-    assert!(fragments.iter().any(|f| matches!(f, TypeFragment::TypeName(s) if s == "СправочникСсылка.")));
-    assert!(fragments.iter().any(|f| matches!(f, TypeFragment::GenericOpen)));
-    assert!(fragments.iter().any(|f| matches!(f, TypeFragment::TypeName(s) if s == "Имя справочника")));
-    assert!(fragments.iter().any(|f| matches!(f, TypeFragment::GenericClose)));
+    assert!(fragments
+        .iter()
+        .any(|f| matches!(f, TypeFragment::TypeName(s) if s == "СправочникСсылка.")));
+    assert!(fragments
+        .iter()
+        .any(|f| matches!(f, TypeFragment::GenericOpen)));
+    assert!(fragments
+        .iter()
+        .any(|f| matches!(f, TypeFragment::TypeName(s) if s == "Имя справочника")));
+    assert!(fragments
+        .iter()
+        .any(|f| matches!(f, TypeFragment::GenericClose)));
 }
 
 /// Тест сборки типов из фрагментов (делегирован в TypeParser)
@@ -359,7 +374,10 @@ fn test_assemble_types() {
         TypeFragment::TypeName("Имя справочника".to_string()),
         TypeFragment::GenericClose,
     ];
-    assert_eq!(TypeParser::assemble_types(&fragments), "СправочникСсылка.<T>");
+    assert_eq!(
+        TypeParser::assemble_types(&fragments),
+        "СправочникСсылка.<T>"
+    );
 
     // Тест faceted + union
     let fragments = vec![
@@ -428,18 +446,31 @@ fn test_find_by_code_real_html() {
     assert!(!params.is_empty(), "Параметры должны быть найдены");
 
     // Проверяем первый параметр: Код (union Число | Строка)
-    let code_param = params.iter().find(|p| p.name == "Код")
+    let code_param = params
+        .iter()
+        .find(|p| p.name == "Код")
         .expect("Параметр 'Код' должен быть найден");
-    assert_eq!(code_param.type_name, Some("Число | Строка".to_string()),
-        "Тип 'Код' должен быть union 'Число | Строка'");
+    assert_eq!(
+        code_param.type_name,
+        Some("Число | Строка".to_string()),
+        "Тип 'Код' должен быть union 'Число | Строка'"
+    );
     assert!(!code_param.is_optional, "'Код' должен быть обязательным");
 
     // Проверяем второй параметр: ПоискПоПолномуКоду (Булево, необязательный)
-    let search_param = params.iter().find(|p| p.name == "ПоискПоПолномуКоду")
+    let search_param = params
+        .iter()
+        .find(|p| p.name == "ПоискПоПолномуКоду")
         .expect("Параметр 'ПоискПоПолномуКоду' должен быть найден");
-    assert_eq!(search_param.type_name, Some("Булево".to_string()),
-        "Тип 'ПоискПоПолномуКоду' должен быть 'Булево'");
-    assert!(search_param.is_optional, "'ПоискПоПолномуКоду' должен быть необязательным");
+    assert_eq!(
+        search_param.type_name,
+        Some("Булево".to_string()),
+        "Тип 'ПоискПоПолномуКоду' должен быть 'Булево'"
+    );
+    assert!(
+        search_param.is_optional,
+        "'ПоискПоПолномуКоду' должен быть необязательным"
+    );
 
     // ТЕСТ 2: Возвращаемый тип
     let (return_type, return_desc) = extractor.extract_return_info(&document);
@@ -478,8 +509,14 @@ fn test_extract_return_info_empty_section() {
     let extractor = HtmlExtractor::new();
     let (return_type, return_desc) = extractor.extract_return_info(&document);
 
-    assert_eq!(return_type, None, "Возвращаемый тип должен быть None для отсутствующей секции");
-    assert_eq!(return_desc, None, "Описание должно быть None для отсутствующей секции");
+    assert_eq!(
+        return_type, None,
+        "Возвращаемый тип должен быть None для отсутствующей секции"
+    );
+    assert_eq!(
+        return_desc, None,
+        "Описание должно быть None для отсутствующей секции"
+    );
 }
 
 /// Edge case: Пустой return_type (нет типа после "Тип:")
@@ -501,7 +538,10 @@ fn test_extract_return_info_empty_type() {
 
     // Когда нет типа на строке "Тип:", parse_type_fragments не находит фрагменты
     // и возвращает пустой вектор, что приводит к None в assemble_types
-    assert_eq!(return_type, None, "Возвращаемый тип должен быть None для пустого типа");
+    assert_eq!(
+        return_type, None,
+        "Возвращаемый тип должен быть None для пустого типа"
+    );
     // Описание может быть None если нет контента после <br>
     // или может содержать "Описание без типа." в зависимости от парсинга
 }
@@ -643,13 +683,25 @@ fn test_extract_method_overloads_tabular_section_unload() {
 
     // overload 1: Выгрузить(<Строки?: Массив>, <Колонки?: Строка>)
     assert_eq!(overloads[0].parameters.len(), 2);
-    assert_eq!(overloads[0].parameters[0].type_name.as_deref(), Some("Массив"));
-    assert_eq!(overloads[0].parameters[1].type_name.as_deref(), Some("Строка"));
+    assert_eq!(
+        overloads[0].parameters[0].type_name.as_deref(),
+        Some("Массив")
+    );
+    assert_eq!(
+        overloads[0].parameters[1].type_name.as_deref(),
+        Some("Строка")
+    );
 
     // overload 2: Выгрузить(<ПараметрыОтбора?: Структура>, <Колонки?: Строка>)
     assert_eq!(overloads[1].parameters.len(), 2);
-    assert_eq!(overloads[1].parameters[0].type_name.as_deref(), Some("Структура"));
-    assert_eq!(overloads[1].parameters[1].type_name.as_deref(), Some("Строка"));
+    assert_eq!(
+        overloads[1].parameters[0].type_name.as_deref(),
+        Some("Структура")
+    );
+    assert_eq!(
+        overloads[1].parameters[1].type_name.as_deref(),
+        Some("Строка")
+    );
 }
 
 #[test]
@@ -657,8 +709,7 @@ fn test_extract_property_type_value_table_columns() {
     let html_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("examples/syntax_helper/rebuilt.shcntx_ru/objects/catalog234/catalog236/ValueTable/properties/Columns1030.html");
-    let content =
-        std::fs::read_to_string(&html_path).expect("failed to read Columns1030.html");
+    let content = std::fs::read_to_string(&html_path).expect("failed to read Columns1030.html");
     let document = Html::parse_document(&content);
 
     let extractor = HtmlExtractor::new();
@@ -692,8 +743,8 @@ fn test_extract_collection_element_russian_marker() {
 
 #[test]
 fn test_extract_collection_element_real_form_data_collection() {
-    use std::path::Path;
     use scraper::Html;
+    use std::path::Path;
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let html_path = root.join(
@@ -730,8 +781,8 @@ fn test_extract_collection_element_english_marker() {
 
 #[test]
 fn test_extract_collection_element_real_form_items_is_heterogeneous() {
-    use std::path::Path;
     use scraper::Html;
+    use std::path::Path;
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let html_path = root.join(
@@ -750,8 +801,8 @@ fn test_extract_collection_element_real_form_items_is_heterogeneous() {
 
 #[test]
 fn test_mass_validate_collection_item_extraction_on_examples_db() {
-    use std::path::{Path, PathBuf};
     use scraper::Html;
+    use std::path::{Path, PathBuf};
 
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -869,7 +920,8 @@ fn test_mass_validate_collection_item_extraction_on_examples_db() {
         single_expected
     );
     assert_eq!(
-        single_ok, single_expected,
+        single_ok,
+        single_expected,
         "Не все single-item коллекции извлеклись корректно. Примеры: {:?}",
         failures.into_iter().take(10).collect::<Vec<_>>()
     );

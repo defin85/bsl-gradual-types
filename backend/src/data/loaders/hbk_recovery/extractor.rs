@@ -34,8 +34,8 @@ pub fn extract_valid_zip(
         .context("Не удалось переместиться к offset")?;
 
     // Создаём выходной файл
-    let mut output_file = File::create(output_path)
-        .context(format!("Не удалось создать файл: {:?}", output_path))?;
+    let mut output_file =
+        File::create(output_path).context(format!("Не удалось создать файл: {:?}", output_path))?;
 
     // Копируем данные
     let bytes_copied =
@@ -75,8 +75,7 @@ where
         .context(format!("Не удалось создать директорию: {:?}", target_dir))?;
 
     // Открываем ZIP архив
-    let file =
-        File::open(zip_path).context(format!("Не удалось открыть ZIP: {:?}", zip_path))?;
+    let file = File::open(zip_path).context(format!("Не удалось открыть ZIP: {:?}", zip_path))?;
 
     let mut archive = zip::ZipArchive::new(file).context("Не удалось прочитать ZIP архив")?;
 

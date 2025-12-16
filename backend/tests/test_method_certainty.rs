@@ -36,7 +36,9 @@ fn test_method_return_certainty() {
 Результат = М.Количество();
 "#;
 
-    let program = parser.parse_to_ir(code, "test.bsl").expect("parse_to_ir failed");
+    let program = parser
+        .parse_to_ir(code, "test.bsl")
+        .expect("parse_to_ir failed");
     let dto = program.to_dto(false, false);
 
     let rezultat = dto
@@ -49,14 +51,11 @@ fn test_method_return_certainty() {
         .expect("Результат has no type");
 
     assert_eq!(
-        type_res.certainty,
-        "Known",
+        type_res.certainty, "Known",
         "Method return should have Known certainty"
     );
     assert_eq!(
-        type_res.certainty_percent,
-        100,
+        type_res.certainty_percent, 100,
         "Known certainty should be 100%"
     );
 }
-

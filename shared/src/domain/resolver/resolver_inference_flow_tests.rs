@@ -64,4 +64,3 @@ fn test_metadata_lookup_methods_chain_works_with_type_id_normalization() {
         "Ожидали метод ТабличнаяЧасть.Выгрузить из встроенных сигнатур"
     );
 }
-

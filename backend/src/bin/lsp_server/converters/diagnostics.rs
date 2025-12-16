@@ -5,8 +5,8 @@
 
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
-use bsl_shared::domain::types::{ErrorType, ParseError, TypeDiagnostic};
 use bsl_shared::domain::types::DiagnosticSeverity as SharedSeverity;
+use bsl_shared::domain::types::{ErrorType, ParseError, TypeDiagnostic};
 
 /// Convert syntax errors to LSP Diagnostics (Milestone 2.18)
 ///

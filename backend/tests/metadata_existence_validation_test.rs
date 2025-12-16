@@ -24,7 +24,10 @@ mod metadata_existence_validation_tests {
     fn test_levenshtein_detects_russian_typos() {
         // Common 1C metadata typo: "Контрагенты" vs "Контрогенты" (а -> о)
         let distance = levenshtein_distance("Контрагенты", "Контрогенты");
-        assert_eq!(distance, 1, "Single character difference should have distance 1");
+        assert_eq!(
+            distance, 1,
+            "Single character difference should have distance 1"
+        );
 
         // Missing character: "Контрагенты" vs "Контрагены"
         let distance = levenshtein_distance("Контрагенты", "Контрагены");
@@ -40,15 +43,24 @@ mod metadata_existence_validation_tests {
     fn test_similarity_scoring_for_suggestions() {
         // Perfect match
         let sim = similarity("Контрагенты", "Контрагенты");
-        assert!((sim - 1.0).abs() < 0.001, "Identical strings should have similarity 1.0");
+        assert!(
+            (sim - 1.0).abs() < 0.001,
+            "Identical strings should have similarity 1.0"
+        );
 
         // One character difference in 11-char string
         let sim = similarity("Контрагенты", "Контрогенты");
-        assert!(sim > 0.9 && sim < 1.0, "Single typo should have high similarity");
+        assert!(
+            sim > 0.9 && sim < 1.0,
+            "Single typo should have high similarity"
+        );
 
         // Completely different
         let sim = similarity("Контрагенты", "АбсолютноДругое");
-        assert!(sim < 0.5, "Completely different strings should have low similarity");
+        assert!(
+            sim < 0.5,
+            "Completely different strings should have low similarity"
+        );
     }
 
     /// Test 3: MetadataLookup.exists_metadata_object without configuration
@@ -60,7 +72,10 @@ mod metadata_existence_validation_tests {
         let lookup = TypeMetadataLookup::new(repository.clone());
 
         // Verify configuration is NOT loaded
-        assert!(!lookup.is_configuration_loaded(), "Configuration should NOT be loaded");
+        assert!(
+            !lookup.is_configuration_loaded(),
+            "Configuration should NOT be loaded"
+        );
 
         // Try to check configuration metadata (should return false gracefully)
         let exists = lookup.exists_metadata_object(MetadataKind::Catalog, "Контрагенты");
@@ -117,7 +132,10 @@ mod metadata_existence_validation_tests {
 
         // Methods should be empty
         let methods = lookup.get_methods(&resolution);
-        assert!(methods.is_empty(), "Should return empty methods for unknown object");
+        assert!(
+            methods.is_empty(),
+            "Should return empty methods for unknown object"
+        );
     }
 
     /// Test 6: MetadataLookup provides API for validators
@@ -163,8 +181,8 @@ mod metadata_existence_validation_tests {
     /// Test 8: Validators module has UnknownMetadataObject error variant
     #[test]
     fn test_validators_have_unknown_metadata_object_error() {
-        use bsl_shared::domain::validators::TypeErrorKind;
         use bsl_shared::domain::types::MetadataKind;
+        use bsl_shared::domain::validators::TypeErrorKind;
 
         // Create an UnknownMetadataObject error
         let error = TypeErrorKind::UnknownMetadataObject {

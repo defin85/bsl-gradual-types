@@ -55,15 +55,18 @@ pub async fn handle_hover(
 
     if let Some(service) = type_service {
         match service
-            .get_hover_info(file_content, position.line, position.character, Some(hover_config))
+            .get_hover_info(
+                file_content,
+                position.line,
+                position.character,
+                Some(hover_config),
+            )
             .await
         {
-            Ok(hover_info) => {
-                hover_info.map(|info| Hover {
-                        contents: HoverContents::Scalar(MarkedString::String(info)),
-                        range: None,
-                    })
-            }
+            Ok(hover_info) => hover_info.map(|info| Hover {
+                contents: HoverContents::Scalar(MarkedString::String(info)),
+                range: None,
+            }),
             Err(e) => {
                 error!("Failed to get hover info: {}", e);
                 None

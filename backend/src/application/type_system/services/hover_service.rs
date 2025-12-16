@@ -8,7 +8,7 @@ use tracing::{debug, info, warn};
 use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::engine::AnalysisEngine;
-use bsl_shared::ir::{SemanticProgram, ScopeId, SemanticNodeKind};
+use bsl_shared::ir::{ScopeId, SemanticNodeKind, SemanticProgram};
 use bsl_shared::utils::hash::hash_content;
 
 use crate::application::ast_to_ir::AstToIrConverter;
@@ -61,10 +61,7 @@ pub async fn get_hover_info(
     let (ir_program, cache_hit, parse_time) =
         if let Some(cached_ir) = ir_cache.get(content_hash).await {
             let hit_time = start.elapsed();
-            info!(
-                "IR cache HIT in {:?} for hash {}",
-                hit_time, content_hash
-            );
+            info!("IR cache HIT in {:?} for hash {}", hit_time, content_hash);
             (cached_ir, true, std::time::Duration::ZERO)
         } else {
             let parse_start = std::time::Instant::now();
@@ -122,16 +119,20 @@ pub async fn get_hover_info(
         } = &node.kind
         {
             if access_kind.is_property() {
-                if let Some(word_under_cursor) = extract_word_at_position(file_content, line, column)
+                if let Some(word_under_cursor) =
+                    extract_word_at_position(file_content, line, column)
                 {
                     if word_under_cursor.eq_ignore_ascii_case(member_name) {
                         let resolver = analysis_engine.get_resolver();
 
                         // 1) Тип объекта-владельца (flow-sensitive, если объект - переменная)
                         let owner_resolution = if let Some(obj_name) = object_name.as_deref() {
-                            if let Some(flow_type) =
-                                find_variable_type_at_position(&ir_program, obj_name, node.scope_id, line)
-                            {
+                            if let Some(flow_type) = find_variable_type_at_position(
+                                &ir_program,
+                                obj_name,
+                                node.scope_id,
+                                line,
+                            ) {
                                 flow_type
                             } else {
                                 resolver.resolve_variable_with_context(
@@ -192,7 +193,9 @@ pub async fn get_hover_info(
         {
             info!(
                 "Flow-sensitive type for '{}' at line {}: {}",
-                var_name, line, flow_type.type_name()
+                var_name,
+                line,
+                flow_type.type_name()
             );
             flow_type
         } else {
@@ -224,15 +227,24 @@ pub async fn get_hover_info(
                 line, column, node.span
             );
             debug!("Found node: {:?} at span {:?}", node.kind, node.span);
-            Some(format_semantic_node_info(node, file_content, metadata_lookup))
+            Some(format_semantic_node_info(
+                node,
+                file_content,
+                metadata_lookup,
+            ))
         } else {
             // Milestone 2.11 Task B1: Warning when node not found
             warn!("No node found at position {}:{} in IR", line, column);
 
             // Fallback 2: old logic by variable name (without AST, since IR cache is used now)
-            if let Some(symbol_info) =
-                extract_enhanced_symbol_info(analysis_engine, metadata_lookup, file_content, line, column, None)
-            {
+            if let Some(symbol_info) = extract_enhanced_symbol_info(
+                analysis_engine,
+                metadata_lookup,
+                file_content,
+                line,
+                column,
+                None,
+            ) {
                 debug!("Fallback: using extract_enhanced_symbol_info");
                 Some(symbol_info)
             } else {
@@ -258,11 +270,7 @@ pub async fn get_hover_info(
         let hit_rate = ir_cache.get_hit_rate().await;
         info!(
             "IR Cache stats after {} hovers: hit_rate={:.1}%, hits={}, misses={}, evictions={}",
-            current_count,
-            hit_rate,
-            stats.hits,
-            stats.misses,
-            stats.evictions
+            current_count, hit_rate, stats.hits, stats.misses, stats.evictions
         );
     }
 
@@ -350,7 +358,9 @@ pub async fn get_type_at_position(
             } => {
                 // Phase 3: type_hint is now Option<TypeResolution>
                 let resolver = analysis_engine.get_resolver();
-                return Ok(Some(resolver.resolve_expression_sync(&resolution.type_name())));
+                return Ok(Some(
+                    resolver.resolve_expression_sync(&resolution.type_name()),
+                ));
             }
             SemanticNodeKind::FunctionCall {
                 object_type: Some(type_resolution),
@@ -358,12 +368,16 @@ pub async fn get_type_at_position(
             } => {
                 // Phase 3: object_type is now Option<TypeResolution>
                 let resolver = analysis_engine.get_resolver();
-                return Ok(Some(resolver.resolve_expression_sync(&type_resolution.type_name())));
+                return Ok(Some(
+                    resolver.resolve_expression_sync(&type_resolution.type_name()),
+                ));
             }
             SemanticNodeKind::MemberAccess { object_type, .. } => {
                 // Phase 3: object_type is now TypeResolution
                 let resolver = analysis_engine.get_resolver();
-                return Ok(Some(resolver.resolve_expression_sync(&object_type.type_name())));
+                return Ok(Some(
+                    resolver.resolve_expression_sync(&object_type.type_name()),
+                ));
             }
             SemanticNodeKind::NewExpression { type_name, .. } => {
                 let resolver = analysis_engine.get_resolver();
@@ -434,9 +448,11 @@ fn find_variable_type_at_position(
 
         match &node.kind {
             // Variable assignment
-            SemanticNodeKind::Assignment { variable, value_type, .. }
-                if variable.eq_ignore_ascii_case(var_name) && node.span.start_line <= line =>
-            {
+            SemanticNodeKind::Assignment {
+                variable,
+                value_type,
+                ..
+            } if variable.eq_ignore_ascii_case(var_name) && node.span.start_line <= line => {
                 assignments.push((node.span.start_line, value_type.clone()));
             }
             // Declaration with initialization
@@ -490,8 +506,8 @@ fn extract_enhanced_symbol_info(
     column: u32,
     parse_result: Option<&crate::parsing::Program>,
 ) -> Option<String> {
-    use crate::parsing::bsl::ast::{Expression, Statement};
     use super::super::extractors::type_extractor::expression_to_type_name;
+    use crate::parsing::bsl::ast::{Expression, Statement};
 
     // Step 1: Extract word under cursor
     let word_under_cursor = extract_word_at_position(file_content, line, column)?;
@@ -522,7 +538,12 @@ fn extract_enhanced_symbol_info(
                         }
                     }
                 }
-                Statement::FunctionDecl { name, params, compiler_directive, .. } if name == &word_under_cursor => {
+                Statement::FunctionDecl {
+                    name,
+                    params,
+                    compiler_directive,
+                    ..
+                } if name == &word_under_cursor => {
                     let directive_str = match compiler_directive {
                         Some(d) => format!("\n\n*Директива:* {:?}", d),
                         None => String::new(),
@@ -535,7 +556,12 @@ fn extract_enhanced_symbol_info(
                         directive_str
                     ));
                 }
-                Statement::ProcedureDecl { name, params, compiler_directive, .. } if name == &word_under_cursor => {
+                Statement::ProcedureDecl {
+                    name,
+                    params,
+                    compiler_directive,
+                    ..
+                } if name == &word_under_cursor => {
                     let directive_str = match compiler_directive {
                         Some(d) => format!("\n\n*Директива:* {:?}", d),
                         None => String::new(),

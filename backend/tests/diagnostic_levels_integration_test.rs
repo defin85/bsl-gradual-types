@@ -203,7 +203,8 @@ mod diagnostic_levels_integration_tests {
             variable_name: None,
         };
 
-        let detailed = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Detailed);
+        let detailed =
+            error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Detailed);
 
         // Detailed должна просто работать, fallback к Brief + подсказка
         assert!(detailed.message.contains("'Строка'"));
@@ -247,7 +248,10 @@ mod diagnostic_levels_integration_tests {
         assert_eq!(detailed.end_line, 10);
         assert_eq!(detailed.end_column, 35);
 
-        println!("✅ Span preserved: line {}, col {}-{}", compact.line, compact.column, compact.end_column);
+        println!(
+            "✅ Span preserved: line {}, col {}-{}",
+            compact.line, compact.column, compact.end_column
+        );
     }
 
     // ===== Test 3.6: Severity level consistency =====
@@ -319,7 +323,10 @@ mod diagnostic_levels_integration_tests {
         println!("Detailed length: {}", detailed.message.len());
 
         // Generally, detailed should be longest
-        assert!(detailed.message.len() > full.message.len(), "Detailed should have hints");
+        assert!(
+            detailed.message.len() > full.message.len(),
+            "Detailed should have hints"
+        );
         // Full should be >= Compact
         assert!(full.message.len() >= compact.message.len());
 
@@ -359,7 +366,8 @@ mod diagnostic_levels_integration_tests {
             let diagnostic = error.to_diagnostic_with_detail(span, DetailLevel::Detailed);
 
             // Check for Cyrillic characters
-            let has_cyrillic = diagnostic.message
+            let has_cyrillic = diagnostic
+                .message
                 .chars()
                 .any(|c| c as u32 >= 0x0400 && c as u32 <= 0x04FF);
 

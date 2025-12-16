@@ -2,9 +2,9 @@
 
 use scraper::{Html, Selector};
 
-use super::title_extractor::TitleExtractor;
 use super::super::type_parser::TypeParser;
 use super::super::types::CodeExample;
+use super::title_extractor::TitleExtractor;
 
 /// Экстрактор описаний и метаданных
 pub struct DescriptionExtractor;

@@ -102,7 +102,7 @@ impl TypeResolver {
         raw_type: &crate::domain::types::RawTypeData,
     ) -> TypeResolution {
         use crate::domain::metadata_constants::get_base_type_info;
-        use crate::domain::types::{ConfigurationType, ConcreteType, PlatformType};
+        use crate::domain::types::{ConcreteType, ConfigurationType, PlatformType};
 
         // Проверяем, является ли это конфигурационным типом (Справочники.X, Документы.X)
         if let Some(dot_pos) = raw_type.name.find('.') {
@@ -111,15 +111,14 @@ impl TypeResolver {
 
             // Если prefix — коллекция метаданных, создаём ConfigurationType
             if let Some((metadata_kind, facet)) = get_base_type_info(prefix) {
-                let mut resolution = TypeResolution::known(ConcreteType::Configuration(
-                    ConfigurationType {
+                let mut resolution =
+                    TypeResolution::known(ConcreteType::Configuration(ConfigurationType {
                         kind: metadata_kind,
                         name: object_name.to_string(),
                         facet: Some(facet),
                         attributes: vec![],
                         tabular_sections: vec![],
-                    },
-                ));
+                    }));
                 resolution.available_facets = raw_type.facets.clone();
                 resolution.active_facet = Some(facet);
                 return resolution;

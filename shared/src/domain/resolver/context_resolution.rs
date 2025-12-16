@@ -44,7 +44,11 @@ impl TypeResolver {
                         "  -> Generic: base={}, params={:?}",
                         gen.base_type, type_params
                     );
-                    return self.resolve_generic_from_hint(&gen.base_type, &type_params, resolution.certainty);
+                    return self.resolve_generic_from_hint(
+                        &gen.base_type,
+                        &type_params,
+                        resolution.certainty,
+                    );
                 }
                 _ => {
                     let type_name = resolution.type_name();

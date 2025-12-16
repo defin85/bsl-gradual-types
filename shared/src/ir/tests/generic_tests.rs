@@ -146,12 +146,9 @@ fn test_generic_scope_hierarchy() {
     );
 
     // Обновляем параметр в child scope
-    program.symbols.update_generic_param(
-        child_scope,
-        "МассивВОтпроцедуре",
-        0,
-        "Число".to_string(),
-    );
+    program
+        .symbols
+        .update_generic_param(child_scope, "МассивВОтпроцедуре", 0, "Число".to_string());
 
     // Проверяем видимость из child scope
     let resolution = program

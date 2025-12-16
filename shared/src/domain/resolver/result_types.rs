@@ -62,7 +62,10 @@ pub enum ValidationResultV2 {
     /// Функция/метод не найдены
     NotFound,
     /// Отсутствует обязательный параметр
-    MissingRequiredParam { param_name: String, param_index: usize },
+    MissingRequiredParam {
+        param_name: String,
+        param_index: usize,
+    },
     /// Слишком много аргументов
     TooManyArgs { expected: usize, actual: usize },
     /// Несоответствие типов аргумента (с детальной причиной)

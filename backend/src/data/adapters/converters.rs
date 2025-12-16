@@ -72,7 +72,11 @@ fn derive_collection_item_type(
 
     let rt = method_info.return_type.clone()?;
     let rt = rt.trim();
-    if rt.is_empty() || rt == "T" || rt == "Произвольный" || rt == "Неопределено" || rt.contains(',')
+    if rt.is_empty()
+        || rt == "T"
+        || rt == "Произвольный"
+        || rt == "Неопределено"
+        || rt.contains(',')
     {
         return None;
     }
@@ -164,7 +168,7 @@ fn convert_type_info_to_raw(
                                 is_constructor: method_info.name.starts_with("Новый")
                                     || method_info.name.starts_with("New"),
                                 context_requirements: None, // TODO: Извлечь из Syntax Helper
-                                return_facet: None, // TODO: Извлечь из Syntax Helper
+                                return_facet: None,         // TODO: Извлечь из Syntax Helper
                             }
                         })
                         .collect::<Vec<_>>();
@@ -192,7 +196,7 @@ fn convert_type_info_to_raw(
                     is_constructor: method_info.name.starts_with("Новый")
                         || method_info.name.starts_with("New"),
                     context_requirements: None, // TODO: Извлечь из Syntax Helper
-                    return_facet: None, // TODO: Извлечь из Syntax Helper
+                    return_facet: None,         // TODO: Извлечь из Syntax Helper
                 }]
             } else {
                 warn!(
@@ -273,10 +277,10 @@ pub fn convert_resolutions_to_raw(_resolutions: &[TypeResolution]) -> Vec<RawTyp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::loaders::syntax_helper::{DocumentParser, SyntaxHelperDatabase, SyntaxNode};
     use crate::data::loaders::syntax_helper::types::{
         MethodInfo, TypeDocumentation, TypeIdentity, TypeInfo, TypeMetadata, TypeStructure,
     };
+    use crate::data::loaders::syntax_helper::{DocumentParser, SyntaxHelperDatabase, SyntaxNode};
     use scraper::Html;
     use std::path::Path;
 

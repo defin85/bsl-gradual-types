@@ -15,34 +15,34 @@ pub enum TypeErrorKind {
         param_index: usize,
         expected: String,
         actual: String,
-        variable_name: Option<String>,      // MILESTONE 3.6 Phase 3: переменная объекта
+        variable_name: Option<String>, // MILESTONE 3.6 Phase 3: переменная объекта
         param_variable_name: Option<String>, // MILESTONE 3.6 Phase 3: переменная параметра
     },
     /// Обращение к несуществующему свойству объекта
     NonExistentProperty {
         object_type: String,
         property_name: String,
-        variable_name: Option<String>,  // MILESTONE 3.6 Phase 3: имя переменной
+        variable_name: Option<String>, // MILESTONE 3.6 Phase 3: имя переменной
     },
     /// Обращение к несуществующему методу объекта
     NonExistentMethod {
         object_type: String,
         method_name: String,
-        variable_name: Option<String>,  // MILESTONE 3.6 Phase 3: имя переменной
+        variable_name: Option<String>, // MILESTONE 3.6 Phase 3: имя переменной
     },
     /// Обработка простого типа как коллекции
     SimpleTypeAsCollection {
         type_name: String,
         operation: String,
-        variable_name: Option<String>,  // MILESTONE 3.6 Phase 3: имя переменной
+        variable_name: Option<String>, // MILESTONE 3.6 Phase 3: имя переменной
     },
     /// Метод недоступен в текущем контексте выполнения (MILESTONE 3.11 Phase 3)
     MethodNotAvailableInContext {
         method_name: String,
         object_type: String,
         variable_name: Option<String>,
-        current_context: CompilerDirective,      // Type-safe context (OnClient, OnServer, etc.)
-        required_context: ContextRequirements,   // Type-safe requirements (ServerOnly, Universal, etc.)
+        current_context: CompilerDirective, // Type-safe context (OnClient, OnServer, etc.)
+        required_context: ContextRequirements, // Type-safe requirements (ServerOnly, Universal, etc.)
     },
     /// Обращение к несуществующему объекту метаданных (MILESTONE 3.16)
     UnknownMetadataObject {
@@ -82,5 +82,13 @@ pub enum TypeErrorKind {
     UninitializedVariableUsage {
         /// Имя переменной
         variable_name: String,
+    },
+
+    /// Явно указанный тип не найден в репозитории
+    UnknownType {
+        /// Имя типа
+        type_name: String,
+        /// Имя переменной (если доступно)
+        variable_name: Option<String>,
     },
 }

@@ -63,7 +63,9 @@ impl FlowContext {
     /// Получить тип переменной в текущей точке (удобный метод)
     /// Phase 4: Извлекает resolution из VariableState
     pub fn get_variable_type(&self, name: &str) -> Option<&TypeResolution> {
-        self.variable_states.get(name).map(|state| &state.resolution)
+        self.variable_states
+            .get(name)
+            .map(|state| &state.resolution)
     }
 
     /// Проверить, инициализирована ли переменная
@@ -130,7 +132,13 @@ pub trait SemanticVisitor {
 
     /// Посетить присваивание
     /// Phase 3: value_type теперь TypeResolution
-    fn visit_assignment(&mut self, _variable: &str, _value_type: &TypeResolution, _value_node: Option<usize>, _context: &mut FlowContext) {
+    fn visit_assignment(
+        &mut self,
+        _variable: &str,
+        _value_type: &TypeResolution,
+        _value_node: Option<usize>,
+        _context: &mut FlowContext,
+    ) {
         // Default implementation
     }
 
@@ -211,7 +219,10 @@ fn walk_node<V: SemanticVisitor>(
     // Затем обрабатываем специфичные типы узлов
     match &node.kind {
         SemanticNodeKind::VariableDeclaration {
-            name, type_hint, initial_value_type, ..
+            name,
+            type_hint,
+            initial_value_type,
+            ..
         } => {
             visitor.visit_variable_declaration(name, type_hint, context);
 

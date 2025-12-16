@@ -67,4 +67,28 @@ pub struct FormMetadata {
 
     /// Контексты выполнения кода в модуле формы
     pub execution_contexts: Vec<ExecutionContext>,
+
+    /// Элементы формы (UI) и их привязки к данным через DataPath
+    ///
+    /// Парсится из секции `<ChildItems>` в `Form.xml`.
+    pub elements: Vec<FormElementBinding>,
+}
+
+/// Привязка UI-элемента формы к данным (DataPath) + дерево элементов
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FormElementBinding {
+    /// Вид элемента (имя XML-тега: InputField, Table, Page, ...)
+    pub kind: String,
+
+    /// Имя элемента (атрибут `name`), если есть
+    pub name: Option<String>,
+
+    /// ID элемента (атрибут `id`), если есть
+    pub id: Option<i32>,
+
+    /// Привязка к данным формы (внутренний тег `<DataPath>`), если есть
+    pub data_path: Option<String>,
+
+    /// Дочерние элементы (вложенные `<ChildItems>`)
+    pub children: Vec<FormElementBinding>,
 }

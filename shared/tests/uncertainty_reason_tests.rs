@@ -55,6 +55,7 @@ fn create_document_type(name: &str) -> RawTypeData {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     }
 }

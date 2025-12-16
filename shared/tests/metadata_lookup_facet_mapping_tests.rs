@@ -64,6 +64,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     });
 
@@ -105,6 +106,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     });
 
@@ -133,6 +135,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     });
 
@@ -161,6 +164,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     });
 
@@ -189,6 +193,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     });
 
@@ -232,6 +237,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     });
 
@@ -260,6 +266,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     });
 
@@ -301,6 +308,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     });
 
@@ -329,6 +337,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     });
 
@@ -357,6 +366,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     });
 

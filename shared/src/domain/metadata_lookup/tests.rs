@@ -52,11 +52,67 @@ fn create_test_repository() -> Arc<InMemoryTypeRepository> {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
     repo.load_types(vec![array_type]).unwrap();
     repo
+}
+
+#[test]
+fn test_generic_collection_item_type_parameterized_in_return_type() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![RawTypeData {
+        name: "ДанныеФормыКоллекция".to_string(),
+        english_name: "DataFormCollection".to_string(),
+        description: "".to_string(),
+        category: "Platform".to_string(),
+        source: RawDataSource::Platform,
+        methods: vec![RawMethodData {
+            name: "Получить".to_string(),
+            english_name: "Get".to_string(),
+            return_type: "ДанныеФормыЭлементКоллекции".to_string(),
+            params: vec![RawParamData {
+                name: "Индекс".to_string(),
+                param_type: "Число".to_string(),
+                is_optional: false,
+                default_value: None,
+            }],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+            context_requirements: None,
+            return_facet: None,
+        }],
+        properties: vec![],
+        facets: vec![FacetKind::Collection],
+        kind: None,
+        attributes: vec![],
+        tabular_sections: vec![],
+        enum_values: vec![],
+        generic_info: None,
+        collection_item_type: Some("ДанныеФормыЭлементКоллекции".to_string()),
+        module_paths: None,
+    }])
+    .unwrap();
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let methods = lookup.get_methods_for_generic(&GenericType {
+        base_type: "ДанныеФормыКоллекция".to_string(),
+        type_params: vec![ConcreteType::Platform(PlatformType {
+            name: "СтрокаРаботы".to_string(),
+        })],
+    });
+
+    let get = methods
+        .iter()
+        .find(|m| m.name == "Получить")
+        .expect("Should have method Получить");
+    assert_eq!(
+        get.return_type,
+        "ДанныеФормыЭлементКоллекции<СтрокаРаботы>"
+    );
 }
 
 fn create_test_resolution(type_name: &str) -> TypeResolution {
@@ -216,6 +272,7 @@ fn create_test_repository_with_generic_types() -> Arc<InMemoryTypeRepository> {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -386,6 +443,7 @@ fn create_test_repository_with_config_types() -> Arc<InMemoryTypeRepository> {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -403,6 +461,7 @@ fn create_test_repository_with_config_types() -> Arc<InMemoryTypeRepository> {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -420,6 +479,7 @@ fn create_test_repository_with_config_types() -> Arc<InMemoryTypeRepository> {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -438,6 +498,7 @@ fn create_test_repository_with_config_types() -> Arc<InMemoryTypeRepository> {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -585,6 +646,7 @@ fn test_get_methods_prefers_signature_index() {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -670,6 +732,7 @@ fn test_get_methods_fallback_to_raw_when_no_signature_index() {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -730,6 +793,7 @@ fn create_test_repository_with_tabular_sections() -> Arc<InMemoryTypeRepository>
         ],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 

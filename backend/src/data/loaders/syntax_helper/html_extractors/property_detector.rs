@@ -91,8 +91,80 @@ impl PropertyDetector {
     }
 
     /// Извлекает тип элемента коллекции
-    pub fn extract_collection_element(_document: &Html) -> Option<String> {
-        // TODO: Implement collection element extraction
+    pub fn extract_collection_element(document: &Html) -> Option<String> {
+        // В реальном Syntax Helper часто встречается строка вида:
+        // "Элементы коллекции: <Type>" или "Collection elements: <Type>"
+        //
+        // Извлекаем из plain text, чтобы не зависеть от разметки (p/a/br и т.п.).
+        //
+        // В rebuilt.shcntx_ru это часто выглядит так:
+        // <p class="V8SH_chapter">Элементы коллекции:</p>
+        // <a>ДанныеФормыЭлементКоллекции</a><br>
+        let raw_text = document.root_element().text().collect::<Vec<_>>().join(" ");
+        let normalized = raw_text.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        let candidates = [
+            "Элементы коллекции:",
+            "Элементы коллекции",
+            "Collection elements:",
+            "Collection elements",
+        ];
+
+        for marker in candidates {
+            if let Some(pos) = normalized.find(marker) {
+                let mut rest = normalized[pos + marker.len()..].trim();
+                if rest.starts_with(':') {
+                    rest = rest[1..].trim();
+                }
+
+                if rest.is_empty() {
+                    continue;
+                }
+
+                // Ограничиваем сегмент списком типов до описательного блока ("Для объекта ...").
+                // Это снижает риск захвата служебного текста.
+                let end_markers = ["Для объекта", "For object", "For the object"];
+                let mut segment = rest;
+                for end_marker in end_markers {
+                    if let Some(end_pos) = segment.find(end_marker) {
+                        segment = segment[..end_pos].trim();
+                    }
+                }
+
+                // В некоторых типах элементы коллекции перечислены несколькими типами (гетерогенная коллекция),
+                // например: "ГруппаФормы, ДекорацияФормы, ..."
+                // Для таких случаев НЕ возвращаем один конкретный тип (чтобы не вводить в заблуждение).
+                let mut found: Vec<String> = Vec::new();
+                for part in segment.split(',') {
+                    let part = part.trim();
+                    if part.is_empty() {
+                        continue;
+                    }
+                    // Берём первый токен из части.
+                    let token_end = part
+                        .find(|c: char| c.is_whitespace() || c == '(')
+                        .unwrap_or(part.len());
+                    let mut token = part[..token_end].trim().to_string();
+                    while token.ends_with(['.', ',', ';', ':']) {
+                        token.pop();
+                    }
+                    if token.is_empty() {
+                        continue;
+                    }
+                    if !found.contains(&token) {
+                        found.push(token);
+                    }
+                }
+
+                if found.len() == 1 {
+                    return Some(found.remove(0));
+                }
+
+                // 0 — не смогли извлечь; >1 — гетерогенная коллекция (возвращаем None).
+                return None;
+            }
+        }
+
         None
     }
 

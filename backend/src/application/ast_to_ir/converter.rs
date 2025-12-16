@@ -14,8 +14,12 @@ use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
+use bsl_shared::domain::{CodeLocation, ModuleType};
+use bsl_shared::domain::types::MetadataKind;
+use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::ir::*;
 use bsl_shared::utils::hash::hash_content;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::parsing::bsl::ast::{Program, Statement};
@@ -122,6 +126,9 @@ impl AstToIrConverter {
     ) -> Result<SemanticProgram> {
         let mut converter = Self::new(source.clone(), repository, signature_index, resolver);
 
+        // Milestone: инжект контекста модуля (FormModule) в SymbolTable
+        converter.seed_module_context(&file_path);
+
         // Проход 1: Сбор глобальных функций/процедур
         for statement in &ast.statements {
             converter.collect_global_symbols(statement)?;
@@ -145,6 +152,69 @@ impl AstToIrConverter {
             },
             cfg,
         })
+    }
+
+    fn seed_module_context(&mut self, file_path: &str) {
+        let path = Path::new(file_path);
+        let Ok(location) = CodeLocation::determine_from_path(path) else {
+            return;
+        };
+
+        let ModuleType::FormModule { form_name, owner_type } = location.module_type else {
+            return;
+        };
+
+        let Some((xml_kind, object_name)) = owner_type.split_once('.') else {
+            return;
+        };
+
+        let Some(kind) = MetadataKind::from_xml_tag(xml_kind) else {
+            return;
+        };
+
+        let collection = kind.display_name();
+
+        let form_type_name = format!("Формы.{}.{}.{}", collection, object_name, form_name);
+        let form_object_type_name = format!("ДанныеФормыОбъект.{}.{}", collection, object_name);
+        let elements_type_name = format!("ЭлементыФормы.{}.{}.{}", collection, object_name, form_name);
+
+        let span = Span::stub();
+        let root = self.symbol_table.root_scope;
+
+        // Базовые implicit символы модуля формы
+        self.symbol_table.register_variable(
+            root,
+            "Объект".to_string(),
+            TypeResolution::explicit(&form_object_type_name),
+            span,
+        );
+        self.symbol_table.register_variable(
+            root,
+            "Элементы".to_string(),
+            TypeResolution::explicit(&elements_type_name),
+            span,
+        );
+        self.symbol_table.register_variable(
+            root,
+            "ЭтаФорма".to_string(),
+            TypeResolution::explicit(&form_type_name),
+            span,
+        );
+
+        // Реквизиты формы (из синтетического типа `Формы.*`)
+        if let Some(form_type) = self.repository.find_type(&form_type_name) {
+            for prop in form_type.properties {
+                if prop.name == "Объект" || prop.name == "Элементы" || prop.prop_type.is_empty() {
+                    continue;
+                }
+                self.symbol_table.register_variable(
+                    root,
+                    prop.name,
+                    TypeResolution::explicit(&prop.prop_type),
+                    span,
+                );
+            }
+        }
     }
 
     /// Сбор глобальных символов (функции, процедуры)

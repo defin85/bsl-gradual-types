@@ -120,6 +120,7 @@ impl CodeLocation {
     /// - `Catalogs/ИмяОбъекта/Ext/ObjectModule.bsl` → ObjectModule
     /// - `Catalogs/ИмяОбъекта/Ext/ManagerModule.bsl` → ManagerModule
     /// - `Documents/ИмяОбъекта/Forms/ИмяФормы/Ext/Module.bsl` → FormModule
+    /// - `Documents/ИмяОбъекта/Forms/ИмяФормы/Ext/Form/Module.bsl` → FormModule
     /// - `InformationRegisters/ИмяРегистра/Ext/RecordSetModule.bsl` → RecordSetModule
     ///
     /// # Examples
@@ -149,7 +150,7 @@ impl CodeLocation {
             return Self::parse_manager_module_path(path);
         }
 
-        // FormModule: */Forms/*/Ext/Module.bsl
+        // FormModule: */Forms/*/Ext/Module.bsl (или */Forms/*/Ext/Form/Module.bsl)
         if path_str.contains("Forms") && path_str.ends_with("Module.bsl") {
             return Self::parse_form_module_path(path);
         }
@@ -229,15 +230,20 @@ impl CodeLocation {
 
     /// Парсинг пути к модулю формы
     ///
-    /// Путь: `Catalogs/Контрагенты/Forms/ФормаЭлемента/Ext/Module.bsl`
+    /// Путь:
+    /// - `Catalogs/Контрагенты/Forms/ФормаЭлемента/Ext/Module.bsl`
+    /// - `Catalogs/Контрагенты/Forms/ФормаЭлемента/Ext/Form/Module.bsl`
     fn parse_form_module_path(path: &Path) -> Result<Self> {
         let components: Vec<_> = path.components().collect();
 
-        // Извлекаем имя формы (компонент перед "Ext")
-        let form_name = components
+        // Извлекаем имя формы: следующий компонент после "Forms"
+        let forms_index = components
             .iter()
-            .rev()
-            .nth(2) // Пропускаем "Ext" и "Module.bsl"
+            .position(|c| c.as_os_str().to_str() == Some("Forms"))
+            .ok_or_else(|| anyhow!("Cannot find 'Forms' in path: {:?}", path))?;
+
+        let form_name = components
+            .get(forms_index + 1)
             .and_then(|c| c.as_os_str().to_str())
             .ok_or_else(|| anyhow!("Cannot extract form name from path: {:?}", path))?;
 

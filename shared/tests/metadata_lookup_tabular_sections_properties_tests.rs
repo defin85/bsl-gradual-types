@@ -82,6 +82,7 @@ fn create_test_repository_with_tabular_sections_and_properties() -> Arc<InMemory
         ],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -111,6 +112,7 @@ fn create_test_repository_with_tabular_sections_and_properties() -> Arc<InMemory
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -132,6 +134,7 @@ fn create_test_repository_with_tabular_sections_and_properties() -> Arc<InMemory
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -149,6 +152,7 @@ fn create_test_repository_with_tabular_sections_and_properties() -> Arc<InMemory
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -469,6 +473,7 @@ fn test_document_without_tabular_sections_still_works() {
         tabular_sections: vec![], // Пустой список табличных частей
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -486,6 +491,7 @@ fn test_document_without_tabular_sections_still_works() {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 

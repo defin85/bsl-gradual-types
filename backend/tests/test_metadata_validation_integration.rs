@@ -37,6 +37,7 @@ fn create_repository_with_config() -> Arc<InMemoryTypeRepository> {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 
@@ -55,6 +56,7 @@ fn create_repository_with_config() -> Arc<InMemoryTypeRepository> {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 

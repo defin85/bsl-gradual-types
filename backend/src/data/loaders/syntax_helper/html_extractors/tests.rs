@@ -669,3 +669,208 @@ fn test_extract_property_type_value_table_columns() {
         "ValueTable.Columns should be typed as ValueTableColumnCollection"
     );
 }
+
+#[test]
+fn test_extract_collection_element_russian_marker() {
+    use scraper::Html;
+
+    let html = r##"
+        <html><body>
+            <div>Элементы коллекции: <a href="#">ДанныеФормыЭлементКоллекции</a>.</div>
+        </body></html>
+    "##;
+    let document = Html::parse_document(html);
+
+    let extractor = HtmlExtractor::new();
+    let element_type = extractor.extract_collection_element(&document);
+    assert_eq!(
+        element_type.as_deref(),
+        Some("ДанныеФормыЭлементКоллекции"),
+        "Должны извлечь тип элемента коллекции из текста"
+    );
+}
+
+#[test]
+fn test_extract_collection_element_real_form_data_collection() {
+    use std::path::Path;
+    use scraper::Html;
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let html_path = root.join(
+        "examples/syntax_helper/rebuilt.shcntx_ru/objects/catalog1649/catalog1614/FormDataCollection.html",
+    );
+    let content =
+        std::fs::read_to_string(html_path).expect("failed to read FormDataCollection.html");
+    let document = Html::parse_document(&content);
+
+    let extractor = HtmlExtractor::new();
+    let element_type = extractor.extract_collection_element(&document);
+    assert_eq!(
+        element_type.as_deref(),
+        Some("ДанныеФормыЭлементКоллекции"),
+        "Должны извлечь тип элемента коллекции для ДанныеФормыКоллекция из реального HTML"
+    );
+}
+
+#[test]
+fn test_extract_collection_element_english_marker() {
+    use scraper::Html;
+
+    let html = r##"
+        <html><body>
+            <div>Collection elements: <a href="#">ValueTableRow</a></div>
+        </body></html>
+    "##;
+    let document = Html::parse_document(html);
+
+    let extractor = HtmlExtractor::new();
+    let element_type = extractor.extract_collection_element(&document);
+    assert_eq!(element_type.as_deref(), Some("ValueTableRow"));
+}
+
+#[test]
+fn test_extract_collection_element_real_form_items_is_heterogeneous() {
+    use std::path::Path;
+    use scraper::Html;
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let html_path = root.join(
+        "examples/syntax_helper/rebuilt.shcntx_ru/objects/catalog1649/catalog1890/FormItems.html",
+    );
+    let content = std::fs::read_to_string(html_path).expect("failed to read FormItems.html");
+    let document = Html::parse_document(&content);
+
+    let extractor = HtmlExtractor::new();
+    let element_type = extractor.extract_collection_element(&document);
+    assert!(
+        element_type.is_none(),
+        "ЭлементыФормы — гетерогенная коллекция, не должны возвращать один item type"
+    );
+}
+
+#[test]
+fn test_mass_validate_collection_item_extraction_on_examples_db() {
+    use std::path::{Path, PathBuf};
+    use scraper::Html;
+
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().and_then(|s| s.to_str()) == Some("html") {
+                out.push(p);
+            }
+        }
+    }
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let objects_dir = root.join("examples/syntax_helper/rebuilt.shcntx_ru/objects");
+
+    let marker_ru = "Элементы коллекции:".as_bytes();
+    let marker_en = "Collection elements:".as_bytes();
+
+    let mut html_files = Vec::new();
+    walk(&objects_dir, &mut html_files);
+
+    let extractor = HtmlExtractor::new();
+    let mut total_marked = 0usize;
+    let mut single_expected = 0usize;
+    let mut single_ok = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+
+    fn extract_items_segment<'a>(text: &'a str) -> Option<&'a str> {
+        let markers = [
+            "Элементы коллекции:",
+            "Элементы коллекции",
+            "Collection elements:",
+            "Collection elements",
+        ];
+        let mut rest: Option<&str> = None;
+        for m in markers {
+            if let Some(pos) = text.find(m) {
+                rest = Some(text[pos + m.len()..].trim_start());
+                break;
+            }
+        }
+        let mut rest = rest?;
+        if rest.starts_with(':') {
+            rest = rest[1..].trim_start();
+        }
+        let end_markers = ["Для объекта", "For object", "For the object"];
+        for end in end_markers {
+            if let Some(p) = rest.find(end) {
+                rest = rest[..p].trim_end();
+            }
+        }
+        if rest.is_empty() {
+            None
+        } else {
+            Some(rest)
+        }
+    }
+
+    for path in html_files {
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        if !(bytes.windows(marker_ru.len()).any(|w| w == marker_ru)
+            || bytes.windows(marker_en.len()).any(|w| w == marker_en))
+        {
+            continue;
+        }
+        total_marked += 1;
+
+        let content = String::from_utf8_lossy(&bytes);
+        let segment = extract_items_segment(&content);
+        let is_multi = segment.map(|s| s.contains(',')).unwrap_or(false);
+
+        if !is_multi {
+            single_expected += 1;
+        }
+
+        let document = Html::parse_document(&content);
+        let item = extractor.extract_collection_element(&document);
+
+        if is_multi {
+            // Гетерогенная коллекция: допускаем None.
+            continue;
+        }
+
+        if let Some(item) = item {
+            if item.chars().any(|c| c.is_whitespace()) {
+                failures.push(format!(
+                    "{} => extracted item type contains whitespace: '{}'",
+                    path.display(),
+                    item
+                ));
+            } else {
+                single_ok += 1;
+            }
+        } else {
+            failures.push(format!(
+                "{} => expected single item type, got None",
+                path.display()
+            ));
+        }
+    }
+
+    assert!(
+        total_marked >= 100,
+        "Ожидаем заметное количество типов с 'Элементы коллекции', найдено {}",
+        total_marked
+    );
+    assert!(
+        single_expected >= 20,
+        "Ожидаем заметное количество типов с одним item type, найдено {}",
+        single_expected
+    );
+    assert_eq!(
+        single_ok, single_expected,
+        "Не все single-item коллекции извлеклись корректно. Примеры: {:?}",
+        failures.into_iter().take(10).collect::<Vec<_>>()
+    );
+}

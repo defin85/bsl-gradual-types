@@ -22,11 +22,14 @@ impl TypeMetadataLookup {
         );
 
         // 1. Получаем методы базового типа (например, "ТабличнаяЧасть")
-        let base_methods = self
-            .repository
-            .find_type(&generic_type.base_type)
+        let base_raw = self.repository.find_type(&generic_type.base_type);
+        let base_methods = base_raw
+            .as_ref()
             .map(|raw| raw.methods.clone())
             .unwrap_or_default();
+        let collection_item_type = base_raw
+            .as_ref()
+            .and_then(|raw| raw.collection_item_type.clone());
 
         tracing::trace!("  Найдено {} методов базового типа", base_methods.len());
 
@@ -52,6 +55,15 @@ impl TypeMetadataLookup {
                             method.name,
                             param_type_name
                         );
+                    }
+
+                    // Доп. правило: если возвращается "элемент коллекции" без параметра,
+                    // параметризуем его: ItemType -> ItemType<T>
+                    if let Some(ref item_type) = collection_item_type {
+                        if method.return_type == *item_type {
+                            method.return_type =
+                                format!("{}<{}>", item_type, param_type_name);
+                        }
                     }
 
                     // Подменяем "T" в типах параметров

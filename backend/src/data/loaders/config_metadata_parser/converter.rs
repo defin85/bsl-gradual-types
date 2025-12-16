@@ -8,6 +8,59 @@ use bsl_shared::domain::types::{
 };
 
 impl UniversalMetadataObject {
+    /// Конвертирует UniversalMetadataObject в набор RawTypeData, включая синтетические типы форм
+    ///
+    /// Возвращает:
+    /// - основной тип объекта метаданных (как `to_raw_type_data`)
+    /// - (если есть формы) дополнительные типы:
+    ///   - `ДанныеФормыОбъект.<Коллекция>.<Объект>`
+    ///   - `Формы.<Коллекция>.<Объект>.<Форма>` для каждой формы
+    ///   - `ЭлементыФормы.<Коллекция>.<Объект>.<Форма>` для каждой формы
+    ///   - типы строк табличных частей (`Строка<ИмяТЧ>`) для табличных частей объекта
+    pub fn to_raw_type_data_with_forms(&self, prefix: Option<&str>) -> Vec<RawTypeData> {
+        let mut out = Vec::new();
+        out.push(self.to_raw_type_data(prefix));
+
+        let Some(kind) = self.object_type else {
+            return out;
+        };
+
+        if self.forms.is_empty() {
+            return out;
+        }
+
+        let collection = kind.display_name();
+        let object_name = Self::apply_prefix(prefix, &self.name);
+
+        // Тип строк табличных частей: "Строка<ИмяТЧ>"
+        for ts in &self.tabular_sections {
+            out.push(Self::build_tabular_row_type(ts, "Число"));
+        }
+
+        // Тип данных формы объекта: "ДанныеФормыОбъект.<Коллекция>.<Объект>"
+        let form_object_type_name = format!("ДанныеФормыОбъект.{}.{}", collection, object_name);
+        out.push(self.build_form_object_type(&form_object_type_name));
+
+        // Типы формы и контейнера элементов — по каждой форме
+        for form in &self.forms {
+            let form_type_name =
+                format!("Формы.{}.{}.{}", collection, object_name, form.name);
+            out.push(self.build_form_type(
+                &form_type_name,
+                &form_object_type_name,
+                &object_name,
+                collection,
+                form,
+            ));
+
+            let elements_type_name =
+                format!("ЭлементыФормы.{}.{}.{}", collection, object_name, form.name);
+            out.push(Self::build_form_elements_container_type(&elements_type_name, form));
+        }
+
+        out
+    }
+
     /// Конвертирует UniversalMetadataObject в RawTypeData для загрузки в TypeRepository
     ///
     /// Создаёт полное имя типа (например, "Справочники.Контрагенты")
@@ -44,6 +97,7 @@ impl UniversalMetadataObject {
             tabular_sections: self.convert_tabular_sections(),
             enum_values: Vec::new(), // Для перечислений будет заполнено отдельно
             generic_info: None,      // Конфигурационные типы не имеют Generic метаданных (пока)
+            collection_item_type: None,
             module_paths,            // Milestone 3.14: пути к модулям для Go To Definition
         }
     }
@@ -143,6 +197,230 @@ impl UniversalMetadataObject {
                     .collect(),
             })
             .collect()
+    }
+
+    fn build_form_object_type(&self, type_name: &str) -> RawTypeData {
+        let mut properties: Vec<bsl_shared::domain::types::RawPropertyData> = Vec::new();
+
+        // Реквизиты объекта метаданных
+        for attr in &self.attributes {
+            properties.push(bsl_shared::domain::types::RawPropertyData {
+                name: attr.name.clone(),
+                prop_type: attr.type_name.clone(),
+                is_readonly: false,
+            });
+        }
+
+        // Табличные части (как ДанныеФормыКоллекция<Строка...>)
+        for ts in &self.tabular_sections {
+            let row_type = format!("Строка{}", ts.name);
+            properties.push(bsl_shared::domain::types::RawPropertyData {
+                name: ts.name.clone(),
+                prop_type: format!("ДанныеФормыКоллекция<{}>", row_type),
+                is_readonly: false,
+            });
+        }
+
+        RawTypeData {
+            name: type_name.to_string(),
+            english_name: type_name.to_string(),
+            description: String::new(),
+            category: "ДанныеФормы".to_string(),
+            source: RawDataSource::Configuration,
+            methods: Vec::new(),
+            properties,
+            facets: Vec::new(),
+            kind: None,
+            attributes: self.convert_attributes(),
+            tabular_sections: Vec::new(),
+            enum_values: Vec::new(),
+            generic_info: None,
+            collection_item_type: None,
+            module_paths: None,
+        }
+    }
+
+    fn build_form_type(
+        &self,
+        type_name: &str,
+        form_object_type_name: &str,
+        object_name: &str,
+        collection: &str,
+        form: &super::form_types::FormMetadata,
+    ) -> RawTypeData {
+        let mut properties: Vec<bsl_shared::domain::types::RawPropertyData> = Vec::new();
+
+        // "Объект" в модуле формы — это данные формы, а не ДокументОбъект.*
+        properties.push(bsl_shared::domain::types::RawPropertyData {
+            name: "Объект".to_string(),
+            prop_type: form_object_type_name.to_string(),
+            is_readonly: false,
+        });
+
+        // Привязанные реквизиты формы по DataPath: Объект.<ТЧ> где имя элемента совпадает с именем ТЧ
+        for ts in &self.tabular_sections {
+            let has_binding = Self::form_has_direct_object_binding(form, &ts.name);
+            if !has_binding {
+                continue;
+            }
+
+            properties.push(bsl_shared::domain::types::RawPropertyData {
+                name: ts.name.clone(),
+                prop_type: format!("ДанныеФормыКоллекция<Строка{}>", ts.name),
+                is_readonly: false,
+            });
+        }
+
+        RawTypeData {
+            name: type_name.to_string(),
+            english_name: type_name.to_string(),
+            description: String::new(),
+            category: format!("Формы.{}.{}", collection, object_name),
+            source: RawDataSource::Configuration,
+            methods: Vec::new(),
+            properties,
+            facets: Vec::new(),
+            kind: None,
+            attributes: Vec::new(),
+            tabular_sections: Vec::new(),
+            enum_values: Vec::new(),
+            generic_info: None,
+            collection_item_type: None,
+            module_paths: None,
+        }
+    }
+
+    fn form_has_direct_object_binding(form: &super::form_types::FormMetadata, name: &str) -> bool {
+        fn walk(nodes: &[super::form_types::FormElementBinding], name: &str) -> bool {
+            let expected = format!("Объект.{}", name);
+            for n in nodes {
+                let is_match =
+                    n.name.as_deref() == Some(name) && n.data_path.as_deref() == Some(expected.as_str());
+                if is_match {
+                    return true;
+                }
+                if walk(&n.children, name) {
+                    return true;
+                }
+            }
+            false
+        }
+
+        walk(&form.elements, name)
+    }
+
+    fn build_tabular_row_type(
+        ts: &super::types::TabularSectionInfo,
+        line_number_type: &str,
+    ) -> RawTypeData {
+        let mut attributes: Vec<RawAttributeData> = ts
+            .attributes
+            .iter()
+            .map(|a| RawAttributeData {
+                name: a.name.clone(),
+                attr_type: a.type_name.clone(),
+            })
+            .collect();
+
+        // В форме 1С есть системное поле LineNumber (минимально необходимое)
+        attributes.push(RawAttributeData {
+            name: "LineNumber".to_string(),
+            attr_type: line_number_type.to_string(),
+        });
+
+        let type_name = format!("Строка{}", ts.name);
+
+        RawTypeData {
+            name: type_name.clone(),
+            english_name: type_name.clone(),
+            description: String::new(),
+            category: "СтрокиТабличныхЧастей".to_string(),
+            source: RawDataSource::Configuration,
+            methods: Vec::new(),
+            properties: attributes
+                .iter()
+                .map(|a| bsl_shared::domain::types::RawPropertyData {
+                    name: a.name.clone(),
+                    prop_type: a.attr_type.clone(),
+                    is_readonly: false,
+                })
+                .collect(),
+            facets: Vec::new(),
+            kind: None,
+            attributes,
+            tabular_sections: Vec::new(),
+            enum_values: Vec::new(),
+            generic_info: None,
+            collection_item_type: None,
+            module_paths: None,
+        }
+    }
+
+    fn build_form_elements_container_type(
+        type_name: &str,
+        form: &super::form_types::FormMetadata,
+    ) -> RawTypeData {
+        // Важно: коллекция `Элементы` в модуле формы соответствует платформенному типу
+        // `ЭлементыФормы (FormItems)`, где элементы коллекции гетерогенны
+        // (ГруппаФормы/ДекорацияФормы/КнопкаФормы/ПолеФормы/ТаблицаФормы).
+        //
+        // Поэтому:
+        // - type container `ЭлементыФормы.*` — это record с properties по именам элементов формы;
+        // - для каждого элемента задаём UI-тип из ограниченного набора FormItems.
+        // - вспомогательные сущности, которые в XML тоже имеют `name` (ContextMenu, ExtendedTooltip,
+        //   AutoCommandBar и т.п.), НЕ добавляем в `Элементы.*`, чтобы не подменять реальные form items.
+        fn ui_type_from_kind(kind: &str) -> Option<&'static str> {
+            match kind {
+                // Таблица формы
+                "Table" => Some("ТаблицаФормы"),
+
+                // Поля формы (в т.ч. колонки таблиц)
+                "InputField" | "LabelField" => Some("ПолеФормы"),
+
+                // Страницы в XML — это разновидность группировки элементов формы
+                "Pages" | "Page" => Some("ГруппаФормы"),
+
+                // TODO: расширять по мере необходимости (Button/Decoration/etc.)
+                _ => None,
+            }
+        }
+
+        fn collect_props(
+            props: &mut Vec<bsl_shared::domain::types::RawPropertyData>,
+            nodes: &[super::form_types::FormElementBinding],
+        ) {
+            for n in nodes {
+                if let (Some(ref name), Some(ui_type)) = (&n.name, ui_type_from_kind(&n.kind)) {
+                    props.push(bsl_shared::domain::types::RawPropertyData {
+                        name: name.clone(),
+                        prop_type: ui_type.to_string(),
+                        is_readonly: false,
+                    });
+                }
+                collect_props(props, &n.children);
+            }
+        }
+
+        let mut properties: Vec<bsl_shared::domain::types::RawPropertyData> = Vec::new();
+        collect_props(&mut properties, &form.elements);
+
+        RawTypeData {
+            name: type_name.to_string(),
+            english_name: type_name.to_string(),
+            description: String::new(),
+            category: "ЭлементыФормы".to_string(),
+            source: RawDataSource::Configuration,
+            methods: Vec::new(),
+            properties,
+            facets: Vec::new(),
+            kind: None,
+            attributes: Vec::new(),
+            tabular_sections: Vec::new(),
+            enum_values: Vec::new(),
+            generic_info: None,
+            collection_item_type: None,
+            module_paths: None,
+        }
     }
 }
 

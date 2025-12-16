@@ -101,6 +101,7 @@ mod detail_level_tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            collection_item_type: None,
             module_paths: None,
         };
 
@@ -150,6 +151,7 @@ mod detail_level_tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            collection_item_type: None,
             module_paths: None,
         };
 
@@ -365,6 +367,7 @@ mod detail_level_tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            collection_item_type: None,
             module_paths: None,
         };
 

@@ -48,6 +48,10 @@ impl FormParser {
         let events = Self::parse_events(&content)?;
         trace!("  ✅ Parsed {} events", events.len());
 
+        // Парсим UI элементы формы (ChildItems + DataPath)
+        let elements = Self::parse_child_items(&content)?;
+        trace!("  ✅ Parsed {} form elements", elements.len());
+
         // Определяем путь к Module.bsl
         // Form.xml находится в Ext/Form.xml
         // Module.bsl находится в Ext/Form/Module.bsl
@@ -74,7 +78,148 @@ impl FormParser {
             events,
             module_path,
             execution_contexts,
+            elements,
         })
+    }
+
+    /// Парсит секции `<ChildItems>` из Form.xml и извлекает дерево UI-элементов
+    ///
+    /// Извлекает:
+    /// - kind (имя тега)
+    /// - name/id (атрибуты)
+    /// - DataPath (вложенный тег)
+    /// - вложенные элементы из ChildItems
+    fn parse_child_items(content: &str) -> Result<Vec<FormElementBinding>> {
+        let mut reader = Reader::from_str(content);
+        reader.trim_text(true);
+
+        let mut buf = Vec::new();
+        let mut child_items_depth: usize = 0;
+
+        let mut roots: Vec<FormElementBinding> = Vec::new();
+        let mut stack: Vec<FormElementBinding> = Vec::new();
+
+        let mut in_data_path = false;
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+
+                    if tag_name == "ChildItems" {
+                        child_items_depth += 1;
+                    } else if child_items_depth > 0 {
+                        if tag_name == "DataPath" {
+                            in_data_path = true;
+                        } else {
+                            let mut name: Option<String> = None;
+                            let mut id: Option<i32> = None;
+
+                            for attr in e.attributes().flatten() {
+                                let key = String::from_utf8_lossy(attr.key.as_ref());
+                                let value = String::from_utf8_lossy(&attr.value);
+
+                                if key == "name" {
+                                    name = Some(value.to_string());
+                                } else if key == "id" {
+                                    id = value.parse::<i32>().ok();
+                                }
+                            }
+
+                            // В Roadmap: парсим любые элементы с name/id/DataPath.
+                            // DataPath узнаем позже, поэтому берём всё с name или id.
+                            if name.is_some() || id.is_some() {
+                                stack.push(FormElementBinding {
+                                    kind: tag_name,
+                                    name,
+                                    id,
+                                    data_path: None,
+                                    children: Vec::new(),
+                                });
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Empty(e)) => {
+                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    if child_items_depth == 0 || tag_name == "ChildItems" {
+                        // вне ChildItems — игнорируем
+                    } else {
+                        let mut name: Option<String> = None;
+                        let mut id: Option<i32> = None;
+
+                        for attr in e.attributes().flatten() {
+                            let key = String::from_utf8_lossy(attr.key.as_ref());
+                            let value = String::from_utf8_lossy(&attr.value);
+
+                            if key == "name" {
+                                name = Some(value.to_string());
+                            } else if key == "id" {
+                                id = value.parse::<i32>().ok();
+                            }
+                        }
+
+                        if name.is_some() || id.is_some() {
+                            let node = FormElementBinding {
+                                kind: tag_name,
+                                name,
+                                id,
+                                data_path: None,
+                                children: Vec::new(),
+                            };
+
+                            if let Some(parent) = stack.last_mut() {
+                                parent.children.push(node);
+                            } else {
+                                roots.push(node);
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Text(e)) => {
+                    if child_items_depth > 0 && in_data_path {
+                        let text = e.unescape()?.trim().to_string();
+                        if !text.is_empty() {
+                            if let Some(current) = stack.last_mut() {
+                                current.data_path = Some(text);
+                            }
+                        }
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+
+                    if tag_name == "ChildItems" {
+                        child_items_depth = child_items_depth.saturating_sub(1);
+                    } else if tag_name == "DataPath" {
+                        in_data_path = false;
+                    } else if child_items_depth > 0 {
+                        // Если закрывается элемент, который мы добавляли в stack
+                        let should_pop = stack
+                            .last()
+                            .map(|n| n.kind == tag_name)
+                            .unwrap_or(false);
+                        if should_pop {
+                            let node = stack.pop().expect("checked above");
+                            if let Some(parent) = stack.last_mut() {
+                                parent.children.push(node);
+                            } else {
+                                roots.push(node);
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(anyhow!("XML parsing error in ChildItems: {}", e));
+                }
+                _ => {}
+            }
+
+            buf.clear();
+        }
+
+        Ok(roots)
     }
 
     /// Парсит секцию `<Attributes>` из Form.xml

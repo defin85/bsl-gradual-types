@@ -330,6 +330,7 @@ fn test_handle_query_type_no_constructor_graceful() {
         tabular_sections: vec![],
         enum_values: vec![],
         generic_info: None,
+        collection_item_type: None,
         module_paths: None,
     };
 

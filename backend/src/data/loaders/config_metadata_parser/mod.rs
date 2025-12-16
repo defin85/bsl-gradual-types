@@ -27,4 +27,4 @@ pub use types::{
     UniversalMetadataObject,
 };
 pub use form_parser::FormParser;
-pub use form_types::{FormAttribute, FormEvent, FormMetadata, TypeDescription};
+pub use form_types::{FormAttribute, FormElementBinding, FormEvent, FormMetadata, TypeDescription};

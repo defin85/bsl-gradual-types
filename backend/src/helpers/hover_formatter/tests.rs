@@ -149,6 +149,7 @@ mod tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            collection_item_type: None,
             module_paths: None,
         };
 
@@ -185,6 +186,7 @@ mod tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            collection_item_type: None,
             module_paths: None,
         };
 
@@ -458,6 +460,7 @@ mod tests {
             tabular_sections: vec![],
             enum_values: vec![],
             generic_info: None,
+            collection_item_type: None,
             module_paths: None,
         };
         repo.load_types(vec![existing_catalog]).unwrap();
@@ -534,6 +537,7 @@ mod tests {
             ],
             enum_values: vec![],
             generic_info: None,
+            collection_item_type: None,
             module_paths: None,
         };
 

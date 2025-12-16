@@ -64,6 +64,12 @@ fn test_parse_document_form_from_real_example() {
         "Main attribute should have DocumentObject type, got: {:?}",
         main_attr.type_description.types
     );
+
+    // Проверяем, что UI элементы распарсены (ChildItems)
+    assert!(
+        !form.elements.is_empty(),
+        "Form should have UI elements parsed from ChildItems"
+    );
 }
 
 #[test]
@@ -222,6 +228,75 @@ fn test_form_metadata_integration_with_discovery() {
     assert_eq!(form.name, "ФормаДокумента");
     assert!(!form.attributes.is_empty(), "Form should have attributes");
     assert!(!form.events.is_empty(), "Form should have events");
+    assert!(!form.elements.is_empty(), "Form should have elements");
+}
+
+#[test]
+fn test_parse_form_tables_and_bindings_from_real_example() {
+    fn flatten<'a>(
+        acc: &mut Vec<&'a bsl_backend::data::loaders::config_metadata_parser::FormElementBinding>,
+        nodes: &'a [bsl_backend::data::loaders::config_metadata_parser::FormElementBinding],
+    ) {
+        for n in nodes {
+            acc.push(n);
+            flatten(acc, &n.children);
+        }
+    }
+
+    let form_xml = test_config_path()
+        .join("Documents")
+        .join("ЗаказНаряды")
+        .join("Forms")
+        .join("ФормаДокумента")
+        .join("Ext")
+        .join("Form.xml");
+
+    let form = FormParser::parse_form_xml(&form_xml, "Document.ЗаказНаряды", "ФормаДокумента")
+        .expect("Failed to parse form");
+
+    let mut all = Vec::new();
+    flatten(&mut all, &form.elements);
+
+    let works_table = all
+        .iter()
+        .find(|e| e.kind == "Table" && e.name.as_deref() == Some("Работы"))
+        .expect("Should find Table 'Работы'");
+    assert_eq!(
+        works_table.data_path.as_deref(),
+        Some("Объект.Работы"),
+        "Table 'Работы' should be bound to Объект.Работы"
+    );
+
+    let sides_table = all
+        .iter()
+        .find(|e| e.kind == "Table" && e.name.as_deref() == Some("Стороны"))
+        .expect("Should find Table 'Стороны'");
+    assert_eq!(
+        sides_table.data_path.as_deref(),
+        Some("Объект.Стороны"),
+        "Table 'Стороны' should be bound to Объект.Стороны"
+    );
+
+    // Колонки/дочерние элементы таблицы (ChildItems внутри Table) тоже должны иметь DataPath
+    let works_line_number = all
+        .iter()
+        .find(|e| e.kind == "LabelField" && e.name.as_deref() == Some("РаботыНомерСтроки"))
+        .expect("Should find LabelField 'РаботыНомерСтроки'");
+    assert_eq!(
+        works_line_number.data_path.as_deref(),
+        Some("Объект.Работы.LineNumber"),
+        "LabelField 'РаботыНомерСтроки' should be bound to Объект.Работы.LineNumber"
+    );
+
+    let works_work_kind = all
+        .iter()
+        .find(|e| e.kind == "InputField" && e.name.as_deref() == Some("РаботыВидРаботы"))
+        .expect("Should find InputField 'РаботыВидРаботы'");
+    assert_eq!(
+        works_work_kind.data_path.as_deref(),
+        Some("Объект.Работы.ВидРаботы"),
+        "InputField 'РаботыВидРаботы' should be bound to Объект.Работы.ВидРаботы"
+    );
 }
 
 #[test]
@@ -315,4 +390,96 @@ fn test_form_with_multiple_types() {
     assert!(attr.type_description.types.contains(&"String".to_string()));
     assert!(attr.type_description.types.contains(&"Number".to_string()));
     assert!(attr.type_description.types.contains(&"Boolean".to_string()));
+}
+
+#[test]
+fn test_form_synthetic_types_loaded_into_repository() {
+    use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+
+    let discovery = ConfigurationDiscovery::new(test_config_path(), false);
+    let configurations = discovery
+        .discover_all_configurations()
+        .expect("Failed to discover configurations");
+
+    let first_config = &configurations[0];
+    let metadata = discovery
+        .discover_metadata_in_configuration(first_config, None::<fn(_)>)
+        .expect("Failed to discover metadata");
+
+    let doc = metadata
+        .iter()
+        .find(|m| m.name == "ЗаказНаряды" && m.object_type_raw == "Document")
+        .expect("Should find Document.ЗаказНаряды");
+
+    let raw_types = doc.to_raw_type_data_with_forms(None);
+
+    let repo = InMemoryTypeRepository::new();
+    repo.load_types(raw_types).expect("Failed to load types");
+
+    let form_type = repo
+        .find_type("Формы.Документы.ЗаказНаряды.ФормаДокумента")
+        .expect("Form type should exist in repository");
+    let form_props: Vec<_> = form_type.properties.iter().map(|p| p.name.as_str()).collect();
+    assert!(form_props.contains(&"Объект"), "Form type should have property 'Объект'");
+    assert!(form_props.contains(&"Работы"), "Form type should have property 'Работы'");
+    assert!(form_props.contains(&"Стороны"), "Form type should have property 'Стороны'");
+
+    let form_object_type = repo
+        .find_type("ДанныеФормыОбъект.Документы.ЗаказНаряды")
+        .expect("Form object type should exist in repository");
+    let works = form_object_type
+        .properties
+        .iter()
+        .find(|p| p.name == "Работы")
+        .expect("Form object should have property 'Работы'");
+    assert_eq!(
+        works.prop_type,
+        "ДанныеФормыКоллекция<СтрокаРаботы>",
+        "Tabular section 'Работы' should be a data forms collection"
+    );
+
+    let row_type = repo
+        .find_type("СтрокаРаботы")
+        .expect("Row type should exist in repository");
+    assert!(
+        row_type.attributes.iter().any(|a| a.name == "LineNumber"),
+        "Row type should include system field LineNumber"
+    );
+
+    let form_elements_type = repo
+        .find_type("ЭлементыФормы.Документы.ЗаказНаряды.ФормаДокумента")
+        .expect("Form elements container type should exist in repository");
+
+    let works = form_elements_type
+        .properties
+        .iter()
+        .find(|p| p.name == "Работы")
+        .expect("Elements container should have 'Работы'");
+    assert_eq!(
+        works.prop_type,
+        "ТаблицаФормы",
+        "Элементы.Работы should be ТаблицаФормы"
+    );
+
+    let works_line_number = form_elements_type
+        .properties
+        .iter()
+        .find(|p| p.name == "РаботыНомерСтроки")
+        .expect("Elements container should have 'РаботыНомерСтроки'");
+    assert_eq!(
+        works_line_number.prop_type,
+        "ПолеФормы",
+        "Элементы.РаботыНомерСтроки should be ПолеФормы"
+    );
+
+    let works_work_kind = form_elements_type
+        .properties
+        .iter()
+        .find(|p| p.name == "РаботыВидРаботы")
+        .expect("Elements container should have 'РаботыВидРаботы'");
+    assert_eq!(
+        works_work_kind.prop_type,
+        "ПолеФормы",
+        "Элементы.РаботыВидРаботы should be ПолеФормы"
+    );
 }

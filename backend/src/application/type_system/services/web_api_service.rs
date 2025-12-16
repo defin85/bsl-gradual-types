@@ -56,10 +56,39 @@ pub async fn search_types_as_dto(
     let all_types = inference_service.get_all_platform_globals();
     let query_lower = query.to_lowercase();
 
-    let filtered_types: Vec<(&String, &TypeResolution)> = all_types
+    let mut filtered_types: Vec<(&String, &TypeResolution)> = all_types
         .iter()
         .filter(|(name, _)| name.to_lowercase().contains(&query_lower))
         .collect();
+
+    // Детерминированная сортировка + приоритет точного совпадения.
+    // Это важно, когда query — полное имя типа (например, "Документы.ЗаказНаряды"),
+    // но в репозитории присутствуют дополнительные синтетические типы, содержащие query как подстроку.
+    filtered_types.sort_by(|(a, _), (b, _)| {
+        let a_lower = a.to_lowercase();
+        let b_lower = b.to_lowercase();
+
+        let rank = |name: &str, name_lower: &str| -> u8 {
+            if name == query {
+                0
+            } else if name_lower == query_lower {
+                1
+            } else if name.starts_with(query) {
+                2
+            } else if name_lower.starts_with(&query_lower) {
+                3
+            } else if name_lower.ends_with(&format!(".{}", query_lower)) || name_lower.ends_with(&query_lower) {
+                4
+            } else {
+                5
+            }
+        };
+
+        rank(a.as_str(), &a_lower)
+            .cmp(&rank(b.as_str(), &b_lower))
+            .then_with(|| a_lower.len().cmp(&b_lower.len()))
+            .then_with(|| a_lower.cmp(&b_lower))
+    });
 
     // 2. Transform to DTO
     let type_dtos: Vec<TypeDto> = filtered_types

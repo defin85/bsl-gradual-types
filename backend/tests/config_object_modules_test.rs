@@ -133,6 +133,23 @@ fn test_code_location_form_module() {
 }
 
 #[test]
+fn test_code_location_form_module_with_ext_form_subdir() {
+    let path = PathBuf::from("Documents/ЗаказНаряды/Forms/ФормаДокумента/Ext/Form/Module.bsl");
+    let loc = CodeLocation::determine_from_path(&path).expect("Should parse path");
+
+    match loc.module_type {
+        ModuleType::FormModule {
+            ref form_name,
+            ref owner_type,
+        } => {
+            assert_eq!(form_name, "ФормаДокумента");
+            assert_eq!(owner_type, "Document.ЗаказНаряды");
+        }
+        _ => panic!("Expected FormModule"),
+    }
+}
+
+#[test]
 fn test_code_location_record_set_module() {
     let path = PathBuf::from("InformationRegisters/РегистрСведений/Ext/RecordSetModule.bsl");
     let loc = CodeLocation::determine_from_path(&path).expect("Should parse path");

@@ -86,6 +86,12 @@ pub struct RawTypeData {
     /// Generic metadata for collection types (Array<T>, Map<K,V>, etc.)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generic_info: Option<GenericInfo>,
+    /// Тип элемента коллекции (если применимо).
+    ///
+    /// Заполняется из Syntax Helper для типов-коллекций (например, `ДанныеФормыКоллекция`),
+    /// чтобы корректно параметризовать возвращаемые типы методов вида `Получить()`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection_item_type: Option<String>,
     /// Module paths for configuration types (Milestone 3.14)
     /// Used for Go To Definition navigation to ObjectModule.bsl, ManagerModule.bsl, etc.
     #[serde(default, skip_serializing_if = "Option::is_none")]

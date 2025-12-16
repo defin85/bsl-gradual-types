@@ -59,7 +59,7 @@ impl SystemCoordinator {
         // Конвертируем все объекты в RawTypeData
         let raw_types: Vec<RawTypeData> = metadata_objects
             .into_iter()
-            .map(|obj| obj.to_raw_type_data(None))
+            .flat_map(|obj| obj.to_raw_type_data_with_forms(None))
             .collect();
 
         let count = raw_types.len();
@@ -152,7 +152,7 @@ impl SystemCoordinator {
             let prefix = config_info.prefix.as_deref();
             let raw_types: Vec<RawTypeData> = metadata
                 .into_iter()
-                .map(|obj| obj.to_raw_type_data(prefix))
+                .flat_map(|obj| obj.to_raw_type_data_with_forms(prefix))
                 .collect();
 
             total_types += raw_types.len();
@@ -260,7 +260,7 @@ impl SystemCoordinator {
             let prefix = config_info.prefix.as_deref();
             let raw_types: Vec<RawTypeData> = metadata
                 .into_iter()
-                .map(|obj| obj.to_raw_type_data(prefix))
+                .flat_map(|obj| obj.to_raw_type_data_with_forms(prefix))
                 .collect();
 
             total_types += raw_types.len();

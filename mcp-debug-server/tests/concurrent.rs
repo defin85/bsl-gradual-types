@@ -8,7 +8,6 @@
 
 use mcp_debug_server::session::{SessionManager, SessionState};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[tokio::test]
 async fn test_concurrent_sessions_creation() {
@@ -258,7 +257,7 @@ async fn test_concurrent_requests_same_session() {
         .with_max_level(tracing::Level::DEBUG)
         .try_init();
 
-    let (event_tx, _event_rx) = mpsc::channel::<serde_json::Value>(10);
+    let (_event_tx, _event_rx) = mpsc::channel::<serde_json::Value>(10);
     let response_map = Arc::new(Mutex::new(
         HashMap::<u32, oneshot::Sender<serde_json::Value>>::new(),
     ));

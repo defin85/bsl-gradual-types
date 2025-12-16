@@ -8,7 +8,7 @@ use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::parsing::bsl::ast::{Expression, Program, Span as AstSpan, Statement};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::{TypeResolution, Certainty, ResolutionResult};
+use bsl_shared::domain::types::Certainty;
 use std::sync::Arc;
 
 /// Helper функция - создаёт TypeRepository с базовыми типами

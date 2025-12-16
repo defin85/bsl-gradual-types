@@ -8,7 +8,7 @@
 
 #[cfg(test)]
 mod hover_facets_tests {
-    use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
+    use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter};
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
     use bsl_shared::domain::runtime_context::ContextRequirements;

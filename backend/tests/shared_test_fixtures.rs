@@ -35,6 +35,7 @@ pub static SHARED_REPOSITORY: LazyLock<Arc<InMemoryTypeRepository>> = LazyLock::
 /// Инициализируется ОДИН раз при первом доступе (LazyLock).
 /// Использует синхронную инициализацию (start_with_paths_blocking) чтобы
 /// избежать конфликта с tokio runtime в async тестах.
+#[allow(dead_code)]
 pub static SHARED_CONFIG_COORDINATOR: LazyLock<SystemCoordinator> = LazyLock::new(|| {
     let coordinator = SystemCoordinator::new();
     let config_path = std::path::Path::new("../examples/conf/conf_test");
@@ -45,6 +46,7 @@ pub static SHARED_CONFIG_COORDINATOR: LazyLock<SystemCoordinator> = LazyLock::ne
 });
 
 /// Получить shared SystemCoordinator с конфигурацией для тестов.
+#[allow(dead_code)]
 pub fn get_config_coordinator() -> &'static SystemCoordinator {
     &SHARED_CONFIG_COORDINATOR
 }

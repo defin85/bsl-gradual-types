@@ -21,7 +21,6 @@ pub use types::{LoadMetadataResult, StartupError, SymbolInfo};
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use bsl_shared::domain::repository::InMemoryTypeRepository;
     use bsl_shared::TypeRepository;
     use std::sync::Arc;

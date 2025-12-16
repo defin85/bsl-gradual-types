@@ -451,11 +451,6 @@ async fn test_diagnostic_location_accuracy() {
         "Diagnostic должен иметь валидную строку: line={}",
         diag.line
     );
-    assert!(
-        diag.column >= 0,
-        "Diagnostic должен иметь валидную колонку: column={}",
-        diag.column
-    );
 }
 
 // ========================================

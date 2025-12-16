@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

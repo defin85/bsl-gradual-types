@@ -6,13 +6,7 @@ use bsl_backend::application::ast_to_ir::AstToIrConverter;
 use bsl_backend::parsing::bsl::ast::{Expression, Program, Span as AstSpan, Statement};
 use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::{TypeResolution, Certainty, ResolutionResult};
 use std::sync::Arc;
-
-/// Helper функция - создаёт пустой SignatureIndex
-fn create_test_signature_index() -> SignatureIndex {
-    SignatureIndex::new()
-}
 
 #[test]
 fn test_array_initialization_as_generic() {
@@ -34,7 +28,7 @@ fn test_array_initialization_as_generic() {
     };
 
     let repository = Arc::new(InMemoryTypeRepository::new());
-        let signature_index = SignatureIndex::new();
+    let signature_index = SignatureIndex::new();
     let program =
         AstToIrConverter::convert(ast, source.to_string(), "test.bsl".to_string(), repository, signature_index)
             .expect("Failed to convert AST to IR");

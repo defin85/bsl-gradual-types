@@ -127,6 +127,7 @@ impl AnalysisPipeline {
 
 /// Виртуальная компиляция (type inference без генерации кода)
 pub struct VirtualCompiler {
+    #[allow(dead_code)]
     type_env: HashMap<String, String>,
 }
 
@@ -138,7 +139,7 @@ impl VirtualCompiler {
     }
 
     /// Инферим тип переменной из использования
-    pub fn infer_type(&mut self, var: &str, usage: &str) -> String {
+    pub fn infer_type(&mut self, _var: &str, usage: &str) -> String {
         // Простой пример type inference
         if usage.contains("+") || usage.contains("-") {
             "Число".to_string()

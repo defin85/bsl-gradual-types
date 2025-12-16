@@ -40,7 +40,7 @@ async fn test_event_router_events() {
 
     // Создать каналы
     let (event_tx, mut event_rx) = mpsc::channel(10);
-    let response_map = Arc::new(Mutex::new(
+    let _response_map = Arc::new(Mutex::new(
         HashMap::<u32, oneshot::Sender<serde_json::Value>>::new(),
     ));
 

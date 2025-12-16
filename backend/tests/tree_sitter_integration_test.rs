@@ -192,6 +192,28 @@ fn test_tree_sitter_invalid_syntax() {
 }
 
 #[test]
+fn test_tree_sitter_incomplete_new_expression_reports_syntax_error() {
+    // Важно для IDE: `Новый` без типа должен давать синтаксическую ошибку,
+    // иначе hover/completion начинают работать по "сломанному" дереву.
+    let bsl_code = r#"
+Процедура Тест()
+    МойМассив = Новый
+КонецПроцедуры
+"#;
+
+    let coordinator = ParserCoordinator::with_fallback();
+    let result = coordinator.parse(bsl_code);
+
+    assert!(result.is_ok(), "Tree-sitter парсит даже невалидный код");
+    let parse_result = result.unwrap();
+
+    assert!(
+        parse_result.has_errors(),
+        "Ожидаем синтаксическую ошибку для `Новый` без типа, но syntax_errors пуст"
+    );
+}
+
+#[test]
 fn test_tree_sitter_binary_expression() {
     let bsl_code = r#"
 Функция Сумма()

@@ -604,6 +604,7 @@ impl LanguageServer for BslLanguageServer {
 
         let settings = self.settings.read().await;
         Ok(handle_hover(
+            &uri,
             &file_content,
             position,
             self.get_type_service(),
@@ -633,7 +634,18 @@ impl LanguageServer for BslLanguageServer {
             },
         };
 
-        Ok(handle_goto_definition(&file_content, position, self.get_type_service()).await)
+        let file_path_string = uri
+            .to_file_path()
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned());
+
+        Ok(handle_goto_definition(
+            &file_content,
+            file_path_string.as_deref(),
+            position,
+            self.get_type_service(),
+        )
+        .await)
     }
 
     async fn signature_help(

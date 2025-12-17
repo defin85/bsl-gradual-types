@@ -180,7 +180,18 @@ impl MetadataKind {
             _ => return self.display_name().to_string(),
         };
 
-        let suffix = facet.platform_suffix();
+        // Особенность 1С: для регистров "Object facet" представлен типом "НаборЗаписей",
+        // а не "*Объект". В metadata_constants это отражено как FacetKind::Object.
+        let suffix = match (self, facet) {
+            (
+                MetadataKind::InformationRegister
+                | MetadataKind::AccumulationRegister
+                | MetadataKind::AccountingRegister
+                | MetadataKind::CalculationRegister,
+                FacetKind::Object,
+            ) => "НаборЗаписей",
+            _ => facet.platform_suffix(),
+        };
         format!("{}{}", base, suffix)
     }
 }

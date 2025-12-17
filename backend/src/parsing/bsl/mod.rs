@@ -73,6 +73,8 @@ pub mod ast {
             params: Vec<String>,
             body: Vec<Statement>,
             compiler_directive: Option<CompilerDirective>,
+            /// Процедура/функция объявлена с `Экспорт` (публичная)
+            is_export: bool,
             span: Span,
         },
         ProcedureDecl {
@@ -80,6 +82,8 @@ pub mod ast {
             params: Vec<String>,
             body: Vec<Statement>,
             compiler_directive: Option<CompilerDirective>,
+            /// Процедура объявлена с `Экспорт` (публичная)
+            is_export: bool,
             span: Span,
         },
         If {

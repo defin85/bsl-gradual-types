@@ -68,10 +68,17 @@ impl BslLanguageServer {
             let detail_level =
                 bsl_shared::formatting::DetailLevel::parse(&settings.diagnostics.detail_level);
 
-            match type_service
-                .validate_semantics(text, Some(detail_level))
-                .await
-            {
+            let file_path = uri
+                .to_file_path()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string());
+            let semantic_result = match file_path {
+                Some(ref path) => type_service
+                    .validate_semantics_for_file(text, path, Some(detail_level))
+                    .await,
+                None => type_service.validate_semantics(text, Some(detail_level)).await,
+            };
+            match semantic_result {
                 Ok(semantic_errors) => {
                     if !semantic_errors.is_empty() {
                         info!(

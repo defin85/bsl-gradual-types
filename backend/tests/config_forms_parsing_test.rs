@@ -144,7 +144,7 @@ fn test_parse_form_module_contexts() {
 fn test_discover_all_forms_for_document() {
     let discovery = ConfigurationDiscovery::new(test_config_path(), false);
     let forms = discovery
-        .discover_forms("Documents", "ЗаказНаряды")
+        .discover_forms_for_object("Documents", "Document", "ЗаказНаряды")
         .expect("Failed to discover forms");
 
     assert_eq!(
@@ -162,7 +162,7 @@ fn test_discover_forms_no_forms_directory() {
 
     // Константы не имеют форм
     let forms = discovery
-        .discover_forms("Constants", "НекаяКонстанта")
+        .discover_forms_for_object("Constants", "Constant", "НекаяКонстанта")
         .expect("Should not fail for missing Forms directory");
 
     assert!(
@@ -493,4 +493,48 @@ fn test_form_synthetic_types_loaded_into_repository() {
         works_work_kind.prop_type, "ПолеФормы",
         "Элементы.РаботыВидРаботы should be ПолеФормы"
     );
+}
+
+#[test]
+fn test_discover_forms_for_object_handles_business_processes_folder_name() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+
+    let form_xml_path = tmp
+        .path()
+        .join("BusinessProcesses")
+        .join("BP1")
+        .join("Forms")
+        .join("MainForm")
+        .join("Ext")
+        .join("Form.xml");
+
+    fs::create_dir_all(form_xml_path.parent().unwrap()).unwrap();
+    fs::write(
+        &form_xml_path,
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form>
+    <Attributes>
+        <Attribute name="TestAttr" id="1">
+            <Type>
+                <v8:Type>String</v8:Type>
+            </Type>
+            <MainAttribute>false</MainAttribute>
+            <SavedData>false</SavedData>
+        </Attribute>
+    </Attributes>
+</Form>"#,
+    )
+    .unwrap();
+
+    let discovery = ConfigurationDiscovery::new(tmp.path().to_path_buf(), false);
+    let forms = discovery
+        .discover_forms_for_object("BusinessProcesses", "BusinessProcess", "BP1")
+        .expect("discover_forms_for_object");
+
+    assert_eq!(forms.len(), 1);
+    assert_eq!(forms[0].name, "MainForm");
+    assert_eq!(forms[0].owner_type, "BusinessProcess.BP1");
 }

@@ -437,45 +437,49 @@ impl ConfigurationDiscovery {
                             total_objects
                         );
 
-                        // Парсим формы для Document и Catalog
-                        if matches!(object_type.as_str(), "Document" | "Catalog") {
-                            // Создаём временный discovery для поиска форм (с корректным base_path)
-                            // show_progress = false чтобы не создавать вложенные прогресс-бары
-                            let forms_discovery = ConfigurationDiscovery::new(config_info.path.clone(), false);
+                        // Создаём временный discovery для поиска форм/модулей (с корректным base_path)
+                        // show_progress = false чтобы не создавать вложенные прогресс-бары
+                        let forms_discovery =
+                            ConfigurationDiscovery::new(config_info.path.clone(), false);
 
-                            if let Ok(forms) = forms_discovery.discover_forms(&folder_name, object_name) {
-                                metadata.forms = forms;
-                                if !metadata.forms.is_empty() {
-                                    tracing::trace!(
-                                        "      📋 Обнаружено {} форм для {}.{}",
-                                        metadata.forms.len(),
-                                        object_type,
-                                        object_name
-                                    );
-                                }
-                            }
-
-                            // Парсим модули объекта (ObjectModule, ManagerModule)
-                            let (object_mod, manager_mod, record_set_mod) =
-                                forms_discovery.discover_object_modules(&folder_name, object_name);
-
-                            metadata.object_module_path = object_mod;
-                            metadata.manager_module_path = manager_mod;
-                            metadata.record_set_module_path = record_set_mod;
-
-                            if metadata.object_module_path.is_some()
-                                || metadata.manager_module_path.is_some()
-                                || metadata.record_set_module_path.is_some()
-                            {
+                        // Формы: раньше извлекались только для Document/Catalog.
+                        // Теперь пытаемся для всех объектов: если папки Forms нет — это быстрый early return.
+                        if let Ok(forms) = forms_discovery
+                            .discover_forms_for_object(&folder_name, &object_type, object_name)
+                        {
+                            metadata.forms = forms;
+                            if !metadata.forms.is_empty() {
                                 tracing::trace!(
-                                    "      📦 Обнаружены модули для {}.{} (object: {}, manager: {}, record_set: {})",
+                                    "      📋 Обнаружено {} форм для {}.{}",
+                                    metadata.forms.len(),
                                     object_type,
-                                    object_name,
-                                    metadata.object_module_path.is_some(),
-                                    metadata.manager_module_path.is_some(),
-                                    metadata.record_set_module_path.is_some()
+                                    object_name
                                 );
                             }
+                        }
+
+                        // Парсим модули объекта (ObjectModule, ManagerModule, RecordSetModule)
+                        // Для большинства объектов это быстрый fs::exists() и полезно для Go To Definition
+                        // и индексации экспортных методов из модулей.
+                        let (object_mod, manager_mod, record_set_mod) =
+                            forms_discovery.discover_object_modules(&folder_name, object_name);
+
+                        metadata.object_module_path = object_mod;
+                        metadata.manager_module_path = manager_mod;
+                        metadata.record_set_module_path = record_set_mod;
+
+                        if metadata.object_module_path.is_some()
+                            || metadata.manager_module_path.is_some()
+                            || metadata.record_set_module_path.is_some()
+                        {
+                            tracing::trace!(
+                                "      📦 Обнаружены модули для {}.{} (object: {}, manager: {}, record_set: {})",
+                                object_type,
+                                object_name,
+                                metadata.object_module_path.is_some(),
+                                metadata.manager_module_path.is_some(),
+                                metadata.record_set_module_path.is_some()
+                            );
                         }
 
                         // Throttling: отправляем прогресс каждые 5 объектов или на последнем
@@ -808,32 +812,22 @@ impl ConfigurationDiscovery {
         )
     }
 
-    /// Обнаруживает формы для объекта метаданных
+    /// Обнаруживает формы для объекта метаданных (рекомендуемый метод)
     ///
-    /// Сканирует папку Forms внутри объекта и парсит все найденные Form.xml файлы.
+    /// Принимает корректный XML-kind объекта (`Document`, `Catalog`,
+    /// `BusinessProcess`, ...), чтобы правильно формировать `owner_type` для FormParser.
     ///
     /// # Параметры
-    ///
-    /// - `object_type` - тип объекта в множественном числе ("Documents", "Catalogs")
+    /// - `folder_name` - папка в конфигурации ("Documents", "Catalogs", "BusinessProcesses", ...)
+    /// - `object_type` - XML-kind ("Document", "Catalog", "BusinessProcess", ...)
     /// - `object_name` - имя объекта ("ЗаказНаряды", "Контрагенты")
-    ///
-    /// # Возвращает
-    ///
-    /// Вектор `FormMetadata` с информацией о найденных формах
-    ///
-    /// # Errors
-    ///
-    /// Возвращает ошибку при проблемах с чтением файловой системы
-    pub fn discover_forms(
+    pub fn discover_forms_for_object(
         &self,
-        object_type: &str, // "Documents", "Catalogs"
-        object_name: &str, // "ЗаказНаряды", "Контрагенты"
+        folder_name: &str,
+        object_type: &str,
+        object_name: &str,
     ) -> Result<Vec<FormMetadata>> {
-        let forms_dir = self
-            .base_path
-            .join(object_type)
-            .join(object_name)
-            .join("Forms");
+        let forms_dir = self.base_path.join(folder_name).join(object_name).join("Forms");
 
         if !forms_dir.exists() {
             tracing::trace!("  ℹ️ Forms directory not found: {:?}", forms_dir);
@@ -852,9 +846,7 @@ impl ConfigurationDiscovery {
             let form_xml = entry.path().join("Ext").join("Form.xml");
 
             if form_xml.exists() {
-                // Преобразуем тип объекта: Documents -> Document
-                let owner_type_singular = object_type.trim_end_matches('s');
-                let owner_type = format!("{}.{}", owner_type_singular, object_name);
+                let owner_type = format!("{}.{}", object_type, object_name);
 
                 match FormParser::parse_form_xml(&form_xml, &owner_type, &form_name) {
                     Ok(form) => {

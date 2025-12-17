@@ -159,6 +159,7 @@ fn test_nested_scopes() {
                     span: AstSpan::stub(),
                 }],
                 compiler_directive: None,
+                is_export: false,
                 span: AstSpan::stub(),
             },
         ],
@@ -207,6 +208,7 @@ fn test_function_body_indices() {
                 },
             ],
             compiler_directive: None,
+            is_export: false,
             span: AstSpan::stub(),
         }],
     };

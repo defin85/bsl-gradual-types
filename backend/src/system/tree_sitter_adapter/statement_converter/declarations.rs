@@ -24,6 +24,7 @@ pub(crate) fn convert_function_definition_cached(
     let mut params = Vec::new();
     let mut body = Vec::new();
     let is_procedure = node.kind() == "procedure_definition";
+    let mut is_export = false;
 
     // Ищем директиву компилятора перед функцией/процедурой
     let compiler_directive = find_preceding_directive(node, source);
@@ -37,6 +38,12 @@ pub(crate) fn convert_function_definition_cached(
             }
             "parameters" => {
                 params = convert_parameters(&child, source)?;
+            }
+            _ if child.kind().ends_with("_KEYWORD") => {
+                let kw = node_text(&child, source).trim().to_lowercase();
+                if kw == "экспорт" || kw == "export" {
+                    is_export = true;
+                }
             }
             _ => {
                 // Собираем тело функции через dispatcher
@@ -53,6 +60,7 @@ pub(crate) fn convert_function_definition_cached(
             params,
             body,
             compiler_directive,
+            is_export,
             span,
         })
     } else {
@@ -61,6 +69,7 @@ pub(crate) fn convert_function_definition_cached(
             params,
             body,
             compiler_directive,
+            is_export,
             span,
         })
     }

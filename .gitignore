@@ -64,6 +64,7 @@ examples/syntax_helper/shlang_ru/
 examples/syntax_helper/**/*.html
 examples/syntax_helper/**/*.st
 examples/syntax_helper/**/__categories__
+examples/conf_big
 
 # Tools (downloadable utilities)
 tools/EmptyStandbyList.exe

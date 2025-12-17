@@ -6,6 +6,7 @@ use anyhow::Result;
 use tracing::{debug, info, warn};
 
 use bsl_shared::domain::types::TypeResolution;
+use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::ir::{ScopeId, SemanticNodeKind, SemanticProgram};
@@ -47,6 +48,40 @@ pub async fn get_hover_info(
     column: u32,
     hover_config: Option<HoverFormatConfig>,
 ) -> Result<Option<String>> {
+    get_hover_info_with_file_path(
+        parser,
+        analysis_engine,
+        ir_cache,
+        metadata_lookup,
+        hover_formatter,
+        hover_count,
+        file_content,
+        "hover_request.bsl",
+        line,
+        column,
+        hover_config,
+    )
+    .await
+}
+
+/// Hover с учётом пути к файлу.
+///
+/// Важно для модулей форм: `AstToIrConverter` засевает `Объект/Элементы/ЭтаФорма`
+/// только если `file_path` распознаётся как `FormModule` по `CodeLocation`.
+#[allow(clippy::too_many_arguments)]
+pub async fn get_hover_info_with_file_path(
+    parser: &ParserCoordinator,
+    analysis_engine: &AnalysisEngine,
+    ir_cache: &IrCache,
+    metadata_lookup: &TypeMetadataLookup,
+    hover_formatter: &HoverFormatter,
+    hover_count: &std::sync::atomic::AtomicU64,
+    file_content: &str,
+    file_path: &str,
+    line: u32,
+    column: u32,
+    hover_config: Option<HoverFormatConfig>,
+) -> Result<Option<String>> {
     use std::sync::atomic::Ordering;
 
     // MILESTONE 2.13: Measure total time
@@ -55,17 +90,18 @@ pub async fn get_hover_info(
     info!("Hover request: line {}, column {}", line, column);
 
     // MILESTONE 2.13: IR Caching - check cache before parsing
-    let content_hash = hash_content(file_content);
+    // Важно: путь влияет на CodeLocation (FormModule), поэтому включаем его в ключ кеша.
+    let cache_key = hash_content(&format!("{}\n{}", file_path, file_content));
 
     // MILESTONE 2.13: Measure parsing time and cache hit flag
     let (ir_program, cache_hit, parse_time) =
-        if let Some(cached_ir) = ir_cache.get(content_hash).await {
+        if let Some(cached_ir) = ir_cache.get(cache_key).await {
             let hit_time = start.elapsed();
-            info!("IR cache HIT in {:?} for hash {}", hit_time, content_hash);
+            info!("IR cache HIT in {:?} for hash {}", hit_time, cache_key);
             (cached_ir, true, std::time::Duration::ZERO)
         } else {
             let parse_start = std::time::Instant::now();
-            info!("IR cache MISS for hash {}, parsing...", content_hash);
+            info!("IR cache MISS for hash {}, parsing...", cache_key);
 
             // Parse BSL code (only on cache MISS)
             let parse_result = parser
@@ -79,7 +115,7 @@ pub async fn get_hover_info(
             let ir = AstToIrConverter::convert_with_resolver(
                 parse_result.program.clone(),
                 file_content.to_string(),
-                "hover_request.bsl".to_string(),
+                file_path.to_string(),
                 repository,
                 signature_index,
                 Some(resolver),
@@ -90,12 +126,12 @@ pub async fn get_hover_info(
             let parse_duration = parse_start.elapsed();
             info!(
                 "IR cache MISS, parsed in {:?} for hash {}",
-                parse_duration, content_hash
+                parse_duration, cache_key
             );
 
             // Save to cache
-            ir_cache.put(content_hash, ir_arc.clone()).await;
-            debug!("Cached IR for hash {}", content_hash);
+            ir_cache.put(cache_key, ir_arc.clone()).await;
+            debug!("Cached IR for hash {}", cache_key);
 
             (ir_arc, false, parse_duration)
         };
@@ -391,6 +427,97 @@ pub async fn get_type_at_position(
     Ok(None)
 }
 
+/// Get definition location for method/function at specified position (Go To Definition for methods)
+pub async fn get_method_definition_at_position(
+    parser: &ParserCoordinator,
+    analysis_engine: &AnalysisEngine,
+    ir_cache: &IrCache,
+    file_content: &str,
+    file_path: Option<&str>,
+    line: u32,
+    column: u32,
+) -> Result<Option<TypeDefinitionLocation>> {
+    let content_hash = hash_content(file_content);
+
+    let ir_program = if let Some(cached_ir) = ir_cache.get(content_hash).await {
+        cached_ir
+    } else {
+        let parse_result = parser
+            .parse(file_content)
+            .map_err(|e| anyhow::anyhow!("Parse error for get_method_definition_at_position: {}", e))?;
+
+        let repository = analysis_engine.get_repository();
+        let signature_index = repository.get_signature_index_clone();
+        let ir = AstToIrConverter::convert(
+            parse_result.program.clone(),
+            file_content.to_string(),
+            "definition_request.bsl".to_string(),
+            repository,
+            signature_index,
+        )?;
+
+        let ir_arc = std::sync::Arc::new(ir);
+        ir_cache.put(content_hash, ir_arc.clone()).await;
+        ir_arc
+    };
+
+    let Some(node) = ir_program.find_node_at_position(line, column) else {
+        return Ok(None);
+    };
+
+    let repo = analysis_engine.get_repository();
+
+    match &node.kind {
+        SemanticNodeKind::FunctionCall {
+            function_name,
+            object_type: Some(object_type),
+            ..
+        } => {
+            let owner = object_type.type_name();
+            if let Some(loc) = repo.find_method_definition_location(Some(&owner), function_name) {
+                return Ok(Some(loc));
+            }
+        }
+        SemanticNodeKind::FunctionCall {
+            function_name,
+            object_type: None,
+            ..
+        } => {
+            if let Some(loc) = repo.find_method_definition_location(None, function_name) {
+                return Ok(Some(loc));
+            }
+
+            // Fallback: локальная функция/процедура (в т.ч. приватная) в текущем файле.
+            if let Some(file_path) = file_path {
+                let parse_result = parser
+                    .parse(file_content)
+                    .map_err(|e| anyhow::anyhow!("Parse error for local method lookup: {}", e))?;
+
+                for st in parse_result.program.statements {
+                    match st {
+                        crate::parsing::bsl::ast::Statement::FunctionDecl { name, span, .. }
+                        | crate::parsing::bsl::ast::Statement::ProcedureDecl { name, span, .. } => {
+                            if name.eq_ignore_ascii_case(function_name) {
+                                return Ok(Some(TypeDefinitionLocation::user_defined(
+                                    std::path::PathBuf::from(file_path),
+                                    span.start_line,
+                                    span.start_column,
+                                    span.end_line,
+                                    span.end_column,
+                                )));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
+    Ok(None)
+}
+
 /// Invalidate cache for changed file (MILESTONE 2.13)
 ///
 /// Called from LSP on `didChange` notification.
@@ -542,6 +669,7 @@ fn extract_enhanced_symbol_info(
                     name,
                     params,
                     compiler_directive,
+                    is_export: _,
                     ..
                 } if name == &word_under_cursor => {
                     let directive_str = match compiler_directive {
@@ -560,6 +688,7 @@ fn extract_enhanced_symbol_info(
                     name,
                     params,
                     compiler_directive,
+                    is_export: _,
                     ..
                 } if name == &word_under_cursor => {
                     let directive_str = match compiler_directive {

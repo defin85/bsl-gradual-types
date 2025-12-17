@@ -162,6 +162,7 @@ impl AstToIrConverter {
                 params,
                 body,
                 compiler_directive,
+                is_export: _,
                 span: ast_span,
             } => {
                 self.convert_function_declaration(name, params, body, compiler_directive, ast_span)
@@ -172,6 +173,7 @@ impl AstToIrConverter {
                 params,
                 body,
                 compiler_directive,
+                is_export: _,
                 span: ast_span,
             } => {
                 self.convert_procedure_declaration(name, params, body, compiler_directive, ast_span)

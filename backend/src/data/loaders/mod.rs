@@ -3,6 +3,7 @@
 //! Infrastructure компоненты для загрузки данных из внешних источников
 
 pub mod config_metadata_parser;
+pub mod config_bsl_modules;
 pub mod hbk_recovery;
 pub mod platform_types;
 pub mod progress;
@@ -13,6 +14,8 @@ pub mod syntax_helper;
 pub use config_metadata_parser::{
     ConfigurationDiscovery, UniversalMetadataObject, UniversalMetadataParser,
 };
+
+pub use config_bsl_modules::{index_configuration_bsl_modules, IndexedConfigSignatures};
 
 // Новые реэкспорты из syntax_helper
 pub use syntax_helper::{ParsingStats, SyntaxHelperLoader};

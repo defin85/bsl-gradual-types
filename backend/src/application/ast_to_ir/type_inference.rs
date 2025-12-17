@@ -192,6 +192,16 @@ impl AstToIrConverter {
                     return resolution.clone();
                 }
 
+                // Common module: допускаем обращение по имени модуля (ОбщийМодуль.Функция())
+                // Если тип `ОбщиеМодули.<Имя>` загружен из конфигурации, это не undeclared variable.
+                let common_module_type = format!("ОбщиеМодули.{}", name);
+                if self.repository.find_type(&common_module_type).is_some() {
+                    if let Some(ref resolver) = self.resolver {
+                        return resolver.resolve_expression_sync(&common_module_type);
+                    }
+                    return TypeResolution::explicit(&common_module_type);
+                }
+
                 // Переменная не найдена в scope - возвращаем undeclared
                 // MILESTONE 5.1: Это важно для диагностики необъявленных переменных
                 TypeResolution::undeclared_variable(name)

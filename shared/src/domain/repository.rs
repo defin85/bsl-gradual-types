@@ -1,6 +1,7 @@
 //! Data Layer: Type Repository trait and implementations
 
 use crate::domain::signature_index::{SignatureIndex, SignatureValidationResult};
+use crate::domain::type_definition_location::TypeDefinitionLocation;
 use crate::domain::type_id::TypeId;
 use crate::domain::types::{MetadataKind, RawDataSource, RawTypeData};
 use anyhow::Result;
@@ -143,6 +144,47 @@ pub trait TypeRepository: Send + Sync {
     /// Возвращает клон индекса сигнатур для использования в валидаторах
     fn get_signature_index_clone(&self) -> SignatureIndex;
 
+    /// Добавить конфигурационный метод в SignatureIndex (экспорт из модулей конфигурации)
+    ///
+    /// Используется после загрузки конфигурации, чтобы методы из `*.bsl` модулей
+    /// участвовали в hover/validation/signatureHelp.
+    fn add_config_method_signature(
+        &self,
+        owner_type: &str,
+        method: crate::domain::signature_index::MethodSignature,
+    );
+
+    /// Добавить глобальную функцию в SignatureIndex (например, из global common module)
+    fn add_global_function_signature(
+        &self,
+        function_name: &str,
+        method: crate::domain::signature_index::MethodSignature,
+    );
+
+    /// Добавить location определения конфигурационного метода (для Go To Definition на метод)
+    fn add_config_method_definition_location(
+        &self,
+        owner_type: &str,
+        method_name: &str,
+        location: TypeDefinitionLocation,
+    );
+
+    /// Добавить location определения глобальной функции (например, из global common module)
+    fn add_global_function_definition_location(
+        &self,
+        function_name: &str,
+        location: TypeDefinitionLocation,
+    );
+
+    /// Найти location определения метода/функции (case-insensitive)
+    ///
+    /// `owner_type=None` означает глобальную функцию.
+    fn find_method_definition_location(
+        &self,
+        owner_type: Option<&str>,
+        method_name: &str,
+    ) -> Option<TypeDefinitionLocation>;
+
     /// Получить все объекты метаданных указанного вида (Milestone 3.16)
     ///
     /// Возвращает имена объектов без префикса (например, "Контрагенты" вместо "Справочники.Контрагенты")
@@ -238,6 +280,8 @@ pub struct InMemoryTypeRepository {
     last_updated: RwLock<Option<SystemTime>>,
     /// Индекс сигнатур методов для валидации (thread-safe)
     signature_index: RwLock<SignatureIndex>,
+    /// Индекс локаций объявлений методов/функций (для Go To Definition на метод)
+    method_definition_index: RwLock<HashMap<(TypeId, TypeId), TypeDefinitionLocation>>,
     /// Индекс типов: TypeId -> индекс в vectors types (O(1) lookup)
     /// Индексирует по русским именам, английским именам и CamelCase-вариантам
     type_index: RwLock<HashMap<TypeId, usize>>,
@@ -249,6 +293,7 @@ impl InMemoryTypeRepository {
             types: RwLock::new(Vec::new()),
             last_updated: RwLock::new(None),
             signature_index: RwLock::new(SignatureIndex::new()),
+            method_definition_index: RwLock::new(HashMap::new()),
             type_index: RwLock::new(HashMap::new()),
         }
     }
@@ -491,6 +536,91 @@ impl TypeRepository for InMemoryTypeRepository {
 
     fn get_signature_index_clone(&self) -> SignatureIndex {
         self.signature_index.read().unwrap().clone()
+    }
+
+    fn add_config_method_signature(
+        &self,
+        owner_type: &str,
+        method: crate::domain::signature_index::MethodSignature,
+    ) {
+        let mut index = self.signature_index.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("SignatureIndex RwLock poisoned in add_config_method_signature, recovering");
+            poisoned.into_inner()
+        });
+        index.add_config_method(TypeId::new(owner_type), method);
+    }
+
+    fn add_global_function_signature(
+        &self,
+        function_name: &str,
+        method: crate::domain::signature_index::MethodSignature,
+    ) {
+        let mut index = self.signature_index.write().unwrap_or_else(|poisoned| {
+            tracing::warn!(
+                "SignatureIndex RwLock poisoned in add_global_function_signature, recovering"
+            );
+            poisoned.into_inner()
+        });
+        index.add_global_function(TypeId::new(function_name), method);
+    }
+
+    fn add_config_method_definition_location(
+        &self,
+        owner_type: &str,
+        method_name: &str,
+        location: TypeDefinitionLocation,
+    ) {
+        let mut map = self
+            .method_definition_index
+            .write()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!(
+                    "method_definition_index RwLock poisoned in add_config_method_definition_location, recovering"
+                );
+                poisoned.into_inner()
+            });
+        map.insert((TypeId::new(owner_type), TypeId::new(method_name)), location);
+    }
+
+    fn add_global_function_definition_location(
+        &self,
+        function_name: &str,
+        location: TypeDefinitionLocation,
+    ) {
+        let mut map = self
+            .method_definition_index
+            .write()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!(
+                    "method_definition_index RwLock poisoned in add_global_function_definition_location, recovering"
+                );
+                poisoned.into_inner()
+            });
+        let k = TypeId::new(function_name);
+        map.insert((k.clone(), k), location);
+    }
+
+    fn find_method_definition_location(
+        &self,
+        owner_type: Option<&str>,
+        method_name: &str,
+    ) -> Option<TypeDefinitionLocation> {
+        let map = self.method_definition_index.read().unwrap_or_else(|poisoned| {
+            tracing::warn!(
+                "method_definition_index RwLock poisoned in find_method_definition_location, recovering"
+            );
+            poisoned.into_inner()
+        });
+
+        match owner_type {
+            Some(owner) => map
+                .get(&(TypeId::new(owner), TypeId::new(method_name)))
+                .cloned(),
+            None => {
+                let k = TypeId::new(method_name);
+                map.get(&(k.clone(), k)).cloned()
+            }
+        }
     }
 
     fn get_metadata_objects_by_kind(&self, kind: MetadataKind) -> Vec<String> {

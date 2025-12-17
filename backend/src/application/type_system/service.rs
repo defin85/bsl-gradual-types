@@ -10,6 +10,7 @@ use tracing::info;
 
 use bsl_shared::api::dtos::AnalysisResultDto;
 use bsl_shared::api::ValidationErrorDto;
+use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
 use bsl_shared::domain::types::{ParseError, TypeDiagnostic, TypeResolution};
 use bsl_shared::domain::{CompletionItem, TypeMetadataLookup};
 use bsl_shared::engine::AnalysisEngine;
@@ -245,6 +246,31 @@ impl TypeSystemService {
         .await
     }
 
+    /// Hover с учётом пути к файлу (важно для модулей форм).
+    pub async fn get_hover_info_for_file(
+        &self,
+        file_content: &str,
+        file_path: &str,
+        line: u32,
+        column: u32,
+        hover_config: Option<HoverFormatConfig>,
+    ) -> Result<Option<String>> {
+        hover_service::get_hover_info_with_file_path(
+            &self.parser,
+            &self.analysis_engine,
+            &self.ir_cache,
+            &self.metadata_lookup,
+            &self.hover_formatter,
+            &self.hover_count,
+            file_content,
+            file_path,
+            line,
+            column,
+            hover_config,
+        )
+        .await
+    }
+
     /// Get TypeResolution for symbol at specified position (Milestone 3.14)
     ///
     /// Used for Go To Definition
@@ -259,6 +285,45 @@ impl TypeSystemService {
             &self.analysis_engine,
             &self.ir_cache,
             file_content,
+            line,
+            column,
+        )
+        .await
+    }
+
+    /// Go To Definition для метода/функции в позиции курсора (C7)
+    pub async fn get_method_definition_at_position(
+        &self,
+        file_content: &str,
+        line: u32,
+        column: u32,
+    ) -> Result<Option<TypeDefinitionLocation>> {
+        hover_service::get_method_definition_at_position(
+            &self.parser,
+            &self.analysis_engine,
+            &self.ir_cache,
+            file_content,
+            None,
+            line,
+            column,
+        )
+        .await
+    }
+
+    /// Go To Definition для метода/функции с учётом пути к файлу (для локальных/приватных методов)
+    pub async fn get_method_definition_at_position_for_file(
+        &self,
+        file_content: &str,
+        file_path: &str,
+        line: u32,
+        column: u32,
+    ) -> Result<Option<TypeDefinitionLocation>> {
+        hover_service::get_method_definition_at_position(
+            &self.parser,
+            &self.analysis_engine,
+            &self.ir_cache,
+            file_content,
+            Some(file_path),
             line,
             column,
         )
@@ -348,6 +413,24 @@ impl TypeSystemService {
             &self.analysis_engine,
             &self.metadata_lookup,
             code,
+            detail_level,
+        )
+        .await
+    }
+
+    /// Validate code semantics with file path context (нужно для модулей форм).
+    pub async fn validate_semantics_for_file(
+        &self,
+        code: &str,
+        file_path: &str,
+        detail_level: Option<DetailLevel>,
+    ) -> Result<Vec<TypeDiagnostic>> {
+        validation_service::validate_semantics_with_file_path(
+            &self.parser,
+            &self.analysis_engine,
+            &self.metadata_lookup,
+            code,
+            file_path,
             detail_level,
         )
         .await

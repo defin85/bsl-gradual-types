@@ -41,6 +41,7 @@ fn test_assignment_declares_variable_in_symbol_table() {
                 span: AstSpan::stub(),
             }],
             compiler_directive: None,
+            is_export: false,
             span: AstSpan::stub(),
         }],
     };
@@ -110,6 +111,7 @@ fn test_assignment_map_generic_type() {
                 span: AstSpan::stub(),
             }],
             compiler_directive: None,
+            is_export: false,
             span: AstSpan::stub(),
         }],
     };
@@ -161,6 +163,7 @@ fn test_assignment_explicit_type() {
                 span: AstSpan::stub(),
             }],
             compiler_directive: None,
+            is_export: false,
             span: AstSpan::stub(),
         }],
     };
@@ -218,6 +221,7 @@ fn test_assignment_updates_existing_variable() {
                 },
             ],
             compiler_directive: None,
+            is_export: false,
             span: AstSpan::stub(),
         }],
     };
@@ -295,6 +299,7 @@ fn test_multiple_assignments_in_scope() {
                 },
             ],
             compiler_directive: None,
+            is_export: false,
             span: AstSpan::stub(),
         }],
     };

@@ -8,6 +8,7 @@ use tower_lsp::Client;
 use tracing::{debug, error, info, warn};
 
 use bsl_backend::data::loaders::config_metadata_parser::ConfigurationDiscovery;
+use bsl_backend::data::loaders::index_configuration_bsl_modules;
 use bsl_shared::engine::AnalysisEngine;
 
 /// Request for bsl.parseConfiguration
@@ -288,6 +289,28 @@ pub async fn handle_parse_configuration(
         .await;
 
     info!("Configuration parsed successfully: {} types loaded", loaded);
+
+    // Индексация экспортных методов из модулей конфигурации (*.bsl)
+    match index_configuration_bsl_modules(&canonical_path, &metadata) {
+        Ok(indexed) => {
+            for (owner_type, sig) in indexed.config_methods {
+                repo.add_config_method_signature(&owner_type, sig);
+            }
+            for (name, sig) in indexed.global_functions {
+                repo.add_global_function_signature(&name, sig);
+            }
+            for (owner_type, method_name, location) in indexed.definition_locations {
+                repo.add_config_method_definition_location(&owner_type, &method_name, location);
+            }
+            for (function_name, location) in indexed.global_definition_locations {
+                repo.add_global_function_definition_location(&function_name, location);
+            }
+            info!("Configuration module methods indexed successfully");
+        }
+        Err(e) => {
+            warn!("Failed to index configuration module methods: {}", e);
+        }
+    }
 
     ParseConfigurationResponse {
         success: true,

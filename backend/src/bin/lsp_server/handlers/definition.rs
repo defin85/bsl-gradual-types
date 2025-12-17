@@ -14,6 +14,7 @@ use bsl_shared::domain::types::{ConcreteType, ResolutionResult};
 /// Handle textDocument/definition request
 pub async fn handle_goto_definition(
     file_content: &str,
+    file_path: Option<&str>,
     position: Position,
     type_service: Option<Arc<TypeSystemService>>,
 ) -> Option<GotoDefinitionResponse> {
@@ -23,6 +24,39 @@ pub async fn handle_goto_definition(
     );
 
     let service = type_service?;
+
+    // C7: Go To Definition for methods (configuration/module methods)
+    if let Ok(Some(TypeDefinitionLocation::UserDefined {
+        file_path,
+        start_line,
+        start_column,
+        end_line,
+        end_column,
+    })) = service
+        .get_method_definition_at_position_for_file(
+            file_content,
+            file_path.unwrap_or("definition_request.bsl"),
+            position.line,
+            position.character,
+        )
+        .await
+    {
+        if let Ok(target_uri) = Url::from_file_path(&file_path) {
+            return Some(GotoDefinitionResponse::Scalar(Location {
+                uri: target_uri,
+                range: Range {
+                    start: Position {
+                        line: start_line,
+                        character: start_column,
+                    },
+                    end: Position {
+                        line: end_line,
+                        character: end_column,
+                    },
+                },
+            }));
+        }
+    }
 
     // Get TypeResolution at position
     let type_resolution = match service

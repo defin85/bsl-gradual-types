@@ -14,6 +14,7 @@ use crate::config::HoverSettings;
 
 /// Handle textDocument/hover request
 pub async fn handle_hover(
+    uri: &Url,
     file_content: &str,
     position: Position,
     type_service: Option<Arc<TypeSystemService>>,
@@ -54,9 +55,15 @@ pub async fn handle_hover(
     };
 
     if let Some(service) = type_service {
+        let file_path = uri
+            .to_file_path()
+            .ok()
+            .map(|p| p.to_string_lossy().to_string());
+
         match service
-            .get_hover_info(
+            .get_hover_info_for_file(
                 file_content,
+                file_path.as_deref().unwrap_or("hover_request.bsl"),
                 position.line,
                 position.character,
                 Some(hover_config),

@@ -68,7 +68,17 @@ pub async fn handle_did_open(
             let detail_level =
                 bsl_shared::formatting::DetailLevel::parse(&settings.diagnostics.detail_level);
 
-            match service.validate_semantics(text, Some(detail_level)).await {
+            let file_path = uri
+                .to_file_path()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string());
+            let semantic_result = match file_path {
+                Some(ref path) => service
+                    .validate_semantics_for_file(text, path, Some(detail_level))
+                    .await,
+                None => service.validate_semantics(text, Some(detail_level)).await,
+            };
+            match semantic_result {
                 Ok(semantic_errors) => {
                     if !semantic_errors.is_empty() {
                         info!(
@@ -129,7 +139,9 @@ pub async fn handle_did_change(
         })
         .collect();
 
-    let file_path = std::path::PathBuf::from(uri.path());
+    let file_path = uri
+        .to_file_path()
+        .unwrap_or_else(|_| std::path::PathBuf::from(uri.path()));
 
     if let Some(ref service) = type_service {
         if let Err(e) = service
@@ -183,10 +195,19 @@ pub async fn handle_did_change(
             let detail_level =
                 bsl_shared::formatting::DetailLevel::parse(&settings.diagnostics.detail_level);
 
-            match service
-                .validate_semantics(updated_text, Some(detail_level))
-                .await
-            {
+            let file_path = uri
+                .to_file_path()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string());
+            let semantic_result = match file_path {
+                Some(ref path) => service
+                    .validate_semantics_for_file(updated_text, path, Some(detail_level))
+                    .await,
+                None => service
+                    .validate_semantics(updated_text, Some(detail_level))
+                    .await,
+            };
+            match semantic_result {
                 Ok(semantic_errors) => {
                     if !semantic_errors.is_empty() {
                         info!("Found {} semantic errors in {}", semantic_errors.len(), uri);

@@ -4,6 +4,11 @@
 # ============================================================================
 # Поддерживает: Linux, macOS, Windows (Git Bash, MSYS2, Cygwin, WSL)
 # Использование: ./scripts/build-all.sh [--release|--debug] [--skip-tests]
+#   Дополнительно:
+#     --no-auto-version            не менять версии в package.json/Cargo.toml
+#     --force-build-timestamp      принудительно обновлять BUILD_TIMESTAMP (вызывает перекомпиляцию)
+#     --clean-target               cargo clean перед сборкой (удалит весь target/)
+#     --prune-target-days N        удалить старые артефакты из target/debug (mtime > N дней)
 # ============================================================================
 
 set -e  # Остановка при первой ошибке
@@ -67,10 +72,20 @@ NC='\033[0m' # No Color
 
 BUILD_MODE="release"
 SKIP_TESTS=false
+AUTO_VERSION=true
+FORCE_BUILD_TIMESTAMP=false
+CLEAN_TARGET=false
+PRUNE_TARGET_DAYS=""
+
+# Если скрипт запущен без аргументов в WSL — включаем мягкую уборку по умолчанию,
+# чтобы target/ не раздувался бесконтрольно.
+ORIGINAL_ARGC=$#
+DEFAULT_WSL_PRUNE_DAYS=14
 
 # Парсинг аргументов
-for arg in "$@"; do
-    case $arg in
+while [[ $# -gt 0 ]]; do
+    arg="$1"
+    case "$arg" in
         --debug)
             BUILD_MODE="debug"
             ;;
@@ -80,13 +95,33 @@ for arg in "$@"; do
         --skip-tests)
             SKIP_TESTS=true
             ;;
+        --no-auto-version)
+            AUTO_VERSION=false
+            ;;
+        --force-build-timestamp)
+            FORCE_BUILD_TIMESTAMP=true
+            ;;
+        --clean-target)
+            CLEAN_TARGET=true
+            ;;
+        --prune-target-days)
+            shift
+            PRUNE_TARGET_DAYS="${1:-}"
+            ;;
         *)
             echo -e "${RED}❌ Неизвестный аргумент: $arg${NC}"
-            echo "Использование: ./build-all.sh [--release|--debug] [--skip-tests]"
+            echo "Использование: ./build-all.sh [--release|--debug] [--skip-tests] [--no-auto-version] [--force-build-timestamp] [--clean-target] [--prune-target-days N]"
             exit 1
             ;;
     esac
+    shift
 done
+
+# Политика по умолчанию: если аргументов не было, мы в WSL и пользователь явно не просил clean —
+# прореживаем старые debug-артефакты.
+if [ "$ORIGINAL_ARGC" -eq 0 ] && [ "$PLATFORM" = "wsl" ] && [ "$CLEAN_TARGET" = false ] && [ -z "$PRUNE_TARGET_DAYS" ]; then
+    PRUNE_TARGET_DAYS="$DEFAULT_WSL_PRUNE_DAYS"
+fi
 
 # ============================================================================
 # Автоверсионирование
@@ -191,6 +226,46 @@ check_file() {
 }
 
 # ============================================================================
+# ЭТАП 0: Очистка target (опционально)
+# ============================================================================
+
+clean_or_prune_target() {
+    if [ "$CLEAN_TARGET" = true ]; then
+        log_section "ЭТАП 0: Очистка target/ (cargo clean)"
+        log_warning "⚠️  Выполняется cargo clean — удалится весь target/ (сборка начнётся с нуля)"
+        measure_time cargo clean
+        return 0
+    fi
+
+    if [ -n "$PRUNE_TARGET_DAYS" ]; then
+        if ! [[ "$PRUNE_TARGET_DAYS" =~ ^[0-9]+$ ]]; then
+            log_error "❌ Некорректное значение --prune-target-days: '$PRUNE_TARGET_DAYS' (нужно число дней)"
+            return 1
+        fi
+
+        log_section "ЭТАП 0: Прореживание target/debug (mtime > ${PRUNE_TARGET_DAYS} дней)"
+        log_warning "⚠️  Удаляются старые артефакты; следующая сборка может пересобрать зависимости"
+
+        if [ -d "target" ]; then
+            # Удаляем только очевидные heavy dirs; остальные пусть остаются.
+            find target \
+                -type f \
+                \( -path "*/debug/deps/*" -o -path "*/debug/incremental/*" \) \
+                -mtime +"$PRUNE_TARGET_DAYS" \
+                -print -delete 2>/dev/null || true
+
+            find target \
+                -type d \
+                \( -path "*/debug/deps/*" -o -path "*/debug/incremental/*" \) \
+                -empty \
+                -print -delete 2>/dev/null || true
+        fi
+    fi
+
+    return 0
+}
+
+# ============================================================================
 # ЭТАП 1: Сборка Rust бинарников
 # ============================================================================
 
@@ -206,8 +281,12 @@ build_rust_binaries() {
     log_info "Режим: $BUILD_MODE"
     log_info "Флаги: cargo build $cargo_flags --workspace"
 
-    # Принудительно обновляем build.rs для свежего BUILD_TIMESTAMP
-    touch backend/build.rs
+    # ВНИМАНИЕ: принудительное обновление BUILD_TIMESTAMP ломает повторное использование
+    # артефактов и быстро раздувает target/debug/deps из-за новых hash-имен.
+    if [ "$FORCE_BUILD_TIMESTAMP" = true ]; then
+        log_warning "⚠️  Включён --force-build-timestamp: будет выполнен touch backend/build.rs (может сильно раздувать target/)"
+        touch backend/build.rs
+    fi
 
     measure_time cargo build $cargo_flags --workspace
 
@@ -325,7 +404,11 @@ run_quick_tests() {
     log_section "ЭТАП 4: Быстрые проверки"
 
     log_info "\n🧪 Запуск быстрых unit тестов..."
-    measure_time cargo test --lib --workspace --quiet
+    local cargo_flags=""
+    if [ "$BUILD_MODE" = "release" ]; then
+        cargo_flags="--release"
+    fi
+    measure_time cargo test $cargo_flags --lib --workspace --quiet
 
     log_success "\n✅ Быстрые тесты пройдены"
     return 0
@@ -387,8 +470,19 @@ main() {
 
     local total_start=$SECONDS
 
-    # Автоверсионирование
-    BUILD_VERSION=$(auto_version)
+    # Автоверсионирование (опционально)
+    if [ "$AUTO_VERSION" = true ]; then
+        BUILD_VERSION=$(auto_version)
+    else
+        BUILD_VERSION=$(get_current_version)
+        log_warning "⏭️  Автоверсионирование выключено (--no-auto-version), версия: $BUILD_VERSION"
+    fi
+
+    # Этап 0: Очистка/прореживание target (опционально)
+    if ! clean_or_prune_target; then
+        log_error "\n❌ Очистка target провалилась!"
+        exit 1
+    fi
 
     # Этап 1: Rust
     if ! build_rust_binaries; then

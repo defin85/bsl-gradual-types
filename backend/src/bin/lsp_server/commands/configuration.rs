@@ -119,6 +119,21 @@ pub async fn handle_parse_configuration(
         })
         .await;
 
+    // Единый "источник истины" для прогресса этой команды: server-initiated WorkDoneProgress ($/progress).
+    // Важно держать проценты монотонными, т.к. UI в расширении считает increment как delta и не умеет "откатывать" назад.
+    //
+    // Раскладка шкалы:
+    // 0..10   — старт/валидация
+    // 10..30  — discovery/parsing конфигурации (XML, формы, module paths)
+    // 30..90  — загрузка типов в repository
+    // 90..99  — индексация BSL-модулей конфигурации (*.bsl)
+    // 99..100 — завершение
+    fn map_discovery_percent_to_command_percent(p: u32) -> u32 {
+        // p = 0..100 (ProgressUpdate внутри discovery). Маппим в 10..30.
+        let mapped = 10u32.saturating_add(((p as f32) * 0.2).round() as u32);
+        mapped.min(30)
+    }
+
     // Get AnalysisEngine
     let engine = match analysis_engine {
         Some(e) => e,
@@ -157,7 +172,7 @@ pub async fn handle_parse_configuration(
         let client = client_clone.clone();
         let token = token_clone.clone();
 
-        let percentage = update.percentage as u32;
+        let percentage = map_discovery_percent_to_command_percent(update.percentage as u32);
         let message = update.message.unwrap_or_else(|| {
             format!(
                 "{}: {}/{}",
@@ -260,8 +275,12 @@ pub async fn handle_parse_configuration(
 
         // Report progress every 10 types
         if (index + 1) % PROGRESS_REPORT_INTERVAL == 0 || index == total_objects - 1 {
-            let load_progress = ((loaded * 80) / total_objects) as u32;
-            let total_progress = 10 + load_progress;
+            let load_progress = if total_objects == 0 {
+                0u32
+            } else {
+                ((loaded * 60) / total_objects) as u32
+            };
+            let total_progress = 30 + load_progress; // 30..90
 
             let _ = client
                 .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
@@ -278,21 +297,28 @@ pub async fn handle_parse_configuration(
         }
     }
 
-    // Progress end (100%)
+    info!("Configuration parsed successfully: {} types loaded", loaded);
+
+    // Progress: index configuration BSL modules (90..99)
     let _ = client
         .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
             token: token.clone(),
-            value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
-                message: Some(format!("Loaded {} types", loaded)),
-            })),
+            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
+                WorkDoneProgressReport {
+                    message: Some("Indexing configuration module methods (*.bsl)...".to_string()),
+                    percentage: Some(90),
+                    cancellable: Some(false),
+                },
+            )),
         })
         .await;
-
-    info!("Configuration parsed successfully: {} types loaded", loaded);
 
     // Индексация экспортных методов из модулей конфигурации (*.bsl)
     match index_configuration_bsl_modules(&canonical_path, &metadata) {
         Ok(indexed) => {
+            let config_methods_count = indexed.config_methods.len();
+            let global_functions_count = indexed.global_functions.len();
+
             for (owner_type, sig) in indexed.config_methods {
                 repo.add_config_method_signature(&owner_type, sig);
             }
@@ -306,11 +332,50 @@ pub async fn handle_parse_configuration(
                 repo.add_global_function_definition_location(&function_name, location);
             }
             info!("Configuration module methods indexed successfully");
+
+            let _ = client
+                .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
+                    token: token.clone(),
+                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
+                        WorkDoneProgressReport {
+                            message: Some(format!(
+                                "Indexed {} methods, {} global functions",
+                                config_methods_count, global_functions_count
+                            )),
+                            percentage: Some(99),
+                            cancellable: Some(false),
+                        },
+                    )),
+                })
+                .await;
         }
         Err(e) => {
             warn!("Failed to index configuration module methods: {}", e);
+
+            let _ = client
+                .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
+                    token: token.clone(),
+                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
+                        WorkDoneProgressReport {
+                            message: Some(format!("Indexing skipped: {}", e)),
+                            percentage: Some(99),
+                            cancellable: Some(false),
+                        },
+                    )),
+                })
+                .await;
         }
     }
+
+    // Progress end (100%) — после индексации модулей
+    let _ = client
+        .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
+            token: token.clone(),
+            value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
+                message: Some(format!("Loaded {} types", loaded)),
+            })),
+        })
+        .await;
 
     ParseConfigurationResponse {
         success: true,

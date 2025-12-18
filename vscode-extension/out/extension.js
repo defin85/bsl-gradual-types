@@ -18927,6 +18927,7 @@ async function findMainConfiguration() {
 }
 async function autoDetectConfiguration(outputChannel8) {
   outputChannel8?.appendLine("\u{1F50D} Searching for 1C configuration in workspace...");
+  const isTestMode = process.env.NODE_ENV === "test" || process.env.VSCODE_TEST_MODE === "1" || vscode9.extensions.getExtension("vscode.vscode-api-tests") !== void 0;
   const mainConfig = await findMainConfiguration();
   if (mainConfig) {
     outputChannel8?.appendLine(`\u2705 Found main configuration: ${mainConfig.name} at ${mainConfig.path}`);
@@ -18935,6 +18936,10 @@ async function autoDetectConfiguration(outputChannel8) {
     return mainConfig.path;
   } else {
     outputChannel8?.appendLine("\u274C No 1C configuration found in workspace");
+    if (isTestMode) {
+      outputChannel8?.appendLine("\u2139\uFE0F [Test Mode] Skipping configuration selection UI");
+      return null;
+    }
     const result = await vscode9.window.showInformationMessage(
       "\u041A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044F 1\u0421 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438",
       "\u0412\u044B\u0431\u0440\u0430\u0442\u044C \u043F\u0430\u043F\u043A\u0443",
@@ -20139,20 +20144,11 @@ function registerParseConfigurationCommand(context, client2) {
     const config = vscode20.workspace.getConfiguration("bslAnalyzer");
     await config.update("configurationPath", configPath, vscode20.ConfigurationTarget.Workspace);
     try {
-      const result = await vscode20.window.withProgress(
-        {
-          location: vscode20.ProgressLocation.Notification,
-          title: "\u041F\u0430\u0440\u0441\u0438\u043D\u0433 \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438",
-          cancellable: false
-        },
-        async () => {
-          return await client2.sendRequest("workspace/executeCommand", {
-            command: "bsl.parseConfiguration",
-            arguments: [{ configPath }]
-            // ✅ Соответствует camelCase в LSP
-          });
-        }
-      );
+      const result = await client2.sendRequest("workspace/executeCommand", {
+        command: "bsl.parseConfiguration",
+        arguments: [{ configPath }]
+        // ✅ Соответствует camelCase в LSP
+      });
       const response = result;
       if (response.success) {
         vscode20.window.showInformationMessage(

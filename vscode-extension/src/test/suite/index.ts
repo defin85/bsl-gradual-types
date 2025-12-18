@@ -7,12 +7,17 @@ export async function run(): Promise<void> {
     try {
         const config = vscode.workspace.getConfiguration('bslAnalyzer');
 
-        // Установить пустую строку для platformDocsArchive (тесты используют mocks)
-        await config.update(
-            'platformDocsArchive',
-            '', // Пустая строка - тесты работают с mocks
-            vscode.ConfigurationTarget.Global
-        );
+        // Если runTest.ts уже положил реальные пути в user settings (BSL_TEST_USE_REAL_FIXTURES=1),
+        // не перетираем их пустыми значениями.
+        const useRealFixtures = process.env.BSL_TEST_USE_REAL_FIXTURES === '1';
+        if (!useRealFixtures) {
+            // Установить пустую строку для platformDocsArchive (тесты используют mocks)
+            await config.update(
+                'platformDocsArchive',
+                '', // Пустая строка - тесты работают с mocks
+                vscode.ConfigurationTarget.Global
+            );
+        }
 
         console.log('[Test Setup] Mock configuration applied');
     } catch (error) {

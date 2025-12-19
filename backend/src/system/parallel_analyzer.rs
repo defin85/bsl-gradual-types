@@ -23,6 +23,7 @@ use tracing::{debug, info, warn};
 use bsl_shared::domain::types::TypeResolution;
 
 use super::persistent_cache::{PersistentCache, SerializableTypeResolution};
+use crate::system::fs_utils::read_bsl_file;
 
 /// Результат параллельного анализа проекта
 #[derive(Debug, Clone)]
@@ -253,7 +254,7 @@ impl ParallelAnalyzer {
         let start = Instant::now();
 
         // 1. Прочитать содержимое файла
-        let content = fs::read_to_string(file_path)
+        let content = read_bsl_file(file_path)
             .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
 
         // 2. Вычислить hash для cache lookup

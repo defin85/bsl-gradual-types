@@ -7,6 +7,7 @@ use tower_lsp::lsp_types::Url;
 use tracing::{error, info};
 
 use bsl_backend::application::TypeSystemService;
+use bsl_backend::system::fs_utils::read_bsl_file;
 use bsl_shared::api::semantic_dtos::{
     GetSemanticHtmlRequest, GetSemanticTreeRequest, RenderedHtmlDto, SemanticNodeDto,
     SemanticTreeDto,
@@ -31,7 +32,7 @@ pub async fn handle_get_semantic_tree(
 
     // Read file content (from cache or disk)
     let file_content = get_document_content(&uri)
-        .or_else(|| std::fs::read_to_string(&file_path).ok())
+        .or_else(|| read_bsl_file(&file_path).ok())
         .ok_or("Could not read file content")?;
 
     let service = type_service.ok_or("TypeSystemService not initialized")?;

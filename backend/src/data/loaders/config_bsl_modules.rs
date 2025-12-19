@@ -8,15 +8,30 @@
 
 use crate::data::loaders::config_metadata_parser::types::CommonModuleProperties;
 use crate::data::loaders::UniversalMetadataObject;
+use crate::system::fs_utils::read_bsl_file;
 use crate::system::tree_sitter_adapter::TreeSitterAdapter;
+use crate::system::tree_sitter_adapter::span::{LineIndex, node_to_span_cached};
 use anyhow::{anyhow, Result};
 use bsl_shared::domain::code_location::{CodeLocation, ModuleType};
 use bsl_shared::domain::signature_index::{ContextRequirements, MethodSignature, SignatureSource};
 use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
 use bsl_shared::domain::types::{FacetKind, MetadataKind, ParameterInfo};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex, OnceLock,
+};
+use std::time::{Duration, Instant};
 use tree_sitter::Parser;
+
+#[derive(Debug, Clone)]
+pub struct ModuleIndexProgress {
+    pub current: usize,
+    pub total: usize,
+    pub module_path: PathBuf,
+}
 
 #[derive(Debug, Default)]
 pub struct IndexedConfigSignatures {
@@ -71,45 +86,40 @@ pub fn index_configuration_bsl_modules(
     config_root: &Path,
     metadata: &[UniversalMetadataObject],
 ) -> Result<IndexedConfigSignatures> {
+    index_configuration_bsl_modules_with_progress::<fn(ModuleIndexProgress)>(
+        config_root,
+        metadata,
+        None,
+    )
+}
+
+pub fn index_configuration_bsl_modules_with_progress<F>(
+    config_root: &Path,
+    metadata: &[UniversalMetadataObject],
+    mut progress_callback: Option<F>,
+) -> Result<IndexedConfigSignatures>
+where
+    F: FnMut(ModuleIndexProgress),
+{
+    let metrics = parse_metrics_config();
     let common_module_props = collect_common_module_props(metadata);
-
-    let mut all_module_paths: Vec<PathBuf> = Vec::new();
-
-    // Common modules: вычисляем путь напрямую по структуре конфигурации
-    for obj in metadata {
-        if obj.object_type == Some(MetadataKind::CommonModule) {
-            let module_path = config_root
-                .join("CommonModules")
-                .join(&obj.name)
-                .join("Ext")
-                .join("Module.bsl");
-            if module_path.exists() {
-                all_module_paths.push(module_path);
-            }
-        }
-    }
-
-    // Object/Manager/RecordSet модули: берём пути из метаданных (если discovery их нашёл)
-    for obj in metadata {
-        if let Some(p) = obj.object_module_path.as_ref() {
-            all_module_paths.push(p.clone());
-        }
-        if let Some(p) = obj.manager_module_path.as_ref() {
-            all_module_paths.push(p.clone());
-        }
-        if let Some(p) = obj.record_set_module_path.as_ref() {
-            all_module_paths.push(p.clone());
-        }
-    }
-
-    all_module_paths.sort();
-    all_module_paths.dedup();
+    let all_module_paths = collect_module_paths(config_root, metadata);
 
     let mut out = IndexedConfigSignatures::default();
 
     let mut parsed_modules: Vec<ParsedModule> = Vec::new();
+    let mut slow_modules: Vec<(Duration, PathBuf)> = Vec::new();
 
-    for module_path in all_module_paths {
+    let total = all_module_paths.len();
+    for (idx, module_path) in all_module_paths.into_iter().enumerate() {
+        if let Some(ref mut cb) = progress_callback {
+            cb(ModuleIndexProgress {
+                current: idx + 1,
+                total,
+                module_path: module_path.clone(),
+            });
+        }
+
         let Ok(location) = CodeLocation::determine_from_path(&module_path) else {
             continue;
         };
@@ -120,7 +130,7 @@ pub fn index_configuration_bsl_modules(
             continue;
         };
 
-        let source = match std::fs::read_to_string(&module_path) {
+        let source = match read_bsl_file(&module_path) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("Не удалось прочитать {:?}: {}", module_path, e);
@@ -128,13 +138,29 @@ pub fn index_configuration_bsl_modules(
             }
         };
 
-        let parsed = match parse_bsl_module(&source) {
+        let parse_started = Instant::now();
+        let parsed = match parse_bsl_module(&source, &module_path) {
             Ok(p) => p,
             Err(e) => {
+                let elapsed = parse_started.elapsed();
+                if elapsed >= metrics.slow_threshold {
+                    slow_modules.push((elapsed, module_path.clone()));
+                }
                 tracing::warn!("Не удалось распарсить модуль {:?}: {}", module_path, e);
                 continue;
             }
         };
+        let elapsed = parse_started.elapsed();
+        if metrics.log_each {
+            tracing::info!(
+                "Парсинг модуля завершён ({}): {:?}",
+                human_duration(elapsed),
+                module_path
+            );
+        }
+        if elapsed >= metrics.slow_threshold {
+            slow_modules.push((elapsed, module_path.clone()));
+        }
 
         let module_type = location.module_type;
         let is_global = is_global_common_module(&module_type, &common_module_props);
@@ -218,6 +244,183 @@ pub fn index_configuration_bsl_modules(
         }
     }
 
+    report_slow_modules(&mut slow_modules);
+    sort_indexed_signatures(&mut out);
+    Ok(out)
+}
+
+pub fn index_configuration_bsl_modules_with_progress_parallel<F>(
+    config_root: &Path,
+    metadata: &[UniversalMetadataObject],
+    progress_callback: Option<F>,
+) -> Result<IndexedConfigSignatures>
+where
+    F: Fn(ModuleIndexProgress) + Send + Sync + 'static,
+{
+    let metrics = parse_metrics_config();
+    let common_module_props = collect_common_module_props(metadata);
+    let all_module_paths = collect_module_paths(config_root, metadata);
+    let total = all_module_paths.len();
+
+    let progress_callback = progress_callback.map(Arc::new);
+    let progress_counter = AtomicUsize::new(0);
+    let slow_modules = Arc::new(Mutex::new(Vec::new()));
+
+    let parsed_modules: Vec<ParsedModule> = all_module_paths
+        .par_iter()
+        .filter_map(|module_path| {
+            let parse_started = Instant::now();
+            let mut parsed_module: Option<ParsedModule> = None;
+
+            let location = CodeLocation::determine_from_path(module_path);
+            if let Ok(location) = location {
+                if let Some(owner_type_name) =
+                    resolve_owner_type_for_signature(&location.module_type, &common_module_props)
+                {
+                    let source = match read_bsl_file(module_path) {
+                        Ok(s) => Some(s),
+                        Err(e) => {
+                            tracing::warn!("Не удалось прочитать {:?}: {}", module_path, e);
+                            None
+                        }
+                    };
+
+                    if let Some(source) = source {
+                        let parsed = match parse_bsl_module(&source, module_path) {
+                            Ok(p) => Some(p),
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Не удалось распарсить модуль {:?}: {}",
+                                    module_path,
+                                    e
+                                );
+                                None
+                            }
+                        };
+
+                        if let Some(parsed) = parsed {
+                            let module_type = location.module_type;
+                            let is_global =
+                                is_global_common_module(&module_type, &common_module_props);
+
+                            parsed_module = Some(ParsedModule {
+                                owner_type_name,
+                                module_type,
+                                is_global_common_module: is_global,
+                                module_path: module_path.clone(),
+                                decls: parsed.decls,
+                                call_sites: parsed.call_sites,
+                            });
+                        }
+                    }
+                }
+            }
+
+            let elapsed = parse_started.elapsed();
+            if metrics.log_each {
+                tracing::info!(
+                    "Парсинг модуля завершён ({}): {:?}",
+                    human_duration(elapsed),
+                    module_path
+                );
+            }
+            if elapsed >= metrics.slow_threshold {
+                if let Ok(mut guard) = slow_modules.lock() {
+                    guard.push((elapsed, module_path.clone()));
+                }
+            }
+
+            let current = progress_counter.fetch_add(1, Ordering::Relaxed) + 1;
+            if let Some(ref cb) = progress_callback {
+                cb(ModuleIndexProgress {
+                    current,
+                    total,
+                    module_path: module_path.clone(),
+                });
+            }
+
+            parsed_module
+        })
+        .collect();
+
+    let mut out = IndexedConfigSignatures::default();
+    let inferred_param_types = infer_export_param_types_across_modules(&parsed_modules);
+
+    for module in parsed_modules {
+        let module_context = module_context_requirements(&module.module_type, &common_module_props);
+
+        for decl in module.decls {
+            if !decl.is_export {
+                continue;
+            }
+
+            let method_name = decl.name.clone();
+            let ctx = decl.directive_ctx.unwrap_or(module_context);
+            let inferred_for_decl =
+                inferred_param_types.get(&(module.owner_type_name.clone(), decl.name.clone()));
+
+            let signature = MethodSignature::new(
+                method_name.clone(),
+                Some(module.owner_type_name.clone()),
+                decl.params
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, p)| ParameterInfo {
+                        name: p,
+                        type_name: inferred_for_decl
+                            .and_then(|v| v.get(idx))
+                            .cloned()
+                            .flatten(),
+                        is_optional: false,
+                        default_value: None,
+                        description: None,
+                    })
+                    .collect(),
+                decl.return_type.clone(),
+                SignatureSource::Configuration,
+                None, // return_facet: неизвестен на этапе извлечения
+                ctx,
+            );
+
+            out.config_methods
+                .push((module.owner_type_name.clone(), signature.clone()));
+
+            if module.is_global_common_module {
+                let mut global_sig = signature;
+                global_sig.owner_type = None;
+                out.global_functions
+                    .push((method_name.clone(), global_sig));
+                out.global_definition_locations.push((
+                    method_name.clone(),
+                    TypeDefinitionLocation::user_defined(
+                        module.module_path.clone(),
+                        decl.span.start_line,
+                        decl.span.start_column,
+                        decl.span.end_line,
+                        decl.span.end_column,
+                    ),
+                ));
+            }
+
+            out.definition_locations.push((
+                module.owner_type_name.clone(),
+                method_name,
+                TypeDefinitionLocation::user_defined(
+                    module.module_path.clone(),
+                    decl.span.start_line,
+                    decl.span.start_column,
+                    decl.span.end_line,
+                    decl.span.end_column,
+                ),
+            ));
+        }
+    }
+
+    if let Ok(mut guard) = slow_modules.lock() {
+        report_slow_modules(&mut guard);
+    }
+    sort_indexed_signatures(&mut out);
+
     Ok(out)
 }
 
@@ -229,6 +432,97 @@ fn collect_common_module_props(
         .filter(|o| o.object_type == Some(MetadataKind::CommonModule))
         .filter_map(|o| o.common_module_properties.clone().map(|p| (o.name.clone(), p)))
         .collect()
+}
+
+fn collect_module_paths(
+    config_root: &Path,
+    metadata: &[UniversalMetadataObject],
+) -> Vec<PathBuf> {
+    let mut all_module_paths: Vec<PathBuf> = Vec::new();
+
+    // Common modules: вычисляем путь напрямую по структуре конфигурации
+    for obj in metadata {
+        if obj.object_type == Some(MetadataKind::CommonModule) {
+            let module_path = config_root
+                .join("CommonModules")
+                .join(&obj.name)
+                .join("Ext")
+                .join("Module.bsl");
+            if module_path.exists() {
+                all_module_paths.push(module_path);
+            }
+        }
+    }
+
+    // Object/Manager/RecordSet модули: берём пути из метаданных (если discovery их нашёл)
+    for obj in metadata {
+        if let Some(p) = obj.object_module_path.as_ref() {
+            all_module_paths.push(p.clone());
+        }
+        if let Some(p) = obj.manager_module_path.as_ref() {
+            all_module_paths.push(p.clone());
+        }
+        if let Some(p) = obj.record_set_module_path.as_ref() {
+            all_module_paths.push(p.clone());
+        }
+    }
+
+    all_module_paths.sort();
+    all_module_paths.dedup();
+    all_module_paths
+}
+
+fn sort_indexed_signatures(out: &mut IndexedConfigSignatures) {
+    fn location_sort_key(location: &TypeDefinitionLocation) -> (String, u32, u32, u32, u32) {
+        match location {
+            TypeDefinitionLocation::UserDefined {
+                file_path,
+                start_line,
+                start_column,
+                end_line,
+                end_column,
+            } => (
+                file_path.to_string_lossy().to_string(),
+                *start_line,
+                *start_column,
+                *end_line,
+                *end_column,
+            ),
+            _ => (String::new(), 0, 0, 0, 0),
+        }
+    }
+
+    out.config_methods.sort_by(|a, b| {
+        let a_key = (a.0.to_lowercase(), a.1.name.to_lowercase());
+        let b_key = (b.0.to_lowercase(), b.1.name.to_lowercase());
+        a_key.cmp(&b_key)
+    });
+
+    out.global_functions.sort_by(|a, b| {
+        let a_key = a.0.to_lowercase();
+        let b_key = b.0.to_lowercase();
+        a_key.cmp(&b_key)
+    });
+
+    out.definition_locations.sort_by(|a, b| {
+        let a_key = (
+            a.0.to_lowercase(),
+            a.1.to_lowercase(),
+            location_sort_key(&a.2),
+        );
+        let b_key = (
+            b.0.to_lowercase(),
+            b.1.to_lowercase(),
+            location_sort_key(&b.2),
+        );
+        a_key.cmp(&b_key)
+    });
+
+    out.global_definition_locations.sort_by(|a, b| {
+        let a_key = (a.0.to_lowercase(), location_sort_key(&a.1));
+        let b_key = (b.0.to_lowercase(), location_sort_key(&b.1));
+        a_key.cmp(&b_key)
+    });
 }
 
 fn is_global_common_module(
@@ -297,63 +591,199 @@ fn owner_type_to_faceted_type(owner_type: &str, facet: FacetKind) -> Option<Stri
 
 /// Возвращает список объявлений верхнего уровня:
 /// (name, params, is_export, is_function, context_from_directive, return_type)
-fn parse_bsl_module(
-    source: &str,
-) -> Result<ParsedModuleData> {
+fn parse_bsl_module(source: &str, module_path: &Path) -> Result<ParsedModuleData> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_bsl::LANGUAGE.into())
         .map_err(|e| anyhow!("tree-sitter-bsl language error: {:?}", e))?;
 
+    let ts_parse_started = Instant::now();
     let tree = parser
         .parse(source, None)
         .ok_or_else(|| anyhow!("tree-sitter parse returned None"))?;
+    let ts_parse_elapsed = ts_parse_started.elapsed();
+    if ts_parse_elapsed >= Duration::from_secs(1) {
+        tracing::debug!(
+            "tree-sitter parse: {} ({} байт, {} строк) {:?}",
+            human_duration(ts_parse_elapsed),
+            source.len(),
+            source.lines().count(),
+            module_path
+        );
+    }
 
-    let parse_result =
-        TreeSitterAdapter::convert_tree(&tree, source).map_err(|e| anyhow!(e))?;
+    let convert_started = Instant::now();
+    let parse_result = TreeSitterAdapter::convert_tree_fast(&tree, source);
+    let convert_elapsed = convert_started.elapsed();
+    if convert_elapsed >= Duration::from_secs(1) {
+        tracing::debug!(
+            "convert_tree: {} ({} байт, {} строк) {:?}",
+            human_duration(convert_elapsed),
+            source.len(),
+            source.lines().count(),
+            module_path
+        );
+    }
 
-    let call_sites = collect_call_sites(&parse_result.program.statements);
-    let mut decls = Vec::new();
+    match parse_result {
+        Ok(parse_result) => {
+            let call_sites_started = Instant::now();
+            let call_sites = collect_call_sites(&parse_result.program.statements);
+            let call_sites_elapsed = call_sites_started.elapsed();
+            if call_sites_elapsed >= Duration::from_secs(1) {
+                tracing::debug!(
+                    "collect_call_sites: {} ({} байт, {} строк) {:?}",
+                    human_duration(call_sites_elapsed),
+                    source.len(),
+                    source.lines().count(),
+                    module_path
+                );
+            }
+            let mut decls = Vec::new();
 
-    for st in parse_result.program.statements {
-        match st {
-            crate::parsing::bsl::ast::Statement::FunctionDecl {
-                name,
-                params,
-                body,
-                compiler_directive,
-                is_export,
-                span,
-                ..
-            } => decls.push(ParsedDecl {
-                return_type: infer_return_type_from_body(&body),
-                name,
-                params,
-                is_export,
-                directive_ctx: compiler_directive.map(context_from_directive),
-                span,
-            }),
-            crate::parsing::bsl::ast::Statement::ProcedureDecl {
-                name,
-                params,
-                body: _,
-                compiler_directive,
-                is_export,
-                span,
-                ..
-            } => decls.push(ParsedDecl {
-                return_type: None,
-                name,
-                params,
-                is_export,
-                directive_ctx: compiler_directive.map(context_from_directive),
-                span,
-            }),
-            _ => {}
+            for st in parse_result.program.statements {
+                match st {
+                    crate::parsing::bsl::ast::Statement::FunctionDecl {
+                        name,
+                        params,
+                        body,
+                        compiler_directive,
+                        is_export,
+                        span,
+                        ..
+                    } => decls.push(ParsedDecl {
+                        return_type: infer_return_type_from_body(&body),
+                        name,
+                        params,
+                        is_export,
+                        directive_ctx: compiler_directive.map(context_from_directive),
+                        span,
+                    }),
+                    crate::parsing::bsl::ast::Statement::ProcedureDecl {
+                        name,
+                        params,
+                        body: _,
+                        compiler_directive,
+                        is_export,
+                        span,
+                        ..
+                    } => decls.push(ParsedDecl {
+                        return_type: None,
+                        name,
+                        params,
+                        is_export,
+                        directive_ctx: compiler_directive.map(context_from_directive),
+                        span,
+                    }),
+                    _ => {}
+                }
+            }
+
+            Ok(ParsedModuleData { decls, call_sites })
+        }
+        Err(e) => {
+            // Фолбэк: если конвертация в AST/IR падает на выражениях в теле (tree-sitter adapter),
+            // всё равно индексируем экспортные объявления (name/params/Экспорт/директива/Span).
+            //
+            // Это критично для больших конфигураций, где в теле могут встречаться конструкции,
+            // которые мы пока не умеем корректно конвертировать.
+            tracing::debug!(
+                "TreeSitterAdapter::convert_tree failed, fallback to decl-only parse ({}): {}",
+                module_path.display(),
+                e
+            );
+
+            let decls = extract_export_decls_from_tree(&tree, source)?;
+            Ok(ParsedModuleData {
+                decls,
+                call_sites: Vec::new(),
+            })
+        }
+    }
+}
+
+fn extract_export_decls_from_tree(
+    tree: &tree_sitter::Tree,
+    source: &str,
+) -> Result<Vec<ParsedDecl>> {
+    fn node_text(node: &tree_sitter::Node, source: &str) -> String {
+        source[node.byte_range()].to_string()
+    }
+
+    fn convert_parameters(node: &tree_sitter::Node, source: &str) -> Vec<String> {
+        let mut params = Vec::new();
+        let mut cursor = node.walk();
+
+        for child in node.children(&mut cursor) {
+            if child.kind() != "parameter" {
+                continue;
+            }
+
+            let mut param_cursor = child.walk();
+            for param_child in child.children(&mut param_cursor) {
+                if param_child.kind() == "identifier" {
+                    params.push(node_text(&param_child, source));
+                    break;
+                }
+            }
+        }
+
+        params
+    }
+
+    fn collect_definition_nodes<'a>(node: tree_sitter::Node<'a>, out: &mut Vec<tree_sitter::Node<'a>>) {
+        if matches!(node.kind(), "function_definition" | "procedure_definition") {
+            out.push(node);
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            collect_definition_nodes(child, out);
         }
     }
 
-    Ok(ParsedModuleData { decls, call_sites })
+    let line_index = LineIndex::new(source);
+
+    let mut definition_nodes = Vec::new();
+    collect_definition_nodes(tree.root_node(), &mut definition_nodes);
+
+    let mut out = Vec::new();
+
+    for node in definition_nodes {
+        let mut cursor = node.walk();
+        let mut name = String::new();
+        let mut params: Vec<String> = Vec::new();
+        let mut is_export = false;
+
+        for child in node.children(&mut cursor) {
+            match child.kind() {
+                "identifier" if name.is_empty() => name = node_text(&child, source),
+                "parameters" => params = convert_parameters(&child, source),
+                _ if child.kind().ends_with("_KEYWORD") => {
+                    let kw = node_text(&child, source).trim().to_lowercase();
+                    if kw == "экспорт" || kw == "export" {
+                        is_export = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if name.is_empty() {
+            continue;
+        }
+
+        out.push(ParsedDecl {
+            name,
+            params,
+            is_export,
+            directive_ctx: None,
+            return_type: None,
+            span: node_to_span_cached(&node, source, &line_index),
+        });
+    }
+
+    Ok(out)
 }
 
 fn collect_call_sites(statements: &[crate::parsing::bsl::ast::Statement]) -> Vec<CallSite> {
@@ -707,6 +1137,129 @@ fn infer_export_param_types_across_modules(
     }
 
     out
+}
+
+fn report_slow_modules(slow_modules: &mut Vec<(Duration, PathBuf)>) {
+    let metrics = parse_metrics_config();
+    if slow_modules.is_empty() {
+        return;
+    }
+    slow_modules.sort_by(|a, b| b.0.cmp(&a.0));
+    let top = slow_modules.iter().take(metrics.top_n);
+    let table = format_slow_modules_table(top);
+    tracing::info!(
+        "Медленный парсинг модулей: всего={}\n{}",
+        slow_modules.len(),
+        table
+    );
+}
+
+#[derive(Debug, Clone)]
+struct ParseMetricsConfig {
+    slow_threshold: Duration,
+    top_n: usize,
+    log_each: bool,
+}
+
+fn parse_metrics_config() -> &'static ParseMetricsConfig {
+    static CONFIG: OnceLock<ParseMetricsConfig> = OnceLock::new();
+    CONFIG.get_or_init(|| ParseMetricsConfig {
+        slow_threshold: Duration::from_millis(env_u64("BSL_SLOW_MODULE_THRESHOLD_MS", 3000)),
+        top_n: env_usize("BSL_SLOW_MODULE_TOP_N", 5).max(1),
+        log_each: env_bool("BSL_MODULE_PARSE_LOG_EACH", false),
+    })
+}
+
+fn env_u64(key: &str, default: u64) -> u64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn env_bool(key: &str, default: bool) -> bool {
+    match std::env::var(key) {
+        Ok(v) => matches!(v.as_str(), "1" | "true" | "yes" | "on"),
+        Err(_) => default,
+    }
+}
+
+fn format_slow_modules_table<'a>(
+    rows: impl Iterator<Item = &'a (Duration, PathBuf)>,
+) -> String {
+    let mut collected: Vec<(String, String)> = Vec::new();
+    for (idx, (elapsed, path)) in rows.enumerate() {
+        let rank = format!("{}", idx + 1);
+        let duration = human_duration(*elapsed);
+        let path_str = path.to_string_lossy().to_string();
+        collected.push((rank, format!("{} | {}", duration, path_str)));
+    }
+
+    let rank_width = collected
+        .iter()
+        .map(|(rank, _)| rank.len())
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    let detail_width = collected
+        .iter()
+        .map(|(_, detail)| detail.len())
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    let mut out = String::new();
+    let border = format!(
+        "+-{:-<rank$}-+-{:-<detail$}-+",
+        "",
+        "",
+        rank = rank_width,
+        detail = detail_width
+    );
+    out.push_str(&border);
+    out.push('\n');
+    out.push_str(&format!(
+        "| {:<rank$} | {:<detail$} |",
+        "N",
+        "duration | module_path",
+        rank = rank_width,
+        detail = detail_width
+    ));
+    out.push('\n');
+    out.push_str(&border);
+    out.push('\n');
+
+    for (rank, detail) in collected {
+        out.push_str(&format!(
+            "| {:<rank$} | {:<detail$} |",
+            rank,
+            detail,
+            rank = rank_width,
+            detail = detail_width
+        ));
+        out.push('\n');
+    }
+
+    out.push_str(&border);
+    out
+}
+
+fn human_duration(duration: Duration) -> String {
+    let secs = duration.as_secs();
+    let millis = duration.subsec_millis();
+    if secs > 0 {
+        format!("{}.{:03}s", secs, millis)
+    } else {
+        format!("{}ms", millis)
+    }
 }
 
 fn normalize_union_parts(mut parts: Vec<String>) -> Vec<String> {
@@ -1488,5 +2041,47 @@ mod tests {
             }
             other => panic!("expected UserDefined location, got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn indexes_common_module_exports_with_utf8_bom() {
+        let tmp = TempDir::new().unwrap();
+        let module_path = tmp
+            .path()
+            .join("CommonModules")
+            .join("ОбщийМодуль1")
+            .join("Ext")
+            .join("Module.bsl");
+
+        write(
+            &module_path,
+            "\u{FEFF}Процедура П1() Экспорт\r\nКонецПроцедуры\r\n",
+        );
+
+        let mut cm = UniversalMetadataObject::new(
+            "CommonModule".to_string(),
+            "ОбщийМодуль1".to_string(),
+            "00000000-0000-0000-0000-000000000000".to_string(),
+        );
+        cm.common_module_properties = Some(CommonModuleProperties {
+            server: true,
+            client_managed_application: false,
+            client_ordinary_application: false,
+            external_connection: false,
+            server_call: false,
+            global: false,
+            privileged: false,
+            compile: true,
+            return_values_reuse: ReturnValuesReuse::DontUse,
+        });
+
+        let indexed = index_configuration_bsl_modules(tmp.path(), &[cm]).unwrap();
+        assert!(
+            indexed
+                .config_methods
+                .iter()
+                .any(|(owner, sig)| owner == "ОбщиеМодули.ОбщийМодуль1" && sig.name == "П1"),
+            "expected to index exported procedure П1 from a UTF-8 BOM file"
+        );
     }
 }

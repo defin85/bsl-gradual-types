@@ -9,7 +9,7 @@ use bsl_shared::domain::types::{ErrorType, ParseError};
 use bsl_shared::ir::Span;
 use tree_sitter::Node;
 
-use super::span::{byte_offset_to_utf16, node_to_span_cached};
+use super::span::{byte_offset_to_utf16, node_to_span_cached, LineIndex};
 
 /// Собрать все ERROR узлы из дерева (рекурсивный обход)
 ///
@@ -17,22 +17,21 @@ use super::span::{byte_offset_to_utf16, node_to_span_cached};
 /// Для производительности используйте `collect_syntax_errors_cached()` вместо него.
 #[allow(dead_code)]
 pub fn collect_syntax_errors(node: &Node, source: &str) -> Vec<ParseError> {
-    // Для обратной совместимости: предпросчитываем строки
-    let lines: Vec<String> = source.lines().map(|s| s.to_string()).collect();
-    collect_syntax_errors_cached(node, source, &lines)
+    let line_index = LineIndex::new(source);
+    collect_syntax_errors_cached(node, source, &line_index)
 }
 
 /// Собрать все ERROR узлы из дерева с использованием кеша строк (Milestone 2.19)
 pub fn collect_syntax_errors_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Vec<ParseError> {
     let mut errors = Vec::new();
 
     // Если текущий узел - ERROR, добавляем его
     if node.kind() == "ERROR" {
-        let span = node_to_span_cached(node, source, lines);
+        let span = node_to_span_cached(node, source, line_index);
         let text = node
             .utf8_text(source.as_bytes())
             .unwrap_or("<неизвестно>")
@@ -47,7 +46,7 @@ pub fn collect_syntax_errors_cached(
 
     // Проверяем node.is_missing() для пропущенных токенов
     if node.is_missing() {
-        let span = node_to_span_cached(node, source, lines);
+        let span = node_to_span_cached(node, source, line_index);
         errors.push(ParseError {
             message: format!("Отсутствует обязательный элемент: {}", node.kind()),
             span,
@@ -58,7 +57,7 @@ pub fn collect_syntax_errors_cached(
     // Рекурсивно обходим дочерние узлы
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        errors.extend(collect_syntax_errors_cached(&child, source, lines));
+        errors.extend(collect_syntax_errors_cached(&child, source, line_index));
     }
 
     errors
@@ -68,18 +67,22 @@ pub fn collect_syntax_errors_cached(
 ///
 /// В BSL точка с запятой ОБЯЗАТЕЛЬНА между операторами, кроме последнего оператора
 /// перед закрывающим ключевым словом (КонецФункции, КонецПроцедуры).
-pub fn check_missing_semicolons(node: &Node, source: &str, lines: &[String]) -> Vec<ParseError> {
+pub fn check_missing_semicolons(
+    node: &Node,
+    source: &str,
+    line_index: &LineIndex,
+) -> Vec<ParseError> {
     let mut errors = Vec::new();
 
     // Проверяем только тела функций и процедур
     if matches!(node.kind(), "function_definition" | "procedure_definition") {
-        errors.extend(check_function_body_semicolons(node, source, lines));
+        errors.extend(check_function_body_semicolons(node, source, line_index));
     }
 
     // Рекурсивно проверяем вложенные узлы (для вложенных конструкций)
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        errors.extend(check_missing_semicolons(&child, source, lines));
+        errors.extend(check_missing_semicolons(&child, source, line_index));
     }
 
     errors
@@ -89,7 +92,7 @@ pub fn check_missing_semicolons(node: &Node, source: &str, lines: &[String]) -> 
 fn check_function_body_semicolons(
     func_node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Vec<ParseError> {
     let mut errors = Vec::new();
     let mut cursor = func_node.walk();
@@ -133,7 +136,7 @@ fn check_function_body_semicolons(
 
         // Проверяем наличие точки с запятой после statement
         if !has_semicolon_child(stmt) {
-            let span = node_to_span_cached(stmt, source, lines);
+            let span = node_to_span_cached(stmt, source, line_index);
 
             // Позиция для диагностики - конец statement
             let error_span = Span::from_positions(
@@ -163,10 +166,14 @@ fn check_function_body_semicolons(
 ///
 /// Для IDE это плохо: hover/completion начинают работать по сломанной структуре.
 /// Поэтому добавляем явную проверку по тексту.
-pub fn check_incomplete_new_expressions(source: &str, lines: &[String]) -> Vec<ParseError> {
+pub fn check_incomplete_new_expressions(
+    source: &str,
+    line_index: &LineIndex,
+) -> Vec<ParseError> {
     let mut errors = Vec::new();
 
-    for (row, line) in lines.iter().enumerate() {
+    for row in 0..line_index.line_count() {
+        let line = line_index.line_text(source, row);
         let trimmed = line.trim_end();
 
         // Игнорируем комментарии и пустые строки.

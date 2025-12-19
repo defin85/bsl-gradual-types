@@ -259,41 +259,19 @@ async function initializeIndexIfNeeded() {
 
     // Build index with user-provided configuration
     try {
-        await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: 'Building BSL Index',
-            cancellable: false
-        }, async (progress) => {
-            updateStatusBar('$(sync~spin) BSL: Loading platform documentation...');
-            progress.report({ increment: 25, message: 'Loading platform documentation...' });
+        // P4: не дублируем локальный progress (Notification) поверх server-initiated $/progress.
+        updateStatusBar('$(sync~spin) BSL: Building index...');
 
-            updateStatusBar('$(sync~spin) BSL: Parsing configuration...');
-            progress.report({ increment: 25, message: 'Parsing configuration...' });
+        outputChannel.appendLine(`📁 Configuration: ${configPath}`);
+        outputChannel.appendLine(`📚 Platform docs: ${platformDocsArchive}`);
+        outputChannel.appendLine(`🔢 Platform version: ${platformVersion}`);
 
-            updateStatusBar('$(sync~spin) BSL: Building unified index...');
-            progress.report({ increment: 35, message: 'Building unified index...' });
+        // ✅ ЗАМЕНА CLI → LSP: build_unified_index #2
+        const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+        await buildIndex({ workspace_path: workspacePath });
 
-            outputChannel.appendLine(`📁 Configuration: ${configPath}`);
-            outputChannel.appendLine(`📚 Platform docs: ${platformDocsArchive}`);
-            outputChannel.appendLine(`🔢 Platform version: ${platformVersion}`);
-            
-            const args = [
-                '--config', configPath,
-                '--platform-version', platformVersion,
-                '--platform-docs-archive', platformDocsArchive
-            ];
-
-            // ✅ ЗАМЕНА CLI → LSP: build_unified_index #2
-            const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-            await buildIndex({ workspace_path: workspacePath });
-
-            updateStatusBar('$(sync~spin) BSL: Finalizing index...');
-            progress.report({ increment: 15, message: 'Finalizing...' });
-
-            updateStatusBar('$(check) BSL: Index Ready');
-
-            outputChannel.appendLine('✅ Index build completed successfully');
-        });
+        updateStatusBar('$(check) BSL: Index Ready');
+        outputChannel.appendLine('✅ Index build completed successfully');
     } catch (error) {
         updateStatusBar(`$(error) BSL: Index build failed: ${error}`);
         outputChannel.appendLine(`❌ Index build failed: ${error}`);

@@ -3,12 +3,16 @@
 # BSL Gradual Types - Кросс-платформенный скрипт запуска Web API
 # ============================================================================
 # Поддерживает: Linux, macOS, Windows (Git Bash, MSYS2, Cygwin, WSL)
-# Использование: ./scripts/start-web-api.sh [--no-config] [--build] [--no-frontend]
+# Использование: ./scripts/start-web-api.sh [--no-config] [--build] [--no-frontend] \
+#   [--slow-modules-ms N] [--slow-modules-top N] [--log-each-module]
 #
 # Флаги:
 #   --no-config    Запуск без конфигурации (только platform types)
 #   --build        Пересобрать backend и frontend перед запуском
 #   --no-frontend  Не собирать и не подключать frontend (только API)
+#   --slow-modules-ms N    Порог медленного парсинга модуля в миллисекундах
+#   --slow-modules-top N   Топ-N медленных модулей в итоговой сводке
+#   --log-each-module      Логировать время парсинга каждого модуля
 # ============================================================================
 
 set -e
@@ -28,10 +32,10 @@ detect_platform() {
             if grep -qi microsoft /proc/version 2>/dev/null; then
                 PLATFORM="wsl"
                 # WSL может работать с Windows путями через /mnt/
-                DEFAULT_PROJECT_PATH="examples/conf"
+                DEFAULT_PROJECT_PATH="examples/conf_big"
             else
                 PLATFORM="linux"
-                DEFAULT_PROJECT_PATH="examples/conf"
+                DEFAULT_PROJECT_PATH="examples/conf_big"
             fi
             BINARY_EXT=""
             ;;
@@ -71,6 +75,9 @@ PROJECT_PATH="${PROJECT_PATH:-$DEFAULT_PROJECT_PATH}"
 DO_BUILD=false
 NO_FRONTEND=false
 NO_CONFIG=false
+SLOW_MODULES_MS="${BSL_SLOW_MODULE_THRESHOLD_MS:-3000}"
+SLOW_MODULES_TOP="${BSL_SLOW_MODULE_TOP_N:-5}"
+LOG_EACH_MODULE="${BSL_MODULE_PARSE_LOG_EACH:-false}"
 
 # Парсинг аргументов
 for arg in "$@"; do
@@ -84,17 +91,35 @@ for arg in "$@"; do
         --no-frontend)
             NO_FRONTEND=true
             ;;
+        --slow-modules-ms)
+            shift
+            SLOW_MODULES_MS="$1"
+            ;;
+        --slow-modules-top)
+            shift
+            SLOW_MODULES_TOP="$1"
+            ;;
+        --log-each-module)
+            LOG_EACH_MODULE="true"
+            ;;
         --help|-h)
-            echo "Использование: ./start-web-api.sh [--no-config] [--build] [--no-frontend]"
+            echo "Использование: ./start-web-api.sh [--no-config] [--build] [--no-frontend] \\"
+            echo "  [--slow-modules-ms N] [--slow-modules-top N] [--log-each-module]"
             echo ""
             echo "Флаги:"
             echo "  --no-config    Запуск без конфигурации (только platform types)"
             echo "  --build        Пересобрать backend и frontend перед запуском"
             echo "  --no-frontend  Не собирать и не подключать frontend (только API)"
+            echo "  --slow-modules-ms N    Порог медленного парсинга модуля в миллисекундах"
+            echo "  --slow-modules-top N   Топ-N медленных модулей в итоговой сводке"
+            echo "  --log-each-module      Логировать время парсинга каждого модуля"
             echo ""
             echo "Переменные окружения:"
             echo "  PORT           Порт сервера (по умолчанию: 3002)"
             echo "  PROJECT_PATH   Путь к конфигурации 1С"
+            echo "  BSL_SLOW_MODULE_THRESHOLD_MS  Порог медленного парсинга (ms)"
+            echo "  BSL_SLOW_MODULE_TOP_N         Топ-N медленных модулей"
+            echo "  BSL_MODULE_PARSE_LOG_EACH     Логировать каждый модуль (true/false)"
             exit 0
             ;;
     esac
@@ -186,6 +211,9 @@ echo "   Syntax Helper: $SYNTAX_HELPER_PATH"
 if [[ -n "$PROJECT_ARG" ]]; then
     echo "   Project Path: $PROJECT_PATH"
 fi
+echo "   Slow modules threshold: ${SLOW_MODULES_MS}ms"
+echo "   Slow modules top: $SLOW_MODULES_TOP"
+echo "   Log each module: $LOG_EACH_MODULE"
 if [[ -n "$STATIC_ARG" ]]; then
     echo "   Static Files: backend/static"
 fi
@@ -203,6 +231,9 @@ echo ""
 echo "Press Ctrl+C to stop"
 echo "=========================================="
 
+BSL_SLOW_MODULE_THRESHOLD_MS="$SLOW_MODULES_MS" \
+BSL_SLOW_MODULE_TOP_N="$SLOW_MODULES_TOP" \
+BSL_MODULE_PARSE_LOG_EACH="$LOG_EACH_MODULE" \
 ./target/release/bsl-web-server${BINARY_EXT} \
     --port $PORT \
     --enable-cors true \

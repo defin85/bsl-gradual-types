@@ -15,6 +15,7 @@ use tower_lsp::LanguageServer;
 use tracing::{debug, error, info, warn};
 
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
+use bsl_backend::system::fs_utils::read_bsl_file;
 use bsl_shared::api::semantic_dtos::{GetSemanticHtmlRequest, GetSemanticTreeRequest};
 
 use crate::commands::{
@@ -29,6 +30,7 @@ use crate::handlers::{
     handle_signature_help,
 };
 use crate::progress::log_progress_to_file;
+use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
 use crate::types::{GetCurrentContextParams, ServerStatus, ServerStatusParams};
 
 use super::BslLanguageServer;
@@ -152,28 +154,6 @@ impl LanguageServer for BslLanguageServer {
                 let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressUpdate>();
                 let (result_tx, result_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
-                // Generate unique token for Work Done Progress
-                let token = ProgressToken::String(format!(
-                    "bsl-load-types-{}",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis()
-                ));
-
-                // Create progress token
-                if let Err(e) = self
-                    .client
-                    .send_request::<tower_lsp::lsp_types::request::WorkDoneProgressCreate>(
-                        WorkDoneProgressCreateParams {
-                            token: token.clone(),
-                        },
-                    )
-                    .await
-                {
-                    error!("Failed to create work done progress token: {}", e);
-                }
-
                 // Send bsl/serverStatus (loading: true)
                 info!("[LSP->Extension] Sending bsl/serverStatus: loading=true");
                 let _ = self
@@ -183,46 +163,32 @@ impl LanguageServer for BslLanguageServer {
                     ))
                     .await;
 
-                // Send WorkDoneProgressBegin
+                // Send WorkDoneProgressBegin (единый progress bridge)
                 let title = if cfg.configuration_path.is_some() {
                     "Loading platform and configuration types".to_string()
                 } else {
                     "Loading platform types".to_string()
                 };
 
-                let _ = self
-                    .client
-                    .send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                        ProgressParams {
-                            token: token.clone(),
-                            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
-                                WorkDoneProgressBegin {
-                                    title,
-                                    message: Some("Initializing...".to_string()),
-                                    percentage: Some(0),
-                                    cancellable: Some(false),
-                                },
-                            )),
-                        },
-                    )
+                let mut reporter =
+                    LspWorkDoneReporter::create(self.client.clone(), "bsl-load-types").await;
+                reporter.set_throttle_interval(std::time::Duration::from_millis(150));
+                reporter
+                    .begin(title, Some("Initializing...".to_string()))
                     .await;
 
                 log_progress_to_file("[LSP->Extension] SEND WorkDoneProgressBegin");
 
                 // Spawn task to handle progress
                 let client_clone = self.client.clone();
-                let token_clone = token.clone();
                 let start_time = std::time::Instant::now();
                 let self_clone = self.clone();
 
                 tokio::spawn(async move {
-                    let mut last_report: Option<std::time::Instant> = None;
-                    let throttle_interval = std::time::Duration::from_millis(50);
+                    let mut reporter = reporter;
 
                     // PHASE 1: Process progress updates
                     while let Some(update) = progress_rx.recv().await {
-                        let now = std::time::Instant::now();
-
                         debug!(
                             "[RECV] {:?} {:.1}% ({}/{}) - {}",
                             update.phase,
@@ -231,20 +197,6 @@ impl LanguageServer for BslLanguageServer {
                             update.total,
                             update.message.as_deref().unwrap_or("")
                         );
-
-                        // Throttling
-                        let should_skip = if let Some(last) = last_report {
-                            now.duration_since(last) < throttle_interval
-                                && update.percentage < 100.0
-                        } else {
-                            false
-                        };
-
-                        if should_skip {
-                            continue;
-                        }
-
-                        last_report = Some(now);
 
                         // Calculate ETA
                         let elapsed = start_time.elapsed().as_secs_f32();
@@ -294,19 +246,8 @@ impl LanguageServer for BslLanguageServer {
                             message
                         };
 
-                        let _ = client_clone
-                            .send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                                ProgressParams {
-                                    token: token_clone.clone(),
-                                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                                        WorkDoneProgressReport {
-                                            message: Some(message_with_eta),
-                                            percentage: Some(update.percentage as u32),
-                                            cancellable: Some(false),
-                                        },
-                                    )),
-                                },
-                            )
+                        reporter
+                            .report(update.percentage as u32, Some(message_with_eta))
                             .await;
                     }
 
@@ -314,20 +255,10 @@ impl LanguageServer for BslLanguageServer {
                     match result_rx.await {
                         Ok(Ok(())) => {
                             // SUCCESS: Send WorkDoneProgressEnd
-                            let _ = client_clone
-                                .send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                                    ProgressParams {
-                                        token: token_clone.clone(),
-                                        value: ProgressParamsValue::WorkDone(
-                                            WorkDoneProgress::End(WorkDoneProgressEnd {
-                                                message: Some(
-                                                    "Platform types loaded successfully"
-                                                        .to_string(),
-                                                ),
-                                            }),
-                                        ),
-                                    },
-                                )
+                            reporter
+                                .end(Some(
+                                    "Platform types loaded successfully".to_string(),
+                                ))
                                 .await;
 
                             let _ = client_clone
@@ -355,17 +286,8 @@ impl LanguageServer for BslLanguageServer {
                         }
                         Ok(Err(error_msg)) => {
                             // ERROR: Send WorkDoneProgressEnd with error
-                            let _ = client_clone
-                                .send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                                    ProgressParams {
-                                        token: token_clone.clone(),
-                                        value: ProgressParamsValue::WorkDone(
-                                            WorkDoneProgress::End(WorkDoneProgressEnd {
-                                                message: Some(format!("Error: {}", error_msg)),
-                                            }),
-                                        ),
-                                    },
-                                )
+                            reporter
+                                .end(Some(format!("Error: {}", error_msg)))
                                 .await;
 
                             let _ = client_clone
@@ -565,7 +487,7 @@ impl LanguageServer for BslLanguageServer {
         let file_content = match self.documents.read().await.get(&uri) {
             Some(content) => content.clone(),
             None => match uri.to_file_path() {
-                Ok(path) => match std::fs::read_to_string(&path) {
+                Ok(path) => match read_bsl_file(&path) {
                     Ok(content) => content,
                     Err(e) => {
                         error!("Failed to read file for completion: {}", e);
@@ -591,7 +513,7 @@ impl LanguageServer for BslLanguageServer {
         let file_content = match self.documents.read().await.get(&uri) {
             Some(content) => content.clone(),
             None => match uri.to_file_path() {
-                Ok(path) => match std::fs::read_to_string(&path) {
+                Ok(path) => match read_bsl_file(&path) {
                     Ok(content) => content,
                     Err(e) => {
                         error!("Failed to read file for hover: {}", e);
@@ -623,7 +545,7 @@ impl LanguageServer for BslLanguageServer {
         let file_content = match self.documents.read().await.get(&uri) {
             Some(content) => content.clone(),
             None => match uri.to_file_path() {
-                Ok(path) => match std::fs::read_to_string(&path) {
+                Ok(path) => match read_bsl_file(&path) {
                     Ok(content) => content,
                     Err(e) => {
                         error!("Failed to read file for definition: {}", e);
@@ -838,6 +760,8 @@ impl LanguageServer for BslLanguageServer {
                     request,
                     self.coordinator.get_analysis_engine(),
                     self.client.clone(),
+                    "parse-config",
+                    "Parsing configuration",
                 )
                 .await;
                 Ok(Some(serde_json::to_value(result).unwrap()))

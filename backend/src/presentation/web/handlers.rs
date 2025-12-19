@@ -15,7 +15,7 @@ use crate::application::TypeSystemService;
 use crate::system::SystemCoordinator;
 use bsl_shared::api::{
     AstNodeDto, DebugAstResponseDto, DiagnosticsResponseDto, EnhancedHoverResponse,
-    SemanticErrorDto, SyntaxErrorDto,
+    SemanticErrorDto, StartupProgressDto, SyntaxErrorDto,
 };
 
 // --- СТАРЫЕ DTO УДАЛЕНЫ ---
@@ -116,6 +116,14 @@ pub async fn get_version() -> impl IntoResponse {
         "rust_version": env!("CARGO_PKG_RUST_VERSION", "unknown"),
         "name": "BSL Gradual Types"
     }))
+}
+
+/// Startup progress endpoint (polling).
+///
+/// Возвращает прогресс инициализации системы, включая загрузку конфигурации и индексацию модулей.
+pub async fn get_startup_progress(State(state): State<AppState>) -> impl IntoResponse {
+    let snapshot: StartupProgressDto = state.system_coordinator.startup_progress();
+    Json(snapshot)
 }
 
 /// Validate code fragment

@@ -7,16 +7,16 @@ use crate::parsing::bsl::ast::Statement;
 use tree_sitter::Node;
 
 use crate::system::tree_sitter_adapter::expression_converter::convert_expression;
-use crate::system::tree_sitter_adapter::span::node_to_span_cached;
+use crate::system::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
 use crate::system::tree_sitter_adapter::utils::extract_event_handler_pair;
 
 /// Конвертировать add_handler_statement с использованием кеша строк (Milestone 2.19)
 pub(crate) fn convert_add_handler_statement_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Statement, String> {
-    let span = node_to_span_cached(node, source, lines);
+    let span = node_to_span_cached(node, source, line_index);
     let (event, handler) = extract_event_handler_pair(node, source, convert_expression)?;
     Ok(Statement::AddHandler {
         event,
@@ -29,9 +29,9 @@ pub(crate) fn convert_add_handler_statement_cached(
 pub(crate) fn convert_remove_handler_statement_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Statement, String> {
-    let span = node_to_span_cached(node, source, lines);
+    let span = node_to_span_cached(node, source, line_index);
     let (event, handler) = extract_event_handler_pair(node, source, convert_expression)?;
     Ok(Statement::RemoveHandler {
         event,
@@ -44,9 +44,9 @@ pub(crate) fn convert_remove_handler_statement_cached(
 pub(crate) fn convert_await_statement_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Statement, String> {
-    let span = node_to_span_cached(node, source, lines);
+    let span = node_to_span_cached(node, source, line_index);
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind().ends_with("_KEYWORD") {

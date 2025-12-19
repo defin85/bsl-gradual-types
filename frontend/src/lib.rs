@@ -22,11 +22,11 @@ pub mod vscode;
 // Re-export main app component
 pub use app::App;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
 use leptos::prelude::*;
+
+#[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
+use wasm_bindgen::prelude::*;
 
 /// Main entry point for WASM application (Web Frontend only, not VSCode)
 #[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]

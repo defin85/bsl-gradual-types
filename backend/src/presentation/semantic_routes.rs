@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use crate::application::TypeSystemService;
 use crate::presentation::semantic_html_generator::{generate_semantic_html, RenderOptions, Theme};
+use crate::system::fs_utils::read_bsl_file;
 
 /// Query параметры для semantic API
 #[derive(Debug, Deserialize)]
@@ -81,7 +82,7 @@ async fn get_semantic_tree(
     State(type_service): State<Arc<TypeSystemService>>,
 ) -> impl IntoResponse {
     // Step 1: Read the file
-    let source = match std::fs::read_to_string(&file_path) {
+    let source = match read_bsl_file(std::path::Path::new(&file_path)) {
         Ok(s) => s,
         Err(e) => {
             return (StatusCode::NOT_FOUND, format!("Failed to read file: {}", e)).into_response()

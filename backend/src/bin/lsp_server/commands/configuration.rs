@@ -3,13 +3,16 @@
 //! MILESTONE 2.17: Handles bsl.parseConfiguration command.
 
 use std::sync::Arc;
-use tower_lsp::lsp_types::*;
 use tower_lsp::Client;
 use tracing::{debug, error, info, warn};
 
 use bsl_backend::data::loaders::config_metadata_parser::ConfigurationDiscovery;
-use bsl_backend::data::loaders::index_configuration_bsl_modules;
+use bsl_backend::data::loaders::{
+    index_configuration_bsl_modules_with_progress_parallel, ModuleIndexProgress,
+};
 use bsl_shared::engine::AnalysisEngine;
+
+use crate::progress_bridge::{LspWorkDoneReporter, ProgressPlan, ProgressReporter};
 
 /// Request for bsl.parseConfiguration
 #[derive(Debug, serde::Deserialize)]
@@ -33,6 +36,8 @@ pub async fn handle_parse_configuration(
     params: ParseConfigurationParams,
     analysis_engine: Option<Arc<AnalysisEngine>>,
     client: Client,
+    progress_token_prefix: &str,
+    progress_title: &str,
 ) -> ParseConfigurationResponse {
     info!(
         "Custom command: bsl.parseConfiguration - {}",
@@ -85,60 +90,53 @@ pub async fn handle_parse_configuration(
 
     debug!("Validated configuration path: {:?}", canonical_path);
 
-    // Create progress token
-    let token = ProgressToken::String(format!(
-        "parse-config-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-    ));
+    // План зависит от операции: parseConfiguration/buildIndex/incrementalUpdate.
+    // (Нужно, чтобы стадийные веса можно было корректировать независимо, без копипасты.)
+    let plan = if progress_token_prefix.starts_with("bsl-incremental-update") {
+        ProgressPlan::incremental_update()
+    } else if progress_token_prefix.starts_with("bsl-build-index") {
+        ProgressPlan::build_index()
+    } else {
+        ProgressPlan::parse_configuration()
+    };
+    let discovery_range = plan.discovery;
+    let load_types_range = plan.load_types;
+    let index_modules_range = plan.index_bsl_modules;
+    let reporter = tokio::sync::Mutex::new(
+        LspWorkDoneReporter::create(client.clone(), progress_token_prefix).await,
+    );
+    let reporter = Arc::new(reporter);
 
-    // Create progress token
-    if let Err(e) = client
-        .send_request::<tower_lsp::lsp_types::request::WorkDoneProgressCreate>(
-            WorkDoneProgressCreateParams {
-                token: token.clone(),
-            },
-        )
-        .await
     {
-        error!("Failed to create work done progress token: {}", e);
+        let mut reporter = reporter.lock().await;
+        reporter
+            .begin(
+                progress_title.to_string(),
+                Some("Initializing...".to_string()),
+            )
+            .await;
     }
 
-    // Send progress begin
-    let _ = client
-        .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
-            token: token.clone(),
-            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(WorkDoneProgressBegin {
-                title: "Parsing configuration".to_string(),
-                message: Some("Initializing...".to_string()),
-                percentage: Some(0),
-                cancellable: Some(false),
-            })),
-        })
+    // Валидация завершена — фиксируем конец validation стадии (0..10).
+    reporter
+        .lock()
+        .await
+        .report(
+            plan.validation.end,
+            Some("Validation OK".to_string()),
+        )
         .await;
-
-    // Единый "источник истины" для прогресса этой команды: server-initiated WorkDoneProgress ($/progress).
-    // Важно держать проценты монотонными, т.к. UI в расширении считает increment как delta и не умеет "откатывать" назад.
-    //
-    // Раскладка шкалы:
-    // 0..10   — старт/валидация
-    // 10..30  — discovery/parsing конфигурации (XML, формы, module paths)
-    // 30..90  — загрузка типов в repository
-    // 90..99  — индексация BSL-модулей конфигурации (*.bsl)
-    // 99..100 — завершение
-    fn map_discovery_percent_to_command_percent(p: u32) -> u32 {
-        // p = 0..100 (ProgressUpdate внутри discovery). Маппим в 10..30.
-        let mapped = 10u32.saturating_add(((p as f32) * 0.2).round() as u32);
-        mapped.min(30)
-    }
 
     // Get AnalysisEngine
     let engine = match analysis_engine {
         Some(e) => e,
         None => {
             error!("AnalysisEngine not available");
+            reporter
+                .lock()
+                .await
+                .end(Some("Error: AnalysisEngine not available".to_string()))
+                .await;
             return ParseConfigurationResponse {
                 success: false,
                 loaded_types: 0,
@@ -149,53 +147,44 @@ pub async fn handle_parse_configuration(
 
     let repo = engine.get_repository();
 
-    // Progress: discovering metadata (10%)
-    let _ = client
-        .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
-            token: token.clone(),
-            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                WorkDoneProgressReport {
-                    message: Some("Discovering metadata objects...".to_string()),
-                    percentage: Some(10),
-                    cancellable: Some(false),
-                },
-            )),
-        })
+    reporter
+        .lock()
+        .await
+        .report(
+            discovery_range.start,
+            Some("Discovering metadata objects...".to_string()),
+        )
         .await;
 
     let discovery = ConfigurationDiscovery::new(canonical_path.clone(), false);
 
-    // Create progress callback
-    let client_clone = client.clone();
-    let token_clone = token.clone();
-    let progress_callback = move |update: bsl_backend::data::loaders::progress::ProgressUpdate| {
-        let client = client_clone.clone();
-        let token = token_clone.clone();
-
-        let percentage = map_discovery_percent_to_command_percent(update.percentage as u32);
-        let message = update.message.unwrap_or_else(|| {
-            format!(
-                "{}: {}/{}",
-                update.phase.display_name(),
-                update.current,
-                update.total
-            )
-        });
-
-        tokio::spawn(async move {
-            let _ = client
-                .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
-                    token,
-                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                        WorkDoneProgressReport {
-                            message: Some(message),
-                            percentage: Some(percentage),
-                            cancellable: Some(false),
-                        },
-                    )),
-                })
+    let (discovery_tx, mut discovery_rx) = tokio::sync::mpsc::unbounded_channel::<(u32, String)>();
+    let reporter_for_discovery = reporter.clone();
+    let discovery_task = tokio::spawn(async move {
+        while let Some((percentage, message)) = discovery_rx.recv().await {
+            reporter_for_discovery
+                .lock()
+                .await
+                .report(percentage, Some(message))
                 .await;
-        });
+        }
+    });
+
+    // Create progress callback (sync -> async via channel)
+    let progress_callback = {
+        let discovery_tx = discovery_tx.clone();
+        move |update: bsl_backend::data::loaders::progress::ProgressUpdate| {
+            let percentage = discovery_range.map_percent_0_100(update.percentage as u32);
+            let message = update.message.unwrap_or_else(|| {
+                format!(
+                    "{}: {}/{}",
+                    update.phase.display_name(),
+                    update.current,
+                    update.total
+                )
+            });
+            let _ = discovery_tx.send((percentage, message));
+        }
     };
 
     // Convert Result to avoid Send issues
@@ -203,20 +192,19 @@ pub async fn handle_parse_configuration(
         .discover_all_metadata(Some(progress_callback))
         .map_err(|e| e.to_string());
 
+    // Завершаем consumer для discovery (flush последнего репорта на token).
+    drop(discovery_tx);
+    let _ = discovery_task.await;
+
     let metadata = match discovery_result {
         Ok(data) => data,
         Err(error_msg) => {
             error!("Failed to discover metadata: {}", error_msg);
 
-            let _ = client
-                .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
-                    token: token.clone(),
-                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                        WorkDoneProgressEnd {
-                            message: Some(format!("Error: {}", error_msg)),
-                        },
-                    )),
-                })
+            reporter
+                .lock()
+                .await
+                .end(Some(format!("Error: {}", error_msg)))
                 .await;
 
             return ParseConfigurationResponse {
@@ -249,17 +237,10 @@ pub async fn handle_parse_configuration(
                 let error_msg = e.to_string();
                 error!("Failed to load types batch: {}", error_msg);
 
-                let _ = client
-                    .send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                        ProgressParams {
-                            token: token.clone(),
-                            value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                                WorkDoneProgressEnd {
-                                    message: Some(format!("Error: {}", error_msg)),
-                                },
-                            )),
-                        },
-                    )
+                reporter
+                    .lock()
+                    .await
+                    .end(Some(format!("Error: {}", error_msg)))
                     .await;
 
                 return ParseConfigurationResponse {
@@ -275,46 +256,57 @@ pub async fn handle_parse_configuration(
 
         // Report progress every 10 types
         if (index + 1) % PROGRESS_REPORT_INTERVAL == 0 || index == total_objects - 1 {
-            let load_progress = if total_objects == 0 {
-                0u32
-            } else {
-                ((loaded * 60) / total_objects) as u32
-            };
-            let total_progress = 30 + load_progress; // 30..90
-
-            let _ = client
-                .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
-                    token: token.clone(),
-                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                        WorkDoneProgressReport {
-                            message: Some(format!("Loaded {}/{} types", loaded, total_objects)),
-                            percentage: Some(total_progress),
-                            cancellable: Some(false),
-                        },
-                    )),
-                })
+            let total_progress = load_types_range.map_current_total(loaded, total_objects);
+            reporter
+                .lock()
+                .await
+                .report(
+                    total_progress,
+                    Some(format!("Loaded {}/{} types", loaded, total_objects)),
+                )
                 .await;
         }
     }
 
     info!("Configuration parsed successfully: {} types loaded", loaded);
 
-    // Progress: index configuration BSL modules (90..99)
-    let _ = client
-        .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
-            token: token.clone(),
-            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                WorkDoneProgressReport {
-                    message: Some("Indexing configuration module methods (*.bsl)...".to_string()),
-                    percentage: Some(90),
-                    cancellable: Some(false),
-                },
-            )),
-        })
+    reporter
+        .lock()
+        .await
+        .report(
+            index_modules_range.start,
+            Some("Indexing configuration module methods (*.bsl)...".to_string()),
+        )
         .await;
 
+    let (modules_tx, mut modules_rx) = tokio::sync::mpsc::unbounded_channel::<ModuleIndexProgress>();
+    let reporter_for_modules = reporter.clone();
+    let modules_task = tokio::spawn(async move {
+        while let Some(p) = modules_rx.recv().await {
+            let percentage = index_modules_range.map_current_total(p.current, p.total);
+            let message = format!(
+                "Indexed {}/{}: {}",
+                p.current,
+                p.total,
+                p.module_path.display()
+            );
+            reporter_for_modules
+                .lock()
+                .await
+                .report(percentage, Some(message))
+                .await;
+        }
+    });
+
     // Индексация экспортных методов из модулей конфигурации (*.bsl)
-    match index_configuration_bsl_modules(&canonical_path, &metadata) {
+    let modules_tx_clone = modules_tx.clone();
+    match index_configuration_bsl_modules_with_progress_parallel(
+        &canonical_path,
+        &metadata,
+        Some(move |p| {
+            let _ = modules_tx_clone.send(p);
+        }),
+    ) {
         Ok(indexed) => {
             let config_methods_count = indexed.config_methods.len();
             let global_functions_count = indexed.global_functions.len();
@@ -333,48 +325,42 @@ pub async fn handle_parse_configuration(
             }
             info!("Configuration module methods indexed successfully");
 
-            let _ = client
-                .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
-                    token: token.clone(),
-                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                        WorkDoneProgressReport {
-                            message: Some(format!(
-                                "Indexed {} methods, {} global functions",
-                                config_methods_count, global_functions_count
-                            )),
-                            percentage: Some(99),
-                            cancellable: Some(false),
-                        },
+            drop(modules_tx);
+            let _ = modules_task.await;
+
+            reporter
+                .lock()
+                .await
+                .report(
+                    index_modules_range.end,
+                    Some(format!(
+                        "Indexed {} methods, {} global functions",
+                        config_methods_count, global_functions_count
                     )),
-                })
+                )
                 .await;
         }
         Err(e) => {
             warn!("Failed to index configuration module methods: {}", e);
 
-            let _ = client
-                .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
-                    token: token.clone(),
-                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                        WorkDoneProgressReport {
-                            message: Some(format!("Indexing skipped: {}", e)),
-                            percentage: Some(99),
-                            cancellable: Some(false),
-                        },
-                    )),
-                })
+            drop(modules_tx);
+            let _ = modules_task.await;
+
+            reporter
+                .lock()
+                .await
+                .report(
+                    index_modules_range.end,
+                    Some(format!("Indexing skipped: {}", e)),
+                )
                 .await;
         }
     }
 
-    // Progress end (100%) — после индексации модулей
-    let _ = client
-        .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
-            token: token.clone(),
-            value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
-                message: Some(format!("Loaded {} types", loaded)),
-            })),
-        })
+    reporter
+        .lock()
+        .await
+        .end(Some(format!("Loaded {} types", loaded)))
         .await;
 
     ParseConfigurationResponse {

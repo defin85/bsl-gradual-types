@@ -8,16 +8,16 @@ use bsl_shared::ir::Span;
 use tree_sitter::Node;
 
 use crate::system::tree_sitter_adapter::expression_converter::convert_expression;
-use crate::system::tree_sitter_adapter::span::node_to_span_cached;
+use crate::system::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
 use crate::system::tree_sitter_adapter::utils::node_text;
 
 /// Конвертировать for_statement с использованием кеша строк (Milestone 2.19)
 pub(crate) fn convert_for_statement_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Statement, String> {
-    let span = node_to_span_cached(node, source, lines);
+    let span = node_to_span_cached(node, source, line_index);
     let mut cursor = node.walk();
     let mut variable = String::new();
     let mut start = Expression::Number {
@@ -63,7 +63,9 @@ pub(crate) fn convert_for_statement_cached(
             }
             _ => {
                 if in_body {
-                    if let Some(stmt) = super::dispatch_statement_cached(&child, source, lines)? {
+                    if let Some(stmt) =
+                        super::dispatch_statement_cached(&child, source, line_index)?
+                    {
                         body.push(stmt);
                     }
                 }
@@ -84,9 +86,9 @@ pub(crate) fn convert_for_statement_cached(
 pub(crate) fn convert_for_each_statement_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Statement, String> {
-    let span = node_to_span_cached(node, source, lines);
+    let span = node_to_span_cached(node, source, line_index);
     let mut cursor = node.walk();
     let mut variable = String::new();
     let mut collection = Expression::Identifier {
@@ -116,7 +118,9 @@ pub(crate) fn convert_for_each_statement_cached(
             }
             _ => {
                 if in_body {
-                    if let Some(stmt) = super::dispatch_statement_cached(&child, source, lines)? {
+                    if let Some(stmt) =
+                        super::dispatch_statement_cached(&child, source, line_index)?
+                    {
                         body.push(stmt);
                     }
                 }
@@ -136,9 +140,9 @@ pub(crate) fn convert_for_each_statement_cached(
 pub(crate) fn convert_while_statement_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Statement, String> {
-    let span = node_to_span_cached(node, source, lines);
+    let span = node_to_span_cached(node, source, line_index);
     let mut cursor = node.walk();
     let mut condition = Expression::Boolean {
         value: true,
@@ -162,7 +166,9 @@ pub(crate) fn convert_while_statement_cached(
                 }
             }
             _ => {
-                if let Some(stmt) = super::dispatch_statement_cached(&child, source, lines)? {
+                if let Some(stmt) =
+                    super::dispatch_statement_cached(&child, source, line_index)?
+                {
                     body.push(stmt);
                 }
             }

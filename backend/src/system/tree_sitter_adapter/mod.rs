@@ -32,12 +32,13 @@
 
 mod directives;
 mod expression_converter;
-mod span;
+pub(crate) mod span;
 mod statement_converter;
 mod syntax_errors;
 mod utils;
 
 use crate::parsing::bsl::ast::{ParseResult, Program};
+use span::LineIndex;
 use tree_sitter::Tree;
 
 // Re-exports for external use
@@ -77,22 +78,25 @@ impl TreeSitterAdapter {
     pub fn convert_tree(tree: &Tree, source: &str) -> Result<ParseResult, String> {
         let root = tree.root_node();
 
-        // Milestone 2.19: Предпросчитываем все строки один раз (O(n))
-        let lines: Vec<String> = source.lines().map(|s| s.to_string()).collect();
+        // Milestone 2.19+: Предпросчитываем индекс строк один раз (O(n))
+        let line_index = LineIndex::new(source);
 
-        // Собираем синтаксические ошибки из дерева с использованием кеша строк
-        let mut syntax_errors = syntax_errors::collect_syntax_errors_cached(&root, source, &lines);
+        // Собираем синтаксические ошибки из дерева с использованием индекса строк
+        let mut syntax_errors =
+            syntax_errors::collect_syntax_errors_cached(&root, source, &line_index);
 
         // Проверяем отсутствующие точки с запятой (BSL linter)
-        let semicolon_errors = syntax_errors::check_missing_semicolons(&root, source, &lines);
+        let semicolon_errors =
+            syntax_errors::check_missing_semicolons(&root, source, &line_index);
         syntax_errors.extend(semicolon_errors);
 
         // Проверяем незавершённые `Новый` без типа/аргументов (IDE-friendly)
-        let new_errors = syntax_errors::check_incomplete_new_expressions(source, &lines);
+        let new_errors = syntax_errors::check_incomplete_new_expressions(source, &line_index);
         syntax_errors.extend(new_errors);
 
         // Пытаемся извлечь statements даже при наличии ошибок (partial recovery)
-        let statements = statement_converter::convert_source_file_cached(&root, source, &lines)?;
+        let statements =
+            statement_converter::convert_source_file_cached(&root, source, &line_index)?;
         let program = Program { statements };
 
         // Возвращаем ParseResult с программой и ошибками
@@ -101,5 +105,17 @@ impl TreeSitterAdapter {
         } else {
             Ok(ParseResult::with_errors(program, syntax_errors))
         }
+    }
+
+    /// Быстрый путь для индексации (без диагностики/линтера).
+    ///
+    /// Используется в индексации BSL модулей, где нужны только statements.
+    pub fn convert_tree_fast(tree: &Tree, source: &str) -> Result<ParseResult, String> {
+        let root = tree.root_node();
+        let line_index = LineIndex::new(source);
+        let statements =
+            statement_converter::convert_source_file_cached(&root, source, &line_index)?;
+        let program = Program { statements };
+        Ok(ParseResult::success(program))
     }
 }

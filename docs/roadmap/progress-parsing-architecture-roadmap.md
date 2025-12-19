@@ -22,6 +22,7 @@
 - Нет детального прогресса “парсинг BSL модулей X/Y” (сейчас это один этап 90→99% на команду): `backend/src/data/loaders/config_bsl_modules.rs:70`.
 - Нет протокольного/серверного API для incremental reindex (в расширении есть `bslAnalyzer.incrementalUpdate`, но на сервере нет обработчика кастомного метода `bsl/incrementalUpdate`): `vscode-extension/src/lsp/customRequests.ts:225`, `backend/src/bin/lsp_server/server/language_server.rs:688`.
 - В расширении `$/progress` не различает параллельные токены (startup load vs parseConfiguration vs reindex) → возможны “перетирания” прогресса.
+- Для Web API сервера (bsl-web-server) нет “честного” прогресса загрузки (platform types + config types + индекс модулей) в UI/endpoint’ах: сейчас это максимум лог/терминальный progress-bar discovery, без единого публичного прогресс-источника.
 
 ---
 
@@ -130,6 +131,22 @@
 
 ---
 
+### P7: Прогресс загрузки при старте Web API сервера 🟡
+**Цель:** при запуске `bsl-web-server` прогресс загрузки типов/конфигурации виден пользователю не только в логах; проценты/стадии монотонны, а “источник истины” — сервер.
+
+**Подход (MVP):**
+- Ввести единый `StartupProgress` в `SystemCoordinator` (аналог progress engine для LSP), который пишет состояние в shared storage (например, `Arc<RwLock<...>>`).
+- Добавить endpoint для чтения прогресса (polling): `GET /api/startup/progress` → `{ phase, current, total, percentage, message, done }`.
+- Обновить Web UI (если включён) чтобы отображал этот прогресс (poll раз в 200–500ms) и корректно завершал после “индексации BSL модулей”.
+
+**Критерии успеха:**
+- При запуске с `--project-path` пользователь видит стадии: загрузка syntax-helper → discovery конфигураций → парсинг/линковка → индексация `*.bsl` → ready.
+- `/api/startup/progress` возвращает `done=true` только после завершения индексации модулей.
+
+**Проверка:**
+- ✅ ручная проверка curl: `curl -s http://localhost:3002/api/startup/progress`.
+- ✅ интеграционный тест: прогресс монотонный, `done` выставляется после финализации.
+
 ## Следующие шаги (минимальный путь)
 
 1) P1: переписать `$/progress` handler на `Map<token, state>` (без изменения UX).
@@ -137,4 +154,4 @@
 3) P4: убрать локальный `withProgress` из `buildIndex/incrementalUpdate` команд (оставить итоговый toast).
 4) P3: добавить детальный прогресс по `*.bsl` модулям.
 5) P2: централизовать расчёт процентов (убрать магические числа из команд).
-
+6) P7: добавить прогресс загрузки для Web API (endpoint + UI), без дублирования “условных” прогресс-баров.

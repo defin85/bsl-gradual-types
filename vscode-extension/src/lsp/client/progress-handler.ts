@@ -8,6 +8,17 @@ interface ProgressState {
     lastReportedPercentage: number;
 }
 
+function tokenKey(token: any): string {
+    // LSP ProgressToken может быть string | number
+    if (typeof token === 'string') return token;
+    if (typeof token === 'number') return String(token);
+    try {
+        return JSON.stringify(token);
+    } catch {
+        return String(token);
+    }
+}
+
 /**
  * Настраивает обработчик $/progress для Work Done Progress
  * @param client LSP клиент
@@ -22,25 +33,24 @@ export function setupProgressHandler(
     // (progress tokens, созданные LSP Server через window/workDoneProgress/create)
     // Нужна явная регистрация обработчика для показа Progress Window
 
-    const state: ProgressState = {
-        resolve: null,
-        reporter: null,
-        lastReportedPercentage: 0
-    };
+    // Multi-token: несколько параллельных прогрессов не должны "перетирать" друг друга.
+    // Храним состояние по token.
+    const states = new Map<string, ProgressState>();
 
     client.onNotification('$/progress', (params: any) => {
+        const key = tokenKey(params.token);
         const value = params.value;
 
         if (value.kind === 'begin') {
-            handleProgressBegin(value, state, outputChannel);
+            handleProgressBegin(key, value, states, outputChannel);
         }
 
         if (value.kind === 'report') {
-            handleProgressReport(value, state, outputChannel);
+            handleProgressReport(key, value, states, outputChannel);
         }
 
         if (value.kind === 'end') {
-            handleProgressEnd(value, state, outputChannel);
+            handleProgressEnd(key, value, states, outputChannel);
         }
     });
 
@@ -51,22 +61,26 @@ export function setupProgressHandler(
  * Обрабатывает начало прогресса
  */
 function handleProgressBegin(
+    key: string,
     value: any,
-    state: ProgressState,
+    states: Map<string, ProgressState>,
     outputChannel: vscode.OutputChannel
 ): void {
-    outputChannel.appendLine(`[Progress] BEGIN: ${value.title}`);
+    outputChannel.appendLine(`[Progress] BEGIN: ${key} | ${value.title}`);
 
-    // Завершаем старый прогресс если он ещё активен (из-за crash/restart LSP)
-    if (state.resolve) {
-        outputChannel.appendLine('Clearing previous progress before starting new one');
-        state.resolve();
-        state.resolve = null;
-        state.reporter = null;
+    const existing = states.get(key);
+    // Завершаем старый прогресс с тем же token (из-за crash/restart LSP)
+    if (existing?.resolve) {
+        outputChannel.appendLine(`[Progress] Clearing previous progress for token: ${key}`);
+        existing.resolve();
     }
 
-    // Сброс состояния
-    state.lastReportedPercentage = 0;
+    const state: ProgressState = {
+        resolve: null,
+        reporter: null,
+        lastReportedPercentage: 0
+    };
+    states.set(key, state);
 
     // Показать Progress в Status Bar (всегда видно)
     vscode.window.withProgress({
@@ -94,17 +108,19 @@ function handleProgressBegin(
  * Обрабатывает отчёт о прогрессе
  */
 function handleProgressReport(
+    key: string,
     value: any,
-    state: ProgressState,
+    states: Map<string, ProgressState>,
     outputChannel: vscode.OutputChannel
 ): void {
     const percentage = value.percentage || 0;
     const message = value.message || '';
 
-    outputChannel.appendLine(`[Progress] REPORT: ${message} (${percentage}%)`);
+    outputChannel.appendLine(`[Progress] REPORT: ${key} | ${message} (${percentage}%)`);
 
     // Обновить Progress Window
-    if (state.reporter) {
+    const state = states.get(key);
+    if (state?.reporter) {
         const increment = percentage - state.lastReportedPercentage;
         state.lastReportedPercentage = percentage;
 
@@ -119,21 +135,20 @@ function handleProgressReport(
  * Обрабатывает завершение прогресса
  */
 function handleProgressEnd(
+    key: string,
     value: any,
-    state: ProgressState,
+    states: Map<string, ProgressState>,
     outputChannel: vscode.OutputChannel
 ): void {
     const message = value.message || 'Завершено';
 
-    outputChannel.appendLine(`[Progress] END: ${message}`);
+    outputChannel.appendLine(`[Progress] END: ${key} | ${message}`);
 
     // Закрыть Progress Window
-    if (state.resolve) {
+    const state = states.get(key);
+    if (state?.resolve) {
         state.resolve();
-        state.resolve = null;
     }
 
-    // Очистить состояние
-    state.reporter = null;
-    state.lastReportedPercentage = 0;
+    states.delete(key);
 }

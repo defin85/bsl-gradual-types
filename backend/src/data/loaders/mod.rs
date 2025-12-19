@@ -15,7 +15,11 @@ pub use config_metadata_parser::{
     ConfigurationDiscovery, UniversalMetadataObject, UniversalMetadataParser,
 };
 
-pub use config_bsl_modules::{index_configuration_bsl_modules, IndexedConfigSignatures};
+pub use config_bsl_modules::{
+    index_configuration_bsl_modules, index_configuration_bsl_modules_with_progress,
+    index_configuration_bsl_modules_with_progress_parallel, IndexedConfigSignatures,
+    ModuleIndexProgress,
+};
 
 // Новые реэкспорты из syntax_helper
 pub use syntax_helper::{ParsingStats, SyntaxHelperLoader};

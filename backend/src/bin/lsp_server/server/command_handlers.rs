@@ -6,8 +6,13 @@ use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::Url;
 use tracing::{error, info};
 
+use bsl_backend::system::fs_utils::read_bsl_file;
+use crate::commands::{handle_parse_configuration, ParseConfigurationParams};
 use crate::handlers::{find_containing_function_in_dto, CurrentContextResponse};
-use crate::types::GetCurrentContextParams;
+use crate::types::{
+    BuildIndexParams, BuildIndexResponse, GetCurrentContextParams, IncrementalUpdateParams,
+    IncrementalUpdateResponse,
+};
 
 use super::BslLanguageServer;
 
@@ -29,7 +34,7 @@ impl BslLanguageServer {
         let file_content = match self.documents.read().await.get(&uri) {
             Some(content) => content.clone(),
             None => match uri.to_file_path() {
-                Ok(path) => std::fs::read_to_string(&path)
+                Ok(path) => read_bsl_file(&path)
                     .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
                 Err(_) => return Ok(CurrentContextResponse::empty()),
             },
@@ -71,5 +76,73 @@ impl BslLanguageServer {
         } else {
             Ok(CurrentContextResponse::empty())
         }
+    }
+
+    /// Custom request: bsl/buildIndex
+    ///
+    /// MVP: переиспользуем pipeline parseConfiguration (сервер — источник истины, прогресс через $/progress).
+    pub(crate) async fn handle_build_index(
+        &self,
+        _params: BuildIndexParams,
+    ) -> JsonRpcResult<BuildIndexResponse> {
+        let cfg = self.config.read().await.clone();
+        let Some(cfg) = cfg else {
+            return Ok(BuildIndexResponse {
+                success: false,
+                types_count: 0,
+                message: "LSP config not available (initializationOptions not received)".to_string(),
+            });
+        };
+
+        let Some(config_path) = cfg.configuration_path else {
+            return Ok(BuildIndexResponse {
+                success: false,
+                types_count: 0,
+                message: "configurationPath is not configured".to_string(),
+            });
+        };
+
+        let resp = handle_parse_configuration(
+            ParseConfigurationParams { config_path },
+            self.coordinator.get_analysis_engine(),
+            self.client.clone(),
+            "bsl-build-index",
+            "Building BSL index",
+        )
+        .await;
+
+        Ok(BuildIndexResponse {
+            success: resp.success,
+            types_count: resp.loaded_types,
+            message: resp
+                .message
+                .unwrap_or_else(|| "Index build completed".to_string()),
+        })
+    }
+
+    /// Custom request: bsl/incrementalUpdate
+    ///
+    /// MVP: сейчас это честная переиндексация конфигурации без перезапуска LSP.
+    pub(crate) async fn handle_incremental_update(
+        &self,
+        params: IncrementalUpdateParams,
+    ) -> JsonRpcResult<IncrementalUpdateResponse> {
+        let resp = handle_parse_configuration(
+            ParseConfigurationParams {
+                config_path: params.config_path,
+            },
+            self.coordinator.get_analysis_engine(),
+            self.client.clone(),
+            "bsl-incremental-update",
+            "Incremental index update",
+        )
+        .await;
+
+        Ok(IncrementalUpdateResponse {
+            success: resp.success,
+            message: resp
+                .message
+                .unwrap_or_else(|| "Incremental update completed".to_string()),
+        })
     }
 }

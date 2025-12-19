@@ -40,44 +40,22 @@ export function registerIndexCommands(
         const workspacePath = workspaceFolders[0].uri.fsPath;
 
         try {
-            await vscode.window.withProgress({
-                location: vscode.ProgressLocation.Notification,
-                title: 'Building BSL Index',
-                cancellable: false
-            }, async (progress) => {
-                updateStatusBar('$(sync~spin) BSL: Loading platform cache...');
-                progress.report({ increment: 25, message: 'Loading platform cache...' });
+            // P4: не дублируем локальный progress (Notification) поверх server-initiated $/progress.
+            updateStatusBar('$(sync~spin) BSL: Building index...');
 
-                updateStatusBar('$(sync~spin) BSL: Parsing configuration...');
-                progress.report({ increment: 25, message: 'Parsing configuration...' });
+            // Логи/аргументы оставляем только для диагностики (сам build идёт через LSP).
+            const args = ['--config', configPath, '--platform-version', getPlatformVersion()];
+            const platformDocsArchive = getPlatformDocsArchive();
+            if (platformDocsArchive) {
+                args.push('--platform-docs-archive', platformDocsArchive);
+            }
+            outputChannel.appendLine(`BuildIndex (LSP): ${args.join(' ')}`);
 
-                updateStatusBar('$(sync~spin) BSL: Building unified index...');
-                progress.report({ increment: 35, message: 'Building unified index...' });
+            const result = await buildIndex({ workspace_path: workspacePath });
 
-                const args = [
-                    '--config', configPath,
-                    '--platform-version', getPlatformVersion()
-                ];
-
-                const platformDocsArchive = getPlatformDocsArchive();
-                if (platformDocsArchive) {
-                    args.push('--platform-docs-archive', platformDocsArchive);
-                }
-
-                const result = await buildIndex({ workspace_path: workspacePath });
-
-                updateStatusBar('$(sync~spin) BSL: Finalizing index...');
-                progress.report({ increment: 15, message: 'Finalizing...' });
-
-                updateStatusBar('$(check) BSL: Ready');
-
-                const typesCount = result.types_count || 'unknown';
-
-                vscode.window.showInformationMessage(`BSL Index built successfully with ${typesCount} types`);
-
-                return result;
-            });
-
+            updateStatusBar('$(check) BSL: Ready');
+            const typesCount = result.types_count || 'unknown';
+            vscode.window.showInformationMessage(`BSL Index built successfully with ${typesCount} types`);
         } catch (error) {
             updateStatusBar(`$(error) BSL: Index build failed: ${error}`);
             vscode.window.showErrorMessage(`Index build failed: ${error}`);
@@ -116,32 +94,108 @@ export function registerIndexCommands(
         }
 
         try {
-            await vscode.window.withProgress({
-                location: vscode.ProgressLocation.Notification,
-                title: 'Incremental Index Update',
-                cancellable: false
-            }, async (progress) => {
-                updateStatusBar('$(sync~spin) BSL: Analyzing changes...');
-                progress.report({ increment: 30, message: 'Analyzing changes...' });
-
-                updateStatusBar('$(sync~spin) BSL: Updating index...');
-                progress.report({ increment: 50, message: 'Updating index...' });
-
-                const result = await incrementalUpdate(configPath, getPlatformVersion());
-
-                updateStatusBar('$(sync~spin) BSL: Finalizing...');
-                progress.report({ increment: 20, message: 'Finalizing...' });
-
-                updateStatusBar('$(check) BSL: Ready');
-
-                vscode.window.showInformationMessage(`Index updated successfully: ${result.message}`);
-
-                return result.message;
-            });
+            // P4: прогресс показывает сервер через $/progress.
+            updateStatusBar('$(sync~spin) BSL: Incremental update...');
+            const result = await incrementalUpdate(configPath, getPlatformVersion());
+            updateStatusBar('$(check) BSL: Ready');
+            vscode.window.showInformationMessage(`Index updated successfully: ${result.message}`);
         } catch (error) {
             updateStatusBar(`$(error) BSL: Incremental update failed: ${error}`);
             vscode.window.showErrorMessage(`Incremental update failed: ${error}`);
             outputChannel.appendLine(`Incremental update error: ${error}`);
         }
     });
+
+    // P5: авто-реиндексация при изменениях файлов конфигурации (debounce + single-flight).
+    // В тестовом режиме отключаем, чтобы не провоцировать фоновые запросы/таймауты.
+    const isTestMode =
+        process.env.NODE_ENV === 'test' ||
+        process.env.VSCODE_TEST_MODE === '1' ||
+        process.env.VSCODE_EXTENSION_MODE === 'test';
+
+    if (isTestMode) {
+        outputChannel.appendLine('[AutoReindex] Disabled in test mode');
+        return;
+    }
+
+    let watchers: vscode.Disposable[] = [];
+    let debounceTimer: NodeJS.Timeout | undefined;
+    let inFlight = false;
+    let pending = false;
+
+    const disposeWatchers = () => {
+        for (const w of watchers) w.dispose();
+        watchers = [];
+    };
+
+    const scheduleAutoUpdate = (reason: string) => {
+        outputChannel.appendLine(`[AutoReindex] Schedule: ${reason}`);
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => void runAutoUpdate(), 1200);
+    };
+
+    const runAutoUpdate = async () => {
+        const configPath = getConfigurationPath();
+        if (!configPath) return;
+
+        if (inFlight) {
+            pending = true;
+            return;
+        }
+
+        inFlight = true;
+        pending = false;
+
+        try {
+            updateStatusBar('$(sync~spin) BSL: Auto reindex...');
+            await incrementalUpdate(configPath, getPlatformVersion());
+            updateStatusBar('$(check) BSL: Ready');
+            outputChannel.appendLine('[AutoReindex] Completed');
+        } catch (error) {
+            updateStatusBar(`$(error) BSL: Auto reindex failed: ${error}`);
+            outputChannel.appendLine(`[AutoReindex] Failed: ${error}`);
+        } finally {
+            inFlight = false;
+            if (pending) {
+                pending = false;
+                scheduleAutoUpdate('pending changes while in-flight');
+            }
+        }
+    };
+
+    const createWatchers = () => {
+        disposeWatchers();
+        const configPath = getConfigurationPath();
+        if (!configPath) return;
+
+        // Минимальный набор "горячих" файлов: Configuration.xml, любые Ext/*.bsl, Form.xml.
+        const patterns = [
+            'Configuration.xml',
+            '**/Ext/*.bsl',
+            '**/Form.xml'
+        ];
+
+        for (const pattern of patterns) {
+            const watcher = vscode.workspace.createFileSystemWatcher(
+                new vscode.RelativePattern(configPath, pattern)
+            );
+            watcher.onDidCreate(() => scheduleAutoUpdate(`create: ${pattern}`));
+            watcher.onDidChange(() => scheduleAutoUpdate(`change: ${pattern}`));
+            watcher.onDidDelete(() => scheduleAutoUpdate(`delete: ${pattern}`));
+            watchers.push(watcher);
+        }
+
+        outputChannel.appendLine(`[AutoReindex] Watchers installed for: ${configPath}`);
+    };
+
+    createWatchers();
+    context.subscriptions.push({ dispose: disposeWatchers });
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration((e) => {
+            if (e.affectsConfiguration('bslAnalyzer.configurationPath')) {
+                outputChannel.appendLine('[AutoReindex] configurationPath changed, recreating watchers');
+                createWatchers();
+            }
+        })
+    );
 }

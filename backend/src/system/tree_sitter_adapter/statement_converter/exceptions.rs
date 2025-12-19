@@ -7,15 +7,15 @@ use crate::parsing::bsl::ast::Statement;
 use tree_sitter::Node;
 
 use crate::system::tree_sitter_adapter::expression_converter::convert_expression;
-use crate::system::tree_sitter_adapter::span::node_to_span_cached;
+use crate::system::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
 
 /// Конвертировать try_statement с использованием кеша строк (Milestone 2.19)
 pub(crate) fn convert_try_statement_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Statement, String> {
-    let span = node_to_span_cached(node, source, lines);
+    let span = node_to_span_cached(node, source, line_index);
     let mut cursor = node.walk();
     let mut try_body = Vec::new();
     let mut except_body = Vec::new();
@@ -29,7 +29,9 @@ pub(crate) fn convert_try_statement_cached(
                 in_except = true;
             }
             _ => {
-                if let Some(stmt) = super::dispatch_statement_cached(&child, source, lines)? {
+                if let Some(stmt) =
+                    super::dispatch_statement_cached(&child, source, line_index)?
+                {
                     if in_except {
                         except_body.push(stmt);
                     } else {
@@ -51,9 +53,9 @@ pub(crate) fn convert_try_statement_cached(
 pub(crate) fn convert_raise_error_statement_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Statement, String> {
-    let span = node_to_span_cached(node, source, lines);
+    let span = node_to_span_cached(node, source, line_index);
     let mut cursor = node.walk();
     let mut message = None;
 

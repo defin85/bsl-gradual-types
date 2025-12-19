@@ -39,7 +39,7 @@ use crate::parsing::bsl::ast::Statement;
 use tracing::debug;
 use tree_sitter::Node;
 
-use super::span::node_to_span_cached;
+use super::span::{node_to_span_cached, LineIndex};
 
 // ============================================================
 // Entry Points (public API)
@@ -49,13 +49,13 @@ use super::span::node_to_span_cached;
 pub fn convert_source_file_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Vec<Statement>, String> {
     let mut statements = Vec::new();
     let mut cursor = node.walk();
 
     for child in node.children(&mut cursor) {
-        if let Some(stmt) = dispatch_statement_cached(&child, source, lines)? {
+        if let Some(stmt) = dispatch_statement_cached(&child, source, line_index)? {
             statements.push(stmt);
         }
     }
@@ -70,9 +70,9 @@ pub fn convert_source_file_cached(
 pub fn convert_statement_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Option<Statement>, String> {
-    dispatch_statement_cached(node, source, lines)
+    dispatch_statement_cached(node, source, line_index)
 }
 
 // ============================================================
@@ -86,78 +86,80 @@ pub fn convert_statement_cached(
 pub(crate) fn dispatch_statement_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Option<Statement>, String> {
     match node.kind() {
         // Declarations
         "function_definition" | "procedure_definition" => Ok(Some(
-            declarations::convert_function_definition_cached(node, source, lines)?,
+            declarations::convert_function_definition_cached(node, source, line_index)?,
         )),
         "var_definition" | "var_statement" => Ok(Some(
-            declarations::convert_var_definition_cached(node, source, lines)?,
+            declarations::convert_var_definition_cached(node, source, line_index)?,
         )),
 
         // Conditions
         "if_statement" => Ok(Some(conditions::convert_if_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
 
         // Loops
         "for_statement" => Ok(Some(loops::convert_for_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
         "for_each_statement" => Ok(Some(loops::convert_for_each_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
         "while_statement" => Ok(Some(loops::convert_while_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
 
         // Exceptions
         "try_statement" => Ok(Some(exceptions::convert_try_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
         "rise_error_statement" => Ok(Some(exceptions::convert_raise_error_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
 
         // Simple statements
         "assignment_statement" => Ok(Some(simple::convert_assignment_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
-        "return_statement" => Ok(Some(simple::convert_return_cached(node, source, lines)?)),
+        "return_statement" => Ok(Some(simple::convert_return_cached(
+            node, source, line_index,
+        )?)),
         "call_statement" => Ok(Some(simple::convert_call_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
 
         // Break/Continue (inline - too simple for separate module)
         "break_statement" => Ok(Some(Statement::Break {
-            span: node_to_span_cached(node, source, lines),
+            span: node_to_span_cached(node, source, line_index),
         })),
         "continue_statement" => Ok(Some(Statement::Continue {
-            span: node_to_span_cached(node, source, lines),
+            span: node_to_span_cached(node, source, line_index),
         })),
 
         // Special statements
         "goto_statement" => Ok(Some(special::convert_goto_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
         "label_statement" => Ok(Some(special::convert_label_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
         "execute_statement" => Ok(Some(special::convert_execute_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
 
         // Event handlers
         "add_handler_statement" => Ok(Some(handlers::convert_add_handler_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
         "remove_handler_statement" => Ok(Some(handlers::convert_remove_handler_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
         "await_statement" => Ok(Some(handlers::convert_await_statement_cached(
-            node, source, lines,
+            node, source, line_index,
         )?)),
 
         // Skip preprocessor and comments
@@ -185,8 +187,8 @@ pub(crate) fn dispatch_statement_cached(
 /// Для производительности используйте `convert_source_file_cached()` вместо него.
 #[allow(dead_code)]
 pub fn convert_source_file(node: &Node, source: &str) -> Result<Vec<Statement>, String> {
-    let lines: Vec<String> = source.lines().map(|s| s.to_string()).collect();
-    convert_source_file_cached(node, source, &lines)
+    let line_index = LineIndex::new(source);
+    convert_source_file_cached(node, source, &line_index)
 }
 
 /// Конвертировать statement узел
@@ -195,6 +197,6 @@ pub fn convert_source_file(node: &Node, source: &str) -> Result<Vec<Statement>, 
 /// Для производительности используйте `convert_statement_cached()` вместо него.
 #[allow(dead_code)]
 pub fn convert_statement(node: &Node, source: &str) -> Result<Option<Statement>, String> {
-    let lines: Vec<String> = source.lines().map(|s| s.to_string()).collect();
-    convert_statement_cached(node, source, &lines)
+    let line_index = LineIndex::new(source);
+    convert_statement_cached(node, source, &line_index)
 }

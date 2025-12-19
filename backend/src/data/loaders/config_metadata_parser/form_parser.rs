@@ -7,6 +7,7 @@ use std::fs;
 use std::path::Path;
 use tracing::trace;
 
+use crate::system::fs_utils::read_bsl_file;
 use super::form_types::*;
 use super::types::ExecutionContext;
 
@@ -421,7 +422,7 @@ impl FormParser {
     fn parse_module_contexts(module_path: &Path) -> Result<Vec<ExecutionContext>> {
         trace!("  🔍 Parsing module contexts from {:?}", module_path);
 
-        let content = fs::read_to_string(module_path)?;
+        let content = read_bsl_file(module_path)?;
         let mut contexts = Vec::new();
 
         // Поиск директив компиляции

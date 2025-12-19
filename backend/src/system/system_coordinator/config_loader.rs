@@ -3,16 +3,37 @@
 //! Методы для загрузки метаданных из базовых конфигураций и расширений
 
 use anyhow::Result;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
-use tracing::info;
+use std::sync::{Arc, Mutex};
+use tracing::{info, warn};
 
 use crate::data::loaders::progress::ProgressUpdate;
+use crate::data::loaders::{
+    index_configuration_bsl_modules_with_progress_parallel, ModuleIndexProgress,
+    UniversalMetadataObject,
+};
 use bsl_shared::domain::types::RawTypeData;
 
 use super::coordinator::SystemCoordinator;
 use super::types::LoadMetadataResult;
 
 impl SystemCoordinator {
+    fn apply_prefix_for_indexing(
+        metadata: &[UniversalMetadataObject],
+        prefix: Option<&str>,
+    ) -> Vec<UniversalMetadataObject> {
+        let Some(prefix) = prefix.filter(|p| !p.is_empty()) else {
+            return metadata.to_vec();
+        };
+
+        let mut out = metadata.to_vec();
+        for obj in &mut out {
+            obj.name = format!("{}{}", prefix, obj.name);
+        }
+        out
+    }
+
     /// Загрузить метаданные конфигурации через универсальный парсер
     ///
     /// Использует ConfigurationDiscovery для автоматического обнаружения всех объектов метаданных
@@ -54,6 +75,41 @@ impl SystemCoordinator {
         let repository = engine.get_repository();
 
         // Конвертируем все объекты в RawTypeData
+        let indexed = index_configuration_bsl_modules_with_progress_parallel(
+            config_path,
+            &metadata_objects,
+            None::<fn(ModuleIndexProgress)>,
+        );
+        if let Ok(indexed) = indexed {
+            let config_methods_count = indexed.config_methods.len();
+            let global_functions_count = indexed.global_functions.len();
+            let def_locations_count = indexed.definition_locations.len();
+            let global_def_locations_count = indexed.global_definition_locations.len();
+
+            for (owner_type, sig) in indexed.config_methods {
+                repository.add_config_method_signature(&owner_type, sig);
+            }
+            for (name, sig) in indexed.global_functions {
+                repository.add_global_function_signature(&name, sig);
+            }
+            for (owner_type, method_name, location) in indexed.definition_locations {
+                repository.add_config_method_definition_location(&owner_type, &method_name, location);
+            }
+            for (function_name, location) in indexed.global_definition_locations {
+                repository.add_global_function_definition_location(&function_name, location);
+            }
+
+            info!(
+                "Проиндексированы экспортные методы из *.bsl: методов={}, глобальных функций={}, locations={}, global_locations={}",
+                config_methods_count,
+                global_functions_count,
+                def_locations_count,
+                global_def_locations_count
+            );
+        } else if let Err(e) = indexed {
+            warn!("Не удалось проиндексировать экспортные методы из *.bsl модулей: {}", e);
+        }
+
         let raw_types: Vec<RawTypeData> = metadata_objects
             .into_iter()
             .flat_map(|obj| obj.to_raw_type_data_with_forms(None))
@@ -147,6 +203,124 @@ impl SystemCoordinator {
                 .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))?;
 
             let prefix = config_info.prefix.as_deref();
+            let metadata_for_indexing = Self::apply_prefix_for_indexing(&metadata, prefix);
+
+            // Для Web API startup progress (P7): отмечаем отдельную стадию индексации модулей BSL.
+            let prev = self.startup_progress();
+            self.set_startup_progress(bsl_shared::api::StartupProgressDto {
+                phase: "Индексация BSL-модулей".to_string(),
+                message: Some(format!("Конфигурация: {}", config_info.name)),
+                ..prev
+            });
+
+            let config_root = config_info.path.clone();
+            let config_name = Arc::new(config_info.name.clone());
+            let terminal_progress: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
+            let coordinator_for_progress = self.clone_for_blocking();
+            match index_configuration_bsl_modules_with_progress_parallel(
+                &config_info.path,
+                &metadata_for_indexing,
+                Some({
+                    let terminal_progress = Arc::clone(&terminal_progress);
+                    let config_name = Arc::clone(&config_name);
+                    let coordinator_for_progress = coordinator_for_progress.clone();
+                    move |p: ModuleIndexProgress| {
+                    let prev = coordinator_for_progress.startup_progress();
+                    let module_display = p
+                        .module_path
+                        .strip_prefix(&config_root)
+                        .unwrap_or(&p.module_path)
+                        .display()
+                        .to_string();
+                    coordinator_for_progress.set_startup_progress(bsl_shared::api::StartupProgressDto {
+                        phase: "Индексация BSL-модулей".to_string(),
+                        current: p.current as u64,
+                        total: p.total as u64,
+                        percentage: prev.percentage,
+                        message: Some(format!(
+                            "{}: {}/{} — {}",
+                            config_name.as_str(),
+                            p.current,
+                            p.total,
+                            module_display
+                        )),
+                        done: false,
+                    });
+                    if let Ok(mut guard) = terminal_progress.lock() {
+                        let pb = guard.get_or_insert_with(|| {
+                            let pb = ProgressBar::new(p.total as u64);
+                            pb.set_style(
+                                ProgressStyle::default_bar()
+                                    .template(
+                                        "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]",
+                                    )
+                                    .unwrap()
+                                    .progress_chars("##-"),
+                            );
+                            pb.set_message(format!("Индексация {}", config_name.as_str()));
+                            pb
+                        });
+                        pb.set_position(p.current as u64);
+                        pb.set_message(module_display.clone());
+                        if p.current == p.total {
+                            pb.finish_with_message(format!(
+                                "Индексация {} завершена ({} модулей)",
+                                config_name.as_str(),
+                                p.total
+                            ));
+                        }
+                    }
+                }
+                }),
+            ) {
+                Ok(indexed) => {
+                    let config_methods_count = indexed.config_methods.len();
+                    let global_functions_count = indexed.global_functions.len();
+                    let def_locations_count = indexed.definition_locations.len();
+                    let global_def_locations_count = indexed.global_definition_locations.len();
+
+                    for (owner_type, sig) in indexed.config_methods {
+                        repository.add_config_method_signature(&owner_type, sig);
+                    }
+                    for (name, sig) in indexed.global_functions {
+                        repository.add_global_function_signature(&name, sig);
+                    }
+                    for (owner_type, method_name, location) in indexed.definition_locations {
+                        repository.add_config_method_definition_location(
+                            &owner_type,
+                            &method_name,
+                            location,
+                        );
+                    }
+                    for (function_name, location) in indexed.global_definition_locations {
+                        repository.add_global_function_definition_location(&function_name, location);
+                    }
+
+                    info!(
+                        "Проиндексированы экспортные методы из *.bsl для {}: методов={}, глобальных функций={}, locations={}, global_locations={}",
+                        config_info.name,
+                        config_methods_count,
+                        global_functions_count,
+                        def_locations_count,
+                        global_def_locations_count
+                    );
+
+                    let prev = self.startup_progress();
+                    self.set_startup_progress(bsl_shared::api::StartupProgressDto {
+                        phase: "Индексация BSL-модулей".to_string(),
+                        message: Some(format!(
+                            "{}: методов={}, глобальных функций={}",
+                            config_info.name, config_methods_count, global_functions_count
+                        )),
+                        ..prev
+                    });
+                }
+                Err(e) => warn!(
+                    "Не удалось проиндексировать экспортные методы из *.bsl для {}: {}",
+                    config_info.name, e
+                ),
+            }
+
             let raw_types: Vec<RawTypeData> = metadata
                 .into_iter()
                 .flat_map(|obj| obj.to_raw_type_data_with_forms(prefix))
@@ -255,6 +429,123 @@ impl SystemCoordinator {
                 .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))?;
 
             let prefix = config_info.prefix.as_deref();
+            let metadata_for_indexing = Self::apply_prefix_for_indexing(&metadata, prefix);
+
+            let prev = self.startup_progress();
+            self.set_startup_progress(bsl_shared::api::StartupProgressDto {
+                phase: "Индексация BSL-модулей".to_string(),
+                message: Some(format!("Конфигурация: {}", config_info.name)),
+                ..prev
+            });
+
+            let config_root = config_info.path.clone();
+            let config_name = Arc::new(config_info.name.clone());
+            let terminal_progress: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
+            let coordinator_for_progress = self.clone_for_blocking();
+            match index_configuration_bsl_modules_with_progress_parallel(
+                &config_info.path,
+                &metadata_for_indexing,
+                Some({
+                    let terminal_progress = Arc::clone(&terminal_progress);
+                    let config_name = Arc::clone(&config_name);
+                    let coordinator_for_progress = coordinator_for_progress.clone();
+                    move |p: ModuleIndexProgress| {
+                    let prev = coordinator_for_progress.startup_progress();
+                    let module_display = p
+                        .module_path
+                        .strip_prefix(&config_root)
+                        .unwrap_or(&p.module_path)
+                        .display()
+                        .to_string();
+                    coordinator_for_progress.set_startup_progress(bsl_shared::api::StartupProgressDto {
+                        phase: "Индексация BSL-модулей".to_string(),
+                        current: p.current as u64,
+                        total: p.total as u64,
+                        percentage: prev.percentage,
+                        message: Some(format!(
+                            "{}: {}/{} — {}",
+                            config_name.as_str(),
+                            p.current,
+                            p.total,
+                            module_display
+                        )),
+                        done: false,
+                    });
+                    if let Ok(mut guard) = terminal_progress.lock() {
+                        let pb = guard.get_or_insert_with(|| {
+                            let pb = ProgressBar::new(p.total as u64);
+                            pb.set_style(
+                                ProgressStyle::default_bar()
+                                    .template(
+                                        "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]",
+                                    )
+                                    .unwrap()
+                                    .progress_chars("##-"),
+                            );
+                            pb.set_message(format!("Индексация {}", config_name.as_str()));
+                            pb
+                        });
+                        pb.set_position(p.current as u64);
+                        pb.set_message(module_display.clone());
+                        if p.current == p.total {
+                            pb.finish_with_message(format!(
+                                "Индексация {} завершена ({} модулей)",
+                                config_name.as_str(),
+                                p.total
+                            ));
+                        }
+                    }
+                }
+                }),
+            ) {
+                Ok(indexed) => {
+                    let config_methods_count = indexed.config_methods.len();
+                    let global_functions_count = indexed.global_functions.len();
+                    let def_locations_count = indexed.definition_locations.len();
+                    let global_def_locations_count = indexed.global_definition_locations.len();
+
+                    for (owner_type, sig) in indexed.config_methods {
+                        repository.add_config_method_signature(&owner_type, sig);
+                    }
+                    for (name, sig) in indexed.global_functions {
+                        repository.add_global_function_signature(&name, sig);
+                    }
+                    for (owner_type, method_name, location) in indexed.definition_locations {
+                        repository.add_config_method_definition_location(
+                            &owner_type,
+                            &method_name,
+                            location,
+                        );
+                    }
+                    for (function_name, location) in indexed.global_definition_locations {
+                        repository.add_global_function_definition_location(&function_name, location);
+                    }
+
+                    info!(
+                        "Проиндексированы экспортные методы из *.bsl для {}: методов={}, глобальных функций={}, locations={}, global_locations={}",
+                        config_info.name,
+                        config_methods_count,
+                        global_functions_count,
+                        def_locations_count,
+                        global_def_locations_count
+                    );
+
+                    let prev = self.startup_progress();
+                    self.set_startup_progress(bsl_shared::api::StartupProgressDto {
+                        phase: "Индексация BSL-модулей".to_string(),
+                        message: Some(format!(
+                            "{}: методов={}, глобальных функций={}",
+                            config_info.name, config_methods_count, global_functions_count
+                        )),
+                        ..prev
+                    });
+                }
+                Err(e) => warn!(
+                    "Не удалось проиндексировать экспортные методы из *.bsl для {}: {}",
+                    config_info.name, e
+                ),
+            }
+
             let raw_types: Vec<RawTypeData> = metadata
                 .into_iter()
                 .flat_map(|obj| obj.to_raw_type_data_with_forms(prefix))

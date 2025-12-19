@@ -11,6 +11,7 @@ mod config;
 mod converters;
 mod handlers;
 mod progress;
+mod progress_bridge;
 mod server;
 mod types;
 
@@ -102,10 +103,17 @@ async fn main() -> Result<()> {
     // Create LSP service
     info!("Creating LSP service...");
     let coordinator_clone = coordinator.clone();
-    let (service, socket) = LspService::new(move |client| {
+    let (service, socket) = LspService::build(move |client| {
         info!("Initializing BSL Language Server");
         BslLanguageServer::new(client, coordinator_clone.clone())
-    });
+    })
+    // Legacy custom requests used by VSCode extension
+    .custom_method("bsl/buildIndex", BslLanguageServer::handle_build_index)
+    .custom_method(
+        "bsl/incrementalUpdate",
+        BslLanguageServer::handle_incremental_update,
+    )
+    .finish();
     info!("LSP service created");
 
     // Start server

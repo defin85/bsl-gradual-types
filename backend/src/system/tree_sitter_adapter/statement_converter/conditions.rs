@@ -8,15 +8,15 @@ use bsl_shared::ir::Span;
 use tree_sitter::Node;
 
 use crate::system::tree_sitter_adapter::expression_converter::convert_expression;
-use crate::system::tree_sitter_adapter::span::node_to_span_cached;
+use crate::system::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
 
 /// Конвертировать if_statement с использованием кеша строк (Milestone 2.19)
 pub(crate) fn convert_if_statement_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Statement, String> {
-    let span = node_to_span_cached(node, source, lines);
+    let span = node_to_span_cached(node, source, line_index);
     let mut cursor = node.walk();
     let mut condition = Expression::Boolean {
         value: true,
@@ -39,15 +39,17 @@ pub(crate) fn convert_if_statement_cached(
                 }
             }
             "else_clause" => {
-                let else_statements = convert_clause_body_cached(&child, source, lines)?;
+                let else_statements = convert_clause_body_cached(&child, source, line_index)?;
                 else_body = Some(else_statements);
             }
             "elseif_clause" => {
-                let elseif_statements = convert_clause_body_cached(&child, source, lines)?;
+                let elseif_statements = convert_clause_body_cached(&child, source, line_index)?;
                 else_body = Some(elseif_statements);
             }
             kind if in_then && (kind.ends_with("_statement") || kind.ends_with("_definition")) => {
-                if let Some(stmt) = super::dispatch_statement_cached(&child, source, lines)? {
+                if let Some(stmt) =
+                    super::dispatch_statement_cached(&child, source, line_index)?
+                {
                     then_body.push(stmt);
                 }
             }
@@ -69,7 +71,7 @@ pub(crate) fn convert_if_statement_cached(
 pub(crate) fn convert_clause_body_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Vec<Statement>, String> {
     let mut statements = Vec::new();
     let mut cursor = node.walk();
@@ -79,7 +81,7 @@ pub(crate) fn convert_clause_body_cached(
             continue;
         }
 
-        if let Some(stmt) = super::dispatch_statement_cached(&child, source, lines)? {
+        if let Some(stmt) = super::dispatch_statement_cached(&child, source, line_index)? {
             statements.push(stmt);
         }
     }

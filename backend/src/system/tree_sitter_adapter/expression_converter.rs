@@ -204,7 +204,18 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
             }
             "." => {} // Игнорируем точку
             _ => {
-                debug!("access: skipping child {}", child.kind());
+                // MILESTONE 5.3 FIX (дополнение): объект цепочки может быть НЕ access/identifier,
+                // а выражение (например `Новый Структура().Вставить(...)`).
+                // Пробуем сконвертировать любой "expression-like" child как object, если object ещё не найден.
+                if object.is_none() {
+                    if let Some(expr) = convert_expression(&child, source)? {
+                        object = Some(expr);
+                    } else {
+                        debug!("access: skipping child {}", child.kind());
+                    }
+                } else {
+                    debug!("access: skipping child {}", child.kind());
+                }
             }
         }
     }
@@ -252,6 +263,53 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
                 span,
             }))
         }
+        // Случай 1b: method_call без объекта.
+        //
+        // Tree-sitter иногда представляет вызов "просто функции" как access{ method_call(...) }.
+        // Например, `Структура().Вставить(...)` парсится как call_expression{ access(method_call Структура()), method_call Вставить() }.
+        // В этом случае трактуем method_call как вызов глобальной функции.
+        (Some(method), None, _) => {
+            let mut method_cursor = method.walk();
+            let mut method_name = String::new();
+            let mut method_args = Vec::new();
+            let mut method_identifier_span = span;
+
+            for child in method.children(&mut method_cursor) {
+                match child.kind() {
+                    "identifier" => {
+                        method_name = node_text(&child, source);
+                        method_identifier_span = node_to_span(&child, source);
+                    }
+                    "arguments" => {
+                        let mut args_cursor = child.walk();
+                        for arg_child in child.children(&mut args_cursor) {
+                            if arg_child.kind() == "expression" {
+                                if let Some(expr) = convert_expression(&arg_child, source)? {
+                                    method_args.push(expr);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if method_name.is_empty() {
+                debug!("access: method_call without identifier");
+                return Ok(None);
+            }
+
+            let function = Expression::Identifier {
+                name: method_name,
+                span: method_identifier_span,
+            };
+
+            Ok(Some(Expression::Call {
+                function: Box::new(function),
+                args: method_args,
+                span: method_identifier_span,
+            }))
+        }
         // Случай 2: access содержит property -> это PropertyAccess
         (None, Some(obj), Some(prop)) => Ok(Some(Expression::PropertyAccess {
             object: Box::new(obj),
@@ -260,8 +318,6 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
         })),
         // Случай 3: только объект (leaf node)
         (None, Some(obj), None) => Ok(Some(obj)),
-        // method_call без объекта - ошибка
-        (Some(_), None, _) => Err("access with method_call but no object".to_string()),
         // Ничего не распознано
         (None, None, _) => {
             debug!("access: couldn't parse structure, returning None");
@@ -346,8 +402,12 @@ fn convert_call_expression(node: &Node, source: &str) -> Result<Option<Expressio
     // MILESTONE 3.5: Если есть access + method_call -> создаём PropertyAccess
     if let (Some(access), Some(method)) = (access_node, method_call_node) {
         // Получаем object из access
-        let object = convert_expression(&access, source)?
-            .ok_or_else(|| "Failed to convert access node".to_string())?;
+        let Some(object) = convert_expression(&access, source)? else {
+            // В некоторых случаях tree-sitter может дать access без корректно извлекаемого объекта
+            // (например, при наличии ERROR-узлов). Не валим весь парсинг — просто падаем обратно
+            // на стандартный разбор (который в худшем случае вернёт None).
+            return Ok(None);
+        };
 
         // Получаем имя метода из method_call И его span
         let mut method_cursor = method.walk();

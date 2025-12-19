@@ -6,6 +6,38 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Прогресс запуска/инициализации системы (Web API polling).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupProgressDto {
+    /// Стадия (человекочитаемая).
+    pub phase: String,
+    /// Текущий прогресс в рамках стадии.
+    pub current: u64,
+    /// Всего элементов в рамках стадии.
+    pub total: u64,
+    /// Общий процент (0..100), монотонный.
+    pub percentage: f32,
+    /// Дополнительное сообщение (например, имя файла/объекта).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// Признак завершения старта.
+    pub done: bool,
+}
+
+impl Default for StartupProgressDto {
+    fn default() -> Self {
+        Self {
+            phase: "Инициализация".to_string(),
+            current: 0,
+            total: 0,
+            percentage: 0.0,
+            message: None,
+            done: false,
+        }
+    }
+}
+
 /// The main structure representing the complete analysis result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResultDto {

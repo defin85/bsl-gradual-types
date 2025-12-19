@@ -12,6 +12,7 @@ use crate::system::parser_coordinator::ParserCoordinator;
 use crate::system::simple_cache::AnalysisCache;
 use bsl_shared::domain::repository::RepositoryStats;
 use bsl_shared::engine::AnalysisEngine;
+use bsl_shared::api::StartupProgressDto;
 
 // ============================================================================
 // LOCK ORDER CONVENTION
@@ -52,6 +53,9 @@ pub struct SystemCoordinator {
 
     // === TYPE SERVICE CACHE ===
     pub(crate) type_service_cache: Arc<RwLock<Option<Arc<TypeSystemService>>>>,
+
+    // === STARTUP PROGRESS (WEB API) ===
+    pub(crate) startup_progress: Arc<RwLock<StartupProgressDto>>,
 }
 
 impl Default for SystemCoordinator {
@@ -85,6 +89,7 @@ impl SystemCoordinator {
             observability,
             analysis_engine_cache: Arc::new(RwLock::new(None)),
             type_service_cache: Arc::new(RwLock::new(None)),
+            startup_progress: Arc::new(RwLock::new(StartupProgressDto::default())),
         }
     }
 
@@ -218,5 +223,75 @@ impl SystemCoordinator {
             // Если AnalysisEngine не инициализирован - возвращаем пустую статистику
             RepositoryStats::default()
         }
+    }
+
+    /// Получить текущий прогресс старта (для Web API polling).
+    pub fn startup_progress(&self) -> StartupProgressDto {
+        let guard = self.startup_progress.read().unwrap_or_else(|poisoned| {
+            warn!("Startup progress RwLock poisoned (read), recovering data.");
+            poisoned.into_inner()
+        });
+        guard.clone()
+    }
+
+    pub(crate) fn set_startup_progress(&self, progress: StartupProgressDto) {
+        let mut guard = self.startup_progress.write().unwrap_or_else(|poisoned| {
+            warn!("Startup progress RwLock poisoned (write), recovering data.");
+            poisoned.into_inner()
+        });
+
+        // Проценты не должны "доезжать" до 100% до реального конца.
+        // 100% разрешаем только когда done=true.
+        let mut progress = progress;
+        if !progress.done && progress.percentage >= 100.0 {
+            progress.percentage = 99.0;
+        }
+
+        // Гарантия монотонности процентов
+        if progress.percentage < guard.percentage {
+            progress.percentage = guard.percentage;
+        }
+        *guard = progress;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_progress_is_monotonic() {
+        let coordinator = SystemCoordinator::new();
+
+        coordinator.set_startup_progress(StartupProgressDto {
+            percentage: 10.0,
+            ..StartupProgressDto::default()
+        });
+        assert_eq!(coordinator.startup_progress().percentage, 10.0);
+
+        coordinator.set_startup_progress(StartupProgressDto {
+            percentage: 5.0,
+            ..StartupProgressDto::default()
+        });
+        assert_eq!(coordinator.startup_progress().percentage, 10.0);
+    }
+
+    #[test]
+    fn startup_progress_clamps_100_before_done() {
+        let coordinator = SystemCoordinator::new();
+
+        coordinator.set_startup_progress(StartupProgressDto {
+            percentage: 100.0,
+            done: false,
+            ..StartupProgressDto::default()
+        });
+        assert_eq!(coordinator.startup_progress().percentage, 99.0);
+
+        coordinator.set_startup_progress(StartupProgressDto {
+            percentage: 100.0,
+            done: true,
+            ..StartupProgressDto::default()
+        });
+        assert_eq!(coordinator.startup_progress().percentage, 100.0);
     }
 }

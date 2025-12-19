@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use std::collections::HashMap;
+use std::path::Path;
 use tracing::info;
 
 use bsl_shared::utils::hash::hash_content;
@@ -12,6 +13,7 @@ use super::super::extractors::type_extractor::{
     extract_function_name, extract_return_type, extract_type_from_var_declaration, extract_var_name,
 };
 use crate::application::TypeInferenceService;
+use crate::system::fs_utils::read_bsl_file;
 use crate::system::{AnalysisCache, CacheAnalysisResult, ParserCoordinator};
 
 /// CLI operations - file analysis
@@ -25,7 +27,7 @@ use crate::system::{AnalysisCache, CacheAnalysisResult, ParserCoordinator};
 pub async fn analyze_file(parser: &ParserCoordinator, path: &str) -> Result<CacheAnalysisResult> {
     info!("Analyzing file: {}", path);
 
-    let file_content = std::fs::read_to_string(path)
+    let file_content = read_bsl_file(Path::new(path))
         .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", path, e))?;
 
     let _parse_result = parser

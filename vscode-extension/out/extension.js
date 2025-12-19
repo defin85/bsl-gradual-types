@@ -2137,13 +2137,13 @@ var require_connection = __commonJS({
         }
         const startTime = Date.now();
         if (requestHandler || starRequestHandler) {
-          const tokenKey = requestMessage.id ?? String(Date.now());
-          const cancellationSource = IdCancellationReceiverStrategy.is(cancellationStrategy.receiver) ? cancellationStrategy.receiver.createCancellationTokenSource(tokenKey) : cancellationStrategy.receiver.createCancellationTokenSource(requestMessage);
+          const tokenKey2 = requestMessage.id ?? String(Date.now());
+          const cancellationSource = IdCancellationReceiverStrategy.is(cancellationStrategy.receiver) ? cancellationStrategy.receiver.createCancellationTokenSource(tokenKey2) : cancellationStrategy.receiver.createCancellationTokenSource(requestMessage);
           if (requestMessage.id !== null && knownCanceledRequests.has(requestMessage.id)) {
             cancellationSource.cancel();
           }
           if (requestMessage.id !== null) {
-            requestTokens.set(tokenKey, cancellationSource);
+            requestTokens.set(tokenKey2, cancellationSource);
           }
           try {
             let handlerResult;
@@ -2172,14 +2172,14 @@ var require_connection = __commonJS({
             }
             const promise = handlerResult;
             if (!handlerResult) {
-              requestTokens.delete(tokenKey);
+              requestTokens.delete(tokenKey2);
               replySuccess(handlerResult, requestMessage.method, startTime);
             } else if (promise.then) {
               promise.then((resultOrError) => {
-                requestTokens.delete(tokenKey);
+                requestTokens.delete(tokenKey2);
                 reply(resultOrError, requestMessage.method, startTime);
               }, (error) => {
-                requestTokens.delete(tokenKey);
+                requestTokens.delete(tokenKey2);
                 if (error instanceof messages_1.ResponseError) {
                   replyError(error, requestMessage.method, startTime);
                 } else if (error && Is.string(error.message)) {
@@ -2189,11 +2189,11 @@ var require_connection = __commonJS({
                 }
               });
             } else {
-              requestTokens.delete(tokenKey);
+              requestTokens.delete(tokenKey2);
               reply(handlerResult, requestMessage.method, startTime);
             }
           } catch (error) {
-            requestTokens.delete(tokenKey);
+            requestTokens.delete(tokenKey2);
             if (error instanceof messages_1.ResponseError) {
               reply(error, requestMessage.method, startTime);
             } else if (error && Is.string(error.message)) {
@@ -6147,14 +6147,14 @@ var require_protocol = __commonJS({
       FileChangeType2.Changed = 2;
       FileChangeType2.Deleted = 3;
     })(FileChangeType = exports2.FileChangeType || (exports2.FileChangeType = {}));
-    var RelativePattern;
-    (function(RelativePattern2) {
+    var RelativePattern2;
+    (function(RelativePattern3) {
       function is(value) {
         const candidate = value;
         return Is.objectLiteral(candidate) && (vscode_languageserver_types_1.URI.is(candidate.baseUri) || vscode_languageserver_types_1.WorkspaceFolder.is(candidate.baseUri)) && Is.string(candidate.pattern);
       }
-      RelativePattern2.is = is;
-    })(RelativePattern = exports2.RelativePattern || (exports2.RelativePattern = {}));
+      RelativePattern3.is = is;
+    })(RelativePattern2 = exports2.RelativePattern || (exports2.RelativePattern = {}));
     var WatchKind;
     (function(WatchKind2) {
       WatchKind2.Create = 1;
@@ -18125,35 +18125,45 @@ var init_client_options = __esm({
 });
 
 // src/lsp/client/progress-handler.ts
+function tokenKey(token) {
+  if (typeof token === "string") return token;
+  if (typeof token === "number") return String(token);
+  try {
+    return JSON.stringify(token);
+  } catch {
+    return String(token);
+  }
+}
 function setupProgressHandler(client2, outputChannel8) {
+  const states = /* @__PURE__ */ new Map();
+  client2.onNotification("$/progress", (params) => {
+    const key = tokenKey(params.token);
+    const value = params.value;
+    if (value.kind === "begin") {
+      handleProgressBegin(key, value, states, outputChannel8);
+    }
+    if (value.kind === "report") {
+      handleProgressReport(key, value, states, outputChannel8);
+    }
+    if (value.kind === "end") {
+      handleProgressEnd(key, value, states, outputChannel8);
+    }
+  });
+  outputChannel8.appendLine("$/progress handler registered");
+}
+function handleProgressBegin(key, value, states, outputChannel8) {
+  outputChannel8.appendLine(`[Progress] BEGIN: ${key} | ${value.title}`);
+  const existing = states.get(key);
+  if (existing?.resolve) {
+    outputChannel8.appendLine(`[Progress] Clearing previous progress for token: ${key}`);
+    existing.resolve();
+  }
   const state = {
     resolve: null,
     reporter: null,
     lastReportedPercentage: 0
   };
-  client2.onNotification("$/progress", (params) => {
-    const value = params.value;
-    if (value.kind === "begin") {
-      handleProgressBegin(value, state, outputChannel8);
-    }
-    if (value.kind === "report") {
-      handleProgressReport(value, state, outputChannel8);
-    }
-    if (value.kind === "end") {
-      handleProgressEnd(value, state, outputChannel8);
-    }
-  });
-  outputChannel8.appendLine("$/progress handler registered");
-}
-function handleProgressBegin(value, state, outputChannel8) {
-  outputChannel8.appendLine(`[Progress] BEGIN: ${value.title}`);
-  if (state.resolve) {
-    outputChannel8.appendLine("Clearing previous progress before starting new one");
-    state.resolve();
-    state.resolve = null;
-    state.reporter = null;
-  }
-  state.lastReportedPercentage = 0;
+  states.set(key, state);
   vscode5.window.withProgress({
     location: vscode5.ProgressLocation.Window,
     title: value.title,
@@ -18169,11 +18179,12 @@ function handleProgressBegin(value, state, outputChannel8) {
     });
   });
 }
-function handleProgressReport(value, state, outputChannel8) {
+function handleProgressReport(key, value, states, outputChannel8) {
   const percentage = value.percentage || 0;
   const message = value.message || "";
-  outputChannel8.appendLine(`[Progress] REPORT: ${message} (${percentage}%)`);
-  if (state.reporter) {
+  outputChannel8.appendLine(`[Progress] REPORT: ${key} | ${message} (${percentage}%)`);
+  const state = states.get(key);
+  if (state?.reporter) {
     const increment = percentage - state.lastReportedPercentage;
     state.lastReportedPercentage = percentage;
     state.reporter.report({
@@ -18183,15 +18194,14 @@ function handleProgressReport(value, state, outputChannel8) {
     });
   }
 }
-function handleProgressEnd(value, state, outputChannel8) {
+function handleProgressEnd(key, value, states, outputChannel8) {
   const message = value.message || "\u0417\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E";
-  outputChannel8.appendLine(`[Progress] END: ${message}`);
-  if (state.resolve) {
+  outputChannel8.appendLine(`[Progress] END: ${key} | ${message}`);
+  const state = states.get(key);
+  if (state?.resolve) {
     state.resolve();
-    state.resolve = null;
   }
-  state.reporter = null;
-  state.lastReportedPercentage = 0;
+  states.delete(key);
 }
 var vscode5;
 var init_progress_handler = __esm({
@@ -20763,35 +20773,17 @@ function registerIndexCommands(context, safeRegisterCommand2, outputChannel8) {
     }
     const workspacePath = workspaceFolders[0].uri.fsPath;
     try {
-      await vscode25.window.withProgress({
-        location: vscode25.ProgressLocation.Notification,
-        title: "Building BSL Index",
-        cancellable: false
-      }, async (progress) => {
-        updateStatusBar("$(sync~spin) BSL: Loading platform cache...");
-        progress.report({ increment: 25, message: "Loading platform cache..." });
-        updateStatusBar("$(sync~spin) BSL: Parsing configuration...");
-        progress.report({ increment: 25, message: "Parsing configuration..." });
-        updateStatusBar("$(sync~spin) BSL: Building unified index...");
-        progress.report({ increment: 35, message: "Building unified index..." });
-        const args = [
-          "--config",
-          configPath,
-          "--platform-version",
-          getPlatformVersion()
-        ];
-        const platformDocsArchive = getPlatformDocsArchive();
-        if (platformDocsArchive) {
-          args.push("--platform-docs-archive", platformDocsArchive);
-        }
-        const result = await buildIndex({ workspace_path: workspacePath });
-        updateStatusBar("$(sync~spin) BSL: Finalizing index...");
-        progress.report({ increment: 15, message: "Finalizing..." });
-        updateStatusBar("$(check) BSL: Ready");
-        const typesCount = result.types_count || "unknown";
-        vscode25.window.showInformationMessage(`BSL Index built successfully with ${typesCount} types`);
-        return result;
-      });
+      updateStatusBar("$(sync~spin) BSL: Building index...");
+      const args = ["--config", configPath, "--platform-version", getPlatformVersion()];
+      const platformDocsArchive = getPlatformDocsArchive();
+      if (platformDocsArchive) {
+        args.push("--platform-docs-archive", platformDocsArchive);
+      }
+      outputChannel8.appendLine(`BuildIndex (LSP): ${args.join(" ")}`);
+      const result = await buildIndex({ workspace_path: workspacePath });
+      updateStatusBar("$(check) BSL: Ready");
+      const typesCount = result.types_count || "unknown";
+      vscode25.window.showInformationMessage(`BSL Index built successfully with ${typesCount} types`);
     } catch (error) {
       updateStatusBar(`$(error) BSL: Index build failed: ${error}`);
       vscode25.window.showErrorMessage(`Index build failed: ${error}`);
@@ -20822,28 +20814,89 @@ function registerIndexCommands(context, safeRegisterCommand2, outputChannel8) {
       return;
     }
     try {
-      await vscode25.window.withProgress({
-        location: vscode25.ProgressLocation.Notification,
-        title: "Incremental Index Update",
-        cancellable: false
-      }, async (progress) => {
-        updateStatusBar("$(sync~spin) BSL: Analyzing changes...");
-        progress.report({ increment: 30, message: "Analyzing changes..." });
-        updateStatusBar("$(sync~spin) BSL: Updating index...");
-        progress.report({ increment: 50, message: "Updating index..." });
-        const result = await incrementalUpdate(configPath, getPlatformVersion());
-        updateStatusBar("$(sync~spin) BSL: Finalizing...");
-        progress.report({ increment: 20, message: "Finalizing..." });
-        updateStatusBar("$(check) BSL: Ready");
-        vscode25.window.showInformationMessage(`Index updated successfully: ${result.message}`);
-        return result.message;
-      });
+      updateStatusBar("$(sync~spin) BSL: Incremental update...");
+      const result = await incrementalUpdate(configPath, getPlatformVersion());
+      updateStatusBar("$(check) BSL: Ready");
+      vscode25.window.showInformationMessage(`Index updated successfully: ${result.message}`);
     } catch (error) {
       updateStatusBar(`$(error) BSL: Incremental update failed: ${error}`);
       vscode25.window.showErrorMessage(`Incremental update failed: ${error}`);
       outputChannel8.appendLine(`Incremental update error: ${error}`);
     }
   });
+  const isTestMode = process.env.NODE_ENV === "test" || process.env.VSCODE_TEST_MODE === "1" || process.env.VSCODE_EXTENSION_MODE === "test";
+  if (isTestMode) {
+    outputChannel8.appendLine("[AutoReindex] Disabled in test mode");
+    return;
+  }
+  let watchers = [];
+  let debounceTimer2;
+  let inFlight = false;
+  let pending = false;
+  const disposeWatchers = () => {
+    for (const w of watchers) w.dispose();
+    watchers = [];
+  };
+  const scheduleAutoUpdate = (reason) => {
+    outputChannel8.appendLine(`[AutoReindex] Schedule: ${reason}`);
+    if (debounceTimer2) clearTimeout(debounceTimer2);
+    debounceTimer2 = setTimeout(() => void runAutoUpdate(), 1200);
+  };
+  const runAutoUpdate = async () => {
+    const configPath = getConfigurationPath();
+    if (!configPath) return;
+    if (inFlight) {
+      pending = true;
+      return;
+    }
+    inFlight = true;
+    pending = false;
+    try {
+      updateStatusBar("$(sync~spin) BSL: Auto reindex...");
+      await incrementalUpdate(configPath, getPlatformVersion());
+      updateStatusBar("$(check) BSL: Ready");
+      outputChannel8.appendLine("[AutoReindex] Completed");
+    } catch (error) {
+      updateStatusBar(`$(error) BSL: Auto reindex failed: ${error}`);
+      outputChannel8.appendLine(`[AutoReindex] Failed: ${error}`);
+    } finally {
+      inFlight = false;
+      if (pending) {
+        pending = false;
+        scheduleAutoUpdate("pending changes while in-flight");
+      }
+    }
+  };
+  const createWatchers = () => {
+    disposeWatchers();
+    const configPath = getConfigurationPath();
+    if (!configPath) return;
+    const patterns = [
+      "Configuration.xml",
+      "**/Ext/*.bsl",
+      "**/Form.xml"
+    ];
+    for (const pattern of patterns) {
+      const watcher = vscode25.workspace.createFileSystemWatcher(
+        new vscode25.RelativePattern(configPath, pattern)
+      );
+      watcher.onDidCreate(() => scheduleAutoUpdate(`create: ${pattern}`));
+      watcher.onDidChange(() => scheduleAutoUpdate(`change: ${pattern}`));
+      watcher.onDidDelete(() => scheduleAutoUpdate(`delete: ${pattern}`));
+      watchers.push(watcher);
+    }
+    outputChannel8.appendLine(`[AutoReindex] Watchers installed for: ${configPath}`);
+  };
+  createWatchers();
+  context.subscriptions.push({ dispose: disposeWatchers });
+  context.subscriptions.push(
+    vscode25.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("bslAnalyzer.configurationPath")) {
+        outputChannel8.appendLine("[AutoReindex] configurationPath changed, recreating watchers");
+        createWatchers();
+      }
+    })
+  );
 }
 
 // src/commands/configuration.ts
@@ -21342,35 +21395,14 @@ async function initializeIndexIfNeeded() {
   }
   outputChannel7.appendLine("\u{1F680} Building BSL index with user-configured settings...");
   try {
-    await vscode30.window.withProgress({
-      location: vscode30.ProgressLocation.Notification,
-      title: "Building BSL Index",
-      cancellable: false
-    }, async (progress) => {
-      updateStatusBar("$(sync~spin) BSL: Loading platform documentation...");
-      progress.report({ increment: 25, message: "Loading platform documentation..." });
-      updateStatusBar("$(sync~spin) BSL: Parsing configuration...");
-      progress.report({ increment: 25, message: "Parsing configuration..." });
-      updateStatusBar("$(sync~spin) BSL: Building unified index...");
-      progress.report({ increment: 35, message: "Building unified index..." });
-      outputChannel7.appendLine(`\u{1F4C1} Configuration: ${configPath}`);
-      outputChannel7.appendLine(`\u{1F4DA} Platform docs: ${platformDocsArchive}`);
-      outputChannel7.appendLine(`\u{1F522} Platform version: ${platformVersion}`);
-      const args = [
-        "--config",
-        configPath,
-        "--platform-version",
-        platformVersion,
-        "--platform-docs-archive",
-        platformDocsArchive
-      ];
-      const workspacePath = vscode30.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
-      await buildIndex({ workspace_path: workspacePath });
-      updateStatusBar("$(sync~spin) BSL: Finalizing index...");
-      progress.report({ increment: 15, message: "Finalizing..." });
-      updateStatusBar("$(check) BSL: Index Ready");
-      outputChannel7.appendLine("\u2705 Index build completed successfully");
-    });
+    updateStatusBar("$(sync~spin) BSL: Building index...");
+    outputChannel7.appendLine(`\u{1F4C1} Configuration: ${configPath}`);
+    outputChannel7.appendLine(`\u{1F4DA} Platform docs: ${platformDocsArchive}`);
+    outputChannel7.appendLine(`\u{1F522} Platform version: ${platformVersion}`);
+    const workspacePath = vscode30.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+    await buildIndex({ workspace_path: workspacePath });
+    updateStatusBar("$(check) BSL: Index Ready");
+    outputChannel7.appendLine("\u2705 Index build completed successfully");
   } catch (error) {
     updateStatusBar(`$(error) BSL: Index build failed: ${error}`);
     outputChannel7.appendLine(`\u274C Index build failed: ${error}`);

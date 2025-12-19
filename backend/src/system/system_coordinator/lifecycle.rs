@@ -15,6 +15,7 @@ use bsl_shared::engine::AnalysisEngine;
 use crate::data::adapters::convert_syntax_helper_to_raw;
 use crate::data::loaders::{hbk_recovery, progress::ProgressUpdate, SyntaxHelperLoader};
 use crate::system::parser_coordinator::ParserCoordinator;
+use bsl_shared::api::StartupProgressDto;
 
 use super::coordinator::SystemCoordinator;
 use super::types::StartupError;
@@ -77,6 +78,11 @@ impl SystemCoordinator {
         self.observability.log_startup();
 
         info!("[BLOCKING THREAD] SystemCoordinator: инициализация System Layer...");
+        self.set_startup_progress(StartupProgressDto {
+            phase: "Инициализация".to_string(),
+            message: Some("Старт системы".to_string()),
+            ..StartupProgressDto::default()
+        });
 
         // КРИТИЧЕСКИ ВАЖНО: Очищаем кеши при повторной инициализации
         // Это гарантирует, что TypeSystemService получит НОВЫЙ AnalysisEngine с НОВЫМ TypeRepository
@@ -108,6 +114,11 @@ impl SystemCoordinator {
 
         // 2. Загружаем синтаксис-помощник если путь указан
         if let Some(syntax_path) = syntax_helper_path {
+            self.set_startup_progress(StartupProgressDto {
+                phase: "Загрузка Syntax Helper".to_string(),
+                message: Some(format!("Путь: {}", syntax_path.display())),
+                ..self.startup_progress()
+            });
             self.load_syntax_helper(&mut syntax_parser, syntax_path, &progress_tx)?;
         }
 
@@ -161,16 +172,33 @@ impl SystemCoordinator {
                 config_path.display()
             );
 
-            // НОВОЕ: Используем версию с прогрессом если передан progress_tx
-            let result = if let Some(ref tx) = progress_tx {
-                let tx_clone = tx.clone();
-                self.load_all_configurations_with_progress(config_path, move |update| {
-                    let _ = tx_clone.send(update); // Отправляем прогресс в channel
-                })
-            } else {
-                // Обратная совместимость: используем версию без прогресса
-                self.load_all_configurations_metadata(config_path)
-            };
+            self.set_startup_progress(StartupProgressDto {
+                phase: "Загрузка конфигурации".to_string(),
+                message: Some(format!("Путь: {}", config_path.display())),
+                ..self.startup_progress()
+            });
+
+            // Всегда используем версию с прогрессом, чтобы:
+            // - Web API мог показывать честный прогресс старта через /api/startup/progress
+            // - LSP мог проксировать updates через progress_tx (если передан)
+            let tx_opt = progress_tx.clone();
+            let coordinator_for_progress = self.clone_for_blocking();
+            let result = self.load_all_configurations_with_progress(config_path, move |update| {
+                if let Some(ref tx) = tx_opt {
+                    let _ = tx.send(update.clone());
+                }
+                // Пишем прогресс в shared storage для Web API
+                // (проценты из loader’ов уже монотонны, а set_startup_progress зажимает назад).
+                let progress = StartupProgressDto {
+                    phase: update.phase.display_name().to_string(),
+                    current: update.current as u64,
+                    total: update.total as u64,
+                    percentage: update.percentage,
+                    message: update.message.clone(),
+                    done: false,
+                };
+                coordinator_for_progress.set_startup_progress(progress);
+            });
 
             match result {
                 Ok(result_data) => {
@@ -190,6 +218,15 @@ impl SystemCoordinator {
 
         info!("[BLOCKING THREAD] SystemCoordinator: прогрев кеша...");
         self.cache.warm_cache()?;
+
+        self.set_startup_progress(StartupProgressDto {
+            phase: "Готово".to_string(),
+            current: 1,
+            total: 1,
+            percentage: 100.0,
+            message: Some("Система готова".to_string()),
+            done: true,
+        });
 
         info!("[BLOCKING THREAD] SystemCoordinator: система готова!");
         Ok(())

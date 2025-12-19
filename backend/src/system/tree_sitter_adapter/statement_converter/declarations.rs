@@ -7,7 +7,7 @@ use crate::parsing::bsl::ast::Statement;
 use tree_sitter::Node;
 
 use crate::system::tree_sitter_adapter::directives::find_preceding_directive;
-use crate::system::tree_sitter_adapter::span::node_to_span_cached;
+use crate::system::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
 use crate::system::tree_sitter_adapter::utils::{convert_parameters, node_text};
 
 /// Конвертировать function_definition с использованием кеша строк (Milestone 2.19)
@@ -16,9 +16,9 @@ use crate::system::tree_sitter_adapter::utils::{convert_parameters, node_text};
 pub(crate) fn convert_function_definition_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Statement, String> {
-    let span = node_to_span_cached(node, source, lines);
+    let span = node_to_span_cached(node, source, line_index);
     let mut cursor = node.walk();
     let mut name = String::new();
     let mut params = Vec::new();
@@ -47,7 +47,9 @@ pub(crate) fn convert_function_definition_cached(
             }
             _ => {
                 // Собираем тело функции через dispatcher
-                if let Some(stmt) = super::dispatch_statement_cached(&child, source, lines)? {
+                if let Some(stmt) =
+                    super::dispatch_statement_cached(&child, source, line_index)?
+                {
                     body.push(stmt);
                 }
             }
@@ -79,7 +81,7 @@ pub(crate) fn convert_function_definition_cached(
 pub(crate) fn convert_var_definition_cached(
     node: &Node,
     source: &str,
-    lines: &[String],
+    line_index: &LineIndex,
 ) -> Result<Statement, String> {
     let mut cursor = node.walk();
     let mut name = String::new();
@@ -94,6 +96,6 @@ pub(crate) fn convert_var_definition_cached(
     Ok(Statement::VarDeclaration {
         name,
         type_hint: None,
-        span: node_to_span_cached(node, source, lines),
+        span: node_to_span_cached(node, source, line_index),
     })
 }

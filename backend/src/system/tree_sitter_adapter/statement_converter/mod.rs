@@ -63,6 +63,31 @@ pub fn convert_source_file_cached(
     Ok(statements)
 }
 
+/// Конвертировать source_file с прогрессом по количеству детей корневого узла.
+pub fn convert_source_file_cached_with_progress(
+    node: &Node,
+    source: &str,
+    line_index: &LineIndex,
+    mut progress: impl FnMut(usize, usize),
+) -> Result<Vec<Statement>, String> {
+    let mut statements = Vec::new();
+    let mut cursor = node.walk();
+    let total = node.child_count() as usize;
+    let mut processed = 0usize;
+
+    for child in node.children(&mut cursor) {
+        processed = processed.saturating_add(1);
+        if processed == 1 || processed % 1000 == 0 || processed == total {
+            progress(processed, total);
+        }
+        if let Some(stmt) = dispatch_statement_cached(&child, source, line_index)? {
+            statements.push(stmt);
+        }
+    }
+
+    Ok(statements)
+}
+
 /// Конвертировать statement узел с использованием кеша строк (Milestone 2.19)
 ///
 /// Публичная функция для обратной совместимости.

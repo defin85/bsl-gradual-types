@@ -30,12 +30,12 @@
 //! let result = TreeSitterAdapter::convert_tree(&tree, source).unwrap();
 //! ```
 
-mod directives;
+pub(crate) mod directives;
 mod expression_converter;
 pub(crate) mod span;
 mod statement_converter;
 mod syntax_errors;
-mod utils;
+pub(crate) mod utils;
 
 use crate::parsing::bsl::ast::{ParseResult, Program};
 use span::LineIndex;
@@ -115,6 +115,24 @@ impl TreeSitterAdapter {
         let line_index = LineIndex::new(source);
         let statements =
             statement_converter::convert_source_file_cached(&root, source, &line_index)?;
+        let program = Program { statements };
+        Ok(ParseResult::success(program))
+    }
+
+    /// Быстрый путь для индексации с прогрессом по children root-узла.
+    pub fn convert_tree_fast_with_progress(
+        tree: &Tree,
+        source: &str,
+        mut progress: impl FnMut(usize, usize),
+    ) -> Result<ParseResult, String> {
+        let root = tree.root_node();
+        let line_index = LineIndex::new(source);
+        let statements = statement_converter::convert_source_file_cached_with_progress(
+            &root,
+            source,
+            &line_index,
+            &mut progress,
+        )?;
         let program = Program { statements };
         Ok(ParseResult::success(program))
     }

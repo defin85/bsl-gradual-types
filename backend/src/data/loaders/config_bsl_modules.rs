@@ -10,13 +10,16 @@ use crate::data::loaders::config_metadata_parser::types::CommonModuleProperties;
 use crate::data::loaders::UniversalMetadataObject;
 use crate::system::fs_utils::read_bsl_file;
 use crate::system::tree_sitter_adapter::TreeSitterAdapter;
+use crate::system::tree_sitter_adapter::directives::find_preceding_directive;
 use crate::system::tree_sitter_adapter::span::{LineIndex, node_to_span_cached};
+use crate::system::tree_sitter_adapter::utils::{convert_parameters, node_text};
 use anyhow::{anyhow, Result};
 use bsl_shared::domain::code_location::{CodeLocation, ModuleType};
 use bsl_shared::domain::signature_index::{ContextRequirements, MethodSignature, SignatureSource};
 use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
 use bsl_shared::domain::types::{FacetKind, MetadataKind, ParameterInfo};
 use rayon::prelude::*;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -39,6 +42,29 @@ pub struct IndexedConfigSignatures {
     pub global_functions: Vec<(String, MethodSignature)>,
     pub definition_locations: Vec<(String, String, TypeDefinitionLocation)>,
     pub global_definition_locations: Vec<(String, TypeDefinitionLocation)>,
+}
+
+#[derive(Debug)]
+pub struct ModuleParseStats {
+    pub decls: usize,
+    pub export_decls: usize,
+    pub call_sites: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SinglePassMode {
+    Lite,
+    Full,
+}
+
+#[derive(Debug)]
+pub struct ModuleParseComparison {
+    pub module_path: PathBuf,
+    pub single_pass: ModuleParseStats,
+    pub ast: ModuleParseStats,
+    pub missing_decls: Vec<String>,
+    pub extra_decls: Vec<String>,
+    pub callsite_mismatches: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -592,15 +618,8 @@ fn owner_type_to_faceted_type(owner_type: &str, facet: FacetKind) -> Option<Stri
 /// Возвращает список объявлений верхнего уровня:
 /// (name, params, is_export, is_function, context_from_directive, return_type)
 fn parse_bsl_module(source: &str, module_path: &Path) -> Result<ParsedModuleData> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_bsl::LANGUAGE.into())
-        .map_err(|e| anyhow!("tree-sitter-bsl language error: {:?}", e))?;
-
     let ts_parse_started = Instant::now();
-    let tree = parser
-        .parse(source, None)
-        .ok_or_else(|| anyhow!("tree-sitter parse returned None"))?;
+    let tree = parse_with_thread_parser(source)?;
     let ts_parse_elapsed = ts_parse_started.elapsed();
     if ts_parse_elapsed >= Duration::from_secs(1) {
         tracing::debug!(
@@ -613,11 +632,15 @@ fn parse_bsl_module(source: &str, module_path: &Path) -> Result<ParsedModuleData
     }
 
     let convert_started = Instant::now();
-    let parse_result = TreeSitterAdapter::convert_tree_fast(&tree, source);
+    let parse_result = parse_bsl_module_tree_sitter_with_mode(
+        &tree,
+        source,
+        SinglePassMode::Full,
+    );
     let convert_elapsed = convert_started.elapsed();
     if convert_elapsed >= Duration::from_secs(1) {
         tracing::debug!(
-            "convert_tree: {} ({} байт, {} строк) {:?}",
+            "tree-sitter single-pass: {} ({} байт, {} строк) {:?}",
             human_duration(convert_elapsed),
             source.len(),
             source.lines().count(),
@@ -626,82 +649,911 @@ fn parse_bsl_module(source: &str, module_path: &Path) -> Result<ParsedModuleData
     }
 
     match parse_result {
-        Ok(parse_result) => {
-            let call_sites_started = Instant::now();
-            let call_sites = collect_call_sites(&parse_result.program.statements);
-            let call_sites_elapsed = call_sites_started.elapsed();
-            if call_sites_elapsed >= Duration::from_secs(1) {
-                tracing::debug!(
-                    "collect_call_sites: {} ({} байт, {} строк) {:?}",
-                    human_duration(call_sites_elapsed),
-                    source.len(),
-                    source.lines().count(),
-                    module_path
-                );
-            }
-            let mut decls = Vec::new();
-
-            for st in parse_result.program.statements {
-                match st {
-                    crate::parsing::bsl::ast::Statement::FunctionDecl {
-                        name,
-                        params,
-                        body,
-                        compiler_directive,
-                        is_export,
-                        span,
-                        ..
-                    } => decls.push(ParsedDecl {
-                        return_type: infer_return_type_from_body(&body),
-                        name,
-                        params,
-                        is_export,
-                        directive_ctx: compiler_directive.map(context_from_directive),
-                        span,
-                    }),
-                    crate::parsing::bsl::ast::Statement::ProcedureDecl {
-                        name,
-                        params,
-                        body: _,
-                        compiler_directive,
-                        is_export,
-                        span,
-                        ..
-                    } => decls.push(ParsedDecl {
-                        return_type: None,
-                        name,
-                        params,
-                        is_export,
-                        directive_ctx: compiler_directive.map(context_from_directive),
-                        span,
-                    }),
-                    _ => {}
-                }
-            }
-
-            Ok(ParsedModuleData { decls, call_sites })
-        }
+        Ok(data) => Ok(data),
         Err(e) => {
-            // Фолбэк: если конвертация в AST/IR падает на выражениях в теле (tree-sitter adapter),
-            // всё равно индексируем экспортные объявления (name/params/Экспорт/директива/Span).
-            //
-            // Это критично для больших конфигураций, где в теле могут встречаться конструкции,
-            // которые мы пока не умеем корректно конвертировать.
             tracing::debug!(
-                "TreeSitterAdapter::convert_tree failed, fallback to decl-only parse ({}): {}",
+                "Tree-sitter single-pass failed, fallback to AST ({}): {}",
                 module_path.display(),
                 e
             );
 
-            let decls = extract_export_decls_from_tree(&tree, source)?;
-            Ok(ParsedModuleData {
-                decls,
-                call_sites: Vec::new(),
-            })
+            let parse_result = TreeSitterAdapter::convert_tree_fast(&tree, source)
+                .map_err(|e| anyhow!("tree-sitter convert_tree_fast failed: {}", e))?;
+            let (decls, call_sites) = collect_decls_and_call_sites(&parse_result.program.statements);
+            Ok(ParsedModuleData { decls, call_sites })
         }
     }
 }
 
+fn parse_with_thread_parser(source: &str) -> Result<tree_sitter::Tree> {
+    thread_local! {
+        static THREAD_PARSER: RefCell<Option<Parser>> = RefCell::new(None);
+    }
+
+    THREAD_PARSER.with(|cell| {
+        let mut parser_opt = cell.borrow_mut();
+        if parser_opt.is_none() {
+            let mut parser = Parser::new();
+            parser
+                .set_language(&tree_sitter_bsl::LANGUAGE.into())
+                .map_err(|e| anyhow!("tree-sitter-bsl language error: {:?}", e))?;
+            *parser_opt = Some(parser);
+        }
+
+        let parser = parser_opt.as_mut().expect("parser is initialized");
+        parser
+            .parse(source, None)
+            .ok_or_else(|| anyhow!("tree-sitter parse returned None"))
+    })
+}
+
+pub fn compare_module_parsing_from_file(path: &Path) -> Result<ModuleParseComparison> {
+    compare_module_parsing_from_file_with_progress_mode(path, SinglePassMode::Full, |_| {})
+}
+
+pub fn compare_module_parsing_from_file_with_progress(
+    path: &Path,
+    mut progress: impl FnMut(&str),
+) -> Result<ModuleParseComparison> {
+    compare_module_parsing_from_file_with_progress_mode(
+        path,
+        SinglePassMode::Full,
+        &mut progress,
+    )
+}
+
+pub fn compare_module_parsing_from_file_with_progress_mode(
+    path: &Path,
+    mode: SinglePassMode,
+    mut progress: impl FnMut(&str),
+) -> Result<ModuleParseComparison> {
+    progress("Читаем исходник");
+    let source = read_bsl_file(path)?;
+
+    progress("Парсим tree-sitter");
+    let tree = parse_with_thread_parser(&source)?;
+
+    progress("Single-pass обход");
+    let single_pass = parse_bsl_module_tree_sitter_with_mode(&tree, &source, mode)?;
+
+    progress("AST конвертация: старт");
+    let ast = parse_bsl_module_ast_with_progress(&tree, &source, |done, total| {
+        let msg = format!("AST конвертация: {}/{}", done, total);
+        progress(&msg);
+    })?;
+
+    progress("Сравнение результатов");
+    Ok(compare_module_data(path.to_path_buf(), single_pass, ast))
+}
+
+pub fn single_pass_module_stats_from_file_with_progress_mode(
+    path: &Path,
+    mode: SinglePassMode,
+    mut progress: impl FnMut(&str),
+) -> Result<ModuleParseStats> {
+    progress("Читаем исходник");
+    let source = read_bsl_file(path)?;
+
+    progress("Парсим tree-sitter");
+    let tree = parse_with_thread_parser(&source)?;
+
+    progress("Single-pass обход");
+    let single_pass = parse_bsl_module_tree_sitter_with_mode(&tree, &source, mode)?;
+
+    Ok(module_parse_stats(&single_pass))
+}
+
+fn parse_bsl_module_tree_sitter_with_mode(
+    tree: &tree_sitter::Tree,
+    source: &str,
+    mode: SinglePassMode,
+) -> Result<ParsedModuleData> {
+    let line_index = LineIndex::new(source);
+    let mut decls: Vec<ParsedDecl> = Vec::new();
+    let mut call_sites: Vec<CallSite> = Vec::new();
+    let mut env: HashMap<String, Vec<String>> = HashMap::new();
+    let mut return_types: Vec<String> = Vec::new();
+    let track_returns = matches!(mode, SinglePassMode::Full);
+
+    let mut cursor = tree.root_node().walk();
+    for child in tree.root_node().children(&mut cursor) {
+        walk_stmt_ts(
+            &child,
+            source,
+            &line_index,
+            &mut decls,
+            &mut call_sites,
+            &mut env,
+            &mut return_types,
+            track_returns,
+        );
+    }
+
+    Ok(ParsedModuleData { decls, call_sites })
+}
+
+fn module_parse_stats(parsed: &ParsedModuleData) -> ModuleParseStats {
+    let export_decls = parsed.decls.iter().filter(|d| d.is_export).count();
+    ModuleParseStats {
+        decls: parsed.decls.len(),
+        export_decls,
+        call_sites: parsed.call_sites.len(),
+    }
+}
+
+fn parse_bsl_module_ast_with_progress(
+    tree: &tree_sitter::Tree,
+    source: &str,
+    mut progress: impl FnMut(usize, usize),
+) -> Result<ParsedModuleData> {
+    let parse_result =
+        TreeSitterAdapter::convert_tree_fast_with_progress(tree, source, &mut progress)
+            .map_err(|e| anyhow!("tree-sitter convert_tree_fast failed: {}", e))?;
+    let (decls, call_sites) = collect_decls_and_call_sites(&parse_result.program.statements);
+    Ok(ParsedModuleData { decls, call_sites })
+}
+
+fn compare_module_data(
+    module_path: PathBuf,
+    single_pass: ParsedModuleData,
+    ast: ParsedModuleData,
+) -> ModuleParseComparison {
+    let (single_decl_keys, single_export_count) = decl_keys(&single_pass.decls);
+    let (ast_decl_keys, ast_export_count) = decl_keys(&ast.decls);
+
+    let mut missing_decls = Vec::new();
+    let mut extra_decls = Vec::new();
+
+    for key in ast_decl_keys.keys() {
+        if !single_decl_keys.contains_key(key) {
+            missing_decls.push(key.clone());
+        }
+    }
+    for key in single_decl_keys.keys() {
+        if !ast_decl_keys.contains_key(key) {
+            extra_decls.push(key.clone());
+        }
+    }
+
+    missing_decls.sort();
+    extra_decls.sort();
+
+    let mut callsite_mismatches = Vec::new();
+    let single_calls = callsite_keys(&single_pass.call_sites);
+    let ast_calls = callsite_keys(&ast.call_sites);
+
+    for key in ast_calls.keys() {
+        let a = ast_calls.get(key).copied().unwrap_or(0);
+        let b = single_calls.get(key).copied().unwrap_or(0);
+        if a != b {
+            callsite_mismatches.push(format!(
+                "{} (ast={}, single={})",
+                key, a, b
+            ));
+        }
+    }
+    for key in single_calls.keys() {
+        if !ast_calls.contains_key(key) {
+            let b = single_calls.get(key).copied().unwrap_or(0);
+            callsite_mismatches.push(format!(
+                "{} (ast=0, single={})",
+                key, b
+            ));
+        }
+    }
+
+    callsite_mismatches.sort();
+
+    ModuleParseComparison {
+        module_path,
+        single_pass: ModuleParseStats {
+            decls: single_pass.decls.len(),
+            export_decls: single_export_count,
+            call_sites: single_pass.call_sites.len(),
+        },
+        ast: ModuleParseStats {
+            decls: ast.decls.len(),
+            export_decls: ast_export_count,
+            call_sites: ast.call_sites.len(),
+        },
+        missing_decls,
+        extra_decls,
+        callsite_mismatches,
+    }
+}
+
+fn decl_keys(decls: &[ParsedDecl]) -> (HashMap<String, usize>, usize) {
+    let mut out = HashMap::new();
+    let mut export_count = 0;
+    for d in decls {
+        if d.is_export {
+            export_count += 1;
+        }
+        let key = format!(
+            "{}|{}|{}",
+            d.name.to_lowercase(),
+            d.params.len(),
+            d.is_export
+        );
+        *out.entry(key).or_insert(0) += 1;
+    }
+    (out, export_count)
+}
+
+fn callsite_keys(call_sites: &[CallSite]) -> HashMap<String, usize> {
+    let mut out = HashMap::new();
+    for call in call_sites {
+        let key = match &call.target {
+            CallTarget::LocalFunction { name } => format!("local:{}", name.to_lowercase()),
+            CallTarget::QualifiedMethod { receiver, name } => format!(
+                "qual:{}:{}",
+                receiver.join(".").to_lowercase(),
+                name.to_lowercase()
+            ),
+        };
+        *out.entry(key).or_insert(0) += 1;
+    }
+    out
+}
+
+fn walk_stmt_ts(
+    node: &tree_sitter::Node,
+    source: &str,
+    line_index: &LineIndex,
+    decls: &mut Vec<ParsedDecl>,
+    calls: &mut Vec<CallSite>,
+    env: &mut HashMap<String, Vec<String>>,
+    return_types: &mut Vec<String>,
+    track_returns: bool,
+) {
+    match node.kind() {
+        "function_definition" => {
+            if let Some(mut decl) = parse_decl_ts(node, source, line_index) {
+                let mut nested_env = env.clone();
+                let mut func_return_types = Vec::new();
+                walk_function_body_ts(
+                    node,
+                    source,
+                    line_index,
+                    decls,
+                    calls,
+                    &mut nested_env,
+                    &mut func_return_types,
+                    track_returns,
+                );
+                if track_returns {
+                    decl.return_type = finalize_return_types(func_return_types);
+                } else {
+                    decl.return_type = None;
+                }
+                decls.push(decl);
+            }
+        }
+        "procedure_definition" => {
+            if let Some(mut decl) = parse_decl_ts(node, source, line_index) {
+                let mut nested_env = env.clone();
+                let mut func_return_types = Vec::new();
+                walk_function_body_ts(
+                    node,
+                    source,
+                    line_index,
+                    decls,
+                    calls,
+                    &mut nested_env,
+                    &mut func_return_types,
+                    false,
+                );
+                decl.return_type = None;
+                decls.push(decl);
+            }
+        }
+        "assignment_statement" => {
+            if let Some((target, value_node)) = split_assignment_ts(node, source) {
+                walk_expr_ts(&value_node, source, line_index, calls, env);
+                if let Some(t) = infer_expr_type_ts(&value_node, source, env) {
+                    env.entry(target.clone()).or_default().push(t);
+                    if let Some(v) = env.get_mut(&target) {
+                        *v = normalize_union_parts(std::mem::take(v));
+                    }
+                }
+            }
+        }
+        "var_definition" | "var_statement" => {
+            if let Some(name) = first_identifier(node, source) {
+                env.entry(name).or_default();
+            }
+        }
+        "call_statement" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "expression"
+                    || child.kind() == "call_expression"
+                    || child.kind() == "method_call"
+                {
+                    walk_expr_ts(&child, source, line_index, calls, env);
+                }
+            }
+        }
+        "return_statement" => {
+            let mut cursor = node.walk();
+            let mut found_expr = false;
+            for child in node.children(&mut cursor) {
+                if child.kind() == "expression" || child.kind() == "method_call" {
+                    found_expr = true;
+                    if track_returns {
+                        if let Some(t) = infer_expr_type_ts(&child, source, env) {
+                            return_types.push(t);
+                        }
+                    }
+                    walk_expr_ts(&child, source, line_index, calls, env);
+                }
+            }
+            if !found_expr {
+                if track_returns {
+                    return_types.push("Неопределено".to_string());
+                }
+            }
+        }
+        "if_statement" => {
+            walk_if_ts(
+                node,
+                source,
+                line_index,
+                decls,
+                calls,
+                env,
+                return_types,
+                track_returns,
+            );
+        }
+        "for_statement" | "for_each_statement" | "while_statement" => {
+            walk_loop_ts(
+                node,
+                source,
+                line_index,
+                decls,
+                calls,
+                env,
+                return_types,
+                track_returns,
+            );
+        }
+        "try_statement" => {
+            walk_try_ts(
+                node,
+                source,
+                line_index,
+                decls,
+                calls,
+                env,
+                return_types,
+                track_returns,
+            );
+        }
+        "execute_statement" | "raise_error_statement" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "expression" || child.kind() == "method_call" {
+                    walk_expr_ts(&child, source, line_index, calls, env);
+                }
+            }
+        }
+        "add_handler_statement" | "remove_handler_statement" | "await_statement" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "expression" || child.kind() == "method_call" {
+                    walk_expr_ts(&child, source, line_index, calls, env);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parse_decl_ts(
+    node: &tree_sitter::Node,
+    source: &str,
+    line_index: &LineIndex,
+) -> Option<ParsedDecl> {
+    let mut cursor = node.walk();
+    let mut name = String::new();
+    let mut params: Vec<String> = Vec::new();
+    let mut is_export = false;
+
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "identifier" if name.is_empty() => name = node_text(&child, source),
+            "parameters" => {
+                if let Ok(p) = convert_parameters(&child, source) {
+                    params = p;
+                }
+            }
+            _ if child.kind().ends_with("_KEYWORD") => {
+                let kw = node_text(&child, source).trim().to_lowercase();
+                if kw == "экспорт" || kw == "export" {
+                    is_export = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if name.is_empty() {
+        return None;
+    }
+
+    let directive_ctx = find_preceding_directive(node, source).map(context_from_directive);
+
+    Some(ParsedDecl {
+        name,
+        params,
+        is_export,
+        directive_ctx,
+        return_type: None,
+        span: node_to_span_cached(node, source, line_index),
+    })
+}
+
+fn walk_function_body_ts(
+    node: &tree_sitter::Node,
+    source: &str,
+    line_index: &LineIndex,
+    decls: &mut Vec<ParsedDecl>,
+    calls: &mut Vec<CallSite>,
+    env: &mut HashMap<String, Vec<String>>,
+    return_types: &mut Vec<String>,
+    track_returns: bool,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind().ends_with("_statement") || child.kind().ends_with("_definition") {
+            walk_stmt_ts(
+                &child,
+                source,
+                line_index,
+                decls,
+                calls,
+                env,
+                return_types,
+                track_returns,
+            );
+        }
+    }
+}
+
+fn walk_if_ts(
+    node: &tree_sitter::Node,
+    source: &str,
+    line_index: &LineIndex,
+    decls: &mut Vec<ParsedDecl>,
+    calls: &mut Vec<CallSite>,
+    env: &mut HashMap<String, Vec<String>>,
+    return_types: &mut Vec<String>,
+    track_returns: bool,
+) {
+    let mut cursor = node.walk();
+    let mut in_then = false;
+    let mut then_nodes: Vec<tree_sitter::Node> = Vec::new();
+    let mut else_nodes: Vec<tree_sitter::Node> = Vec::new();
+
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "THEN_KEYWORD" | "ТОГДА_KEYWORD" => in_then = true,
+            "ENDIF_KEYWORD" | "КОНЕЦЕСЛИ_KEYWORD" => break,
+            _ if !in_then
+                && (child.kind().contains("expression")
+                    || child.kind() == "call_expression"
+                    || child.kind() == "method_call") =>
+            {
+                walk_expr_ts(&child, source, line_index, calls, env);
+            }
+            "else_clause" | "elseif_clause" => else_nodes.push(child),
+            kind if in_then && (kind.ends_with("_statement") || kind.ends_with("_definition")) => {
+                then_nodes.push(child);
+            }
+            _ => {}
+        }
+    }
+
+    let mut then_env = env.clone();
+    for node in then_nodes {
+        walk_stmt_ts(
+            &node,
+            source,
+            line_index,
+            decls,
+            calls,
+            &mut then_env,
+            return_types,
+            track_returns,
+        );
+    }
+
+    let mut else_env = env.clone();
+    for node in else_nodes {
+        let mut clause_cursor = node.walk();
+        for child in node.children(&mut clause_cursor) {
+            if child.kind().ends_with("_statement") || child.kind().ends_with("_definition") {
+                walk_stmt_ts(
+                    &child,
+                    source,
+                    line_index,
+                    decls,
+                    calls,
+                    &mut else_env,
+                    return_types,
+                    track_returns,
+                );
+            }
+        }
+    }
+
+    *env = HashMap::new();
+    merge_envs(env, then_env);
+    merge_envs(env, else_env);
+}
+
+fn walk_loop_ts(
+    node: &tree_sitter::Node,
+    source: &str,
+    line_index: &LineIndex,
+    decls: &mut Vec<ParsedDecl>,
+    calls: &mut Vec<CallSite>,
+    env: &mut HashMap<String, Vec<String>>,
+    return_types: &mut Vec<String>,
+    track_returns: bool,
+) {
+    let mut cursor = node.walk();
+    let mut body_nodes: Vec<tree_sitter::Node> = Vec::new();
+
+    for child in node.children(&mut cursor) {
+        if child.kind().contains("expression")
+            || child.kind() == "call_expression"
+            || child.kind() == "method_call"
+        {
+            walk_expr_ts(&child, source, line_index, calls, env);
+        } else if child.kind().ends_with("_statement") || child.kind().ends_with("_definition") {
+            body_nodes.push(child);
+        }
+    }
+
+    let mut body_env = env.clone();
+    for node in body_nodes {
+        walk_stmt_ts(
+            &node,
+            source,
+            line_index,
+            decls,
+            calls,
+            &mut body_env,
+            return_types,
+            track_returns,
+        );
+    }
+    merge_envs(env, body_env);
+}
+
+fn walk_try_ts(
+    node: &tree_sitter::Node,
+    source: &str,
+    line_index: &LineIndex,
+    decls: &mut Vec<ParsedDecl>,
+    calls: &mut Vec<CallSite>,
+    env: &mut HashMap<String, Vec<String>>,
+    return_types: &mut Vec<String>,
+    track_returns: bool,
+) {
+    let mut cursor = node.walk();
+    let mut try_nodes: Vec<tree_sitter::Node> = Vec::new();
+    let mut except_nodes: Vec<tree_sitter::Node> = Vec::new();
+    let mut in_except = false;
+
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "EXCEPT_KEYWORD" | "ИСКЛЮЧЕНИЕ_KEYWORD" => {
+                in_except = true;
+            }
+            kind if kind.ends_with("_statement") || kind.ends_with("_definition") => {
+                if in_except {
+                    except_nodes.push(child);
+                } else {
+                    try_nodes.push(child);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut try_env = env.clone();
+    for node in try_nodes {
+        walk_stmt_ts(
+            &node,
+            source,
+            line_index,
+            decls,
+            calls,
+            &mut try_env,
+            return_types,
+            track_returns,
+        );
+    }
+
+    let mut except_env = env.clone();
+    for node in except_nodes {
+        walk_stmt_ts(
+            &node,
+            source,
+            line_index,
+            decls,
+            calls,
+            &mut except_env,
+            return_types,
+            track_returns,
+        );
+    }
+
+    *env = HashMap::new();
+    merge_envs(env, try_env);
+    merge_envs(env, except_env);
+}
+
+fn walk_expr_ts(
+    node: &tree_sitter::Node,
+    source: &str,
+    line_index: &LineIndex,
+    calls: &mut Vec<CallSite>,
+    env: &HashMap<String, Vec<String>>,
+) {
+    if node.kind() == "call_expression" || node.kind() == "method_call" {
+        if let Some(call) = parse_call_ts(node, source, env) {
+            calls.push(call);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "arguments" {
+                let mut args_cursor = child.walk();
+                for arg_child in child.children(&mut args_cursor) {
+                    if arg_child.kind() == "expression" {
+                        walk_expr_ts(&arg_child, source, line_index, calls, env);
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_expr_ts(&child, source, line_index, calls, env);
+    }
+}
+
+fn parse_call_ts(
+    node: &tree_sitter::Node,
+    source: &str,
+    env: &HashMap<String, Vec<String>>,
+) -> Option<CallSite> {
+    let mut cursor = node.walk();
+    let mut access_node: Option<tree_sitter::Node> = None;
+    let mut method_call_node: Option<tree_sitter::Node> = None;
+    let mut func_name: Option<String> = None;
+    let mut args: Vec<tree_sitter::Node> = Vec::new();
+
+    if node.kind() == "method_call" {
+        method_call_node = Some(*node);
+    }
+
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "access" => access_node = Some(child),
+            "method_call" => method_call_node = Some(child),
+            "identifier" if func_name.is_none() => {
+                func_name = Some(node_text(&child, source));
+            }
+            "arguments" => {
+                let mut args_cursor = child.walk();
+                for arg_child in child.children(&mut args_cursor) {
+                    if arg_child.kind() == "expression" {
+                        args.push(arg_child);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(method_call) = method_call_node {
+        let mut method_cursor = method_call.walk();
+        for child in method_call.children(&mut method_cursor) {
+            match child.kind() {
+                "identifier" if func_name.is_none() => {
+                    func_name = Some(node_text(&child, source));
+                }
+                "arguments" if args.is_empty() => {
+                    let mut args_cursor = child.walk();
+                    for arg_child in child.children(&mut args_cursor) {
+                        if arg_child.kind() == "expression" {
+                            args.push(arg_child);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let arg_types = args
+        .iter()
+        .map(|arg| infer_expr_type_ts(arg, source, env))
+        .collect();
+
+    if let (Some(access), Some(method_call)) = (access_node, method_call_node) {
+        let receiver = split_dotted_path(&access, source);
+        let name = first_identifier(&method_call, source)?;
+        return Some(CallSite {
+            target: CallTarget::QualifiedMethod { receiver, name },
+            arg_types,
+        });
+    }
+
+    if func_name.is_none() {
+        if let Some(access) = access_node {
+            func_name = first_identifier(&access, source);
+        }
+    }
+
+    if let Some(name) = func_name {
+        return Some(CallSite {
+            target: CallTarget::LocalFunction { name },
+            arg_types,
+        });
+    }
+
+    None
+}
+
+fn split_assignment_ts<'a>(
+    node: &'a tree_sitter::Node<'a>,
+    source: &str,
+) -> Option<(String, tree_sitter::Node<'a>)> {
+    let mut cursor = node.walk();
+    let mut seen_eq = false;
+    let mut target_name: Option<String> = None;
+    let mut value_expr: Option<tree_sitter::Node> = None;
+
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "=" => seen_eq = true,
+            "identifier" if !seen_eq && target_name.is_none() => {
+                target_name = Some(node_text(&child, source));
+            }
+            "expression" | "call_expression" | "const_expression" | "method_call"
+                if seen_eq && value_expr.is_none() =>
+            {
+                value_expr = Some(child);
+            }
+            _ => {}
+        }
+    }
+
+    let target = target_name?;
+    let value = value_expr?;
+    Some((target, value))
+}
+
+fn infer_expr_type_ts(
+    node: &tree_sitter::Node,
+    source: &str,
+    env: &HashMap<String, Vec<String>>,
+) -> Option<String> {
+    if node.kind() == "expression" || node.kind() == "const_expression" {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(t) = infer_expr_type_ts(&child, source, env) {
+                return Some(t);
+            }
+        }
+        return None;
+    }
+
+    match node.kind() {
+        "string" => Some("Строка".to_string()),
+        "number" => Some("Число".to_string()),
+        "date" | "date_literal" => Some("Дата".to_string()),
+        "identifier" => {
+            let name = node_text(node, source);
+            if name.eq_ignore_ascii_case("неопределено") {
+                return Some("Неопределено".to_string());
+            }
+            env_get_union_ts(env, &name)
+        }
+        "new_expression" | "new_expression_method" => extract_new_type_ts(node, source),
+        _ => {
+            let text = node_text(node, source).to_lowercase();
+            if text == "истина" || text == "true" {
+                Some("Булево".to_string())
+            } else if text == "ложь" || text == "false" {
+                Some("Булево".to_string())
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn extract_new_type_ts(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    let mut cursor = node.walk();
+    let mut type_expr: Option<String> = None;
+
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "NEW_KEYWORD" | "НОВЫЙ_KEYWORD" => {}
+            "identifier" | "property_access" => {
+                if type_expr.is_none() {
+                    type_expr = Some(node_text(&child, source));
+                }
+            }
+            "arguments" => {
+                let mut arg_cursor = child.walk();
+                for arg_child in child.children(&mut arg_cursor) {
+                    if arg_child.kind() == "expression" && type_expr.is_none() {
+                        type_expr = Some(node_text(&arg_child, source));
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    type_expr
+}
+
+fn split_dotted_path(node: &tree_sitter::Node, source: &str) -> Vec<String> {
+    let text = node_text(node, source);
+    text.split('.')
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .map(|p| p.to_string())
+        .collect()
+}
+
+fn first_identifier(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "identifier" {
+            return Some(node_text(&child, source));
+        }
+    }
+    None
+}
+
+fn finalize_return_types(collected: Vec<String>) -> Option<String> {
+    if collected.is_empty() {
+        return Some("Неопределено".to_string());
+    }
+
+    Some(normalize_union_parts(collected).join(" | "))
+}
+
+fn env_get_union_ts(env: &HashMap<String, Vec<String>>, name: &str) -> Option<String> {
+    let mut parts = env.get(name)?.clone();
+    parts = normalize_union_parts(parts);
+    (!parts.is_empty()).then(|| parts.join(" | "))
+}
+
+fn merge_envs(target: &mut HashMap<String, Vec<String>>, source: HashMap<String, Vec<String>>) {
+    for (k, v) in source {
+        for t in v {
+            target.entry(k.clone()).or_default().push(t);
+        }
+        if let Some(values) = target.get_mut(&k) {
+            *values = normalize_union_parts(std::mem::take(values));
+        }
+    }
+}
+
+#[allow(dead_code)]
 fn extract_export_decls_from_tree(
     tree: &tree_sitter::Tree,
     source: &str,
@@ -786,6 +1638,7 @@ fn extract_export_decls_from_tree(
     Ok(out)
 }
 
+#[allow(dead_code)]
 fn collect_call_sites(statements: &[crate::parsing::bsl::ast::Statement]) -> Vec<CallSite> {
     use crate::parsing::bsl::ast::{Expression, Statement};
 
@@ -1024,6 +1877,295 @@ fn collect_call_sites(statements: &[crate::parsing::bsl::ast::Statement]) -> Vec
     let mut env: VarEnv = HashMap::new();
     walk_block(&mut out, statements, &mut env);
     out
+}
+
+fn collect_decls_and_call_sites(
+    statements: &[crate::parsing::bsl::ast::Statement],
+) -> (Vec<ParsedDecl>, Vec<CallSite>) {
+    use crate::parsing::bsl::ast::{Expression, Statement};
+
+    type VarEnv = HashMap<String, Vec<String>>;
+
+    fn env_get_union(env: &VarEnv, name: &str) -> Option<String> {
+        let mut parts = env.get(name)?.clone();
+        parts = normalize_union_parts(parts);
+        (!parts.is_empty()).then(|| parts.join(" | "))
+    }
+
+    fn env_add_type(env: &mut VarEnv, name: &str, t: String) {
+        env.entry(name.to_string()).or_default().push(t);
+        if let Some(v) = env.get_mut(name) {
+            *v = normalize_union_parts(std::mem::take(v));
+        }
+    }
+
+    fn expr_to_dotted_path(expr: &Expression) -> Option<Vec<String>> {
+        match expr {
+            Expression::Identifier { name, .. } => Some(vec![name.clone()]),
+            Expression::PropertyAccess { object, property, .. } => {
+                let mut base = expr_to_dotted_path(object)?;
+                base.push(property.clone());
+                Some(base)
+            }
+            _ => None,
+        }
+    }
+
+    fn infer_expr_type_with_env(expr: &Expression, env: &VarEnv) -> Option<String> {
+        match expr {
+            Expression::Identifier { name, .. } => env_get_union(env, name).or_else(|| {
+                name.eq_ignore_ascii_case("неопределено")
+                    .then(|| "Неопределено".to_string())
+            }),
+            _ => infer_expr_type(expr),
+        }
+    }
+
+    fn walk_expr(acc: &mut Vec<CallSite>, expr: &Expression, env: &VarEnv) {
+        match expr {
+            Expression::Call { function, args, .. } => {
+                match function.as_ref() {
+                    Expression::Identifier { name, .. } => acc.push(CallSite {
+                        target: CallTarget::LocalFunction { name: name.clone() },
+                        arg_types: args
+                            .iter()
+                            .map(|a| infer_expr_type_with_env(a, env))
+                            .collect(),
+                    }),
+                    Expression::PropertyAccess {
+                        object,
+                        property,
+                        ..
+                    } => {
+                        if let Some(receiver) = expr_to_dotted_path(object) {
+                            acc.push(CallSite {
+                                target: CallTarget::QualifiedMethod {
+                                    receiver,
+                                    name: property.clone(),
+                                },
+                                arg_types: args
+                                    .iter()
+                                    .map(|a| infer_expr_type_with_env(a, env))
+                                    .collect(),
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+
+                walk_expr(acc, function, env);
+                for a in args {
+                    walk_expr(acc, a, env);
+                }
+            }
+            Expression::Binary { left, right, .. } => {
+                walk_expr(acc, left, env);
+                walk_expr(acc, right, env);
+            }
+            Expression::Unary { operand, .. } => walk_expr(acc, operand, env),
+            Expression::Ternary {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                walk_expr(acc, condition, env);
+                walk_expr(acc, then_expr, env);
+                walk_expr(acc, else_expr, env);
+            }
+            Expression::New { args, .. } => {
+                for a in args {
+                    walk_expr(acc, a, env);
+                }
+            }
+            Expression::PropertyAccess { object, .. } => walk_expr(acc, object, env),
+            Expression::IndexAccess { object, index, .. } => {
+                walk_expr(acc, object, env);
+                walk_expr(acc, index, env);
+            }
+            Expression::Await { expression, .. } => walk_expr(acc, expression, env),
+            Expression::Identifier { .. }
+            | Expression::String { .. }
+            | Expression::Number { .. }
+            | Expression::Boolean { .. }
+            | Expression::Date { .. } => {}
+        }
+    }
+
+    fn merge_envs(a: &mut VarEnv, b: VarEnv) {
+        for (k, v) in b {
+            for t in v {
+                env_add_type(a, &k, t);
+            }
+        }
+    }
+
+    fn walk_block(
+        decls: &mut Vec<ParsedDecl>,
+        calls: &mut Vec<CallSite>,
+        statements: &[Statement],
+        env: &mut VarEnv,
+    ) {
+        for st in statements {
+            walk_stmt(decls, calls, st, env);
+        }
+    }
+
+    fn walk_stmt(
+        decls: &mut Vec<ParsedDecl>,
+        calls: &mut Vec<CallSite>,
+        st: &Statement,
+        env: &mut VarEnv,
+    ) {
+        match st {
+            Statement::Assignment { target, value, .. } => {
+                walk_expr(calls, target, env);
+                walk_expr(calls, value, env);
+
+                if let Expression::Identifier { name, .. } = target {
+                    if let Some(t) = infer_expr_type_with_env(value, env) {
+                        env_add_type(env, name, t);
+                    }
+                }
+            }
+            Statement::VarDeclaration { name, type_hint, .. } => {
+                if let Some(hint) = type_hint.as_ref().filter(|s| !s.trim().is_empty()) {
+                    env_add_type(env, name, hint.trim().to_string());
+                }
+            }
+            Statement::FunctionDecl {
+                name,
+                params,
+                body,
+                compiler_directive,
+                is_export,
+                span,
+                ..
+            } => {
+                decls.push(ParsedDecl {
+                    return_type: infer_return_type_from_body(body),
+                    name: name.clone(),
+                    params: params.clone(),
+                    is_export: *is_export,
+                    directive_ctx: compiler_directive.map(context_from_directive),
+                    span: *span,
+                });
+                let mut nested_env = env.clone();
+                walk_block(decls, calls, body, &mut nested_env);
+            }
+            Statement::ProcedureDecl {
+                name,
+                params,
+                body,
+                compiler_directive,
+                is_export,
+                span,
+                ..
+            } => {
+                decls.push(ParsedDecl {
+                    return_type: None,
+                    name: name.clone(),
+                    params: params.clone(),
+                    is_export: *is_export,
+                    directive_ctx: compiler_directive.map(context_from_directive),
+                    span: *span,
+                });
+                let mut nested_env = env.clone();
+                walk_block(decls, calls, body, &mut nested_env);
+            }
+            Statement::If {
+                condition,
+                then_body,
+                else_body,
+                ..
+            } => {
+                walk_expr(calls, condition, env);
+
+                let mut then_env = env.clone();
+                walk_block(decls, calls, then_body, &mut then_env);
+
+                let mut else_env = env.clone();
+                if let Some(else_body) = else_body {
+                    walk_block(decls, calls, else_body, &mut else_env);
+                }
+
+                *env = HashMap::new();
+                merge_envs(env, then_env);
+                merge_envs(env, else_env);
+            }
+            Statement::For {
+                start, end, body, ..
+            } => {
+                walk_expr(calls, start, env);
+                walk_expr(calls, end, env);
+
+                let mut body_env = env.clone();
+                walk_block(decls, calls, body, &mut body_env);
+                merge_envs(env, body_env);
+            }
+            Statement::ForEach { collection, body, .. } => {
+                walk_expr(calls, collection, env);
+
+                let mut body_env = env.clone();
+                walk_block(decls, calls, body, &mut body_env);
+                merge_envs(env, body_env);
+            }
+            Statement::While { condition, body, .. } => {
+                walk_expr(calls, condition, env);
+
+                let mut body_env = env.clone();
+                walk_block(decls, calls, body, &mut body_env);
+                merge_envs(env, body_env);
+            }
+            Statement::Return { value, .. } => {
+                if let Some(v) = value {
+                    walk_expr(calls, v, env);
+                }
+            }
+            Statement::Try {
+                try_body,
+                except_body,
+                ..
+            } => {
+                let mut try_env = env.clone();
+                walk_block(decls, calls, try_body, &mut try_env);
+
+                let mut except_env = env.clone();
+                walk_block(decls, calls, except_body, &mut except_env);
+
+                *env = HashMap::new();
+                merge_envs(env, try_env);
+                merge_envs(env, except_env);
+            }
+            Statement::Call { expression, .. } => walk_expr(calls, expression, env),
+            Statement::Break { .. }
+            | Statement::Continue { .. }
+            | Statement::Goto { .. }
+            | Statement::Label { .. } => {}
+            Statement::Execute { code, .. } => walk_expr(calls, code, env),
+            Statement::RaiseError { message, .. } => {
+                if let Some(m) = message {
+                    walk_expr(calls, m, env);
+                }
+            }
+            Statement::AddHandler {
+                event, handler, ..
+            }
+            | Statement::RemoveHandler {
+                event, handler, ..
+            } => {
+                walk_expr(calls, event, env);
+                walk_expr(calls, handler, env);
+            }
+            Statement::Await { expression, .. } => walk_expr(calls, expression, env),
+        }
+    }
+
+    let mut decls = Vec::new();
+    let mut calls = Vec::new();
+    let mut env: VarEnv = HashMap::new();
+    walk_block(&mut decls, &mut calls, statements, &mut env);
+    (decls, calls)
 }
 
 fn infer_export_param_types_across_modules(

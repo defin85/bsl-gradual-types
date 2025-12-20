@@ -234,6 +234,29 @@ impl TypeMetadataLookup {
     ) -> Option<Vec<RawPropertyData>> {
         // 1. Проверяем, показывает ли фасет свойства
         if !facet.shows_properties() {
+            if matches!(facet, FacetKind::Manager)
+                && matches!(self.extract_metadata_kind(resolution), Some(MetadataKind::Enum))
+            {
+                if let Some(config_type) = self.get_raw_type(resolution) {
+                    let enum_name = config_type
+                        .name
+                        .strip_prefix("Перечисления.")
+                        .unwrap_or(config_type.name.as_str());
+                    let enum_ref_type = format!("ПеречислениеСсылка.{}", enum_name);
+
+                    let props = config_type
+                        .enum_values
+                        .iter()
+                        .map(|value| RawPropertyData {
+                            name: value.clone(),
+                            prop_type: enum_ref_type.clone(),
+                            is_readonly: true,
+                        })
+                        .collect();
+                    return Some(props);
+                }
+            }
+
             return Some(vec![]); // Пустой список для Manager/Selection/List
         }
 

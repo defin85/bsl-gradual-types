@@ -233,8 +233,15 @@ impl TypeMetadataLookup {
         &self,
         resolution: &TypeResolution,
     ) -> Option<Vec<RawPropertyData>> {
-        let type_name = resolution.type_name();
-        let enum_name = type_name.strip_prefix("ПеречислениеМенеджер.")?;
+        let enum_name = match &resolution.result {
+            ResolutionResult::Concrete(ConcreteType::Configuration(cfg))
+                if cfg.kind == MetadataKind::Enum
+                    && matches!(resolution.active_facet, None | Some(FacetKind::Manager)) =>
+            {
+                cfg.name.as_str()
+            }
+            _ => return None,
+        };
         let enum_ref_type = Self::get_platform_facet_type(MetadataKind::Enum, FacetKind::Reference)
             .map(|platform_type| {
                 crate::domain::facet_utils::substitute_type_name(platform_type, enum_name)

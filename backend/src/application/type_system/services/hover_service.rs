@@ -5,9 +5,7 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use bsl_shared::domain::types::{
-    ConcreteType, FacetKind, MetadataKind, ResolutionResult, TypeResolution,
-};
+use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::engine::AnalysisEngine;
@@ -196,23 +194,6 @@ pub async fn get_hover_info_with_file_path(
                         } else {
                             resolver.resolve_expression_sync(&result_type.type_name())
                         };
-                        if property_resolution.is_unknown() {
-                            if let ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) =
-                                &owner_resolution.result
-                            {
-                                if cfg.kind == MetadataKind::Enum
-                                    && owner_resolution.active_facet == Some(FacetKind::Manager)
-                                {
-                                    property_resolution = TypeResolution::metadata_type(
-                                        MetadataKind::Enum,
-                                        &cfg.name,
-                                        Some(FacetKind::Reference),
-                                    );
-                                    is_readonly = Some(true);
-                                }
-                            }
-                        }
-
                         let formatter = if let Some(config) = hover_config.clone() {
                             HoverFormatter::new(config, metadata_lookup.clone())
                         } else {

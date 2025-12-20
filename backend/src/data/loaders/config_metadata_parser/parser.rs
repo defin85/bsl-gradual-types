@@ -42,10 +42,12 @@ impl UniversalMetadataParser {
         let mut synonym: Option<String> = None;
         let mut attributes = Vec::new();
         let mut tabular_sections = Vec::new();
+        let mut enum_values = Vec::new();
 
         let mut current_element = String::new();
         let mut current_attribute: Option<AttributeInfo> = None;
         let mut current_tabular: Option<TabularSectionInfo> = None;
+        let mut current_enum_value: Option<String> = None;
         let mut in_tabular_attributes = false;
         let mut in_type_tag = false; // Флаг для отслеживания вхождения в <Type>
 
@@ -84,6 +86,8 @@ impl UniversalMetadataParser {
                             attributes: Vec::new(),
                         });
                         tracing::trace!("📋 Создана новая табличная часть");
+                    } else if tag_name == "EnumValue" {
+                        current_enum_value = Some(String::new());
                     } else if tag_name == "ChildObjects" && current_tabular.is_some() {
                         in_tabular_attributes = true;
                         tracing::trace!("🔄 Вход в ChildObjects табличной части");
@@ -122,7 +126,10 @@ impl UniversalMetadataParser {
                     match current_element.as_str() {
                         "Uuid" => uuid = text,
                         "Name" => {
-                            if let Some(ref mut attr) = current_attribute {
+                            if let Some(ref mut enum_value) = current_enum_value {
+                                *enum_value = text.clone();
+                                tracing::trace!("  ✅ Значение перечисления: {}", text);
+                            } else if let Some(ref mut attr) = current_attribute {
                                 attr.name = text.clone();
                                 tracing::trace!("  ✅ Имя атрибута: {}", text);
                             } else if let Some(ref mut tab) = current_tabular {
@@ -178,6 +185,12 @@ impl UniversalMetadataParser {
                             tabular_sections.push(tab);
                         }
                         in_tabular_attributes = false;
+                    } else if tag_name == "EnumValue" {
+                        if let Some(value) = current_enum_value.take() {
+                            if !value.is_empty() {
+                                enum_values.push(value);
+                            }
+                        }
                     } else if tag_name == "ChildObjects" && in_tabular_attributes {
                         in_tabular_attributes = false;
                         tracing::trace!("🔄 Выход из ChildObjects табличной части");
@@ -203,6 +216,7 @@ impl UniversalMetadataParser {
         metadata.synonym = synonym;
         metadata.attributes = attributes;
         metadata.tabular_sections = tabular_sections;
+        metadata.enum_values = enum_values;
 
         // Парсим дополнительные свойства для CommonModule
         if object_type_raw == "CommonModule" {
@@ -366,5 +380,46 @@ impl UniversalMetadataParser {
         );
 
         Ok(props)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn parses_enum_values_from_xml() {
+        let xml = r#"
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+    <Enum uuid="00000000-0000-0000-0000-000000000000">
+        <Properties>
+            <Name>ТестПеречисление</Name>
+        </Properties>
+        <ChildObjects>
+            <EnumValue uuid="11111111-1111-1111-1111-111111111111">
+                <Properties>
+                    <Name>Первое</Name>
+                </Properties>
+            </EnumValue>
+            <EnumValue uuid="22222222-2222-2222-2222-222222222222">
+                <Properties>
+                    <Name>Второе</Name>
+                </Properties>
+            </EnumValue>
+        </ChildObjects>
+    </Enum>
+</MetaDataObject>
+"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let parsed = UniversalMetadataParser::parse_any_object(file.path()).unwrap();
+        assert_eq!(parsed.enum_values.len(), 2);
+        assert!(parsed.enum_values.contains(&"Первое".to_string()));
+        assert!(parsed.enum_values.contains(&"Второе".to_string()));
     }
 }

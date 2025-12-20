@@ -1,8 +1,6 @@
 //! Реестр паттернов для определения MetadataKind из имён типов платформы 1С
 //!
-//! Поддерживает два источника паттернов:
-//! 1. Автоизвлечённые из Syntax Helper при загрузке
-//! 2. Хардкод fallback для случаев без Syntax Helper
+//! Поддерживает только автоизвлечённые паттерны из Syntax Helper при загрузке.
 
 use super::types::MetadataKind;
 use crate::domain::type_id::TypeId;
@@ -43,7 +41,6 @@ impl MetadataPatternRegistry {
     }
 
     /// Определить MetadataKind из фасетного префикса
-    /// Сначала ищет в извлечённых, затем в хардкоде
     pub fn get_metadata_kind(&self, prefix: &str) -> Option<MetadataKind> {
         // 1. Поиск в автоизвлечённых паттернах на нормализованных строках
         // Сортируем по длине (длинные первыми) для корректного матчинга
@@ -58,54 +55,6 @@ impl MetadataPatternRegistry {
             }
         }
 
-        // 2. Fallback на хардкод (важен порядок - длинные первыми!)
-        Self::hardcoded_metadata_kind(prefix)
-    }
-
-    /// Хардкод fallback для MetadataKind (используется без Syntax Helper)
-    ///
-    /// Публичный метод для использования из SignatureIndex и других компонентов.
-    pub fn hardcoded_metadata_kind(prefix: &str) -> Option<MetadataKind> {
-        // Порядок важен: сначала более длинные префиксы!
-        if prefix.starts_with("ПланВидовХарактеристик") {
-            return Some(MetadataKind::ChartOfCharacteristicTypes);
-        }
-        if prefix.starts_with("ПланВидовРасчета") {
-            return Some(MetadataKind::ChartOfCalculationTypes);
-        }
-        if prefix.starts_with("ПланСчетов") {
-            return Some(MetadataKind::ChartOfAccounts);
-        }
-        if prefix.starts_with("ПланОбмена") {
-            return Some(MetadataKind::ExchangePlan);
-        }
-        if prefix.starts_with("РегистрСведений") {
-            return Some(MetadataKind::InformationRegister);
-        }
-        if prefix.starts_with("РегистрНакопления") {
-            return Some(MetadataKind::AccumulationRegister);
-        }
-        if prefix.starts_with("РегистрБухгалтерии") {
-            return Some(MetadataKind::AccountingRegister);
-        }
-        if prefix.starts_with("РегистрРасчета") {
-            return Some(MetadataKind::CalculationRegister);
-        }
-        if prefix.starts_with("БизнесПроцесс") {
-            return Some(MetadataKind::BusinessProcess);
-        }
-        if prefix.starts_with("Справочник") {
-            return Some(MetadataKind::Catalog);
-        }
-        if prefix.starts_with("Документ") {
-            return Some(MetadataKind::Document);
-        }
-        if prefix.starts_with("Перечисление") {
-            return Some(MetadataKind::Enum);
-        }
-        if prefix.starts_with("Задача") {
-            return Some(MetadataKind::Task);
-        }
         None
     }
 
@@ -280,24 +229,15 @@ mod tests {
     }
 
     #[test]
-    fn test_registry_fallback() {
+    fn test_registry_without_patterns_returns_none() {
         let registry = MetadataPatternRegistry::new();
-        assert_eq!(
-            registry.get_metadata_kind("СправочникМенеджер"),
-            Some(MetadataKind::Catalog)
-        );
-        assert_eq!(
-            registry.get_metadata_kind("ДокументОбъект"),
-            Some(MetadataKind::Document)
-        );
+        assert_eq!(registry.get_metadata_kind("СправочникМенеджер"), None);
+        assert_eq!(registry.get_metadata_kind("ДокументОбъект"), None);
         assert_eq!(
             registry.get_metadata_kind("РегистрСведенийНаборЗаписей"),
-            Some(MetadataKind::InformationRegister)
+            None
         );
-        assert_eq!(
-            registry.get_metadata_kind("ПланОбменаОбъект"),
-            Some(MetadataKind::ExchangePlan)
-        );
+        assert_eq!(registry.get_metadata_kind("ПланОбменаОбъект"), None);
     }
 
     #[test]
@@ -342,37 +282,18 @@ mod tests {
     }
 
     #[test]
-    fn test_registry_extracted_priority_over_hardcoded() {
-        // Тест что extracted паттерны имеют приоритет над hardcoded
+    fn test_registry_extracted_patterns_match() {
         let mut registry = MetadataPatternRegistry::new();
 
-        // Добавляем кастомный паттерн
         registry.update_from_patterns(vec![ExtractedPattern {
             prefix: "Справочник".to_string(),
             kind: MetadataKind::Catalog,
             placeholder_suffix: Some("справочника".to_string()),
         }]);
 
-        // Извлечённый паттерн должен матчить
         assert_eq!(
             registry.get_metadata_kind("СправочникОбъект"),
             Some(MetadataKind::Catalog)
-        );
-    }
-
-    #[test]
-    fn test_registry_fallback_when_no_extracted() {
-        let registry = MetadataPatternRegistry::new();
-
-        // Без extracted паттернов, используется fallback
-        assert!(!registry.has_extracted_patterns());
-        assert_eq!(
-            registry.get_metadata_kind("БизнесПроцессОбъект"),
-            Some(MetadataKind::BusinessProcess)
-        );
-        assert_eq!(
-            registry.get_metadata_kind("ЗадачаМенеджер"),
-            Some(MetadataKind::Task)
         );
     }
 

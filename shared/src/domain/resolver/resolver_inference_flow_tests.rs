@@ -19,8 +19,22 @@ fn create_repo_with_tabular_section_type() -> Arc<InMemoryTypeRepository> {
     }])
     .unwrap();
 
-    // Встроенные методы добавляются через SignatureIndex и должны совпадать по TypeId нормализации.
-    repo.populate_signature_index(|index| index.initialize_builtin_methods());
+    // Методы добавляются через SignatureIndex и должны совпадать по TypeId нормализации.
+    repo.populate_signature_index(|index| {
+        let signature = crate::domain::signature_index::MethodSignature::new(
+            "Выгрузить".to_string(),
+            Some("ТабличнаяЧасть".to_string()),
+            vec![],
+            Some("ТаблицаЗначений".to_string()),
+            crate::domain::signature_index::SignatureSource::Platform,
+            None,
+            crate::domain::signature_index::ContextRequirements::Universal,
+        );
+        index.add_platform_method(
+            crate::domain::type_id::TypeId::new("ТабличнаяЧасть"),
+            signature,
+        );
+    });
 
     Arc::new(repo)
 }
@@ -61,6 +75,6 @@ fn test_metadata_lookup_methods_chain_works_with_type_id_normalization() {
     let methods = lookup.get_methods(&resolution);
     assert!(
         methods.iter().any(|m| m.name == "Выгрузить"),
-        "Ожидали метод ТабличнаяЧасть.Выгрузить из встроенных сигнатур"
+        "Ожидали метод ТабличнаяЧасть.Выгрузить из SignatureIndex"
     );
 }

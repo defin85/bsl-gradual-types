@@ -10,11 +10,86 @@ fn create_test_resolver() -> TypeResolver {
     TypeResolver::new(repo)
 }
 
+fn add_test_constructors(index: &mut SignatureIndex) {
+    use crate::domain::signature_index::ConstructorSignature;
+    use crate::domain::signature_index::SignatureSource;
+    use crate::domain::type_id::TypeId;
+    use crate::domain::types::ParameterInfo;
+
+    index.add_constructor(
+        TypeId::new("Массив"),
+        ConstructorSignature {
+            type_name: "Массив".to_string(),
+            params: vec![ParameterInfo {
+                name: "Размер".to_string(),
+                type_name: Some("Число".to_string()),
+                is_optional: true,
+                default_value: None,
+                description: None,
+            }],
+            facet: None,
+            source: SignatureSource::Platform,
+            is_collection: true,
+            generic_params_count: 1,
+        },
+    );
+    index.add_constructor(
+        TypeId::new("Соответствие"),
+        ConstructorSignature {
+            type_name: "Соответствие".to_string(),
+            params: vec![],
+            facet: None,
+            source: SignatureSource::Platform,
+            is_collection: true,
+            generic_params_count: 2,
+        },
+    );
+    index.add_constructor(
+        TypeId::new("ТаблицаЗначений"),
+        ConstructorSignature {
+            type_name: "ТаблицаЗначений".to_string(),
+            params: vec![],
+            facet: None,
+            source: SignatureSource::Platform,
+            is_collection: false,
+            generic_params_count: 0,
+        },
+    );
+    index.add_constructor(
+        TypeId::new("СписокЗначений"),
+        ConstructorSignature {
+            type_name: "СписокЗначений".to_string(),
+            params: vec![],
+            facet: None,
+            source: SignatureSource::Platform,
+            is_collection: true,
+            generic_params_count: 1,
+        },
+    );
+    index.add_constructor(
+        TypeId::new("ФиксированныйМассив"),
+        ConstructorSignature {
+            type_name: "ФиксированныйМассив".to_string(),
+            params: vec![ParameterInfo {
+                name: "Массив".to_string(),
+                type_name: Some("Массив".to_string()),
+                is_optional: false,
+                default_value: None,
+                description: None,
+            }],
+            facet: None,
+            source: SignatureSource::Platform,
+            is_collection: true,
+            generic_params_count: 1,
+        },
+    );
+}
+
 #[test]
 fn test_resolve_constructor_simple_array() {
     let resolver = create_test_resolver();
     let mut index = SignatureIndex::new();
-    index.initialize_builtin_constructors();
+    add_test_constructors(&mut index);
 
     let result = resolver.resolve_constructor("Массив", &[], &index);
 
@@ -38,7 +113,7 @@ fn test_resolve_constructor_simple_array() {
 fn test_resolve_constructor_array_with_size() {
     let resolver = create_test_resolver();
     let mut index = SignatureIndex::new();
-    index.initialize_builtin_constructors();
+    add_test_constructors(&mut index);
 
     let result = resolver.resolve_constructor(
         "Массив",
@@ -63,7 +138,7 @@ fn test_resolve_constructor_array_with_size() {
 fn test_resolve_constructor_map() {
     let resolver = create_test_resolver();
     let mut index = SignatureIndex::new();
-    index.initialize_builtin_constructors();
+    add_test_constructors(&mut index);
 
     let result = resolver.resolve_constructor("Соответствие", &[], &index);
 
@@ -84,7 +159,7 @@ fn test_resolve_constructor_map() {
 fn test_resolve_constructor_value_table() {
     let resolver = create_test_resolver();
     let mut index = SignatureIndex::new();
-    index.initialize_builtin_constructors();
+    add_test_constructors(&mut index);
 
     let result = resolver.resolve_constructor("ТаблицаЗначений", &[], &index);
 
@@ -105,7 +180,7 @@ fn test_resolve_constructor_value_table() {
 fn test_resolve_constructor_case_insensitive() {
     let resolver = create_test_resolver();
     let mut index = SignatureIndex::new();
-    index.initialize_builtin_constructors();
+    add_test_constructors(&mut index);
 
     // Разные регистры должны работать
     let result1 = resolver.resolve_constructor("массив", &[], &index);
@@ -167,7 +242,7 @@ fn test_resolve_constructor_dynamic_question_mark() {
 fn test_resolve_constructor_too_many_args() {
     let resolver = create_test_resolver();
     let mut index = SignatureIndex::new();
-    index.initialize_builtin_constructors();
+    add_test_constructors(&mut index);
 
     let result = resolver.resolve_constructor(
         "Массив",
@@ -190,7 +265,7 @@ fn test_resolve_constructor_too_many_args() {
 fn test_resolve_constructor_fixed_array() {
     let resolver = create_test_resolver();
     let mut index = SignatureIndex::new();
-    index.initialize_builtin_constructors();
+    add_test_constructors(&mut index);
 
     // ФиксированныйМассив требует обязательный параметр
     let result = resolver.resolve_constructor("ФиксированныйМассив", &[], &index);
@@ -211,7 +286,7 @@ fn test_resolve_constructor_fixed_array() {
 fn test_resolve_constructor_fixed_array_with_source() {
     let resolver = create_test_resolver();
     let mut index = SignatureIndex::new();
-    index.initialize_builtin_constructors();
+    add_test_constructors(&mut index);
 
     let result =
         resolver.resolve_constructor("ФиксированныйМассив", &["Массив".to_string()], &index);
@@ -234,7 +309,7 @@ fn test_resolve_constructor_fixed_array_with_source() {
 fn test_resolve_constructor_fixed_array_with_generic_source() {
     let resolver = create_test_resolver();
     let mut index = SignatureIndex::new();
-    index.initialize_builtin_constructors();
+    add_test_constructors(&mut index);
 
     // Передаем Массив<Число> как исходный массив
     let result = resolver.resolve_constructor(
@@ -259,7 +334,7 @@ fn test_resolve_constructor_fixed_array_with_generic_source() {
 fn test_resolve_constructor_value_list() {
     let resolver = create_test_resolver();
     let mut index = SignatureIndex::new();
-    index.initialize_builtin_constructors();
+    add_test_constructors(&mut index);
 
     let result = resolver.resolve_constructor("СписокЗначений", &[], &index);
 
@@ -286,7 +361,7 @@ fn test_extract_generic_from_type() {
     // Проверяем что ФиксированныйМассив правильно извлекает generic
 
     let mut index = SignatureIndex::new();
-    index.initialize_builtin_constructors();
+    add_test_constructors(&mut index);
 
     let result = resolver.resolve_constructor(
         "ФиксированныйМассив",
@@ -306,7 +381,7 @@ fn test_extract_generic_from_type() {
 fn test_extract_generic_nested() {
     let resolver = create_test_resolver();
     let mut index = SignatureIndex::new();
-    index.initialize_builtin_constructors();
+    add_test_constructors(&mut index);
 
     // Вложенный generic: Массив<Массив<Число>>
     let result = resolver.resolve_constructor(

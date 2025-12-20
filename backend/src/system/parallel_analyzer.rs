@@ -127,12 +127,11 @@ impl ParallelAnalyzer {
         // 3. Создать прогресс-бар
         let progress = if self.show_progress {
             let pb = ProgressBar::new(total_files as u64);
-            let style = ProgressStyle::default_bar();
-            let style = match style.template(
+            let style = match ProgressStyle::default_bar().template(
                 "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}",
             ) {
                 Ok(style) => style.progress_chars("#>-"),
-                Err(_) => style,
+                Err(_) => ProgressStyle::default_bar(),
             };
             pb.set_style(style);
             Some(pb)

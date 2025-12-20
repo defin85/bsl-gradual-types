@@ -55,6 +55,9 @@ pub struct UniversalMetadataObject {
     /// Табличные части объекта (для документов, справочников)
     pub tabular_sections: Vec<TabularSectionInfo>,
 
+    /// Значения перечисления (для Enum)
+    pub enum_values: Vec<String>,
+
     /// Дополнительные свойства объекта, извлечённые из XML
     pub properties: HashMap<String, String>,
 
@@ -88,6 +91,7 @@ impl UniversalMetadataObject {
             facets,
             attributes: Vec::new(),
             tabular_sections: Vec::new(),
+            enum_values: Vec::new(),
             properties: HashMap::new(),
             execution_contexts: Vec::new(),
             common_module_properties: None,

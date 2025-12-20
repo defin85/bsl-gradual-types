@@ -139,12 +139,12 @@ where
                     .into_iter()
                     .enumerate()
                     .map(|(idx, p)| ParameterInfo {
-                        name: p,
+                        name: p.name,
                         type_name: inferred_for_decl
                             .and_then(|v| v.get(idx))
                             .cloned()
                             .flatten(),
-                        is_optional: false,
+                        is_optional: p.is_optional,
                         default_value: None,
                         description: None,
                     })
@@ -311,12 +311,12 @@ where
                     .into_iter()
                     .enumerate()
                     .map(|(idx, p)| ParameterInfo {
-                        name: p,
+                        name: p.name,
                         type_name: inferred_for_decl
                             .and_then(|v| v.get(idx))
                             .cloned()
                             .flatten(),
-                        is_optional: false,
+                        is_optional: p.is_optional,
                         default_value: None,
                         description: None,
                     })

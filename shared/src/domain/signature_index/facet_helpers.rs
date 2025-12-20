@@ -7,8 +7,7 @@
 //! - Подстановки имени объекта в return type
 
 use super::super::facet_utils;
-use super::super::metadata_patterns::MetadataPatternRegistry;
-use super::super::types::{FacetKind, MetadataKind};
+use super::super::types::FacetKind;
 
 /// Извлечь базовый фасетный тип из полного имени типа
 ///
@@ -34,18 +33,6 @@ pub fn extract_base_facet_type(type_name: &str) -> Option<&str> {
 /// - "Массив" -> None (не фасетный тип)
 pub fn get_facet_kind_from_prefix(prefix: &str) -> Option<FacetKind> {
     facet_utils::get_facet_kind_from_prefix(prefix)
-}
-
-/// Получить MetadataKind из фасетного префикса по его началу
-///
-/// # Примеры
-/// - "СправочникМенеджер" -> Some(MetadataKind::Catalog)
-/// - "ДокументОбъект" -> Some(MetadataKind::Document)
-/// - "РегистрСведенийНаборЗаписей" -> Some(MetadataKind::InformationRegister)
-///
-/// Делегирует вызов в `MetadataPatternRegistry::hardcoded_metadata_kind()`.
-pub fn get_metadata_kind_from_prefix(prefix: &str) -> Option<MetadataKind> {
-    MetadataPatternRegistry::hardcoded_metadata_kind(prefix)
 }
 
 /// Подставить реальное имя объекта в return type вместо placeholder

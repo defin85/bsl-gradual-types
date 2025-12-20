@@ -45,11 +45,17 @@ pub struct ModuleParseComparison {
 #[derive(Debug)]
 pub(crate) struct ParsedDecl {
     pub(crate) name: String,
-    pub(crate) params: Vec<String>,
+    pub(crate) params: Vec<ParsedParam>,
     pub(crate) is_export: bool,
     pub(crate) directive_ctx: Option<ContextRequirements>,
     pub(crate) return_type: Option<String>,
     pub(crate) span: crate::parsing::bsl::ast::Span,
+}
+
+#[derive(Debug)]
+pub(crate) struct ParsedParam {
+    pub(crate) name: String,
+    pub(crate) is_optional: bool,
 }
 
 #[derive(Debug)]

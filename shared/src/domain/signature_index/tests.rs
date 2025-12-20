@@ -10,6 +10,76 @@ mod tests {
     use crate::domain::type_id::TypeId;
     use crate::domain::types::{FacetKind, MetadataKind, ParameterInfo, TypeResolution};
 
+    fn add_test_constructors(index: &mut SignatureIndex) {
+        index.add_constructor(
+            TypeId::new("Массив"),
+            ConstructorSignature {
+                type_name: "Массив".to_string(),
+                params: vec![ParameterInfo {
+                    name: "Размер".to_string(),
+                    type_name: Some("Число".to_string()),
+                    is_optional: true,
+                    default_value: None,
+                    description: None,
+                }],
+                facet: None,
+                source: SignatureSource::Platform,
+                is_collection: true,
+                generic_params_count: 1,
+            },
+        );
+        index.add_constructor(
+            TypeId::new("Соответствие"),
+            ConstructorSignature {
+                type_name: "Соответствие".to_string(),
+                params: vec![],
+                facet: None,
+                source: SignatureSource::Platform,
+                is_collection: true,
+                generic_params_count: 2,
+            },
+        );
+        index.add_constructor(
+            TypeId::new("ТаблицаЗначений"),
+            ConstructorSignature {
+                type_name: "ТаблицаЗначений".to_string(),
+                params: vec![],
+                facet: None,
+                source: SignatureSource::Platform,
+                is_collection: false,
+                generic_params_count: 0,
+            },
+        );
+        index.add_constructor(
+            TypeId::new("СписокЗначений"),
+            ConstructorSignature {
+                type_name: "СписокЗначений".to_string(),
+                params: vec![],
+                facet: None,
+                source: SignatureSource::Platform,
+                is_collection: true,
+                generic_params_count: 1,
+            },
+        );
+        index.add_constructor(
+            TypeId::new("ФиксированныйМассив"),
+            ConstructorSignature {
+                type_name: "ФиксированныйМассив".to_string(),
+                params: vec![ParameterInfo {
+                    name: "Массив".to_string(),
+                    type_name: Some("Массив".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: None,
+                }],
+                facet: None,
+                source: SignatureSource::Platform,
+                is_collection: true,
+                generic_params_count: 1,
+            },
+        );
+    }
+
     #[test]
     fn test_signature_index_basic() {
         let mut index = SignatureIndex::new();
@@ -86,7 +156,7 @@ mod tests {
     #[test]
     fn test_find_constructor_case_insensitive() {
         let mut index = SignatureIndex::new();
-        index.initialize_builtin_constructors();
+        add_test_constructors(&mut index);
 
         // Поиск в разных регистрах
         assert!(index.find_constructor("Массив").is_some());
@@ -97,7 +167,7 @@ mod tests {
     #[test]
     fn test_is_collection_type() {
         let mut index = SignatureIndex::new();
-        index.initialize_builtin_constructors();
+        add_test_constructors(&mut index);
 
         assert!(index.is_collection_type("Массив"));
         assert!(index.is_collection_type("Соответствие"));
@@ -107,7 +177,7 @@ mod tests {
     #[test]
     fn test_get_generic_params_count() {
         let mut index = SignatureIndex::new();
-        index.initialize_builtin_constructors();
+        add_test_constructors(&mut index);
 
         assert_eq!(index.get_generic_params_count("Массив"), Some(1));
         assert_eq!(index.get_generic_params_count("Соответствие"), Some(2));
@@ -115,11 +185,11 @@ mod tests {
     }
 
     #[test]
-    fn test_builtin_constructors() {
+    fn test_constructors_added() {
         let mut index = SignatureIndex::new();
-        index.initialize_builtin_constructors();
+        add_test_constructors(&mut index);
 
-        // Проверяем что все встроенные конструкторы добавлены
+        // Проверяем что все тестовые конструкторы добавлены
         assert!(index.find_constructor("Массив").is_some());
         assert!(index.find_constructor("Соответствие").is_some());
         assert!(index.find_constructor("ТаблицаЗначений").is_some());
@@ -523,122 +593,29 @@ mod tests {
     }
 
     #[test]
-    fn test_get_metadata_kind_from_prefix_catalog() {
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("СправочникМенеджер"),
-            Some(MetadataKind::Catalog)
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("СправочникОбъект"),
-            Some(MetadataKind::Catalog)
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("СправочникСсылка"),
-            Some(MetadataKind::Catalog)
-        );
-    }
-
-    #[test]
-    fn test_get_metadata_kind_from_prefix_document() {
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("ДокументМенеджер"),
-            Some(MetadataKind::Document)
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("ДокументОбъект"),
-            Some(MetadataKind::Document)
-        );
-    }
-
-    #[test]
-    fn test_get_metadata_kind_from_prefix_registers() {
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("РегистрСведенийМенеджер"),
-            Some(MetadataKind::InformationRegister)
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("РегистрНакопленияНаборЗаписей"),
-            Some(MetadataKind::AccumulationRegister)
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("РегистрБухгалтерииВыборка"),
-            Some(MetadataKind::AccountingRegister)
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("РегистрРасчетаЗапись"),
-            Some(MetadataKind::CalculationRegister)
-        );
-    }
-
-    #[test]
-    fn test_get_metadata_kind_from_prefix_plans() {
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("ПланСчетовМенеджер"),
-            Some(MetadataKind::ChartOfAccounts)
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("ПланВидовХарактеристикОбъект"),
-            Some(MetadataKind::ChartOfCharacteristicTypes)
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("ПланВидовРасчетаСсылка"),
-            Some(MetadataKind::ChartOfCalculationTypes)
-        );
-    }
-
-    #[test]
-    fn test_get_metadata_kind_from_prefix_other() {
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("БизнесПроцессМенеджер"),
-            Some(MetadataKind::BusinessProcess)
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("ЗадачаОбъект"),
-            Some(MetadataKind::Task)
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("ПеречислениеМенеджер"),
-            Some(MetadataKind::Enum)
-        );
-    }
-
-    #[test]
-    fn test_get_metadata_kind_from_prefix_non_faceted() {
-        // Не-фасетные типы -> None
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("Массив"),
-            None
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("ТаблицаЗначений"),
-            None
-        );
-    }
-
-    // ================= MILESTONE 3.13: MetadataPatternRegistry Tests =================
-
-    #[test]
-    fn test_get_metadata_kind_from_prefix_exchange_plan() {
-        // Планы обмена
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("ПланОбменаМенеджер"),
-            Some(MetadataKind::ExchangePlan)
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("ПланОбменаОбъект"),
-            Some(MetadataKind::ExchangePlan)
-        );
-        assert_eq!(
-            SignatureIndex::get_metadata_kind_from_prefix("ПланОбменаСсылка"),
-            Some(MetadataKind::ExchangePlan)
-        );
-    }
-
-    #[test]
     fn test_resolve_metadata_kind_instance_method() {
-        let index = SignatureIndex::new();
+        use crate::domain::metadata_patterns::ExtractedPattern;
 
-        // Instance method должен работать как статический (fallback)
+        let mut index = SignatureIndex::new();
+
+        index.update_metadata_patterns(vec![
+            ExtractedPattern {
+                prefix: "Справочник".to_string(),
+                kind: MetadataKind::Catalog,
+                placeholder_suffix: Some("справочника".to_string()),
+            },
+            ExtractedPattern {
+                prefix: "Документ".to_string(),
+                kind: MetadataKind::Document,
+                placeholder_suffix: Some("документа".to_string()),
+            },
+            ExtractedPattern {
+                prefix: "ПланОбмена".to_string(),
+                kind: MetadataKind::ExchangePlan,
+                placeholder_suffix: Some("плана обмена".to_string()),
+            },
+        ]);
+
         assert_eq!(
             index.resolve_metadata_kind("СправочникМенеджер"),
             Some(MetadataKind::Catalog)

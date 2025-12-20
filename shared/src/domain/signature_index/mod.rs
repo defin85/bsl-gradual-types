@@ -36,5 +36,5 @@ pub use super::runtime_context::ContextRequirements;
 // Facet helper functions (статические методы SignatureIndex делегируют сюда)
 pub use facet_helpers::{
     extract_base_facet_type, extract_metadata_name, get_facet_kind_from_prefix,
-    get_metadata_kind_from_prefix, substitute_type_name,
+    substitute_type_name,
 };

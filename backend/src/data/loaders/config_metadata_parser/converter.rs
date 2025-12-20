@@ -97,7 +97,7 @@ impl UniversalMetadataObject {
             kind: self.object_type,
             attributes: self.convert_attributes(),
             tabular_sections: self.convert_tabular_sections(),
-            enum_values: Vec::new(), // Для перечислений будет заполнено отдельно
+            enum_values: self.enum_values.clone(),
             generic_info: None,      // Конфигурационные типы не имеют Generic метаданных (пока)
             collection_item_type: None,
             module_paths, // Milestone 3.14: пути к модулям для Go To Definition

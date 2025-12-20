@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::system::tree_sitter_adapter::directives::find_preceding_directive;
 use crate::system::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
-use crate::system::tree_sitter_adapter::utils::{convert_parameters, node_text};
+use crate::system::tree_sitter_adapter::utils::node_text;
 
 use super::directives::context_from_directive;
 use super::types::{CallSite, CallTarget, ParsedDecl, ParsedModuleData, SinglePassMode};
@@ -200,16 +200,14 @@ fn parse_decl_ts(
 ) -> Option<ParsedDecl> {
     let mut cursor = node.walk();
     let mut name = String::new();
-    let mut params: Vec<String> = Vec::new();
+    let mut params: Vec<super::types::ParsedParam> = Vec::new();
     let mut is_export = false;
 
     for child in node.children(&mut cursor) {
         match child.kind() {
             "identifier" if name.is_empty() => name = node_text(&child, source),
             "parameters" => {
-                if let Ok(p) = convert_parameters(&child, source) {
-                    params = p;
-                }
+                params = parse_parameters_ts(&child, source);
             }
             _ if child.kind().ends_with("_KEYWORD") => {
                 let kw = node_text(&child, source).trim().to_lowercase();
@@ -474,6 +472,44 @@ fn walk_expr_ts(
     }
 }
 
+fn parse_parameters_ts(node: &tree_sitter::Node, source: &str) -> Vec<super::types::ParsedParam> {
+    let mut params = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "parameter" {
+            continue;
+        }
+
+        let mut name: Option<String> = None;
+        let mut is_optional = false;
+        let mut param_cursor = child.walk();
+        for param_child in child.children(&mut param_cursor) {
+            if param_child.kind() == "identifier" && name.is_none() {
+                name = Some(node_text(&param_child, source));
+                continue;
+            }
+
+            if param_child.kind() == "=" {
+                is_optional = true;
+            }
+        }
+
+        if !is_optional {
+            let param_text = node_text(&child, source);
+            if param_text.contains('=') {
+                is_optional = true;
+            }
+        }
+
+        if let Some(name) = name {
+            params.push(super::types::ParsedParam { name, is_optional });
+        }
+    }
+
+    params
+}
+
 fn parse_call_ts(
     node: &tree_sitter::Node,
     source: &str,
@@ -708,12 +744,18 @@ fn extract_export_decls_from_tree(
         source[node.byte_range()].to_string()
     }
 
-    fn convert_parameters(node: &tree_sitter::Node, source: &str) -> Vec<String> {
+    fn convert_parameters(
+        node: &tree_sitter::Node,
+        source: &str,
+    ) -> Vec<super::types::ParsedParam> {
         let mut out = Vec::new();
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "identifier" {
-                out.push(node_text(&child, source));
+                out.push(super::types::ParsedParam {
+                    name: node_text(&child, source),
+                    is_optional: false,
+                });
             }
         }
         out
@@ -727,7 +769,7 @@ fn extract_export_decls_from_tree(
             continue;
         }
         let mut name = String::new();
-        let mut params = Vec::new();
+        let mut params: Vec<super::types::ParsedParam> = Vec::new();
         let mut is_export = false;
 
         let mut child_cursor = node.walk();

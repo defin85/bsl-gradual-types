@@ -65,64 +65,12 @@ mod tests {
 
         repo.load_types(platform_types).unwrap();
 
-        // Инициализируем SignatureIndex с конструкторами и встроенными методами
-        repo.populate_signature_index(|index| {
-            index.initialize_builtin_constructors();
-            index.initialize_builtin_methods();
-        });
+        // SignatureIndex в тесте не инициализируем: источником правды остаётся Syntax Helper.
 
         // Применяем GenericInfo
         crate::data::loaders::apply_generic_info_to_repository(repo.as_ref());
 
         repo
-    }
-
-    #[test]
-    fn test_signature_index_has_builtin_constructors() {
-        use bsl_shared::domain::signature_index::SignatureIndex;
-
-        let mut index = SignatureIndex::new();
-        index.initialize_builtin_constructors();
-
-        // Проверяем что встроенные конструкторы загружены
-        assert!(
-            index.find_constructor("Массив").is_some(),
-            "Конструктор Массив должен быть загружен"
-        );
-        assert!(
-            index.find_constructor("Соответствие").is_some(),
-            "Конструктор Соответствие должен быть загружен"
-        );
-        assert!(
-            index.find_constructor("ТаблицаЗначений").is_some(),
-            "Конструктор ТаблицаЗначений должен быть загружен"
-        );
-        assert!(
-            index.find_constructor("СписокЗначений").is_some(),
-            "Конструктор СписокЗначений должен быть загружен"
-        );
-        assert!(
-            index.find_constructor("ФиксированныйМассив").is_some(),
-            "Конструктор ФиксированныйМассив должен быть загружен"
-        );
-    }
-
-    #[test]
-    fn test_repository_initialization_with_constructors() {
-        let repo = create_test_repository();
-
-        // Проверяем что SignatureIndex содержит конструкторы
-        repo.populate_signature_index(|index| {
-            // Проверяем наличие конструкторов
-            assert!(
-                index.find_constructor("Массив").is_some(),
-                "Конструктор Массив должен быть в индексе"
-            );
-        });
-
-        // Проверяем что репозиторий успешно инициализирован
-        let stats = repo.get_stats();
-        assert!(stats.total_types > 0, "Репозиторий должен содержать типы");
     }
 
     #[test]

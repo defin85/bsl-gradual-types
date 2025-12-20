@@ -84,8 +84,12 @@ impl SignatureSourceRegistry {
             for platform_type in &types {
                 for method in &platform_type.methods {
                     if method.is_constructor {
+                        let constructor =
+                            raw_method_to_constructor(method, &platform_type.name, platform_type);
+                        index.add_constructor(TypeId::new(&platform_type.name), constructor);
                         continue;
                     }
+
                     let signature = raw_method_to_signature(method, &platform_type.name);
                     let type_id = TypeId::new(&platform_type.name);
                     index.add_platform_method(type_id, signature.clone());
@@ -100,8 +104,6 @@ impl SignatureSourceRegistry {
             }
         }
 
-        // Инициализируем встроенные конструкторы и методы
-        index.initialize_builtin_constructors();
         // Встроенные методы не инициализируем: источником правды является Syntax Helper.
 
         index
@@ -158,6 +160,42 @@ pub fn raw_method_to_signature(method: &RawMethodData, owner_type: &str) -> Meth
         return_facet,
         context_requirements,
     )
+}
+
+pub fn raw_method_to_constructor(
+    method: &RawMethodData,
+    owner_type: &str,
+    owner_raw: &RawTypeData,
+) -> super::signature_index::ConstructorSignature {
+    let params = method
+        .params
+        .iter()
+        .map(|p| ParameterInfo {
+            name: p.name.clone(),
+            type_name: Some(p.param_type.clone()),
+            is_optional: p.is_optional,
+            default_value: p.default_value.clone(),
+            description: None,
+        })
+        .collect();
+
+    let (is_collection, generic_params_count) = match &owner_raw.generic_info {
+        Some(info) => (true, info.type_param_count),
+        None => {
+            let is_collection = owner_raw.collection_item_type.is_some();
+            let generic_params_count = if is_collection { 1 } else { 0 };
+            (is_collection, generic_params_count)
+        }
+    };
+
+    super::signature_index::ConstructorSignature {
+        type_name: owner_type.to_string(),
+        params,
+        facet: None,
+        source: SignatureSource::Platform,
+        is_collection,
+        generic_params_count,
+    }
 }
 
 /// Выводит метаданные метода (facet и context) на основе его сигнатуры
@@ -268,8 +306,7 @@ mod tests {
         assert_eq!(registry.source_count(), 0);
 
         let index = registry.build();
-        // Должны быть только builtin конструкторы
-        assert!(index.find_constructor("Массив").is_some());
+        assert!(index.find_constructor("Массив").is_none());
     }
 
     #[test]

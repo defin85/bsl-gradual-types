@@ -211,7 +211,7 @@ fn find_largest_module(root: &Path) -> Result<PathBuf> {
 
             if size > best_size {
                 best_size = size;
-                best_path = Some(path);
+                best_path = Some(path.clone());
                 eprintln!(
                     "New largest module: {} ({} bytes)",
                     path.display(),

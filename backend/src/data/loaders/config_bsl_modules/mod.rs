@@ -32,5 +32,3 @@ pub use types::{
     IndexedConfigSignatures, ModuleIndexProgress, ModuleParseComparison, ModuleParseStats,
     SinglePassMode,
 };
-
-pub(crate) use types::{CallSite, CallTarget, ParsedDecl, ParsedModule, ParsedModuleData};

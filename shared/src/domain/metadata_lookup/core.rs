@@ -319,6 +319,11 @@ impl TypeMetadataLookup {
             return true;
         }
 
+        // Проверяем значения перечисления
+        if raw.enum_values.iter().any(|v| v == member_name) {
+            return true;
+        }
+
         false
     }
 

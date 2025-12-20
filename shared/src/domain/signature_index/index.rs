@@ -8,13 +8,10 @@
 
 use super::super::metadata_patterns::{ExtractedPattern, MetadataPatternRegistry};
 use super::super::type_id::TypeId;
-use super::super::types::{FacetKind, MetadataKind, ParameterInfo};
+use super::super::types::{FacetKind, MetadataKind};
 use super::facet_helpers;
 use super::method::MethodSignature;
-use super::method_builder::MethodBuilder;
-use super::types::{
-    ConstructorSignature, SignatureMismatch, SignatureSource, SignatureValidationResult,
-};
+use super::types::{ConstructorSignature, SignatureMismatch, SignatureValidationResult};
 use std::collections::HashMap;
 
 // Re-export ContextRequirements для обратной совместимости
@@ -441,15 +438,6 @@ impl SignatureIndex {
         facet_helpers::get_facet_kind_from_prefix(prefix)
     }
 
-    /// Получить MetadataKind из фасетного префикса по его началу
-    ///
-    /// # Примеры
-    /// - "СправочникМенеджер" -> Some(MetadataKind::Catalog)
-    /// - "ДокументОбъект" -> Some(MetadataKind::Document)
-    pub fn get_metadata_kind_from_prefix(prefix: &str) -> Option<MetadataKind> {
-        facet_helpers::get_metadata_kind_from_prefix(prefix)
-    }
-
     /// Подставить реальное имя объекта в return type вместо placeholder
     ///
     /// # Примеры
@@ -480,8 +468,7 @@ impl SignatureIndex {
 
     /// Определить MetadataKind из префикса (instance метод - использует реестр паттернов)
     ///
-    /// Сначала ищет в извлечённых паттернах из Syntax Helper,
-    /// затем использует hardcoded fallback.
+    /// Ищет в извлечённых паттернах из Syntax Helper.
     pub fn resolve_metadata_kind(&self, prefix: &str) -> Option<MetadataKind> {
         self.metadata_patterns.get_metadata_kind(prefix)
     }
@@ -499,258 +486,6 @@ impl SignatureIndex {
     /// Получить ссылку на реестр паттернов MetadataKind
     pub fn metadata_patterns(&self) -> &MetadataPatternRegistry {
         &self.metadata_patterns
-    }
-
-    // ==================== Инициализация встроенных конструкторов и методов ====================
-
-    /// Инициализировать встроенные конструкторы коллекций
-    pub fn initialize_builtin_constructors(&mut self) {
-        // Массив - коллекция с 1 generic параметром
-        self.add_constructor(
-            TypeId::new("Массив"),
-            ConstructorSignature {
-                type_name: "Массив".to_string(),
-                params: vec![
-                    // Необязательный параметр размера
-                    ParameterInfo {
-                        name: "Размер".to_string(),
-                        type_name: Some("Число".to_string()),
-                        is_optional: true,
-                        default_value: None,
-                        description: Some("Начальный размер массива".to_string()),
-                    },
-                ],
-                facet: None,
-                source: SignatureSource::Platform,
-                is_collection: true,
-                generic_params_count: 1,
-            },
-        );
-
-        // Соответствие (Map) - коллекция с 2 generic параметрами
-        self.add_constructor(
-            TypeId::new("Соответствие"),
-            ConstructorSignature {
-                type_name: "Соответствие".to_string(),
-                params: vec![],
-                facet: None,
-                source: SignatureSource::Platform,
-                is_collection: true,
-                generic_params_count: 2, // Key, Value
-            },
-        );
-
-        // ТаблицаЗначений
-        self.add_constructor(
-            TypeId::new("ТаблицаЗначений"),
-            ConstructorSignature {
-                type_name: "ТаблицаЗначений".to_string(),
-                params: vec![],
-                facet: None,
-                source: SignatureSource::Platform,
-                is_collection: false,
-                generic_params_count: 0,
-            },
-        );
-
-        // СписокЗначений - коллекция с 1 generic параметром
-        self.add_constructor(
-            TypeId::new("СписокЗначений"),
-            ConstructorSignature {
-                type_name: "СписокЗначений".to_string(),
-                params: vec![],
-                facet: None,
-                source: SignatureSource::Platform,
-                is_collection: true,
-                generic_params_count: 1,
-            },
-        );
-
-        // ФиксированныйМассив - коллекция с 1 generic параметром
-        self.add_constructor(
-            TypeId::new("ФиксированныйМассив"),
-            ConstructorSignature {
-                type_name: "ФиксированныйМассив".to_string(),
-                params: vec![ParameterInfo {
-                    name: "Массив".to_string(),
-                    type_name: Some("Массив".to_string()),
-                    is_optional: false,
-                    default_value: None,
-                    description: Some(
-                        "Исходный массив для преобразования в фиксированный".to_string(),
-                    ),
-                }],
-                facet: None,
-                source: SignatureSource::Platform,
-                is_collection: true,
-                generic_params_count: 1,
-            },
-        );
-    }
-
-    /// Инициализация встроенных методов для типов без документации syntax_helper
-    ///
-    /// Вызывается для добавления hardcoded методов типов, которые отсутствуют
-    /// или неполно представлены в Syntax Helper.
-    pub fn initialize_builtin_methods(&mut self) {
-        self.add_tabular_section_methods();
-    }
-
-    /// Добавить методы ТабличнаяЧасть
-    ///
-    /// Табличная часть - коллекция строк в документах/справочниках.
-    /// Методы позволяют добавлять, удалять, искать и манипулировать строками.
-    ///
-    /// Использует MethodBuilder для fluent API вместо verbose MethodSignature::new().
-    fn add_tabular_section_methods(&mut self) {
-        let type_id = TypeId::new("ТабличнаяЧасть");
-
-        // Выгрузить(СписокКолонок?, ОтборСтрок?) -> ТаблицаЗначений
-        MethodBuilder::for_type(&type_id)
-            .method("Выгрузить")
-            .returns("ТаблицаЗначений")
-            .param("СписокКолонок", "Строка")
-            .optional()
-            .desc("Список колонок для выгрузки")
-            .param("ОтборСтрок", "Структура")
-            .optional()
-            .desc("Условия отбора строк")
-            .add_to(self);
-
-        // Добавить() -> СтрокаТабличнойЧасти
-        MethodBuilder::for_type(&type_id)
-            .method("Добавить")
-            .returns("СтрокаТабличнойЧасти")
-            .add_to(self);
-
-        // Вставить(Индекс) -> СтрокаТабличнойЧасти
-        MethodBuilder::for_type(&type_id)
-            .method("Вставить")
-            .returns("СтрокаТабличнойЧасти")
-            .param("Индекс", "Число")
-            .required()
-            .desc("Индекс позиции для вставки")
-            .add_to(self);
-
-        // Количество() -> Число
-        MethodBuilder::for_type(&type_id)
-            .method("Количество")
-            .returns("Число")
-            .add_to(self);
-
-        // Очистить() -> void
-        MethodBuilder::for_type(&type_id)
-            .method("Очистить")
-            .void()
-            .add_to(self);
-
-        // Удалить(Строка) -> void
-        MethodBuilder::for_type(&type_id)
-            .method("Удалить")
-            .void()
-            .param("Строка", "СтрокаТабличнойЧасти")
-            .required()
-            .desc("Строка или индекс для удаления")
-            .add_to(self);
-
-        // Найти(Значение, Колонки?) -> СтрокаТабличнойЧасти | Неопределено
-        MethodBuilder::for_type(&type_id)
-            .method("Найти")
-            .returns("СтрокаТабличнойЧасти")
-            .param_any("Значение")
-            .required()
-            .desc("Искомое значение")
-            .param("Колонки", "Строка")
-            .optional()
-            .desc("Список колонок для поиска")
-            .add_to(self);
-
-        // НайтиСтроки(Отбор) -> Массив
-        MethodBuilder::for_type(&type_id)
-            .method("НайтиСтроки")
-            .returns("Массив")
-            .param("Отбор", "Структура")
-            .required()
-            .desc("Структура с условиями отбора")
-            .add_to(self);
-
-        // Получить(Индекс) -> СтрокаТабличнойЧасти
-        MethodBuilder::for_type(&type_id)
-            .method("Получить")
-            .returns("СтрокаТабличнойЧасти")
-            .param("Индекс", "Число")
-            .required()
-            .desc("Индекс строки")
-            .add_to(self);
-
-        // Индекс(Строка) -> Число
-        MethodBuilder::for_type(&type_id)
-            .method("Индекс")
-            .returns("Число")
-            .param("Строка", "СтрокаТабличнойЧасти")
-            .required()
-            .desc("Строка табличной части")
-            .add_to(self);
-
-        // Итого(Колонка) -> Число
-        MethodBuilder::for_type(&type_id)
-            .method("Итого")
-            .returns("Число")
-            .param("Колонка", "Строка")
-            .required()
-            .desc("Имя числовой колонки")
-            .add_to(self);
-
-        // Сдвинуть(Строка, Смещение) -> void
-        MethodBuilder::for_type(&type_id)
-            .method("Сдвинуть")
-            .void()
-            .param("Строка", "СтрокаТабличнойЧасти")
-            .required()
-            .desc("Строка для сдвига")
-            .param("Смещение", "Число")
-            .required()
-            .desc("Количество позиций для сдвига")
-            .add_to(self);
-
-        // Загрузить(ТаблицаЗначений) -> void
-        MethodBuilder::for_type(&type_id)
-            .method("Загрузить")
-            .void()
-            .param("ТаблицаЗначений", "ТаблицаЗначений")
-            .required()
-            .desc("Таблица значений для загрузки")
-            .add_to(self);
-
-        // Сортировать(СтрокаСортировки) -> void
-        MethodBuilder::for_type(&type_id)
-            .method("Сортировать")
-            .void()
-            .param("СтрокаСортировки", "Строка")
-            .required()
-            .desc("Описание сортировки (например, 'Колонка1 Возр')")
-            .add_to(self);
-
-        // ВыгрузитьКолонку(Колонка) -> Массив
-        MethodBuilder::for_type(&type_id)
-            .method("ВыгрузитьКолонку")
-            .returns("Массив")
-            .param("Колонка", "Строка")
-            .required()
-            .desc("Имя колонки для выгрузки")
-            .add_to(self);
-
-        // ЗагрузитьКолонку(Массив, Колонка) -> void
-        MethodBuilder::for_type(&type_id)
-            .method("ЗагрузитьКолонку")
-            .void()
-            .param("Массив", "Массив")
-            .required()
-            .desc("Массив значений для загрузки")
-            .param("Колонка", "Строка")
-            .required()
-            .desc("Имя колонки для загрузки")
-            .add_to(self);
     }
 
     // ==================== Валидация сигнатур ====================
@@ -862,6 +597,7 @@ impl Default for SignatureIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::SignatureSource;
 
     #[test]
     fn test_type_id_normalization_fallback() {

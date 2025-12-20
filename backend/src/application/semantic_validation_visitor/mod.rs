@@ -10,7 +10,7 @@
 //! - `validators` - Validation logic (type validation, call validation)
 //! - `helpers` - Helper functions for metadata collection detection
 
-mod helpers;
+pub mod helpers;
 mod validators;
 mod visitor;
 

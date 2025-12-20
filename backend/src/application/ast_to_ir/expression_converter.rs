@@ -4,13 +4,14 @@
 //! из AST представления в семантические узлы IR.
 
 use anyhow::Result;
-use bsl_shared::domain::types::TypeResolution;
+use bsl_shared::domain::types::{FacetKind, TypeResolution};
 use bsl_shared::ir::{MemberAccessKind, SemanticNode, SemanticNodeKind, Span};
 
 use crate::parsing::bsl::ast::Expression;
 
 use super::converter::AstToIrConverter;
 use super::global_collections::{get_manager_type_for_metadata, is_global_collection};
+use crate::application::semantic_validation_visitor::helpers::collection_name_to_metadata_kind;
 
 impl AstToIrConverter {
     /// Конвертация вызова функции
@@ -212,8 +213,11 @@ impl AstToIrConverter {
 
                 // Вычисляем result_type для MemberAccess
                 // Для Справочники.Контрагенты -> СправочникМенеджер.Контрагенты
-                let result_type =
-                    TypeResolution::explicit(&get_manager_type_for_metadata(name, property));
+                let result_type = if let Some(kind) = collection_name_to_metadata_kind(name) {
+                    TypeResolution::metadata_type(kind, property, Some(FacetKind::Manager))
+                } else {
+                    TypeResolution::explicit(&get_manager_type_for_metadata(name, property))
+                };
 
                 // Создаём MemberAccess с object_node указывающим на GlobalPropertyAccess
                 let member_node = SemanticNode {

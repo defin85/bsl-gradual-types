@@ -145,12 +145,14 @@ impl MethodExtractor {
                                         let (russian, english) =
                                             Self::parse_bilingual_name(&link_text);
                                         items.push((russian, english));
-                                        debug!(
-                                            "Extracted from '{}': {} ({})",
-                                            section_name,
-                                            items.last().unwrap().0,
-                                            items.last().unwrap().1
-                                        );
+                                        if let Some((ru, en)) = items.last() {
+                                            debug!(
+                                                "Extracted from '{}': {} ({})",
+                                                section_name,
+                                                ru,
+                                                en
+                                            );
+                                        }
                                     }
                                 }
                             }

@@ -337,9 +337,9 @@ impl TreeSitterParser {
         let mut parser = Parser::new();
 
         // Инициализация BSL грамматики от alkoleft
-        parser
-            .set_language(&tree_sitter_bsl::LANGUAGE.into())
-            .expect("Failed to load BSL grammar");
+        if let Err(err) = parser.set_language(&tree_sitter_bsl::LANGUAGE.into()) {
+            error!("Failed to load BSL grammar: {:?}", err);
+        }
 
         debug!("Tree-sitter-bsl parser initialized");
 

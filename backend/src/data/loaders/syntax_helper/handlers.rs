@@ -202,8 +202,10 @@ impl SyntaxHelperLoader {
                 // но не в подкаталогах вида catalogXXX
                 if path.contains(&top_level_pattern) {
                     // Проверяем, что это не вложенная категория
-                    let after_pattern =
-                        &path[path.find(&top_level_pattern).unwrap() + top_level_pattern.len()..];
+                    let Some(start) = path.find(&top_level_pattern) else {
+                        continue;
+                    };
+                    let after_pattern = &path[start + top_level_pattern.len()..];
 
                     // Если после паттерна нет другого catalog*, значит это тип в основной категории
                     if !after_pattern.starts_with("catalog") {

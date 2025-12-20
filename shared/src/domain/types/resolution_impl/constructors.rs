@@ -123,11 +123,7 @@ impl TypeResolution {
 
     /// Metadata type (catalog, document, etc.) with optional facet
     pub fn metadata_type(kind: MetadataKind, name: &str, facet: Option<FacetKind>) -> Self {
-        let available_facets = if facet.is_some() {
-            vec![facet.unwrap()]
-        } else {
-            vec![]
-        };
+        let available_facets = facet.map_or_else(Vec::new, |f| vec![f]);
 
         Self {
             certainty: Certainty::Known,

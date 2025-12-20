@@ -332,7 +332,9 @@ impl DocumentParser {
 
     /// Извлекает контексты доступности функции
     fn extract_availability_contexts(document: &Html) -> Vec<String> {
-        let availability_selector = Selector::parse("p.V8SH_chapter + p").unwrap();
+        let Ok(availability_selector) = Selector::parse("p.V8SH_chapter + p") else {
+            return Vec::new();
+        };
 
         for element in document.select(&availability_selector) {
             let text = element.text().collect::<String>();

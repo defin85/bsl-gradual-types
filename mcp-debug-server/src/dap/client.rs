@@ -56,8 +56,14 @@ impl DapClient {
                 crate::types::DapError::SpawnFailed(e.to_string())
             })?;
 
-        let stdin = child.stdin.take().expect("Failed to get stdin");
-        let stdout = child.stdout.take().expect("Failed to get stdout");
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| DapError::SpawnFailed("Failed to get stdin".to_string()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| DapError::SpawnFailed("Failed to get stdout".to_string()))?;
 
         let transport = DapTransport::new(stdin, stdout);
         let (writer, reader) = transport.split();

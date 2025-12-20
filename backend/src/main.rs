@@ -95,9 +95,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // Create TypeSystemService using SystemCoordinator's singleton method
-    let type_service = system_coord
-        .type_service()
-        .expect("AnalysisEngine should be initialized after start_with_paths");
+    let type_service = system_coord.type_service().ok_or_else(|| {
+        let err: Box<dyn std::error::Error> =
+            "AnalysisEngine should be initialized after start_with_paths".into();
+        err
+    })?;
 
     let app_state = AppState {
         type_service: type_service.clone(),

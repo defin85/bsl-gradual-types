@@ -634,7 +634,10 @@ impl LanguageServer for BslLanguageServer {
                 .await
                 .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
 
-                Ok(Some(serde_json::to_value(result).unwrap()))
+                Ok(Some(
+                    serde_json::to_value(result)
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+                ))
             }
             "bsl.getSemanticTree" => {
                 if params.arguments.is_empty() {
@@ -661,7 +664,10 @@ impl LanguageServer for BslLanguageServer {
                 .await
                 .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
 
-                Ok(Some(serde_json::to_value(result).unwrap()))
+                Ok(Some(
+                    serde_json::to_value(result)
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+                ))
             }
             "bsl.searchTypes" => {
                 if params.arguments.is_empty() {
@@ -679,7 +685,10 @@ impl LanguageServer for BslLanguageServer {
                     })?;
 
                 let result = handle_search_types(request, self.coordinator.get_analysis_engine());
-                Ok(Some(serde_json::to_value(result).unwrap()))
+                Ok(Some(
+                    serde_json::to_value(result)
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+                ))
             }
             "bsl.getAllTypes" => {
                 // Parameters are optional - use defaults if not provided
@@ -699,7 +708,10 @@ impl LanguageServer for BslLanguageServer {
                 };
 
                 let result = handle_get_all_types(request, self.coordinator.type_service());
-                Ok(Some(serde_json::to_value(result).unwrap()))
+                Ok(Some(
+                    serde_json::to_value(result)
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+                ))
             }
             "bsl.getCurrentContext" => {
                 if params.arguments.is_empty() {
@@ -717,7 +729,10 @@ impl LanguageServer for BslLanguageServer {
                     })?;
 
                 let result = self.handle_get_current_context(request).await?;
-                Ok(Some(serde_json::to_value(result).unwrap()))
+                Ok(Some(
+                    serde_json::to_value(result)
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+                ))
             }
             "bsl.queryType" => {
                 if params.arguments.is_empty() {
@@ -735,11 +750,17 @@ impl LanguageServer for BslLanguageServer {
                     })?;
 
                 let result = handle_query_type(request, self.coordinator.get_analysis_engine());
-                Ok(Some(serde_json::to_value(result).unwrap()))
+                Ok(Some(
+                    serde_json::to_value(result)
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+                ))
             }
             "bsl.getTypeRepositoryStats" => {
                 let result = handle_get_type_repository_stats(self.coordinator.clone());
-                Ok(Some(serde_json::to_value(result).unwrap()))
+                Ok(Some(
+                    serde_json::to_value(result)
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+                ))
             }
             "bsl.parseConfiguration" => {
                 if params.arguments.is_empty() {
@@ -764,7 +785,10 @@ impl LanguageServer for BslLanguageServer {
                     "Parsing configuration",
                 )
                 .await;
-                Ok(Some(serde_json::to_value(result).unwrap()))
+                Ok(Some(
+                    serde_json::to_value(result)
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+                ))
             }
             _ => {
                 warn!("Unknown command: {}", params.command);

@@ -364,14 +364,14 @@ impl ConfigurationDiscovery {
         // Создаём терминальный прогресс-бар если show_progress == true
         let terminal_progress = if self.show_progress {
             let pb = ProgressBar::new(total_objects as u64);
-            pb.set_style(
-                ProgressStyle::default_bar()
-                    .template(
-                        "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]",
-                    )
-                    .unwrap()
-                    .progress_chars("##-"),
-            );
+            let style = ProgressStyle::default_bar();
+            let style = match style.template(
+                "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]",
+            ) {
+                Ok(style) => style.progress_chars("##-"),
+                Err(_) => style,
+            };
+            pb.set_style(style);
             pb.set_message(format!("Парсинг {}", config_info.name));
             Some(pb)
         } else {

@@ -89,7 +89,7 @@ impl IrCache {
 
         Self {
             storage: Arc::new(RwLock::new(LruCache::new(
-                NonZeroUsize::new(capacity).expect("Capacity must be > 0"),
+                NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::MIN),
             ))),
             stats: Arc::new(RwLock::new(IrCacheStats::default())),
         }
@@ -382,5 +382,11 @@ mod tests {
         // Статистика НЕ сбрасывается: 1 hit + 1 eviction при очистке
         assert_eq!(stats.hits, 1);
         assert_eq!(stats.evictions, 1);
+    }
+
+    #[tokio::test]
+    async fn test_zero_capacity_falls_back_to_minimum() {
+        let cache = IrCache::new(0);
+        assert_eq!(cache.capacity().await, 1);
     }
 }

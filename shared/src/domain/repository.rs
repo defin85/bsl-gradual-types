@@ -344,8 +344,14 @@ impl Default for InMemoryTypeRepository {
 
 impl TypeRepository for InMemoryTypeRepository {
     fn load_types(&self, new_types: Vec<RawTypeData>) -> Result<()> {
-        let mut types = self.types.write().unwrap();
-        let mut index = self.type_index.write().unwrap();
+        let mut types = self.types.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("types RwLock poisoned in load_types, recovering");
+            poisoned.into_inner()
+        });
+        let mut index = self.type_index.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("type_index RwLock poisoned in load_types, recovering");
+            poisoned.into_inner()
+        });
 
         let types_count = new_types.len();
         let start_time = std::time::Instant::now();
@@ -376,7 +382,10 @@ impl TypeRepository for InMemoryTypeRepository {
         types.extend(new_types);
 
         // Обновляем timestamp
-        *self.last_updated.write().unwrap() = Some(SystemTime::now());
+        *self.last_updated.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("last_updated RwLock poisoned in load_types, recovering");
+            poisoned.into_inner()
+        }) = Some(SystemTime::now());
 
         let elapsed = start_time.elapsed();
         tracing::debug!(
@@ -390,12 +399,21 @@ impl TypeRepository for InMemoryTypeRepository {
     }
 
     fn get_all_types(&self) -> Vec<RawTypeData> {
-        self.types.read().unwrap().clone()
+        self.types.read().unwrap_or_else(|poisoned| {
+            tracing::warn!("types RwLock poisoned in get_all_types, recovering");
+            poisoned.into_inner()
+        }).clone()
     }
 
     fn find_type(&self, name: &str) -> Option<RawTypeData> {
-        let types = self.types.read().unwrap();
-        let index = self.type_index.read().unwrap();
+        let types = self.types.read().unwrap_or_else(|poisoned| {
+            tracing::warn!("types RwLock poisoned in find_type, recovering");
+            poisoned.into_inner()
+        });
+        let index = self.type_index.read().unwrap_or_else(|poisoned| {
+            tracing::warn!("type_index RwLock poisoned in find_type, recovering");
+            poisoned.into_inner()
+        });
 
         // Убираем generic параметры: "ТабличнаяЧасть<Работы>" -> "ТабличнаяЧасть"
         let base_name = if let Some(idx) = name.find('<') {
@@ -434,8 +452,14 @@ impl TypeRepository for InMemoryTypeRepository {
     }
 
     fn get_stats(&self) -> RepositoryStats {
-        let types = self.types.read().unwrap();
-        let last_updated = self.last_updated.read().unwrap();
+        let types = self.types.read().unwrap_or_else(|poisoned| {
+            tracing::warn!("types RwLock poisoned in get_stats, recovering");
+            poisoned.into_inner()
+        });
+        let last_updated = self.last_updated.read().unwrap_or_else(|poisoned| {
+            tracing::warn!("last_updated RwLock poisoned in get_stats, recovering");
+            poisoned.into_inner()
+        });
 
         // Различаем типы по источнику
         let platform_count = types
@@ -477,7 +501,10 @@ impl TypeRepository for InMemoryTypeRepository {
     ) -> SignatureValidationResult {
         use crate::domain::signature_index::{MethodSignature, SignatureSource};
 
-        let index = self.signature_index.read().unwrap();
+        let index = self.signature_index.read().unwrap_or_else(|poisoned| {
+            tracing::warn!("SignatureIndex RwLock poisoned in validate_method_signature, recovering");
+            poisoned.into_inner()
+        });
 
         // Ищем все overload'ы метода в индексе
         let expected_overloads = index.find_methods(owner_type, method_name);
@@ -535,7 +562,10 @@ impl TypeRepository for InMemoryTypeRepository {
     }
 
     fn get_signature_index_clone(&self) -> SignatureIndex {
-        self.signature_index.read().unwrap().clone()
+        self.signature_index.read().unwrap_or_else(|poisoned| {
+            tracing::warn!("SignatureIndex RwLock poisoned in get_signature_index_clone, recovering");
+            poisoned.into_inner()
+        }).clone()
     }
 
     fn add_config_method_signature(
@@ -624,7 +654,10 @@ impl TypeRepository for InMemoryTypeRepository {
     }
 
     fn get_metadata_objects_by_kind(&self, kind: MetadataKind) -> Vec<String> {
-        let types = self.types.read().unwrap();
+        let types = self.types.read().unwrap_or_else(|poisoned| {
+            tracing::warn!("types RwLock poisoned in get_metadata_objects_by_kind, recovering");
+            poisoned.into_inner()
+        });
         let prefix = kind.to_prefix();
 
         types
@@ -685,8 +718,14 @@ impl TypeRepository for InMemoryTypeRepository {
         type_name: &str,
         generic_info: crate::domain::types::GenericInfo,
     ) -> bool {
-        let mut types = self.types.write().unwrap();
-        let index = self.type_index.read().unwrap();
+        let mut types = self.types.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("types RwLock poisoned in set_generic_info, recovering");
+            poisoned.into_inner()
+        });
+        let index = self.type_index.read().unwrap_or_else(|poisoned| {
+            tracing::warn!("type_index RwLock poisoned in set_generic_info, recovering");
+            poisoned.into_inner()
+        });
 
         // O(1) lookup через TypeId
         let id = TypeId::new(type_name);

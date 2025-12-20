@@ -249,14 +249,14 @@ impl SystemCoordinator {
                     if let Ok(mut guard) = terminal_progress.lock() {
                         let pb = guard.get_or_insert_with(|| {
                             let pb = ProgressBar::new(p.total as u64);
-                            pb.set_style(
-                                ProgressStyle::default_bar()
-                                    .template(
-                                        "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]",
-                                    )
-                                    .unwrap()
-                                    .progress_chars("##-"),
-                            );
+                            let style = ProgressStyle::default_bar();
+                            let style = match style.template(
+                                "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]",
+                            ) {
+                                Ok(style) => style.progress_chars("##-"),
+                                Err(_) => style,
+                            };
+                            pb.set_style(style);
                             pb.set_message(format!("Индексация {}", config_name.as_str()));
                             pb
                         });

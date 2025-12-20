@@ -61,12 +61,13 @@ pub struct CacheAnalysisResult {
 impl AnalysisCache {
     /// Создать новый простой кеш
     pub fn new(capacity: usize) -> Self {
+        let capacity = std::num::NonZeroUsize::new(capacity).unwrap_or(std::num::NonZeroUsize::MIN);
         Self {
-            storage: lru::LruCache::new(std::num::NonZeroUsize::new(capacity).unwrap()),
+            storage: lru::LruCache::new(capacity),
             ttl_tracker: HashMap::new(),
             default_ttl: Duration::from_secs(300), // 5 минут TTL
             string_cache: std::sync::Mutex::new(lru::LruCache::new(
-                std::num::NonZeroUsize::new(capacity).unwrap(),
+                capacity,
             )),
             string_stats: std::sync::Mutex::new((0, 0)),
         }
@@ -137,26 +138,41 @@ impl AnalysisCache {
 
     /// Получить результат анализа из кэша по строковому ключу
     pub fn get_analysis(&self, key: &str) -> Option<CacheAnalysisResult> {
-        let mut cache = self.string_cache.lock().unwrap();
+        let mut cache = self
+            .string_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(result) = cache.get(key) {
-            let mut stats = self.string_stats.lock().unwrap();
+            let mut stats = self
+                .string_stats
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             stats.0 += 1; // hits
             return Some(result.clone());
         }
-        let mut stats = self.string_stats.lock().unwrap();
+        let mut stats = self
+            .string_stats
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         stats.1 += 1; // misses
         None
     }
 
     /// Сохранить результат анализа в кэш по строковому ключу
     pub fn store_analysis(&self, key: String, result: CacheAnalysisResult) {
-        let mut cache = self.string_cache.lock().unwrap();
+        let mut cache = self
+            .string_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         cache.put(key, result);
     }
 
     /// Получить hit rate кэша
     pub fn get_hit_rate(&self) -> f64 {
-        let (hits, misses) = *self.string_stats.lock().unwrap();
+        let (hits, misses) = *self
+            .string_stats
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let total = hits + misses;
         if total == 0 {
             return 0.0;
@@ -201,4 +217,16 @@ mod comparison_notes {
     //! - ~100 LOC
     //!
     //! Экономия: ~50% сложности, сохраняет основную функциональность
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_capacity_is_never_zero() {
+        let cache = AnalysisCache::new(0);
+        let stats = cache.cache_stats();
+        assert_eq!(stats.max_capacity, 1);
+    }
 }

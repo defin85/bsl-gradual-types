@@ -55,15 +55,19 @@ pub fn detect_file_type(path: &Path, document: &Html) -> FileType {
         if path_str.contains("Global context") && path_str.contains("methods") {
             // Проверяем заголовок документа
             let title_selector = Selector::parse("h1.V8SH_pagetitle")
-                .unwrap_or_else(|_| Selector::parse("h1").unwrap());
+                .or_else(|_| Selector::parse("h1"))
+                .ok();
 
-            if let Some(title_elem) = document.select(&title_selector).next() {
-                let title = title_elem.text().collect::<String>();
-                // Если заголовок начинается с "Глобальный контекст." или "Global context."
-                // это глобальная функция
-                if title.starts_with("Глобальный контекст.") || title.starts_with("Global context.")
-                {
-                    return FileType::GlobalFunction;
+            if let Some(selector) = title_selector {
+                if let Some(title_elem) = document.select(&selector).next() {
+                    let title = title_elem.text().collect::<String>();
+                    // Если заголовок начинается с "Глобальный контекст." или "Global context."
+                    // это глобальная функция
+                    if title.starts_with("Глобальный контекст.")
+                        || title.starts_with("Global context.")
+                    {
+                        return FileType::GlobalFunction;
+                    }
                 }
             }
         }
@@ -82,20 +86,23 @@ pub fn detect_file_type(path: &Path, document: &Html) -> FileType {
     }
 
     // Проверяем по содержимому
-    let title_selector =
-        Selector::parse("h1.V8SH_pagetitle").unwrap_or_else(|_| Selector::parse("h1").unwrap());
+    let title_selector = Selector::parse("h1.V8SH_pagetitle")
+        .or_else(|_| Selector::parse("h1"))
+        .ok();
 
-    if let Some(title_elem) = document.select(&title_selector).next() {
-        let title = title_elem.text().collect::<String>();
+    if let Some(selector) = title_selector {
+        if let Some(title_elem) = document.select(&selector).next() {
+            let title = title_elem.text().collect::<String>();
 
-        // Если в заголовке есть скобки - это тип
-        if title.contains('(') && title.contains(')') {
-            return FileType::Type;
-        }
+            // Если в заголовке есть скобки - это тип
+            if title.contains('(') && title.contains(')') {
+                return FileType::Type;
+            }
 
-        // Если заголовок содержит "." - это метод
-        if title.contains('.') && !title.contains("...") {
-            return FileType::Method;
+            // Если заголовок содержит "." - это метод
+            if title.contains('.') && !title.contains("...") {
+                return FileType::Method;
+            }
         }
     }
 

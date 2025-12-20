@@ -251,7 +251,10 @@ pub mod common {
 
     impl ParserFactory {
         pub fn create() -> Box<dyn Parser> {
-            Box::new(super::BslParser::new("").unwrap())
+            match super::BslParser::new("") {
+                Ok(parser) => Box::new(parser),
+                Err(_) => Box::new(super::BslParser),
+            }
         }
     }
 

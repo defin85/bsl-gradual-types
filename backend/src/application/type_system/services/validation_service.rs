@@ -2,7 +2,7 @@
 //!
 //! Functions for validating BSL code syntax and semantics.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use tracing::info;
 
 use bsl_shared::api::ValidationErrorDto;
@@ -221,14 +221,14 @@ pub async fn validate_semantics_debug(
         .parse(code)
         .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
 
-    debug_info["steps"]
+    let steps = debug_info["steps"]
         .as_array_mut()
-        .unwrap()
-        .push(serde_json::json!({
-            "step": "parse",
-            "success": true,
-            "syntax_errors": parse_result.syntax_errors.len()
-        }));
+        .ok_or_else(|| anyhow!("debug_info.steps is not array"))?;
+    steps.push(serde_json::json!({
+        "step": "parse",
+        "success": true,
+        "syntax_errors": parse_result.syntax_errors.len()
+    }));
 
     if !parse_result.syntax_errors.is_empty() {
         return Ok((Vec::new(), debug_info));
@@ -251,14 +251,14 @@ pub async fn validate_semantics_debug(
         Some(resolver_arc.clone()),
     )?;
 
-    debug_info["steps"]
+    let steps = debug_info["steps"]
         .as_array_mut()
-        .unwrap()
-        .push(serde_json::json!({
-            "step": "ast_to_ir",
-            "success": true,
-            "ir_nodes": ir.nodes.len()
-        }));
+        .ok_or_else(|| anyhow!("debug_info.steps is not array"))?;
+    steps.push(serde_json::json!({
+        "step": "ast_to_ir",
+        "success": true,
+        "ir_nodes": ir.nodes.len()
+    }));
 
     // 4. Add basic IR info
     debug_info["ir_info"] = serde_json::json!({
@@ -274,14 +274,14 @@ pub async fn validate_semantics_debug(
     walk_program(&ir, &mut visitor);
     let errors = visitor.into_errors();
 
-    debug_info["steps"]
+    let steps = debug_info["steps"]
         .as_array_mut()
-        .unwrap()
-        .push(serde_json::json!({
-            "step": "semantic_validation",
-            "success": true,
-            "errors_found": errors.len()
-        }));
+        .ok_or_else(|| anyhow!("debug_info.steps is not array"))?;
+    steps.push(serde_json::json!({
+        "step": "semantic_validation",
+        "success": true,
+        "errors_found": errors.len()
+    }));
 
     Ok((errors, debug_info))
 }

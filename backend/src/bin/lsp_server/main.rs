@@ -15,7 +15,7 @@ mod progress_bridge;
 mod server;
 mod types;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use std::io::Write;
 use std::sync::Arc;
@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
         .write(true)
         .truncate(true)
         .open("rust_lsp_server.log")
-        .expect("Failed to create log file");
+        .context("Failed to create log file")?;
 
     // Configure logging to FILE instead of stderr
     tracing_subscriber::fmt()

@@ -78,7 +78,10 @@ impl ResolutionResult {
 
         // 4. If only one type remains, return Concrete
         if normalized.len() == 1 {
-            return ResolutionResult::Concrete(normalized.into_iter().next().unwrap().type_);
+            if let Some(single) = normalized.into_iter().next() {
+                return ResolutionResult::Concrete(single.type_);
+            }
+            return ResolutionResult::Dynamic;
         }
 
         ResolutionResult::Union(normalized)
@@ -91,7 +94,10 @@ impl ResolutionResult {
         }
 
         if types.len() == 1 {
-            return ResolutionResult::Concrete(types.into_iter().next().unwrap());
+            if let Some(single) = types.into_iter().next() {
+                return ResolutionResult::Concrete(single);
+            }
+            return ResolutionResult::Dynamic;
         }
 
         // Deduplicate
@@ -103,7 +109,10 @@ impl ResolutionResult {
         }
 
         if unique_types.len() == 1 {
-            return ResolutionResult::Concrete(unique_types.into_iter().next().unwrap());
+            if let Some(single) = unique_types.into_iter().next() {
+                return ResolutionResult::Concrete(single);
+            }
+            return ResolutionResult::Dynamic;
         }
 
         ResolutionResult::Intersection(unique_types)

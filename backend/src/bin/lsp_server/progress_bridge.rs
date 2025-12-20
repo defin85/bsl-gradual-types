@@ -104,7 +104,7 @@ impl LspWorkDoneReporter {
             "{token_prefix}-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_else(|_| Duration::from_secs(0))
                 .as_millis()
         ));
 

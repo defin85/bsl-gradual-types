@@ -127,14 +127,14 @@ impl ParallelAnalyzer {
         // 3. Создать прогресс-бар
         let progress = if self.show_progress {
             let pb = ProgressBar::new(total_files as u64);
-            pb.set_style(
-                ProgressStyle::default_bar()
-                    .template(
-                        "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}",
-                    )
-                    .expect("Invalid progress template")
-                    .progress_chars("#>-"),
-            );
+            let style = ProgressStyle::default_bar();
+            let style = match style.template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}",
+            ) {
+                Ok(style) => style.progress_chars("#>-"),
+                Err(_) => style,
+            };
+            pb.set_style(style);
             Some(pb)
         } else {
             None
@@ -150,20 +150,25 @@ impl ParallelAnalyzer {
             match self.analyze_file(file_path) {
                 Ok(result) => {
                     if result.from_cache {
-                        let mut hits = cache_hits.lock().unwrap();
+                        let mut hits = cache_hits
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
                         *hits += 1;
                     }
 
                     file_results
                         .lock()
-                        .unwrap()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .insert(file_path.display().to_string(), result);
                 }
                 Err(e) => {
-                    errors.lock().unwrap().push(AnalysisError {
-                        file_path: file_path.display().to_string(),
-                        error_message: e.to_string(),
-                    });
+                    errors
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push(AnalysisError {
+                            file_path: file_path.display().to_string(),
+                            error_message: e.to_string(),
+                        });
                 }
             }
 
@@ -179,18 +184,18 @@ impl ParallelAnalyzer {
 
         // 7. Собрать результаты
         let file_results_map = match Arc::try_unwrap(file_results) {
-            Ok(mutex) => mutex.into_inner().unwrap(),
-            Err(arc) => arc.lock().unwrap().clone(),
+            Ok(mutex) => mutex.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()),
+            Err(arc) => arc.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone(),
         };
 
         let errors_vec = match Arc::try_unwrap(errors) {
-            Ok(mutex) => mutex.into_inner().unwrap(),
-            Err(arc) => arc.lock().unwrap().clone(),
+            Ok(mutex) => mutex.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()),
+            Err(arc) => arc.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone(),
         };
 
         let files_from_cache = match Arc::try_unwrap(cache_hits) {
-            Ok(mutex) => mutex.into_inner().unwrap(),
-            Err(arc) => *arc.lock().unwrap(),
+            Ok(mutex) => mutex.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()),
+            Err(arc) => *arc.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
         };
 
         let files_analyzed = file_results_map.len();

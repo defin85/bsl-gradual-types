@@ -212,6 +212,10 @@ impl TypeMetadataLookup {
     /// }
     /// ```
     pub fn get_properties(&self, resolution: &TypeResolution) -> Vec<RawPropertyData> {
+        if let Some(enum_props) = self.get_enum_manager_properties(resolution) {
+            return enum_props;
+        }
+
         // Приоритет 1 - Lazy lookup через active_facet (для конфигурационных типов)
         if let Some(facet) = resolution.active_facet {
             if let Some(props) = self.get_facet_properties(resolution, facet) {
@@ -223,6 +227,29 @@ impl TypeMetadataLookup {
         self.get_raw_type(resolution)
             .map(|raw| raw.properties)
             .unwrap_or_default()
+    }
+
+    fn get_enum_manager_properties(
+        &self,
+        resolution: &TypeResolution,
+    ) -> Option<Vec<RawPropertyData>> {
+        let type_name = resolution.type_name();
+        let enum_name = type_name.strip_prefix("ПеречислениеМенеджер.")?;
+        let raw = self
+            .repository
+            .find_type(&format!("Перечисления.{}", enum_name))?;
+
+        let enum_ref_type = format!("ПеречислениеСсылка.{}", enum_name);
+        Some(
+            raw.enum_values
+                .iter()
+                .map(|value| RawPropertyData {
+                    name: value.clone(),
+                    prop_type: enum_ref_type.clone(),
+                    is_readonly: true,
+                })
+                .collect(),
+        )
     }
 
     /// Получить табличные части для TypeResolution
@@ -322,6 +349,17 @@ impl TypeMetadataLookup {
         // Проверяем значения перечисления
         if raw.enum_values.iter().any(|v| v == member_name) {
             return true;
+        }
+
+        if let Some(enum_name) = resolution.type_name().strip_prefix("ПеречислениеМенеджер.") {
+            if let Some(raw_enum) = self
+                .repository
+                .find_type(&format!("Перечисления.{}", enum_name))
+            {
+                if raw_enum.enum_values.iter().any(|v| v == member_name) {
+                    return true;
+                }
+            }
         }
 
         false

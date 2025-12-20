@@ -182,14 +182,14 @@ pub async fn get_hover_info_with_file_path(
                         };
 
                         // 2) Тип свойства из метаданных (если есть), иначе fallback на result_type узла
-                        let (prop_type, mut is_readonly) = metadata_lookup
+                        let (prop_type, is_readonly) = metadata_lookup
                             .get_properties(&owner_resolution)
                             .into_iter()
                             .find(|p| p.name.eq_ignore_ascii_case(member_name))
                             .map(|p| (p.prop_type, Some(p.is_readonly)))
                             .unwrap_or_else(|| (String::new(), None));
 
-                        let mut property_resolution = if !prop_type.trim().is_empty() {
+                        let property_resolution = if !prop_type.trim().is_empty() {
                             resolver.resolve_expression_sync(&prop_type)
                         } else {
                             resolver.resolve_expression_sync(&result_type.type_name())

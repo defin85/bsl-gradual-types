@@ -4,7 +4,7 @@ use super::TypeMetadataLookup;
 use crate::domain::resolver::GenericStrategy;
 use crate::domain::signature_index::MethodSignature;
 use crate::domain::types::{
-    ConcreteType, FacetKind, GenericType, PlatformType, RawMethodData, RawParamData,
+    ConcreteType, FacetKind, GenericType, MetadataKind, PlatformType, RawMethodData, RawParamData,
     RawPropertyData, RawTabularSectionData, RawTypeData, ResolutionResult, TypeResolution,
 };
 

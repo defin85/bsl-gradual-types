@@ -235,11 +235,14 @@ impl TypeMetadataLookup {
     ) -> Option<Vec<RawPropertyData>> {
         let type_name = resolution.type_name();
         let enum_name = type_name.strip_prefix("ПеречислениеМенеджер.")?;
+        let enum_ref_type = Self::get_platform_facet_type(MetadataKind::Enum, FacetKind::Reference)
+            .map(|platform_type| {
+                crate::domain::facet_utils::substitute_type_name(platform_type, enum_name)
+            })?;
         let raw = self
             .repository
             .find_type(&format!("Перечисления.{}", enum_name))?;
 
-        let enum_ref_type = format!("ПеречислениеСсылка.{}", enum_name);
         Some(
             raw.enum_values
                 .iter()

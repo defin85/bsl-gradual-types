@@ -12,7 +12,7 @@ use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{RawDataSource, RawTypeData};
 use bsl_shared::engine::AnalysisEngine;
 
-use crate::data::adapters::convert_syntax_helper_to_raw;
+use crate::data::adapters::{convert_syntax_helper_global_functions, convert_syntax_helper_to_raw};
 use crate::data::loaders::{hbk_recovery, progress::ProgressUpdate, SyntaxHelperLoader};
 use crate::system::parser_coordinator::ParserCoordinator;
 use bsl_shared::api::StartupProgressDto;
@@ -352,6 +352,20 @@ impl SystemCoordinator {
             .register(SyntaxHelperSource::new(platform_types_clone))
             .build();
         repository.set_signature_index(index);
+
+        let global_function_signatures =
+            convert_syntax_helper_global_functions(&database);
+        if !global_function_signatures.is_empty() {
+            let count = global_function_signatures.len();
+            for signature in global_function_signatures {
+                let name = signature.name.clone();
+                repository.add_global_function_signature(&name, signature);
+            }
+            info!(
+                "SignatureIndex заполнен {} глобальными функциями",
+                count
+            );
+        }
 
         // Milestone 3.x: Применяем GenericInfo для типов-коллекций (inference rules)
         let generic_count = apply_generic_info_to_repository(repository.as_ref());

@@ -83,6 +83,7 @@ impl DocumentParser {
             .first()
             .map(|o| o.parameters.clone())
             .unwrap_or_else(|| self.html_extractor.extract_parameters(document));
+        let contexts = Self::extract_availability_contexts(document);
 
         Ok(MethodInfo {
             name: name.clone(),
@@ -92,6 +93,7 @@ impl DocumentParser {
             parameters,
             return_type,
             return_description,
+            contexts,
         })
     }
 
@@ -338,7 +340,13 @@ impl DocumentParser {
 
         for element in document.select(&availability_selector) {
             let text = element.text().collect::<String>();
-            if text.contains("клиент") || text.contains("сервер") || text.contains("соединение")
+            let text_lower = text.to_lowercase();
+            if text_lower.contains("клиент")
+                || text_lower.contains("client")
+                || text_lower.contains("сервер")
+                || text_lower.contains("server")
+                || text_lower.contains("соединение")
+                || text_lower.contains("connection")
             {
                 return text
                     .split(',')

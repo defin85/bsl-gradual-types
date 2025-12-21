@@ -216,31 +216,24 @@ fn infer_method_metadata(method: &RawMethodData) -> (Option<FacetKind>, ContextR
     let method_name = method.name.to_lowercase();
     let return_type = method.return_type.to_lowercase();
 
-    // Методы создания объектов -> Object, ServerOnly
-    if method_name.starts_with("создать")
+    let inferred = if method_name.starts_with("создать")
         || method_name.starts_with("create")
         || method_name == "скопировать"
         || method_name == "copy"
     {
-        return (Some(FacetKind::Object), ContextRequirements::ServerOnly);
-    }
-
-    // Методы поиска -> Reference, ServerOnly
-    if method_name.starts_with("найтипо")
+        // Методы создания объектов -> Object, ServerOnly
+        (Some(FacetKind::Object), ContextRequirements::ServerOnly)
+    } else if method_name.starts_with("найтипо")
         || method_name.starts_with("findby")
         || method_name == "найти"
         || method_name == "find"
     {
-        return (Some(FacetKind::Reference), ContextRequirements::ServerOnly);
-    }
-
-    // Методы выборки -> Selection, ServerOnly
-    if method_name == "выбрать" || method_name == "select" {
-        return (Some(FacetKind::Selection), ContextRequirements::ServerOnly);
-    }
-
-    // Методы записи -> ServerOnly (без facet - void)
-    if method_name == "записать"
+        // Методы поиска -> Reference, ServerOnly
+        (Some(FacetKind::Reference), ContextRequirements::ServerOnly)
+    } else if method_name == "выбрать" || method_name == "select" {
+        // Методы выборки -> Selection, ServerOnly
+        (Some(FacetKind::Selection), ContextRequirements::ServerOnly)
+    } else if method_name == "записать"
         || method_name == "write"
         || method_name == "провести"
         || method_name == "post"
@@ -249,30 +242,31 @@ fn infer_method_metadata(method: &RawMethodData) -> (Option<FacetKind>, ContextR
         || method_name == "удалить"
         || method_name == "delete"
     {
-        return (None, ContextRequirements::ServerOnly);
-    }
-
-    // Методы получения объекта -> Object, ServerOnly
-    if method_name == "получитьобъект" || method_name == "getobject" {
-        return (Some(FacetKind::Object), ContextRequirements::ServerOnly);
-    }
-
-    // Методы проверки ссылки -> Reference, Universal
-    if method_name == "пустая"
+        // Методы записи -> ServerOnly (без facet - void)
+        (None, ContextRequirements::ServerOnly)
+    } else if method_name == "получитьобъект" || method_name == "getobject" {
+        // Методы получения объекта -> Object, ServerOnly
+        (Some(FacetKind::Object), ContextRequirements::ServerOnly)
+    } else if method_name == "пустая"
         || method_name == "isempty"
         || method_name == "пустаяссылка"
         || method_name == "emptyref"
     {
-        return (Some(FacetKind::Reference), ContextRequirements::Universal);
+        // Методы проверки ссылки -> Reference, Universal
+        (Some(FacetKind::Reference), ContextRequirements::Universal)
+    } else if return_type.contains("менеджер") || return_type.contains("manager") {
+        // Методы менеджера без явного типа возврата
+        (Some(FacetKind::Manager), ContextRequirements::Universal)
+    } else {
+        // По умолчанию - Universal context, без facet
+        (None, ContextRequirements::Universal)
+    };
+
+    if let Some(context_override) = method.context_requirements {
+        return (inferred.0, context_override);
     }
 
-    // Методы менеджера без явного типа возврата
-    if return_type.contains("менеджер") || return_type.contains("manager") {
-        return (Some(FacetKind::Manager), ContextRequirements::Universal);
-    }
-
-    // По умолчанию - Universal context, без facet
-    (None, ContextRequirements::Universal)
+    inferred
 }
 
 #[cfg(test)]
@@ -464,5 +458,19 @@ mod tests {
         let (facet, context) = infer_method_metadata(&method);
         assert_eq!(facet, None);
         assert_eq!(context, ContextRequirements::ServerOnly);
+    }
+
+    #[test]
+    fn test_infer_method_metadata_context_override() {
+        let method = RawMethodData {
+            name: "Записать".to_string(),
+            return_type: "".to_string(),
+            context_requirements: Some(ContextRequirements::ClientOnly),
+            ..Default::default()
+        };
+
+        let (facet, context) = infer_method_metadata(&method);
+        assert_eq!(facet, None);
+        assert_eq!(context, ContextRequirements::ClientOnly);
     }
 }

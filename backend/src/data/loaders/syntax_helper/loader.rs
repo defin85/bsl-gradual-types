@@ -25,8 +25,8 @@ use tracing::{info, warn};
 use super::document_parsers::DocumentParser;
 use super::indexing::IndexBuilder;
 use super::types::{
-    CategoryInfo, MethodInfo, OptimizationSettings, PropertyInfo, SyntaxHelperDatabase, SyntaxNode,
-    TypeIndex, TypeInfo,
+    CategoryInfo, GlobalFunctionInfo, MethodInfo, OptimizationSettings, PropertyInfo,
+    SyntaxHelperDatabase, SyntaxNode, TypeIndex, TypeInfo,
 };
 
 use super::stats::ParsingStats;
@@ -49,6 +49,8 @@ pub struct SyntaxHelperLoader {
     pub(crate) properties: Arc<DashMap<String, PropertyInfo>>,
     /// Категории (lock-free)
     pub(crate) categories: Arc<DashMap<String, CategoryInfo>>,
+    /// Глобальные функции (lock-free)
+    pub(crate) global_functions: Arc<DashMap<String, GlobalFunctionInfo>>,
 
     /// Индексы для поиска (собираются после парсинга)
     pub(crate) type_index: Arc<DashMap<String, TypeIndex>>,
@@ -90,6 +92,7 @@ impl SyntaxHelperLoader {
             methods: Arc::new(DashMap::new()),
             properties: Arc::new(DashMap::new()),
             categories: Arc::new(DashMap::new()),
+            global_functions: Arc::new(DashMap::new()),
             type_index: Arc::new(DashMap::new()),
             document_parser: DocumentParser::new(),
             settings,
@@ -441,6 +444,11 @@ impl SyntaxHelperLoader {
         // Копируем категории
         for entry in self.categories.iter() {
             db.categories
+                .insert(entry.key().clone(), entry.value().clone());
+        }
+
+        for entry in self.global_functions.iter() {
+            db.global_functions
                 .insert(entry.key().clone(), entry.value().clone());
         }
 

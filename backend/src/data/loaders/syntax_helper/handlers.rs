@@ -269,6 +269,7 @@ impl SyntaxHelperLoader {
             }
             SyntaxNode::GlobalFunction(func) => {
                 let key = format!("global_function_{}", func.name);
+                self.global_functions.insert(key.clone(), func.clone());
                 // Добавим в nodes для общего доступа
                 self.nodes.insert(key, SyntaxNode::GlobalFunction(func));
             }

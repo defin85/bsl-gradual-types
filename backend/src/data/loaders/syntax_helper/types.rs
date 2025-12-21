@@ -117,6 +117,8 @@ pub struct MethodInfo {
     pub parameters: Vec<ParameterInfo>,
     pub return_type: Option<String>,
     pub return_description: Option<String>,
+    #[serde(default)]
+    pub contexts: Vec<String>,
 }
 
 /// Один вариант синтаксиса (overload) метода.
@@ -179,6 +181,8 @@ pub struct SyntaxHelperDatabase {
     pub methods: HashMap<String, MethodInfo>,
     pub properties: HashMap<String, PropertyInfo>,
     pub categories: HashMap<String, CategoryInfo>,
+    #[serde(default)]
+    pub global_functions: HashMap<String, GlobalFunctionInfo>,
 }
 
 /// Индексы для поиска типов

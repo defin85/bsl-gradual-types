@@ -37,6 +37,27 @@ pub fn validate_method_call_context(
     None
 }
 
+/// Validates global function availability in the current runtime context.
+pub fn validate_global_function_call_context(
+    current_execution_context: &RuntimeExecutionContext,
+    signature_index: &SignatureIndex,
+    function_name: &str,
+) -> Option<TypeErrorKind> {
+    if let Some(signature) = signature_index.find_global_function(function_name) {
+        if !current_execution_context.can_call_method(&signature.context_requirements) {
+            return Some(TypeErrorKind::MethodNotAvailableInContext {
+                method_name: function_name.to_string(),
+                object_type: "Глобальный контекст".to_string(),
+                variable_name: None,
+                current_context: current_execution_context.current_directive,
+                required_context: signature.context_requirements,
+            });
+        }
+    }
+
+    None
+}
+
 /// Converts ValidationResult to TypeDiagnostic (Milestone 3.10)
 /// TODO: Use in future for detailed parameter diagnostics
 #[allow(dead_code)]

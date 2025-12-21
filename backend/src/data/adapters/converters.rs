@@ -1,8 +1,10 @@
 //! Functions to convert parsed data into the common `RawTypeData` format.
 
 use crate::data::loaders::{SyntaxHelperDatabase, SyntaxNode, TypeInfo};
+use bsl_shared::domain::signature_index::{ContextRequirements, MethodSignature, SignatureSource};
 use bsl_shared::domain::types::{
-    RawDataSource, RawMethodData, RawParamData, RawPropertyData, RawTypeData, TypeResolution,
+    ParameterInfo as SignatureParam, RawDataSource, RawMethodData, RawParamData, RawPropertyData,
+    RawTypeData, TypeResolution,
 };
 use std::collections::HashSet;
 use tracing::warn;
@@ -28,6 +30,36 @@ pub fn convert_syntax_helper_to_raw(db: &SyntaxHelperDatabase) -> Vec<RawTypeDat
             }
         })
         .collect()
+}
+
+fn contexts_to_requirements(contexts: &[String]) -> Option<ContextRequirements> {
+    if contexts.is_empty() {
+        return None;
+    }
+
+    let mut has_server = false;
+    let mut has_client = false;
+
+    for ctx in contexts {
+        let lower = ctx.to_lowercase();
+        if lower.contains("сервер")
+            || lower.contains("server")
+            || lower.contains("внешнее соединение")
+            || lower.contains("external connection")
+        {
+            has_server = true;
+        }
+        if lower.contains("клиент") || lower.contains("client") {
+            has_client = true;
+        }
+    }
+
+    match (has_server, has_client) {
+        (true, true) => Some(ContextRequirements::Universal),
+        (true, false) => Some(ContextRequirements::ServerOnly),
+        (false, true) => Some(ContextRequirements::ClientOnly),
+        (false, false) => None,
+    }
 }
 
 fn derive_collection_item_type(
@@ -128,6 +160,7 @@ fn convert_type_info_to_raw(
                     .english_name
                     .clone()
                     .unwrap_or_else(|| english.clone());
+                let context_requirements = contexts_to_requirements(&method_info.contexts);
 
                 // Если в документации есть варианты синтаксиса — разворачиваем в overload'ы.
                 if !method_info.overloads.is_empty() {
@@ -167,7 +200,7 @@ fn convert_type_info_to_raw(
                                 is_deprecated: false,
                                 is_constructor: method_info.name.starts_with("Новый")
                                     || method_info.name.starts_with("New"),
-                                context_requirements: None, // TODO: Извлечь из Syntax Helper
+                                context_requirements,
                                 return_facet: None,         // TODO: Извлечь из Syntax Helper
                             }
                         })
@@ -195,7 +228,7 @@ fn convert_type_info_to_raw(
                     is_deprecated: false,
                     is_constructor: method_info.name.starts_with("Новый")
                         || method_info.name.starts_with("New"),
-                    context_requirements: None, // TODO: Извлечь из Syntax Helper
+                    context_requirements,
                     return_facet: None,         // TODO: Извлечь из Syntax Helper
                 }]
             } else {
@@ -274,6 +307,64 @@ pub fn convert_resolutions_to_raw(_resolutions: &[TypeResolution]) -> Vec<RawTyp
     vec![]
 }
 
+pub fn convert_syntax_helper_global_functions(
+    db: &SyntaxHelperDatabase,
+) -> Vec<MethodSignature> {
+    let mut signatures = Vec::new();
+
+    for func in db.global_functions.values() {
+        let params: Vec<SignatureParam> = func
+            .parameters
+            .iter()
+            .map(|p| SignatureParam {
+                name: p.name.clone(),
+                type_name: p.type_name.clone(),
+                is_optional: p.is_optional,
+                default_value: p.default_value.clone(),
+                description: p.description.clone(),
+            })
+            .collect();
+
+        let return_type = func
+            .return_type
+            .as_ref()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty());
+        let context_requirements =
+            contexts_to_requirements(&func.contexts).unwrap_or_default();
+
+        let signature = MethodSignature::new(
+            func.name.clone(),
+            None,
+            params.clone(),
+            return_type.clone(),
+            SignatureSource::Platform,
+            None,
+            context_requirements,
+        );
+        signatures.push(signature);
+
+        if let Some(english) = func
+            .english_name
+            .as_ref()
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty() && !name.eq_ignore_ascii_case(&func.name))
+        {
+            signatures.push(MethodSignature::new(
+                english,
+                None,
+                params.clone(),
+                return_type.clone(),
+                SignatureSource::Platform,
+                None,
+                context_requirements,
+            ));
+        }
+    }
+
+    signatures
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +372,7 @@ mod tests {
         MethodInfo, TypeDocumentation, TypeIdentity, TypeInfo, TypeMetadata, TypeStructure,
     };
     use crate::data::loaders::syntax_helper::{DocumentParser, SyntaxHelperDatabase, SyntaxNode};
+    use bsl_shared::domain::signature_index::ContextRequirements;
     use scraper::Html;
     use std::path::Path;
 
@@ -407,6 +499,7 @@ mod tests {
                 parameters: Vec::new(),
                 return_type: Some("ЭлементТеста".to_string()),
                 return_description: None,
+                contexts: Vec::new(),
             },
         );
 
@@ -417,5 +510,37 @@ mod tests {
             .expect("RawTypeData for ТестКоллекция should be present");
 
         assert_eq!(coll.collection_item_type.as_deref(), Some("ЭлементТеста"));
+    }
+
+    #[test]
+    fn test_convert_global_function_signatures_from_syntax_helper() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let html_path = root.join(
+            "examples/syntax_helper/rebuilt.shcntx_ru/objects/Global context/methods/catalog20/NStr871.html",
+        );
+
+        let content = std::fs::read_to_string(&html_path)
+            .expect("failed to read NStr871.html");
+        let document = Html::parse_document(&content);
+        let parser = DocumentParser::new();
+        let func_info = parser
+            .parse_global_function(&html_path, &document)
+            .expect("failed to parse global function info");
+
+        let mut db = SyntaxHelperDatabase::default();
+        db.global_functions.insert("k".to_string(), func_info);
+
+        let signatures = convert_syntax_helper_global_functions(&db);
+        let nstr_sig = signatures
+            .iter()
+            .find(|sig| sig.name == "НСтр")
+            .expect("НСтр signature should exist");
+
+        assert_eq!(nstr_sig.return_type.as_deref(), Some("Строка"));
+        assert_eq!(nstr_sig.context_requirements, ContextRequirements::Universal);
+        assert!(
+            signatures.iter().any(|sig| sig.name == "NStr"),
+            "English alias should be exported"
+        );
     }
 }

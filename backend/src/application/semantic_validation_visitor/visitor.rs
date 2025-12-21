@@ -17,7 +17,8 @@ use crate::application::semantic_validation_visitor::helpers::{
     collection_name_to_metadata_kind, is_metadata_collection_name,
 };
 use crate::application::semantic_validation_visitor::validators::{
-    validate_method_call_context, validation_result_v2_to_diagnostic,
+    validate_global_function_call_context, validate_method_call_context,
+    validation_result_v2_to_diagnostic,
 };
 
 /// Semantic validation visitor for BSL code
@@ -384,6 +385,40 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 if let Some(diagnostic) =
                     validation_result_v2_to_diagnostic(&validation_result, node.span)
                 {
+                    self.errors.push(diagnostic);
+                }
+            }
+            SemanticNodeKind::FunctionCall {
+                function_name,
+                object_name: None,
+                object_type: None,
+                arg_types,
+                ..
+            } => {
+                // Check undeclared variables in arguments
+                for (idx, arg_type) in arg_types.iter().enumerate() {
+                    if let Some(var_name) = arg_type.is_undeclared_variable() {
+                        let error_kind = TypeErrorKind::UndeclaredVariable {
+                            variable_name: var_name.to_string(),
+                            method_name: Some(function_name.clone()),
+                            param_index: Some(idx + 1),
+                        };
+                        let diagnostic =
+                            error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                        self.errors.push(diagnostic);
+                    }
+                }
+
+                if let Some(error_kind) = validate_global_function_call_context(
+                    &self.current_execution_context,
+                    self.signature_index,
+                    function_name,
+                ) {
+                    let diagnostic = error_kind.to_diagnostic_with_severity(
+                        node.span,
+                        self.detail_level,
+                        DiagnosticSeverity::Warning,
+                    );
                     self.errors.push(diagnostic);
                 }
             }

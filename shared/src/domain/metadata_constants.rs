@@ -129,6 +129,19 @@ pub const FACETED_TYPES: &[(&str, &str, MetadataKind, FacetKind)] = &[
         MetadataKind::Document,
         FacetKind::List,
     ),
+    // Перечисления
+    (
+        "ПеречислениеМенеджер",
+        "EnumManager",
+        MetadataKind::Enum,
+        FacetKind::Manager,
+    ),
+    (
+        "ПеречислениеСсылка",
+        "EnumRef",
+        MetadataKind::Enum,
+        FacetKind::Reference,
+    ),
     // Регистры сведений
     (
         "РегистрСведенийМенеджер",
@@ -382,6 +395,14 @@ mod tests {
             get_faceted_type_info("ДокументОбъект"),
             Some((MetadataKind::Document, FacetKind::Object))
         );
+        assert_eq!(
+            get_faceted_type_info("ПеречислениеМенеджер"),
+            Some((MetadataKind::Enum, FacetKind::Manager))
+        );
+        assert_eq!(
+            get_faceted_type_info("EnumRef"),
+            Some((MetadataKind::Enum, FacetKind::Reference))
+        );
         assert_eq!(get_faceted_type_info("Unknown"), None);
     }
 
@@ -398,6 +419,10 @@ mod tests {
             get_base_type_info("СправочникОбъект"),
             Some((MetadataKind::Catalog, FacetKind::Object))
         );
+        assert_eq!(
+            get_base_type_info("ПеречислениеМенеджер"),
+            Some((MetadataKind::Enum, FacetKind::Manager))
+        );
     }
 
     #[test]
@@ -408,10 +433,14 @@ mod tests {
         assert!(is_configuration_type_pattern(
             "СправочникМенеджер.Контрагенты"
         ));
+        assert!(is_configuration_type_pattern(
+            "ПеречислениеМенеджер.ВидыОпераций"
+        ));
 
         // Без точки - сами коллекции/фасеты
         assert!(is_configuration_type_pattern("Справочники"));
         assert!(is_configuration_type_pattern("СправочникМенеджер"));
+        assert!(is_configuration_type_pattern("ПеречислениеСсылка"));
 
         // Не конфигурационные
         assert!(!is_configuration_type_pattern("Массив"));

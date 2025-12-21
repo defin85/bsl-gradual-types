@@ -11,6 +11,7 @@ use bsl_shared::api::dtos::{
     TabularSectionDto, TypeDto, UnionComponentDto,
 };
 use bsl_shared::api::{MethodDto, ParamDto};
+use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
 use bsl_shared::domain::types::{Certainty, ResolutionResult, TypeResolution};
 use bsl_shared::domain::{CompletionItem, TypeMetadataLookup};
 
@@ -56,44 +57,13 @@ pub async fn search_types_as_dto(
     let all_types = inference_service.get_all_platform_globals();
     let query_lower = query.to_lowercase();
 
-    let mut filtered_types: Vec<(&String, &TypeResolution)> = all_types
+    let filtered_types: Vec<(&String, &TypeResolution)> = all_types
         .iter()
         .filter(|(name, _)| name.to_lowercase().contains(&query_lower))
         .collect();
 
-    // Детерминированная сортировка + приоритет точного совпадения.
-    // Это важно, когда query — полное имя типа (например, "Документы.ЗаказНаряды"),
-    // но в репозитории присутствуют дополнительные синтетические типы, содержащие query как подстроку.
-    filtered_types.sort_by(|(a, _), (b, _)| {
-        let a_lower = a.to_lowercase();
-        let b_lower = b.to_lowercase();
-
-        let rank = |name: &str, name_lower: &str| -> u8 {
-            if name == query {
-                0
-            } else if name_lower == query_lower {
-                1
-            } else if name.starts_with(query) {
-                2
-            } else if name_lower.starts_with(&query_lower) {
-                3
-            } else if name_lower.ends_with(&format!(".{}", query_lower))
-                || name_lower.ends_with(&query_lower)
-            {
-                4
-            } else {
-                5
-            }
-        };
-
-        rank(a.as_str(), &a_lower)
-            .cmp(&rank(b.as_str(), &b_lower))
-            .then_with(|| a_lower.len().cmp(&b_lower.len()))
-            .then_with(|| a_lower.cmp(&b_lower))
-    });
-
     // 2. Transform to DTO
-    let type_dtos: Vec<TypeDto> = filtered_types
+    let mut type_dtos: Vec<TypeDto> = filtered_types
         .iter()
         .map(|(name, res)| {
             type_resolution_to_dto(name, res, metadata_lookup, |_| {
@@ -103,16 +73,54 @@ pub async fn search_types_as_dto(
         })
         .collect();
 
+    let mut global_function_dtos =
+        search_global_functions_as_dto(inference_service, query);
+
+    let mut all_dtos = Vec::with_capacity(type_dtos.len() + global_function_dtos.len());
+    all_dtos.append(&mut type_dtos);
+    all_dtos.append(&mut global_function_dtos);
+
+    // Детерминированная сортировка + приоритет точного совпадения.
+    // Это важно, когда query — полное имя типа (например, "Документы.ЗаказНаряды"),
+    // но в репозитории присутствуют дополнительные синтетические типы, содержащие query как подстроку.
+    let rank = |name: &str, name_lower: &str| -> u8 {
+        if name == query {
+            0
+        } else if name_lower == query_lower {
+            1
+        } else if name.starts_with(query) {
+            2
+        } else if name_lower.starts_with(&query_lower) {
+            3
+        } else if name_lower.ends_with(&format!(".{}", query_lower))
+            || name_lower.ends_with(&query_lower)
+        {
+            4
+        } else {
+            5
+        }
+    };
+
+    all_dtos.sort_by(|a, b| {
+        let a_lower = a.name.to_lowercase();
+        let b_lower = b.name.to_lowercase();
+
+        rank(a.name.as_str(), &a_lower)
+            .cmp(&rank(b.name.as_str(), &b_lower))
+            .then_with(|| a_lower.len().cmp(&b_lower.len()))
+            .then_with(|| a_lower.cmp(&b_lower))
+    });
+
     // 3. Generate metrics
     let metrics = MetricsDto {
-        total_types: type_dtos.len(),
-        certainty_high: type_dtos.iter().filter(|t| t.certainty > 80).count(),
-        certainty_medium: type_dtos
+        total_types: all_dtos.len(),
+        certainty_high: all_dtos.iter().filter(|t| t.certainty > 80).count(),
+        certainty_medium: all_dtos
             .iter()
             .filter(|t| t.certainty > 40 && t.certainty <= 80)
             .count(),
-        certainty_low: type_dtos.iter().filter(|t| t.certainty <= 40).count(),
-        flow_sensitive: type_dtos.iter().filter(|t| t.flow_sensitive).count(),
+        certainty_low: all_dtos.iter().filter(|t| t.certainty <= 40).count(),
+        flow_sensitive: all_dtos.iter().filter(|t| t.flow_sensitive).count(),
         cache_hit_rate: format!("{:.1}%", cache.get_hit_rate()),
         analysis_speed: "125ms".to_string(),
     };
@@ -124,7 +132,7 @@ pub async fn search_types_as_dto(
         CategoryDto {
             color: "#3498db".to_string(),
             icon: "🔧".to_string(),
-            count: type_dtos
+            count: all_dtos
                 .iter()
                 .filter(|t| t.category == "Platform")
                 .count(),
@@ -135,15 +143,14 @@ pub async fn search_types_as_dto(
         CategoryDto {
             color: "#e74c3c".to_string(),
             icon: "⚙️".to_string(),
-            count: type_dtos
+            count: all_dtos
                 .iter()
                 .filter(|t| t.category == "Configuration")
                 .count(),
         },
     );
-
     Ok(AnalysisResultDto {
-        types: type_dtos,
+        types: all_dtos,
         categories,
         metrics,
         connections: vec![],
@@ -398,15 +405,103 @@ fn determine_category_and_source(res: &TypeResolution) -> (String, String) {
     // 3. Determine category by ConcreteType
     match &res.result {
         ResolutionResult::Concrete(ConcreteType::Platform(_)) => {
-            ("Platform".to_string(), "Static Analysis".to_string())
+            ("Platform".to_string(), "Platform".to_string())
         }
         ResolutionResult::Concrete(ConcreteType::Configuration(_)) => {
             ("Configuration".to_string(), "Configuration".to_string())
         }
         ResolutionResult::Concrete(ConcreteType::Primitive(_)) => {
-            ("Platform".to_string(), "Primitive".to_string())
+            ("Platform".to_string(), "Platform".to_string())
         }
-        _ => ("Platform".to_string(), "Static Analysis".to_string()),
+        ResolutionResult::Concrete(ConcreteType::GlobalFunction(_)) => {
+            ("Platform".to_string(), "Platform".to_string())
+        }
+        _ => ("Platform".to_string(), "Platform".to_string()),
+    }
+}
+
+fn search_global_functions_as_dto(
+    inference_service: &TypeInferenceService,
+    query: &str,
+) -> Vec<TypeDto> {
+    inference_service
+        .search_global_functions(query)
+        .into_iter()
+        .map(|(name, sig)| global_function_signature_to_dto(&name, &sig))
+        .collect()
+}
+
+fn normalize_signature_type(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+}
+
+fn global_function_signature_to_dto(name: &str, signature: &MethodSignature) -> TypeDto {
+    let (category, source) = match signature.source {
+        SignatureSource::Platform => {
+            ("Platform".to_string(), "Platform".to_string())
+        }
+        SignatureSource::Configuration | SignatureSource::UserCode => {
+            ("Configuration".to_string(), "Configuration".to_string())
+        }
+    };
+    let return_type = normalize_signature_type(&signature.return_type);
+    let return_hint = return_type
+        .clone()
+        .unwrap_or_else(|| "Неопределено".to_string());
+    let description = format!("Глобальная функция. Возвращает: {}", return_hint);
+
+    let params = signature
+        .params
+        .iter()
+        .map(|p| ParamDto {
+            name: p.name.clone(),
+            param_type: p
+                .type_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .unwrap_or("Произвольный")
+                .to_string(),
+            is_optional: p.is_optional,
+            default_value: p.default_value.clone(),
+        })
+        .collect();
+
+    let method = MethodDto {
+        name: name.to_string(),
+        english_name: None,
+        return_type,
+        params,
+        description: None,
+        is_deprecated: false,
+        is_constructor: false,
+    };
+
+    TypeDto {
+        id: name.to_string(),
+        name: name.to_string(),
+        category,
+        certainty: 100,
+        certainty_text: "Known 100%".to_string(),
+        facets: vec![],
+        methods_count: Some(1),
+        methods: vec![method],
+        attributes_count: None,
+        properties: vec![],
+        enum_values: None,
+        tabular_sections: vec![],
+        source,
+        flow_sensitive: false,
+        description,
+        union_types: None,
+        flow_analysis: None,
+        connections: None,
+        warning: None,
+        recommendation: None,
     }
 }
 

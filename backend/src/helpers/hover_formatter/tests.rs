@@ -9,9 +9,10 @@ mod tests {
     use crate::helpers::hover_formatter::formatter::HoverFormatter;
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+    use bsl_shared::domain::signature_index::{ContextRequirements, MethodSignature, SignatureSource};
     use bsl_shared::domain::types::{
-        Certainty, ConcreteType, PlatformType, RawMethodData, RawPropertyData, ResolutionMetadata,
-        ResolutionResult, ResolutionSource, TypeResolution,
+        Certainty, ConcreteType, ParameterInfo, PlatformType, RawMethodData, RawPropertyData,
+        ResolutionMetadata, ResolutionResult, ResolutionSource, TypeResolution,
     };
     use bsl_shared::formatting::DetailLevel;
     use std::sync::Arc;
@@ -33,6 +34,39 @@ mod tests {
 
         assert!(result.contains("Переменная"));
         assert!(result.contains("МассивДанных"));
+    }
+
+    #[test]
+    fn test_format_function_signature_with_docs() {
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+        let formatter = HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup);
+
+        let signature = MethodSignature::new(
+            "ТестФункция".to_string(),
+            None,
+            vec![ParameterInfo {
+                name: "Параметр".to_string(),
+                type_name: Some("Строка".to_string()),
+                is_optional: true,
+                default_value: None,
+                description: None,
+            }],
+            Some("Число".to_string()),
+            Some("Описание функции".to_string()),
+            Some("Описание возврата".to_string()),
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::default(),
+        );
+
+        let result = formatter.format_function_signature("Функция", &signature);
+
+        assert!(result.contains("Функция"));
+        assert!(result.contains("ТестФункция([Параметр: Строка])"));
+        assert!(result.contains("-> Число"));
+        assert!(result.contains("Описание функции"));
+        assert!(result.contains("Описание возврата"));
     }
 
     #[test]

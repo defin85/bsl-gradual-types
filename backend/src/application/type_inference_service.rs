@@ -4,6 +4,7 @@
 //! Использует чистый Domain TypeResolver для основной логики типизации.
 
 use bsl_shared::domain::repository::{CompletionItem, CompletionKind, TypeRepository};
+use bsl_shared::domain::signature_index::MethodSignature;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{
     Attribute, ConcreteType, ConfigurationType, MetadataKind, RawAttributeData, RawDataSource,
@@ -83,6 +84,19 @@ impl TypeInferenceService {
     pub fn search_types(&self, query: &str) -> Vec<String> {
         let completions = self.get_completions(query);
         completions.into_iter().map(|c| c.label).collect()
+    }
+
+    /// Поиск глобальных функций по запросу (Application логика)
+    pub fn search_global_functions(&self, query: &str) -> Vec<(String, MethodSignature)> {
+        let index = self.repository.get_signature_index_clone();
+        let query_lower = query.to_lowercase();
+
+        index
+            .get_global_functions()
+            .iter()
+            .filter(|(name, _)| name.display().to_lowercase().contains(&query_lower))
+            .map(|(name, sig)| (name.display().to_string(), sig.clone()))
+            .collect()
     }
 
     /// Получить все типы как HashMap (Application логика)

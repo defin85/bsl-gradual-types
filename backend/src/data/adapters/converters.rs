@@ -330,6 +330,16 @@ pub fn convert_syntax_helper_global_functions(
             .as_ref()
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty());
+        let description = func
+            .description
+            .as_ref()
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty());
+        let return_description = func
+            .return_description
+            .as_ref()
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty());
         let context_requirements =
             contexts_to_requirements(&func.contexts).unwrap_or_default();
 
@@ -338,6 +348,8 @@ pub fn convert_syntax_helper_global_functions(
             None,
             params.clone(),
             return_type.clone(),
+            description.clone(),
+            return_description.clone(),
             SignatureSource::Platform,
             None,
             context_requirements,
@@ -355,6 +367,8 @@ pub fn convert_syntax_helper_global_functions(
                 None,
                 params.clone(),
                 return_type.clone(),
+                description.clone(),
+                return_description.clone(),
                 SignatureSource::Platform,
                 None,
                 context_requirements,
@@ -369,7 +383,8 @@ pub fn convert_syntax_helper_global_functions(
 mod tests {
     use super::*;
     use crate::data::loaders::syntax_helper::types::{
-        MethodInfo, TypeDocumentation, TypeIdentity, TypeInfo, TypeMetadata, TypeStructure,
+        GlobalFunctionInfo, MethodInfo, TypeDocumentation, TypeIdentity, TypeInfo, TypeMetadata,
+        TypeStructure,
     };
     use crate::data::loaders::syntax_helper::{DocumentParser, SyntaxHelperDatabase, SyntaxNode};
     use bsl_shared::domain::signature_index::ContextRequirements;
@@ -541,6 +556,47 @@ mod tests {
         assert!(
             signatures.iter().any(|sig| sig.name == "NStr"),
             "English alias should be exported"
+        );
+    }
+
+    #[test]
+    fn test_convert_global_function_docs() {
+        let mut db = SyntaxHelperDatabase::default();
+        db.global_functions.insert(
+            "k".to_string(),
+            GlobalFunctionInfo {
+                name: "ТестФункция".to_string(),
+                english_name: Some("TestFunction".to_string()),
+                description: Some("Описание функции".to_string()),
+                parameters: Vec::new(),
+                return_type: Some("Строка".to_string()),
+                return_description: Some("Описание возврата".to_string()),
+                polymorphic: false,
+                pure: false,
+                contexts: Vec::new(),
+                category: None,
+            },
+        );
+
+        let signatures = convert_syntax_helper_global_functions(&db);
+        let ru_sig = signatures
+            .iter()
+            .find(|sig| sig.name == "ТестФункция")
+            .expect("Русская сигнатура должна быть");
+        let en_sig = signatures
+            .iter()
+            .find(|sig| sig.name == "TestFunction")
+            .expect("Английская сигнатура должна быть");
+
+        assert_eq!(ru_sig.description.as_deref(), Some("Описание функции"));
+        assert_eq!(
+            ru_sig.return_description.as_deref(),
+            Some("Описание возврата")
+        );
+        assert_eq!(en_sig.description.as_deref(), Some("Описание функции"));
+        assert_eq!(
+            en_sig.return_description.as_deref(),
+            Some("Описание возврата")
         );
     }
 }

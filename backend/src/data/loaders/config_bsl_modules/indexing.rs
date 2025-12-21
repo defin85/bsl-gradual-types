@@ -150,6 +150,8 @@ where
                     })
                     .collect(),
                 decl.return_type.clone(),
+                None,
+                None,
                 SignatureSource::Configuration,
                 None, // return_facet: неизвестен на этапе извлечения
                 ctx,
@@ -322,6 +324,8 @@ where
                     })
                     .collect(),
                 decl.return_type.clone(),
+                None,
+                None,
                 SignatureSource::Configuration,
                 None,
                 ctx,

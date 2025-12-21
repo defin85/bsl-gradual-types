@@ -205,6 +205,35 @@ log_section() {
     echo -e "${BLUE}============================================================${NC}"
 }
 
+# Проверка состояния upstream
+check_git_upstream_ahead() {
+    log_info "\n🔍 Проверка коммитов относительно @{u}..."
+
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        log_warning "⚠️  Git репозиторий не найден, проверка @{u} пропущена"
+        return 0
+    fi
+
+    if ! git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+        log_warning "⚠️  Upstream для текущей ветки не настроен, проверка @{u} пропущена"
+        return 0
+    fi
+
+    local ahead
+    ahead=$(git rev-list --count @{u}..HEAD 2>/dev/null || true)
+
+    if [ -z "$ahead" ]; then
+        log_warning "⚠️  Не удалось определить количество коммитов впереди @{u}"
+        return 0
+    fi
+
+    if [ "$ahead" -gt 0 ]; then
+        log_warning "⚠️  Локальная ветка опережает @{u} на $ahead коммит(ов)"
+    else
+        log_success "✅ Локальная ветка синхронизирована с @{u}"
+    fi
+}
+
 # Функция для измерения времени
 measure_time() {
     local start=$SECONDS
@@ -467,6 +496,8 @@ main() {
     log_info "Расширение бинарников: '${BINARY_EXT:-<нет>}'"
     log_info "Режим сборки: $BUILD_MODE"
     log_info "Тесты: $([ "$SKIP_TESTS" = true ] && echo "пропущены" || echo "включены")"
+
+    check_git_upstream_ahead
 
     local total_start=$SECONDS
 

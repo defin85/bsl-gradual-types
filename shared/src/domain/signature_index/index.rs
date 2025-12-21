@@ -219,6 +219,11 @@ impl SignatureIndex {
         &self.constructors
     }
 
+    /// Получить все глобальные функции
+    pub fn get_global_functions(&self) -> &HashMap<TypeId, MethodSignature> {
+        &self.global_functions
+    }
+
     /// Проверить является ли тип коллекцией
     pub fn is_collection_type(&self, type_name: &str) -> bool {
         self.find_constructor(type_name)
@@ -609,6 +614,8 @@ mod tests {
             Some("Табличная часть".to_string()),
             vec![],
             Some("Массив".to_string()),
+            None,
+            None,
             SignatureSource::Platform,
             None,
             ContextRequirements::Universal,

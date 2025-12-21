@@ -4,7 +4,7 @@
 //! semantic nodes, and other BSL constructs.
 
 use bsl_shared::domain::types::{
-    Certainty, ConcreteType, GenericType, ResolutionResult, TypeResolution,
+    Certainty, ConcreteType, GenericType, ResolutionResult, TypeResolution, UncertaintyReason,
 };
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::ir::{SemanticNode, SemanticNodeKind};
@@ -139,8 +139,8 @@ pub fn format_semantic_node_info(
         SemanticNodeKind::IfStatement { condition_type, .. } => {
             // Phase 3: condition_type is now TypeResolution
             format!(
-                "**Условие:** `Если ... Тогда`\n\n*Условие:* {}\n\n📍 Позиция: {}:{}-{}:{}",
-                condition_type.type_name(),
+                "**Условие:** `Если ... Тогда`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
+                format_condition_hover(condition_type),
                 node.span.start_line,
                 node.span.start_column,
                 node.span.end_line,
@@ -150,8 +150,8 @@ pub fn format_semantic_node_info(
         SemanticNodeKind::WhileLoop { condition_type, .. } => {
             // Phase 3: condition_type is now TypeResolution
             format!(
-                "**Цикл:** `Пока ... Цикл`\n\n*Условие:* {}\n\n📍 Позиция: {}:{}-{}:{}",
-                condition_type.type_name(),
+                "**Цикл:** `Пока ... Цикл`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
+                format_condition_hover(condition_type),
                 node.span.start_line,
                 node.span.start_column,
                 node.span.end_line,
@@ -167,6 +167,48 @@ pub fn format_semantic_node_info(
                 node.span.end_line,
                 node.span.end_column
             )
+        }
+    }
+}
+
+fn format_condition_hover(condition_type: &TypeResolution) -> String {
+    let mut lines = vec![
+        "*Ожидаемый тип:* Булево".to_string(),
+        format!("*Фактический тип:* {}", condition_type.type_name()),
+        format!(
+            "*Уверенность:* {}",
+            format_certainty_label(condition_type.certainty)
+        ),
+    ];
+
+    if let Some(reason) = condition_type.metadata.uncertainty_reason.as_ref() {
+        lines.push(format!("*Причина:* {}", format_uncertainty_reason(reason)));
+    }
+
+    lines.join("\n")
+}
+
+fn format_certainty_label(certainty: Certainty) -> &'static str {
+    match certainty {
+        Certainty::Known => "Known",
+        Certainty::Inferred => "Inferred",
+        Certainty::InferredWeak => "InferredWeak",
+        Certainty::Unknown => "Unknown",
+    }
+}
+
+fn format_uncertainty_reason(reason: &UncertaintyReason) -> String {
+    match reason {
+        UncertaintyReason::ConfigurationNotLoaded => {
+            "Метаданные конфигурации не загружены".to_string()
+        }
+        UncertaintyReason::MetadataObjectNotFound { kind, name } => {
+            format!("{} \"{}\" не найден", kind.to_russian_name(), name)
+        }
+        UncertaintyReason::Other(message) => message.clone(),
+        UncertaintyReason::TypeNotFound { name } => format!("Тип \"{}\" не найден", name),
+        UncertaintyReason::UndeclaredVariable { name } => {
+            format!("Переменная \"{}\" не объявлена", name)
         }
     }
 }
@@ -271,6 +313,61 @@ fn format_assignment_hover(
     ));
 
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+    use bsl_shared::domain::repository::InMemoryTypeRepository;
+    use bsl_shared::domain::types::TypeResolution;
+    use bsl_shared::ir::{ScopeId, SemanticNode, SemanticNodeKind, Span};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_condition_hover_includes_expected_actual_and_certainty() {
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+
+        let condition_type = TypeResolution::unknown();
+        let node = SemanticNode {
+            kind: SemanticNodeKind::IfStatement {
+                condition_type,
+                then_branch: Vec::new(),
+                else_branch: None,
+            },
+            span: Span::stub(),
+            scope_id: ScopeId(0),
+        };
+
+        let result = format_semantic_node_info(&node, "", &metadata_lookup);
+
+        assert!(result.contains("Если ... Тогда"));
+        assert!(result.contains("*Ожидаемый тип:* Булево"));
+        assert!(result.contains("*Фактический тип:* Dynamic"));
+        assert!(result.contains("*Уверенность:* Unknown"));
+    }
+
+    #[test]
+    fn test_condition_hover_includes_uncertainty_reason() {
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+
+        let condition_type = TypeResolution::undeclared_variable("Флаг");
+        let node = SemanticNode {
+            kind: SemanticNodeKind::WhileLoop {
+                condition_type,
+                body: Vec::new(),
+            },
+            span: Span::stub(),
+            scope_id: ScopeId(0),
+        };
+
+        let result = format_semantic_node_info(&node, "", &metadata_lookup);
+
+        assert!(result.contains("Пока ... Цикл"));
+        assert!(result.contains("Переменная \"Флаг\" не объявлена"));
+    }
 }
 
 /// Formats variable hover information (using Inline Scope Analysis)

@@ -262,6 +262,26 @@ pub async fn get_hover_info_with_file_path(
                 line, column, node.span
             );
             debug!("Found node: {:?} at span {:?}", node.kind, node.span);
+            if let SemanticNodeKind::FunctionCall {
+                function_name,
+                object_type,
+                ..
+            } = &node.kind
+            {
+                if let Some(signature) = metadata_lookup
+                    .find_method_signature_for_call(object_type.as_ref(), function_name)
+                {
+                    let formatter = if let Some(config) = hover_config.clone() {
+                        HoverFormatter::new(config, metadata_lookup.clone())
+                    } else {
+                        hover_formatter.clone()
+                    };
+                    let label = if object_type.is_some() { "Метод" } else { "Функция" };
+                    return Ok(Some(
+                        formatter.format_function_signature(label, &signature),
+                    ));
+                }
+            }
             Some(format_semantic_node_info(
                 node,
                 file_content,

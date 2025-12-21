@@ -4,6 +4,7 @@
 //! функций и объектов метаданных.
 
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+use bsl_shared::domain::signature_index::MethodSignature;
 use bsl_shared::domain::types::{Certainty, ResolutionResult, TypeResolution};
 use bsl_shared::formatting::DetailLevel;
 
@@ -179,6 +180,57 @@ impl HoverFormatter {
             .add_header("Функция", name)
             .add_section("Сигнатура", signature)
             .build()
+    }
+
+    /// Форматировать hover для вызова функции/метода
+    pub fn format_function_signature(&self, label: &str, signature: &MethodSignature) -> String {
+        let params_str = signature
+            .params
+            .iter()
+            .map(|p| {
+                let type_str = p.type_name.as_deref().unwrap_or("Any");
+                if p.is_optional {
+                    format!("[{}: {}]", p.name, type_str)
+                } else {
+                    format!("{}: {}", p.name, type_str)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let signature_str = if let Some(return_type) = signature
+            .return_type
+            .as_deref()
+            .map(|t| t.trim())
+            .filter(|t| !t.is_empty())
+        {
+            format!("{}({}) -> {}", signature.name, params_str, return_type)
+        } else {
+            format!("{}({})", signature.name, params_str)
+        };
+
+        let mut builder = HoverBuilder::new(&self.config)
+            .add_header(label, &signature.name)
+            .add_section("Сигнатура", &signature_str);
+
+        if let Some(description) = signature
+            .description
+            .as_ref()
+            .map(|d| d.trim())
+            .filter(|d| !d.is_empty())
+        {
+            builder = builder.add_section("Описание", description);
+        }
+
+        if let Some(return_description) = signature
+            .return_description
+            .as_ref()
+            .map(|d| d.trim())
+            .filter(|d| !d.is_empty())
+        {
+            builder = builder.add_section("Описание возврата", return_description);
+        }
+
+        builder.build()
     }
 
     /// Форматирует hover для несуществующего объекта метаданных

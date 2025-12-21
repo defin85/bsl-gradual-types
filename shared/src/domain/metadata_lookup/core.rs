@@ -187,6 +187,28 @@ impl TypeMetadataLookup {
         vec![]
     }
 
+    /// Найти сигнатуру метода/функции для вызова (глобальной или объектной)
+    pub fn find_method_signature_for_call(
+        &self,
+        owner_type: Option<&TypeResolution>,
+        method_name: &str,
+    ) -> Option<MethodSignature> {
+        match owner_type {
+            Some(resolution) => {
+                let owner_name = self
+                    .normalize_type_name(resolution)
+                    .unwrap_or_else(|| resolution.type_name());
+                if owner_name.is_empty() {
+                    None
+                } else {
+                    self.repository
+                        .find_method_signature(Some(&owner_name), method_name)
+                }
+            }
+            None => self.repository.find_method_signature(None, method_name),
+        }
+    }
+
     /// Получить свойства для TypeResolution
     ///
     /// # Параметры
@@ -502,7 +524,7 @@ impl TypeMetadataLookup {
                     default_value: p.default_value,
                 })
                 .collect(),
-            description: None,
+            description: sig.description,
             is_deprecated: false,
             is_constructor: false,
             context_requirements: Some(sig.context_requirements),

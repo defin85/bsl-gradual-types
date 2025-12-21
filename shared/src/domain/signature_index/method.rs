@@ -39,6 +39,8 @@ fn default_resolved_params() -> Arc<OnceLock<Vec<(String, TypeResolution)>>> {
 ///     Some("СправочникМенеджер.Номенклатура".to_string()),
 ///     vec![],
 ///     Some("СправочникОбъект.Номенклатура".to_string()),
+///     None,
+///     None,
 ///     SignatureSource::Platform,
 ///     Some(FacetKind::Object),
 ///     ContextRequirements::ServerOnly,
@@ -50,6 +52,10 @@ pub struct MethodSignature {
     pub owner_type: Option<String>, // None для глобальных функций
     pub params: Vec<ParameterInfo>,
     pub return_type: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub return_description: Option<String>,
     pub source: SignatureSource,
 
     /// Facet возвращаемого типа (для методов конфигурационных объектов)
@@ -96,6 +102,8 @@ impl Clone for MethodSignature {
             owner_type: self.owner_type.clone(),
             params: self.params.clone(),
             return_type: self.return_type.clone(),
+            description: self.description.clone(),
+            return_description: self.return_description.clone(),
             source: self.source,
             return_facet: self.return_facet,
             context_requirements: self.context_requirements, // Copy trait
@@ -115,6 +123,8 @@ impl MethodSignature {
         owner_type: Option<String>,
         params: Vec<ParameterInfo>,
         return_type: Option<String>,
+        description: Option<String>,
+        return_description: Option<String>,
         source: SignatureSource,
         return_facet: Option<FacetKind>,
         context_requirements: ContextRequirements,
@@ -124,6 +134,8 @@ impl MethodSignature {
             owner_type,
             params,
             return_type,
+            description,
+            return_description,
             source,
             return_facet,
             context_requirements,

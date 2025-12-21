@@ -156,6 +156,8 @@ pub fn raw_method_to_signature(method: &RawMethodData, owner_type: &str) -> Meth
         } else {
             Some(method.return_type.clone())
         },
+        method.description.clone(),
+        None,
         SignatureSource::Platform,
         return_facet,
         context_requirements,

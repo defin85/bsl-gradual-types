@@ -158,6 +158,38 @@ pub fn format_semantic_node_info(
                 node.span.end_column
             )
         }
+        SemanticNodeKind::ForLoop {
+            variable,
+            range_type,
+            ..
+        } => {
+            // Phase 3: range_type is now TypeResolution
+            format!(
+                "**Цикл:** `Для {} = ... По ... Цикл`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
+                variable,
+                format_expected_type_hover("Число", range_type),
+                node.span.start_line,
+                node.span.start_column,
+                node.span.end_line,
+                node.span.end_column
+            )
+        }
+        SemanticNodeKind::ForEachLoop {
+            variable,
+            collection_type,
+            ..
+        } => {
+            // Phase 3: collection_type is now TypeResolution
+            format!(
+                "**Цикл:** `Для Каждого {} Из ... Цикл`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
+                variable,
+                format_expected_type_hover("Коллекция", collection_type),
+                node.span.start_line,
+                node.span.start_column,
+                node.span.end_line,
+                node.span.end_column
+            )
+        }
         _ => {
             format!(
                 "**Узел IR:** {:?}\n\n📍 Позиция: {}:{}-{}:{}",
@@ -172,16 +204,20 @@ pub fn format_semantic_node_info(
 }
 
 fn format_condition_hover(condition_type: &TypeResolution) -> String {
+    format_expected_type_hover("Булево", condition_type)
+}
+
+fn format_expected_type_hover(expected_type: &str, actual_type: &TypeResolution) -> String {
     let mut lines = vec![
-        "*Ожидаемый тип:* Булево".to_string(),
-        format!("*Фактический тип:* {}", condition_type.type_name()),
+        format!("*Ожидаемый тип:* {}", expected_type),
+        format!("*Фактический тип:* {}", actual_type.type_name()),
         format!(
             "*Уверенность:* {}",
-            format_certainty_label(condition_type.certainty)
+            format_certainty_label(actual_type.certainty)
         ),
     ];
 
-    if let Some(reason) = condition_type.metadata.uncertainty_reason.as_ref() {
+    if let Some(reason) = actual_type.metadata.uncertainty_reason.as_ref() {
         lines.push(format!("*Причина:* {}", format_uncertainty_reason(reason)));
     }
 

@@ -73,7 +73,7 @@
 - Симптом: hover в `Если/Пока/Для` показывает `Условие: Dynamic`.
 - Цель: более информативный hover (ожидаемый тип `Булево` + фактический `TypeResolution` с certainty/причиной).
 - ✅ Для бинарных выражений теперь читается оператор и выводится `Булево` для сравнений: `backend/src/system/tree_sitter_adapter/expression_converter.rs:330`, `backend/src/application/ast_to_ir/type_inference.rs:79`.
-- ⚠️ Нужна проверка hover в реальных условиях/циклах и форматирование certainty/причины для `TypeResolution`.
+- ✅ Проверен hover в реальных условиях/циклах и форматирование certainty/причины для `TypeResolution`: `backend/src/application/type_system/formatters/hover_formatters.rs:161`, `backend/tests/condition_loop_hover_test.rs`.
 
 ### Самоприсваивание с конкатенацией теряет тип
 

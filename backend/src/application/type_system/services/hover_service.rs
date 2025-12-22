@@ -142,9 +142,11 @@ pub async fn get_hover_info_with_file_path(
     // Milestone 2.11 Task B1: DEBUG logs for node search
     debug!("Looking for node at position {}:{}", line, column);
 
+    let node_at_position = ir_program.find_node_at_position(line, column);
+
     // Специальный кейс: hover на имени свойства (obj.Property) должен показывать тип свойства,
     // а не тип переменной-объекта слева от точки.
-    if let Some(node) = ir_program.find_node_at_position(line, column) {
+    if let Some(node) = node_at_position {
         if let SemanticNodeKind::MemberAccess {
             object_name,
             object_type,
@@ -256,7 +258,7 @@ pub async fn get_hover_info_with_file_path(
         );
 
         // Fallback 1: Try find_node_at_position for other nodes (functions, loops, etc.)
-        if let Some(node) = ir_program.find_node_at_position(line, column) {
+        if let Some(node) = node_at_position {
             info!(
                 "find_node_at_position({}, {}) found node (not variable): span={:?}",
                 line, column, node.span

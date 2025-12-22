@@ -82,6 +82,7 @@ impl SemanticProgram {
                 SemanticNodeKind::Assignment { variable, .. } => {
                     format!("Assignment({})", variable)
                 }
+                SemanticNodeKind::VariableAccess { name } => format!("VariableAccess({})", name),
                 SemanticNodeKind::FunctionCall {
                     function_name,
                     object_name,
@@ -126,9 +127,10 @@ impl SemanticProgram {
                 let type_priority = match &node.kind {
                     SemanticNodeKind::FunctionCall { .. } => 0, // Высший приоритет
                     SemanticNodeKind::MemberAccess { .. } => 1, // Высокий приоритет
-                    SemanticNodeKind::VariableDeclaration { .. } => 2, // Средний приоритет
-                    SemanticNodeKind::Assignment { .. } => 10,  // Низкий приоритет
-                    _ => 5,                                     // Остальные - средний приоритет
+                    SemanticNodeKind::VariableAccess { .. } => 2, // Высокий приоритет
+                    SemanticNodeKind::VariableDeclaration { .. } => 3, // Средний приоритет
+                    SemanticNodeKind::Assignment { .. } => 10, // Низкий приоритет
+                    _ => 5, // Остальные - средний приоритет
                 };
 
                 // Сортировка: сначала по размеру span, затем по приоритету типа
@@ -140,6 +142,7 @@ impl SemanticProgram {
                 SemanticNodeKind::Assignment { variable, .. } => {
                     format!("Assignment({})", variable)
                 }
+                SemanticNodeKind::VariableAccess { name } => format!("VariableAccess({})", name),
                 SemanticNodeKind::FunctionCall {
                     function_name,
                     object_name,
@@ -200,6 +203,9 @@ impl SemanticProgram {
         match &node.kind {
             // Присваивание: МассивДанных = Новый Массив
             SemanticNodeKind::Assignment { variable, .. } => Some(variable.clone()),
+
+            // Доступ к переменной: МассивДанных
+            SemanticNodeKind::VariableAccess { name } => Some(name.clone()),
 
             // Доступ к члену: МассивДанных.Добавить
             SemanticNodeKind::MemberAccess {

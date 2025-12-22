@@ -14,6 +14,103 @@ use super::global_collections::{get_manager_type_for_metadata, is_global_collect
 use crate::application::semantic_validation_visitor::helpers::collection_name_to_metadata_kind;
 
 impl AstToIrConverter {
+    /// Создаёт IR-узлы для hover внутри выражений
+    ///
+    /// Обходит выражение рекурсивно и конвертирует Call/PropertyAccess,
+    /// чтобы hover работал на вложенных вызовах и доступах.
+    pub(crate) fn convert_expression_for_hover(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Option<usize>> {
+        match expr {
+            Expression::Call {
+                function,
+                args,
+                span,
+            } => {
+                let node_idx =
+                    self.convert_call_expression(*function.clone(), args.clone(), *span)?;
+
+                for arg in args {
+                    self.convert_expression_for_hover(arg)?;
+                }
+
+                Ok(node_idx)
+            }
+            Expression::PropertyAccess {
+                object,
+                property,
+                span,
+            } => {
+                let node_idx =
+                    self.convert_property_access_expression(object, property, *span)?;
+
+                if !matches!(
+                    **object,
+                    Expression::PropertyAccess { .. } | Expression::Identifier { .. }
+                ) {
+                    self.convert_expression_for_hover(object)?;
+                }
+
+                Ok(node_idx)
+            }
+            Expression::Identifier { name, span } => {
+                let name_lower = name.to_lowercase();
+                if matches!(
+                    name_lower.as_str(),
+                    "неопределено" | "null" | "истина" | "ложь" | "true" | "false"
+                ) {
+                    return Ok(None);
+                }
+
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::VariableAccess { name: name.clone() },
+                    span: self.ast_span_to_ir_span(*span),
+                    scope_id: self.current_scope,
+                };
+
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
+            }
+            Expression::Binary { left, right, .. } => {
+                self.convert_expression_for_hover(left)?;
+                self.convert_expression_for_hover(right)?;
+                Ok(None)
+            }
+            Expression::Unary { operand, .. } => {
+                self.convert_expression_for_hover(operand)?;
+                Ok(None)
+            }
+            Expression::Ternary {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.convert_expression_for_hover(condition)?;
+                self.convert_expression_for_hover(then_expr)?;
+                self.convert_expression_for_hover(else_expr)?;
+                Ok(None)
+            }
+            Expression::New { args, .. } => {
+                for arg in args {
+                    self.convert_expression_for_hover(arg)?;
+                }
+                Ok(None)
+            }
+            Expression::IndexAccess { object, index, .. } => {
+                self.convert_expression_for_hover(object)?;
+                self.convert_expression_for_hover(index)?;
+                Ok(None)
+            }
+            Expression::Await { expression, .. } => {
+                self.convert_expression_for_hover(expression)?;
+                Ok(None)
+            }
+            _ => Ok(None),
+        }
+    }
+
     /// Конвертация вызова функции
     pub(crate) fn convert_call_expression(
         &mut self,

@@ -73,6 +73,11 @@ pub enum SemanticNodeKind {
         initial_value_type: Option<TypeResolution>,
     },
 
+    /// Доступ к переменной в выражении: `x`
+    VariableAccess {
+        name: String,
+    },
+
     /// Присваивание: `x = 42;`
     ///
     /// # Phase 3: TypeResolution для value_type

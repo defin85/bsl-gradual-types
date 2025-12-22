@@ -94,6 +94,10 @@ impl AstToIrConverter {
                 value,
                 span: ast_span,
             } => {
+                if let Some(ref expr) = value {
+                    self.convert_expression_for_hover(expr)?;
+                }
+
                 // Phase 3: Используем infer_type_resolution для возвращаемого значения
                 let value_type = value.as_ref().map(|v| self.infer_type_resolution(v));
                 let span = self.ast_span_to_ir_span(ast_span);
@@ -116,23 +120,10 @@ impl AstToIrConverter {
 
             Statement::Call {
                 expression,
-                span: ast_span,
+                span: _ast_span,
             } => {
-                let span = self.ast_span_to_ir_span(ast_span);
-
-                // Обрабатываем как FunctionCall
-                if let Expression::Call { function, args, .. } = expression {
-                    return self.convert_call_expression(*function, args, span);
-                } else if let Expression::PropertyAccess {
-                    object,
-                    property,
-                    span: prop_span,
-                } = expression
-                {
-                    // MILESTONE 5.5: Используем convert_property_access_expression для GlobalPropertyAccess
-                    return self.convert_property_access_expression(&object, &property, prop_span);
-                }
-                Ok(None) // Если expression не Call и не PropertyAccess
+                let node_idx = self.convert_expression_for_hover(&expression)?;
+                Ok(node_idx)
             }
 
             Statement::Break { span: ast_span } => {
@@ -197,23 +188,7 @@ impl AstToIrConverter {
         if let Expression::Identifier { name: var_name, .. } = target {
             // ИСПРАВЛЕНИЕ Milestone 3.5 + 3.16: Обрабатываем value expression ПЕРЕД Assignment
             // Это создаст промежуточные узлы (FunctionCall, MemberAccess) для hover и валидации
-            let value_node_idx = match &value {
-                Expression::Call {
-                    function,
-                    args,
-                    span: call_span,
-                } => self.convert_call_expression(*function.clone(), args.clone(), *call_span)?,
-
-                // MILESTONE 3.16 + 5.5: Обрабатываем PropertyAccess для валидации метаданных
-                // Например: Док = Документы.ЗаказКлиента
-                Expression::PropertyAccess {
-                    object,
-                    property,
-                    span: prop_span,
-                } => self.convert_property_access_expression(object, property, *prop_span)?,
-
-                _ => None,
-            };
+            let value_node_idx = self.convert_expression_for_hover(&value)?;
 
             let span = self.ast_span_to_ir_span(ast_span);
 
@@ -326,6 +301,8 @@ impl AstToIrConverter {
         else_body: Option<Vec<Statement>>,
         ast_span: crate::parsing::bsl::ast::Span,
     ) -> Result<Option<usize>> {
+        self.convert_expression_for_hover(&condition)?;
+
         // Phase 3: Используем infer_type_resolution для условия
         let condition_type = self.infer_type_resolution(&condition);
         let span = self.ast_span_to_ir_span(ast_span);
@@ -385,6 +362,8 @@ impl AstToIrConverter {
         body: Vec<Statement>,
         ast_span: crate::parsing::bsl::ast::Span,
     ) -> Result<Option<usize>> {
+        self.convert_expression_for_hover(&condition)?;
+
         // Phase 3: Используем infer_type_resolution для условия
         let condition_type = self.infer_type_resolution(&condition);
         let span = self.ast_span_to_ir_span(ast_span);
@@ -425,6 +404,9 @@ impl AstToIrConverter {
         body: Vec<Statement>,
         ast_span: crate::parsing::bsl::ast::Span,
     ) -> Result<Option<usize>> {
+        self.convert_expression_for_hover(&start)?;
+        self.convert_expression_for_hover(&end)?;
+
         // Phase 3: For loop range всегда числовой
         let range_type = TypeResolution::primitive("Число");
         let span = self.ast_span_to_ir_span(ast_span);
@@ -477,6 +459,8 @@ impl AstToIrConverter {
         body: Vec<Statement>,
         ast_span: crate::parsing::bsl::ast::Span,
     ) -> Result<Option<usize>> {
+        self.convert_expression_for_hover(&collection)?;
+
         // Phase 3: Используем infer_type_resolution для коллекции
         let collection_type = self.infer_type_resolution(&collection);
         let span = self.ast_span_to_ir_span(ast_span);

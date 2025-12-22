@@ -149,6 +149,10 @@ impl SemanticProgram {
                 attributes.insert("is_export".to_string(), is_export.to_string());
                 ("Variable".to_string(), Some(name.clone()), attributes)
             }
+            SemanticNodeKind::VariableAccess { name } => {
+                attributes.insert("name".to_string(), name.clone());
+                ("VariableAccess".to_string(), Some(name.clone()), attributes)
+            }
             SemanticNodeKind::FunctionDeclaration {
                 name,
                 params,

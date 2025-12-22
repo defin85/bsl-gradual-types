@@ -783,6 +783,7 @@ impl LanguageServer for BslLanguageServer {
                     self.client.clone(),
                     "parse-config",
                     "Parsing configuration",
+                    Some(self.coordinator.clone()),
                 )
                 .await;
                 Ok(Some(

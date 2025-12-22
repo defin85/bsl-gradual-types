@@ -41,6 +41,8 @@ async fn test_server_only_method_warns_in_client_context_for_form_module() {
             Some("ТестТип".to_string()),
             vec![],
             Some("Неопределено".to_string()),
+            None,
+            None,
             SignatureSource::Platform,
             None,
             ContextRequirements::ServerOnly,

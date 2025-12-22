@@ -75,6 +75,14 @@ pub enum UncertaintyReason {
         /// Variable name
         name: String,
     },
+
+    /// Invalid string concatenation (non-string operand in string + ...)
+    InvalidStringConcatenation {
+        /// Left operand type
+        left_type: String,
+        /// Right operand type
+        right_type: String,
+    },
 }
 
 /// Source of the type resolution

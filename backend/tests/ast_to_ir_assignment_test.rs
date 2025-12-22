@@ -254,6 +254,76 @@ fn test_assignment_updates_existing_variable() {
     println!("✅ PASSED: Flow-sensitive обновление типа работает");
 }
 
+/// ✅ Проверка конкатенации строк: тип остаётся Строка
+#[test]
+fn test_assignment_string_concat_keeps_string_type() {
+    let ast = Program {
+        statements: vec![Statement::ProcedureDecl {
+            name: "Тест".to_string(),
+            params: vec![],
+            body: vec![
+                Statement::Assignment {
+                    target: Expression::Identifier {
+                        name: "ТекстЗаголовка".to_string(),
+                        span: AstSpan::stub(),
+                    },
+                    value: Expression::String {
+                        value: "по командировке".to_string(),
+                        span: AstSpan::stub(),
+                    },
+                    span: AstSpan::stub(),
+                },
+                Statement::Assignment {
+                    target: Expression::Identifier {
+                        name: "ТекстЗаголовка".to_string(),
+                        span: AstSpan::stub(),
+                    },
+                    value: Expression::Binary {
+                        left: Box::new(Expression::Identifier {
+                            name: "ТекстЗаголовка".to_string(),
+                            span: AstSpan::stub(),
+                        }),
+                        operator: "+".to_string(),
+                        right: Box::new(Expression::String {
+                            value: " доп.".to_string(),
+                            span: AstSpan::stub(),
+                        }),
+                        span: AstSpan::stub(),
+                    },
+                    span: AstSpan::stub(),
+                },
+            ],
+            compiler_directive: None,
+            is_export: false,
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Процедура Тест()\n  ТекстЗаголовка = \"по командировке\";\n  ТекстЗаголовка = ТекстЗаголовка + \" доп.\";\nКонецПроцедуры"
+            .to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let scope_id = ir
+        .symbols
+        .scopes
+        .iter()
+        .find(|(_, s)| s.parent == Some(ir.symbols.root_scope))
+        .map(|(id, _)| *id)
+        .expect("Procedure scope not found");
+
+    let var_type = ir.symbols.get_variable_type(scope_id, "ТекстЗаголовка");
+    assert!(var_type.is_some(), "Переменная НЕ найдена в SymbolTable");
+
+    let res = var_type.unwrap();
+    assert_eq!(res.type_name(), "Строка");
+}
+
 /// ✅ Проверка множественных переменных в одной процедуре
 #[test]
 fn test_multiple_assignments_in_scope() {

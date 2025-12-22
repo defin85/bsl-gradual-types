@@ -662,6 +662,8 @@ fn test_get_methods_prefers_signature_index() {
                 description: None,
             }],
             Some("СправочникСсылка".to_string()), // Корректный return_type!
+            None,
+            None,
             SignatureSource::Platform,
             Some(FacetKind::Reference),
             ContextRequirements::Universal,

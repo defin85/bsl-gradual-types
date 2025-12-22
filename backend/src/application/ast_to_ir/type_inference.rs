@@ -10,6 +10,7 @@ use bsl_shared::domain::resolver::GenericStrategy;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::{
     Certainty, ConcreteType, GenericType, PlatformType, ResolutionResult, TypeResolution,
+    UncertaintyReason,
 };
 
 use super::converter::AstToIrConverter;
@@ -73,6 +74,30 @@ impl AstToIrConverter {
                     format!("{}.{}", info.item_manager_type, property)
                 } else {
                     format!("{}.{}", base_type, property)
+                }
+            }
+            Expression::Binary {
+                left,
+                operator,
+                right,
+                ..
+            } => {
+                let left_type = self.infer_expression_type(left);
+                let right_type = self.infer_expression_type(right);
+
+                match operator.as_str() {
+                    "+" => {
+                        if left_type.eq_ignore_ascii_case("Строка")
+                            || right_type.eq_ignore_ascii_case("Строка")
+                        {
+                            "Строка".to_string()
+                        } else {
+                            "Число".to_string()
+                        }
+                    }
+                    "-" | "*" | "/" => "Число".to_string(),
+                    "=" | "<>" | ">" | "<" | ">=" | "<=" => "Булево".to_string(),
+                    _ => "Dynamic".to_string(),
                 }
             }
             Expression::Call { function, .. } => {
@@ -360,8 +385,49 @@ impl AstToIrConverter {
                 TypeResolution::inferred_weak(&type_str)
             }
 
-            // Бинарные/унарные операции
-            Expression::Binary { .. } | Expression::Unary { .. } => {
+            // Бинарные операции
+            Expression::Binary {
+                left,
+                operator,
+                right,
+                ..
+            } => {
+                if operator == "+" {
+                    let left_res = self.infer_type_resolution(left);
+                    let right_res = self.infer_type_resolution(right);
+
+                    let left_is_string = left_res.type_name().eq_ignore_ascii_case("Строка");
+                    let right_is_string = right_res.type_name().eq_ignore_ascii_case("Строка");
+                    let left_known = left_res.certainty == Certainty::Known;
+                    let right_known = right_res.certainty == Certainty::Known;
+
+                    if left_is_string && right_is_string {
+                        return TypeResolution::primitive("Строка");
+                    }
+
+                    if (left_is_string && right_known && !right_is_string)
+                        || (right_is_string && left_known && !left_is_string)
+                    {
+                        let mut res = TypeResolution::unknown();
+                        res.metadata.uncertainty_reason =
+                            Some(UncertaintyReason::InvalidStringConcatenation {
+                                left_type: left_res.type_name(),
+                                right_type: right_res.type_name(),
+                            });
+                        return res;
+                    }
+
+                    if left_is_string || right_is_string {
+                        return TypeResolution::unknown();
+                    }
+                }
+
+                let type_str = self.infer_expression_type(expr);
+                TypeResolution::inferred(&type_str)
+            }
+
+            // Унарные операции
+            Expression::Unary { .. } => {
                 let type_str = self.infer_expression_type(expr);
                 TypeResolution::inferred(&type_str)
             }

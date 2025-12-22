@@ -91,4 +91,12 @@ pub enum TypeErrorKind {
         /// Имя переменной (если доступно)
         variable_name: Option<String>,
     },
+
+    /// Недопустимая конкатенация строк (операнд не строка)
+    InvalidStringConcatenation {
+        /// Тип левого операнда
+        left_type: String,
+        /// Тип правого операнда
+        right_type: String,
+    },
 }

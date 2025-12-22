@@ -6,7 +6,7 @@ use crate::domain::type_id::TypeId;
 use crate::domain::types::{MetadataKind, RawDataSource, RawTypeData};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 use std::time::SystemTime;
 
@@ -97,6 +97,12 @@ pub trait TypeRepository: Send + Sync {
     /// Загрузить типы в репозиторий
     fn load_types(&self, types: Vec<RawTypeData>) -> Result<()>;
 
+    /// Обновить или добавить типы в репозиторий (по имени типа)
+    fn upsert_types(&self, types: Vec<RawTypeData>) -> Result<()>;
+
+    /// Удалить типы из репозитория по именам (регистронезависимо)
+    fn remove_types(&self, type_names: &[String]) -> Result<usize>;
+
     /// Получить все типы из репозитория
     fn get_all_types(&self) -> Vec<RawTypeData>;
 
@@ -161,6 +167,12 @@ pub trait TypeRepository: Send + Sync {
         method: crate::domain::signature_index::MethodSignature,
     );
 
+    /// Удалить конфигурационные методы по именам (регистронезависимо)
+    fn remove_config_method_signatures(&self, owner_type: &str, method_names: &[String]);
+
+    /// Удалить глобальные функции по именам (регистронезависимо)
+    fn remove_global_function_signatures(&self, function_names: &[String]);
+
     /// Добавить location определения конфигурационного метода (для Go To Definition на метод)
     fn add_config_method_definition_location(
         &self,
@@ -175,6 +187,12 @@ pub trait TypeRepository: Send + Sync {
         function_name: &str,
         location: TypeDefinitionLocation,
     );
+
+    /// Удалить locations для конфигурационных методов по именам (регистронезависимо)
+    fn remove_config_method_definition_locations(&self, owner_type: &str, method_names: &[String]);
+
+    /// Удалить locations для глобальных функций по именам (регистронезависимо)
+    fn remove_global_function_definition_locations(&self, function_names: &[String]);
 
     /// Найти location определения метода/функции (case-insensitive)
     ///
@@ -398,6 +416,95 @@ impl TypeRepository for InMemoryTypeRepository {
         Ok(())
     }
 
+    fn upsert_types(&self, new_types: Vec<RawTypeData>) -> Result<()> {
+        if new_types.is_empty() {
+            return Ok(());
+        }
+
+        let mut types = self.types.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("types RwLock poisoned in upsert_types, recovering");
+            poisoned.into_inner()
+        });
+        let mut index = self.type_index.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("type_index RwLock poisoned in upsert_types, recovering");
+            poisoned.into_inner()
+        });
+
+        let mut primary_index: HashMap<TypeId, usize> = HashMap::new();
+        for (idx, t) in types.iter().enumerate() {
+            primary_index.entry(TypeId::new(&t.name)).or_insert(idx);
+        }
+
+        for type_data in new_types {
+            let id = TypeId::new(&type_data.name);
+            if let Some(&idx) = primary_index.get(&id) {
+                if let Some(slot) = types.get_mut(idx) {
+                    *slot = type_data;
+                }
+            } else {
+                types.push(type_data);
+                primary_index.insert(id, types.len().saturating_sub(1));
+            }
+        }
+
+        index.clear();
+        for (idx, type_data) in types.iter().enumerate() {
+            let id = TypeId::new(&type_data.name);
+            index.entry(id).or_insert(idx);
+
+            if !type_data.english_name.is_empty() && type_data.english_name != type_data.name {
+                let en_id = TypeId::new(&type_data.english_name);
+                index.entry(en_id).or_insert(idx);
+            }
+        }
+
+        *self.last_updated.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("last_updated RwLock poisoned in upsert_types, recovering");
+            poisoned.into_inner()
+        }) = Some(SystemTime::now());
+
+        Ok(())
+    }
+
+    fn remove_types(&self, type_names: &[String]) -> Result<usize> {
+        if type_names.is_empty() {
+            return Ok(0);
+        }
+
+        let mut types = self.types.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("types RwLock poisoned in remove_types, recovering");
+            poisoned.into_inner()
+        });
+        let mut index = self.type_index.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("type_index RwLock poisoned in remove_types, recovering");
+            poisoned.into_inner()
+        });
+
+        let targets: HashSet<TypeId> =
+            type_names.iter().map(|n| TypeId::new(n)).collect();
+        let before = types.len();
+        types.retain(|t| !targets.contains(&TypeId::new(&t.name)));
+        let removed = before.saturating_sub(types.len());
+
+        index.clear();
+        for (idx, type_data) in types.iter().enumerate() {
+            let id = TypeId::new(&type_data.name);
+            index.entry(id).or_insert(idx);
+
+            if !type_data.english_name.is_empty() && type_data.english_name != type_data.name {
+                let en_id = TypeId::new(&type_data.english_name);
+                index.entry(en_id).or_insert(idx);
+            }
+        }
+
+        *self.last_updated.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("last_updated RwLock poisoned in remove_types, recovering");
+            poisoned.into_inner()
+        }) = Some(SystemTime::now());
+
+        Ok(removed)
+    }
+
     fn get_all_types(&self) -> Vec<RawTypeData> {
         self.types.read().unwrap_or_else(|poisoned| {
             tracing::warn!("types RwLock poisoned in get_all_types, recovering");
@@ -515,6 +622,8 @@ impl TypeRepository for InMemoryTypeRepository {
             Some(owner_type.to_string()),
             actual_params.to_vec(),
             actual_return_type.map(|s| s.to_string()),
+            None,
+            None,
             SignatureSource::UserCode,
             None,
             crate::domain::signature_index::ContextRequirements::default(),
@@ -594,6 +703,26 @@ impl TypeRepository for InMemoryTypeRepository {
         index.add_global_function(TypeId::new(function_name), method);
     }
 
+    fn remove_config_method_signatures(&self, owner_type: &str, method_names: &[String]) {
+        let mut index = self.signature_index.write().unwrap_or_else(|poisoned| {
+            tracing::warn!(
+                "SignatureIndex RwLock poisoned in remove_config_method_signatures, recovering"
+            );
+            poisoned.into_inner()
+        });
+        index.remove_config_methods(owner_type, method_names);
+    }
+
+    fn remove_global_function_signatures(&self, function_names: &[String]) {
+        let mut index = self.signature_index.write().unwrap_or_else(|poisoned| {
+            tracing::warn!(
+                "SignatureIndex RwLock poisoned in remove_global_function_signatures, recovering"
+            );
+            poisoned.into_inner()
+        });
+        index.remove_global_functions(function_names);
+    }
+
     fn add_config_method_definition_location(
         &self,
         owner_type: &str,
@@ -628,6 +757,47 @@ impl TypeRepository for InMemoryTypeRepository {
             });
         let k = TypeId::new(function_name);
         map.insert((k.clone(), k), location);
+    }
+
+    fn remove_config_method_definition_locations(&self, owner_type: &str, method_names: &[String]) {
+        if method_names.is_empty() {
+            return;
+        }
+
+        let mut map = self
+            .method_definition_index
+            .write()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!(
+                    "method_definition_index RwLock poisoned in remove_config_method_definition_locations, recovering"
+                );
+                poisoned.into_inner()
+            });
+
+        for name in method_names {
+            map.remove(&(TypeId::new(owner_type), TypeId::new(name)));
+        }
+    }
+
+    fn remove_global_function_definition_locations(&self, function_names: &[String]) {
+        if function_names.is_empty() {
+            return;
+        }
+
+        let mut map = self
+            .method_definition_index
+            .write()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!(
+                    "method_definition_index RwLock poisoned in remove_global_function_definition_locations, recovering"
+                );
+                poisoned.into_inner()
+            });
+
+        for name in function_names {
+            let k = TypeId::new(name);
+            map.remove(&(k.clone(), k));
+        }
     }
 
     fn find_method_definition_location(
@@ -882,5 +1052,99 @@ mod tests {
 
         assert!(repo.find_type("НесуществующийТип").is_none());
         assert_eq!(repo.get_all_types().len(), 0);
+    }
+
+    #[test]
+    fn test_upsert_types_updates_existing() {
+        let repo = InMemoryTypeRepository::new();
+
+        let type_data = RawTypeData {
+            name: "Документ".to_string(),
+            english_name: "Document".to_string(),
+            description: "old".to_string(),
+            source: RawDataSource::Configuration,
+            ..Default::default()
+        };
+        repo.load_types(vec![type_data]).unwrap();
+
+        let updated = RawTypeData {
+            name: "Документ".to_string(),
+            english_name: "Document".to_string(),
+            description: "new".to_string(),
+            source: RawDataSource::Configuration,
+            ..Default::default()
+        };
+        repo.upsert_types(vec![updated]).unwrap();
+
+        let found = repo.find_type("Документ").unwrap();
+        assert_eq!(found.description, "new");
+    }
+
+    #[test]
+    fn test_remove_types_removes_indexed_entries() {
+        let repo = InMemoryTypeRepository::new();
+
+        let type_a = RawTypeData {
+            name: "ТипА".to_string(),
+            english_name: "TypeA".to_string(),
+            source: RawDataSource::Configuration,
+            ..Default::default()
+        };
+        let type_b = RawTypeData {
+            name: "ТипБ".to_string(),
+            english_name: "TypeB".to_string(),
+            source: RawDataSource::Configuration,
+            ..Default::default()
+        };
+        repo.load_types(vec![type_a, type_b]).unwrap();
+
+        let removed = repo.remove_types(&vec!["ТипА".to_string()]).unwrap();
+        assert_eq!(removed, 1);
+        assert!(repo.find_type("ТипА").is_none());
+        assert!(repo.find_type("TypeA").is_none());
+        assert!(repo.find_type("ТипБ").is_some());
+    }
+
+    #[test]
+    fn test_remove_signatures_by_name() {
+        use crate::domain::runtime_context::ContextRequirements;
+        use crate::domain::signature_index::{MethodSignature, SignatureSource};
+
+        let repo = InMemoryTypeRepository::new();
+        let owner = "СправочникМенеджер.Контрагенты";
+
+        let sig = MethodSignature::new(
+            "Тест".to_string(),
+            Some(owner.to_string()),
+            vec![],
+            None,
+            None,
+            None,
+            SignatureSource::Configuration,
+            None,
+            ContextRequirements::default(),
+        );
+        repo.add_config_method_signature(owner, sig);
+        assert!(repo.find_method_signature(Some(owner), "Тест").is_some());
+
+        repo.remove_config_method_signatures(owner, &vec!["Тест".to_string()]);
+        assert!(repo.find_method_signature(Some(owner), "Тест").is_none());
+
+        let global_sig = MethodSignature::new(
+            "Глобальная".to_string(),
+            None,
+            vec![],
+            None,
+            None,
+            None,
+            SignatureSource::Configuration,
+            None,
+            ContextRequirements::default(),
+        );
+        repo.add_global_function_signature("Глобальная", global_sig);
+        assert!(repo.find_method_signature(None, "Глобальная").is_some());
+
+        repo.remove_global_function_signatures(&vec!["Глобальная".to_string()]);
+        assert!(repo.find_method_signature(None, "Глобальная").is_none());
     }
 }

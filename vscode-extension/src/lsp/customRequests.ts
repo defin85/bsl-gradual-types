@@ -98,6 +98,7 @@ export interface CheckCompatibilityResponse {
 export interface IncrementalUpdateParams {
     config_path: string;
     platform_version: string;
+    changed_paths?: string[];
 }
 
 export interface IncrementalUpdateResponse {
@@ -224,12 +225,14 @@ export async function analyzeFile(filePath: string): Promise<void> {
  */
 export async function incrementalUpdate(
     configPath: string,
-    platformVersion: string
+    platformVersion: string,
+    changedPaths?: string[]
 ): Promise<IncrementalUpdateResponse> {
     const { sendCustomRequest } = await import('./client');
     return await sendCustomRequest<IncrementalUpdateResponse>('bsl/incrementalUpdate', {
         config_path: configPath,
-        platform_version: platformVersion
+        platform_version: platformVersion,
+        changed_paths: changedPaths
     });
 }
 

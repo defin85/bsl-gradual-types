@@ -20,6 +20,8 @@ pub use parallel_analyzer::{ParallelAnalyzer, PerformanceStats, ProjectAnalysisR
 pub use parser_coordinator::ParserCoordinator;
 pub use persistent_cache::{CacheCleanupStats, CacheStats, CachedAnalysis, PersistentCache};
 pub use simple_cache::{AnalysisCache, CacheAnalysisResult, FileHash};
-pub use system_coordinator::{LoadMetadataResult, StartupError, SymbolInfo, SystemCoordinator};
+pub use system_coordinator::{
+    ConfigIndexCache, LoadMetadataResult, ObjectKey, StartupError, SymbolInfo, SystemCoordinator,
+};
 pub use tree_cache::{hash_content, TreeCache};
 pub use tree_sitter_adapter::TreeSitterAdapter;

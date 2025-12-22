@@ -30,6 +30,8 @@ fn test_find_by_code_return_type_from_signature_index() {
                 description: None,
             }],
             Some("СправочникСсылка.<Имя справочника>".to_string()),
+            None,
+            None,
             SignatureSource::Platform,
             None,
             ContextRequirements::Universal,

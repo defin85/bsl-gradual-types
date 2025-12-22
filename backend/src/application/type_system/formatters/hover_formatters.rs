@@ -210,6 +210,13 @@ fn format_uncertainty_reason(reason: &UncertaintyReason) -> String {
         UncertaintyReason::UndeclaredVariable { name } => {
             format!("Переменная \"{}\" не объявлена", name)
         }
+        UncertaintyReason::InvalidStringConcatenation {
+            left_type,
+            right_type,
+        } => format!(
+            "Недопустимая конкатенация строк: '{}' + '{}'",
+            left_type, right_type
+        ),
     }
 }
 

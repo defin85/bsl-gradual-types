@@ -96,7 +96,7 @@ export function registerIndexCommands(
         try {
             // P4: прогресс показывает сервер через $/progress.
             updateStatusBar('$(sync~spin) BSL: Incremental update...');
-            const result = await incrementalUpdate(configPath, getPlatformVersion());
+            const result = await incrementalUpdate(configPath, getPlatformVersion(), []);
             updateStatusBar('$(check) BSL: Ready');
             vscode.window.showInformationMessage(`Index updated successfully: ${result.message}`);
         } catch (error) {
@@ -122,13 +122,17 @@ export function registerIndexCommands(
     let debounceTimer: NodeJS.Timeout | undefined;
     let inFlight = false;
     let pending = false;
+    let pendingPaths = new Set<string>();
 
     const disposeWatchers = () => {
         for (const w of watchers) w.dispose();
         watchers = [];
     };
 
-    const scheduleAutoUpdate = (reason: string) => {
+    const scheduleAutoUpdate = (reason: string, uri?: vscode.Uri) => {
+        if (uri) {
+            pendingPaths.add(uri.fsPath);
+        }
         outputChannel.appendLine(`[AutoReindex] Schedule: ${reason}`);
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => void runAutoUpdate(), 1200);
@@ -148,7 +152,9 @@ export function registerIndexCommands(
 
         try {
             updateStatusBar('$(sync~spin) BSL: Auto reindex...');
-            await incrementalUpdate(configPath, getPlatformVersion());
+            const changedPaths = Array.from(pendingPaths);
+            pendingPaths.clear();
+            await incrementalUpdate(configPath, getPlatformVersion(), changedPaths);
             updateStatusBar('$(check) BSL: Ready');
             outputChannel.appendLine('[AutoReindex] Completed');
         } catch (error) {
@@ -170,18 +176,17 @@ export function registerIndexCommands(
 
         // Минимальный набор "горячих" файлов: Configuration.xml, любые Ext/*.bsl, Form.xml.
         const patterns = [
-            'Configuration.xml',
             '**/Ext/*.bsl',
-            '**/Form.xml'
+            '**/*.xml'
         ];
 
         for (const pattern of patterns) {
             const watcher = vscode.workspace.createFileSystemWatcher(
                 new vscode.RelativePattern(configPath, pattern)
             );
-            watcher.onDidCreate(() => scheduleAutoUpdate(`create: ${pattern}`));
-            watcher.onDidChange(() => scheduleAutoUpdate(`change: ${pattern}`));
-            watcher.onDidDelete(() => scheduleAutoUpdate(`delete: ${pattern}`));
+            watcher.onDidCreate((uri) => scheduleAutoUpdate(`create: ${uri.fsPath}`, uri));
+            watcher.onDidChange((uri) => scheduleAutoUpdate(`change: ${uri.fsPath}`, uri));
+            watcher.onDidDelete((uri) => scheduleAutoUpdate(`delete: ${uri.fsPath}`, uri));
             watchers.push(watcher);
         }
 

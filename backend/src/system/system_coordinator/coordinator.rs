@@ -13,6 +13,7 @@ use crate::system::simple_cache::AnalysisCache;
 use bsl_shared::domain::repository::RepositoryStats;
 use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::api::StartupProgressDto;
+use super::types::ConfigIndexCache;
 
 // ============================================================================
 // LOCK ORDER CONVENTION
@@ -56,6 +57,9 @@ pub struct SystemCoordinator {
 
     // === STARTUP PROGRESS (WEB API) ===
     pub(crate) startup_progress: Arc<RwLock<StartupProgressDto>>,
+
+    // === CONFIG INDEX CACHE ===
+    pub(crate) config_index_cache: Arc<RwLock<Option<ConfigIndexCache>>>,
 }
 
 impl Default for SystemCoordinator {
@@ -90,6 +94,7 @@ impl SystemCoordinator {
             analysis_engine_cache: Arc::new(RwLock::new(None)),
             type_service_cache: Arc::new(RwLock::new(None)),
             startup_progress: Arc::new(RwLock::new(StartupProgressDto::default())),
+            config_index_cache: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -116,6 +121,11 @@ impl SystemCoordinator {
             poisoned.into_inner()
         });
         Some(parser.clone())
+    }
+
+    /// Получить кэш индекса конфигурации (для инкрементального обновления)
+    pub fn config_index_cache(&self) -> Arc<RwLock<Option<ConfigIndexCache>>> {
+        self.config_index_cache.clone()
     }
 
     /// Получить IR Cache

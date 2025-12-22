@@ -17,7 +17,9 @@ mod types;
 
 // Реэкспорты публичного API
 pub use coordinator::SystemCoordinator;
-pub use types::{LoadMetadataResult, StartupError, SymbolInfo};
+pub use types::{
+    ConfigIndexCache, LoadMetadataResult, ObjectKey, StartupError, SymbolInfo,
+};
 
 #[cfg(test)]
 mod tests {

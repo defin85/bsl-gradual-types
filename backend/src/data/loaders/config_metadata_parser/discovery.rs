@@ -46,7 +46,7 @@ impl ConfigurationDiscovery {
 
     /// Конвертирует XML тег из Configuration.xml в название папки
     /// Пример: "Catalog" -> "Catalogs", "Document" -> "Documents"
-    fn xml_tag_to_folder_name(&self, xml_tag: &str) -> String {
+    pub fn xml_tag_to_folder_name(&self, xml_tag: &str) -> String {
         match xml_tag {
             "Catalog" => "Catalogs".to_string(),
             "Document" => "Documents".to_string(),
@@ -69,6 +69,33 @@ impl ConfigurationDiscovery {
             "Subsystem" => "Subsystems".to_string(),
             "Language" => "Languages".to_string(),
             _ => xml_tag.to_string(), // Fallback для неизвестных типов
+        }
+    }
+
+    /// Обратный маппинг: папка -> XML-тег (Catalogs -> Catalog)
+    pub fn folder_name_to_xml_tag(folder_name: &str) -> Option<&'static str> {
+        match folder_name {
+            "Catalogs" => Some("Catalog"),
+            "Documents" => Some("Document"),
+            "Enums" => Some("Enum"),
+            "InformationRegisters" => Some("InformationRegister"),
+            "AccumulationRegisters" => Some("AccumulationRegister"),
+            "AccountingRegisters" => Some("AccountingRegister"),
+            "CalculationRegisters" => Some("CalculationRegister"),
+            "ChartsOfAccounts" => Some("ChartOfAccounts"),
+            "ChartsOfCharacteristicTypes" => Some("ChartOfCharacteristicTypes"),
+            "ChartsOfCalculationTypes" => Some("ChartOfCalculationTypes"),
+            "Reports" => Some("Report"),
+            "DataProcessors" => Some("DataProcessor"),
+            "BusinessProcesses" => Some("BusinessProcess"),
+            "Tasks" => Some("Task"),
+            "ExchangePlans" => Some("ExchangePlan"),
+            "Constants" => Some("Constant"),
+            "Roles" => Some("Role"),
+            "CommonModules" => Some("CommonModule"),
+            "Subsystems" => Some("Subsystem"),
+            "Languages" => Some("Language"),
+            _ => None,
         }
     }
 

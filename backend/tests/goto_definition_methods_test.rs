@@ -30,6 +30,8 @@ fn create_minimal_service() -> (TypeSystemService, Arc<InMemoryTypeRepository>) 
             Some("ТестТип".to_string()),
             vec![],
             Some("Неопределено".to_string()),
+            None,
+            None,
             SignatureSource::Platform,
             None,
             ContextRequirements::default(),

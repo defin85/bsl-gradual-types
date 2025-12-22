@@ -18513,11 +18513,12 @@ async function checkTypeCompatibility(sourceType, targetType) {
 async function analyzeFile(filePath) {
   logger.debug(`File ${filePath} will be analyzed via LSP textDocument/didOpen`);
 }
-async function incrementalUpdate(configPath, platformVersion) {
+async function incrementalUpdate(configPath, platformVersion, changedPaths) {
   const { sendCustomRequest: sendCustomRequest2 } = await Promise.resolve().then(() => (init_client(), client_exports));
   return await sendCustomRequest2("bsl/incrementalUpdate", {
     config_path: configPath,
-    platform_version: platformVersion
+    platform_version: platformVersion,
+    changed_paths: changedPaths
   });
 }
 async function extractPlatformDocs(archivePath, platformVersion, force = false) {
@@ -20815,7 +20816,7 @@ function registerIndexCommands(context, safeRegisterCommand2, outputChannel8) {
     }
     try {
       updateStatusBar("$(sync~spin) BSL: Incremental update...");
-      const result = await incrementalUpdate(configPath, getPlatformVersion());
+      const result = await incrementalUpdate(configPath, getPlatformVersion(), []);
       updateStatusBar("$(check) BSL: Ready");
       vscode25.window.showInformationMessage(`Index updated successfully: ${result.message}`);
     } catch (error) {
@@ -20833,11 +20834,15 @@ function registerIndexCommands(context, safeRegisterCommand2, outputChannel8) {
   let debounceTimer2;
   let inFlight = false;
   let pending = false;
+  let pendingPaths = /* @__PURE__ */ new Set();
   const disposeWatchers = () => {
     for (const w of watchers) w.dispose();
     watchers = [];
   };
-  const scheduleAutoUpdate = (reason) => {
+  const scheduleAutoUpdate = (reason, uri) => {
+    if (uri) {
+      pendingPaths.add(uri.fsPath);
+    }
     outputChannel8.appendLine(`[AutoReindex] Schedule: ${reason}`);
     if (debounceTimer2) clearTimeout(debounceTimer2);
     debounceTimer2 = setTimeout(() => void runAutoUpdate(), 1200);
@@ -20853,7 +20858,9 @@ function registerIndexCommands(context, safeRegisterCommand2, outputChannel8) {
     pending = false;
     try {
       updateStatusBar("$(sync~spin) BSL: Auto reindex...");
-      await incrementalUpdate(configPath, getPlatformVersion());
+      const changedPaths = Array.from(pendingPaths);
+      pendingPaths.clear();
+      await incrementalUpdate(configPath, getPlatformVersion(), changedPaths);
       updateStatusBar("$(check) BSL: Ready");
       outputChannel8.appendLine("[AutoReindex] Completed");
     } catch (error) {
@@ -20872,17 +20879,16 @@ function registerIndexCommands(context, safeRegisterCommand2, outputChannel8) {
     const configPath = getConfigurationPath();
     if (!configPath) return;
     const patterns = [
-      "Configuration.xml",
       "**/Ext/*.bsl",
-      "**/Form.xml"
+      "**/*.xml"
     ];
     for (const pattern of patterns) {
       const watcher = vscode25.workspace.createFileSystemWatcher(
         new vscode25.RelativePattern(configPath, pattern)
       );
-      watcher.onDidCreate(() => scheduleAutoUpdate(`create: ${pattern}`));
-      watcher.onDidChange(() => scheduleAutoUpdate(`change: ${pattern}`));
-      watcher.onDidDelete(() => scheduleAutoUpdate(`delete: ${pattern}`));
+      watcher.onDidCreate((uri) => scheduleAutoUpdate(`create: ${uri.fsPath}`, uri));
+      watcher.onDidChange((uri) => scheduleAutoUpdate(`change: ${uri.fsPath}`, uri));
+      watcher.onDidDelete((uri) => scheduleAutoUpdate(`delete: ${uri.fsPath}`, uri));
       watchers.push(watcher);
     }
     outputChannel8.appendLine(`[AutoReindex] Watchers installed for: ${configPath}`);

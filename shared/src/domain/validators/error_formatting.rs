@@ -176,6 +176,13 @@ impl TypeErrorKind {
             TypeErrorKind::UnknownType { type_name, .. } => {
                 format!("Тип '{}' не найден", type_name)
             }
+            TypeErrorKind::InvalidStringConcatenation {
+                left_type,
+                right_type,
+            } => format!(
+                "Конкатенация строк требует тип 'Строка' для обоих операндов: получено '{}' и '{}'",
+                left_type, right_type
+            ),
         }
     }
 
@@ -302,6 +309,7 @@ impl TypeErrorKind {
             // UninitializedVariableUsage: Standard format matches Brief
             TypeErrorKind::UninitializedVariableUsage { .. } => self.format_brief(),
             TypeErrorKind::UnknownType { .. } => self.format_brief(),
+            TypeErrorKind::InvalidStringConcatenation { .. } => self.format_brief(),
         }
     }
 
@@ -458,6 +466,10 @@ impl TypeErrorKind {
                         type_name
                     )
                 }
+            }
+            TypeErrorKind::InvalidStringConcatenation { .. } => {
+                "\u{1F4A1} Подсказка: Приведите операнд к строке, например: Строка(<выражение>)."
+                    .to_string()
             }
         }
     }

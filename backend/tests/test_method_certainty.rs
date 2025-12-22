@@ -22,6 +22,8 @@ fn test_method_return_certainty() {
             Some("Массив".to_string()),
             vec![],
             Some("Число".to_string()),
+            None,
+            None,
             SignatureSource::Platform,
             None,
             ContextRequirements::default(),

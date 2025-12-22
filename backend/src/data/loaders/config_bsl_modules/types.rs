@@ -17,6 +17,25 @@ pub struct IndexedConfigSignatures {
     pub global_functions: Vec<(String, bsl_shared::domain::signature_index::MethodSignature)>,
     pub definition_locations: Vec<(String, String, TypeDefinitionLocation)>,
     pub global_definition_locations: Vec<(String, TypeDefinitionLocation)>,
+    pub module_signatures: Vec<ModuleSignatureSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModuleSignatureSnapshot {
+    pub module_path: PathBuf,
+    pub owner_type: Option<String>,
+    pub method_names: Vec<String>,
+    pub global_function_names: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct ModuleIndexResult {
+    pub module_path: PathBuf,
+    pub config_methods: Vec<(String, bsl_shared::domain::signature_index::MethodSignature)>,
+    pub global_functions: Vec<(String, bsl_shared::domain::signature_index::MethodSignature)>,
+    pub definition_locations: Vec<(String, String, TypeDefinitionLocation)>,
+    pub global_definition_locations: Vec<(String, TypeDefinitionLocation)>,
+    pub snapshot: ModuleSignatureSnapshot,
 }
 
 #[derive(Debug)]

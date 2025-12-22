@@ -7,7 +7,9 @@ use tower_lsp::lsp_types::Url;
 use tracing::{error, info};
 
 use bsl_backend::system::fs_utils::read_bsl_file;
-use crate::commands::{handle_parse_configuration, ParseConfigurationParams};
+use crate::commands::{
+    handle_incremental_update, handle_parse_configuration, ParseConfigurationParams,
+};
 use crate::handlers::{find_containing_function_in_dto, CurrentContextResponse};
 use crate::types::{
     BuildIndexParams, BuildIndexResponse, GetCurrentContextParams, IncrementalUpdateParams,
@@ -108,6 +110,7 @@ impl BslLanguageServer {
             self.client.clone(),
             "bsl-build-index",
             "Building BSL index",
+            Some(self.coordinator.clone()),
         )
         .await;
 
@@ -127,22 +130,12 @@ impl BslLanguageServer {
         &self,
         params: IncrementalUpdateParams,
     ) -> JsonRpcResult<IncrementalUpdateResponse> {
-        let resp = handle_parse_configuration(
-            ParseConfigurationParams {
-                config_path: params.config_path,
-            },
-            self.coordinator.get_analysis_engine(),
-            self.client.clone(),
-            "bsl-incremental-update",
-            "Incremental index update",
-        )
-        .await;
+        let resp =
+            handle_incremental_update(params, self.coordinator.clone(), self.client.clone()).await;
 
         Ok(IncrementalUpdateResponse {
             success: resp.success,
-            message: resp
-                .message
-                .unwrap_or_else(|| "Incremental update completed".to_string()),
+            message: resp.message,
         })
     }
 }

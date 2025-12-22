@@ -12,7 +12,7 @@ use super::super::types::{FacetKind, MetadataKind};
 use super::facet_helpers;
 use super::method::MethodSignature;
 use super::types::{ConstructorSignature, SignatureMismatch, SignatureValidationResult};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // Re-export ContextRequirements для обратной совместимости
 pub use super::super::runtime_context::ContextRequirements;
@@ -199,6 +199,46 @@ impl SignatureIndex {
     /// Добавить глобальную функцию
     pub fn add_global_function(&mut self, name: TypeId, method: MethodSignature) {
         self.global_functions.insert(name, method);
+    }
+
+    /// Удалить конфигурационные методы по имени (регистронезависимо)
+    pub fn remove_config_methods(&mut self, type_name: &str, method_names: &[String]) -> usize {
+        let type_id = TypeId::new(type_name);
+        let Some(methods) = self.config_methods.get_mut(&type_id) else {
+            return 0;
+        };
+
+        if method_names.is_empty() {
+            return 0;
+        }
+
+        let target: HashSet<String> =
+            method_names.iter().map(|n| n.to_lowercase()).collect();
+        let before = methods.len();
+        methods.retain(|m| !target.contains(&m.name.to_lowercase()));
+        let removed = before.saturating_sub(methods.len());
+
+        if methods.is_empty() {
+            self.config_methods.remove(&type_id);
+        }
+
+        removed
+    }
+
+    /// Удалить глобальные функции по имени (регистронезависимо)
+    pub fn remove_global_functions(&mut self, function_names: &[String]) -> usize {
+        if function_names.is_empty() {
+            return 0;
+        }
+
+        let mut removed = 0;
+        for name in function_names {
+            if self.global_functions.remove(&TypeId::new(name)).is_some() {
+                removed += 1;
+            }
+        }
+
+        removed
     }
 
     /// Добавить конструктор

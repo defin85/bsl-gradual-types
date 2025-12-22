@@ -246,6 +246,13 @@ impl<'a> TypeValidator<'a> {
                     // false positives for user-defined functions/procedures.
                     None
                 }
+                UncertaintyReason::InvalidStringConcatenation {
+                    left_type,
+                    right_type,
+                } => Some(TypeErrorKind::InvalidStringConcatenation {
+                    left_type: left_type.clone(),
+                    right_type: right_type.clone(),
+                }),
             }
         } else {
             None

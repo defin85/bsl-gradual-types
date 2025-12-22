@@ -97,6 +97,8 @@ pub struct CheckCompatibilityResponse {
 pub struct IncrementalUpdateParams {
     pub config_path: String,
     pub platform_version: String,
+    #[serde(default)]
+    pub changed_paths: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]

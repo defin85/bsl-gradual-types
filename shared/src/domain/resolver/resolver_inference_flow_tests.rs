@@ -26,6 +26,8 @@ fn create_repo_with_tabular_section_type() -> Arc<InMemoryTypeRepository> {
             Some("ТабличнаяЧасть".to_string()),
             vec![],
             Some("ТаблицаЗначений".to_string()),
+            None,
+            None,
             crate::domain::signature_index::SignatureSource::Platform,
             None,
             crate::domain::signature_index::ContextRequirements::Universal,

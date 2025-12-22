@@ -341,6 +341,8 @@ fn convert_binary_expression(node: &Node, source: &str) -> Result<Option<Express
             } else {
                 right = Some(expr);
             }
+        } else if child.kind() == "operator" {
+            operator = node_text(&child, source);
         } else if child.kind() == "+" || child.kind() == "-" || child.kind() == "*" {
             operator = child.kind().to_string();
         }

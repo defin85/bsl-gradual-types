@@ -1,6 +1,6 @@
 # Roadmap: Hover глобальных функций и UX вокруг hover/индексации
 
-**Статус:** 🔴 ПЛАН  
+**Статус:** 🟢 СДЕЛАНО  
 **Приоритет:** HIGH  
 **Цель:** добавить описания глобальных функций в hover и зафиксировать сопутствующие UX‑задачи (автодополнение, индексация, hover в условиях).
 
@@ -32,10 +32,21 @@
 
 ## План работ (главная задача)
 
-1) Расширить `MethodSignature` doc‑полями (`description`, `return_description`), обновить `Clone` и `new`.  
-2) В `convert_syntax_helper_global_functions` заполнить описания (и для русских, и для английских алиасов), отсекая пустые строки.  
-3) Добавить форматирование hover для `FunctionCall` через `HoverFormatter` + lookup сигнатуры.  
-4) Добавить тесты (formatter/конвертация).
+1) ✅ Расширить `MethodSignature` doc‑полями (`description`, `return_description`), обновить `Clone` и `new`.  
+2) ✅ В `convert_syntax_helper_global_functions` заполнить описания (и для русских, и для английских алиасов), отсекая пустые строки.  
+3) ✅ Добавить форматирование hover для `FunctionCall` через `HoverFormatter` + lookup сигнатуры.  
+4) ✅ Добавить тесты (formatter/конвертация).  
+5) ✅ Обновить оставшиеся вызовы `MethodSignature::new` под новую сигнатуру.
+
+---
+
+## Фактический прогресс (проверено по репозиторию)
+
+- ✅ `MethodSignature` расширен doc‑полями и обновлены `Clone/new`: `shared/src/domain/signature_index/method.rs:50`, `shared/src/domain/signature_index/method.rs:121`.
+- ✅ Конвертация глобальных функций переносит `description`/`return_description` и для английских алиасов: `backend/src/data/adapters/converters.rs:310`, `backend/src/data/adapters/converters.rs:365`.
+- ✅ Hover для `FunctionCall` использует lookup сигнатуры и форматирует описания: `backend/src/application/type_system/services/hover_service.rs:265`, `backend/src/helpers/hover_formatter/formatter.rs:186`.
+- ✅ Добавлены тесты форматтера/конвертации: `backend/src/helpers/hover_formatter/tests.rs:40`, `backend/src/data/adapters/converters.rs:530`.
+- ✅ Обновлены старые вызовы `MethodSignature::new`: `shared/src/domain/repository.rs:513`, `backend/tests/lsp_signature_help_test.rs:453`.
 
 ---
 
@@ -52,42 +63,26 @@
 
 ### Инкрементальная переиндексация при сохранении (AutoReindex)
 
-- При сохранении `*.bsl` триггерится AutoReindex и, судя по прогрессу, идёт почти полная переиндексация.
-- Пример логов:
-```text
-[AutoReindex] Schedule: change: **/Ext/*.bsl
-[Progress] BEGIN: bsl-incremental-update-1766311449309 | Incremental index update
-[Progress] REPORT: bsl-incremental-update-1766311449309 | Validation OK (10%)
-[Progress] REPORT: bsl-incremental-update-1766311449309 | Файл 2335/15192: МенеджерОборудованияВызовСервераПереопределяемый (13%)
-[Progress] REPORT: bsl-incremental-update-1766311449309 | Файл 5085/15192: УчетныеЗаписиСинхронизацииФайлов (16%)
-[Progress] REPORT: bsl-incremental-update-1766311449309 | Indexed 463/8862: /home/egor/code/bsl-gradual-types/examples/conf_big/InformationRegisters/ОснованияПолномочийОтветственныхЛиц/Ext/ManagerModule.bsl (90%)
-[Progress] REPORT: bsl-incremental-update-1766311449309 | Indexed 963/8862: /home/egor/code/bsl-gradual-types/examples/conf_big/Catalogs/ДоверенностиНалогоплательщика/Ext/ObjectModule.bsl (91%)
-[Progress] REPORT: bsl-incremental-update-1766311449309 | Indexed 76971 methods, 113 global functions (99%)
-[Progress] END: bsl-incremental-update-1766311449309 | Loaded 9371 types
-[AutoReindex] Completed
-```
-- Гипотеза: incremental update пересчитывает весь набор модулей вместо диффа по изменённому файлу.
-- Связь: `docs/roadmap/disk-cache-platform-config-parsing-roadmap.md` (кеши и инкрементальность).
-- Проверить:
-  - источник логов `[AutoReindex]` и `[Progress]` (кто инициирует);
-  - почему при единичном изменении берётся полный список `**/Ext/*.bsl`;
-  - можно ли сузить пересборку до изменённых модулей + зависимых типов;
-  - как использовать дисковый кеш/хеши, чтобы пропускать неизменённые файлы.
+- ✅ VSCode собирает изменённые пути (`**/Ext/*.bsl`, `**/*.xml`) и отправляет их в `bsl/incrementalUpdate`: `vscode-extension/src/commands/index-commands.ts:121`, `vscode-extension/src/commands/index-commands.ts:177`, `vscode-extension/src/lsp/customRequests.ts:226`.
+- ✅ LSP принимает `changed_paths` и при наличии кэша обновляет только затронутые XML/BSL, иначе делает полный parse: `backend/src/bin/lsp_server/types.rs:94`, `backend/src/bin/lsp_server/commands/configuration.rs:398`, `backend/src/data/loaders/config_bsl_modules/indexing.rs:400`.
+- ✅ Кэш автоиндексации хранит только data-only снимки метаданных/сигнатур, пригоден для disk-cache: `backend/src/system/system_coordinator/types.rs:38`, `backend/src/data/loaders/config_bsl_modules/types.rs:14`.
+- Связь: `docs/roadmap/disk-cache-platform-config-parsing-roadmap.md` (D4/D5) — остаётся добавить дисковый слой/хеши поверх текущих снапшотов.
 
 ### Hover в условиях и циклах показывает Dynamic
 
 - Симптом: hover в `Если/Пока/Для` показывает `Условие: Dynamic`.
 - Цель: более информативный hover (ожидаемый тип `Булево` + фактический `TypeResolution` с certainty/причиной).
-- Проверить:
-  - как формируется `condition_type` в IR;
-  - достаточно ли заменить форматирование на более полное;
-  - как корректно отображать unknown/union для условий.
+- ✅ Для бинарных выражений теперь читается оператор и выводится `Булево` для сравнений: `backend/src/system/tree_sitter_adapter/expression_converter.rs:330`, `backend/src/application/ast_to_ir/type_inference.rs:79`.
+- ⚠️ Нужна проверка hover в реальных условиях/циклах и форматирование certainty/причины для `TypeResolution`.
 
 ### Самоприсваивание с конкатенацией теряет тип
 
 - Симптом: `ТекстЗаголовка = ТекстЗаголовка + НСтр("ru = ' по командировке'");` — тип не резолвится, хотя ранее был `Строка`.
 - Задача: проверить flow‑sensitive обновление типа при бинарных операциях.
 - Ожидаемое поведение: после присваивания тип остаётся `Строка`.
+- ✅ Тип `Строка` сохраняется для `строка + строка`, а `строка + Known(не-строка)` даёт Unknown с причиной: `backend/src/application/ast_to_ir/type_inference.rs:388`, `shared/src/domain/types/certainty.rs:79`.
+- ✅ Диагностика конкатенации становится Error при явном Known и не трогает Unknown: `shared/src/domain/validators/type_validator.rs:220`, `shared/src/domain/validators/error_kinds.rs:95`, `shared/src/domain/validators/error_formatting.rs:176`.
+- ✅ Тесты на сохранение типа и ошибку конкатенации: `backend/tests/ast_to_ir_assignment_test.rs:257`, `backend/tests/string_concat_validation_test.rs:13`.
 
 ### Управление автоиндексацией в LSP (pause/resume)
 
@@ -103,9 +98,9 @@
 
 ## Тестирование и проверка
 
-- `cargo test -p bsl_shared signature_index`
-- `cargo test -p bsl_backend hover_formatter`
-- Если Web API поднят пользователем: проверить hover для `НСтр`.
+- `cargo test -p bsl-shared signature_index` — ✅ 56 тестов (0 fail).
+- `cargo test -p bsl-backend hover_formatter` — ✅ 23 теста (0 fail).
+- Если Web API поднят пользователем: проверить hover для `НСтр` (не проверялось).
 
 ---
 

@@ -42,3 +42,10 @@ export function getPlatformDocsArchive(): string {
     
     return '';
 }
+
+/**
+ * Получить флаг авто-реиндексации
+ */
+export function getAutoReindexEnabled(): boolean {
+    return BslAnalyzerConfig.autoReindexEnabled;
+}

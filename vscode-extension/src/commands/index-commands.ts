@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { CommandHandler } from '../types';
-import { updateStatusBar } from '../lsp/progress';
-import { getConfigurationPath, getPlatformVersion, getPlatformDocsArchive } from '../utils';
-import { queryType, buildIndex, incrementalUpdate } from '../lsp/customRequests';
+import { setAutoReindexPaused, updateStatusBar } from '../lsp/progress';
+import { getAutoReindexEnabled, getConfigurationPath, getPlatformVersion, getPlatformDocsArchive } from '../utils';
+import { queryType, buildIndex, incrementalUpdate, pauseAutoReindex, resumeAutoReindex } from '../lsp/customRequests';
 import { showIndexStatsWebview } from '../webviews';
 
 /**
@@ -13,6 +13,61 @@ export function registerIndexCommands(
     safeRegisterCommand: (commandId: string, callback: CommandHandler) => Promise<vscode.Disposable | null>,
     outputChannel: vscode.OutputChannel
 ) {
+    const isTestMode =
+        process.env.NODE_ENV === 'test' ||
+        process.env.VSCODE_TEST_MODE === '1' ||
+        process.env.VSCODE_EXTENSION_MODE === 'test';
+
+    let watchers: vscode.Disposable[] = [];
+    let debounceTimer: NodeJS.Timeout | undefined;
+    let inFlight = false;
+    let pending = false;
+    let pendingPaths = new Set<string>();
+    let userPaused = false;
+    let lastPauseSynced: boolean | null = null;
+
+    const isAutoReindexPaused = () => userPaused || !getAutoReindexEnabled();
+
+    const applyPausedStatus = () => {
+        if (isAutoReindexPaused()) {
+            updateStatusBar('$(debug-pause) BSL: Auto reindex paused');
+        }
+    };
+
+    const syncAutoReindexState = async (reason: string) => {
+        const paused = isAutoReindexPaused();
+        setAutoReindexPaused(paused);
+        if (paused) {
+            applyPausedStatus();
+        } else if (!inFlight) {
+            updateStatusBar('$(check) BSL: Ready');
+        }
+
+        if (isTestMode) {
+            return;
+        }
+
+        if (lastPauseSynced === paused) {
+            return;
+        }
+
+        try {
+            if (paused) {
+                await pauseAutoReindex();
+            } else {
+                await resumeAutoReindex();
+            }
+            lastPauseSynced = paused;
+            outputChannel.appendLine(
+                `[AutoReindex] LSP state: ${paused ? 'paused' : 'resumed'} (${reason})`
+            );
+        } catch (error) {
+            outputChannel.appendLine(
+                `[AutoReindex] Failed to sync LSP pause state (${reason}): ${error}`
+            );
+        }
+    };
+
     // Build Unified BSL Index
     safeRegisterCommand('bslAnalyzer.buildIndex', async () => {
         const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -96,7 +151,14 @@ export function registerIndexCommands(
         try {
             // P4: прогресс показывает сервер через $/progress.
             updateStatusBar('$(sync~spin) BSL: Incremental update...');
-            const result = await incrementalUpdate(configPath, getPlatformVersion(), []);
+            const result = await incrementalUpdate(configPath, getPlatformVersion(), [], false);
+            if (!result.success) {
+                updateStatusBar(`$(error) BSL: Incremental update failed: ${result.message}`);
+                vscode.window.showErrorMessage(`Incremental update failed: ${result.message}`);
+                outputChannel.appendLine(`Incremental update failed: ${result.message}`);
+                return;
+            }
+            pendingPaths.clear();
             updateStatusBar('$(check) BSL: Ready');
             vscode.window.showInformationMessage(`Index updated successfully: ${result.message}`);
         } catch (error) {
@@ -106,23 +168,83 @@ export function registerIndexCommands(
         }
     });
 
+    // Pause Auto Reindex
+    safeRegisterCommand('bslAnalyzer.pauseAutoReindex', async () => {
+        userPaused = true;
+        await syncAutoReindexState('user pause');
+        outputChannel.appendLine('[AutoReindex] Paused by user');
+        vscode.window.showInformationMessage('BSL Analyzer: Auto reindex paused');
+    });
+
+    // Resume Auto Reindex
+    safeRegisterCommand('bslAnalyzer.resumeAutoReindex', async () => {
+        userPaused = false;
+        await syncAutoReindexState('user resume');
+        outputChannel.appendLine('[AutoReindex] Resumed by user');
+
+        if (!getAutoReindexEnabled()) {
+            vscode.window.showWarningMessage('BSL Analyzer: Auto reindex is disabled in settings');
+            applyPausedStatus();
+            return;
+        }
+
+        if (pendingPaths.size > 0) {
+            await runAutoUpdate();
+        } else {
+            updateStatusBar('$(check) BSL: Ready');
+        }
+    });
+
+    // Reindex Now (manual)
+    safeRegisterCommand('bslAnalyzer.reindexNow', async () => {
+        const configPath = getConfigurationPath();
+        if (!configPath) {
+            vscode.window.showWarningMessage('Please configure the 1C configuration path in settings');
+            return;
+        }
+
+        const changedPaths = Array.from(pendingPaths);
+        pendingPaths.clear();
+
+        try {
+            updateStatusBar('$(sync~spin) BSL: Reindex now...');
+            const result = await incrementalUpdate(
+                configPath,
+                getPlatformVersion(),
+                changedPaths,
+                false
+            );
+            if (!result.success) {
+                updateStatusBar(`$(error) BSL: Reindex failed: ${result.message}`);
+                vscode.window.showErrorMessage(`Reindex failed: ${result.message}`);
+                outputChannel.appendLine(`Reindex failed: ${result.message}`);
+                for (const path of changedPaths) {
+                    pendingPaths.add(path);
+                }
+                applyPausedStatus();
+                return;
+            }
+            updateStatusBar('$(check) BSL: Ready');
+            vscode.window.showInformationMessage(`Reindex completed: ${result.message}`);
+        } catch (error) {
+            updateStatusBar(`$(error) BSL: Reindex failed: ${error}`);
+            vscode.window.showErrorMessage(`Reindex failed: ${error}`);
+            outputChannel.appendLine(`Reindex error: ${error}`);
+            for (const path of changedPaths) {
+                pendingPaths.add(path);
+            }
+        } finally {
+            applyPausedStatus();
+        }
+    });
+
     // P5: авто-реиндексация при изменениях файлов конфигурации (debounce + single-flight).
     // В тестовом режиме отключаем, чтобы не провоцировать фоновые запросы/таймауты.
-    const isTestMode =
-        process.env.NODE_ENV === 'test' ||
-        process.env.VSCODE_TEST_MODE === '1' ||
-        process.env.VSCODE_EXTENSION_MODE === 'test';
-
     if (isTestMode) {
         outputChannel.appendLine('[AutoReindex] Disabled in test mode');
+        void syncAutoReindexState('test mode');
         return;
     }
-
-    let watchers: vscode.Disposable[] = [];
-    let debounceTimer: NodeJS.Timeout | undefined;
-    let inFlight = false;
-    let pending = false;
-    let pendingPaths = new Set<string>();
 
     const disposeWatchers = () => {
         for (const w of watchers) w.dispose();
@@ -134,13 +256,31 @@ export function registerIndexCommands(
             pendingPaths.add(uri.fsPath);
         }
         outputChannel.appendLine(`[AutoReindex] Schedule: ${reason}`);
+        if (isTestMode) {
+            return;
+        }
+        if (isAutoReindexPaused()) {
+            outputChannel.appendLine('[AutoReindex] Paused - changes queued');
+            applyPausedStatus();
+            return;
+        }
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => void runAutoUpdate(), 1200);
     };
 
     const runAutoUpdate = async () => {
+        if (isTestMode) {
+            return;
+        }
+        if (isAutoReindexPaused()) {
+            applyPausedStatus();
+            return;
+        }
         const configPath = getConfigurationPath();
         if (!configPath) return;
+        if (pendingPaths.size === 0) {
+            return;
+        }
 
         if (inFlight) {
             pending = true;
@@ -149,15 +289,35 @@ export function registerIndexCommands(
 
         inFlight = true;
         pending = false;
+        const changedPaths = Array.from(pendingPaths);
+        pendingPaths.clear();
 
         try {
             updateStatusBar('$(sync~spin) BSL: Auto reindex...');
-            const changedPaths = Array.from(pendingPaths);
-            pendingPaths.clear();
-            await incrementalUpdate(configPath, getPlatformVersion(), changedPaths);
+            const result = await incrementalUpdate(
+                configPath,
+                getPlatformVersion(),
+                changedPaths,
+                true
+            );
+            if (!result.success) {
+                for (const path of changedPaths) {
+                    pendingPaths.add(path);
+                }
+                outputChannel.appendLine(`[AutoReindex] Skipped: ${result.message}`);
+                if (/paused/i.test(result.message)) {
+                    applyPausedStatus();
+                } else {
+                    updateStatusBar(`$(error) BSL: Auto reindex failed: ${result.message}`);
+                }
+                return;
+            }
             updateStatusBar('$(check) BSL: Ready');
             outputChannel.appendLine('[AutoReindex] Completed');
         } catch (error) {
+            for (const path of changedPaths) {
+                pendingPaths.add(path);
+            }
             updateStatusBar(`$(error) BSL: Auto reindex failed: ${error}`);
             outputChannel.appendLine(`[AutoReindex] Failed: ${error}`);
         } finally {
@@ -166,6 +326,7 @@ export function registerIndexCommands(
                 pending = false;
                 scheduleAutoUpdate('pending changes while in-flight');
             }
+            applyPausedStatus();
         }
     };
 
@@ -194,12 +355,23 @@ export function registerIndexCommands(
     };
 
     createWatchers();
+    void syncAutoReindexState('startup');
     context.subscriptions.push({ dispose: disposeWatchers });
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (e.affectsConfiguration('bslAnalyzer.configurationPath')) {
                 outputChannel.appendLine('[AutoReindex] configurationPath changed, recreating watchers');
                 createWatchers();
+                pendingPaths.clear();
+            }
+            if (e.affectsConfiguration('bslAnalyzer.autoReindexEnabled')) {
+                outputChannel.appendLine(
+                    `[AutoReindex] autoReindexEnabled changed: ${getAutoReindexEnabled()}`
+                );
+                void syncAutoReindexState('settings change');
+                if (!isAutoReindexPaused() && pendingPaths.size > 0) {
+                    scheduleAutoUpdate('auto reindex enabled');
+                }
             }
         })
     );

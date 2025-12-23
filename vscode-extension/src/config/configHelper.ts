@@ -60,6 +60,10 @@ export class BslAnalyzerConfig {
     static get autoIndexBuild(): boolean {
         return this.getConfig().get<boolean>('autoIndexBuild', false);
     }
+
+    static get autoReindexEnabled(): boolean {
+        return this.getConfig().get<boolean>('autoReindexEnabled', true);
+    }
     
     // Настройки анализа
     static get rulesConfig(): string {
@@ -107,6 +111,8 @@ const LEGACY_CONFIG_MAP: { [oldKey: string]: string } = {
     'index.platformVersion': 'platformVersion',
     'index.platformDocsArchive': 'platformDocsArchive',
     'index.autoIndexBuild': 'autoIndexBuild',
+    'index.autoReindexEnabled': 'autoReindexEnabled',
+    'autoReindex.enabled': 'autoReindexEnabled',
     'analysis.rulesConfig': 'rulesConfig',
     'analysis.enableMetrics': 'enableMetrics'
 };

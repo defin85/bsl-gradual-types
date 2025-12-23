@@ -7,6 +7,7 @@ export {
     getConfigurationPath, 
     getPlatformVersion, 
     getPlatformDocsArchive,
+    getAutoReindexEnabled,
     setOutputChannel as setConfigOutputChannel 
 } from './config';
 

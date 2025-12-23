@@ -30,5 +30,6 @@ pub struct BslLanguageServer {
     pub(crate) documents: Arc<RwLock<HashMap<Url, String>>>,
     pub(crate) config: Arc<RwLock<Option<LspConfig>>>,
     pub(crate) settings: Arc<RwLock<BslSettings>>,
+    pub(crate) auto_reindex_paused: Arc<RwLock<bool>>,
     pub(crate) coordinator: Arc<SystemCoordinator>,
 }

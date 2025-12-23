@@ -27,7 +27,8 @@
             "configurationPath": "C:\\MyProject\\conf",
             "platformVersion": "8.3.25",
             "platformDocsArchive": "C:\\1C\\rebuilt.shcntx_ru.zip",
-            "autoIndexBuild": true
+            "autoIndexBuild": true,
+            "autoReindexEnabled": true
         },
         "analysis": {
             "rulesConfig": "",
@@ -60,6 +61,7 @@
 - `bslAnalyzer.index.platformVersion` - версия платформы (формат: X.X.X)
 - `bslAnalyzer.index.platformDocsArchive` - путь к архиву документации
 - `bslAnalyzer.index.autoIndexBuild` - автоматическая сборка индекса
+- `bslAnalyzer.index.autoReindexEnabled` - авто-реиндексация при изменениях файлов конфигурации
 
 ### 6. Группа `analysis` - Настройки анализа
 - `bslAnalyzer.analysis.rulesConfig` - путь к файлу правил

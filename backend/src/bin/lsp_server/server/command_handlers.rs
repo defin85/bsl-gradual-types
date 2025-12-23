@@ -3,8 +3,8 @@
 //! Contains implementation of helper methods for command handling.
 
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
-use tower_lsp::lsp_types::Url;
-use tracing::{error, info};
+use tower_lsp::lsp_types::{MessageType, Url};
+use tracing::{error, info, warn};
 
 use bsl_backend::system::fs_utils::read_bsl_file;
 use crate::commands::{
@@ -12,8 +12,8 @@ use crate::commands::{
 };
 use crate::handlers::{find_containing_function_in_dto, CurrentContextResponse};
 use crate::types::{
-    BuildIndexParams, BuildIndexResponse, GetCurrentContextParams, IncrementalUpdateParams,
-    IncrementalUpdateResponse,
+    AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
+    GetCurrentContextParams, IncrementalUpdateParams, IncrementalUpdateResponse,
 };
 
 use super::BslLanguageServer;
@@ -130,12 +130,73 @@ impl BslLanguageServer {
         &self,
         params: IncrementalUpdateParams,
     ) -> JsonRpcResult<IncrementalUpdateResponse> {
+        if params.is_auto {
+            let paused = *self.auto_reindex_paused.read().await;
+            if paused {
+                warn!("Auto reindex skipped: paused");
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        "Auto reindex is paused; incrementalUpdate skipped.",
+                    )
+                    .await;
+                return Ok(IncrementalUpdateResponse {
+                    success: false,
+                    message: "Auto reindex paused".to_string(),
+                });
+            }
+        }
+
         let resp =
             handle_incremental_update(params, self.coordinator.clone(), self.client.clone()).await;
 
         Ok(IncrementalUpdateResponse {
             success: resp.success,
             message: resp.message,
+        })
+    }
+
+    /// Custom request: bsl/pauseAutoReindex
+    pub(crate) async fn handle_pause_auto_reindex(
+        &self,
+        _params: AutoReindexCommandParams,
+    ) -> JsonRpcResult<AutoReindexStateResponse> {
+        let mut paused = self.auto_reindex_paused.write().await;
+        if !*paused {
+            *paused = true;
+            info!("Auto reindex paused via LSP");
+        }
+
+        self.client
+            .log_message(MessageType::INFO, "Auto reindex paused.")
+            .await;
+
+        Ok(AutoReindexStateResponse {
+            success: true,
+            paused: true,
+            message: "Auto reindex paused".to_string(),
+        })
+    }
+
+    /// Custom request: bsl/resumeAutoReindex
+    pub(crate) async fn handle_resume_auto_reindex(
+        &self,
+        _params: AutoReindexCommandParams,
+    ) -> JsonRpcResult<AutoReindexStateResponse> {
+        let mut paused = self.auto_reindex_paused.write().await;
+        if *paused {
+            *paused = false;
+            info!("Auto reindex resumed via LSP");
+        }
+
+        self.client
+            .log_message(MessageType::INFO, "Auto reindex resumed.")
+            .await;
+
+        Ok(AutoReindexStateResponse {
+            success: true,
+            paused: false,
+            message: "Auto reindex resumed".to_string(),
         })
     }
 }

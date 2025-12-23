@@ -113,6 +113,14 @@ async fn main() -> Result<()> {
         "bsl/incrementalUpdate",
         BslLanguageServer::handle_incremental_update,
     )
+    .custom_method(
+        "bsl/pauseAutoReindex",
+        BslLanguageServer::handle_pause_auto_reindex,
+    )
+    .custom_method(
+        "bsl/resumeAutoReindex",
+        BslLanguageServer::handle_resume_auto_reindex,
+    )
     .finish();
     info!("LSP service created");
 

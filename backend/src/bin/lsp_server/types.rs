@@ -99,12 +99,27 @@ pub struct IncrementalUpdateParams {
     pub platform_version: String,
     #[serde(default)]
     pub changed_paths: Vec<String>,
+    #[serde(default)]
+    pub is_auto: bool,
 }
 
 #[derive(Debug, Serialize)]
 #[allow(dead_code)]
 pub struct IncrementalUpdateResponse {
     pub success: bool,
+    pub message: String,
+}
+
+/// Custom request: bsl/pauseAutoReindex and bsl/resumeAutoReindex
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct AutoReindexCommandParams {}
+
+#[derive(Debug, Serialize)]
+#[allow(dead_code)]
+pub struct AutoReindexStateResponse {
+    pub success: bool,
+    pub paused: bool,
     pub message: String,
 }
 

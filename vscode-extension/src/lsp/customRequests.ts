@@ -99,10 +99,17 @@ export interface IncrementalUpdateParams {
     config_path: string;
     platform_version: string;
     changed_paths?: string[];
+    is_auto?: boolean;
 }
 
 export interface IncrementalUpdateResponse {
     success: boolean;
+    message: string;
+}
+
+export interface AutoReindexStateResponse {
+    success: boolean;
+    paused: boolean;
     message: string;
 }
 
@@ -226,14 +233,35 @@ export async function analyzeFile(filePath: string): Promise<void> {
 export async function incrementalUpdate(
     configPath: string,
     platformVersion: string,
-    changedPaths?: string[]
+    changedPaths?: string[],
+    isAuto?: boolean
 ): Promise<IncrementalUpdateResponse> {
     const { sendCustomRequest } = await import('./client');
-    return await sendCustomRequest<IncrementalUpdateResponse>('bsl/incrementalUpdate', {
+    const params: IncrementalUpdateParams = {
         config_path: configPath,
         platform_version: platformVersion,
         changed_paths: changedPaths
-    });
+    };
+    if (isAuto !== undefined) {
+        params.is_auto = isAuto;
+    }
+    return await sendCustomRequest<IncrementalUpdateResponse>('bsl/incrementalUpdate', params);
+}
+
+/**
+ * Пауза авто-реиндексации через LSP
+ */
+export async function pauseAutoReindex(): Promise<AutoReindexStateResponse> {
+    const { sendCustomRequest } = await import('./client');
+    return await sendCustomRequest<AutoReindexStateResponse>('bsl/pauseAutoReindex', {});
+}
+
+/**
+ * Возобновление авто-реиндексации через LSP
+ */
+export async function resumeAutoReindex(): Promise<AutoReindexStateResponse> {
+    const { sendCustomRequest } = await import('./client');
+    return await sendCustomRequest<AutoReindexStateResponse>('bsl/resumeAutoReindex', {});
 }
 
 /**

@@ -21,6 +21,7 @@ impl BslLanguageServer {
             documents: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(RwLock::new(None)),
             settings: Arc::new(RwLock::new(BslSettings::default())),
+            auto_reindex_paused: Arc::new(RwLock::new(false)),
             coordinator,
         }
     }

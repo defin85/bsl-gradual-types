@@ -30,6 +30,11 @@ let globalIndexingProgress: IndexingProgress = {
     progress: 0
 };
 
+let autoReindexPaused = false;
+
+const AUTO_REINDEX_PAUSED_TEXT = '$(debug-pause) BSL: Auto reindex paused';
+const AUTO_REINDEX_PAUSED_TOOLTIP = 'Auto reindex paused';
+
 // Event emitter для обновления прогресса
 export const progressEmitter = new vscode.EventEmitter<IndexingProgress>();
 
@@ -53,9 +58,13 @@ export function updateStatusBar(text?: string, progress?: IndexingProgress) {
     }
 
     if (text) {
-        statusBarItem.text = text;
+        const resolvedText =
+            autoReindexPaused && /\bReady\b/.test(text)
+                ? AUTO_REINDEX_PAUSED_TEXT
+                : text;
+        statusBarItem.text = resolvedText;
         // Установить tooltip из text (удаляя иконки VSCode)
-        const cleanText = text.replace(/\$\([^)]+\)/g, '').trim();
+        const cleanText = resolvedText.replace(/\$\([^)]+\)/g, '').trim();
         statusBarItem.tooltip = cleanText;
         statusBarItem.show();
         return;
@@ -68,8 +77,13 @@ export function updateStatusBar(text?: string, progress?: IndexingProgress) {
         statusBarItem.tooltip = `Progress: ${percent}%\n${progress.currentStep}`;
         statusBarItem.show();
     } else {
-        statusBarItem.text = '$(database) BSL Analyzer';
-        statusBarItem.tooltip = 'BSL Type Safety Analyzer\nClick to build index';
+        if (autoReindexPaused) {
+            statusBarItem.text = AUTO_REINDEX_PAUSED_TEXT;
+            statusBarItem.tooltip = AUTO_REINDEX_PAUSED_TOOLTIP;
+        } else {
+            statusBarItem.text = '$(database) BSL Analyzer';
+            statusBarItem.tooltip = 'BSL Type Safety Analyzer\nClick to build index';
+        }
         statusBarItem.show();
     }
 }
@@ -106,9 +120,15 @@ export function updateLspStatus(state: State): void {
             break;
 
         case State.Running:
-            statusBarItem.text = '$(check) BSL: Ready';
-            statusBarItem.tooltip = 'BSL Type Safety Analyzer\nLSP Server активен';
-            statusBarItem.backgroundColor = undefined;
+            if (autoReindexPaused) {
+                statusBarItem.text = AUTO_REINDEX_PAUSED_TEXT;
+                statusBarItem.tooltip = AUTO_REINDEX_PAUSED_TOOLTIP;
+                statusBarItem.backgroundColor = undefined;
+            } else {
+                statusBarItem.text = '$(check) BSL: Ready';
+                statusBarItem.tooltip = 'BSL Type Safety Analyzer\nLSP Server активен';
+                statusBarItem.backgroundColor = undefined;
+            }
             break;
 
         default:
@@ -117,4 +137,8 @@ export function updateLspStatus(state: State): void {
     }
 
     statusBarItem.show();
+}
+
+export function setAutoReindexPaused(paused: boolean): void {
+    autoReindexPaused = paused;
 }

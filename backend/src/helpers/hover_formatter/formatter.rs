@@ -110,22 +110,36 @@ impl HoverFormatter {
             }
             DetailLevel::Full => {
                 // Тип + методы (до max_methods)
-                HoverBuilder::new(&self.config)
+                let description = self.metadata_lookup.get_description(resolution);
+                let mut builder = HoverBuilder::new(&self.config)
                     .add_header("Переменная", name)
                     .add_type_info(resolution)
-                    .add_certainty(&resolution.certainty)
+                    .add_certainty(&resolution.certainty);
+
+                if !description.trim().is_empty() {
+                    builder = builder.add_section("Описание", description.trim());
+                }
+
+                builder
                     .add_methods(resolution, &self.metadata_lookup)
                     .build()
             }
             DetailLevel::Detailed => {
                 // Полный hover с методами, свойствами, фасетами и документацией
                 // Порядок: тип -> фасеты -> свойства (state) -> табличные части -> методы (behavior) -> документация
-                HoverBuilder::new(&self.config)
+                let description = self.metadata_lookup.get_description(resolution);
+                let mut builder = HoverBuilder::new(&self.config)
                     .add_header("Переменная", name)
                     .add_type_info(resolution)
                     .add_certainty(&resolution.certainty)
                     .add_facet_info(resolution)
-                    .add_generic_info(resolution)
+                    .add_generic_info(resolution);
+
+                if !description.trim().is_empty() {
+                    builder = builder.add_section("Описание", description.trim());
+                }
+
+                builder
                     .add_properties(resolution, &self.metadata_lookup)
                     .add_tabular_sections(resolution, &self.metadata_lookup)
                     .add_methods(resolution, &self.metadata_lookup)
@@ -165,19 +179,28 @@ impl HoverFormatter {
                 .add_type_info(property_resolution)
                 .add_certainty(&property_resolution.certainty)
                 .build(),
-            DetailLevel::Full | DetailLevel::Detailed => HoverBuilder::new(&self.config)
-                .add_header("Свойство", &display_name)
-                .add_section("Владелец", &owner_resolution.type_name())
-                .add_section("Только чтение", readonly_str)
-                .add_type_info(property_resolution)
-                .add_certainty(&property_resolution.certainty)
-                .add_facet_info(property_resolution)
-                .add_generic_info(property_resolution)
-                .add_properties(property_resolution, &self.metadata_lookup)
-                .add_tabular_sections(property_resolution, &self.metadata_lookup)
-                .add_methods(property_resolution, &self.metadata_lookup)
-                .add_documentation_links(property_resolution)
-                .build(),
+            DetailLevel::Full | DetailLevel::Detailed => {
+                let description = self.metadata_lookup.get_description(property_resolution);
+                let mut builder = HoverBuilder::new(&self.config)
+                    .add_header("Свойство", &display_name)
+                    .add_section("Владелец", &owner_resolution.type_name())
+                    .add_section("Только чтение", readonly_str)
+                    .add_type_info(property_resolution)
+                    .add_certainty(&property_resolution.certainty)
+                    .add_facet_info(property_resolution)
+                    .add_generic_info(property_resolution);
+
+                if !description.trim().is_empty() {
+                    builder = builder.add_section("Описание", description.trim());
+                }
+
+                builder
+                    .add_properties(property_resolution, &self.metadata_lookup)
+                    .add_tabular_sections(property_resolution, &self.metadata_lookup)
+                    .add_methods(property_resolution, &self.metadata_lookup)
+                    .add_documentation_links(property_resolution)
+                    .build()
+            }
         }
     }
 

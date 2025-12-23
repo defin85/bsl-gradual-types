@@ -217,7 +217,7 @@ fn test_regular_method_vs_constructor() {
     assert!(constructor_method.is_constructor);
 
     // In frontend, constructors should be filtered separately
-    let methods = vec![regular_method.clone(), constructor_method.clone()];
+    let methods = [regular_method.clone(), constructor_method.clone()];
     let constructors: Vec<_> = methods.iter().filter(|m| m.is_constructor).collect();
     let regular_methods: Vec<_> = methods.iter().filter(|m| !m.is_constructor).collect();
 
@@ -383,7 +383,7 @@ fn test_handle_query_type_no_constructor_graceful() {
 /// Test 4.2: Frontend filtering logic
 #[test]
 fn test_frontend_filtering_constructors_vs_methods() {
-    let all_methods = vec![
+    let all_methods = [
         MethodDto {
             name: "Новый Массив".to_string(),
             english_name: None,

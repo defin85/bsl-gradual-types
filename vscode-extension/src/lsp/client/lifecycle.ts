@@ -104,6 +104,7 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
     // Добавляем обработчики состояния ПЕРЕД запуском
     setupStateChangeHandler(client, outputChannel);
     setupConnectionErrorHandler(client, outputChannel);
+    setupProgressHandler(client, outputChannel);
 
     // Start the client
     try {
@@ -116,7 +117,6 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
 
         // Регистрируем обработчики после успешного запуска
         setupServerStatusHandler(client, outputChannel);
-        setupProgressHandler(client, outputChannel);
         registerCustomHandlers(client, outputChannel);
 
         // Уведомляем провайдеры об изменении статуса

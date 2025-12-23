@@ -1,6 +1,7 @@
 //! Tests for validators module
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::domain::types::{
         Certainty, ConcreteType, PrimitiveType, ResolutionMetadata, ResolutionResult,

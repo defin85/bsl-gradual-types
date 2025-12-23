@@ -53,21 +53,14 @@ async fn test_event_router_events() {
     // Запустить router в background task
     let router_task = tokio::spawn(async move {
         // Симулируем EventRouter.run() вручную
-        loop {
-            match reader.receive().await {
-                Ok(message) => {
-                    let msg_type = message
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
+        while let Ok(message) = reader.receive().await {
+            let msg_type = message
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
 
-                    if msg_type == "event" {
-                        if event_tx.send(message).await.is_err() {
-                            break;
-                        }
-                    }
-                }
-                Err(_) => break,
+            if msg_type == "event" && event_tx.send(message).await.is_err() {
+                break;
             }
         }
     });
@@ -129,27 +122,22 @@ async fn test_event_router_responses() {
 
     // Запустить router в background task
     let router_task = tokio::spawn(async move {
-        loop {
-            match reader.receive().await {
-                Ok(message) => {
-                    let msg_type = message
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
+        while let Ok(message) = reader.receive().await {
+            let msg_type = message
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
 
-                    if msg_type == "response" {
-                        if let Some(seq) = message.get("request_seq").and_then(|v| v.as_u64()) {
-                            let seq = seq as u32;
-                            let mut map = response_map_clone.lock().await;
-                            if let Some(tx) = map.remove(&seq) {
-                                let _ = tx.send(message);
-                            }
-                        }
-                    } else if msg_type == "event" {
-                        let _ = event_tx.send(message).await;
+            if msg_type == "response" {
+                if let Some(seq) = message.get("request_seq").and_then(|v| v.as_u64()) {
+                    let seq = seq as u32;
+                    let mut map = response_map_clone.lock().await;
+                    if let Some(tx) = map.remove(&seq) {
+                        let _ = tx.send(message);
                     }
                 }
-                Err(_) => break,
+            } else if msg_type == "event" {
+                let _ = event_tx.send(message).await;
             }
         }
     });
@@ -207,33 +195,28 @@ async fn test_event_router_mixed_messages() {
     let response_map_clone = response_map.clone();
 
     let router_task = tokio::spawn(async move {
-        loop {
-            match reader.receive().await {
-                Ok(message) => {
-                    let msg_type = message
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
+        while let Ok(message) = reader.receive().await {
+            let msg_type = message
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
 
-                    match msg_type {
-                        "event" => {
-                            if event_tx.send(message).await.is_err() {
-                                break;
-                            }
-                        }
-                        "response" => {
-                            if let Some(seq) = message.get("request_seq").and_then(|v| v.as_u64()) {
-                                let seq = seq as u32;
-                                let mut map = response_map_clone.lock().await;
-                                if let Some(tx) = map.remove(&seq) {
-                                    let _ = tx.send(message);
-                                }
-                            }
-                        }
-                        _ => {}
+            match msg_type {
+                "event" => {
+                    if event_tx.send(message).await.is_err() {
+                        break;
                     }
                 }
-                Err(_) => break,
+                "response" => {
+                    if let Some(seq) = message.get("request_seq").and_then(|v| v.as_u64()) {
+                        let seq = seq as u32;
+                        let mut map = response_map_clone.lock().await;
+                        if let Some(tx) = map.remove(&seq) {
+                            let _ = tx.send(message);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     });
@@ -290,36 +273,31 @@ async fn test_event_router_invalid_messages() {
     let response_map_clone = response_map.clone();
 
     let router_task = tokio::spawn(async move {
-        loop {
-            match reader.receive().await {
-                Ok(message) => {
-                    let msg_type = message
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
+        while let Ok(message) = reader.receive().await {
+            let msg_type = message
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
 
-                    match msg_type {
-                        "event" => {
-                            if event_tx.send(message).await.is_err() {
-                                break;
-                            }
-                        }
-                        "response" => {
-                            if let Some(seq) = message.get("request_seq").and_then(|v| v.as_u64()) {
-                                let seq = seq as u32;
-                                let mut map = response_map_clone.lock().await;
-                                if let Some(tx) = map.remove(&seq) {
-                                    let _ = tx.send(message);
-                                }
-                            }
-                        }
-                        _ => {
-                            // Unknown type - игнорируем
-                            tracing::warn!("Unknown message type: {}", msg_type);
+            match msg_type {
+                "event" => {
+                    if event_tx.send(message).await.is_err() {
+                        break;
+                    }
+                }
+                "response" => {
+                    if let Some(seq) = message.get("request_seq").and_then(|v| v.as_u64()) {
+                        let seq = seq as u32;
+                        let mut map = response_map_clone.lock().await;
+                        if let Some(tx) = map.remove(&seq) {
+                            let _ = tx.send(message);
                         }
                     }
                 }
-                Err(_) => break,
+                _ => {
+                    // Unknown type - игнорируем
+                    tracing::warn!("Unknown message type: {}", msg_type);
+                }
             }
         }
     });
@@ -368,29 +346,24 @@ async fn test_event_router_orphaned_response() {
     let response_map_clone = response_map.clone();
 
     let router_task = tokio::spawn(async move {
-        loop {
-            match reader.receive().await {
-                Ok(message) => {
-                    let msg_type = message
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
+        while let Ok(message) = reader.receive().await {
+            let msg_type = message
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
 
-                    if msg_type == "response" {
-                        if let Some(seq) = message.get("request_seq").and_then(|v| v.as_u64()) {
-                            let seq = seq as u32;
-                            let mut map = response_map_clone.lock().await;
-                            if let Some(tx) = map.remove(&seq) {
-                                let _ = tx.send(message);
-                            } else {
-                                tracing::warn!("Orphaned response for seq: {}", seq);
-                            }
-                        }
-                    } else if msg_type == "event" {
-                        let _ = event_tx.send(message).await;
+            if msg_type == "response" {
+                if let Some(seq) = message.get("request_seq").and_then(|v| v.as_u64()) {
+                    let seq = seq as u32;
+                    let mut map = response_map_clone.lock().await;
+                    if let Some(tx) = map.remove(&seq) {
+                        let _ = tx.send(message);
+                    } else {
+                        tracing::warn!("Orphaned response for seq: {}", seq);
                     }
                 }
-                Err(_) => break,
+            } else if msg_type == "event" {
+                let _ = event_tx.send(message).await;
             }
         }
     });

@@ -833,7 +833,7 @@ fn test_mass_validate_collection_item_extraction_on_examples_db() {
     let mut single_ok = 0usize;
     let mut failures: Vec<String> = Vec::new();
 
-    fn extract_items_segment<'a>(text: &'a str) -> Option<&'a str> {
+    fn extract_items_segment(text: &str) -> Option<&str> {
         let markers = [
             "Элементы коллекции:",
             "Элементы коллекции",

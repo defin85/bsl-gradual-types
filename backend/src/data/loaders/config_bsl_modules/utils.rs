@@ -1,7 +1,7 @@
 use bsl_shared::domain::types::{FacetKind, MetadataKind};
 
 pub(crate) fn normalize_union_parts(mut parts: Vec<String>) -> Vec<String> {
-    parts.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    parts.sort_by_key(|p| p.to_lowercase());
     parts.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     parts
 }

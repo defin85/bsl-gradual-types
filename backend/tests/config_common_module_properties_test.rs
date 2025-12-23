@@ -22,6 +22,7 @@ fn create_temp_common_module(xml_content: &str) -> (TempDir, PathBuf) {
 }
 
 /// Хелпер для создания XML CommonModule с кастомными свойствами
+#[allow(clippy::too_many_arguments)]
 fn create_common_module_xml(
     name: &str,
     uuid: &str,

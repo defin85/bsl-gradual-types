@@ -18,7 +18,7 @@ pub(crate) fn parse_metrics_config() -> &'static ParseMetricsConfig {
     })
 }
 
-pub(crate) fn report_slow_modules(slow_modules: &mut Vec<(Duration, PathBuf)>) {
+pub(crate) fn report_slow_modules(slow_modules: &mut [(Duration, PathBuf)]) {
     let metrics = parse_metrics_config();
     if slow_modules.is_empty() {
         return;

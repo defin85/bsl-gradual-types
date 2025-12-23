@@ -5,7 +5,7 @@
 
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::signature_index::MethodSignature;
-use bsl_shared::domain::types::{Certainty, ResolutionResult, TypeResolution};
+use bsl_shared::domain::types::{Certainty, ConcreteType, ResolutionResult, TypeResolution};
 use bsl_shared::formatting::DetailLevel;
 
 use super::builder::HoverBuilder;
@@ -65,6 +65,13 @@ impl HoverFormatter {
 
         // Проверка наличия метаданных
         let has_metadata = self.metadata_lookup.get_raw_type(resolution).is_some();
+        let platform_docs_loaded = self.metadata_lookup.platform_docs_loaded();
+        let is_platform_like = is_platform_like_resolution(resolution);
+        let has_metadata = if is_platform_like && !platform_docs_loaded {
+            false
+        } else {
+            has_metadata
+        };
 
         // Если Unknown — показываем специальное предупреждение
         if matches!(resolution.certainty, Certainty::Unknown) {
@@ -315,5 +322,31 @@ impl HoverFormatter {
         }
 
         None
+    }
+}
+
+fn is_platform_like_resolution(resolution: &TypeResolution) -> bool {
+    match &resolution.result {
+        ResolutionResult::Concrete(concrete) => matches!(
+            concrete,
+            ConcreteType::Platform(_) | ConcreteType::Primitive(_) | ConcreteType::Special(_)
+        ),
+        ResolutionResult::Nullable(inner) => matches!(
+            inner.as_ref(),
+            ConcreteType::Platform(_) | ConcreteType::Primitive(_) | ConcreteType::Special(_)
+        ),
+        ResolutionResult::Intersection(types) => types.iter().any(|t| {
+            matches!(
+                t,
+                ConcreteType::Platform(_) | ConcreteType::Primitive(_) | ConcreteType::Special(_)
+            )
+        }),
+        ResolutionResult::Union(variants) => variants.iter().any(|wt| {
+            matches!(
+                wt.type_,
+                ConcreteType::Platform(_) | ConcreteType::Primitive(_) | ConcreteType::Special(_)
+            )
+        }),
+        _ => false,
     }
 }

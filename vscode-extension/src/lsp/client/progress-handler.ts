@@ -6,6 +6,15 @@ interface ProgressState {
     resolve: ((value: void) => void) | null;
     reporter: vscode.Progress<{ message?: string; increment?: number }> | null;
     lastReportedPercentage: number;
+    pending: PendingReport | null;
+    startedAtMs: number;
+    pendingEndMessage: string | null;
+    endTimer: NodeJS.Timeout | null;
+}
+
+interface PendingReport {
+    message: string;
+    percentage: number;
 }
 
 function tokenKey(token: any): string {
@@ -18,6 +27,8 @@ function tokenKey(token: any): string {
         return String(token);
     }
 }
+
+const MIN_PROGRESS_VISIBLE_MS = 800;
 
 /**
  * Настраивает обработчик $/progress для Work Done Progress
@@ -72,14 +83,26 @@ function handleProgressBegin(
     // Завершаем старый прогресс с тем же token (из-за crash/restart LSP)
     if (existing?.resolve) {
         outputChannel.appendLine(`[Progress] Clearing previous progress for token: ${key}`);
+        if (existing.endTimer) {
+            clearTimeout(existing.endTimer);
+            existing.endTimer = null;
+        }
         existing.resolve();
     }
 
-    const state: ProgressState = {
+    const state = existing && !existing.resolve ? existing : {
         resolve: null,
         reporter: null,
-        lastReportedPercentage: 0
+        lastReportedPercentage: 0,
+        pending: null,
+        startedAtMs: Date.now(),
+        pendingEndMessage: null,
+        endTimer: null
     };
+    state.resolve = null;
+    state.reporter = null;
+    state.lastReportedPercentage = 0;
+    state.startedAtMs = Date.now();
     states.set(key, state);
 
     // Показать Progress в Status Bar (всегда видно)
@@ -96,6 +119,12 @@ function handleProgressBegin(
             message: value.message || 'Инициализация...',
             increment: 0
         });
+
+        flushPending(state);
+        if (state.pendingEndMessage) {
+            scheduleEnd(key, state, state.pendingEndMessage, states, outputChannel);
+            state.pendingEndMessage = null;
+        }
 
         // Ждём завершения прогресса
         return new Promise<void>((resolve) => {
@@ -119,16 +148,36 @@ function handleProgressReport(
     outputChannel.appendLine(`[Progress] REPORT: ${key} | ${message} (${percentage}%)`);
 
     // Обновить Progress Window
-    const state = states.get(key);
-    if (state?.reporter) {
-        const increment = percentage - state.lastReportedPercentage;
-        state.lastReportedPercentage = percentage;
-
-        state.reporter.report({
-            message: message,
-            increment: Math.max(0, increment)  // Не допускать отрицательных значений
-        });
+    let state = states.get(key);
+    if (!state) {
+        state = {
+            resolve: null,
+            reporter: null,
+            lastReportedPercentage: 0,
+            pending: null,
+            startedAtMs: Date.now(),
+            pendingEndMessage: null,
+            endTimer: null
+        };
+        states.set(key, state);
+        outputChannel.appendLine(`[Progress] REPORT before BEGIN: ${key} | ${message} (${percentage}%)`);
     }
+
+    if (!state.reporter) {
+        if (!state.pending || percentage >= state.pending.percentage) {
+            state.pending = { percentage, message };
+        }
+        return;
+    }
+
+    const previous = state.lastReportedPercentage;
+    const normalized = Math.max(previous, percentage);
+    state.lastReportedPercentage = normalized;
+
+    state.reporter.report({
+        message: message,
+        increment: Math.max(0, normalized - previous)  // Не допускать отрицательных значений
+    });
 }
 
 /**
@@ -144,11 +193,70 @@ function handleProgressEnd(
 
     outputChannel.appendLine(`[Progress] END: ${key} | ${message}`);
 
-    // Закрыть Progress Window
-    const state = states.get(key);
-    if (state?.resolve) {
-        state.resolve();
+    // Закрыть Progress Window (с минимальной длительностью отображения)
+    let state = states.get(key);
+    if (!state) {
+        state = {
+            resolve: null,
+            reporter: null,
+            lastReportedPercentage: 0,
+            pending: null,
+            startedAtMs: Date.now(),
+            pendingEndMessage: null,
+            endTimer: null
+        };
+        states.set(key, state);
     }
 
-    states.delete(key);
+    if (!state.reporter || !state.resolve) {
+        state.pendingEndMessage = message;
+        return;
+    }
+
+    scheduleEnd(key, state, message, states, outputChannel);
+}
+
+function flushPending(state: ProgressState): void {
+    if (!state.reporter || !state.pending) {
+        return;
+    }
+
+    const previous = state.lastReportedPercentage;
+    const normalized = Math.max(previous, state.pending.percentage);
+    state.lastReportedPercentage = normalized;
+
+    state.reporter.report({
+        message: state.pending.message,
+        increment: Math.max(0, normalized - previous)
+    });
+
+    state.pending = null;
+}
+
+function scheduleEnd(
+    key: string,
+    state: ProgressState,
+    message: string,
+    states: Map<string, ProgressState>,
+    outputChannel: vscode.OutputChannel
+): void {
+    if (!state.resolve) {
+        state.pendingEndMessage = message;
+        return;
+    }
+
+    if (state.endTimer) {
+        clearTimeout(state.endTimer);
+        state.endTimer = null;
+    }
+
+    const elapsed = Date.now() - state.startedAtMs;
+    const delay = Math.max(0, MIN_PROGRESS_VISIBLE_MS - elapsed);
+
+    state.endTimer = setTimeout(() => {
+        state.endTimer = null;
+        outputChannel.appendLine(`[Progress] END (delayed): ${key} | ${message}`);
+        state.resolve?.();
+        states.delete(key);
+    }, delay);
 }

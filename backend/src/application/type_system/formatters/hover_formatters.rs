@@ -3,6 +3,8 @@
 //! Functions for formatting hover tooltips for variables, functions,
 //! semantic nodes, and other BSL constructs.
 
+#![allow(clippy::items_after_test_module)]
+
 use bsl_shared::domain::types::{
     Certainty, ConcreteType, GenericType, ResolutionResult, TypeResolution, UncertaintyReason,
 };

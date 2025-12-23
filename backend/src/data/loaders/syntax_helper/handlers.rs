@@ -8,6 +8,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::debug;
 
 use super::super::progress::{IndexingPhase, ProgressUpdate};
@@ -93,11 +94,44 @@ impl SyntaxHelperLoader {
                     self.save_node(node.clone());
                     let count = self.processed_files.fetch_add(1, Ordering::Relaxed) + 1;
 
-                    // Отправляем прогресс каждые 10 файлов
+                    // Отправляем прогресс по времени, чтобы не "схлопывался" на быстрых машинах
                     if let Some(ref callback) = progress_callback {
-                        if count.is_multiple_of(10) {
-                            let total = self.total_files.load(Ordering::Relaxed);
+                        let total = self.total_files.load(Ordering::Relaxed);
+                        if total == 0 {
+                            return;
+                        }
 
+                        let now_ms = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let should_report = if count == total {
+                            self.last_progress_at.store(now_ms, Ordering::Relaxed);
+                            self.last_reported_count.store(count, Ordering::Relaxed);
+                            true
+                        } else {
+                            const PROGRESS_MIN_INTERVAL_MS: u64 = 75;
+                            let last_ms = self.last_progress_at.load(Ordering::Relaxed);
+                            let last_count = self.last_reported_count.load(Ordering::Relaxed);
+                            let enough_time = now_ms.saturating_sub(last_ms)
+                                >= PROGRESS_MIN_INTERVAL_MS;
+                            let advanced = count > last_count;
+                            if enough_time && advanced {
+                                self.last_progress_at
+                                    .compare_exchange(
+                                        last_ms,
+                                        now_ms,
+                                        Ordering::Relaxed,
+                                        Ordering::Relaxed,
+                                    )
+                                    .is_ok()
+                            } else {
+                                false
+                            }
+                        };
+
+                        if should_report {
+                            self.last_reported_count.store(count, Ordering::Relaxed);
                             // Извлекаем имя типа из узла
                             let type_name = match &node {
                                 SyntaxNode::Type(type_info) => {

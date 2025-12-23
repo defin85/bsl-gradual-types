@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
 
-use crate::data::loaders::progress::ProgressUpdate;
+use crate::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 use crate::data::loaders::{
     index_configuration_bsl_modules_with_progress_parallel, ModuleIndexProgress,
     UniversalMetadataObject,
@@ -124,18 +124,19 @@ impl SystemCoordinator {
         Ok(count)
     }
 
-    /// Загружает метаданные из ВСЕХ конфигураций с прогрессом (4 фазы для каждой)
+    /// Загружает метаданные из ВСЕХ конфигураций с прогрессом (4 фазы парсинга + индексация модулей)
     ///
     /// Новая версия с поддержкой прогресса через callback.
     /// Автоматически обнаруживает все конфигурации в указанной папке:
     /// - Базовую конфигурацию (ObjectBelonging = "Own")
     /// - Расширения конфигурации (ObjectBelonging = "Adopted")
     ///
-    /// Для каждой конфигурации отправляет прогресс через 4 фазы:
+    /// Для каждой конфигурации отправляет прогресс через 4 фазы парсинга:
     /// - ConfigurationDiscovery (0-5%)
-    /// - ConfigurationParsing (5-85%)
-    /// - ConfigurationLinking (85-95%)
-    /// - ConfigurationFinalizing (95-100%)
+    /// - ConfigurationParsing (5-80%)
+    /// - ConfigurationLinking (80-90%)
+    /// - ConfigurationFinalizing (90-95%)
+    ///   Затем отдельно сообщает прогресс индексации BSL-модулей.
     ///
     /// # Аргументы
     /// * `config_path` - Путь к папке с конфигурациями (содержит Configuration.xml или подпапки)
@@ -194,7 +195,7 @@ impl SystemCoordinator {
                     .unwrap_or_default()
             );
 
-            // НОВОЕ: Используем новый метод с прогрессом через 4 фазы
+            // НОВОЕ: Используем новый метод с прогрессом через 4 фазы парсинга
             let metadata = discovery
                 .discover_metadata_in_configuration_with_progress(
                     &config_info,
@@ -215,6 +216,7 @@ impl SystemCoordinator {
 
             let config_root = config_info.path.clone();
             let config_name = Arc::new(config_info.name.clone());
+            let progress_callback_for_modules = progress_callback.clone();
             let terminal_progress: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
             let coordinator_for_progress = self.clone_for_blocking();
             match index_configuration_bsl_modules_with_progress_parallel(
@@ -224,52 +226,68 @@ impl SystemCoordinator {
                     let terminal_progress = Arc::clone(&terminal_progress);
                     let config_name = Arc::clone(&config_name);
                     let coordinator_for_progress = coordinator_for_progress.clone();
+                    let progress_callback = progress_callback_for_modules;
                     move |p: ModuleIndexProgress| {
-                    let prev = coordinator_for_progress.startup_progress();
-                    let module_display = p
-                        .module_path
-                        .strip_prefix(&config_root)
-                        .unwrap_or(&p.module_path)
-                        .display()
-                        .to_string();
-                    coordinator_for_progress.set_startup_progress(bsl_shared::api::StartupProgressDto {
-                        phase: "Индексация BSL-модулей".to_string(),
-                        current: p.current as u64,
-                        total: p.total as u64,
-                        percentage: prev.percentage,
-                        message: Some(format!(
-                            "{}: {}/{} — {}",
-                            config_name.as_str(),
-                            p.current,
-                            p.total,
-                            module_display
-                        )),
-                        done: false,
-                    });
-                    if let Ok(mut guard) = terminal_progress.lock() {
-                        let pb = guard.get_or_insert_with(|| {
-                            let pb = ProgressBar::new(p.total as u64);
-                            let style = match ProgressStyle::default_bar().template(
-                                "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]",
-                            ) {
-                                Ok(style) => style.progress_chars("##-"),
-                                Err(_) => ProgressStyle::default_bar(),
-                            };
-                            pb.set_style(style);
-                            pb.set_message(format!("Индексация {}", config_name.as_str()));
-                            pb
-                        });
-                        pb.set_position(p.current as u64);
-                        pb.set_message(module_display.clone());
-                        if p.current == p.total {
-                            pb.finish_with_message(format!(
-                                "Индексация {} завершена ({} модулей)",
+                        let prev = coordinator_for_progress.startup_progress();
+                        let module_display = p
+                            .module_path
+                            .strip_prefix(&config_root)
+                            .unwrap_or(&p.module_path)
+                            .display()
+                            .to_string();
+                        if p.current.is_multiple_of(5) || p.current == p.total {
+                            let message = format!(
+                                "Индексация BSL-модулей: {} {}/{} — {}",
                                 config_name.as_str(),
-                                p.total
+                                p.current,
+                                p.total,
+                                module_display
+                            );
+                            progress_callback(ProgressUpdate::new(
+                                IndexingPhase::ConfigurationIndexingModules,
+                                p.current,
+                                p.total,
+                                Some(message),
                             ));
                         }
+                        coordinator_for_progress.set_startup_progress(bsl_shared::api::StartupProgressDto {
+                            phase: "Индексация BSL-модулей".to_string(),
+                            current: p.current as u64,
+                            total: p.total as u64,
+                            percentage: prev.percentage,
+                            message: Some(format!(
+                                "{}: {}/{} — {}",
+                                config_name.as_str(),
+                                p.current,
+                                p.total,
+                                module_display
+                            )),
+                            done: false,
+                        });
+                        if let Ok(mut guard) = terminal_progress.lock() {
+                            let pb = guard.get_or_insert_with(|| {
+                                let pb = ProgressBar::new(p.total as u64);
+                                let style = match ProgressStyle::default_bar().template(
+                                    "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]",
+                                ) {
+                                    Ok(style) => style.progress_chars("##-"),
+                                    Err(_) => ProgressStyle::default_bar(),
+                                };
+                                pb.set_style(style);
+                                pb.set_message(format!("Индексация {}", config_name.as_str()));
+                                pb
+                            });
+                            pb.set_position(p.current as u64);
+                            pb.set_message(module_display.clone());
+                            if p.current == p.total {
+                                pb.finish_with_message(format!(
+                                    "Индексация {} завершена ({} модулей)",
+                                    config_name.as_str(),
+                                    p.total
+                                ));
+                            }
+                        }
                     }
-                }
                 }),
             ) {
                 Ok(indexed) => {

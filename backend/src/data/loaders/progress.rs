@@ -2,7 +2,7 @@
 //!
 //! Поддерживает парсинг:
 //! - Платформенных типов (Syntax Helper): 4 фазы
-//! - Конфигурации (Configuration.xml): 4 фазы
+//! - Конфигурации (Configuration.xml): 5 фаз (включая индексацию BSL-модулей)
 //! - Восстановления .hbk файлов: извлечение архивов
 
 use serde::{Deserialize, Serialize};
@@ -40,14 +40,17 @@ pub enum IndexingPhase {
     /// Сканирование структуры конфигурации (0-5%)
     ConfigurationDiscovery,
 
-    /// Парсинг XML файлов конфигурации (5-85%)
+    /// Парсинг XML файлов конфигурации (5-80%)
     ConfigurationParsing,
 
-    /// Построение связей между типами (85-95%)
+    /// Построение связей между типами (80-90%)
     ConfigurationLinking,
 
-    /// Финализация загрузки конфигурации (95-100%)
+    /// Финализация загрузки конфигурации (90-95%)
     ConfigurationFinalizing,
+
+    /// Индексация BSL-модулей конфигурации (95-100%)
+    ConfigurationIndexingModules,
 }
 
 impl IndexingPhase {
@@ -63,7 +66,8 @@ impl IndexingPhase {
             Self::ConfigurationDiscovery
             | Self::ConfigurationParsing
             | Self::ConfigurationLinking
-            | Self::ConfigurationFinalizing => ProgressSource::Configuration,
+            | Self::ConfigurationFinalizing
+            | Self::ConfigurationIndexingModules => ProgressSource::Configuration,
         }
     }
 
@@ -82,8 +86,9 @@ impl IndexingPhase {
             // Конфигурация
             Self::ConfigurationDiscovery => 0.0,
             Self::ConfigurationParsing => 5.0,
-            Self::ConfigurationLinking => 85.0,
-            Self::ConfigurationFinalizing => 95.0,
+            Self::ConfigurationLinking => 80.0,
+            Self::ConfigurationFinalizing => 90.0,
+            Self::ConfigurationIndexingModules => 95.0,
         }
     }
 
@@ -101,9 +106,10 @@ impl IndexingPhase {
 
             // Конфигурация
             Self::ConfigurationDiscovery => 5.0,
-            Self::ConfigurationParsing => 80.0, // Основная фаза парсинга XML
+            Self::ConfigurationParsing => 75.0, // Основная фаза парсинга XML
             Self::ConfigurationLinking => 10.0,
             Self::ConfigurationFinalizing => 5.0,
+            Self::ConfigurationIndexingModules => 5.0,
         }
     }
 
@@ -124,6 +130,7 @@ impl IndexingPhase {
             Self::ConfigurationParsing => "Парсинг Configuration.xml",
             Self::ConfigurationLinking => "Построение связей",
             Self::ConfigurationFinalizing => "Финализация",
+            Self::ConfigurationIndexingModules => "Индексация BSL-модулей",
         }
     }
 }
@@ -310,15 +317,17 @@ mod tests {
 
         // Конфигурация
         assert_eq!(IndexingPhase::ConfigurationDiscovery.weight(), 5.0);
-        assert_eq!(IndexingPhase::ConfigurationParsing.weight(), 80.0);
+        assert_eq!(IndexingPhase::ConfigurationParsing.weight(), 75.0);
         assert_eq!(IndexingPhase::ConfigurationLinking.weight(), 10.0);
         assert_eq!(IndexingPhase::ConfigurationFinalizing.weight(), 5.0);
+        assert_eq!(IndexingPhase::ConfigurationIndexingModules.weight(), 5.0);
 
         // Сумма весов конфигурации = 100.0
         let total_weight_config = IndexingPhase::ConfigurationDiscovery.weight()
             + IndexingPhase::ConfigurationParsing.weight()
             + IndexingPhase::ConfigurationLinking.weight()
-            + IndexingPhase::ConfigurationFinalizing.weight();
+            + IndexingPhase::ConfigurationFinalizing.weight()
+            + IndexingPhase::ConfigurationIndexingModules.weight();
         assert_eq!(total_weight_config, 100.0);
     }
 

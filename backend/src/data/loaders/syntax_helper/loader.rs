@@ -16,7 +16,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::path::Path;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicU64, AtomicUsize, Ordering},
     Arc,
 };
 use tracing::{info, warn};
@@ -67,6 +67,10 @@ pub struct SyntaxHelperLoader {
     pub(crate) error_count: Arc<AtomicUsize>,
     /// Общее количество файлов
     pub(crate) total_files: Arc<AtomicUsize>,
+    /// Временная метка последнего прогресса (Unix ms)
+    pub(crate) last_progress_at: Arc<AtomicU64>,
+    /// Последний счетчик, отправленный в прогресс
+    pub(crate) last_reported_count: Arc<AtomicUsize>,
 }
 
 impl SyntaxHelperLoader {
@@ -99,6 +103,8 @@ impl SyntaxHelperLoader {
             processed_files: Arc::new(AtomicUsize::new(0)),
             error_count: Arc::new(AtomicUsize::new(0)),
             total_files: Arc::new(AtomicUsize::new(0)),
+            last_progress_at: Arc::new(AtomicU64::new(0)),
+            last_reported_count: Arc::new(AtomicUsize::new(0)),
         }
     }
 

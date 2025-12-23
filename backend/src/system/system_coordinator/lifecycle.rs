@@ -342,6 +342,7 @@ impl SystemCoordinator {
         repository
             .load_types(platform_raw_data)
             .map_err(StartupError::PlatformTypesError)?;
+        repository.set_platform_docs_loaded(true);
 
         // Заполняем SignatureIndex через Registry паттерн
         // Единственный источник данных - syntax_helper (документация 1С)
@@ -390,6 +391,7 @@ impl SystemCoordinator {
         repository: &Arc<InMemoryTypeRepository>,
     ) -> Result<(), StartupError> {
         info!("Загружаем базовые типы платформы 1С (fallback mode)...");
+        repository.set_platform_docs_loaded(false);
 
         // Примитивные типы
         let platform_types = vec![

@@ -81,15 +81,15 @@ impl AnalysisPass for DeadCodePass {
         // Пример: код после Возврат
         let lines: Vec<&str> = code.lines().collect();
         for (i, line) in lines.iter().enumerate() {
-            if line.trim().starts_with("Возврат") {
-                if i + 1 < lines.len() && !lines[i + 1].trim().starts_with("КонецФункции")
-                {
-                    errors.push(AnalysisError {
-                        pass_name: self.name().to_string(),
-                        line: i + 2,
-                        message: "Недостижимый код после Возврат".to_string(),
-                    });
-                }
+            if line.trim().starts_with("Возврат")
+                && i + 1 < lines.len()
+                && !lines[i + 1].trim().starts_with("КонецФункции")
+            {
+                errors.push(AnalysisError {
+                    pass_name: self.name().to_string(),
+                    line: i + 2,
+                    message: "Недостижимый код после Возврат".to_string(),
+                });
             }
         }
 
@@ -123,6 +123,12 @@ impl AnalysisPipeline {
         }
 
         all_errors
+    }
+}
+
+impl Default for AnalysisPipeline {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -160,6 +166,12 @@ impl VirtualCompiler {
         } else {
             Err(format!("Ожидался тип {}, получен {}", expected, actual))
         }
+    }
+}
+
+impl Default for VirtualCompiler {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

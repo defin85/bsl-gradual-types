@@ -223,9 +223,7 @@ pub fn get_all_types_as_dto(
     // 2. First transform to DTO (to know category), then filter, then paginate
     let all_type_dtos: Vec<TypeDto> = all_types
         .iter()
-        .map(|(name, res)| {
-            type_resolution_to_dto(name, res, metadata_lookup, |r| generate_type_description(r))
-        })
+        .map(|(name, res)| type_resolution_to_dto(name, res, metadata_lookup, generate_type_description))
         .collect();
 
     // 3. Apply filters

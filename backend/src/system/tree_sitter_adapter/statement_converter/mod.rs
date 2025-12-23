@@ -72,12 +72,12 @@ pub fn convert_source_file_cached_with_progress(
 ) -> Result<Vec<Statement>, String> {
     let mut statements = Vec::new();
     let mut cursor = node.walk();
-    let total = node.child_count() as usize;
+    let total = node.child_count();
     let mut processed = 0usize;
 
     for child in node.children(&mut cursor) {
         processed = processed.saturating_add(1);
-        if processed == 1 || processed % 1000 == 0 || processed == total {
+        if processed == 1 || processed.is_multiple_of(1000) || processed == total {
             progress(processed, total);
         }
         if let Some(stmt) = dispatch_statement_cached(&child, source, line_index)? {

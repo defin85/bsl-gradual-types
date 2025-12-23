@@ -79,9 +79,7 @@ fn derive_collection_item_type(
         .methods
         .iter()
         .find(|(ru, en)| ru == "Получить" || en == "Get");
-    let Some((russian, _english)) = get_method else {
-        return None;
-    };
+    let (russian, _english) = get_method?;
 
     let method_info = {
         let type_qualified_key = format!("method_{}.{}", type_info.identity.russian_name, russian);

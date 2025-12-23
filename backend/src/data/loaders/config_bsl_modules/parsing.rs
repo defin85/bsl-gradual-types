@@ -58,7 +58,7 @@ pub(crate) fn parse_bsl_module(source: &str, module_path: &Path) -> Result<Parse
 
 pub(crate) fn parse_with_thread_parser(source: &str) -> Result<tree_sitter::Tree> {
     thread_local! {
-        static THREAD_PARSER: RefCell<Option<Parser>> = RefCell::new(None);
+        static THREAD_PARSER: RefCell<Option<Parser>> = const { RefCell::new(None) };
     }
 
     THREAD_PARSER.with(|cell| {

@@ -94,7 +94,7 @@ fn test_detect_multiple_guards() {
     let guards = detect_type_guards("x <> Неопределено И ЗначениеЗаполнено(x)");
 
     // Должно найти 2 guards
-    assert!(guards.len() >= 1); // Минимум 1, так как парсинг простой
+    assert!(!guards.is_empty()); // Минимум 1, так как парсинг простой
 }
 
 #[test]

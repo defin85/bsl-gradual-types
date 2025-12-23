@@ -11,8 +11,9 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
 // Импорт структур прогресса
@@ -380,7 +381,7 @@ impl ConfigurationDiscovery {
             Some(format!("Обнаружено {} объектов", total_objects)),
         ));
 
-        // === PHASE 2: Parsing (5-85%) ===
+        // === PHASE 2: Parsing (5-80%) ===
         progress_callback(ProgressUpdate::new(
             IndexingPhase::ConfigurationParsing,
             0,
@@ -406,6 +407,8 @@ impl ConfigurationDiscovery {
 
         // Счётчик обработанных объектов (потокобезопасный)
         let processed = Arc::new(AtomicUsize::new(0));
+        let last_report_at = Arc::new(AtomicU64::new(0));
+        let last_reported_count = Arc::new(AtomicUsize::new(0));
 
         // Параллельный парсинг через rayon::par_iter
         let all_metadata: Vec<_> = parsing_tasks
@@ -471,7 +474,7 @@ impl ConfigurationDiscovery {
                         // Формы: раньше извлекались только для Document/Catalog.
                         // Теперь пытаемся для всех объектов: если папки Forms нет — это быстрый early return.
                         if let Ok(forms) = forms_discovery
-                            .discover_forms_for_object(&folder_name, &object_type, object_name)
+                            .discover_forms_for_object(&folder_name, object_type, object_name)
                         {
                             metadata.forms = forms;
                             if !metadata.forms.is_empty() {
@@ -508,8 +511,38 @@ impl ConfigurationDiscovery {
                             );
                         }
 
-                        // Throttling: отправляем прогресс каждые 5 объектов или на последнем
-                        if count.is_multiple_of(5) || count == total_objects {
+                        // Throttling: прогресс по времени, чтобы не "схлопывался" на быстрых машинах
+                        let now_ms = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let should_report = if count == total_objects {
+                            last_report_at.store(now_ms, Ordering::Relaxed);
+                            last_reported_count.store(count, Ordering::Relaxed);
+                            true
+                        } else {
+                            const PROGRESS_MIN_INTERVAL_MS: u64 = 75;
+                            let last_ms = last_report_at.load(Ordering::Relaxed);
+                            let last_count = last_reported_count.load(Ordering::Relaxed);
+                            let enough_time = now_ms.saturating_sub(last_ms)
+                                >= PROGRESS_MIN_INTERVAL_MS;
+                            let advanced = count > last_count;
+                            if enough_time && advanced {
+                                last_report_at
+                                    .compare_exchange(
+                                        last_ms,
+                                        now_ms,
+                                        Ordering::Relaxed,
+                                        Ordering::Relaxed,
+                                    )
+                                    .is_ok()
+                            } else {
+                                false
+                            }
+                        };
+
+                        if should_report {
+                            last_reported_count.store(count, Ordering::Relaxed);
                             progress_callback(ProgressUpdate::new(
                                 IndexingPhase::ConfigurationParsing,
                                 count,
@@ -542,7 +575,7 @@ impl ConfigurationDiscovery {
             ));
         }
 
-        // === PHASE 3: Linking (85-95%) ===
+        // === PHASE 3: Linking (80-90%) ===
         progress_callback(ProgressUpdate::new(
             IndexingPhase::ConfigurationLinking,
             0,
@@ -558,7 +591,7 @@ impl ConfigurationDiscovery {
             Some(format!("Обработано {} типов", all_metadata.len())),
         ));
 
-        // === PHASE 4: Finalizing (95-100%) ===
+        // === PHASE 4: Finalizing (90-95%) ===
         progress_callback(ProgressUpdate::new(
             IndexingPhase::ConfigurationFinalizing,
             0,

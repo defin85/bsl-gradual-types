@@ -118,6 +118,7 @@ impl MethodSignature {
     /// Создать новую сигнатуру метода
     ///
     /// Инициализирует lazy resolution кэши как пустые.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         owner_type: Option<String>,

@@ -44,6 +44,7 @@ fn main() {
             IndexingPhase::ConfigurationParsing => "📋",
             IndexingPhase::ConfigurationLinking => "⛓",
             IndexingPhase::ConfigurationFinalizing => "✅",
+            IndexingPhase::ConfigurationIndexingModules => "🧩",
             IndexingPhase::HbkExtraction => "📦",
         };
 

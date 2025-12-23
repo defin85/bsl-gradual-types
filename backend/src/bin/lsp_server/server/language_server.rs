@@ -231,12 +231,14 @@ impl LanguageServer for BslLanguageServer {
                                 })
                             }
                             _ => {
-                                format!(
-                                    "{} | {}/{}",
-                                    update.phase.display_name(),
-                                    update.current,
-                                    update.total
-                                )
+                                update.message.clone().unwrap_or_else(|| {
+                                    format!(
+                                        "{} | {}/{}",
+                                        update.phase.display_name(),
+                                        update.current,
+                                        update.total
+                                    )
+                                })
                             }
                         };
 

@@ -39,6 +39,7 @@ pub(crate) fn parse_bsl_module_tree_sitter_with_mode(
     Ok(ParsedModuleData { decls, call_sites })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_stmt_ts(
     node: &tree_sitter::Node,
     source: &str,
@@ -92,7 +93,7 @@ fn walk_stmt_ts(
         }
         "assignment_statement" => {
             if let Some((target, value_node)) = split_assignment_ts(node, source) {
-                walk_expr_ts(&value_node, source, line_index, calls, env);
+                walk_expr_ts(&value_node, source, calls, env);
                 if let Some(t) = infer_expr_type_ts(&value_node, source, env) {
                     env.entry(target.clone()).or_default().push(t);
                     if let Some(v) = env.get_mut(&target) {
@@ -113,7 +114,7 @@ fn walk_stmt_ts(
                     || child.kind() == "call_expression"
                     || child.kind() == "method_call"
                 {
-                    walk_expr_ts(&child, source, line_index, calls, env);
+                    walk_expr_ts(&child, source, calls, env);
                 }
             }
         }
@@ -128,13 +129,11 @@ fn walk_stmt_ts(
                             return_types.push(t);
                         }
                     }
-                    walk_expr_ts(&child, source, line_index, calls, env);
+                    walk_expr_ts(&child, source, calls, env);
                 }
             }
-            if !found_expr {
-                if track_returns {
-                    return_types.push("Неопределено".to_string());
-                }
+            if !found_expr && track_returns {
+                return_types.push("Неопределено".to_string());
             }
         }
         "if_statement" => {
@@ -177,7 +176,7 @@ fn walk_stmt_ts(
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "expression" || child.kind() == "method_call" {
-                    walk_expr_ts(&child, source, line_index, calls, env);
+                    walk_expr_ts(&child, source, calls, env);
                 }
             }
         }
@@ -185,9 +184,9 @@ fn walk_stmt_ts(
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "expression" || child.kind() == "method_call" {
-                    walk_expr_ts(&child, source, line_index, calls, env);
-                }
+                walk_expr_ts(&child, source, calls, env);
             }
+        }
         }
         _ => {}
     }
@@ -235,6 +234,7 @@ fn parse_decl_ts(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_function_body_ts(
     node: &tree_sitter::Node,
     source: &str,
@@ -262,6 +262,7 @@ fn walk_function_body_ts(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_if_ts(
     node: &tree_sitter::Node,
     source: &str,
@@ -286,7 +287,7 @@ fn walk_if_ts(
                     || child.kind() == "call_expression"
                     || child.kind() == "method_call") =>
             {
-                walk_expr_ts(&child, source, line_index, calls, env);
+                walk_expr_ts(&child, source, calls, env);
             }
             "else_clause" | "elseif_clause" => else_nodes.push(child),
             kind if in_then && (kind.ends_with("_statement") || kind.ends_with("_definition")) => {
@@ -334,6 +335,7 @@ fn walk_if_ts(
     merge_envs(env, else_env);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_loop_ts(
     node: &tree_sitter::Node,
     source: &str,
@@ -353,7 +355,7 @@ fn walk_loop_ts(
                 || child.kind() == "call_expression"
                 || child.kind() == "method_call" =>
             {
-                walk_expr_ts(&child, source, line_index, calls, env);
+                walk_expr_ts(&child, source, calls, env);
             }
             kind if kind.ends_with("_statement") || kind.ends_with("_definition") => {
                 body_nodes.push(child);
@@ -379,6 +381,7 @@ fn walk_loop_ts(
     merge_envs(env, body_env);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_try_ts(
     node: &tree_sitter::Node,
     source: &str,
@@ -444,7 +447,6 @@ fn walk_try_ts(
 fn walk_expr_ts(
     node: &tree_sitter::Node,
     source: &str,
-    line_index: &LineIndex,
     calls: &mut Vec<CallSite>,
     env: &mut HashMap<String, Vec<String>>,
 ) {
@@ -458,7 +460,7 @@ fn walk_expr_ts(
                 let mut args_cursor = child.walk();
                 for arg_child in child.children(&mut args_cursor) {
                     if arg_child.kind() == "expression" {
-                        walk_expr_ts(&arg_child, source, line_index, calls, env);
+                        walk_expr_ts(&arg_child, source, calls, env);
                     }
                 }
             }
@@ -468,7 +470,7 @@ fn walk_expr_ts(
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk_expr_ts(&child, source, line_index, calls, env);
+        walk_expr_ts(&child, source, calls, env);
     }
 }
 
@@ -652,9 +654,11 @@ fn infer_expr_type_ts(
         "new_expression" | "new_expression_method" => extract_new_type_ts(node, source),
         _ => {
             let text = node_text(node, source).to_lowercase();
-            if text == "истина" || text == "true" {
-                Some("Булево".to_string())
-            } else if text == "ложь" || text == "false" {
+            if text == "истина"
+                || text == "true"
+                || text == "ложь"
+                || text == "false"
+            {
                 Some("Булево".to_string())
             } else {
                 None

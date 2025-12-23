@@ -18180,13 +18180,25 @@ function handleProgressBegin(key, value, states, outputChannel8) {
   const existing = states.get(key);
   if (existing?.resolve) {
     outputChannel8.appendLine(`[Progress] Clearing previous progress for token: ${key}`);
+    if (existing.endTimer) {
+      clearTimeout(existing.endTimer);
+      existing.endTimer = null;
+    }
     existing.resolve();
   }
-  const state = {
+  const state = existing && !existing.resolve ? existing : {
     resolve: null,
     reporter: null,
-    lastReportedPercentage: 0
+    lastReportedPercentage: 0,
+    pending: null,
+    startedAtMs: Date.now(),
+    pendingEndMessage: null,
+    endTimer: null
   };
+  state.resolve = null;
+  state.reporter = null;
+  state.lastReportedPercentage = 0;
+  state.startedAtMs = Date.now();
   states.set(key, state);
   vscode5.window.withProgress({
     location: vscode5.ProgressLocation.Window,
@@ -18198,6 +18210,11 @@ function handleProgressBegin(key, value, states, outputChannel8) {
       message: value.message || "\u0418\u043D\u0438\u0446\u0438\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u044F...",
       increment: 0
     });
+    flushPending(state);
+    if (state.pendingEndMessage) {
+      scheduleEnd(key, state, state.pendingEndMessage, states, outputChannel8);
+      state.pendingEndMessage = null;
+    }
     return new Promise((resolve) => {
       state.resolve = resolve;
     });
@@ -18207,31 +18224,94 @@ function handleProgressReport(key, value, states, outputChannel8) {
   const percentage = value.percentage || 0;
   const message = value.message || "";
   outputChannel8.appendLine(`[Progress] REPORT: ${key} | ${message} (${percentage}%)`);
-  const state = states.get(key);
-  if (state?.reporter) {
-    const increment = percentage - state.lastReportedPercentage;
-    state.lastReportedPercentage = percentage;
-    state.reporter.report({
-      message,
-      increment: Math.max(0, increment)
-      // Не допускать отрицательных значений
-    });
+  let state = states.get(key);
+  if (!state) {
+    state = {
+      resolve: null,
+      reporter: null,
+      lastReportedPercentage: 0,
+      pending: null,
+      startedAtMs: Date.now(),
+      pendingEndMessage: null,
+      endTimer: null
+    };
+    states.set(key, state);
+    outputChannel8.appendLine(`[Progress] REPORT before BEGIN: ${key} | ${message} (${percentage}%)`);
   }
+  if (!state.reporter) {
+    if (!state.pending || percentage >= state.pending.percentage) {
+      state.pending = { percentage, message };
+    }
+    return;
+  }
+  const previous = state.lastReportedPercentage;
+  const normalized = Math.max(previous, percentage);
+  state.lastReportedPercentage = normalized;
+  state.reporter.report({
+    message,
+    increment: Math.max(0, normalized - previous)
+    // Не допускать отрицательных значений
+  });
 }
 function handleProgressEnd(key, value, states, outputChannel8) {
   const message = value.message || "\u0417\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E";
   outputChannel8.appendLine(`[Progress] END: ${key} | ${message}`);
-  const state = states.get(key);
-  if (state?.resolve) {
-    state.resolve();
+  let state = states.get(key);
+  if (!state) {
+    state = {
+      resolve: null,
+      reporter: null,
+      lastReportedPercentage: 0,
+      pending: null,
+      startedAtMs: Date.now(),
+      pendingEndMessage: null,
+      endTimer: null
+    };
+    states.set(key, state);
   }
-  states.delete(key);
+  if (!state.reporter || !state.resolve) {
+    state.pendingEndMessage = message;
+    return;
+  }
+  scheduleEnd(key, state, message, states, outputChannel8);
 }
-var vscode5;
+function flushPending(state) {
+  if (!state.reporter || !state.pending) {
+    return;
+  }
+  const previous = state.lastReportedPercentage;
+  const normalized = Math.max(previous, state.pending.percentage);
+  state.lastReportedPercentage = normalized;
+  state.reporter.report({
+    message: state.pending.message,
+    increment: Math.max(0, normalized - previous)
+  });
+  state.pending = null;
+}
+function scheduleEnd(key, state, message, states, outputChannel8) {
+  if (!state.resolve) {
+    state.pendingEndMessage = message;
+    return;
+  }
+  if (state.endTimer) {
+    clearTimeout(state.endTimer);
+    state.endTimer = null;
+  }
+  const elapsed = Date.now() - state.startedAtMs;
+  const delay = Math.max(0, MIN_PROGRESS_VISIBLE_MS - elapsed);
+  state.endTimer = setTimeout(() => {
+    state.endTimer = null;
+    outputChannel8.appendLine(`[Progress] END (delayed): ${key} | ${message}`);
+    state.resolve?.();
+    states.delete(key);
+  }, delay);
+}
+var vscode5, MIN_PROGRESS_VISIBLE_MS;
 var init_progress_handler = __esm({
   "src/lsp/client/progress-handler.ts"() {
     "use strict";
     vscode5 = __toESM(require("vscode"));
+    MIN_PROGRESS_VISIBLE_MS = 800;
   }
 });
 
@@ -18337,13 +18417,13 @@ async function startLanguageClient(context) {
   );
   setupStateChangeHandler(client, outputChannel4);
   setupConnectionErrorHandler(client, outputChannel4);
+  setupProgressHandler(client, outputChannel4);
   try {
     outputChannel4.appendLine("Starting LSP client...");
     outputChannel4.appendLine(`Server command: ${JSON.stringify(serverOptions)}`);
     await client.start();
     outputChannel4.appendLine("LSP client started successfully");
     setupServerStatusHandler(client, outputChannel4);
-    setupProgressHandler(client, outputChannel4);
     registerCustomHandlers(client, outputChannel4);
     vscode7.commands.executeCommand("bslAnalyzer.refreshOverview");
     startHealthCheck(client, outputChannel4);

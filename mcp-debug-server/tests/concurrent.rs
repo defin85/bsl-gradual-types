@@ -302,7 +302,9 @@ async fn test_concurrent_requests_same_session() {
 
     // Проверить, что все receivers получили responses
     for (i, rx) in receivers.into_iter().enumerate() {
-        let response = rx.await.expect(&format!("Response {} not received", i));
+        let response = rx
+            .await
+            .unwrap_or_else(|_| panic!("Response {} not received", i));
         assert_eq!(response["request_seq"], i as u64);
         assert_eq!(response["success"], true);
     }

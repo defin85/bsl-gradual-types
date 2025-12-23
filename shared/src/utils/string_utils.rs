@@ -192,7 +192,7 @@ mod tests {
         // "saturday" -> "sunday": a->u, t->, u->n, r->d, d->a, a->y (complex)
         // Actually: sat->sun=2, urday->day=2 = around 3-4
         let dist = levenshtein_distance("saturday", "sunday");
-        assert!(dist >= 3 && dist <= 4);
+        assert!((3..=4).contains(&dist));
     }
 
     // === Similarity tests ===
@@ -225,9 +225,9 @@ mod tests {
     fn test_similarity_range() {
         // Ensure similarity is always in [0.0, 1.0]
         let sim1 = similarity("abc", "xyz");
-        assert!(sim1 >= 0.0 && sim1 <= 1.0);
+        assert!((0.0..=1.0).contains(&sim1));
 
         let sim2 = similarity("hello", "hallo");
-        assert!(sim2 >= 0.0 && sim2 <= 1.0);
+        assert!((0.0..=1.0).contains(&sim2));
     }
 }

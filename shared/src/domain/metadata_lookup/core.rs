@@ -441,7 +441,7 @@ impl TypeMetadataLookup {
     ///
     /// - **Platform** типы: `Массив`, `ТаблицаЗначений`, `Строка`
     /// - **Configuration** типы: `Справочники.Контрагенты`, `Документы.Заказ`
-    /// - **Primitive** и **Special** типы пока не поддерживаются (нет RawTypeData)
+    /// - **Primitive** и **Special** типы поддерживаются, если загружены из Syntax Helper
     #[allow(clippy::only_used_in_recursion)]
     pub(crate) fn extract_type_name(&self, resolution: &TypeResolution) -> Option<String> {
         match &resolution.result {
@@ -459,8 +459,8 @@ impl TypeMetadataLookup {
                         Some(format!("{}.{}", config.kind.to_prefix(), config.name))
                     }
                 }
-                // Primitive и Special типы не имеют RawTypeData в repository
-                ConcreteType::Primitive(_) | ConcreteType::Special(_) => None,
+                ConcreteType::Primitive(prim) => Some(prim.display_name().to_string()),
+                ConcreteType::Special(special) => Some(special.display_name().to_string()),
                 // GlobalFunction может иметь документацию
                 ConcreteType::GlobalFunction(func) => Some(func.name.clone()),
                 ConcreteType::TabularRow(tr) => Some(tr.get_full_name()),

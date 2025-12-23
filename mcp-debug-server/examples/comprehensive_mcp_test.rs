@@ -38,7 +38,6 @@
 //! ✅ 13. debug_terminate - завершение debug сессии
 
 use std::env;
-use std::path::PathBuf;
 
 fn main() {
     println!("=== MCP Debug Server: Comprehensive Test ===\n");
@@ -50,7 +49,8 @@ fn main() {
         "examples/fixtures/test_program"
     };
 
-    let test_program_path = PathBuf::from(env::current_dir().unwrap())
+    let test_program_path = env::current_dir()
+        .unwrap()
         .join(test_program)
         .canonicalize()
         .expect("Test program not found. Compile it first!");

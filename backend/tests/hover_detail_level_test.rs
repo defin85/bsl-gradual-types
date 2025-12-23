@@ -566,7 +566,7 @@ mod detail_level_tests {
         assert_eq!(config.max_methods, 10);
         assert_eq!(config.max_properties, 5);
         assert_eq!(config.detail_level, DetailLevel::Detailed);
-        assert_eq!(config.show_certainty, true);
+        assert!(config.show_certainty);
         assert_eq!(config.output_format, HoverOutputFormat::Markdown);
     }
 
@@ -584,7 +584,7 @@ mod detail_level_tests {
         assert_eq!(config.max_methods, 5);
         assert_eq!(config.max_properties, 3);
         assert_eq!(config.detail_level, DetailLevel::Detailed);
-        assert_eq!(config.show_certainty, false);
+        assert!(!config.show_certainty);
         assert_eq!(config.output_format, HoverOutputFormat::PlainText);
     }
 

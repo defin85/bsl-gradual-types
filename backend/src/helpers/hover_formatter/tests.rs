@@ -3,6 +3,7 @@
 //! Тесты для всех компонентов модуля hover_formatter.
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::helpers::hover_formatter::builder::HoverBuilder;
     use crate::helpers::hover_formatter::config::{HoverFormatConfig, HoverOutputFormat};

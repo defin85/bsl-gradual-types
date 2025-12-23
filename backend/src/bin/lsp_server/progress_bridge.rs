@@ -117,7 +117,7 @@ impl LspWorkDoneReporter {
         Self {
             client,
             token,
-            throttle_interval: Duration::from_millis(150),
+            throttle_interval: Duration::from_millis(75),
             last_sent: None,
             last_percentage: 0,
             pending: None,

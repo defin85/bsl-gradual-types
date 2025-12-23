@@ -23,11 +23,11 @@ use std::sync::{Arc, LazyLock};
 /// Инициализируется ОДИН раз при первом доступе (LazyLock).
 /// Thread-safe: LazyLock гарантирует однократную инициализацию.
 pub static SHARED_TEST_SERVICE: LazyLock<TypeSystemService> =
-    LazyLock::new(|| create_test_service_internal());
+    LazyLock::new(create_test_service_internal);
 
 /// Shared repository для тестов, которым нужен доступ к репозиторию напрямую.
 pub static SHARED_REPOSITORY: LazyLock<Arc<InMemoryTypeRepository>> =
-    LazyLock::new(|| create_repository_internal());
+    LazyLock::new(create_repository_internal);
 
 /// Shared SystemCoordinator с конфигурацией для тестов табличных частей.
 /// Инициализируется ОДИН раз при первом доступе (LazyLock).
@@ -150,7 +150,7 @@ mod tests {
         // Проверяем что shared service инициализируется
         let _service = get_test_service();
         // Если дошли сюда без паники - всё работает
-        assert!(true, "Shared service initialized successfully");
+        // Инициализация прошла без паники — считаем успешной.
     }
 
     #[test]

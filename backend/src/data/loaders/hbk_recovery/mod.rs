@@ -269,7 +269,7 @@ mod tests {
         assert!(output_path.exists(), "Output ZIP должен существовать");
         assert_eq!(
             size,
-            empty_zip.len() as usize,
+            empty_zip.len(),
             "Размер должен быть размер ZIP"
         );
     }
@@ -525,9 +525,9 @@ mod tests {
 
         // Создаём тестовый .hbk файл
         let mut file = File::create(&test_file_path).unwrap();
-        file.write_all(&vec![0xFF; 100]).unwrap();
+        file.write_all(&[0xFF; 100]).unwrap();
         file.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap();
-        file.write_all(&vec![0x00; 100]).unwrap();
+        file.write_all(&[0x00; 100]).unwrap();
         drop(file);
 
         // Создаём директорию кеша

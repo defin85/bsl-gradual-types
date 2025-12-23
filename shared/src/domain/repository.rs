@@ -94,6 +94,12 @@ pub enum CompletionKind {
 
 /// Trait для репозитория типов
 pub trait TypeRepository: Send + Sync {
+    /// Установить флаг загрузки документации платформы (Syntax Helper)
+    fn set_platform_docs_loaded(&self, loaded: bool);
+
+    /// Проверить, загружена ли документация платформы (Syntax Helper)
+    fn platform_docs_loaded(&self) -> bool;
+
     /// Загрузить типы в репозиторий
     fn load_types(&self, types: Vec<RawTypeData>) -> Result<()>;
 
@@ -296,6 +302,7 @@ pub struct RepositoryStats {
 pub struct InMemoryTypeRepository {
     types: RwLock<Vec<RawTypeData>>,
     last_updated: RwLock<Option<SystemTime>>,
+    platform_docs_loaded: RwLock<bool>,
     /// Индекс сигнатур методов для валидации (thread-safe)
     signature_index: RwLock<SignatureIndex>,
     /// Индекс локаций объявлений методов/функций (для Go To Definition на метод)
@@ -310,6 +317,7 @@ impl InMemoryTypeRepository {
         Self {
             types: RwLock::new(Vec::new()),
             last_updated: RwLock::new(None),
+            platform_docs_loaded: RwLock::new(true),
             signature_index: RwLock::new(SignatureIndex::new()),
             method_definition_index: RwLock::new(HashMap::new()),
             type_index: RwLock::new(HashMap::new()),
@@ -361,6 +369,27 @@ impl Default for InMemoryTypeRepository {
 }
 
 impl TypeRepository for InMemoryTypeRepository {
+    fn set_platform_docs_loaded(&self, loaded: bool) {
+        let mut flag = self
+            .platform_docs_loaded
+            .write()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("platform_docs_loaded RwLock poisoned, recovering");
+                poisoned.into_inner()
+            });
+        *flag = loaded;
+    }
+
+    fn platform_docs_loaded(&self) -> bool {
+        *self
+            .platform_docs_loaded
+            .read()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("platform_docs_loaded RwLock poisoned, recovering");
+                poisoned.into_inner()
+            })
+    }
+
     fn load_types(&self, new_types: Vec<RawTypeData>) -> Result<()> {
         let mut types = self.types.write().unwrap_or_else(|poisoned| {
             tracing::warn!("types RwLock poisoned in load_types, recovering");
@@ -1098,7 +1127,7 @@ mod tests {
         };
         repo.load_types(vec![type_a, type_b]).unwrap();
 
-        let removed = repo.remove_types(&vec!["ТипА".to_string()]).unwrap();
+        let removed = repo.remove_types(&["ТипА".to_string()]).unwrap();
         assert_eq!(removed, 1);
         assert!(repo.find_type("ТипА").is_none());
         assert!(repo.find_type("TypeA").is_none());
@@ -1127,7 +1156,7 @@ mod tests {
         repo.add_config_method_signature(owner, sig);
         assert!(repo.find_method_signature(Some(owner), "Тест").is_some());
 
-        repo.remove_config_method_signatures(owner, &vec!["Тест".to_string()]);
+        repo.remove_config_method_signatures(owner, &["Тест".to_string()]);
         assert!(repo.find_method_signature(Some(owner), "Тест").is_none());
 
         let global_sig = MethodSignature::new(
@@ -1144,7 +1173,7 @@ mod tests {
         repo.add_global_function_signature("Глобальная", global_sig);
         assert!(repo.find_method_signature(None, "Глобальная").is_some());
 
-        repo.remove_global_function_signatures(&vec!["Глобальная".to_string()]);
+        repo.remove_global_function_signatures(&["Глобальная".to_string()]);
         assert!(repo.find_method_signature(None, "Глобальная").is_none());
     }
 }

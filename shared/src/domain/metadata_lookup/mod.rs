@@ -82,4 +82,9 @@ impl TypeMetadataLookup {
     pub(crate) fn repository(&self) -> &Arc<dyn TypeRepository> {
         &self.repository
     }
+
+    /// Проверить, загружена ли документация платформы (Syntax Helper)
+    pub fn platform_docs_loaded(&self) -> bool {
+        self.repository.platform_docs_loaded()
+    }
 }

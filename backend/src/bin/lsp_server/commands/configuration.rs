@@ -821,8 +821,10 @@ fn build_config_index_cache(
     module_signatures: &[ModuleSignatureSnapshot],
 ) -> ConfigIndexCache {
     let discovery = ConfigurationDiscovery::new(config_root.to_path_buf(), false);
-    let mut cache = ConfigIndexCache::default();
-    cache.config_root = config_root.to_path_buf();
+    let mut cache = ConfigIndexCache {
+        config_root: config_root.to_path_buf(),
+        ..Default::default()
+    };
 
     for obj in metadata {
         let key = ObjectKey::new(&obj.object_type_raw, &obj.name);
@@ -1044,6 +1046,7 @@ fn apply_module_index_result(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_metadata_update(
     cache: &mut ConfigIndexCache,
     repository: &dyn TypeRepository,
@@ -1101,7 +1104,7 @@ fn remove_object(
     };
 
     let raw_type = metadata.to_raw_type_data(None);
-    if let Ok(removed) = repository.remove_types(&vec![raw_type.name]) {
+    if let Ok(removed) = repository.remove_types(&[raw_type.name]) {
         *removed_types += removed;
     }
 

@@ -3,6 +3,7 @@
 //! Все тесты из оригинального модуля сохранены без изменений.
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::domain::signature_index::{
         ConstructorSignature, ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,

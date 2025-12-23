@@ -78,6 +78,7 @@ toml = "0.8"
 
 # HBK Recovery (Milestone: .hbk file recovery)
 zip = "2.2"
+flate2 = "1"
 
 # Время и даты
 chrono = { workspace = true }

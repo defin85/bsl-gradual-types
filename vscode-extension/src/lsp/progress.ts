@@ -95,6 +95,11 @@ export function getCurrentProgress(): IndexingProgress {
     return globalIndexingProgress;
 }
 
+export function setIndexingProgress(progress: IndexingProgress): void {
+    globalIndexingProgress = progress;
+    progressEmitter.fire(progress);
+}
+
 /**
  * Обновляет status bar в зависимости от состояния LSP сервера
  *

@@ -101,8 +101,17 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
         query: string
     ) {
         try {
+            const trimmedQuery = query.trim();
+            if (trimmedQuery.length < 2) {
+                webviewView.webview.postMessage({
+                    type: 'searchResults',
+                    data: [],
+                });
+                return;
+            }
+
             // ✅ РЕАЛЬНЫЕ ДАННЫЕ из TypeRepository через LSP
-            const response = await searchTypes(query, 15);
+            const response = await searchTypes(trimmedQuery, 15);
 
             // Конвертируем в формат для webview (совместим с mock данными)
             const results = response.types.map(t => ({
@@ -118,7 +127,7 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
             });
 
             this.outputChannel?.appendLine(
-                `🔍 Search "${query}" → ${response.total} results from TypeRepository`
+                `🔍 Search "${trimmedQuery}" → ${response.total} results from TypeRepository`
             );
         } catch (error) {
             this.outputChannel?.appendLine(

@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import { BslOverviewItem } from './items';
 import { progressEmitter, getCurrentProgress } from '../lsp/progress';
-import { isClientRunning } from '../lsp/client';
+import { getServerVersion, isClientRunning } from '../lsp/client';
 import { BslAnalyzerConfig } from '../config/configHelper';
+import { getTypeRepositoryStats, getWorkspaceStats } from '../lsp/customRequests';
 
 /**
  * Провайдер для дерева обзора BSL Analyzer
@@ -52,11 +53,19 @@ export class BslOverviewProvider implements vscode.TreeDataProvider<BslOverviewI
         }
     }
 
-    private getWorkspaceItems(): Thenable<BslOverviewItem[]> {
+    private async getWorkspaceItems(): Promise<BslOverviewItem[]> {
+        const stats = await getWorkspaceStats();
+        const repoStats = await getTypeRepositoryStats();
+        const fileCount = stats ? stats.bslFiles : 0;
+        const issuesCount = stats ? stats.diagnostics : 0;
+        const lastAnalysis = repoStats?.lastUpdateTime
+            ? formatUpdateTime(repoStats.lastUpdateTime)
+            : 'Never';
+
         const workspaceItems = [
-            new BslOverviewItem('BSL Files: Scanning...', vscode.TreeItemCollapsibleState.None, 'file-count'),
-            new BslOverviewItem('Last Analysis: Never', vscode.TreeItemCollapsibleState.None, 'last-analysis'),
-            new BslOverviewItem('Issues Found: 0', vscode.TreeItemCollapsibleState.None, 'issues')
+            new BslOverviewItem(`BSL Files: ${fileCount}`, vscode.TreeItemCollapsibleState.None, 'file-count'),
+            new BslOverviewItem(`Last Analysis: ${lastAnalysis}`, vscode.TreeItemCollapsibleState.None, 'last-analysis'),
+            new BslOverviewItem(`Issues Found: ${issuesCount}`, vscode.TreeItemCollapsibleState.None, 'issues')
         ];
         
         // Добавляем информацию об индексации если она активна
@@ -72,19 +81,29 @@ export class BslOverviewProvider implements vscode.TreeDataProvider<BslOverviewI
         return Promise.resolve(workspaceItems);
     }
 
-    private getServerItems(): Thenable<BslOverviewItem[]> {
+    private async getServerItems(): Promise<BslOverviewItem[]> {
         // Проверка статуса LSP сервера
         const serverStatus = isClientRunning() ? 'Running' : 'Stopped';
         const statusIcon = isClientRunning() ? '$(check)' : '$(error)';
         const statusColor = isClientRunning() ? '✅' : '⚠️';
-        
-        this.outputChannel.appendLine(`${statusColor} LSP Status Check: ${serverStatus} (isClientRunning=${isClientRunning()})`);
-        
-        return Promise.resolve([
+
+        const repoStats = await getTypeRepositoryStats();
+        const totalTypes = repoStats?.totalTypes ?? 0;
+        const platformTypes = repoStats?.platformTypes ?? 0;
+        const configTypes = repoStats?.configurationTypes ?? 0;
+        const platformVersion = BslAnalyzerConfig.platformVersion || 'Unknown';
+        const lspVersion = getServerVersion() || 'Unknown';
+
+        return [
             new BslOverviewItem(`${statusIcon} Status: ${serverStatus}`, vscode.TreeItemCollapsibleState.None, 'status'),
-            new BslOverviewItem('UnifiedBslIndex: Loading...', vscode.TreeItemCollapsibleState.None, 'index-count'),
-            new BslOverviewItem('Platform: 8.3.25', vscode.TreeItemCollapsibleState.None, 'platform')
-        ]);
+            new BslOverviewItem(
+                `TypeRepository: ${totalTypes} (Platform ${platformTypes}, Config ${configTypes})`,
+                vscode.TreeItemCollapsibleState.None,
+                'index-count'
+            ),
+            new BslOverviewItem(`Platform: ${platformVersion}`, vscode.TreeItemCollapsibleState.None, 'platform'),
+            new BslOverviewItem(`LSP Version: ${lspVersion}`, vscode.TreeItemCollapsibleState.None, 'lsp-version')
+        ];
     }
 
     private getConfigItems(): Thenable<BslOverviewItem[]> {
@@ -97,5 +116,25 @@ export class BslOverviewProvider implements vscode.TreeDataProvider<BslOverviewI
             new BslOverviewItem(`Real-time Analysis: ${realTimeEnabled}`, vscode.TreeItemCollapsibleState.None, 'real-time'),
             new BslOverviewItem(`Metrics: ${metricsEnabled}`, vscode.TreeItemCollapsibleState.None, 'metrics')
         ]);
+    }
+}
+
+function formatUpdateTime(isoTimestamp: string): string {
+    try {
+        const date = new Date(isoTimestamp);
+        const now = new Date();
+        const diffMs = now.getTime() - date.getTime();
+        const diffMinutes = Math.floor(diffMs / 60000);
+
+        if (diffMinutes < 1) {
+            return 'just now';
+        }
+        if (diffMinutes < 60) {
+            return `${diffMinutes} min ago`;
+        }
+        const hours = Math.floor(diffMinutes / 60);
+        return `${hours} h ago`;
+    } catch {
+        return 'unknown';
     }
 }

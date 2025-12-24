@@ -77,6 +77,7 @@ export function getConfigCategoryName(entityKind: string): string {
         'AccumulationRegister': 'Регистры накопления',
         'AccountingRegister': 'Регистры бухгалтерии',
         'CalculationRegister': 'Регистры расчета',
+        'Register': 'Регистры',
         'ChartOfCharacteristicTypes': 'Планы видов характеристик',
         'ChartOfAccounts': 'Планы счетов',
         'ChartOfCalculationTypes': 'Планы видов расчета',
@@ -85,7 +86,12 @@ export function getConfigCategoryName(entityKind: string): string {
         'ExchangePlan': 'Планы обмена',
         'CommonModule': 'Общие модули',
         'Report': 'Отчеты',
-        'DataProcessor': 'Обработки'
+        'DataProcessor': 'Обработки',
+        'Enum': 'Перечисления',
+        'Constant': 'Константы',
+        'Role': 'Роли',
+        'Subsystem': 'Подсистемы',
+        'Language': 'Языки'
     };
 
     return categoryMap[entityKind] || 'Другие объекты';

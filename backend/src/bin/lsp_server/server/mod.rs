@@ -28,6 +28,7 @@ pub use tower_lsp::lsp_types::Url;
 pub struct BslLanguageServer {
     pub(crate) client: Client,
     pub(crate) documents: Arc<RwLock<HashMap<Url, String>>>,
+    pub(crate) diagnostics_counts: Arc<RwLock<HashMap<Url, usize>>>,
     pub(crate) config: Arc<RwLock<Option<LspConfig>>>,
     pub(crate) settings: Arc<RwLock<BslSettings>>,
     pub(crate) auto_reindex_paused: Arc<RwLock<bool>>,

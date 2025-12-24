@@ -177,6 +177,20 @@ export function isClientRunning(): boolean {
 }
 
 /**
+ * Возвращает версию LSP сервера из initialize result
+ */
+export function getServerVersion(): string | undefined {
+    if (!client) {
+        return undefined;
+    }
+    const info = (client as any).initializeResult?.serverInfo;
+    if (info && typeof info.version === 'string') {
+        return info.version;
+    }
+    return undefined;
+}
+
+/**
  * Отправляет запрос на сервер для выполнения кастомной команды
  */
 export async function sendCustomRequest<T = unknown>(method: string, params?: unknown): Promise<T> {

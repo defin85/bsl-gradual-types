@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { HierarchicalTypeItem } from './typeModels';
 import { TypeTreeBuilder } from './typeTreeBuilder';
+import { progressEmitter } from '../lsp/progress';
 
 // Re-export for backward compatibility
 export { HierarchicalTypeItem } from './typeModels';
@@ -16,12 +17,22 @@ export class HierarchicalTypeIndexProvider implements vscode.TreeDataProvider<Hi
 
     private outputChannel: vscode.OutputChannel | undefined;
     private treeBuilder: TypeTreeBuilder;
+    private wasIndexing = false;
 
     constructor(outputChannel?: vscode.OutputChannel) {
         this.outputChannel = outputChannel;
         this.treeBuilder = new TypeTreeBuilder(outputChannel);
         // Запускаем загрузку типов асинхронно
         this.initializeTypes();
+
+        // Обновляем дерево после завершения индексации типов
+        progressEmitter.event((progress) => {
+            const isIndexing = progress.isIndexing;
+            if (this.wasIndexing && !isIndexing) {
+                this.refresh();
+            }
+            this.wasIndexing = isIndexing;
+        });
     }
 
     private async initializeTypes(): Promise<void> {

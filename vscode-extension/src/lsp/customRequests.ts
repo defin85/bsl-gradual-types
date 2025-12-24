@@ -329,6 +329,14 @@ export interface TypeRepositoryStats {
 }
 
 /**
+ * Статистика workspace (файлы и диагностика)
+ */
+export interface WorkspaceStatsResponse {
+    bslFiles: number;
+    diagnostics: number;
+}
+
+/**
  * Параметры запроса всех типов
  */
 export interface GetAllTypesRequest {
@@ -418,6 +426,48 @@ export async function getTypeRepositoryStats(): Promise<TypeRepositoryStats | nu
         return result as TypeRepositoryStats || null;
     } catch (error) {
         logger.error('Failed to get type repository stats', error);
+        return null;
+    }
+}
+
+/**
+ * Получить статистику workspace через LSP Server
+ */
+let workspaceStatsUnsupported = false;
+let workspaceStatsUnsupportedNotified = false;
+
+export async function getWorkspaceStats(): Promise<WorkspaceStatsResponse | null> {
+    if (workspaceStatsUnsupported) {
+        return null;
+    }
+
+    const client = (await import('./client')).getLanguageClient();
+    if (!client) {
+        logger.warn('[Workspace Stats] LSP client not available');
+        return null;
+    }
+
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.getWorkspaceStats',
+            arguments: [{}]
+        });
+        return result as WorkspaceStatsResponse || null;
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('Method not found')) {
+            workspaceStatsUnsupported = true;
+            if (!workspaceStatsUnsupportedNotified) {
+                workspaceStatsUnsupportedNotified = true;
+                logger.warn('[Workspace Stats] LSP server does not support getWorkspaceStats yet');
+                const vscode = await import('vscode');
+                vscode.window.showWarningMessage(
+                    'BSL Analyzer: LSP server does not support workspace stats yet. Please обновите бинарник.'
+                );
+            }
+            return null;
+        }
+        logger.error('Failed to get workspace stats', error);
         return null;
     }
 }

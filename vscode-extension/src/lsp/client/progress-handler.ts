@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
+import { setIndexingProgress } from '../progress';
 
 /** Состояние активного прогресса */
 interface ProgressState {
@@ -119,6 +120,11 @@ function handleProgressBegin(
             message: value.message || 'Инициализация...',
             increment: 0
         });
+        setIndexingProgress({
+            isIndexing: true,
+            currentStep: value.title || 'Initializing',
+            progress: 0
+        });
 
         flushPending(state);
         if (state.pendingEndMessage) {
@@ -178,6 +184,11 @@ function handleProgressReport(
         message: message,
         increment: Math.max(0, normalized - previous)  // Не допускать отрицательных значений
     });
+    setIndexingProgress({
+        isIndexing: true,
+        currentStep: message || 'Processing',
+        progress: normalized
+    });
 }
 
 /**
@@ -210,10 +221,21 @@ function handleProgressEnd(
 
     if (!state.reporter || !state.resolve) {
         state.pendingEndMessage = message;
+        setIndexingProgress({
+            isIndexing: false,
+            currentStep: message || 'Done',
+            progress: 100
+        });
         return;
     }
 
     scheduleEnd(key, state, message, states, outputChannel);
+
+    setIndexingProgress({
+        isIndexing: false,
+        currentStep: message || 'Done',
+        progress: 100
+    });
 }
 
 function flushPending(state: ProgressState): void {

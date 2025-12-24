@@ -95,14 +95,7 @@ impl LanguageServer for BslLanguageServer {
                     trigger_characters: Some(vec![".".to_string(), " ".to_string()]),
                     ..Default::default()
                 }),
-                diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
-                    DiagnosticOptions {
-                        identifier: Some("bsl-gradual-types".to_string()),
-                        inter_file_dependencies: true,
-                        workspace_diagnostics: false,
-                        work_done_progress_options: WorkDoneProgressOptions::default(),
-                    },
-                )),
+                diagnostic_provider: None,
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: vec![
                         "bsl.getAllTypes".to_string(),
@@ -111,6 +104,7 @@ impl LanguageServer for BslLanguageServer {
                         "bsl.searchTypes".to_string(),
                         "bsl.getCurrentContext".to_string(),
                         "bsl.getTypeRepositoryStats".to_string(),
+                        "bsl.getWorkspaceStats".to_string(),
                         "bsl.parseConfiguration".to_string(),
                     ],
                     work_done_progress_options: WorkDoneProgressOptions::default(),
@@ -401,9 +395,11 @@ impl LanguageServer for BslLanguageServer {
             handlers::handle_did_open(&uri, &text, version, self.get_type_service(), &settings)
                 .await;
 
+        let diagnostics_len = diagnostics.len();
         self.client
             .publish_diagnostics(uri.clone(), diagnostics, Some(version))
             .await;
+        self.update_diagnostics_count(&uri, diagnostics_len).await;
 
         self.client
             .log_message(
@@ -456,9 +452,11 @@ impl LanguageServer for BslLanguageServer {
         )
         .await;
 
+        let diagnostics_len = diagnostics.len();
         self.client
             .publish_diagnostics(uri.clone(), diagnostics, Some(version))
             .await;
+        self.update_diagnostics_count(&uri, diagnostics_len).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -469,6 +467,7 @@ impl LanguageServer for BslLanguageServer {
         self.client
             .publish_diagnostics(uri.clone(), vec![], None)
             .await;
+        self.update_diagnostics_count(&uri, 0).await;
 
         self.client
             .log_message(MessageType::INFO, format!("Closed document: {}", uri))
@@ -709,7 +708,7 @@ impl LanguageServer for BslLanguageServer {
                     })?
                 };
 
-                let result = handle_get_all_types(request, self.coordinator.type_service());
+                let result = handle_get_all_types(request, self.coordinator.get_analysis_engine());
                 Ok(Some(
                     serde_json::to_value(result)
                         .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
@@ -759,6 +758,13 @@ impl LanguageServer for BslLanguageServer {
             }
             "bsl.getTypeRepositoryStats" => {
                 let result = handle_get_type_repository_stats(self.coordinator.clone());
+                Ok(Some(
+                    serde_json::to_value(result)
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+                ))
+            }
+            "bsl.getWorkspaceStats" => {
+                let result = self.handle_get_workspace_stats().await?;
                 Ok(Some(
                     serde_json::to_value(result)
                         .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,

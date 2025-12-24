@@ -30,17 +30,34 @@ export class TypeTreeBuilder {
 
         try {
             // Загружаем типы через LSP Custom Request (bsl.getAllTypes)
-            const response = await getAllTypes({ limit: 5000 });
+            const pageSize = 5000;
+            const collected: TypeDto[] = [];
+            let offset = 0;
 
-            if (!response || !response.types) {
+            for (let page = 0; page < 200; page++) {
+                const response = await getAllTypes({ limit: pageSize, offset });
+                if (!response || !response.types) {
+                    break;
+                }
+                if (response.types.length === 0) {
+                    break;
+                }
+                collected.push(...response.types);
+                if (response.types.length < pageSize) {
+                    break;
+                }
+                offset += response.types.length;
+            }
+
+            if (collected.length === 0) {
                 this.outputChannel?.appendLine('TypeTreeBuilder: No types received from LSP');
                 return;
             }
 
-            this.outputChannel?.appendLine(`TypeTreeBuilder: Received ${response.types.length} types from LSP`);
+            this.outputChannel?.appendLine(`TypeTreeBuilder: Received ${collected.length} types from LSP`);
 
             // Конвертируем TypeDto в BslEntity и распределяем по картам
-            for (const typeDto of response.types) {
+            for (const typeDto of collected) {
                 const entity = this.convertTypeDtoToBslEntity(typeDto);
 
                 if (typeDto.source === 'Platform') {

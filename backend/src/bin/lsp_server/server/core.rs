@@ -19,6 +19,7 @@ impl BslLanguageServer {
         Self {
             client,
             documents: Arc::new(RwLock::new(HashMap::new())),
+            diagnostics_counts: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(RwLock::new(None)),
             settings: Arc::new(RwLock::new(BslSettings::default())),
             auto_reindex_paused: Arc::new(RwLock::new(false)),
@@ -102,10 +103,21 @@ impl BslLanguageServer {
         }
 
         // Send updated diagnostics
+        let diagnostics_len = diagnostics.len();
         self.client
             .publish_diagnostics(uri.clone(), diagnostics, None)
             .await;
+        self.update_diagnostics_count(uri, diagnostics_len).await;
 
         Ok(())
+    }
+
+    pub async fn update_diagnostics_count(&self, uri: &Url, count: usize) {
+        let mut counts = self.diagnostics_counts.write().await;
+        if count == 0 {
+            counts.remove(uri);
+        } else {
+            counts.insert(uri.clone(), count);
+        }
     }
 }

@@ -60,6 +60,14 @@ pub struct BuildIndexResponse {
     pub message: String,
 }
 
+/// Custom request: bsl/getWorkspaceStats - workspace stats for Overview panel
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceStatsResponse {
+    pub bsl_files: usize,
+    pub diagnostics: usize,
+}
+
 /// Custom request: bsl/validateMethod - method call validation
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]

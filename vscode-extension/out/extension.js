@@ -17865,6 +17865,7 @@ __export(progress_exports, {
   initializeProgress: () => initializeProgress,
   progressEmitter: () => progressEmitter,
   setAutoReindexPaused: () => setAutoReindexPaused,
+  setIndexingProgress: () => setIndexingProgress,
   updateLspStatus: () => updateLspStatus,
   updateStatusBar: () => updateStatusBar
 });
@@ -17904,6 +17905,10 @@ ${progress.currentStep}`;
 }
 function getCurrentProgress() {
   return globalIndexingProgress;
+}
+function setIndexingProgress(progress) {
+  globalIndexingProgress = progress;
+  progressEmitter.fire(progress);
 }
 function updateLspStatus(state) {
   if (!statusBarItem) {
@@ -18210,6 +18215,11 @@ function handleProgressBegin(key, value, states, outputChannel8) {
       message: value.message || "\u0418\u043D\u0438\u0446\u0438\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u044F...",
       increment: 0
     });
+    setIndexingProgress({
+      isIndexing: true,
+      currentStep: value.title || "Initializing",
+      progress: 0
+    });
     flushPending(state);
     if (state.pendingEndMessage) {
       scheduleEnd(key, state, state.pendingEndMessage, states, outputChannel8);
@@ -18252,6 +18262,11 @@ function handleProgressReport(key, value, states, outputChannel8) {
     increment: Math.max(0, normalized - previous)
     // Не допускать отрицательных значений
   });
+  setIndexingProgress({
+    isIndexing: true,
+    currentStep: message || "Processing",
+    progress: normalized
+  });
 }
 function handleProgressEnd(key, value, states, outputChannel8) {
   const message = value.message || "\u0417\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E";
@@ -18271,9 +18286,19 @@ function handleProgressEnd(key, value, states, outputChannel8) {
   }
   if (!state.reporter || !state.resolve) {
     state.pendingEndMessage = message;
+    setIndexingProgress({
+      isIndexing: false,
+      currentStep: message || "Done",
+      progress: 100
+    });
     return;
   }
   scheduleEnd(key, state, message, states, outputChannel8);
+  setIndexingProgress({
+    isIndexing: false,
+    currentStep: message || "Done",
+    progress: 100
+  });
 }
 function flushPending(state) {
   if (!state.reporter || !state.pending) {
@@ -18311,6 +18336,7 @@ var init_progress_handler = __esm({
   "src/lsp/client/progress-handler.ts"() {
     "use strict";
     vscode5 = __toESM(require("vscode"));
+    init_progress();
     MIN_PROGRESS_VISIBLE_MS = 800;
   }
 });
@@ -18458,6 +18484,16 @@ function getLanguageClient() {
 function isClientRunning() {
   return client !== null && client.isRunning();
 }
+function getServerVersion() {
+  if (!client) {
+    return void 0;
+  }
+  const info = client.initializeResult?.serverInfo;
+  if (info && typeof info.version === "string") {
+    return info.version;
+  }
+  return void 0;
+}
 async function sendCustomRequest(method, params) {
   if (!client || !client.isRunning()) {
     throw new Error("LSP client is not running");
@@ -18543,6 +18579,7 @@ var init_lifecycle = __esm({
 var client_exports = {};
 __export(client_exports, {
   getLanguageClient: () => getLanguageClient,
+  getServerVersion: () => getServerVersion,
   initializeLspClient: () => initializeLspClient,
   isClientRunning: () => isClientRunning,
   restartLanguageClient: () => restartLanguageClient,
@@ -18571,6 +18608,7 @@ __export(customRequests_exports, {
   extractPlatformDocs: () => extractPlatformDocs,
   getAllTypes: () => getAllTypes,
   getTypeRepositoryStats: () => getTypeRepositoryStats,
+  getWorkspaceStats: () => getWorkspaceStats,
   incrementalUpdate: () => incrementalUpdate,
   pauseAutoReindex: () => pauseAutoReindex,
   queryType: () => queryType,
@@ -18683,6 +18721,39 @@ async function getTypeRepositoryStats() {
     return null;
   }
 }
+async function getWorkspaceStats() {
+  if (workspaceStatsUnsupported) {
+    return null;
+  }
+  const client2 = (await Promise.resolve().then(() => (init_client(), client_exports))).getLanguageClient();
+  if (!client2) {
+    logger.warn("[Workspace Stats] LSP client not available");
+    return null;
+  }
+  try {
+    const result = await client2.sendRequest("workspace/executeCommand", {
+      command: "bsl.getWorkspaceStats",
+      arguments: [{}]
+    });
+    return result || null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("Method not found")) {
+      workspaceStatsUnsupported = true;
+      if (!workspaceStatsUnsupportedNotified) {
+        workspaceStatsUnsupportedNotified = true;
+        logger.warn("[Workspace Stats] LSP server does not support getWorkspaceStats yet");
+        const vscode31 = await import("vscode");
+        vscode31.window.showWarningMessage(
+          "BSL Analyzer: LSP server does not support workspace stats yet. Please \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 \u0431\u0438\u043D\u0430\u0440\u043D\u0438\u043A."
+        );
+      }
+      return null;
+    }
+    logger.error("Failed to get workspace stats", error);
+    return null;
+  }
+}
 async function getAllTypes(params) {
   const client2 = (await Promise.resolve().then(() => (init_client(), client_exports))).getLanguageClient();
   if (!client2) {
@@ -18700,10 +18771,13 @@ async function getAllTypes(params) {
     return null;
   }
 }
+var workspaceStatsUnsupported, workspaceStatsUnsupportedNotified;
 var init_customRequests = __esm({
   "src/lsp/customRequests.ts"() {
     "use strict";
     init_logger();
+    workspaceStatsUnsupported = false;
+    workspaceStatsUnsupportedNotified = false;
   }
 });
 
@@ -19142,6 +19216,7 @@ var vscode11 = __toESM(require("vscode"));
 init_progress();
 init_client();
 init_configHelper();
+init_customRequests();
 var BslOverviewProvider = class {
   constructor(outputChannel8) {
     this._onDidChangeTreeData = new vscode11.EventEmitter();
@@ -19177,11 +19252,16 @@ var BslOverviewProvider = class {
       }
     }
   }
-  getWorkspaceItems() {
+  async getWorkspaceItems() {
+    const stats = await getWorkspaceStats();
+    const repoStats = await getTypeRepositoryStats();
+    const fileCount = stats ? stats.bslFiles : 0;
+    const issuesCount = stats ? stats.diagnostics : 0;
+    const lastAnalysis = repoStats?.lastUpdateTime ? formatUpdateTime2(repoStats.lastUpdateTime) : "Never";
     const workspaceItems = [
-      new BslOverviewItem("BSL Files: Scanning...", vscode11.TreeItemCollapsibleState.None, "file-count"),
-      new BslOverviewItem("Last Analysis: Never", vscode11.TreeItemCollapsibleState.None, "last-analysis"),
-      new BslOverviewItem("Issues Found: 0", vscode11.TreeItemCollapsibleState.None, "issues")
+      new BslOverviewItem(`BSL Files: ${fileCount}`, vscode11.TreeItemCollapsibleState.None, "file-count"),
+      new BslOverviewItem(`Last Analysis: ${lastAnalysis}`, vscode11.TreeItemCollapsibleState.None, "last-analysis"),
+      new BslOverviewItem(`Issues Found: ${issuesCount}`, vscode11.TreeItemCollapsibleState.None, "issues")
     ];
     const progress = getCurrentProgress();
     if (progress.isIndexing) {
@@ -19194,16 +19274,26 @@ Progress: ${progress.progress}%`;
     }
     return Promise.resolve(workspaceItems);
   }
-  getServerItems() {
+  async getServerItems() {
     const serverStatus = isClientRunning() ? "Running" : "Stopped";
     const statusIcon = isClientRunning() ? "$(check)" : "$(error)";
     const statusColor = isClientRunning() ? "\u2705" : "\u26A0\uFE0F";
-    this.outputChannel.appendLine(`${statusColor} LSP Status Check: ${serverStatus} (isClientRunning=${isClientRunning()})`);
-    return Promise.resolve([
+    const repoStats = await getTypeRepositoryStats();
+    const totalTypes = repoStats?.totalTypes ?? 0;
+    const platformTypes = repoStats?.platformTypes ?? 0;
+    const configTypes = repoStats?.configurationTypes ?? 0;
+    const platformVersion = BslAnalyzerConfig.platformVersion || "Unknown";
+    const lspVersion = getServerVersion() || "Unknown";
+    return [
       new BslOverviewItem(`${statusIcon} Status: ${serverStatus}`, vscode11.TreeItemCollapsibleState.None, "status"),
-      new BslOverviewItem("UnifiedBslIndex: Loading...", vscode11.TreeItemCollapsibleState.None, "index-count"),
-      new BslOverviewItem("Platform: 8.3.25", vscode11.TreeItemCollapsibleState.None, "platform")
-    ]);
+      new BslOverviewItem(
+        `TypeRepository: ${totalTypes} (Platform ${platformTypes}, Config ${configTypes})`,
+        vscode11.TreeItemCollapsibleState.None,
+        "index-count"
+      ),
+      new BslOverviewItem(`Platform: ${platformVersion}`, vscode11.TreeItemCollapsibleState.None, "platform"),
+      new BslOverviewItem(`LSP Version: ${lspVersion}`, vscode11.TreeItemCollapsibleState.None, "lsp-version")
+    ];
   }
   getConfigItems() {
     const configPath = BslAnalyzerConfig.configurationPath || "Not configured";
@@ -19216,6 +19306,24 @@ Progress: ${progress.progress}%`;
     ]);
   }
 };
+function formatUpdateTime2(isoTimestamp) {
+  try {
+    const date = new Date(isoTimestamp);
+    const now = /* @__PURE__ */ new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMinutes = Math.floor(diffMs / 6e4);
+    if (diffMinutes < 1) {
+      return "just now";
+    }
+    if (diffMinutes < 60) {
+      return `${diffMinutes} min ago`;
+    }
+    const hours = Math.floor(diffMinutes / 60);
+    return `${hours} h ago`;
+  } catch {
+    return "unknown";
+  }
+}
 
 // src/providers/diagnosticsProvider.ts
 var vscode12 = __toESM(require("vscode"));
@@ -19410,6 +19518,7 @@ function getConfigCategoryName(entityKind) {
     "AccumulationRegister": "\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u044B \u043D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u0438\u044F",
     "AccountingRegister": "\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u044B \u0431\u0443\u0445\u0433\u0430\u043B\u0442\u0435\u0440\u0438\u0438",
     "CalculationRegister": "\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u044B \u0440\u0430\u0441\u0447\u0435\u0442\u0430",
+    "Register": "\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u044B",
     "ChartOfCharacteristicTypes": "\u041F\u043B\u0430\u043D\u044B \u0432\u0438\u0434\u043E\u0432 \u0445\u0430\u0440\u0430\u043A\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043A",
     "ChartOfAccounts": "\u041F\u043B\u0430\u043D\u044B \u0441\u0447\u0435\u0442\u043E\u0432",
     "ChartOfCalculationTypes": "\u041F\u043B\u0430\u043D\u044B \u0432\u0438\u0434\u043E\u0432 \u0440\u0430\u0441\u0447\u0435\u0442\u0430",
@@ -19418,7 +19527,12 @@ function getConfigCategoryName(entityKind) {
     "ExchangePlan": "\u041F\u043B\u0430\u043D\u044B \u043E\u0431\u043C\u0435\u043D\u0430",
     "CommonModule": "\u041E\u0431\u0449\u0438\u0435 \u043C\u043E\u0434\u0443\u043B\u0438",
     "Report": "\u041E\u0442\u0447\u0435\u0442\u044B",
-    "DataProcessor": "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0438"
+    "DataProcessor": "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0438",
+    "Enum": "\u041F\u0435\u0440\u0435\u0447\u0438\u0441\u043B\u0435\u043D\u0438\u044F",
+    "Constant": "\u041A\u043E\u043D\u0441\u0442\u0430\u043D\u0442\u044B",
+    "Role": "\u0420\u043E\u043B\u0438",
+    "Subsystem": "\u041F\u043E\u0434\u0441\u0438\u0441\u0442\u0435\u043C\u044B",
+    "Language": "\u042F\u0437\u044B\u043A\u0438"
   };
   return categoryMap[entityKind] || "\u0414\u0440\u0443\u0433\u0438\u0435 \u043E\u0431\u044A\u0435\u043A\u0442\u044B";
 }
@@ -19451,13 +19565,29 @@ var TypeTreeBuilder = class {
     this.configTypes.clear();
     this.typeCategories.clear();
     try {
-      const response = await getAllTypes({ limit: 5e3 });
-      if (!response || !response.types) {
+      const pageSize = 5e3;
+      const collected = [];
+      let offset = 0;
+      for (let page = 0; page < 200; page++) {
+        const response = await getAllTypes({ limit: pageSize, offset });
+        if (!response || !response.types) {
+          break;
+        }
+        if (response.types.length === 0) {
+          break;
+        }
+        collected.push(...response.types);
+        if (response.types.length < pageSize) {
+          break;
+        }
+        offset += response.types.length;
+      }
+      if (collected.length === 0) {
         this.outputChannel?.appendLine("TypeTreeBuilder: No types received from LSP");
         return;
       }
-      this.outputChannel?.appendLine(`TypeTreeBuilder: Received ${response.types.length} types from LSP`);
-      for (const typeDto of response.types) {
+      this.outputChannel?.appendLine(`TypeTreeBuilder: Received ${collected.length} types from LSP`);
+      for (const typeDto of collected) {
         const entity = this.convertTypeDtoToBslEntity(typeDto);
         if (typeDto.source === "Platform") {
           this.platformTypes.set(entity.qualified_name, entity);
@@ -19760,13 +19890,22 @@ var TypeTreeBuilder = class {
 };
 
 // src/providers/hierarchicalTypeProvider.ts
+init_progress();
 var HierarchicalTypeIndexProvider = class {
   constructor(outputChannel8) {
     this._onDidChangeTreeData = new vscode17.EventEmitter();
     this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+    this.wasIndexing = false;
     this.outputChannel = outputChannel8;
     this.treeBuilder = new TypeTreeBuilder(outputChannel8);
     this.initializeTypes();
+    progressEmitter.event((progress) => {
+      const isIndexing = progress.isIndexing;
+      if (this.wasIndexing && !isIndexing) {
+        this.refresh();
+      }
+      this.wasIndexing = isIndexing;
+    });
   }
   async initializeTypes() {
     await this.treeBuilder.loadTypes();
@@ -19933,7 +20072,15 @@ var BslActionsWebviewProvider = class {
   }
   async handleSearchTypes(webviewView, query) {
     try {
-      const response = await searchTypes(query, 15);
+      const trimmedQuery = query.trim();
+      if (trimmedQuery.length < 2) {
+        webviewView.webview.postMessage({
+          type: "searchResults",
+          data: []
+        });
+        return;
+      }
+      const response = await searchTypes(trimmedQuery, 15);
       const results = response.types.map((t) => ({
         name: t.name,
         facet: t.facet,
@@ -19944,7 +20091,7 @@ var BslActionsWebviewProvider = class {
         data: results
       });
       this.outputChannel?.appendLine(
-        `\u{1F50D} Search "${query}" \u2192 ${response.total} results from TypeRepository`
+        `\u{1F50D} Search "${trimmedQuery}" \u2192 ${response.total} results from TypeRepository`
       );
     } catch (error) {
       this.outputChannel?.appendLine(

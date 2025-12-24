@@ -6,6 +6,8 @@ use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::{MessageType, Url};
 use tracing::{error, info, warn};
 
+use std::path::{Path, PathBuf};
+
 use bsl_backend::system::fs_utils::read_bsl_file;
 use crate::commands::{
     handle_incremental_update, handle_parse_configuration, ParseConfigurationParams,
@@ -14,6 +16,7 @@ use crate::handlers::{find_containing_function_in_dto, CurrentContextResponse};
 use crate::types::{
     AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
     GetCurrentContextParams, IncrementalUpdateParams, IncrementalUpdateResponse,
+    WorkspaceStatsResponse,
 };
 
 use super::BslLanguageServer;
@@ -199,4 +202,72 @@ impl BslLanguageServer {
             message: "Auto reindex resumed".to_string(),
         })
     }
+
+    /// Custom request: bsl/getWorkspaceStats
+    pub(crate) async fn handle_get_workspace_stats(
+        &self,
+    ) -> JsonRpcResult<WorkspaceStatsResponse> {
+        let config = self.config.read().await.clone();
+        let root = resolve_workspace_root(config);
+        let bsl_files = root
+            .as_deref()
+            .map(count_bsl_files)
+            .unwrap_or(0);
+
+        let diagnostics = {
+            let counts = self.diagnostics_counts.read().await;
+            counts.values().sum()
+        };
+
+        Ok(WorkspaceStatsResponse {
+            bsl_files,
+            diagnostics,
+        })
+    }
+}
+
+fn resolve_workspace_root(config: Option<crate::config::LspConfig>) -> Option<PathBuf> {
+    let config_path = config.and_then(|cfg| cfg.configuration_path);
+    let path = config_path.map(PathBuf::from)?;
+    if path.is_dir() {
+        return Some(path);
+    }
+
+    if path.file_name().and_then(|name| name.to_str()) == Some("Configuration.xml") {
+        return path.parent().map(|parent| parent.to_path_buf());
+    }
+
+    None
+}
+
+fn count_bsl_files(root: &Path) -> usize {
+    let mut count = 0usize;
+    let mut stack = vec![root.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with('.')
+                        || name == "target"
+                        || name == "node_modules"
+                        || name == ".bsl_cache"
+                    {
+                        continue;
+                    }
+                }
+                stack.push(path);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("bsl") {
+                count += 1;
+            }
+        }
+    }
+
+    count
 }

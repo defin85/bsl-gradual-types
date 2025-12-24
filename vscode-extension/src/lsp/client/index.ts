@@ -19,6 +19,7 @@ export {
     stopLanguageClient,
     restartLanguageClient,
     getLanguageClient,
+    getServerVersion,
     isClientRunning,
     sendCustomRequest,
     sendCustomNotification

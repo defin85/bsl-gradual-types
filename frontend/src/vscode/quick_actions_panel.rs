@@ -71,6 +71,9 @@ pub fn QuickActionsPanel(
         if query.len() >= 2 {
             // Send search request to VSCode
             let _ = send_to_vscode(VsCodeMessage::new("searchTypes", query));
+        } else {
+            // Clear results on short/empty query
+            let _ = send_to_vscode(VsCodeMessage::new("searchTypes", String::new()));
         }
     };
 

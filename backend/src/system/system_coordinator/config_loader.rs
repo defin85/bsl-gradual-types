@@ -60,10 +60,34 @@ impl SystemCoordinator {
         // show_progress = false - нет терминального прогресс-бара для этого метода
         let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
 
-        // Без progress_callback в публичном методе (для обратной совместимости)
-        let metadata_objects = discovery
-            .discover_all_metadata(None::<fn(crate::data::loaders::progress::ProgressUpdate)>)
-            .map_err(|e| anyhow::anyhow!("Не удалось обнаружить метаданные: {}", e))?;
+        let config_info = discover_single_config(&discovery, config_path);
+
+        let metadata_objects = if let Some(config_info) = config_info {
+            let config_set_id = config_set_id_from_single(&config_info);
+            let cache_key =
+                self.build_config_cache_key(config_path, &config_info, Some(&config_set_id))?;
+            let cache = self.disk_cache();
+            let entry = cache
+                .get_or_build_with(
+                    &cache_key,
+                    || {
+                        // Без progress_callback в публичном методе (для обратной совместимости)
+                        discovery
+                            .discover_metadata_in_configuration(
+                                &config_info,
+                                None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
+                            )
+                            .map_err(|e| anyhow::anyhow!("Не удалось обнаружить метаданные: {}", e))
+                    },
+                    |metadata| !metadata.is_empty(),
+                )?;
+            entry.value
+        } else {
+            // Без progress_callback в публичном методе (для обратной совместимости)
+            discovery
+                .discover_all_metadata(None::<fn(crate::data::loaders::progress::ProgressUpdate)>)
+                .map_err(|e| anyhow::anyhow!("Не удалось обнаружить метаданные: {}", e))?
+        };
 
         info!("Обнаружено {} объектов метаданных", metadata_objects.len());
 
@@ -180,6 +204,8 @@ impl SystemCoordinator {
         })?;
         let repository = engine.get_repository();
 
+        let config_set_id = config_set_id_from_configs(&configurations);
+
         for config_info in configurations {
             info!(
                 "Загрузка конфигурации: {} ({}{})",
@@ -197,7 +223,7 @@ impl SystemCoordinator {
             );
 
             let cache_key =
-                self.build_config_cache_key(config_path, &config_info, &discovery)?;
+                self.build_config_cache_key(config_path, &config_info, Some(&config_set_id))?;
             let cache = self.disk_cache();
             let entry = cache
                 .get_or_build_with(
@@ -437,6 +463,8 @@ impl SystemCoordinator {
         })?;
         let repository = engine.get_repository();
 
+        let config_set_id = config_set_id_from_configs(&configurations);
+
         for config_info in configurations {
             info!(
                 "Загрузка конфигурации: {} ({}{})",
@@ -454,7 +482,7 @@ impl SystemCoordinator {
             );
 
             let cache_key =
-                self.build_config_cache_key(config_path, &config_info, &discovery)?;
+                self.build_config_cache_key(config_path, &config_info, Some(&config_set_id))?;
             let cache = self.disk_cache();
             let entry = cache
                 .get_or_build_with(
@@ -620,7 +648,7 @@ impl SystemCoordinator {
         &self,
         root_path: &Path,
         config_info: &crate::data::loaders::config_metadata_parser::ConfigurationInfo,
-        discovery: &crate::data::loaders::config_metadata_parser::ConfigurationDiscovery,
+        config_set_id: Option<&str>,
     ) -> Result<DiskCacheKey> {
         let canonical_root =
             std::fs::canonicalize(root_path).unwrap_or_else(|_| root_path.to_path_buf());
@@ -639,13 +667,15 @@ impl SystemCoordinator {
                     .to_string()
             });
 
+        let config_set_id = config_set_id.unwrap_or_default();
         let source_identity = format!(
-            "{}|{}",
+            "{}|{}|{}",
             canonical_config.to_string_lossy(),
-            config_info.uuid.clone().unwrap_or_default()
+            config_info.uuid.clone().unwrap_or_default(),
+            config_set_id
         );
         let source_fingerprint =
-            config_fingerprint(discovery, &config_info.path).map_err(|e| {
+            config_fingerprint(&config_info.path).map_err(|e| {
                 anyhow::anyhow!("Ошибка вычисления fingerprint конфигурации: {}", e)
             })?;
         let settings_fingerprint = config_settings_fingerprint();
@@ -695,9 +725,11 @@ mod tests {
             Ok(list) if !list.is_empty() => list,
             _ => return,
         };
+        let config_set_id = config_set_id_from_configs(&configs);
         let config_info = &configs[0];
+
         let key = coordinator
-            .build_config_cache_key(config_root, config_info, &discovery)
+            .build_config_cache_key(config_root, config_info, Some(&config_set_id))
             .unwrap();
 
         let entry = cache
@@ -755,10 +787,7 @@ fn emit_cached_config_progress<F>(
     }
 }
 
-fn config_fingerprint(
-    discovery: &crate::data::loaders::config_metadata_parser::ConfigurationDiscovery,
-    config_path: &Path,
-) -> Result<String> {
+fn config_fingerprint(config_path: &Path) -> Result<String> {
     use walkdir::WalkDir;
 
     let mut files: Vec<PathBuf> = WalkDir::new(config_path)
@@ -806,11 +835,82 @@ fn config_fingerprint(
         }
     }
 
-    let _ = discovery;
     Ok(hasher.finalize().to_hex().to_string())
 }
 
 fn config_settings_fingerprint() -> String {
     let strict = std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok();
-    format!("config_parser_v1;strict_fingerprint={}", strict)
+    format!(
+        "config_parser_v1;modules_indexing_v1;strict_fingerprint={}",
+        strict
+    )
+}
+
+fn config_set_id_from_configs(
+    configs: &[crate::data::loaders::config_metadata_parser::ConfigurationInfo],
+) -> String {
+    let mut base = None;
+    let mut extensions = Vec::new();
+
+    for info in configs {
+        let id = info.uuid.clone().unwrap_or_else(|| {
+            blake3::hash(info.path.to_string_lossy().as_bytes())
+                .to_hex()
+                .to_string()
+        });
+        if info.is_base() {
+            base = Some(id);
+        } else {
+            extensions.push(id);
+        }
+    }
+
+    extensions.sort();
+    let mut parts = Vec::new();
+    if let Some(base) = base {
+        parts.push(base);
+    }
+    parts.extend(extensions);
+
+    if parts.is_empty() {
+        return String::new();
+    }
+
+    blake3::hash(parts.join("|").as_bytes()).to_hex().to_string()
+}
+
+fn config_set_id_from_single(
+    info: &crate::data::loaders::config_metadata_parser::ConfigurationInfo,
+) -> String {
+    let id = info.uuid.clone().unwrap_or_else(|| {
+        blake3::hash(info.path.to_string_lossy().as_bytes())
+            .to_hex()
+            .to_string()
+    });
+    blake3::hash(id.as_bytes()).to_hex().to_string()
+}
+
+fn discover_single_config(
+    discovery: &crate::data::loaders::config_metadata_parser::ConfigurationDiscovery,
+    config_path: &Path,
+) -> Option<crate::data::loaders::config_metadata_parser::ConfigurationInfo> {
+    let config_xml = if config_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        == Some("Configuration.xml")
+    {
+        config_path.to_path_buf()
+    } else {
+        config_path.join("Configuration.xml")
+    };
+
+    if !config_xml.exists() {
+        return None;
+    }
+
+    let configs = discovery.discover_all_configurations().ok()?;
+    let config_dir = std::fs::canonicalize(config_xml.parent()?).ok()?;
+    configs
+        .into_iter()
+        .find(|info| std::fs::canonicalize(&info.path).ok().as_ref() == Some(&config_dir))
 }

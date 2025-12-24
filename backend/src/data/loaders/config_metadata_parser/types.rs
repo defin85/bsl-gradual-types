@@ -247,7 +247,7 @@ impl CommonModuleProperties {
 }
 
 /// Тип конфигурации 1С
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConfigurationType {
     /// Основная конфигурация (базовая)
     Base,
@@ -256,7 +256,7 @@ pub enum ConfigurationType {
 }
 
 /// Информация о найденной конфигурации
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigurationInfo {
     /// Путь к папке конфигурации (содержит Configuration.xml)
     pub path: PathBuf,

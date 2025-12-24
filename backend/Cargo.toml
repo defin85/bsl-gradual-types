@@ -69,6 +69,10 @@ globset = { workspace = true }
 
 # Cache
 lru = { workspace = true }
+fs2 = { workspace = true }
+tempfile = { workspace = true }
+blake3 = { workspace = true }
+zstd = { workspace = true }
 
 # LSP
 tower-lsp = { workspace = true }

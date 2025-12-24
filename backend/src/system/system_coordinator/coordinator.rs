@@ -7,6 +7,7 @@ use tracing::warn;
 
 use crate::application::TypeSystemService;
 use crate::system::basic_observability::BasicObservability;
+use crate::system::disk_cache::DiskCache;
 use crate::system::ir_cache::IrCache;
 use crate::system::parser_coordinator::ParserCoordinator;
 use crate::system::simple_cache::AnalysisCache;
@@ -47,6 +48,7 @@ pub struct SystemCoordinator {
     /// ParserCoordinator обёрнут в RwLock для обновления с TypeResolver (Milestone 3.17)
     pub(crate) parser: Arc<RwLock<Arc<ParserCoordinator>>>,
     pub(crate) observability: Arc<BasicObservability>,
+    pub(crate) disk_cache: Arc<DiskCache>,
 
     // === ANALYSIS ENGINE CACHE ===
     // Используем Arc<RwLock> для оптимизации read-heavy паттернов
@@ -86,11 +88,21 @@ impl SystemCoordinator {
         // 4. Basic observability
         let observability = Arc::new(BasicObservability::default());
 
+        // 5. Disk cache (Milestone D1)
+        let disk_cache = match DiskCache::new(1) {
+            Ok(cache) => Arc::new(cache),
+            Err(err) => {
+                warn!("Disk cache disabled: {}", err);
+                Arc::new(DiskCache::disabled(1))
+            }
+        };
+
         Self {
             cache,
             ir_cache,
             parser,
             observability,
+            disk_cache,
             analysis_engine_cache: Arc::new(RwLock::new(None)),
             type_service_cache: Arc::new(RwLock::new(None)),
             startup_progress: Arc::new(RwLock::new(StartupProgressDto::default())),
@@ -131,6 +143,11 @@ impl SystemCoordinator {
     /// Получить IR Cache
     pub fn ir_cache(&self) -> Arc<IrCache> {
         self.ir_cache.clone()
+    }
+
+    /// Получить DiskCache (Milestone D1)
+    pub fn disk_cache(&self) -> Arc<DiskCache> {
+        self.disk_cache.clone()
     }
 
     /// Получить AnalysisEngine (делегирует Domain Layer логику)

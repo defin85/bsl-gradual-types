@@ -3,6 +3,7 @@
 
 // === SIMPLIFIED ARCHITECTURE ONLY ===
 pub mod basic_observability;
+pub mod disk_cache; // Milestone D1: Disk cache API
 pub mod fs_utils; // Keep utility functions
 pub mod ir_cache; // Milestone 2.13: IR кеширование для LSP hover
 pub mod parallel_analyzer; // Milestone 2.4: Параллельный анализ
@@ -15,6 +16,7 @@ pub mod tree_sitter_adapter;
 
 // Re-export simplified components (specific imports to avoid conflicts)
 pub use basic_observability::{BasicObservability, SimpleMetrics, StructuredLogger};
+pub use disk_cache::{CacheEntry, CacheManifest, DiskCache, DiskCacheKey};
 pub use ir_cache::{IrCache, IrCacheStats};
 pub use parallel_analyzer::{ParallelAnalyzer, PerformanceStats, ProjectAnalysisResult};
 pub use parser_coordinator::ParserCoordinator;

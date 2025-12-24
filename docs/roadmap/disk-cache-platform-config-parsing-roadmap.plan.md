@@ -13,7 +13,12 @@
 ## Ключевые решения (до реализации)
 
 - Формат артефактов: единый формат (например, serde + bincode/CBOR + zstd), без SQLite.
-- Идентификаторы: `project_id`, `config_id`, `platform_id` (канонизированные пути + версия при наличии).
+- Идентификаторы:
+  - `project_id = hash(root_path)`;
+  - `config_id = uuid из Configuration.xml`;
+  - `extension_id = uuid из Configuration.xml`;
+  - `config_set_id = config_id + sorted(extension_id[])`;
+  - `platform_id` (канонизированный путь + версия при наличии).
 - Fingerprint: быстрый mtime+size, fallback на blake3.
 - Метрики: счетчики hit/miss и тайминги parse/build/load; окно агрегации для UI.
 
@@ -26,7 +31,7 @@
   v<schema_version>/
     <source_kind>/                # platform | config | combined | ast
       <project_id>/               # для platform может быть "global"
-        <config_id>/              # для platform может быть "none"
+          <config_id>/              # для platform может быть "none"
           <key_hash>/
             artifact.bin
             manifest.json
@@ -38,6 +43,8 @@
 - optional: stats (hit_count, last_used_at)
 
 ## D1: DiskCache API + manifest + locking
+
+Статус: DONE
 
 Задачи:
 - Ввести `DiskCache` API: `get_or_build(key, builder) -> artifact`.
@@ -52,7 +59,14 @@
 Тесты:
 - Unit: atomic write, lock, schema_version mismatch.
 
+Факты:
+- Реализован `DiskCache` + lock + manifest.
+- Интеграция в `SystemCoordinator` (инициализация и геттер).
+- Запущено `cargo test -p bsl-backend disk_cache`.
+
 ## D2: Cache платформы (слой A)
+
+Статус: DONE
 
 Задачи:
 - Кэширование результата парсинга `syntax_helper`.
@@ -65,7 +79,14 @@
 Тесты:
 - Интеграционный: повторный запуск не парсит полностью.
 
+Факты:
+- DiskCache интегрирован в загрузку `syntax_helper` (platform layer A).
+- Fingerprint по HTML файлам + настройкам парсера, ключ на blake3.
+- Тест: `cargo test -p bsl-backend syntax_helper_disk_cache_reuse`.
+
 ## D3: Cache платформы (слой B)
+
+Статус: DONE
 
 Задачи:
 - Сериализация `Vec<RawTypeData>` или готовых структур `SignatureIndex`.
@@ -77,7 +98,14 @@
 Тесты:
 - Интеграционный: наличие ожидаемых методов (например `Массив.Добавить`).
 
+Факты:
+- DiskCache интегрирован в конвертацию `SyntaxHelperDatabase -> Vec<RawTypeData>`.
+- Добавлен тест `test_platform_raw_cache_produces_signature_index`.
+- Тест: `cargo test -p bsl-backend platform_raw_cache_produces_signature_index`.
+
 ## D4: Cache конфигурации (слой A)
+
+Статус: DONE
 
 Задачи:
 - Кэш результата discovery/парсинга `Configuration.xml`.
@@ -88,6 +116,12 @@
 
 Тесты:
 - Интеграционный на примерах `examples/conf*` (если доступны).
+
+Факты:
+- DiskCache интегрирован в discovery метаданных конфигураций (layer A).
+- Fingerprint по XML файлам + strict режим через `BSL_CACHE_STRICT_FINGERPRINT`.
+- Добавлен тест `test_config_metadata_disk_cache_reuse`.
+- Тест: `cargo test -p bsl-backend config_metadata_disk_cache_reuse`.
 
 ## D5: Cache конфигурации (слой B)
 
@@ -175,3 +209,16 @@ UI действия:
 - `cargo test --workspace`
 - Интеграционные тесты по этапам.
 - Проверка фактов через `rg` по точкам интеграции.
+
+- Критично: write_atomic использует tempfile::persist, который не перезаписывает существующий файл. При инвалидации кэша artifact.json/manifest.json уже есть, и запись упадёт, что делает rebuild невозможным.
+    backend/src/system/disk_cache.rs:301-310
+  - Важно: Ошибка записи кэша приводит к фатальной ошибке старта (StartupError::PlatformTypesError), хотя это инфраструктурная проблема (диск/права) и должна быть деградируемой. Сейчас любой сбой store ломает
+    запуск вместо fallback на построенные данные. backend/src/system/system_coordinator/lifecycle.rs:326-366, backend/src/system/disk_cache.rs:230-262
+  - Важно: При ошибках парсинга syntax_helper кэш всё равно может быть записан, если db.nodes не пустой. Это закрепляет частично/повреждённый результат и может “залипнуть” между запусками. backend/src/system/
+    system_coordinator/lifecycle.rs:331-365
+  - Важно: Тест test_platform_raw_cache_produces_signature_index глобально меняет env (BSL_CACHE_DIR/BSL_CACHE_DISABLE) без восстановления, а тесты запускаются параллельно — возможны гонки/флейки. backend/src/
+    system/system_coordinator/lifecycle.rs:734-738
+  - Рекомендация: Fingerprint по mtime+size без контент‑хеша допускает ложные cache hits при сохранении timestamps (например, копирование/архивы). Это риск тихих устаревших данных. backend/src/system/
+    system_coordinator/lifecycle.rs:640-652
+  - Рекомендация: JSON‑сериализация больших структур (SyntaxHelperDatabase, Vec<RawTypeData>) может быть тяжёлой по CPU/IO и размеру. Если это не временно, стоит перейти на бинарный формат/сжатие. backend/src/
+    system/disk_cache.rs:243-260, backend/src/system/system_coordinator/lifecycle.rs:442-458

@@ -2,11 +2,12 @@
 
 use super::form_types::FormMetadata;
 use bsl_shared::domain::types::{FacetKind, MetadataKind};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Информация об атрибуте объекта метаданных
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttributeInfo {
     pub name: String,
     pub type_name: String,
@@ -14,7 +15,7 @@ pub struct AttributeInfo {
 }
 
 /// Информация о табличной части объекта метаданных
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TabularSectionInfo {
     pub name: String,
     pub synonym: Option<String>,
@@ -28,7 +29,7 @@ pub struct TabularSectionInfo {
 /// - Константы, Перечисления
 /// - Планы счетов, видов характеристик, расчета
 /// - Общие модули, Роли, Подсистемы и т.д.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UniversalMetadataObject {
     /// Сырое имя типа из XML (например, "Catalog", "InformationRegister")
     pub object_type_raw: String,
@@ -166,7 +167,7 @@ pub enum ExecutionContext {
 }
 
 /// Режим повторного использования возвращаемых значений
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReturnValuesReuse {
     /// Не использовать повторно
     DontUse,
@@ -183,7 +184,7 @@ pub enum ReturnValuesReuse {
 /// - Является ли модуль глобальным (процедуры/функции доступны без префикса)
 /// - Является ли модуль привилегированным
 /// - Режим повторного использования возвращаемых значений
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CommonModuleProperties {
     /// Выполняется на сервере
     pub server: bool,

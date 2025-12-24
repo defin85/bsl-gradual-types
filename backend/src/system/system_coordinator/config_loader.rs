@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
 
@@ -17,6 +17,7 @@ use bsl_shared::domain::types::RawTypeData;
 
 use super::coordinator::SystemCoordinator;
 use super::types::LoadMetadataResult;
+use crate::system::DiskCacheKey;
 
 impl SystemCoordinator {
     fn apply_prefix_for_indexing(
@@ -195,13 +196,28 @@ impl SystemCoordinator {
                     .unwrap_or_default()
             );
 
-            // НОВОЕ: Используем новый метод с прогрессом через 4 фазы парсинга
-            let metadata = discovery
-                .discover_metadata_in_configuration_with_progress(
-                    &config_info,
-                    progress_callback.clone(),
-                )
-                .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))?;
+            let cache_key =
+                self.build_config_cache_key(config_path, &config_info, &discovery)?;
+            let cache = self.disk_cache();
+            let entry = cache
+                .get_or_build_with(
+                    &cache_key,
+                    || {
+                        // НОВОЕ: Используем новый метод с прогрессом через 4 фазы парсинга
+                        discovery.discover_metadata_in_configuration_with_progress(
+                            &config_info,
+                            progress_callback.clone(),
+                        )
+                        .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))
+                    },
+                    |metadata| !metadata.is_empty(),
+                )?;
+
+            if entry.from_cache {
+                emit_cached_config_progress(&config_info, &progress_callback);
+            }
+
+            let metadata = entry.value;
 
             let prefix = config_info.prefix.as_deref();
             let metadata_for_indexing = Self::apply_prefix_for_indexing(&metadata, prefix);
@@ -437,13 +453,25 @@ impl SystemCoordinator {
                     .unwrap_or_default()
             );
 
-            // Без progress_callback в публичном методе (для обратной совместимости)
-            let metadata = discovery
-                .discover_metadata_in_configuration(
-                    &config_info,
-                    None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
-                )
-                .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))?;
+            let cache_key =
+                self.build_config_cache_key(config_path, &config_info, &discovery)?;
+            let cache = self.disk_cache();
+            let entry = cache
+                .get_or_build_with(
+                    &cache_key,
+                    || {
+                        // Без progress_callback в публичном методе (для обратной совместимости)
+                        discovery
+                            .discover_metadata_in_configuration(
+                                &config_info,
+                                None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
+                            )
+                            .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))
+                    },
+                    |metadata| !metadata.is_empty(),
+                )?;
+
+            let metadata = entry.value;
 
             let prefix = config_info.prefix.as_deref();
             let metadata_for_indexing = Self::apply_prefix_for_indexing(&metadata, prefix);
@@ -587,4 +615,202 @@ impl SystemCoordinator {
             total_types,
         })
     }
+
+    fn build_config_cache_key(
+        &self,
+        root_path: &Path,
+        config_info: &crate::data::loaders::config_metadata_parser::ConfigurationInfo,
+        discovery: &crate::data::loaders::config_metadata_parser::ConfigurationDiscovery,
+    ) -> Result<DiskCacheKey> {
+        let canonical_root =
+            std::fs::canonicalize(root_path).unwrap_or_else(|_| root_path.to_path_buf());
+        let canonical_config =
+            std::fs::canonicalize(&config_info.path).unwrap_or_else(|_| config_info.path.clone());
+
+        let project_id = blake3::hash(canonical_root.to_string_lossy().as_bytes())
+            .to_hex()
+            .to_string();
+        let config_id = config_info
+            .uuid
+            .clone()
+            .unwrap_or_else(|| {
+                blake3::hash(canonical_config.to_string_lossy().as_bytes())
+                    .to_hex()
+                    .to_string()
+            });
+
+        let source_identity = format!(
+            "{}|{}",
+            canonical_config.to_string_lossy(),
+            config_info.uuid.clone().unwrap_or_default()
+        );
+        let source_fingerprint =
+            config_fingerprint(discovery, &config_info.path).map_err(|e| {
+                anyhow::anyhow!("Ошибка вычисления fingerprint конфигурации: {}", e)
+            })?;
+        let settings_fingerprint = config_settings_fingerprint();
+
+        let key_hash = blake3::hash(
+            format!(
+                "{}|{}|{}",
+                source_identity, source_fingerprint, settings_fingerprint
+            )
+            .as_bytes(),
+        )
+        .to_hex()
+        .to_string();
+
+        Ok(DiskCacheKey::new(
+            "config",
+            key_hash,
+            source_identity,
+            source_fingerprint,
+            settings_fingerprint,
+        )
+        .with_project_id(project_id)
+        .with_config_id(config_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::loaders::config_metadata_parser::ConfigurationDiscovery;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_config_metadata_disk_cache_reuse() {
+        let config_root = Path::new("examples/conf/conf_test");
+        if !config_root.exists() {
+            eprintln!("⚠️ Конфигурация не найдена в examples/conf/conf_test");
+            return;
+        }
+
+        let temp = TempDir::new().unwrap();
+        let cache = crate::system::DiskCache::with_root(temp.path().to_path_buf(), 1).unwrap();
+        let coordinator = SystemCoordinator::new();
+
+        let discovery = ConfigurationDiscovery::new(config_root.to_path_buf(), false);
+        let configs = match discovery.discover_all_configurations() {
+            Ok(list) if !list.is_empty() => list,
+            _ => return,
+        };
+        let config_info = &configs[0];
+        let key = coordinator
+            .build_config_cache_key(config_root, config_info, &discovery)
+            .unwrap();
+
+        let entry = cache
+            .get_or_build_with(
+                &key,
+                || {
+                    discovery
+                        .discover_metadata_in_configuration(
+                            config_info,
+                            None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
+                        )
+                        .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))
+                },
+                |metadata| !metadata.is_empty(),
+            )
+            .unwrap();
+        assert!(!entry.from_cache);
+
+        let entry = cache
+            .get_or_build_with(
+                &key,
+                || {
+                    discovery
+                        .discover_metadata_in_configuration(
+                            config_info,
+                            None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
+                        )
+                        .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))
+                },
+                |metadata| !metadata.is_empty(),
+            )
+            .unwrap();
+        assert!(entry.from_cache);
+    }
+}
+fn emit_cached_config_progress<F>(
+    config_info: &crate::data::loaders::config_metadata_parser::ConfigurationInfo,
+    progress_callback: &F,
+) where
+    F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
+{
+    let phases = [
+        IndexingPhase::ConfigurationDiscovery,
+        IndexingPhase::ConfigurationParsing,
+        IndexingPhase::ConfigurationLinking,
+        IndexingPhase::ConfigurationFinalizing,
+    ];
+    for phase in phases {
+        progress_callback(ProgressUpdate::new(
+            phase,
+            1,
+            1,
+            Some(format!("{} (кэш)", config_info.name)),
+        ));
+    }
+}
+
+fn config_fingerprint(
+    discovery: &crate::data::loaders::config_metadata_parser::ConfigurationDiscovery,
+    config_path: &Path,
+) -> Result<String> {
+    use walkdir::WalkDir;
+
+    let mut files: Vec<PathBuf> = WalkDir::new(config_path)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("xml") {
+                Some(path.to_path_buf())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if files.is_empty() {
+        let config_xml = config_path.join("Configuration.xml");
+        if config_xml.exists() {
+            files.push(config_xml);
+        }
+    }
+
+    files.sort();
+
+    let strict = std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok();
+    let mut hasher = blake3::Hasher::new();
+    for path in files {
+        let path_str = path.to_string_lossy();
+        hasher.update(path_str.as_bytes());
+        if let Ok(metadata) = std::fs::metadata(&path) {
+            hasher.update(&metadata.len().to_le_bytes());
+            let modified = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0);
+            hasher.update(&modified.to_le_bytes());
+        }
+        if strict {
+            if let Ok(contents) = std::fs::read(&path) {
+                let content_hash = blake3::hash(&contents);
+                hasher.update(content_hash.as_bytes());
+            }
+        }
+    }
+
+    let _ = discovery;
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn config_settings_fingerprint() -> String {
+    let strict = std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok();
+    format!("config_parser_v1;strict_fingerprint={}", strict)
 }

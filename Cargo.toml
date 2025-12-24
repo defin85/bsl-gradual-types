@@ -60,6 +60,9 @@ walkdir = "2.5"
 notify = "6.1"
 globset = "0.4"
 lru = "0.12"
+fs2 = "0.4"
+blake3 = "1.5"
+zstd = "0.13"
 
 # Frontend dependencies
 leptos = { version = "0.8", features = ["csr"] }

@@ -2,7 +2,8 @@
 //!
 //! Инициализация системы, загрузка типов платформы
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -11,14 +12,37 @@ use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{RawDataSource, RawTypeData};
 use bsl_shared::engine::AnalysisEngine;
+use serde::{Deserialize, Serialize};
 
 use crate::data::adapters::{convert_syntax_helper_global_functions, convert_syntax_helper_to_raw};
-use crate::data::loaders::{hbk_recovery, progress::ProgressUpdate, SyntaxHelperLoader};
+use crate::data::loaders::{
+    hbk_recovery, progress::ProgressUpdate, SyntaxHelperDatabase, SyntaxHelperLoader,
+};
 use crate::system::parser_coordinator::ParserCoordinator;
+use crate::system::DiskCacheKey;
 use bsl_shared::api::StartupProgressDto;
 
 use super::coordinator::SystemCoordinator;
 use super::types::StartupError;
+
+#[derive(Debug, Clone)]
+struct PlatformCacheMeta {
+    source_identity: String,
+    source_fingerprint: String,
+    settings_fingerprint: String,
+}
+
+#[derive(Debug, Clone)]
+struct SyntaxHelperLoadResult {
+    database: SyntaxHelperDatabase,
+    cache_meta: Option<PlatformCacheMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SyntaxHelperCachePayload {
+    database: SyntaxHelperDatabase,
+    parse_ok: bool,
+}
 
 impl SystemCoordinator {
     /// Инициализация системы с реальным парсингом синтаксис-помощника
@@ -110,26 +134,33 @@ impl SystemCoordinator {
 
         // 1. Создаем Infrastructure компоненты (Data Layer)
         info!("SystemCoordinator: инициализация Data Layer loaders...");
-        let mut syntax_parser = SyntaxHelperLoader::new();
 
         // 2. Загружаем синтаксис-помощник если путь указан
-        if let Some(syntax_path) = syntax_helper_path {
+        let syntax_result = if let Some(syntax_path) = syntax_helper_path {
             self.set_startup_progress(StartupProgressDto {
                 phase: "Загрузка Syntax Helper".to_string(),
                 message: Some(format!("Путь: {}", syntax_path.display())),
                 ..self.startup_progress()
             });
-            self.load_syntax_helper(&mut syntax_parser, syntax_path, &progress_tx)?;
-        }
+            self.load_syntax_helper(syntax_path, &progress_tx)?
+        } else {
+            SyntaxHelperLoadResult {
+                database: SyntaxHelperDatabase::default(),
+                cache_meta: None,
+            }
+        };
 
         // 3. Создаем Domain Layer компоненты
         info!("SystemCoordinator: инициализация Domain Layer...");
         let repository = Arc::new(InMemoryTypeRepository::new());
 
         // 4. Загружаем данные в репозиторий (через Adapters)
-        let database = syntax_parser.export_database();
-        if !database.nodes.is_empty() {
-            self.populate_repository_from_syntax_helper(&repository, database)?;
+        if !syntax_result.database.nodes.is_empty() {
+            self.populate_repository_from_syntax_helper(
+                &repository,
+                syntax_result.database,
+                syntax_result.cache_meta.as_ref(),
+            )?;
         } else {
             // Загружаем базовые типы как fallback
             Self::load_fallback_types(&repository)?;
@@ -235,10 +266,11 @@ impl SystemCoordinator {
     /// Загрузка синтаксис-помощника с HBK recovery
     fn load_syntax_helper(
         &self,
-        syntax_parser: &mut SyntaxHelperLoader,
         syntax_path: &Path,
         progress_tx: &Option<mpsc::UnboundedSender<ProgressUpdate>>,
-    ) -> Result<(), StartupError> {
+    ) -> Result<SyntaxHelperLoadResult, StartupError> {
+        let mut syntax_parser = SyntaxHelperLoader::new();
+
         // HBK Recovery: Восстанавливаем .hbk файлы перед парсингом
         info!("Проверяем наличие .hbk файлов для восстановления...");
 
@@ -298,34 +330,119 @@ impl SystemCoordinator {
 
         info!("Загружаем синтаксис-помощник: {}", syntax_path.display());
 
-        // MILESTONE 2.20.2.3: Парсим с прогрессом если передан callback
-        if let Some(ref tx) = progress_tx {
-            let tx_clone = tx.clone();
-            match syntax_parser.parse_with_progress(syntax_path, move |update: ProgressUpdate| {
-                let _ = tx_clone.send(update); // Отправляем в channel
-            }) {
-                Ok(()) => {
-                    info!("Парсинг синтаксис-помощника завершен успешно");
-                }
-                Err(e) => {
-                    warn!("Ошибка парсинга синтаксис-помощника: {}", e);
-                    info!("Будем использовать базовые типы платформы 1С...");
-                }
-            }
-        } else {
-            // Обратная совместимость: парсим без прогресса
-            match syntax_parser.parse_syntax_helper(syntax_path) {
-                Ok(()) => {
-                    info!("Парсинг синтаксис-помощника завершен успешно");
-                }
-                Err(e) => {
-                    warn!("Ошибка парсинга синтаксис-помощника: {}", e);
-                    info!("Будем использовать базовые типы платформы 1С...");
-                }
-            }
+        let cache_key = self.build_syntax_helper_cache_key(syntax_path, &syntax_parser)?;
+        let cache = self.disk_cache();
+        let entry = cache
+            .get_or_build_with(
+                &cache_key,
+                || {
+                    let mut parse_ok = true;
+                    // MILESTONE 2.20.2.3: Парсим с прогрессом если передан callback
+                    if let Some(ref tx) = progress_tx {
+                        let tx_clone = tx.clone();
+                        match syntax_parser.parse_with_progress(
+                            syntax_path,
+                            move |update: ProgressUpdate| {
+                                let _ = tx_clone.send(update); // Отправляем в channel
+                            },
+                        ) {
+                            Ok(()) => {
+                                info!("Парсинг синтаксис-помощника завершен успешно");
+                            }
+                            Err(e) => {
+                                warn!("Ошибка парсинга синтаксис-помощника: {}", e);
+                                info!("Будем использовать базовые типы платформы 1С...");
+                                parse_ok = false;
+                            }
+                        }
+                    } else {
+                        // Обратная совместимость: парсим без прогресса
+                        match syntax_parser.parse_syntax_helper(syntax_path) {
+                            Ok(()) => {
+                                info!("Парсинг синтаксис-помощника завершен успешно");
+                            }
+                            Err(e) => {
+                                warn!("Ошибка парсинга синтаксис-помощника: {}", e);
+                                info!("Будем использовать базовые типы платформы 1С...");
+                                parse_ok = false;
+                            }
+                        }
+                    }
+
+                    Ok(SyntaxHelperCachePayload {
+                        database: syntax_parser.export_database(),
+                        parse_ok,
+                    })
+                },
+                |payload| payload.parse_ok && !payload.database.nodes.is_empty(),
+            )
+            .map_err(StartupError::PlatformTypesError)?;
+
+        if entry.from_cache {
+            info!("Используем кэш синтаксис-помощника");
         }
 
-        Ok(())
+        let cache_meta = PlatformCacheMeta {
+            source_identity: cache_key.source_identity.clone(),
+            source_fingerprint: cache_key.source_fingerprint.clone(),
+            settings_fingerprint: cache_key.settings_fingerprint.clone(),
+        };
+
+        Ok(SyntaxHelperLoadResult {
+            database: entry.value.database,
+            cache_meta: Some(cache_meta),
+        })
+    }
+
+    fn build_syntax_helper_cache_key(
+        &self,
+        syntax_path: &Path,
+        syntax_parser: &SyntaxHelperLoader,
+    ) -> Result<DiskCacheKey, StartupError> {
+        let canonical = fs::canonicalize(syntax_path).unwrap_or_else(|_| syntax_path.to_path_buf());
+        let source_identity = canonical.to_string_lossy().to_string();
+        let source_fingerprint =
+            syntax_helper_fingerprint(syntax_parser, syntax_path)
+                .map_err(StartupError::PlatformTypesError)?;
+        let settings_fingerprint = syntax_helper_settings_fingerprint(syntax_parser);
+        let key_hash = blake3::hash(
+            format!(
+                "{}|{}|{}",
+                source_identity, source_fingerprint, settings_fingerprint
+            )
+            .as_bytes(),
+        )
+        .to_hex()
+        .to_string();
+
+        Ok(DiskCacheKey::new(
+            "platform",
+            key_hash,
+            source_identity,
+            source_fingerprint,
+            settings_fingerprint,
+        ))
+    }
+
+    fn build_platform_raw_cache_key(&self, meta: &PlatformCacheMeta) -> DiskCacheKey {
+        let settings_fingerprint = format!("{};raw_v1", meta.settings_fingerprint);
+        let key_hash = blake3::hash(
+            format!(
+                "{}|{}|{}",
+                meta.source_identity, meta.source_fingerprint, settings_fingerprint
+            )
+            .as_bytes(),
+        )
+        .to_hex()
+        .to_string();
+
+        DiskCacheKey::new(
+            "platform_raw",
+            key_hash,
+            meta.source_identity.clone(),
+            meta.source_fingerprint.clone(),
+            settings_fingerprint,
+        )
     }
 
     /// Заполнение репозитория из синтаксис-помощника
@@ -333,8 +450,25 @@ impl SystemCoordinator {
         &self,
         repository: &Arc<InMemoryTypeRepository>,
         database: crate::data::loaders::syntax_helper::SyntaxHelperDatabase,
+        cache_meta: Option<&PlatformCacheMeta>,
     ) -> Result<(), StartupError> {
-        let platform_raw_data = convert_syntax_helper_to_raw(&database);
+        let platform_raw_data = if let Some(meta) = cache_meta {
+            let cache_key = self.build_platform_raw_cache_key(meta);
+            let cache = self.disk_cache();
+            let entry = cache
+                .get_or_build_with(
+                    &cache_key,
+                    || Ok(convert_syntax_helper_to_raw(&database)),
+                    |types| !types.is_empty(),
+                )
+                .map_err(StartupError::PlatformTypesError)?;
+            if entry.from_cache {
+                info!("Используем кэш platform raw types");
+            }
+            entry.value
+        } else {
+            convert_syntax_helper_to_raw(&database)
+        };
 
         // MILESTONE 2.20.5: Заполняем SignatureIndex из загруженных типов
         let platform_types_clone = platform_raw_data.clone(); // Клонируем для SignatureIndex
@@ -488,5 +622,192 @@ impl SystemCoordinator {
         info!("GenericInfo применён к {} типам-коллекциям", generic_count);
         warn!("Методы недоступны в fallback mode. Укажите путь к syntax_helper для полной функциональности.");
         Ok(())
+    }
+}
+
+fn syntax_helper_fingerprint(
+    syntax_parser: &SyntaxHelperLoader,
+    syntax_path: &Path,
+) -> anyhow::Result<String> {
+    let mut roots = Vec::new();
+    let context_help_path = syntax_path.join("rebuilt.shcntx_ru");
+    let language_help_path = syntax_path.join("rebuilt.shlang_ru");
+
+    if context_help_path.exists() {
+        roots.push(context_help_path);
+    }
+    if language_help_path.exists() {
+        roots.push(language_help_path);
+    }
+    if roots.is_empty() && syntax_path.exists() {
+        roots.push(syntax_path.to_path_buf());
+    }
+
+    let mut files: Vec<PathBuf> = Vec::new();
+    for root in roots {
+        files.extend(syntax_parser.collect_html_files(&root)?);
+    }
+    files.sort();
+
+    let mut hasher = blake3::Hasher::new();
+    for path in files {
+        let path_str = path.to_string_lossy();
+        hasher.update(path_str.as_bytes());
+        if let Ok(metadata) = fs::metadata(&path) {
+            hasher.update(&metadata.len().to_le_bytes());
+            let modified = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0);
+            hasher.update(&modified.to_le_bytes());
+        }
+        if std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok() {
+            if let Ok(contents) = fs::read(&path) {
+                let content_hash = blake3::hash(&contents);
+                hasher.update(content_hash.as_bytes());
+            }
+        }
+    }
+
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn syntax_helper_settings_fingerprint(syntax_parser: &SyntaxHelperLoader) -> String {
+    let settings = &syntax_parser.settings;
+    let strict = std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok();
+    format!(
+        "syntax_helper_parser_v1;threads={:?};batch={};show={};limit={:?};skip={:?};parallel={};strict_fingerprint={}",
+        settings.max_threads,
+        settings.batch_size,
+        settings.show_progress,
+        settings.file_limit,
+        settings.skip_dirs,
+        settings.parallel_indexing,
+        strict
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tempfile::TempDir;
+
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, prev }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(prev) = &self.prev {
+                std::env::set_var(self.key, prev);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    #[test]
+    fn test_syntax_helper_disk_cache_reuse() {
+        let syntax_path = Path::new("examples/syntax_helper");
+        if !syntax_path.exists() {
+            eprintln!("⚠️ Syntax Helper не найден в examples/syntax_helper");
+            return;
+        }
+
+        let temp = TempDir::new().unwrap();
+        let cache = crate::system::DiskCache::with_root(temp.path().to_path_buf(), 1).unwrap();
+        let builds = AtomicUsize::new(0);
+        let coordinator = SystemCoordinator::new();
+
+        let mut parser = SyntaxHelperLoader::new();
+        let key = coordinator
+            .build_syntax_helper_cache_key(syntax_path, &parser)
+            .unwrap();
+        let entry = cache
+            .get_or_build_with(
+                &key,
+                || {
+                    builds.fetch_add(1, Ordering::SeqCst);
+                    parser.parse_syntax_helper(syntax_path)?;
+                    Ok(SyntaxHelperCachePayload {
+                        database: parser.export_database(),
+                        parse_ok: true,
+                    })
+                },
+                |payload| payload.parse_ok && !payload.database.nodes.is_empty(),
+            )
+            .unwrap();
+        assert!(!entry.from_cache);
+
+        let mut parser = SyntaxHelperLoader::new();
+        let key = coordinator
+            .build_syntax_helper_cache_key(syntax_path, &parser)
+            .unwrap();
+        let entry = cache
+            .get_or_build_with(
+                &key,
+                || {
+                    builds.fetch_add(1, Ordering::SeqCst);
+                    parser.parse_syntax_helper(syntax_path)?;
+                    Ok(SyntaxHelperCachePayload {
+                        database: parser.export_database(),
+                        parse_ok: true,
+                    })
+                },
+                |payload| payload.parse_ok && !payload.database.nodes.is_empty(),
+            )
+            .unwrap();
+        assert!(entry.from_cache);
+        assert_eq!(builds.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_platform_raw_cache_produces_signature_index() {
+        let syntax_path = Path::new("examples/syntax_helper");
+        if !syntax_path.exists() {
+            eprintln!("⚠️ Syntax Helper не найден в examples/syntax_helper");
+            return;
+        }
+
+        let temp = TempDir::new().unwrap();
+        let _cache_dir_guard = EnvGuard::set("BSL_CACHE_DIR", temp.path());
+        let _cache_disable_guard = EnvGuard::remove("BSL_CACHE_DISABLE");
+
+        let coordinator = SystemCoordinator::new();
+        let load_result = coordinator.load_syntax_helper(syntax_path, &None).unwrap();
+
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        coordinator
+            .populate_repository_from_syntax_helper(
+                &repository,
+                load_result.database,
+                load_result.cache_meta.as_ref(),
+            )
+            .unwrap();
+
+        let index = repository.get_signature_index_clone();
+        let methods = index.get_type_methods("Массив");
+        assert!(
+            methods.iter().any(|method| method.name == "Добавить"),
+            "Ожидали метод Массив.Добавить в SignatureIndex"
+        );
     }
 }

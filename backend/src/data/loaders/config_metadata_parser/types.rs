@@ -75,6 +75,9 @@ pub struct UniversalMetadataObject {
     pub object_module_path: Option<PathBuf>,
     pub manager_module_path: Option<PathBuf>,
     pub record_set_module_path: Option<PathBuf>,
+
+    /// Путь к модулю общего модуля (CommonModule)
+    pub common_module_path: Option<PathBuf>,
 }
 
 impl UniversalMetadataObject {
@@ -100,6 +103,7 @@ impl UniversalMetadataObject {
             object_module_path: None,
             manager_module_path: None,
             record_set_module_path: None,
+            common_module_path: None,
         }
     }
 

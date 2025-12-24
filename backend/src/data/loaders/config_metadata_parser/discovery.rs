@@ -511,6 +511,11 @@ impl ConfigurationDiscovery {
                             );
                         }
 
+                        if object_type == "CommonModule" {
+                            metadata.common_module_path =
+                                forms_discovery.discover_common_module_path(object_name);
+                        }
+
                         // Throttling: прогресс по времени, чтобы не "схлопывался" на быстрых машинах
                         let now_ms = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
@@ -869,6 +874,21 @@ impl ConfigurationDiscovery {
                 None
             },
         )
+    }
+
+    pub fn discover_common_module_path(&self, object_name: &str) -> Option<PathBuf> {
+        let module_path = self
+            .base_path
+            .join("CommonModules")
+            .join(object_name)
+            .join("Ext")
+            .join("Module.bsl");
+
+        if module_path.exists() {
+            Some(module_path)
+        } else {
+            None
+        }
     }
 
     /// Обнаруживает формы для объекта метаданных (рекомендуемый метод)

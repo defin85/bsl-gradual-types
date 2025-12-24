@@ -8,6 +8,7 @@
 use bsl_backend::data::loaders::config_metadata_parser::discovery::ConfigurationDiscovery;
 use bsl_shared::domain::code_location::{CodeLocation, ModuleType};
 use std::path::PathBuf;
+use tempfile::TempDir;
 
 /// Базовый путь к тестовой конфигурации
 fn test_config_path() -> PathBuf {
@@ -63,6 +64,72 @@ fn test_discover_metadata_includes_module_paths() {
 
         println!("✅ Metadata parsed, objects with modules: {}", has_modules);
     }
+}
+
+#[test]
+fn test_discover_common_module_path() {
+    let temp = TempDir::new().expect("Не удалось создать временную папку");
+    let config_root = temp.path();
+
+    let config_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+    <Configuration>
+        <Properties>
+            <Name>ТестоваяКонфигурация</Name>
+        </Properties>
+        <ChildObjects>
+            <CommonModule>ТестовыйОбщийМодуль</CommonModule>
+        </ChildObjects>
+    </Configuration>
+</MetaDataObject>"#;
+
+    std::fs::write(config_root.join("Configuration.xml"), config_xml)
+        .expect("Не удалось записать Configuration.xml");
+
+    let module_dir = config_root
+        .join("CommonModules")
+        .join("ТестовыйОбщийМодуль");
+    std::fs::create_dir_all(module_dir.join("Ext"))
+        .expect("Не удалось создать структуру CommonModules");
+
+    let module_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+    <CommonModule uuid="00000000-0000-0000-0000-000000000000">
+        <Properties>
+            <Name>ТестовыйОбщийМодуль</Name>
+            <Global>false</Global>
+            <Server>true</Server>
+        </Properties>
+    </CommonModule>
+</MetaDataObject>"#;
+
+    std::fs::write(
+        config_root
+            .join("CommonModules")
+            .join("ТестовыйОбщийМодуль.xml"),
+        module_xml,
+    )
+    .expect("Не удалось записать CommonModule.xml");
+
+    let module_path = module_dir.join("Ext").join("Module.bsl");
+    std::fs::write(&module_path, "Процедура Тест() Экспорт\nКонецПроцедуры\n")
+        .expect("Не удалось записать Module.bsl");
+
+    let discovery = ConfigurationDiscovery::new(config_root.to_path_buf(), false);
+    let configs = discovery
+        .discover_all_configurations()
+        .expect("Should discover configurations");
+    let config_info = configs.first().expect("Should have configuration");
+    let metadata = discovery
+        .discover_metadata_in_configuration(config_info, None::<fn(_)>)
+        .expect("Should parse metadata");
+
+    let common_module = metadata
+        .iter()
+        .find(|obj| obj.object_type_raw == "CommonModule")
+        .expect("CommonModule должен быть найден");
+
+    assert_eq!(common_module.common_module_path.as_ref(), Some(&module_path));
 }
 
 #[test]

@@ -108,6 +108,29 @@ impl DiskCache {
         self.get_or_build_with(key, build, |_| true)
     }
 
+    pub fn try_get<T>(&self, key: &DiskCacheKey) -> Result<Option<T>>
+    where
+        T: DeserializeOwned,
+    {
+        if self.disabled {
+            return Ok(None);
+        }
+
+        let cache_dir = self.cache_dir(key);
+        if !cache_dir.exists() {
+            return Ok(None);
+        }
+
+        let _lock = self.lock_key(&cache_dir)?;
+        match self.try_load::<T>(key, &cache_dir) {
+            Ok(value) => Ok(value),
+            Err(err) => {
+                warn!("Disk cache read failed: {}", err);
+                Ok(None)
+            }
+        }
+    }
+
     pub fn get_or_build_with<T, F, P>(
         &self,
         key: &DiskCacheKey,

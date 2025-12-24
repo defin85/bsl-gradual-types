@@ -10,14 +10,21 @@ use tracing::{info, warn};
 
 use crate::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 use crate::data::loaders::{
-    index_configuration_bsl_modules_with_progress_parallel, ModuleIndexProgress,
-    UniversalMetadataObject,
+    collect_module_paths, index_configuration_bsl_modules_with_progress_parallel_cached,
+    IndexedConfigSignatures, ModuleIndexProgress, ParsedModuleData, UniversalMetadataObject,
 };
 use bsl_shared::domain::types::RawTypeData;
+use serde::{Deserialize, Serialize};
 
 use super::coordinator::SystemCoordinator;
 use super::types::LoadMetadataResult;
 use crate::system::DiskCacheKey;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ConfigLayerBCachePayload {
+    raw_types: Vec<RawTypeData>,
+    indexed: IndexedConfigSignatures,
+}
 
 impl SystemCoordinator {
     fn apply_prefix_for_indexing(
@@ -62,7 +69,7 @@ impl SystemCoordinator {
 
         let config_info = discover_single_config(&discovery, config_path);
 
-        let metadata_objects = if let Some(config_info) = config_info {
+        let metadata_objects = if let Some(ref config_info) = config_info {
             let config_set_id = config_set_id_from_single(&config_info);
             let cache_key =
                 self.build_config_cache_key(config_path, &config_info, Some(&config_set_id))?;
@@ -99,51 +106,94 @@ impl SystemCoordinator {
         // Получаем TypeRepository из AnalysisEngine
         let repository = engine.get_repository();
 
-        // Конвертируем все объекты в RawTypeData
-        let indexed = index_configuration_bsl_modules_with_progress_parallel(
-            config_path,
-            &metadata_objects,
-            None::<fn(ModuleIndexProgress)>,
-        );
-        if let Ok(indexed) = indexed {
-            let config_methods_count = indexed.config_methods.len();
-            let global_functions_count = indexed.global_functions.len();
-            let def_locations_count = indexed.definition_locations.len();
-            let global_def_locations_count = indexed.global_definition_locations.len();
+        let mut payload = None;
+        if let Some(config_info) = config_info {
+            let config_set_id = config_set_id_from_single(&config_info);
+            let prefix = config_info.prefix.as_deref();
+            let metadata_for_indexing = Self::apply_prefix_for_indexing(&metadata_objects, prefix);
 
-            for (owner_type, sig) in indexed.config_methods {
-                repository.add_config_method_signature(&owner_type, sig);
-            }
-            for (name, sig) in indexed.global_functions {
-                repository.add_global_function_signature(&name, sig);
-            }
-            for (owner_type, method_name, location) in indexed.definition_locations {
-                repository.add_config_method_definition_location(&owner_type, &method_name, location);
-            }
-            for (function_name, location) in indexed.global_definition_locations {
-                repository.add_global_function_definition_location(&function_name, location);
-            }
-
-            info!(
-                "Проиндексированы экспортные методы из *.bsl: методов={}, глобальных функций={}, locations={}, global_locations={}",
-                config_methods_count,
-                global_functions_count,
-                def_locations_count,
-                global_def_locations_count
-            );
-        } else if let Err(e) = indexed {
-            warn!("Не удалось проиндексировать экспортные методы из *.bsl модулей: {}", e);
+            let cache_key = self.build_config_layer_b_cache_key(
+                config_path,
+                &config_info,
+                Some(&config_set_id),
+                &metadata_for_indexing,
+            )?;
+            let cache = self.disk_cache();
+            let entry = cache.get_or_build_with(
+                &cache_key,
+                || {
+                    self.build_config_layer_b_payload(
+                        config_path,
+                        &config_info,
+                        &config_set_id,
+                        &metadata_objects,
+                        &metadata_for_indexing,
+                        prefix,
+                        None::<fn(ModuleIndexProgress)>,
+                    )
+                },
+                |payload| !payload.raw_types.is_empty(),
+            )?;
+            payload = Some(entry.value);
         }
 
-        let raw_types: Vec<RawTypeData> = metadata_objects
-            .into_iter()
-            .flat_map(|obj| obj.to_raw_type_data_with_forms(None))
-            .collect();
+        let payload = match payload {
+            Some(payload) => payload,
+            None => {
+                let indexed = match index_configuration_bsl_modules_with_progress_parallel_cached(
+                    config_path,
+                    &metadata_objects,
+                    None::<fn(ModuleIndexProgress)>,
+                    |_| Ok(None),
+                    |_, _| Ok(()),
+                ) {
+                    Ok(indexed) => indexed,
+                    Err(e) => {
+                        warn!(
+                            "Не удалось проиндексировать экспортные методы из *.bsl модулей: {}",
+                            e
+                        );
+                        IndexedConfigSignatures::default()
+                    }
+                };
+                let raw_types: Vec<RawTypeData> = metadata_objects
+                    .into_iter()
+                    .flat_map(|obj| obj.to_raw_type_data_with_forms(None))
+                    .collect();
+                ConfigLayerBCachePayload { raw_types, indexed }
+            }
+        };
 
-        let count = raw_types.len();
+        let config_methods_count = payload.indexed.config_methods.len();
+        let global_functions_count = payload.indexed.global_functions.len();
+        let def_locations_count = payload.indexed.definition_locations.len();
+        let global_def_locations_count = payload.indexed.global_definition_locations.len();
+
+        for (owner_type, sig) in payload.indexed.config_methods {
+            repository.add_config_method_signature(&owner_type, sig);
+        }
+        for (name, sig) in payload.indexed.global_functions {
+            repository.add_global_function_signature(&name, sig);
+        }
+        for (owner_type, method_name, location) in payload.indexed.definition_locations {
+            repository.add_config_method_definition_location(&owner_type, &method_name, location);
+        }
+        for (function_name, location) in payload.indexed.global_definition_locations {
+            repository.add_global_function_definition_location(&function_name, location);
+        }
+
+        info!(
+            "Проиндексированы экспортные методы из *.bsl: методов={}, глобальных функций={}, locations={}, global_locations={}",
+            config_methods_count,
+            global_functions_count,
+            def_locations_count,
+            global_def_locations_count
+        );
+
+        let count = payload.raw_types.len();
 
         // Загружаем все типы в репозиторий за один вызов
-        repository.load_types(raw_types)?;
+        repository.load_types(payload.raw_types)?;
 
         info!("Загружено {} типов из конфигурации", count);
         Ok(count)
@@ -261,15 +311,22 @@ impl SystemCoordinator {
             let progress_callback_for_modules = progress_callback.clone();
             let terminal_progress: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
             let coordinator_for_progress = self.clone_for_blocking();
-            match index_configuration_bsl_modules_with_progress_parallel(
-                &config_info.path,
+
+            let layer_key = self.build_config_layer_b_cache_key(
+                config_path,
+                &config_info,
+                Some(&config_set_id),
                 &metadata_for_indexing,
-                Some({
+            )?;
+            let cache = self.disk_cache();
+            let entry = cache.get_or_build_with(
+                &layer_key,
+                || {
                     let terminal_progress = Arc::clone(&terminal_progress);
                     let config_name = Arc::clone(&config_name);
                     let coordinator_for_progress = coordinator_for_progress.clone();
                     let progress_callback = progress_callback_for_modules;
-                    move |p: ModuleIndexProgress| {
+                    let progress = Some(move |p: ModuleIndexProgress| {
                         let prev = coordinator_for_progress.startup_progress();
                         let module_display = p
                             .module_path
@@ -329,67 +386,74 @@ impl SystemCoordinator {
                                 ));
                             }
                         }
-                    }
-                }),
-            ) {
-                Ok(indexed) => {
-                    let config_methods_count = indexed.config_methods.len();
-                    let global_functions_count = indexed.global_functions.len();
-                    let def_locations_count = indexed.definition_locations.len();
-                    let global_def_locations_count = indexed.global_definition_locations.len();
-
-                    for (owner_type, sig) in indexed.config_methods {
-                        repository.add_config_method_signature(&owner_type, sig);
-                    }
-                    for (name, sig) in indexed.global_functions {
-                        repository.add_global_function_signature(&name, sig);
-                    }
-                    for (owner_type, method_name, location) in indexed.definition_locations {
-                        repository.add_config_method_definition_location(
-                            &owner_type,
-                            &method_name,
-                            location,
-                        );
-                    }
-                    for (function_name, location) in indexed.global_definition_locations {
-                        repository.add_global_function_definition_location(&function_name, location);
-                    }
-
-                    info!(
-                        "Проиндексированы экспортные методы из *.bsl для {}: методов={}, глобальных функций={}, locations={}, global_locations={}",
-                        config_info.name,
-                        config_methods_count,
-                        global_functions_count,
-                        def_locations_count,
-                        global_def_locations_count
-                    );
-
-                    let prev = self.startup_progress();
-                    self.set_startup_progress(bsl_shared::api::StartupProgressDto {
-                        phase: "Индексация BSL-модулей".to_string(),
-                        message: Some(format!(
-                            "{}: методов={}, глобальных функций={}",
-                            config_info.name, config_methods_count, global_functions_count
-                        )),
-                        ..prev
                     });
-                }
-                Err(e) => warn!(
-                    "Не удалось проиндексировать экспортные методы из *.bsl для {}: {}",
-                    config_info.name, e
-                ),
+
+                    self.build_config_layer_b_payload(
+                        config_path,
+                        &config_info,
+                        &config_set_id,
+                        &metadata,
+                        &metadata_for_indexing,
+                        prefix,
+                        progress,
+                    )
+                },
+                |payload| !payload.raw_types.is_empty(),
+            )?;
+
+            if entry.from_cache {
+                emit_cached_module_index_progress(&config_info, &progress_callback);
+                let prev = self.startup_progress();
+                self.set_startup_progress(bsl_shared::api::StartupProgressDto {
+                    phase: "Индексация BSL-модулей".to_string(),
+                    message: Some(format!("{}: из кэша", config_info.name)),
+                    ..prev
+                });
             }
 
-            let raw_types: Vec<RawTypeData> = metadata
-                .into_iter()
-                .flat_map(|obj| obj.to_raw_type_data_with_forms(prefix))
-                .collect();
+            let payload = entry.value;
+            let config_methods_count = payload.indexed.config_methods.len();
+            let global_functions_count = payload.indexed.global_functions.len();
+            let def_locations_count = payload.indexed.definition_locations.len();
+            let global_def_locations_count = payload.indexed.global_definition_locations.len();
 
-            total_types += raw_types.len();
+            for (owner_type, sig) in payload.indexed.config_methods {
+                repository.add_config_method_signature(&owner_type, sig);
+            }
+            for (name, sig) in payload.indexed.global_functions {
+                repository.add_global_function_signature(&name, sig);
+            }
+            for (owner_type, method_name, location) in payload.indexed.definition_locations {
+                repository.add_config_method_definition_location(&owner_type, &method_name, location);
+            }
+            for (function_name, location) in payload.indexed.global_definition_locations {
+                repository.add_global_function_definition_location(&function_name, location);
+            }
+
+            info!(
+                "Проиндексированы экспортные методы из *.bsl для {}: методов={}, глобальных функций={}, locations={}, global_locations={}",
+                config_info.name,
+                config_methods_count,
+                global_functions_count,
+                def_locations_count,
+                global_def_locations_count
+            );
+
+            let prev = self.startup_progress();
+            self.set_startup_progress(bsl_shared::api::StartupProgressDto {
+                phase: "Индексация BSL-модулей".to_string(),
+                message: Some(format!(
+                    "{}: методов={}, глобальных функций={}",
+                    config_info.name, config_methods_count, global_functions_count
+                )),
+                ..prev
+            });
+
+            total_types += payload.raw_types.len();
 
             // Загружаем типы в репозиторий
             repository
-                .load_types(raw_types)
+                .load_types(payload.raw_types)
                 .map_err(|e| anyhow::anyhow!("Ошибка загрузки типов: {}", e))?;
 
             match config_info.config_type {
@@ -515,120 +579,133 @@ impl SystemCoordinator {
             let config_name = Arc::new(config_info.name.clone());
             let terminal_progress: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
             let coordinator_for_progress = self.clone_for_blocking();
-            match index_configuration_bsl_modules_with_progress_parallel(
-                &config_info.path,
+
+            let layer_key = self.build_config_layer_b_cache_key(
+                config_path,
+                &config_info,
+                Some(&config_set_id),
                 &metadata_for_indexing,
-                Some({
+            )?;
+            let cache = self.disk_cache();
+            let entry = cache.get_or_build_with(
+                &layer_key,
+                || {
                     let terminal_progress = Arc::clone(&terminal_progress);
                     let config_name = Arc::clone(&config_name);
                     let coordinator_for_progress = coordinator_for_progress.clone();
-                    move |p: ModuleIndexProgress| {
-                    let prev = coordinator_for_progress.startup_progress();
-                    let module_display = p
-                        .module_path
-                        .strip_prefix(&config_root)
-                        .unwrap_or(&p.module_path)
-                        .display()
-                        .to_string();
-                    coordinator_for_progress.set_startup_progress(bsl_shared::api::StartupProgressDto {
-                        phase: "Индексация BSL-модулей".to_string(),
-                        current: p.current as u64,
-                        total: p.total as u64,
-                        percentage: prev.percentage,
-                        message: Some(format!(
-                            "{}: {}/{} — {}",
-                            config_name.as_str(),
-                            p.current,
-                            p.total,
-                            module_display
-                        )),
-                        done: false,
-                    });
-                    if let Ok(mut guard) = terminal_progress.lock() {
-                        let pb = guard.get_or_insert_with(|| {
-                            let pb = ProgressBar::new(p.total as u64);
-                            pb.set_style(
-                                ProgressStyle::default_bar()
-                                    .template(
-                                        "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]",
-                                    )
-                                    .unwrap()
-                                    .progress_chars("##-"),
-                            );
-                            pb.set_message(format!("Индексация {}", config_name.as_str()));
-                            pb
-                        });
-                        pb.set_position(p.current as u64);
-                        pb.set_message(module_display.clone());
-                        if p.current == p.total {
-                            pb.finish_with_message(format!(
-                                "Индексация {} завершена ({} модулей)",
+                    let progress = Some(move |p: ModuleIndexProgress| {
+                        let prev = coordinator_for_progress.startup_progress();
+                        let module_display = p
+                            .module_path
+                            .strip_prefix(&config_root)
+                            .unwrap_or(&p.module_path)
+                            .display()
+                            .to_string();
+                        coordinator_for_progress.set_startup_progress(bsl_shared::api::StartupProgressDto {
+                            phase: "Индексация BSL-модулей".to_string(),
+                            current: p.current as u64,
+                            total: p.total as u64,
+                            percentage: prev.percentage,
+                            message: Some(format!(
+                                "{}: {}/{} — {}",
                                 config_name.as_str(),
-                                p.total
-                            ));
+                                p.current,
+                                p.total,
+                                module_display
+                            )),
+                            done: false,
+                        });
+                        if let Ok(mut guard) = terminal_progress.lock() {
+                            let pb = guard.get_or_insert_with(|| {
+                                let pb = ProgressBar::new(p.total as u64);
+                                pb.set_style(
+                                    ProgressStyle::default_bar()
+                                        .template(
+                                            "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]",
+                                        )
+                                        .unwrap()
+                                        .progress_chars("##-"),
+                                );
+                                pb.set_message(format!("Индексация {}", config_name.as_str()));
+                                pb
+                            });
+                            pb.set_position(p.current as u64);
+                            pb.set_message(module_display.clone());
+                            if p.current == p.total {
+                                pb.finish_with_message(format!(
+                                    "Индексация {} завершена ({} модулей)",
+                                    config_name.as_str(),
+                                    p.total
+                                ));
+                            }
                         }
-                    }
-                }
-                }),
-            ) {
-                Ok(indexed) => {
-                    let config_methods_count = indexed.config_methods.len();
-                    let global_functions_count = indexed.global_functions.len();
-                    let def_locations_count = indexed.definition_locations.len();
-                    let global_def_locations_count = indexed.global_definition_locations.len();
-
-                    for (owner_type, sig) in indexed.config_methods {
-                        repository.add_config_method_signature(&owner_type, sig);
-                    }
-                    for (name, sig) in indexed.global_functions {
-                        repository.add_global_function_signature(&name, sig);
-                    }
-                    for (owner_type, method_name, location) in indexed.definition_locations {
-                        repository.add_config_method_definition_location(
-                            &owner_type,
-                            &method_name,
-                            location,
-                        );
-                    }
-                    for (function_name, location) in indexed.global_definition_locations {
-                        repository.add_global_function_definition_location(&function_name, location);
-                    }
-
-                    info!(
-                        "Проиндексированы экспортные методы из *.bsl для {}: методов={}, глобальных функций={}, locations={}, global_locations={}",
-                        config_info.name,
-                        config_methods_count,
-                        global_functions_count,
-                        def_locations_count,
-                        global_def_locations_count
-                    );
-
-                    let prev = self.startup_progress();
-                    self.set_startup_progress(bsl_shared::api::StartupProgressDto {
-                        phase: "Индексация BSL-модулей".to_string(),
-                        message: Some(format!(
-                            "{}: методов={}, глобальных функций={}",
-                            config_info.name, config_methods_count, global_functions_count
-                        )),
-                        ..prev
                     });
-                }
-                Err(e) => warn!(
-                    "Не удалось проиндексировать экспортные методы из *.bsl для {}: {}",
-                    config_info.name, e
-                ),
+
+                    self.build_config_layer_b_payload(
+                        config_path,
+                        &config_info,
+                        &config_set_id,
+                        &metadata,
+                        &metadata_for_indexing,
+                        prefix,
+                        progress,
+                    )
+                },
+                |payload| !payload.raw_types.is_empty(),
+            )?;
+
+            if entry.from_cache {
+                let prev = self.startup_progress();
+                self.set_startup_progress(bsl_shared::api::StartupProgressDto {
+                    phase: "Индексация BSL-модулей".to_string(),
+                    message: Some(format!("{}: из кэша", config_info.name)),
+                    ..prev
+                });
             }
 
-            let raw_types: Vec<RawTypeData> = metadata
-                .into_iter()
-                .flat_map(|obj| obj.to_raw_type_data_with_forms(prefix))
-                .collect();
+            let payload = entry.value;
+            let config_methods_count = payload.indexed.config_methods.len();
+            let global_functions_count = payload.indexed.global_functions.len();
+            let def_locations_count = payload.indexed.definition_locations.len();
+            let global_def_locations_count = payload.indexed.global_definition_locations.len();
 
-            total_types += raw_types.len();
+            for (owner_type, sig) in payload.indexed.config_methods {
+                repository.add_config_method_signature(&owner_type, sig);
+            }
+            for (name, sig) in payload.indexed.global_functions {
+                repository.add_global_function_signature(&name, sig);
+            }
+            for (owner_type, method_name, location) in payload.indexed.definition_locations {
+                repository.add_config_method_definition_location(&owner_type, &method_name, location);
+            }
+            for (function_name, location) in payload.indexed.global_definition_locations {
+                repository.add_global_function_definition_location(&function_name, location);
+            }
+
+            info!(
+                "Проиндексированы экспортные методы из *.bsl для {}: методов={}, глобальных функций={}, locations={}, global_locations={}",
+                config_info.name,
+                config_methods_count,
+                global_functions_count,
+                def_locations_count,
+                global_def_locations_count
+            );
+
+            let prev = self.startup_progress();
+            self.set_startup_progress(bsl_shared::api::StartupProgressDto {
+                phase: "Индексация BSL-модулей".to_string(),
+                message: Some(format!(
+                    "{}: методов={}, глобальных функций={}",
+                    config_info.name, config_methods_count, global_functions_count
+                )),
+                ..prev
+            });
+
+            total_types += payload.raw_types.len();
 
             // Загружаем типы в репозиторий
             repository
-                .load_types(raw_types)
+                .load_types(payload.raw_types)
                 .map_err(|e| anyhow::anyhow!("Ошибка загрузки типов: {}", e))?;
 
             match config_info.config_type {
@@ -644,33 +721,187 @@ impl SystemCoordinator {
         })
     }
 
+    fn build_config_layer_b_payload<F>(
+        &self,
+        root_path: &Path,
+        config_info: &crate::data::loaders::config_metadata_parser::ConfigurationInfo,
+        config_set_id: &str,
+        metadata: &[UniversalMetadataObject],
+        metadata_for_indexing: &[UniversalMetadataObject],
+        prefix: Option<&str>,
+        progress_callback: Option<F>,
+    ) -> Result<ConfigLayerBCachePayload>
+    where
+        F: Fn(ModuleIndexProgress) + Send + Sync + 'static,
+    {
+        let indexed = match self.index_config_bsl_modules_with_cache(
+            root_path,
+            config_info,
+            config_set_id,
+            metadata_for_indexing,
+            progress_callback,
+        ) {
+            Ok(indexed) => indexed,
+            Err(e) => {
+                warn!(
+                    "Не удалось проиндексировать экспортные методы из *.bsl для {}: {}",
+                    config_info.name, e
+                );
+                IndexedConfigSignatures::default()
+            }
+        };
+
+        let raw_types: Vec<RawTypeData> = metadata
+            .iter()
+            .flat_map(|obj| obj.to_raw_type_data_with_forms(prefix))
+            .collect();
+
+        Ok(ConfigLayerBCachePayload { raw_types, indexed })
+    }
+
+    fn index_config_bsl_modules_with_cache<F>(
+        &self,
+        root_path: &Path,
+        config_info: &crate::data::loaders::config_metadata_parser::ConfigurationInfo,
+        config_set_id: &str,
+        metadata_for_indexing: &[UniversalMetadataObject],
+        progress_callback: Option<F>,
+    ) -> Result<IndexedConfigSignatures>
+    where
+        F: Fn(ModuleIndexProgress) + Send + Sync + 'static,
+    {
+        let cache = self.disk_cache();
+
+        let load_cached = |module_path: &Path| -> Result<Option<ParsedModuleData>> {
+            if !module_path.exists() {
+                return Ok(None);
+            }
+            let key = self.build_config_module_cache_key(
+                root_path,
+                config_info,
+                Some(config_set_id),
+                module_path,
+            )?;
+            cache.try_get(&key)
+        };
+
+        let store_cached = |module_path: &Path, parsed: &ParsedModuleData| -> Result<()> {
+            if !module_path.exists() {
+                return Ok(());
+            }
+            let key = self.build_config_module_cache_key(
+                root_path,
+                config_info,
+                Some(config_set_id),
+                module_path,
+            )?;
+            let parsed = parsed.clone();
+            let _ = cache.get_or_build_with(&key, || Ok(parsed), |_| true)?;
+            Ok(())
+        };
+
+        index_configuration_bsl_modules_with_progress_parallel_cached(
+            root_path,
+            metadata_for_indexing,
+            progress_callback,
+            load_cached,
+            store_cached,
+        )
+    }
+
+    fn build_config_layer_b_cache_key(
+        &self,
+        root_path: &Path,
+        config_info: &crate::data::loaders::config_metadata_parser::ConfigurationInfo,
+        config_set_id: Option<&str>,
+        metadata_for_indexing: &[UniversalMetadataObject],
+    ) -> Result<DiskCacheKey> {
+        let identity = config_cache_identity(root_path, config_info);
+        let config_set_id = config_set_id.unwrap_or_default();
+        let source_identity = format!(
+            "{}|{}|{}",
+            identity.canonical_config.to_string_lossy(),
+            config_info.uuid.clone().unwrap_or_default(),
+            config_set_id
+        );
+        let source_fingerprint =
+            config_layer_b_fingerprint(&config_info.path, metadata_for_indexing).map_err(
+                |e| anyhow::anyhow!("Ошибка вычисления fingerprint конфигурации: {}", e),
+            )?;
+        let settings_fingerprint = config_layer_b_settings_fingerprint();
+
+        let key_hash = blake3::hash(
+            format!(
+                "{}|{}|{}",
+                source_identity, source_fingerprint, settings_fingerprint
+            )
+            .as_bytes(),
+        )
+        .to_hex()
+        .to_string();
+
+        Ok(DiskCacheKey::new(
+            "config-layer-b",
+            key_hash,
+            source_identity,
+            source_fingerprint,
+            settings_fingerprint,
+        )
+        .with_project_id(identity.project_id)
+        .with_config_id(identity.config_id))
+    }
+
+    fn build_config_module_cache_key(
+        &self,
+        root_path: &Path,
+        config_info: &crate::data::loaders::config_metadata_parser::ConfigurationInfo,
+        config_set_id: Option<&str>,
+        module_path: &Path,
+    ) -> Result<DiskCacheKey> {
+        let identity = config_cache_identity(root_path, config_info);
+        let config_set_id = config_set_id.unwrap_or_default();
+        let source_identity = format!(
+            "{}|{}",
+            module_path.to_string_lossy(),
+            config_set_id
+        );
+        let strict = cache_strict_fingerprint();
+        let source_fingerprint = file_fingerprint(module_path, strict)?;
+        let settings_fingerprint = module_cache_settings_fingerprint();
+
+        let key_hash = blake3::hash(
+            format!(
+                "{}|{}|{}",
+                source_identity, source_fingerprint, settings_fingerprint
+            )
+            .as_bytes(),
+        )
+        .to_hex()
+        .to_string();
+
+        Ok(DiskCacheKey::new(
+            "config-module-parse",
+            key_hash,
+            source_identity,
+            source_fingerprint,
+            settings_fingerprint,
+        )
+        .with_project_id(identity.project_id)
+        .with_config_id(identity.config_id))
+    }
+
     fn build_config_cache_key(
         &self,
         root_path: &Path,
         config_info: &crate::data::loaders::config_metadata_parser::ConfigurationInfo,
         config_set_id: Option<&str>,
     ) -> Result<DiskCacheKey> {
-        let canonical_root =
-            std::fs::canonicalize(root_path).unwrap_or_else(|_| root_path.to_path_buf());
-        let canonical_config =
-            std::fs::canonicalize(&config_info.path).unwrap_or_else(|_| config_info.path.clone());
-
-        let project_id = blake3::hash(canonical_root.to_string_lossy().as_bytes())
-            .to_hex()
-            .to_string();
-        let config_id = config_info
-            .uuid
-            .clone()
-            .unwrap_or_else(|| {
-                blake3::hash(canonical_config.to_string_lossy().as_bytes())
-                    .to_hex()
-                    .to_string()
-            });
+        let identity = config_cache_identity(root_path, config_info);
 
         let config_set_id = config_set_id.unwrap_or_default();
         let source_identity = format!(
             "{}|{}|{}",
-            canonical_config.to_string_lossy(),
+            identity.canonical_config.to_string_lossy(),
             config_info.uuid.clone().unwrap_or_default(),
             config_set_id
         );
@@ -697,9 +928,16 @@ impl SystemCoordinator {
             source_fingerprint,
             settings_fingerprint,
         )
-        .with_project_id(project_id)
-        .with_config_id(config_id))
+        .with_project_id(identity.project_id)
+        .with_config_id(identity.config_id))
     }
+}
+
+#[derive(Debug)]
+struct ConfigCacheIdentity {
+    project_id: String,
+    config_id: String,
+    canonical_config: PathBuf,
 }
 
 #[cfg(test)]
@@ -787,6 +1025,48 @@ fn emit_cached_config_progress<F>(
     }
 }
 
+fn emit_cached_module_index_progress<F>(
+    config_info: &crate::data::loaders::config_metadata_parser::ConfigurationInfo,
+    progress_callback: &F,
+) where
+    F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
+{
+    progress_callback(ProgressUpdate::new(
+        IndexingPhase::ConfigurationIndexingModules,
+        1,
+        1,
+        Some(format!("Индексация BSL-модулей: {} (кэш)", config_info.name)),
+    ));
+}
+
+fn config_cache_identity(
+    root_path: &Path,
+    config_info: &crate::data::loaders::config_metadata_parser::ConfigurationInfo,
+) -> ConfigCacheIdentity {
+    let canonical_root =
+        std::fs::canonicalize(root_path).unwrap_or_else(|_| root_path.to_path_buf());
+    let canonical_config =
+        std::fs::canonicalize(&config_info.path).unwrap_or_else(|_| config_info.path.clone());
+    let project_id = blake3::hash(canonical_root.to_string_lossy().as_bytes())
+        .to_hex()
+        .to_string();
+    let config_id = config_info.uuid.clone().unwrap_or_else(|| {
+        blake3::hash(canonical_config.to_string_lossy().as_bytes())
+            .to_hex()
+            .to_string()
+    });
+
+    ConfigCacheIdentity {
+        project_id,
+        config_id,
+        canonical_config,
+    }
+}
+
+fn cache_strict_fingerprint() -> bool {
+    std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok()
+}
+
 fn config_fingerprint(config_path: &Path) -> Result<String> {
     use walkdir::WalkDir;
 
@@ -812,12 +1092,87 @@ fn config_fingerprint(config_path: &Path) -> Result<String> {
 
     files.sort();
 
-    let strict = std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok();
+    let strict = cache_strict_fingerprint();
+    Ok(fingerprint_paths(&files, strict))
+}
+
+fn config_settings_fingerprint() -> String {
+    let strict = cache_strict_fingerprint();
+    format!(
+        "config_parser_v1;modules_indexing_v1;strict_fingerprint={}",
+        strict
+    )
+}
+
+fn config_layer_b_fingerprint(
+    config_path: &Path,
+    metadata_for_indexing: &[UniversalMetadataObject],
+) -> Result<String> {
+    use walkdir::WalkDir;
+
+    let mut files: Vec<PathBuf> = WalkDir::new(config_path)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("xml") {
+                Some(path.to_path_buf())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let module_paths = collect_module_paths(config_path, metadata_for_indexing);
+    for path in module_paths {
+        if path.is_file() {
+            files.push(path);
+        }
+    }
+
+    if files.is_empty() {
+        let config_xml = config_path.join("Configuration.xml");
+        if config_xml.exists() {
+            files.push(config_xml);
+        }
+    }
+
+    files.sort();
+    files.dedup();
+
+    let strict = cache_strict_fingerprint();
+    Ok(fingerprint_paths(&files, strict))
+}
+
+fn config_layer_b_settings_fingerprint() -> String {
+    let strict = cache_strict_fingerprint();
+    format!(
+        "config_layer_b_v1;modules_indexing_v1;strict_fingerprint={}",
+        strict
+    )
+}
+
+fn module_cache_settings_fingerprint() -> String {
+    let strict = cache_strict_fingerprint();
+    format!(
+        "config_module_parse_v1;strict_fingerprint={}",
+        strict
+    )
+}
+
+fn file_fingerprint(path: &Path, strict: bool) -> Result<String> {
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    Ok(fingerprint_paths(&[path.to_path_buf()], strict))
+}
+
+fn fingerprint_paths(paths: &[PathBuf], strict: bool) -> String {
     let mut hasher = blake3::Hasher::new();
-    for path in files {
+    for path in paths {
         let path_str = path.to_string_lossy();
         hasher.update(path_str.as_bytes());
-        if let Ok(metadata) = std::fs::metadata(&path) {
+        if let Ok(metadata) = std::fs::metadata(path) {
             hasher.update(&metadata.len().to_le_bytes());
             let modified = metadata
                 .modified()
@@ -828,22 +1183,14 @@ fn config_fingerprint(config_path: &Path) -> Result<String> {
             hasher.update(&modified.to_le_bytes());
         }
         if strict {
-            if let Ok(contents) = std::fs::read(&path) {
+            if let Ok(contents) = std::fs::read(path) {
                 let content_hash = blake3::hash(&contents);
                 hasher.update(content_hash.as_bytes());
             }
         }
     }
 
-    Ok(hasher.finalize().to_hex().to_string())
-}
-
-fn config_settings_fingerprint() -> String {
-    let strict = std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok();
-    format!(
-        "config_parser_v1;modules_indexing_v1;strict_fingerprint={}",
-        strict
-    )
+    hasher.finalize().to_hex().to_string()
 }
 
 fn config_set_id_from_configs(

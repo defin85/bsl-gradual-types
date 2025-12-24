@@ -125,16 +125,26 @@
 
 ## D5: Cache конфигурации (слой B)
 
+Статус: DONE
+
 Задачи:
 - Индекс экспортных методов + `definition_locations`.
 - File-level кэш для `.bsl` модулей.
 - Merkle-фингерпринт по BSL/XML/другим артефактам.
 
 Артефакты:
-- `source_kind=config`, layer B + per-file entries.
+- `source_kind=config-layer-b`, layer B.
+- `source_kind=config-module-parse`, per-file entries.
 
 Тесты:
 - Изменение `.bsl` -> инвалидация только модуля, индекс обновляется.
+- Тест: `cargo test -p bsl-backend cached_index_reuses_unchanged_modules`.
+
+Факты:
+- DiskCache интегрирован в layer B: `RawTypeData` + индекс экспортных методов.
+- Per-file кэш парсинга модулей BSL с повторным использованием.
+- Fingerprint по XML + BSL (strict режим через `BSL_CACHE_STRICT_FINGERPRINT`).
+- Discovery сохраняет фактический путь CommonModule (для корректной индексации/кэша).
 
 ## D6: Combined cache
 

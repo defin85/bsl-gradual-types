@@ -16,15 +16,20 @@ pub use config_metadata_parser::{
 };
 
 pub use config_bsl_modules::{
+    collect_module_paths,
     index_configuration_bsl_modules, index_configuration_bsl_modules_by_paths,
     index_configuration_bsl_modules_with_progress,
-    index_configuration_bsl_modules_with_progress_parallel, IndexedConfigSignatures,
+    index_configuration_bsl_modules_with_progress_parallel,
+    IndexedConfigSignatures,
     ModuleIndexProgress, ModuleIndexResult, ModuleParseComparison, ModuleParseStats,
     ModuleSignatureSnapshot, SinglePassMode,
     compare_module_parsing_from_file, compare_module_parsing_from_file_with_progress,
     compare_module_parsing_from_file_with_progress_mode,
     single_pass_module_stats_from_file_with_progress_mode,
 };
+
+pub(crate) use config_bsl_modules::ParsedModuleData;
+pub(crate) use config_bsl_modules::index_configuration_bsl_modules_with_progress_parallel_cached;
 
 // Новые реэкспорты из syntax_helper
 pub use syntax_helper::{ParsingStats, SyntaxHelperLoader};

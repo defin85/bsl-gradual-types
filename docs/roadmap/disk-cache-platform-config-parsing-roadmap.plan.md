@@ -148,6 +148,8 @@
 
 ## D6: Combined cache
 
+Статус: DONE
+
 Задачи:
 - Комбинированный ключ (platform + config + settings).
 - Быстрый "run -> готово" для hover/validation.
@@ -156,7 +158,13 @@
 - `source_kind=combined`.
 
 Тесты:
-- Интеграционные: multi-platform + multi-config.
+- Интеграционный: `test_combined_cache_roundtrip` (examples).
+
+Факты:
+- Добавлен combined cache ключ (platform + config meta) и загрузка перед парсингом конфигурации.
+- Реализован сбор combined payload (platform raw + config raw + index) и запись в кэш.
+- Тест: `cargo test -p bsl-backend test_combined_cache_roundtrip`.
+- Уточнён combined payload без platform raw, прогресс обновляется при hit, meta учитывает быстрый path через config cache.
 
 ## D7: Политики обновления и уборка
 

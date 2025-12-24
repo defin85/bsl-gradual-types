@@ -168,6 +168,8 @@
 
 ## D7: Политики обновления и уборка
 
+Статус: DONE
+
 Задачи:
 - Политики: `blocking` vs `stale-while-revalidate` (опционально).
 - Cleanup по размеру/TTL.
@@ -178,6 +180,10 @@
 
 Тесты:
 - Unit на cleanup/TTL.
+
+Факты:
+- DiskCache поддерживает TTL, SWR, LRU cleanup по размеру и метрики hit/miss/таймингов.
+- Добавлены тесты TTL и SWR.
 
 ## AST cache (дополнительный блок)
 

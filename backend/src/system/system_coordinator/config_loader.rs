@@ -89,10 +89,13 @@ impl SystemCoordinator {
             let cache_key =
                 self.build_config_cache_key(config_path, &config_info, Some(&config_set_id))?;
             let cache = self.disk_cache();
+            let discovery_root = config_path.to_path_buf();
+            let config_info = config_info.clone();
             let entry = cache
-                .get_or_build_with(
+                .get_or_build_with_swr(
                     &cache_key,
-                    || {
+                    move || {
+                        let discovery = ConfigurationDiscovery::new(discovery_root, false);
                         // Без progress_callback в публичном методе (для обратной совместимости)
                         discovery
                             .discover_metadata_in_configuration(
@@ -134,16 +137,23 @@ impl SystemCoordinator {
                 &metadata_for_indexing,
             )?;
             let cache = self.disk_cache();
-            let entry = cache.get_or_build_with(
+            let coordinator = self.clone_for_blocking();
+            let config_path = config_path.to_path_buf();
+            let config_info = config_info.clone();
+            let config_set_id = config_set_id.clone();
+            let metadata_objects = metadata_objects.clone();
+            let metadata_for_indexing = metadata_for_indexing.clone();
+            let prefix = prefix.map(str::to_string);
+            let entry = cache.get_or_build_with_swr(
                 &cache_key,
-                || {
-                    self.build_config_layer_b_payload(
-                        config_path,
+                move || {
+                    coordinator.build_config_layer_b_payload(
+                        &config_path,
                         &config_info,
                         &config_set_id,
                         &metadata_objects,
                         &metadata_for_indexing,
-                        prefix,
+                        prefix.as_deref(),
                         None::<fn(ModuleIndexProgress)>,
                     )
                 },
@@ -335,16 +345,21 @@ impl SystemCoordinator {
             let cache_key =
                 self.build_config_cache_key(config_path, &config_info, Some(&config_set_id))?;
             let cache = self.disk_cache();
+            let discovery_root = config_path.to_path_buf();
+            let config_info_clone = config_info.clone();
+            let progress_callback_clone = progress_callback.clone();
             let entry = cache
-                .get_or_build_with(
+                .get_or_build_with_swr(
                     &cache_key,
-                    || {
+                    move || {
+                        let discovery = ConfigurationDiscovery::new(discovery_root, true);
                         // НОВОЕ: Используем новый метод с прогрессом через 4 фазы парсинга
-                        discovery.discover_metadata_in_configuration_with_progress(
-                            &config_info,
-                            progress_callback.clone(),
-                        )
-                        .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))
+                        discovery
+                            .discover_metadata_in_configuration_with_progress(
+                                &config_info_clone,
+                                progress_callback_clone.clone(),
+                            )
+                            .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))
                     },
                     |metadata| !metadata.is_empty(),
                 )?;
@@ -379,9 +394,16 @@ impl SystemCoordinator {
                 &metadata_for_indexing,
             )?;
             let cache = self.disk_cache();
-            let entry = cache.get_or_build_with(
+            let coordinator = self.clone_for_blocking();
+            let config_path = config_path.to_path_buf();
+            let config_info_for_build = config_info.clone();
+            let config_set_id = config_set_id.clone();
+            let metadata = metadata.clone();
+            let metadata_for_indexing = metadata_for_indexing.clone();
+            let prefix = prefix.map(str::to_string);
+            let entry = cache.get_or_build_with_swr(
                 &layer_key,
-                || {
+                move || {
                     let terminal_progress = Arc::clone(&terminal_progress);
                     let config_name = Arc::clone(&config_name);
                     let coordinator_for_progress = coordinator_for_progress.clone();
@@ -448,13 +470,13 @@ impl SystemCoordinator {
                         }
                     });
 
-                    self.build_config_layer_b_payload(
-                        config_path,
-                        &config_info,
+                    coordinator.build_config_layer_b_payload(
+                        &config_path,
+                        &config_info_for_build,
                         &config_set_id,
                         &metadata,
                         &metadata_for_indexing,
-                        prefix,
+                        prefix.as_deref(),
                         progress,
                     )
                 },
@@ -616,14 +638,17 @@ impl SystemCoordinator {
             let cache_key =
                 self.build_config_cache_key(config_path, &config_info, Some(&config_set_id))?;
             let cache = self.disk_cache();
+            let discovery_root = config_path.to_path_buf();
+            let config_info_clone = config_info.clone();
             let entry = cache
-                .get_or_build_with(
+                .get_or_build_with_swr(
                     &cache_key,
-                    || {
+                    move || {
+                        let discovery = ConfigurationDiscovery::new(discovery_root, true);
                         // Без progress_callback в публичном методе (для обратной совместимости)
                         discovery
                             .discover_metadata_in_configuration(
-                                &config_info,
+                                &config_info_clone,
                                 None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
                             )
                             .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))
@@ -655,9 +680,16 @@ impl SystemCoordinator {
                 &metadata_for_indexing,
             )?;
             let cache = self.disk_cache();
-            let entry = cache.get_or_build_with(
+            let coordinator = self.clone_for_blocking();
+            let config_path = config_path.to_path_buf();
+            let config_info_for_build = config_info.clone();
+            let config_set_id = config_set_id.clone();
+            let metadata = metadata.clone();
+            let metadata_for_indexing = metadata_for_indexing.clone();
+            let prefix = prefix.map(str::to_string);
+            let entry = cache.get_or_build_with_swr(
                 &layer_key,
-                || {
+                move || {
                     let terminal_progress = Arc::clone(&terminal_progress);
                     let config_name = Arc::clone(&config_name);
                     let coordinator_for_progress = coordinator_for_progress.clone();
@@ -709,13 +741,13 @@ impl SystemCoordinator {
                         }
                     });
 
-                    self.build_config_layer_b_payload(
-                        config_path,
-                        &config_info,
+                    coordinator.build_config_layer_b_payload(
+                        &config_path,
+                        &config_info_for_build,
                         &config_set_id,
                         &metadata,
                         &metadata_for_indexing,
-                        prefix,
+                        prefix.as_deref(),
                         progress,
                     )
                 },
@@ -1032,36 +1064,17 @@ impl SystemCoordinator {
             let cache = self.disk_cache();
             let entry = match cache.try_get(&cache_key) {
                 Ok(Some(metadata)) => metadata,
-                Ok(None) => {
+                Ok(None) | Err(_) => {
+                    let discovery_root = config_path.to_path_buf();
+                    let config_info = config_info.clone();
                     cache
-                        .get_or_build_with(
+                        .get_or_build_with_swr(
                             &cache_key,
-                            || {
+                            move || {
+                                let discovery = ConfigurationDiscovery::new(discovery_root, true);
                                 discovery
                                     .discover_metadata_in_configuration(
-                                        config_info,
-                                        None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
-                                    )
-                                    .map_err(|e| {
-                                        anyhow::anyhow!("Не удалось обнаружить метаданные: {}", e)
-                                    })
-                            },
-                            |metadata| !metadata.is_empty(),
-                        )?
-                        .value
-                }
-                Err(err) => {
-                    warn!(
-                        "Ошибка чтения config cache (combined meta), пересоздаём: {}",
-                        err
-                    );
-                    cache
-                        .get_or_build_with(
-                            &cache_key,
-                            || {
-                                discovery
-                                    .discover_metadata_in_configuration(
-                                        config_info,
+                                        &config_info,
                                         None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
                                     )
                                     .map_err(|e| {

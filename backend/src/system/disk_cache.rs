@@ -6,6 +6,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 
@@ -64,14 +66,52 @@ pub struct CacheManifest {
     pub source_fingerprint: String,
     pub settings_fingerprint: String,
     pub created_at: u64,
+    #[serde(default)]
+    pub last_used_at: u64,
     pub size_bytes: u64,
     pub build_time_ms: u64,
+    #[serde(default)]
+    pub load_time_ms: u64,
+    #[serde(default)]
+    pub hit_count: u64,
 }
 
 pub struct DiskCache {
     root: PathBuf,
     schema_version: u32,
     disabled: bool,
+    stats: Arc<DiskCacheStats>,
+    last_cleanup_at: Arc<AtomicU64>,
+}
+
+#[derive(Debug, Default)]
+struct DiskCacheStats {
+    hit_count: AtomicU64,
+    miss_count: AtomicU64,
+    stale_hit_count: AtomicU64,
+    load_time_ms_total: AtomicU64,
+    build_time_ms_total: AtomicU64,
+    stored_entries: AtomicU64,
+    expired_entries: AtomicU64,
+    evicted_entries: AtomicU64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiskCacheStatsSnapshot {
+    pub hit_count: u64,
+    pub miss_count: u64,
+    pub stale_hit_count: u64,
+    pub load_time_ms_total: u64,
+    pub build_time_ms_total: u64,
+    pub stored_entries: u64,
+    pub expired_entries: u64,
+    pub evicted_entries: u64,
+}
+
+#[derive(Debug)]
+pub struct CacheCleanupReport {
+    pub removed_entries: u64,
+    pub freed_bytes: u64,
 }
 
 impl DiskCache {
@@ -89,6 +129,8 @@ impl DiskCache {
             root,
             schema_version,
             disabled,
+            stats: Arc::new(DiskCacheStats::default()),
+            last_cleanup_at: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -97,6 +139,21 @@ impl DiskCache {
             root: PathBuf::from(".bsl_cache"),
             schema_version,
             disabled: true,
+            stats: Arc::new(DiskCacheStats::default()),
+            last_cleanup_at: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    pub fn stats(&self) -> DiskCacheStatsSnapshot {
+        DiskCacheStatsSnapshot {
+            hit_count: self.stats.hit_count.load(Ordering::Relaxed),
+            miss_count: self.stats.miss_count.load(Ordering::Relaxed),
+            stale_hit_count: self.stats.stale_hit_count.load(Ordering::Relaxed),
+            load_time_ms_total: self.stats.load_time_ms_total.load(Ordering::Relaxed),
+            build_time_ms_total: self.stats.build_time_ms_total.load(Ordering::Relaxed),
+            stored_entries: self.stats.stored_entries.load(Ordering::Relaxed),
+            expired_entries: self.stats.expired_entries.load(Ordering::Relaxed),
+            evicted_entries: self.stats.evicted_entries.load(Ordering::Relaxed),
         }
     }
 
@@ -122,10 +179,18 @@ impl DiskCache {
         }
 
         let _lock = self.lock_key(&cache_dir)?;
-        match self.try_load::<T>(key, &cache_dir) {
-            Ok(value) => Ok(value),
+        match self.try_load::<T>(key, &cache_dir, false) {
+            Ok(load) => {
+                if load.value.is_some() {
+                    self.stats.hit_count.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    self.stats.miss_count.fetch_add(1, Ordering::Relaxed);
+                }
+                Ok(load.value)
+            }
             Err(err) => {
                 warn!("Disk cache read failed: {}", err);
+                self.stats.miss_count.fetch_add(1, Ordering::Relaxed);
                 Ok(None)
             }
         }
@@ -155,24 +220,126 @@ impl DiskCache {
 
         let _lock = self.lock_key(&cache_dir)?;
 
-        match self.try_load::<T>(key, &cache_dir) {
-            Ok(Some(value)) => {
-                return Ok(CacheEntry {
-                    value,
-                    from_cache: true,
-                })
+        match self.try_load::<T>(key, &cache_dir, false) {
+            Ok(load) => {
+                if let Some(value) = load.value {
+                    self.stats.hit_count.fetch_add(1, Ordering::Relaxed);
+                    return Ok(CacheEntry {
+                        value,
+                        from_cache: true,
+                    });
+                }
+                self.stats.miss_count.fetch_add(1, Ordering::Relaxed);
             }
-            Ok(None) => {}
             Err(err) => {
                 warn!("Disk cache read failed: {}", err);
+                self.stats.miss_count.fetch_add(1, Ordering::Relaxed);
             }
         }
 
         let started = Instant::now();
         let value = build()?;
         let build_time_ms = started.elapsed().as_millis() as u64;
+        self.stats
+            .build_time_ms_total
+            .fetch_add(build_time_ms, Ordering::Relaxed);
 
         if should_cache(&value) {
+            if let Err(err) = self.store(key, &cache_dir, &value, build_time_ms) {
+                warn!("Disk cache store failed: {}", err);
+            }
+        } else {
+            debug!("Skip caching for key {}", key.key);
+        }
+
+        Ok(CacheEntry {
+            value,
+            from_cache: false,
+        })
+    }
+
+    pub fn get_or_build_with_swr<T, F, P>(
+        &self,
+        key: &DiskCacheKey,
+        build: F,
+        should_cache: P,
+    ) -> Result<CacheEntry<T>>
+    where
+        T: Serialize + DeserializeOwned + Send + 'static,
+        F: FnOnce() -> Result<T> + Send + 'static,
+        P: Fn(&T) -> bool + Send + Sync + 'static,
+    {
+        if self.disabled {
+            let value = build()?;
+            return Ok(CacheEntry {
+                value,
+                from_cache: false,
+            });
+        }
+
+        let should_cache = Arc::new(should_cache);
+        let mut build = Some(build);
+        let cache_dir = self.cache_dir(key);
+        fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
+        let allow_stale = cache_swr_enabled();
+        let mut stale_value = None;
+        let mut should_rebuild = false;
+
+        {
+            let _lock = self.lock_key(&cache_dir)?;
+            match self.try_load::<T>(key, &cache_dir, allow_stale) {
+                Ok(load) => {
+                    if let Some(value) = load.value {
+                        if load.is_expired && allow_stale {
+                            stale_value = Some(value);
+                            should_rebuild = true;
+                        } else {
+                            self.stats.hit_count.fetch_add(1, Ordering::Relaxed);
+                            return Ok(CacheEntry {
+                                value,
+                                from_cache: true,
+                            });
+                        }
+                    } else {
+                        self.stats.miss_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                Err(err) => {
+                    warn!("Disk cache read failed: {}", err);
+                    self.stats.miss_count.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+
+        if let Some(value) = stale_value {
+            self.stats.stale_hit_count.fetch_add(1, Ordering::Relaxed);
+            if should_rebuild {
+                if let Some(build) = build.take() {
+                    self.spawn_rebuild(
+                        key.clone(),
+                        cache_dir.clone(),
+                        build,
+                        Arc::clone(&should_cache),
+                    );
+                }
+            }
+            return Ok(CacheEntry {
+                value,
+                from_cache: true,
+            });
+        }
+
+        let started = Instant::now();
+        let value = build
+            .take()
+            .expect("build closure must be available")
+            ()?;
+        let build_time_ms = started.elapsed().as_millis() as u64;
+        self.stats
+            .build_time_ms_total
+            .fetch_add(build_time_ms, Ordering::Relaxed);
+
+        if (should_cache)(&value) {
             if let Err(err) = self.store(key, &cache_dir, &value, build_time_ms) {
                 warn!("Disk cache store failed: {}", err);
             }
@@ -214,7 +381,174 @@ impl DiskCache {
         Ok(DiskCacheLock { _file: file })
     }
 
-    fn try_load<T>(&self, key: &DiskCacheKey, cache_dir: &Path) -> Result<Option<T>>
+    fn spawn_rebuild<T, F, P>(
+        &self,
+        key: DiskCacheKey,
+        cache_dir: PathBuf,
+        build: F,
+        should_cache: Arc<P>,
+    ) where
+        T: Serialize + DeserializeOwned + Send + 'static,
+        F: FnOnce() -> Result<T> + Send + 'static,
+        P: Fn(&T) -> bool + Send + Sync + 'static,
+    {
+        let cache = self.clone_for_thread();
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let value = match build() {
+                Ok(value) => value,
+                Err(err) => {
+                    warn!("Disk cache SWR build failed: {}", err);
+                    return;
+                }
+            };
+            let build_time_ms = started.elapsed().as_millis() as u64;
+            cache
+                .stats
+                .build_time_ms_total
+                .fetch_add(build_time_ms, Ordering::Relaxed);
+
+            if (should_cache)(&value) {
+                if let Err(err) = cache.store(&key, &cache_dir, &value, build_time_ms) {
+                    warn!("Disk cache SWR store failed: {}", err);
+                }
+            }
+        });
+    }
+
+    fn update_manifest(&self, cache_dir: &Path, manifest: &CacheManifest) -> Result<()> {
+        let manifest_path = cache_dir.join("manifest.json");
+        let bytes = serde_json::to_vec(manifest).context("Failed to serialize manifest")?;
+        write_atomic(&manifest_path, &bytes)?;
+        Ok(())
+    }
+
+    fn cleanup_if_needed(&self) -> Result<()> {
+        if self.disabled {
+            return Ok(());
+        }
+        let interval_secs = cache_cleanup_interval_secs();
+        if let Some(interval) = interval_secs {
+            let now = current_timestamp();
+            let last = self.last_cleanup_at.load(Ordering::Relaxed);
+            if last != 0 && now.saturating_sub(last) < interval {
+                return Ok(());
+            }
+            self.last_cleanup_at.store(now, Ordering::Relaxed);
+        }
+
+        let _ = self.cleanup();
+        Ok(())
+    }
+
+    pub fn cleanup(&self) -> Result<CacheCleanupReport> {
+        if self.disabled {
+            return Ok(CacheCleanupReport {
+                removed_entries: 0,
+                freed_bytes: 0,
+            });
+        }
+
+        let _lock = cache_cleanup_lock();
+        let ttl_secs = cache_ttl_secs();
+        let max_bytes = cache_max_bytes();
+        let now = current_timestamp();
+        let mut entries = Vec::new();
+        let mut total_size = 0u64;
+        let mut removed = 0u64;
+        let mut freed = 0u64;
+
+        let version_root = self.root.join(format!("v{}", self.schema_version));
+        for manifest_path in collect_manifest_paths(&version_root) {
+            let cache_dir = match manifest_path.parent() {
+                Some(dir) => dir.to_path_buf(),
+                None => continue,
+            };
+            let manifest_bytes = match fs::read(&manifest_path) {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    let _ = fs::remove_dir_all(&cache_dir);
+                    continue;
+                }
+            };
+            let manifest: CacheManifest = match serde_json::from_slice(&manifest_bytes) {
+                Ok(parsed) => parsed,
+                Err(_) => {
+                    let _ = fs::remove_dir_all(&cache_dir);
+                    continue;
+                }
+            };
+
+            let last_used_at = if manifest.last_used_at == 0 {
+                manifest.created_at
+            } else {
+                manifest.last_used_at
+            };
+
+            let expired = ttl_secs
+                .map(|ttl| {
+                    let base_ts = match cache_ttl_mode().as_str() {
+                        "idle" => last_used_at,
+                        _ => manifest.created_at,
+                    };
+                    now >= base_ts.saturating_add(ttl)
+                })
+                .unwrap_or(false);
+
+            if expired {
+                let _ = fs::remove_dir_all(&cache_dir);
+                removed += 1;
+                freed += manifest.size_bytes;
+                self.stats.expired_entries.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+
+            total_size = total_size.saturating_add(manifest.size_bytes);
+            entries.push(CacheEntryInfo {
+                path: cache_dir,
+                size_bytes: manifest.size_bytes,
+                last_used_at,
+            });
+        }
+
+        if let Some(limit) = max_bytes {
+            if total_size > limit {
+                entries.sort_by_key(|entry| entry.last_used_at);
+                for entry in entries {
+                    if total_size <= limit {
+                        break;
+                    }
+                    let _ = fs::remove_dir_all(&entry.path);
+                    total_size = total_size.saturating_sub(entry.size_bytes);
+                    removed += 1;
+                    freed += entry.size_bytes;
+                    self.stats.evicted_entries.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+
+        Ok(CacheCleanupReport {
+            removed_entries: removed,
+            freed_bytes: freed,
+        })
+    }
+
+    fn clone_for_thread(&self) -> Self {
+        Self {
+            root: self.root.clone(),
+            schema_version: self.schema_version,
+            disabled: self.disabled,
+            stats: Arc::clone(&self.stats),
+            last_cleanup_at: Arc::clone(&self.last_cleanup_at),
+        }
+    }
+
+    fn try_load<T>(
+        &self,
+        key: &DiskCacheKey,
+        cache_dir: &Path,
+        allow_stale: bool,
+    ) -> Result<CacheLoadResult<T>>
     where
         T: DeserializeOwned,
     {
@@ -222,7 +556,7 @@ impl DiskCache {
         let artifact_path = cache_dir.join("artifact.json");
 
         if !manifest_path.exists() || !artifact_path.exists() {
-            return Ok(None);
+            return Ok(CacheLoadResult::empty());
         }
 
         let manifest_bytes =
@@ -231,7 +565,7 @@ impl DiskCache {
             Ok(parsed) => parsed,
             Err(err) => {
                 warn!("Failed to parse cache manifest: {}", err);
-                return Ok(None);
+                return Ok(CacheLoadResult::empty());
             }
         };
 
@@ -242,9 +576,34 @@ impl DiskCache {
             || manifest.settings_fingerprint != key.settings_fingerprint
         {
             debug!("Cache manifest mismatch, skipping");
-            return Ok(None);
+            return Ok(CacheLoadResult::empty());
         }
 
+        let ttl_secs = cache_ttl_secs();
+        let mut is_expired = false;
+        if let Some(ttl) = ttl_secs {
+            let base_ts = match cache_ttl_mode().as_str() {
+                "idle" => {
+                    if manifest.last_used_at == 0 {
+                        manifest.created_at
+                    } else {
+                        manifest.last_used_at
+                    }
+                }
+                _ => manifest.created_at,
+            };
+            let expires_at = base_ts.saturating_add(ttl);
+            if current_timestamp() >= expires_at {
+                is_expired = true;
+                if !allow_stale {
+                    self.stats.expired_entries.fetch_add(1, Ordering::Relaxed);
+                    let _ = fs::remove_dir_all(cache_dir);
+                    return Ok(CacheLoadResult::empty());
+                }
+            }
+        }
+
+        let load_started = Instant::now();
         let artifact_bytes =
             fs::read(&artifact_path).context("Failed to read cache artifact")?;
         let payload = match zstd::stream::decode_all(&artifact_bytes[..]) {
@@ -255,11 +614,35 @@ impl DiskCache {
             Ok(parsed) => parsed,
             Err(err) => {
                 warn!("Failed to parse cache artifact: {}", err);
-                return Ok(None);
+                return Ok(CacheLoadResult::empty());
             }
         };
 
-        Ok(Some(value))
+        let load_time_ms = load_started.elapsed().as_millis() as u64;
+        self.stats
+            .load_time_ms_total
+            .fetch_add(load_time_ms, Ordering::Relaxed);
+
+        let touch_interval = cache_touch_interval_secs();
+        let last_used_at = if manifest.last_used_at == 0 {
+            manifest.created_at
+        } else {
+            manifest.last_used_at
+        };
+        if current_timestamp().saturating_sub(last_used_at) >= touch_interval {
+            let updated = CacheManifest {
+                last_used_at: current_timestamp(),
+                hit_count: manifest.hit_count.saturating_add(1),
+                load_time_ms,
+                ..manifest
+            };
+            let _ = self.update_manifest(cache_dir, &updated);
+        }
+
+        Ok(CacheLoadResult {
+            value: Some(value),
+            is_expired,
+        })
     }
 
     fn store<T>(
@@ -289,12 +672,18 @@ impl DiskCache {
             source_fingerprint: key.source_fingerprint.clone(),
             settings_fingerprint: key.settings_fingerprint.clone(),
             created_at: current_timestamp(),
+            last_used_at: current_timestamp(),
             size_bytes,
             build_time_ms,
+            load_time_ms: 0,
+            hit_count: 0,
         };
         let manifest_bytes =
             serde_json::to_vec(&manifest).context("Failed to serialize manifest")?;
         write_atomic(&manifest_path, &manifest_bytes)?;
+
+        self.stats.stored_entries.fetch_add(1, Ordering::Relaxed);
+        let _ = self.cleanup_if_needed();
 
         Ok(())
     }
@@ -302,6 +691,28 @@ impl DiskCache {
 
 struct DiskCacheLock {
     _file: File,
+}
+
+#[derive(Debug)]
+struct CacheLoadResult<T> {
+    value: Option<T>,
+    is_expired: bool,
+}
+
+impl<T> CacheLoadResult<T> {
+    fn empty() -> Self {
+        Self {
+            value: None,
+            is_expired: false,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct CacheEntryInfo {
+    path: PathBuf,
+    size_bytes: u64,
+    last_used_at: u64,
 }
 
 fn resolve_cache_root() -> PathBuf {
@@ -325,6 +736,59 @@ fn is_cache_disabled() -> bool {
             .as_str(),
         "1" | "true" | "yes"
     )
+}
+
+fn cache_ttl_secs() -> Option<u64> {
+    std::env::var("BSL_CACHE_TTL_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+}
+
+fn cache_max_bytes() -> Option<u64> {
+    std::env::var("BSL_CACHE_MAX_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+}
+
+fn cache_cleanup_interval_secs() -> Option<u64> {
+    std::env::var("BSL_CACHE_CLEANUP_INTERVAL_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .or(Some(300))
+}
+
+fn cache_touch_interval_secs() -> u64 {
+    std::env::var("BSL_CACHE_TOUCH_INTERVAL_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(60)
+}
+
+fn cache_ttl_mode() -> String {
+    std::env::var("BSL_CACHE_TTL_MODE")
+        .ok()
+        .unwrap_or_else(|| "created".to_string())
+}
+
+fn cache_swr_enabled() -> bool {
+    matches!(
+        std::env::var("BSL_CACHE_SWR")
+            .unwrap_or_else(|_| "1".to_string())
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes"
+    )
+}
+
+fn cache_cleanup_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn sanitize_component(value: &str) -> String {
@@ -357,11 +821,34 @@ fn current_timestamp() -> u64 {
         .as_secs()
 }
 
+fn collect_manifest_paths(root: &Path) -> Vec<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    let mut manifests = Vec::new();
+
+    while let Some(dir) = stack.pop() {
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.file_name().and_then(|n| n.to_str()) == Some("manifest.json") {
+                manifests.push(path);
+            }
+        }
+    }
+
+    manifests
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Barrier};
+    use std::sync::{Arc, Barrier, Mutex, OnceLock};
     use std::thread;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -377,9 +864,48 @@ mod tests {
             .with_config_id("config")
     }
 
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, prev }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(prev) = &self.prev {
+                std::env::set_var(self.key, prev);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn test_disk_cache_roundtrip() {
+        let _guard = env_lock();
         let temp = TempDir::new().unwrap();
+        let _disable = EnvGuard::remove("BSL_CACHE_DISABLE");
         let cache = DiskCache::with_root(temp.path().to_path_buf(), 1).unwrap();
         let key = test_key();
 
@@ -397,7 +923,9 @@ mod tests {
 
     #[test]
     fn test_disk_cache_schema_mismatch() {
+        let _guard = env_lock();
         let temp = TempDir::new().unwrap();
+        let _disable = EnvGuard::remove("BSL_CACHE_DISABLE");
         let key = test_key();
         let builds = Arc::new(AtomicUsize::new(0));
 
@@ -424,7 +952,9 @@ mod tests {
 
     #[test]
     fn test_disk_cache_lock_single_builder() {
+        let _guard = env_lock();
         let temp = TempDir::new().unwrap();
+        let _disable = EnvGuard::remove("BSL_CACHE_DISABLE");
         let cache = Arc::new(DiskCache::with_root(temp.path().to_path_buf(), 1).unwrap());
         let key = Arc::new(test_key());
         let builds = Arc::new(AtomicUsize::new(0));
@@ -459,7 +989,9 @@ mod tests {
 
     #[test]
     fn test_disk_cache_skip_store() {
+        let _guard = env_lock();
         let temp = TempDir::new().unwrap();
+        let _disable = EnvGuard::remove("BSL_CACHE_DISABLE");
         let cache = DiskCache::with_root(temp.path().to_path_buf(), 1).unwrap();
         let key = test_key();
 
@@ -473,5 +1005,115 @@ mod tests {
             .unwrap();
         assert!(!entry.from_cache);
         assert_eq!(entry.value.value, "b");
+    }
+
+    #[test]
+    fn test_disk_cache_ttl_expired() {
+        let _guard = env_lock();
+        let temp = TempDir::new().unwrap();
+        let _ttl = EnvGuard::set("BSL_CACHE_TTL_SECS", "1");
+        let _swr = EnvGuard::set("BSL_CACHE_SWR", "0");
+        let _disable = EnvGuard::remove("BSL_CACHE_DISABLE");
+        let cache = DiskCache::with_root(temp.path().to_path_buf(), 1).unwrap();
+        let key = test_key();
+
+        let entry = cache
+            .get_or_build(&key, || Ok(TestValue { value: "old".into() }))
+            .unwrap();
+        assert!(!entry.from_cache);
+
+        let manifest_path = cache.cache_dir(&key).join("manifest.json");
+        let manifest_bytes = fs::read(&manifest_path).unwrap();
+        let mut manifest: CacheManifest = serde_json::from_slice(&manifest_bytes).unwrap();
+        manifest.created_at = 0;
+        manifest.last_used_at = 0;
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+        write_atomic(&manifest_path, &manifest_bytes).unwrap();
+
+        let entry = cache
+            .get_or_build(&key, || Ok(TestValue { value: "new".into() }))
+            .unwrap();
+        assert!(!entry.from_cache);
+        assert_eq!(entry.value.value, "new");
+    }
+
+    #[test]
+    fn test_disk_cache_swr_rebuild() {
+        let _guard = env_lock();
+        let temp = TempDir::new().unwrap();
+        let _ttl = EnvGuard::set("BSL_CACHE_TTL_SECS", "1");
+        let _swr = EnvGuard::set("BSL_CACHE_SWR", "1");
+        let _disable = EnvGuard::remove("BSL_CACHE_DISABLE");
+        let cache = DiskCache::with_root(temp.path().to_path_buf(), 1).unwrap();
+        let key = test_key();
+
+        let entry = cache
+            .get_or_build(&key, || Ok(TestValue { value: "old".into() }))
+            .unwrap();
+        assert!(!entry.from_cache);
+        let stats_before = cache.stats().stored_entries;
+
+        let manifest_path = cache.cache_dir(&key).join("manifest.json");
+        let manifest_bytes = fs::read(&manifest_path).unwrap();
+        let mut manifest: CacheManifest = serde_json::from_slice(&manifest_bytes).unwrap();
+        manifest.created_at = 0;
+        manifest.last_used_at = 0;
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+        write_atomic(&manifest_path, &manifest_bytes).unwrap();
+
+        let entry = cache
+            .get_or_build_with_swr(
+                &key,
+                || Ok(TestValue { value: "new".into() }),
+                |_| true,
+            )
+            .unwrap();
+        assert!(entry.from_cache);
+        assert_eq!(entry.value.value, "old");
+
+        for _ in 0..100 {
+            if cache.stats().stored_entries >= stats_before + 1 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let value = cache.try_get::<TestValue>(&key).unwrap();
+        assert!(value.is_some(), "Ожидали обновлённый кэш");
+        assert_eq!(value.unwrap().value, "new");
+    }
+
+    #[test]
+    fn test_disk_cache_cleanup_by_size() {
+        let _guard = env_lock();
+        let temp = TempDir::new().unwrap();
+        let _interval = EnvGuard::set("BSL_CACHE_CLEANUP_INTERVAL_SECS", "1");
+        let _disable = EnvGuard::remove("BSL_CACHE_DISABLE");
+        let cache = DiskCache::with_root(temp.path().to_path_buf(), 1).unwrap();
+
+        let key1 = DiskCacheKey::new("test", "key1", "id1", "fp1", "settings");
+        let key2 = DiskCacheKey::new("test", "key2", "id2", "fp2", "settings");
+
+        let entry = cache
+            .get_or_build(&key1, || Ok(TestValue { value: "a".into() }))
+            .unwrap();
+        assert!(!entry.from_cache);
+
+        let manifest_path = cache.cache_dir(&key1).join("manifest.json");
+        let manifest_bytes = fs::read(&manifest_path).unwrap();
+        let manifest: CacheManifest = serde_json::from_slice(&manifest_bytes).unwrap();
+
+        let _max = EnvGuard::set("BSL_CACHE_MAX_BYTES", &manifest.size_bytes.to_string());
+        thread::sleep(Duration::from_secs(1));
+
+        let entry = cache
+            .get_or_build(&key2, || Ok(TestValue { value: "b".into() }))
+            .unwrap();
+        assert!(!entry.from_cache);
+
+        let first = cache.try_get::<TestValue>(&key1).unwrap();
+        let second = cache.try_get::<TestValue>(&key2).unwrap();
+        assert!(first.is_none(), "Ожидали вытеснение первого entry");
+        assert!(second.is_some(), "Ожидали сохранение второго entry");
     }
 }

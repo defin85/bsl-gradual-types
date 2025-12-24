@@ -13,7 +13,7 @@ pub struct ModuleIndexProgress {
     pub module_path: PathBuf,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IndexedConfigSignatures {
     pub config_methods: Vec<(String, bsl_shared::domain::signature_index::MethodSignature)>,
     pub global_functions: Vec<(String, bsl_shared::domain::signature_index::MethodSignature)>,

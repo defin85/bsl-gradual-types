@@ -17,6 +17,22 @@ const fs = require('fs');
 const FRONTEND_DIR = path.resolve(__dirname, '../../frontend');
 const WEBVIEW_DIST = path.resolve(__dirname, '../media/webview');
 const TEMP_DIR = path.resolve(__dirname, '../.tmp-wasm-build');
+const trunkEnv = (() => {
+    const env = { ...process.env };
+    if (env.NO_COLOR === '1') {
+        env.NO_COLOR = 'true';
+    } else if (env.NO_COLOR === '0') {
+        env.NO_COLOR = 'false';
+    }
+    if (env.TRUNK_NO_COLOR === '1') {
+        env.TRUNK_NO_COLOR = 'true';
+    } else if (env.TRUNK_NO_COLOR === '0') {
+        env.TRUNK_NO_COLOR = 'false';
+    } else if (env.NO_COLOR && !env.TRUNK_NO_COLOR) {
+        env.TRUNK_NO_COLOR = 'true';
+    }
+    return env;
+})();
 
 // Parse arguments
 const args = process.argv.slice(2);
@@ -50,6 +66,7 @@ for (const webview of webviews) {
             `trunk build ${releaseArg} --dist ${tempDist} --features vscode ${webview}.html`,
             {
                 cwd: FRONTEND_DIR,
+                env: trunkEnv,
                 stdio: 'inherit',
                 shell: true
             }

@@ -349,7 +349,7 @@ impl SystemCoordinator {
         syntax_path: &Path,
         progress_tx: &Option<mpsc::UnboundedSender<ProgressUpdate>>,
     ) -> Result<SyntaxHelperLoadResult, StartupError> {
-        let mut syntax_parser = SyntaxHelperLoader::new();
+        let syntax_parser = SyntaxHelperLoader::new();
 
         // HBK Recovery: Восстанавливаем .hbk файлы перед парсингом
         info!("Проверяем наличие .hbk файлов для восстановления...");
@@ -412,16 +412,19 @@ impl SystemCoordinator {
 
         let cache_key = self.build_syntax_helper_cache_key(syntax_path, &syntax_parser)?;
         let cache = self.disk_cache();
+        let syntax_path = syntax_path.to_path_buf();
+        let progress_tx = progress_tx.clone();
         let entry = cache
-            .get_or_build_with(
+            .get_or_build_with_swr(
                 &cache_key,
-                || {
+                move || {
                     let mut parse_ok = true;
+                    let mut syntax_parser = SyntaxHelperLoader::new();
                     // MILESTONE 2.20.2.3: Парсим с прогрессом если передан callback
                     if let Some(ref tx) = progress_tx {
                         let tx_clone = tx.clone();
                         match syntax_parser.parse_with_progress(
-                            syntax_path,
+                            &syntax_path,
                             move |update: ProgressUpdate| {
                                 let _ = tx_clone.send(update); // Отправляем в channel
                             },
@@ -437,7 +440,7 @@ impl SystemCoordinator {
                         }
                     } else {
                         // Обратная совместимость: парсим без прогресса
-                        match syntax_parser.parse_syntax_helper(syntax_path) {
+                        match syntax_parser.parse_syntax_helper(&syntax_path) {
                             Ok(()) => {
                                 info!("Парсинг синтаксис-помощника завершен успешно");
                             }
@@ -573,10 +576,11 @@ impl SystemCoordinator {
         let platform_raw_data = if let Some(meta) = cache_meta {
             let cache_key = self.build_platform_raw_cache_key(meta);
             let cache = self.disk_cache();
+            let database_for_build = database.clone();
             let entry = cache
-                .get_or_build_with(
+                .get_or_build_with_swr(
                     &cache_key,
-                    || Ok(convert_syntax_helper_to_raw(&database)),
+                    move || Ok(convert_syntax_helper_to_raw(&database_for_build)),
                     |types| !types.is_empty(),
                 )
                 .map_err(StartupError::PlatformTypesError)?;

@@ -20,9 +20,10 @@ pub mod ast {
     pub use bsl_shared::domain::code_location::CompilerDirective;
     pub use bsl_shared::domain::types::{ErrorType, ParseError};
     pub use bsl_shared::ir::Span;
+    use serde::{Deserialize, Serialize};
 
     /// Результат парсинга с поддержкой частичного восстановления
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct ParseResult {
         pub program: Program,
         pub syntax_errors: Vec<ParseError>,
@@ -51,12 +52,12 @@ pub mod ast {
         }
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Program {
         pub statements: Vec<Statement>,
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum Statement {
         Assignment {
             target: Expression,
@@ -161,7 +162,7 @@ pub mod ast {
         },
     }
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
     pub enum Expression {
         Identifier {
             name: String,

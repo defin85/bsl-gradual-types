@@ -105,7 +105,7 @@ pub async fn get_hover_info_with_file_path(
 
             // Parse BSL code (only on cache MISS)
             let parse_result = parser
-                .parse(file_content)
+                .parse_with_cache_for_file(file_content, file_path)
                 .map_err(|e| anyhow::anyhow!("Parse error for hover: {}", e))?;
 
             // Convert AST -> IR for Inline Scope Analysis

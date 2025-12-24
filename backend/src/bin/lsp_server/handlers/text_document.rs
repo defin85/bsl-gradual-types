@@ -22,12 +22,21 @@ pub async fn handle_did_open(
     settings: &BslSettings,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
+    let file_path_opt = uri
+        .to_file_path()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string());
 
     // IR cache preheating is done in server.rs
 
     // PHASE 1: Syntax validation
     if let Some(ref service) = type_service {
-        match service.parse_and_validate(text) {
+        let parse_result = if let Some(ref path) = file_path_opt {
+            service.parse_and_validate_for_file(text, path)
+        } else {
+            service.parse_and_validate(text)
+        };
+        match parse_result {
             Ok(errors) => {
                 if !errors.is_empty() {
                     info!("Found {} syntax errors in {}", errors.len(), uri);
@@ -68,11 +77,7 @@ pub async fn handle_did_open(
             let detail_level =
                 bsl_shared::formatting::DetailLevel::parse(&settings.diagnostics.detail_level);
 
-            let file_path = uri
-                .to_file_path()
-                .ok()
-                .map(|p| p.to_string_lossy().to_string());
-            let semantic_result = match file_path {
+            let semantic_result = match file_path_opt {
                 Some(ref path) => service
                     .validate_semantics_for_file(text, path, Some(detail_level))
                     .await,
@@ -111,6 +116,10 @@ pub async fn handle_did_change(
     settings: &BslSettings,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
+    let file_path_opt = uri
+        .to_file_path()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string());
 
     // Invalidate IR cache
     let uri_str = uri.to_string();
@@ -139,13 +148,13 @@ pub async fn handle_did_change(
         })
         .collect();
 
-    let file_path = uri
+    let file_path_buf = uri
         .to_file_path()
         .unwrap_or_else(|_| std::path::PathBuf::from(uri.path()));
 
     if let Some(ref service) = type_service {
         if let Err(e) = service
-            .parse_incremental(file_path, updated_text.to_string(), text_edits)
+            .parse_incremental(file_path_buf, updated_text.to_string(), text_edits)
             .await
         {
             error!("Incremental parsing failed: {}", e);
@@ -156,7 +165,12 @@ pub async fn handle_did_change(
 
     // Syntax validation
     if let Some(ref service) = type_service {
-        match service.parse_and_validate(updated_text) {
+        let parse_result = if let Some(ref path) = file_path_opt {
+            service.parse_and_validate_for_file(updated_text, path)
+        } else {
+            service.parse_and_validate(updated_text)
+        };
+        match parse_result {
             Ok(errors) => {
                 if !errors.is_empty() {
                     info!("Found {} syntax errors in {}", errors.len(), uri);
@@ -195,11 +209,7 @@ pub async fn handle_did_change(
             let detail_level =
                 bsl_shared::formatting::DetailLevel::parse(&settings.diagnostics.detail_level);
 
-            let file_path = uri
-                .to_file_path()
-                .ok()
-                .map(|p| p.to_string_lossy().to_string());
-            let semantic_result = match file_path {
+            let semantic_result = match file_path_opt {
                 Some(ref path) => service
                     .validate_semantics_for_file(updated_text, path, Some(detail_level))
                     .await,

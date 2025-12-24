@@ -47,7 +47,16 @@ impl BslLanguageServer {
 
         // PHASE 1: Syntax validation
         if let Some(type_service) = self.get_type_service() {
-            match type_service.parse_and_validate(text) {
+            let file_path = uri
+                .to_file_path()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string());
+            let parse_result = if let Some(ref path) = file_path {
+                type_service.parse_and_validate_for_file(text, path)
+            } else {
+                type_service.parse_and_validate(text)
+            };
+            match parse_result {
                 Ok(errors) => {
                     if !errors.is_empty() {
                         info!(

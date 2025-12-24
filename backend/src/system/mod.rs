@@ -3,6 +3,7 @@
 
 // === SIMPLIFIED ARCHITECTURE ONLY ===
 pub mod basic_observability;
+pub mod ast_cache;
 pub mod disk_cache; // Milestone D1: Disk cache API
 pub mod fs_utils; // Keep utility functions
 pub mod ir_cache; // Milestone 2.13: IR кеширование для LSP hover
@@ -16,6 +17,7 @@ pub mod tree_sitter_adapter;
 
 // Re-export simplified components (specific imports to avoid conflicts)
 pub use basic_observability::{BasicObservability, SimpleMetrics, StructuredLogger};
+pub use ast_cache::{AstCache, AstCacheStats};
 pub use disk_cache::{
     CacheCleanupReport, CacheEntry, CacheManifest, DiskCache, DiskCacheKey,
     DiskCacheStatsSnapshot,

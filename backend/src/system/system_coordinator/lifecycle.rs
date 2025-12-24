@@ -179,10 +179,10 @@ impl SystemCoordinator {
 
         // MILESTONE 3.17: Обновляем ParserCoordinator с TypeResolver для резолюции active_facet
         {
-            let new_parser = Arc::new(ParserCoordinator::new_with_resolver(
-                repository.clone(),
-                resolver.clone(),
-            ));
+            let new_parser = Arc::new(
+                ParserCoordinator::new_with_resolver(repository.clone(), resolver.clone())
+                    .with_disk_cache(self.disk_cache()),
+            );
             let mut parser_guard = self.parser.write().unwrap_or_else(|poisoned| {
                 warn!("Parser RwLock poisoned (write), recovering data.");
                 poisoned.into_inner()
@@ -228,6 +228,14 @@ impl SystemCoordinator {
             if let Some(platform_meta) = syntax_result.cache_meta.as_ref() {
                 match self.build_config_combined_cache_meta(config_path) {
                     Ok(config_meta) => {
+                        let parser_guard = self.parser.read().unwrap_or_else(|poisoned| {
+                            warn!("Parser RwLock poisoned (read), recovering data.");
+                            poisoned.into_inner()
+                        });
+                        parser_guard.set_cache_scope(
+                            Some(config_meta.project_id.clone()),
+                            Some(config_meta.config_set_id.clone()),
+                        );
                         let key = self.build_combined_cache_key(platform_meta, &config_meta);
                         combined_cache_key = Some(key.clone());
                         let cache = self.disk_cache();

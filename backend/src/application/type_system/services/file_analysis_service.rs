@@ -31,7 +31,7 @@ pub async fn analyze_file(parser: &ParserCoordinator, path: &str) -> Result<Cach
         .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", path, e))?;
 
     let _parse_result = parser
-        .parse(&file_content)
+        .parse_with_cache_for_file(&file_content, path)
         .map_err(|e| anyhow::anyhow!("Parse error for file {}: {}", path, e))?;
 
     let analysis_result = CacheAnalysisResult {
@@ -75,7 +75,7 @@ pub async fn analyze_file_content(
 
     // 2. Parse file
     let parse_result = parser
-        .parse(content)
+        .parse_with_cache_for_file(content, file_path)
         .map_err(|e| anyhow::anyhow!("Parse error for content {}: {}", file_path, e))?;
 
     info!(

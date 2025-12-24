@@ -189,15 +189,30 @@
 
 Цель: ускорить открытие модулей и повторные операции над AST.
 
+Статус: DONE
+
 L1 in-memory:
 - LRU по открытым документам.
-- Инвалидация по версии документа.
+- Инвалидация по хешу контента (LSP версия меняется вместе с хешем).
 
 L2 disk snapshot:
 - `source_kind=ast`, ключ включает `project_id/config_id`, `file_path`, `file_hash`, `parser_settings`.
 - Сериализация AST + минимальный индекс (если нужен).
 
 Метрики:
+
+Задачи:
+- L1 LRU для `ParseResult` по хешу содержимого.
+- L2 диск через `DiskCache` для `source_kind=ast`.
+- Интеграция в LSP (syntax/hover/semantics) через cache-aware парсинг.
+
+Тесты:
+- Unit: `ast_cache_hits_misses_and_evictions`.
+
+Факты:
+- Добавлен `AstCache` (LRU) и интеграция в `ParserCoordinator`.
+- AST диск-кэш: `source_kind=ast`, fingerprint по контенту, scope по `project_id/config_id` когда известны.
+- LSP синтаксическая проверка и hover используют `parse_with_cache_for_file`.
 - `ast_parse_time_ms`, `open_file_latency_ms`, `ast_cache_hit/miss`.
 
 Тесты:

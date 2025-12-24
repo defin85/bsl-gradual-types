@@ -402,6 +402,14 @@ impl TypeSystemService {
         validation_service::parse_and_validate(&self.parser, source)
     }
 
+    pub fn parse_and_validate_for_file(
+        &self,
+        source: &str,
+        file_path: &str,
+    ) -> Result<Vec<ParseError>> {
+        validation_service::parse_and_validate_for_file(&self.parser, source, file_path)
+    }
+
     /// Validate code semantics via IR traversal (Milestone 3.7)
     pub async fn validate_semantics(
         &self,

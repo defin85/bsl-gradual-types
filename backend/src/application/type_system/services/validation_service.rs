@@ -87,7 +87,7 @@ pub async fn validate_semantics_with_file_path(
 ) -> Result<Vec<TypeDiagnostic>> {
     // 1. Parse
     let parse_result = parser
-        .parse(code)
+        .parse_with_cache_for_file(code, file_path)
         .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
 
     // 2. If syntax errors exist -> semantic validation is meaningless
@@ -162,6 +162,19 @@ pub fn parse_and_validate(parser: &ParserCoordinator, source: &str) -> Result<Ve
         .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
 
     // Return syntax errors (may be empty Vec)
+    Ok(parse_result.syntax_errors)
+}
+
+/// Parse and validate BSL code with file path (LSP open/change).
+pub fn parse_and_validate_for_file(
+    parser: &ParserCoordinator,
+    source: &str,
+    file_path: &str,
+) -> Result<Vec<ParseError>> {
+    let parse_result = parser
+        .parse_with_cache_for_file(source, file_path)
+        .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
+
     Ok(parse_result.syntax_errors)
 }
 

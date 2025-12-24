@@ -81,14 +81,7 @@ impl SystemCoordinator {
         // 2. IR caching (Milestone 2.13)
         let ir_cache = Arc::new(IrCache::new(100)); // 100 файлов (~10 MB RAM)
 
-        // 3. Simple parsing (будет обновлён с TypeResolver в start_with_paths_blocking)
-        // Milestone 3.17: Используем RwLock для возможности обновления
-        let parser = Arc::new(RwLock::new(Arc::new(ParserCoordinator::with_fallback())));
-
-        // 4. Basic observability
-        let observability = Arc::new(BasicObservability::default());
-
-        // 5. Disk cache (Milestone D1)
+        // 3. Disk cache (Milestone D1)
         let disk_cache = match DiskCache::new(1) {
             Ok(cache) => Arc::new(cache),
             Err(err) => {
@@ -96,6 +89,15 @@ impl SystemCoordinator {
                 Arc::new(DiskCache::disabled(1))
             }
         };
+
+        // 4. Simple parsing (будет обновлён с TypeResolver в start_with_paths_blocking)
+        // Milestone 3.17: Используем RwLock для возможности обновления
+        let parser = Arc::new(RwLock::new(Arc::new(
+            ParserCoordinator::with_fallback().with_disk_cache(disk_cache.clone()),
+        )));
+
+        // 5. Basic observability
+        let observability = Arc::new(BasicObservability::default());
 
         Self {
             cache,

@@ -5,17 +5,23 @@
 #![allow(clippy::explicit_counter_loop)]
 
 use anyhow::Result;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, RwLock};
 use tracing::{debug, error, warn};
 use tree_sitter::{InputEdit, Parser, Point};
 
 use crate::parsing::ParseResult;
+use crate::system::ast_cache::AstCache;
+use crate::system::disk_cache::{DiskCache, DiskCacheKey};
 use crate::system::tree_cache::{hash_content, TreeCache};
 use crate::system::tree_sitter_adapter::TreeSitterAdapter;
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::parsing::Parser as ParserTrait; // Milestone 2.8: Parser trait
+
+fn ast_cache_key(content: &str) -> [u8; 32] {
+    *blake3::hash(content.as_bytes()).as_bytes()
+}
 
 /// Текстовое изменение для инкрементального парсинга (из LSP)
 #[derive(Debug, Clone)]
@@ -37,9 +43,18 @@ pub struct TextEdit {
 pub struct ParserCoordinator {
     tree_sitter: TreeSitterParser,
     tree_cache: TreeCache,
+    ast_cache: AstCache,
+    disk_cache: Arc<DiskCache>,
+    cache_scope: Arc<RwLock<AstCacheScope>>,
     repository: Arc<dyn TypeRepository>,
     /// TypeResolver для резолюции типов с active_facet (Milestone 3.17)
     resolver: Option<Arc<TypeResolver>>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct AstCacheScope {
+    project_id: Option<String>,
+    config_id: Option<String>,
 }
 
 /// TreeSitter парсер с tree-sitter-bsl
@@ -68,6 +83,9 @@ impl ParserCoordinator {
         Self {
             tree_sitter: TreeSitterParser::new(),
             tree_cache: TreeCache::new(),
+            ast_cache: AstCache::new_from_env(),
+            disk_cache: Arc::new(DiskCache::disabled(1)),
+            cache_scope: Arc::new(RwLock::new(AstCacheScope::default())),
             repository,
             resolver: None,
         }
@@ -98,6 +116,9 @@ impl ParserCoordinator {
         Self {
             tree_sitter: TreeSitterParser::new(),
             tree_cache: TreeCache::new(),
+            ast_cache: AstCache::new_from_env(),
+            disk_cache: Arc::new(DiskCache::disabled(1)),
+            cache_scope: Arc::new(RwLock::new(AstCacheScope::default())),
             repository,
             resolver: Some(resolver),
         }
@@ -132,30 +153,46 @@ impl ParserCoordinator {
         Self {
             tree_sitter: TreeSitterParser::new(),
             tree_cache: TreeCache::new(),
+            ast_cache: AstCache::new_from_env(),
+            disk_cache: Arc::new(DiskCache::disabled(1)),
+            cache_scope: Arc::new(RwLock::new(AstCacheScope::default())),
             repository: empty_repo,
             resolver: None,
         }
     }
 
+    pub fn with_disk_cache(mut self, disk_cache: Arc<DiskCache>) -> Self {
+        self.disk_cache = disk_cache;
+        self
+    }
+
+    pub fn set_cache_scope(&self, project_id: Option<String>, config_id: Option<String>) {
+        let mut scope = self
+            .cache_scope
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        scope.project_id = project_id;
+        scope.config_id = config_id;
+    }
+
+    fn cache_scope_snapshot(&self) -> AstCacheScope {
+        self.cache_scope
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
     /// Парсинг через Tree-sitter с поддержкой ParseResult (Milestone 2.7 Task 3)
     pub fn parse(&self, content: &str) -> Result<ParseResult, String> {
-        match self.tree_sitter.parse(content) {
-            Ok(result) => {
-                if result.has_errors() {
-                    warn!(
-                        "TreeSitter parsing completed with {} syntax errors",
-                        result.syntax_errors.len()
-                    );
-                } else {
-                    debug!("TreeSitter parsing successful");
-                }
-                Ok(result)
-            }
-            Err(tree_sitter_error) => {
-                error!("TreeSitter parsing failed: {}", tree_sitter_error);
-                Err(format!("Tree-sitter parsing failed: {}", tree_sitter_error))
-            }
-        }
+        self.parse_with_cache_internal(content, None)
+    }
+
+    pub fn parse_with_cache_for_file(
+        &self,
+        content: &str,
+        file_path: &str,
+    ) -> Result<ParseResult, String> {
+        self.parse_with_cache_internal(content, Some(file_path))
     }
 
     /// Инкрементальный парсинг для LSP textDocument/didChange с ParseResult (Milestone 2.7 Task 3)
@@ -165,14 +202,17 @@ impl ParserCoordinator {
         new_content: String,
         edits: Vec<TextEdit>,
     ) -> Result<ParseResult, String> {
-        let new_hash = hash_content(&new_content);
+        let new_hash = ast_cache_key(&new_content);
+        let new_tree_hash = hash_content(&new_content);
 
         // Попытка получить старое дерево из кеша
         if let Some((old_tree, old_source, old_hash)) = self.tree_cache.get(&file_path) {
             // Проверяем, нужно ли обновление
-            if old_hash == new_hash {
+            if old_hash == new_tree_hash {
                 debug!("Content unchanged, using cached tree");
-                return TreeSitterAdapter::convert_tree(&old_tree, &new_content);
+                let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                self.store_ast_memory(new_hash, &result);
+                return Ok(result);
             }
 
             // Применяем инкрементальное обновление
@@ -187,7 +227,8 @@ impl ParserCoordinator {
                 Ok((new_tree, program)) => {
                     // Кешируем новое дерево
                     self.tree_cache
-                        .update(&file_path, new_tree, new_content, new_hash);
+                        .update(&file_path, new_tree, new_content.clone(), new_tree_hash);
+                    self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
                     return Ok(program);
                 }
                 Err(e) => {
@@ -203,6 +244,7 @@ impl ParserCoordinator {
         debug!("Full parse for file: {:?}", file_path);
         match self.tree_sitter.parse(&new_content) {
             Ok(program) => {
+                self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
                 // Кешируем дерево для будущих инкрементальных обновлений
                 // TODO: получить tree из парсера
                 Ok(program)
@@ -212,6 +254,128 @@ impl ParserCoordinator {
                 Err(format!("Tree-sitter parsing failed: {}", e))
             }
         }
+    }
+
+    fn parse_with_cache_internal(
+        &self,
+        content: &str,
+        file_path: Option<&str>,
+    ) -> Result<ParseResult, String> {
+        let content_hash = ast_cache_key(content);
+
+        if let Some(cached) = self.ast_cache.get(content_hash) {
+            return Ok((*cached).clone());
+        }
+
+        if let Some(path) = file_path {
+            if Path::new(path).exists() {
+                if let Ok(Some(cached)) = self.try_load_ast_from_disk(path, content) {
+                    let cached_arc = Arc::new(cached.clone());
+                    self.ast_cache.put(content_hash, cached_arc);
+                    return Ok(cached);
+                }
+            }
+        }
+
+        match self.tree_sitter.parse(content) {
+            Ok(result) => {
+                if result.has_errors() {
+                    warn!(
+                        "TreeSitter parsing completed with {} syntax errors",
+                        result.syntax_errors.len()
+                    );
+                } else {
+                    debug!("TreeSitter parsing successful");
+                }
+
+                self.store_ast_cache(content_hash, &result, file_path.map(Path::new), content);
+                Ok(result)
+            }
+            Err(tree_sitter_error) => {
+                error!("TreeSitter parsing failed: {}", tree_sitter_error);
+                Err(format!("Tree-sitter parsing failed: {}", tree_sitter_error))
+            }
+        }
+    }
+
+    fn store_ast_cache(
+        &self,
+        content_hash: [u8; 32],
+        result: &ParseResult,
+        file_path: Option<&Path>,
+        content: &str,
+    ) {
+        self.store_ast_memory(content_hash, result);
+
+        if let Some(path) = file_path {
+            if path.exists() {
+                let path_str = path.to_string_lossy();
+                let _ = self.store_ast_in_disk(&path_str, content, result);
+            }
+        }
+    }
+
+    fn store_ast_memory(&self, content_hash: [u8; 32], result: &ParseResult) {
+        self.ast_cache
+            .put(content_hash, Arc::new(result.clone()));
+    }
+
+    fn try_load_ast_from_disk(
+        &self,
+        file_path: &str,
+        content: &str,
+    ) -> Result<Option<ParseResult>, String> {
+        let key = self.build_ast_cache_key(file_path, content);
+        self.disk_cache
+            .try_get::<ParseResult>(&key)
+            .map_err(|e| format!("AST disk cache read failed: {}", e))
+    }
+
+    fn store_ast_in_disk(
+        &self,
+        file_path: &str,
+        content: &str,
+        result: &ParseResult,
+    ) -> Result<(), String> {
+        let key = self.build_ast_cache_key(file_path, content);
+        self.disk_cache
+            .get_or_build_with(&key, || Ok(result.clone()), |_| true)
+            .map(|_| ())
+            .map_err(|e| format!("AST disk cache write failed: {}", e))
+    }
+
+    fn build_ast_cache_key(&self, file_path: &str, content: &str) -> DiskCacheKey {
+        let canonical = std::fs::canonicalize(file_path)
+            .ok()
+            .unwrap_or_else(|| PathBuf::from(file_path));
+        let source_identity = canonical.to_string_lossy().to_string();
+        let source_fingerprint = blake3::hash(content.as_bytes()).to_hex().to_string();
+        let settings_fingerprint = format!("ast_v1|{}", env!("CARGO_PKG_VERSION"));
+        let key_hash = blake3::hash(
+            format!(
+                "{}|{}|{}",
+                source_identity, source_fingerprint, settings_fingerprint
+            )
+            .as_bytes(),
+        )
+        .to_hex()
+        .to_string();
+
+        let scope = self.cache_scope_snapshot();
+        let mut key = DiskCacheKey::new(
+            "ast",
+            key_hash,
+            source_identity,
+            source_fingerprint,
+            settings_fingerprint,
+        );
+        if let Some(project_id) = scope.project_id {
+            key = key.with_project_id(project_id);
+        }
+        if let Some(config_id) = scope.config_id {
+            key = key.with_config_id(config_id);
+        }
+        key
     }
 
     /// Парсинг с конвертацией в IR (Milestone 2.8)
@@ -240,7 +404,7 @@ impl ParserCoordinator {
         use crate::application::ast_to_ir::AstToIrConverter;
 
         // 1. Парсинг в AST (tree-sitter) с поддержкой ParseResult
-        let parse_result = self.parse(content)?;
+        let parse_result = self.parse_with_cache_for_file(content, file_path)?;
 
         // Логируем синтаксические ошибки, если они есть
         if parse_result.has_errors() {

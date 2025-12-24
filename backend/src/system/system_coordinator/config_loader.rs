@@ -26,6 +26,21 @@ struct ConfigLayerBCachePayload {
     indexed: IndexedConfigSignatures,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct CombinedConfigCachePayload {
+    pub raw_types: Vec<RawTypeData>,
+    pub indexed: IndexedConfigSignatures,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ConfigCombinedCacheMeta {
+    pub project_id: String,
+    pub config_set_id: String,
+    pub source_identity: String,
+    pub source_fingerprint: String,
+    pub settings_fingerprint: String,
+}
+
 impl SystemCoordinator {
     fn apply_prefix_for_indexing(
         metadata: &[UniversalMetadataObject],
@@ -227,6 +242,42 @@ impl SystemCoordinator {
     where
         F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
     {
+        let (result, _payload) = self.load_all_configurations_with_progress_inner(
+            config_path,
+            progress_callback,
+            false,
+        )?;
+        Ok(result)
+    }
+
+    pub(crate) fn load_all_configurations_with_progress_collect<F>(
+        &self,
+        config_path: &Path,
+        progress_callback: F,
+    ) -> Result<(LoadMetadataResult, CombinedConfigCachePayload)>
+    where
+        F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
+    {
+        let (result, payload) = self.load_all_configurations_with_progress_inner(
+            config_path,
+            progress_callback,
+            true,
+        )?;
+        let payload = payload.ok_or_else(|| {
+            anyhow::anyhow!("Combined config payload not collected")
+        })?;
+        Ok((result, payload))
+    }
+
+    fn load_all_configurations_with_progress_inner<F>(
+        &self,
+        config_path: &Path,
+        progress_callback: F,
+        collect_payload: bool,
+    ) -> Result<(LoadMetadataResult, Option<CombinedConfigCachePayload>)>
+    where
+        F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
+    {
         use crate::data::loaders::config_metadata_parser::{
             ConfigurationDiscovery, ConfigurationType,
         };
@@ -255,6 +306,15 @@ impl SystemCoordinator {
         let repository = engine.get_repository();
 
         let config_set_id = config_set_id_from_configs(&configurations);
+
+        let mut combined_payload = if collect_payload {
+            Some(CombinedConfigCachePayload {
+                raw_types: Vec::new(),
+                indexed: IndexedConfigSignatures::default(),
+            })
+        } else {
+            None
+        };
 
         for config_info in configurations {
             info!(
@@ -417,6 +477,11 @@ impl SystemCoordinator {
             let def_locations_count = payload.indexed.definition_locations.len();
             let global_def_locations_count = payload.indexed.global_definition_locations.len();
 
+            if let Some(ref mut combined) = combined_payload {
+                combined.raw_types.extend(payload.raw_types.clone());
+                extend_indexed_signatures(&mut combined.indexed, &payload.indexed);
+            }
+
             for (owner_type, sig) in payload.indexed.config_methods {
                 repository.add_config_method_signature(&owner_type, sig);
             }
@@ -462,11 +527,14 @@ impl SystemCoordinator {
             }
         }
 
-        Ok(LoadMetadataResult {
-            base_config_count: base_count,
-            extensions_count: ext_count,
-            total_types,
-        })
+        Ok((
+            LoadMetadataResult {
+                base_config_count: base_count,
+                extensions_count: ext_count,
+                total_types,
+            },
+            combined_payload,
+        ))
     }
 
     /// Загружает метаданные из ВСЕХ конфигураций (базовой + расширений) с применением префиксов
@@ -931,6 +999,119 @@ impl SystemCoordinator {
         .with_project_id(identity.project_id)
         .with_config_id(identity.config_id))
     }
+
+    pub(crate) fn build_config_combined_cache_meta(
+        &self,
+        config_path: &Path,
+    ) -> Result<ConfigCombinedCacheMeta> {
+        use crate::data::loaders::config_metadata_parser::ConfigurationDiscovery;
+
+        let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), true);
+        let configurations = discovery
+            .discover_all_configurations()
+            .map_err(|e| anyhow::anyhow!("Ошибка обнаружения конфигураций: {}", e))?;
+        if configurations.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Конфигурации не найдены в {}",
+                config_path.display()
+            ));
+        }
+
+        let config_set_id = config_set_id_from_configs(&configurations);
+        let mut combined_items: Vec<DiskCacheKey> = Vec::new();
+        let mut project_id = None;
+
+        for config_info in &configurations {
+            let identity = config_cache_identity(config_path, config_info);
+            if project_id.is_none() {
+                project_id = Some(identity.project_id.clone());
+            }
+
+            let cache_key =
+                self.build_config_cache_key(config_path, config_info, Some(&config_set_id))?;
+            let cache = self.disk_cache();
+            let entry = match cache.try_get(&cache_key) {
+                Ok(Some(metadata)) => metadata,
+                Ok(None) => {
+                    cache
+                        .get_or_build_with(
+                            &cache_key,
+                            || {
+                                discovery
+                                    .discover_metadata_in_configuration(
+                                        config_info,
+                                        None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
+                                    )
+                                    .map_err(|e| {
+                                        anyhow::anyhow!("Не удалось обнаружить метаданные: {}", e)
+                                    })
+                            },
+                            |metadata| !metadata.is_empty(),
+                        )?
+                        .value
+                }
+                Err(err) => {
+                    warn!(
+                        "Ошибка чтения config cache (combined meta), пересоздаём: {}",
+                        err
+                    );
+                    cache
+                        .get_or_build_with(
+                            &cache_key,
+                            || {
+                                discovery
+                                    .discover_metadata_in_configuration(
+                                        config_info,
+                                        None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
+                                    )
+                                    .map_err(|e| {
+                                        anyhow::anyhow!("Не удалось обнаружить метаданные: {}", e)
+                                    })
+                            },
+                            |metadata| !metadata.is_empty(),
+                        )?
+                        .value
+                }
+            };
+
+            let prefix = config_info.prefix.as_deref();
+            let metadata_for_indexing = Self::apply_prefix_for_indexing(&entry, prefix);
+
+            let layer_key = self.build_config_layer_b_cache_key(
+                config_path,
+                config_info,
+                Some(&config_set_id),
+                &metadata_for_indexing,
+            )?;
+            combined_items.push(layer_key);
+        }
+
+        combined_items.sort_by(|a, b| a.source_identity.cmp(&b.source_identity));
+
+        let source_identity = combined_items
+            .iter()
+            .map(|key| key.source_identity.clone())
+            .collect::<Vec<_>>()
+            .join("||");
+        let source_fingerprint = combined_items
+            .iter()
+            .map(|key| key.source_fingerprint.clone())
+            .collect::<Vec<_>>()
+            .join("||");
+        let settings_fingerprint = combined_items
+            .iter()
+            .map(|key| key.settings_fingerprint.clone())
+            .collect::<Vec<_>>()
+            .join("||");
+
+        Ok(ConfigCombinedCacheMeta {
+            project_id: project_id.unwrap_or_else(|| project_id_from_root(config_path)),
+            config_set_id: config_set_id.clone(),
+            source_identity: format!("config_set_id={};{}", config_set_id, source_identity),
+            source_fingerprint,
+            settings_fingerprint,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -1061,6 +1242,35 @@ fn config_cache_identity(
         config_id,
         canonical_config,
     }
+}
+
+fn project_id_from_root(root_path: &Path) -> String {
+    let canonical_root =
+        std::fs::canonicalize(root_path).unwrap_or_else(|_| root_path.to_path_buf());
+    blake3::hash(canonical_root.to_string_lossy().as_bytes())
+        .to_hex()
+        .to_string()
+}
+
+fn extend_indexed_signatures(
+    target: &mut IndexedConfigSignatures,
+    source: &IndexedConfigSignatures,
+) {
+    target
+        .config_methods
+        .extend(source.config_methods.clone());
+    target
+        .global_functions
+        .extend(source.global_functions.clone());
+    target
+        .definition_locations
+        .extend(source.definition_locations.clone());
+    target
+        .global_definition_locations
+        .extend(source.global_definition_locations.clone());
+    target
+        .module_signatures
+        .extend(source.module_signatures.clone());
 }
 
 fn cache_strict_fingerprint() -> bool {

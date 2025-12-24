@@ -16,13 +16,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::adapters::{convert_syntax_helper_global_functions, convert_syntax_helper_to_raw};
 use crate::data::loaders::{
-    hbk_recovery, progress::ProgressUpdate, SyntaxHelperDatabase, SyntaxHelperLoader,
+    hbk_recovery, progress::ProgressUpdate, IndexedConfigSignatures, SyntaxHelperDatabase,
+    SyntaxHelperLoader,
 };
 use crate::system::parser_coordinator::ParserCoordinator;
 use crate::system::DiskCacheKey;
 use bsl_shared::api::StartupProgressDto;
 
 use super::coordinator::SystemCoordinator;
+use super::config_loader::ConfigCombinedCacheMeta;
 use super::types::StartupError;
 
 #[derive(Debug, Clone)]
@@ -42,6 +44,12 @@ struct SyntaxHelperLoadResult {
 struct SyntaxHelperCachePayload {
     database: SyntaxHelperDatabase,
     parse_ok: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CombinedCachePayload {
+    config_raw_types: Vec<RawTypeData>,
+    config_indexed: IndexedConfigSignatures,
 }
 
 impl SystemCoordinator {
@@ -155,16 +163,16 @@ impl SystemCoordinator {
         let repository = Arc::new(InMemoryTypeRepository::new());
 
         // 4. Загружаем данные в репозиторий (через Adapters)
-        if !syntax_result.database.nodes.is_empty() {
+        let _platform_raw_data = if !syntax_result.database.nodes.is_empty() {
             self.populate_repository_from_syntax_helper(
                 &repository,
                 syntax_result.database,
                 syntax_result.cache_meta.as_ref(),
-            )?;
+            )?
         } else {
             // Загружаем базовые типы как fallback
-            Self::load_fallback_types(&repository)?;
-        }
+            Self::load_fallback_types(&repository)?
+        };
 
         // 5. Создаем Domain resolver
         let resolver = Arc::new(TypeResolver::new(repository.clone()));
@@ -184,7 +192,7 @@ impl SystemCoordinator {
         }
 
         // 6. Создаем упрощенный AnalysisEngine (без Infrastructure зависимостей)
-        let analysis_engine = AnalysisEngine::new(resolver, repository);
+        let analysis_engine = AnalysisEngine::new(resolver, repository.clone());
 
         // Кешируем AnalysisEngine
         {
@@ -214,35 +222,107 @@ impl SystemCoordinator {
             // - LSP мог проксировать updates через progress_tx (если передан)
             let tx_opt = progress_tx.clone();
             let coordinator_for_progress = self.clone_for_blocking();
-            let result = self.load_all_configurations_with_progress(config_path, move |update| {
-                if let Some(ref tx) = tx_opt {
-                    let _ = tx.send(update.clone());
-                }
-                // Пишем прогресс в shared storage для Web API
-                // (проценты из loader’ов уже монотонны, а set_startup_progress зажимает назад).
-                let progress = StartupProgressDto {
-                    phase: update.phase.display_name().to_string(),
-                    current: update.current as u64,
-                    total: update.total as u64,
-                    percentage: update.percentage,
-                    message: update.message.clone(),
-                    done: false,
-                };
-                coordinator_for_progress.set_startup_progress(progress);
-            });
+            let mut combined_cache_hit = false;
+            let mut combined_cache_key = None;
 
-            match result {
-                Ok(result_data) => {
-                    info!(
-                        "Загружено {} типов из {} базовых конфигураций и {} расширений",
-                        result_data.total_types,
-                        result_data.base_config_count,
-                        result_data.extensions_count
-                    );
+            if let Some(platform_meta) = syntax_result.cache_meta.as_ref() {
+                match self.build_config_combined_cache_meta(config_path) {
+                    Ok(config_meta) => {
+                        let key = self.build_combined_cache_key(platform_meta, &config_meta);
+                        combined_cache_key = Some(key.clone());
+                        let cache = self.disk_cache();
+                        match cache.try_get::<CombinedCachePayload>(&key) {
+                            Ok(Some(payload)) => {
+                                info!("Используем combined cache конфигурации");
+                                Self::apply_combined_config_payload(&repository, &payload)?;
+                                combined_cache_hit = true;
+                                let prev = self.startup_progress();
+                                self.set_startup_progress(StartupProgressDto {
+                                    phase: "Загрузка конфигурации".to_string(),
+                                    current: 1,
+                                    total: 1,
+                                    percentage: 100.0,
+                                    message: Some("Конфигурация: из combined cache".to_string()),
+                                    done: false,
+                                    ..prev
+                                });
+                                info!(
+                                    "Загружено {} типов из combined cache",
+                                    payload.config_raw_types.len()
+                                );
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                warn!("Ошибка чтения combined cache: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Не удалось подготовить combined cache meta: {}", e);
+                    }
                 }
-                Err(e) => {
-                    warn!("Ошибка загрузки метаданных конфигурации: {}", e);
-                    info!("Продолжаем работу с типами платформы...");
+            }
+
+            if !combined_cache_hit {
+                let progress_callback = move |update: ProgressUpdate| {
+                    if let Some(ref tx) = tx_opt {
+                        let _ = tx.send(update.clone());
+                    }
+                    // Пишем прогресс в shared storage для Web API
+                    // (проценты из loader’ов уже монотонны, а set_startup_progress зажимает назад).
+                    let progress = StartupProgressDto {
+                        phase: update.phase.display_name().to_string(),
+                        current: update.current as u64,
+                        total: update.total as u64,
+                        percentage: update.percentage,
+                        message: update.message.clone(),
+                        done: false,
+                    };
+                    coordinator_for_progress.set_startup_progress(progress);
+                };
+
+                let result = if combined_cache_key.is_some() {
+                    self.load_all_configurations_with_progress_collect(
+                        config_path,
+                        progress_callback,
+                    )
+                    .map(|(result, payload)| (result, Some(payload)))
+                } else {
+                    self.load_all_configurations_with_progress(
+                        config_path,
+                        progress_callback,
+                    )
+                    .map(|result| (result, None))
+                };
+
+                match result {
+                    Ok((result_data, payload)) => {
+                        info!(
+                            "Загружено {} типов из {} базовых конфигураций и {} расширений",
+                            result_data.total_types,
+                            result_data.base_config_count,
+                            result_data.extensions_count
+                        );
+
+                        if let (Some(key), Some(payload)) = (combined_cache_key, payload) {
+                            if let Some(_platform_meta) = syntax_result.cache_meta.as_ref() {
+                                let combined_payload = CombinedCachePayload {
+                                    config_raw_types: payload.raw_types,
+                                    config_indexed: payload.indexed,
+                                };
+                                let cache = self.disk_cache();
+                                let _ = cache.get_or_build_with(
+                                    &key,
+                                    || Ok(combined_payload),
+                                    |payload| !payload.config_raw_types.is_empty(),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Ошибка загрузки метаданных конфигурации: {}", e);
+                        info!("Продолжаем работу с типами платформы...");
+                    }
                 }
             }
         }
@@ -445,13 +525,51 @@ impl SystemCoordinator {
         )
     }
 
+    fn build_combined_cache_key(
+        &self,
+        platform_meta: &PlatformCacheMeta,
+        config_meta: &ConfigCombinedCacheMeta,
+    ) -> DiskCacheKey {
+        let source_identity = format!(
+            "{}||{}",
+            platform_meta.source_identity, config_meta.source_identity
+        );
+        let source_fingerprint = format!(
+            "{}||{}",
+            platform_meta.source_fingerprint, config_meta.source_fingerprint
+        );
+        let settings_fingerprint = format!(
+            "{}||{}",
+            platform_meta.settings_fingerprint, config_meta.settings_fingerprint
+        );
+        let key_hash = blake3::hash(
+            format!(
+                "{}|{}|{}",
+                source_identity, source_fingerprint, settings_fingerprint
+            )
+            .as_bytes(),
+        )
+        .to_hex()
+        .to_string();
+
+        DiskCacheKey::new(
+            "combined",
+            key_hash,
+            source_identity,
+            source_fingerprint,
+            settings_fingerprint,
+        )
+        .with_project_id(config_meta.project_id.clone())
+        .with_config_id(config_meta.config_set_id.clone())
+    }
+
     /// Заполнение репозитория из синтаксис-помощника
     fn populate_repository_from_syntax_helper(
         &self,
         repository: &Arc<InMemoryTypeRepository>,
         database: crate::data::loaders::syntax_helper::SyntaxHelperDatabase,
         cache_meta: Option<&PlatformCacheMeta>,
-    ) -> Result<(), StartupError> {
+    ) -> Result<Vec<RawTypeData>, StartupError> {
         let platform_raw_data = if let Some(meta) = cache_meta {
             let cache_key = self.build_platform_raw_cache_key(meta);
             let cache = self.disk_cache();
@@ -474,7 +592,7 @@ impl SystemCoordinator {
         let platform_types_clone = platform_raw_data.clone(); // Клонируем для SignatureIndex
 
         repository
-            .load_types(platform_raw_data)
+            .load_types(platform_raw_data.clone())
             .map_err(StartupError::PlatformTypesError)?;
         repository.set_platform_docs_loaded(true);
 
@@ -513,6 +631,37 @@ impl SystemCoordinator {
         info!("SignatureIndex заполнен платформенными методами");
         info!("GenericInfo применён к {} типам-коллекциям", generic_count);
 
+        Ok(platform_raw_data)
+    }
+
+    fn apply_combined_config_payload(
+        repository: &Arc<InMemoryTypeRepository>,
+        payload: &CombinedCachePayload,
+    ) -> Result<(), StartupError> {
+        for (owner_type, sig) in &payload.config_indexed.config_methods {
+            repository.add_config_method_signature(owner_type, sig.clone());
+        }
+        for (name, sig) in &payload.config_indexed.global_functions {
+            repository.add_global_function_signature(name, sig.clone());
+        }
+        for (owner_type, method_name, location) in &payload.config_indexed.definition_locations {
+            repository.add_config_method_definition_location(
+                owner_type,
+                method_name,
+                location.clone(),
+            );
+        }
+        for (function_name, location) in &payload.config_indexed.global_definition_locations {
+            repository.add_global_function_definition_location(
+                function_name,
+                location.clone(),
+            );
+        }
+
+        repository
+            .load_types(payload.config_raw_types.clone())
+            .map_err(StartupError::PlatformTypesError)?;
+
         Ok(())
     }
 
@@ -523,7 +672,7 @@ impl SystemCoordinator {
     /// Методы будут недоступны, но GenericInfo для inference будет работать.
     pub(crate) fn load_fallback_types(
         repository: &Arc<InMemoryTypeRepository>,
-    ) -> Result<(), StartupError> {
+    ) -> Result<Vec<RawTypeData>, StartupError> {
         info!("Загружаем базовые типы платформы 1С (fallback mode)...");
         repository.set_platform_docs_loaded(false);
 
@@ -600,7 +749,7 @@ impl SystemCoordinator {
         let type_count = platform_types.len();
 
         repository
-            .load_types(platform_types)
+            .load_types(platform_types.clone())
             .map_err(StartupError::PlatformTypesError)?;
 
         // Заполняем SignatureIndex (будет пустой в fallback mode)
@@ -621,7 +770,7 @@ impl SystemCoordinator {
         );
         info!("GenericInfo применён к {} типам-коллекциям", generic_count);
         warn!("Методы недоступны в fallback mode. Укажите путь к syntax_helper для полной функциональности.");
-        Ok(())
+        Ok(platform_types)
     }
 }
 
@@ -809,5 +958,40 @@ mod tests {
             methods.iter().any(|method| method.name == "Добавить"),
             "Ожидали метод Массив.Добавить в SignatureIndex"
         );
+    }
+
+    #[test]
+    fn test_combined_cache_roundtrip() {
+        let syntax_path = Path::new("examples/syntax_helper");
+        let config_path = Path::new("examples/conf/conf_test");
+        if !syntax_path.exists() || !config_path.exists() {
+            eprintln!("⚠️ Не найдены примеры syntax_helper или конфигурации");
+            return;
+        }
+
+        let temp = TempDir::new().unwrap();
+        let _cache_dir_guard = EnvGuard::set("BSL_CACHE_DIR", temp.path());
+        let _cache_disable_guard = EnvGuard::remove("BSL_CACHE_DISABLE");
+
+        let coordinator = SystemCoordinator::new();
+        let load_result = coordinator
+            .load_syntax_helper(syntax_path, &None)
+            .unwrap();
+        let platform_meta = match load_result.cache_meta.as_ref() {
+            Some(meta) => meta.clone(),
+            None => return,
+        };
+
+        coordinator
+            .start_with_paths_blocking(Some(syntax_path), Some(config_path), None)
+            .unwrap();
+
+        let config_meta = coordinator
+            .build_config_combined_cache_meta(config_path)
+            .unwrap();
+        let key = coordinator.build_combined_cache_key(&platform_meta, &config_meta);
+        let cache = coordinator.disk_cache();
+        let cached = cache.try_get::<CombinedCachePayload>(&key).unwrap();
+        assert!(cached.is_some(), "Combined cache entry отсутствует");
     }
 }

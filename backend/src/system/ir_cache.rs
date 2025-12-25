@@ -61,7 +61,7 @@ pub struct IrCache {
 }
 
 /// Статистика IR Cache
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct IrCacheStats {
     /// Количество успешных попаданий в кеш
     pub hits: usize,

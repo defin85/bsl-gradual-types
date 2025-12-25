@@ -2,7 +2,7 @@
     "name": "bsl-gradual-types",
     "displayName": "BSL Gradual Type System",
     "description": "Production-ready BSL (1C:Enterprise) gradual type system with flow-sensitive analysis, union types, and enhanced LSP server",
-    "version": "0.4.59",
+    "version": "0.4.60",
     "publisher": "bsl-gradual-types-team",
     "icon": "images/bsl-analyzer-logo.png",
     "engines": {
@@ -177,6 +177,13 @@
                         "default": true,
                         "description": "Автоматически переиндексировать при изменениях файлов конфигурации",
                         "order": 4
+                    },
+                    "bslAnalyzer.cacheEnabled": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Включить кэширование (disk + AST) для текущей рабочей области",
+                        "scope": "resource",
+                        "order": 5
                     }
                 }
             },
@@ -383,6 +390,26 @@
                 "category": "BSL Gradual Types"
             },
             {
+                "command": "bslAnalyzer.cacheStats",
+                "title": "Show Cache Stats",
+                "category": "BSL Analyzer"
+            },
+            {
+                "command": "bslAnalyzer.clearCache",
+                "title": "Clear Cache (Project/Config)",
+                "category": "BSL Analyzer"
+            },
+            {
+                "command": "bslAnalyzer.toggleCache",
+                "title": "Toggle Cache (Workspace)",
+                "category": "BSL Analyzer"
+            },
+            {
+                "command": "bslAnalyzer.refreshCacheDashboard",
+                "title": "Refresh Cache Dashboard",
+                "category": "BSL Analyzer"
+            },
+            {
                 "command": "bslAnalyzer.searchType",
                 "title": "Search BSL Type",
                 "category": "BSL Index",
@@ -508,6 +535,11 @@
                     "id": "bslAnalyzer",
                     "title": "BSL Analyzer",
                     "icon": "$(bracket)"
+                },
+                {
+                    "id": "bslAnalyzerCache",
+                    "title": "BSL Cache",
+                    "icon": "$(database)"
                 }
             ]
         },
@@ -533,6 +565,13 @@
                     "id": "bslAnalyzer.actions",
                     "name": "Quick Actions",
                     "type": "webview"
+                }
+            ],
+            "bslAnalyzerCache": [
+                {
+                    "id": "bslAnalyzer.cacheDashboard",
+                    "name": "Cache Dashboard",
+                    "type": "tree"
                 }
             ]
         },
@@ -586,6 +625,15 @@
                 },
                 {
                     "command": "bslAnalyzer.restartServer"
+                },
+                {
+                    "command": "bslAnalyzer.cacheStats"
+                },
+                {
+                    "command": "bslAnalyzer.clearCache"
+                },
+                {
+                    "command": "bslAnalyzer.toggleCache"
                 },
                 {
                     "command": "bslAnalyzer.searchType"
@@ -642,6 +690,11 @@
                 {
                     "command": "bslAnalyzer.refreshOverview",
                     "when": "view == bslAnalyzer.overview",
+                    "group": "navigation"
+                },
+                {
+                    "command": "bslAnalyzer.refreshCacheDashboard",
+                    "when": "view == bslAnalyzer.cacheDashboard",
                     "group": "navigation"
                 },
                 {

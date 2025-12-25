@@ -225,11 +225,17 @@ CLI/env:
 - `BSL_CACHE_DISABLE=1` (no-op режим).
 - `BSL_CACHE_DIR=...`.
 
-LSP команды (черновик):
-- `bsl.cache.status` -> краткий статус (enabled, size, entries).
-- `bsl.cache.metrics` -> счетчики/тайминги.
-- `bsl.cache.clear(project|config)` -> очистка per-project/per-config.
-- `bsl.cache.toggle` -> включить/выключить (persist в settings).
+LSP команды:
+- `bsl.cache.getStats` -> статус + метрики (hits/misses, timings, size/entries).
+- `bsl.cache.clear` -> очистка per-project/per-config.
+- `bsl.cache.setEnabled` -> включить/выключить (persist в settings).
+
+Статус: DONE
+
+Факты:
+- Добавлены команды LSP для статуса/очистки/включения кэша, с per-project/per-config scope.
+- CLI команда `bsl-cli cache stats|clear --config-path ...` выводит JSON.
+- Workspace setting `bslAnalyzer.cacheEnabled` синхронизируется с LSP (ENV имеет приоритет).
 
 ## Панель расширения (мини-дашборд)
 

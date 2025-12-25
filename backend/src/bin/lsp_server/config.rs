@@ -19,6 +19,10 @@ pub struct LspConfig {
     /// Reserved for future versioned type loading
     #[allow(dead_code)]
     pub platform_version: Option<String>,
+
+    /// Enable/disable cache (workspace setting)
+    #[serde(default)]
+    pub cache_enabled: Option<bool>,
 }
 
 /// MILESTONE 3.6 Phase 1+3: BSL Settings (from workspace/didChangeConfiguration)

@@ -14,7 +14,10 @@ use crate::system::simple_cache::AnalysisCache;
 use bsl_shared::domain::repository::RepositoryStats;
 use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::api::StartupProgressDto;
-use super::types::ConfigIndexCache;
+use super::types::{
+    CacheClearReport, CacheScope, CacheStatsReport, CacheToggleResult, ConfigIndexCache,
+    DiskCacheStatsReport,
+};
 
 // ============================================================================
 // LOCK ORDER CONVENTION
@@ -150,6 +153,93 @@ impl SystemCoordinator {
     /// Получить DiskCache (Milestone D1)
     pub fn disk_cache(&self) -> Arc<DiskCache> {
         self.disk_cache.clone()
+    }
+
+    /// Включить/выключить кэш с учетом ENV-приоритета
+    pub async fn set_cache_enabled(&self, enabled: bool) -> CacheToggleResult {
+        let env_disabled = self.disk_cache.env_disabled();
+        let effective = self.disk_cache.set_enabled(enabled);
+
+        if let Some(parser) = self.parser_coordinator() {
+            parser.set_cache_enabled(effective);
+            if !effective {
+                parser.clear_ast_cache();
+            }
+        }
+
+        if !effective {
+            self.ir_cache.clear().await;
+        }
+
+        CacheToggleResult {
+            requested: enabled,
+            effective,
+            env_disabled,
+        }
+    }
+
+    /// Получить статистику кэша для указанного scope
+    pub async fn cache_stats(&self, scope: &CacheScope) -> anyhow::Result<CacheStatsReport> {
+        let mut scope_ids = scope.config_ids.clone();
+        if !scope.config_set_id.is_empty() {
+            scope_ids.push(scope.config_set_id.clone());
+        }
+        scope_ids.sort();
+        scope_ids.dedup();
+
+        let disk_cache = self.disk_cache.clone();
+        let project_id = scope.project_id.clone();
+        let disk_scope = tokio::task::spawn_blocking(move || {
+            disk_cache.scope_usage_for_ids(&project_id, &scope_ids)
+        })
+        .await??;
+        let disk_runtime = self.disk_cache.stats();
+        let cache_root = self.disk_cache.root_path().to_string_lossy().into_owned();
+        let ast_stats = self
+            .parser_coordinator()
+            .map(|parser| parser.ast_cache_stats())
+            .unwrap_or_default();
+        let ir_stats = self.ir_cache.get_stats().await;
+
+        Ok(CacheStatsReport {
+            cache_enabled: self.disk_cache.is_enabled(),
+            env_disabled: self.disk_cache.env_disabled(),
+            swr_enabled: self.disk_cache.swr_enabled(),
+            cache_root,
+            scope: scope.clone(),
+            disk: DiskCacheStatsReport {
+                runtime: disk_runtime,
+                scope: disk_scope,
+            },
+            ast: ast_stats,
+            ir: ir_stats,
+        })
+    }
+
+    /// Очистить кэш для указанного scope
+    pub async fn clear_cache_scope(&self, scope: &CacheScope) -> anyhow::Result<CacheClearReport> {
+        let mut scope_ids = scope.config_ids.clone();
+        if !scope.config_set_id.is_empty() {
+            scope_ids.push(scope.config_set_id.clone());
+        }
+        scope_ids.sort();
+        scope_ids.dedup();
+
+        let disk = self
+            .disk_cache
+            .clear_scope_for_ids(&scope.project_id, &scope_ids)?;
+
+        if let Some(parser) = self.parser_coordinator() {
+            parser.clear_ast_cache();
+        }
+        self.ir_cache.clear().await;
+
+        Ok(CacheClearReport {
+            scope: scope.clone(),
+            disk,
+            ast_cleared: true,
+            ir_cleared: true,
+        })
     }
 
     /// Получить AnalysisEngine (делегирует Domain Layer логику)

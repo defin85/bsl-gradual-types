@@ -10,7 +10,7 @@ use clap::Parser;
 use colored::*;
 use std::path::Path;
 
-use args::{CliArgs, CliOutputFormat, Commands};
+use args::{CacheCommand, CliArgs, CliOutputFormat, Commands};
 use bsl_shared::engine::AnalysisEngine;
 use formatters::CliFormatter;
 
@@ -51,6 +51,10 @@ async fn main() {
             show_ir,
             show_symbols,
         } => analyze_ir_command(&path, &args.format, args.verbose, show_ir, show_symbols).await,
+        Commands::Cache {
+            config_path,
+            action,
+        } => cache_command(&config_path, action).await,
     };
 
     if let Err(e) = result {
@@ -337,6 +341,26 @@ async fn analyze_ir_command(
             "analysis_time_ms": ir_result.analysis_duration_ms,
         });
         println!("\n{}", serde_json::to_string_pretty(&json)?);
+    }
+
+    Ok(())
+}
+
+async fn cache_command(config_path: &str, action: CacheCommand) -> anyhow::Result<()> {
+    let coordinator = bsl_backend::system::SystemCoordinator::new();
+    let scope = coordinator.cache_scope_for_config_path(Path::new(config_path))?;
+
+    match action {
+        CacheCommand::Stats => {
+            let report = coordinator.cache_stats(&scope).await?;
+            let output = serde_json::to_string_pretty(&report)?;
+            println!("{}", output);
+        }
+        CacheCommand::Clear => {
+            let report = coordinator.clear_cache_scope(&scope).await?;
+            let output = serde_json::to_string_pretty(&report)?;
+            println!("{}", output);
+        }
     }
 
     Ok(())

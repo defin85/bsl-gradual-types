@@ -6,7 +6,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
@@ -79,7 +79,8 @@ pub struct CacheManifest {
 pub struct DiskCache {
     root: PathBuf,
     schema_version: u32,
-    disabled: bool,
+    env_disabled: bool,
+    disabled: Arc<AtomicBool>,
     stats: Arc<DiskCacheStats>,
     last_cleanup_at: Arc<AtomicU64>,
 }
@@ -96,7 +97,7 @@ struct DiskCacheStats {
     evicted_entries: AtomicU64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DiskCacheStatsSnapshot {
     pub hit_count: u64,
     pub miss_count: u64,
@@ -108,10 +109,16 @@ pub struct DiskCacheStatsSnapshot {
     pub evicted_entries: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CacheCleanupReport {
     pub removed_entries: u64,
     pub freed_bytes: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DiskCacheScopeStats {
+    pub entries: u64,
+    pub size_bytes: u64,
 }
 
 impl DiskCache {
@@ -121,14 +128,15 @@ impl DiskCache {
     }
 
     pub fn with_root(root: PathBuf, schema_version: u32) -> Result<Self> {
-        let disabled = is_cache_disabled();
-        if !disabled {
+        let env_disabled = is_cache_disabled();
+        if !env_disabled {
             fs::create_dir_all(&root).context("Failed to create disk cache root")?;
         }
         Ok(Self {
             root,
             schema_version,
-            disabled,
+            env_disabled,
+            disabled: Arc::new(AtomicBool::new(env_disabled)),
             stats: Arc::new(DiskCacheStats::default()),
             last_cleanup_at: Arc::new(AtomicU64::new(0)),
         })
@@ -138,10 +146,49 @@ impl DiskCache {
         Self {
             root: PathBuf::from(".bsl_cache"),
             schema_version,
-            disabled: true,
+            env_disabled: false,
+            disabled: Arc::new(AtomicBool::new(true)),
             stats: Arc::new(DiskCacheStats::default()),
             last_cleanup_at: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    pub fn env_disabled(&self) -> bool {
+        self.env_disabled
+    }
+
+    pub fn is_disabled(&self) -> bool {
+        self.disabled.load(Ordering::Relaxed)
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        !self.is_disabled()
+    }
+
+    pub fn set_enabled(&self, enabled: bool) -> bool {
+        if self.env_disabled {
+            self.disabled.store(true, Ordering::Relaxed);
+            return false;
+        }
+
+        if enabled {
+            if let Err(err) = fs::create_dir_all(&self.root) {
+                warn!("Failed to create disk cache root: {}", err);
+                self.disabled.store(true, Ordering::Relaxed);
+                return false;
+            }
+        }
+
+        self.disabled.store(!enabled, Ordering::Relaxed);
+        enabled
+    }
+
+    pub fn swr_enabled(&self) -> bool {
+        cache_swr_enabled()
+    }
+
+    pub fn root_path(&self) -> &Path {
+        &self.root
     }
 
     pub fn stats(&self) -> DiskCacheStatsSnapshot {
@@ -157,6 +204,80 @@ impl DiskCache {
         }
     }
 
+    pub fn scope_usage(
+        &self,
+        project_id: Option<&str>,
+        config_id: Option<&str>,
+    ) -> Result<DiskCacheScopeStats> {
+        if self.is_disabled() {
+            return Ok(DiskCacheScopeStats::default());
+        }
+
+        let mut stats = DiskCacheScopeStats::default();
+        for scope_root in self.collect_scope_roots(project_id, config_id)? {
+            let scope_stats = self.collect_scope_stats(&scope_root);
+            stats.entries = stats.entries.saturating_add(scope_stats.entries);
+            stats.size_bytes = stats.size_bytes.saturating_add(scope_stats.size_bytes);
+        }
+        Ok(stats)
+    }
+
+    pub fn scope_usage_for_ids(
+        &self,
+        project_id: &str,
+        config_ids: &[String],
+    ) -> Result<DiskCacheScopeStats> {
+        if self.is_disabled() || config_ids.is_empty() {
+            return Ok(DiskCacheScopeStats::default());
+        }
+
+        let mut stats = DiskCacheScopeStats::default();
+        for scope_root in self.collect_scope_roots_for_ids(project_id, config_ids)? {
+            let scope_stats = self.collect_scope_stats(&scope_root);
+            stats.entries = stats.entries.saturating_add(scope_stats.entries);
+            stats.size_bytes = stats.size_bytes.saturating_add(scope_stats.size_bytes);
+        }
+        Ok(stats)
+    }
+
+    pub fn clear_scope(&self, project_id: &str, config_id: &str) -> Result<CacheCleanupReport> {
+        if self.is_disabled() {
+            return Ok(CacheCleanupReport {
+                removed_entries: 0,
+                freed_bytes: 0,
+            });
+        }
+
+        self.clear_scope_for_ids(project_id, &[config_id.to_string()])
+    }
+
+    pub fn clear_scope_for_ids(
+        &self,
+        project_id: &str,
+        config_ids: &[String],
+    ) -> Result<CacheCleanupReport> {
+        if self.is_disabled() || config_ids.is_empty() {
+            return Ok(CacheCleanupReport {
+                removed_entries: 0,
+                freed_bytes: 0,
+            });
+        }
+
+        let mut removed_entries = 0u64;
+        let mut freed_bytes = 0u64;
+        for scope_root in self.collect_scope_roots_for_ids(project_id, config_ids)? {
+            let scope_stats = self.collect_scope_stats(&scope_root);
+            removed_entries = removed_entries.saturating_add(scope_stats.entries);
+            freed_bytes = freed_bytes.saturating_add(scope_stats.size_bytes);
+            let _ = fs::remove_dir_all(&scope_root);
+        }
+
+        Ok(CacheCleanupReport {
+            removed_entries,
+            freed_bytes,
+        })
+    }
+
     pub fn get_or_build<T, F>(&self, key: &DiskCacheKey, build: F) -> Result<CacheEntry<T>>
     where
         T: Serialize + DeserializeOwned,
@@ -169,7 +290,7 @@ impl DiskCache {
     where
         T: DeserializeOwned,
     {
-        if self.disabled {
+        if self.is_disabled() {
             return Ok(None);
         }
 
@@ -207,7 +328,7 @@ impl DiskCache {
         F: FnOnce() -> Result<T>,
         P: Fn(&T) -> bool,
     {
-        if self.disabled {
+        if self.is_disabled() {
             let value = build()?;
             return Ok(CacheEntry {
                 value,
@@ -269,7 +390,7 @@ impl DiskCache {
         F: FnOnce() -> Result<T> + Send + 'static,
         P: Fn(&T) -> bool + Send + Sync + 'static,
     {
-        if self.disabled {
+        if self.is_disabled() {
             let value = build()?;
             return Ok(CacheEntry {
                 value,
@@ -424,7 +545,7 @@ impl DiskCache {
     }
 
     fn cleanup_if_needed(&self) -> Result<()> {
-        if self.disabled {
+        if self.is_disabled() {
             return Ok(());
         }
         let interval_secs = cache_cleanup_interval_secs();
@@ -442,7 +563,7 @@ impl DiskCache {
     }
 
     pub fn cleanup(&self) -> Result<CacheCleanupReport> {
-        if self.disabled {
+        if self.is_disabled() {
             return Ok(CacheCleanupReport {
                 removed_entries: 0,
                 freed_bytes: 0,
@@ -537,10 +658,98 @@ impl DiskCache {
         Self {
             root: self.root.clone(),
             schema_version: self.schema_version,
-            disabled: self.disabled,
+            env_disabled: self.env_disabled,
+            disabled: Arc::clone(&self.disabled),
             stats: Arc::clone(&self.stats),
             last_cleanup_at: Arc::clone(&self.last_cleanup_at),
         }
+    }
+
+    fn collect_scope_roots(
+        &self,
+        project_id: Option<&str>,
+        config_id: Option<&str>,
+    ) -> Result<Vec<PathBuf>> {
+        let version_root = self.root.join(format!("v{}", self.schema_version));
+        if project_id.is_none() && config_id.is_none() {
+            return Ok(vec![version_root]);
+        }
+
+        let project = sanitize_component(project_id.unwrap_or("global"));
+        let config = sanitize_component(config_id.unwrap_or("none"));
+        let mut roots = Vec::new();
+        let entries = match fs::read_dir(&version_root) {
+            Ok(entries) => entries,
+            Err(_) => return Ok(roots),
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let scope_root = path.join(&project).join(&config);
+            if scope_root.exists() {
+                roots.push(scope_root);
+            }
+        }
+
+        Ok(roots)
+    }
+
+    fn collect_scope_roots_for_ids(
+        &self,
+        project_id: &str,
+        config_ids: &[String],
+    ) -> Result<Vec<PathBuf>> {
+        use std::collections::HashSet;
+
+        let version_root = self.root.join(format!("v{}", self.schema_version));
+        let entries = match fs::read_dir(&version_root) {
+            Ok(entries) => entries,
+            Err(_) => return Ok(Vec::new()),
+        };
+
+        let project = sanitize_component(project_id);
+        let mut roots = HashSet::new();
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            for config_id in config_ids {
+                let config = sanitize_component(config_id);
+                let scope_root = path.join(&project).join(&config);
+                if scope_root.exists() {
+                    roots.insert(scope_root);
+                }
+            }
+        }
+
+        Ok(roots.into_iter().collect())
+    }
+
+    fn collect_scope_stats(&self, root: &Path) -> DiskCacheScopeStats {
+        if !root.exists() {
+            return DiskCacheScopeStats::default();
+        }
+
+        let mut stats = DiskCacheScopeStats::default();
+        for manifest_path in collect_manifest_paths(root) {
+            let manifest_bytes = match fs::read(&manifest_path) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            let manifest: CacheManifest = match serde_json::from_slice(&manifest_bytes) {
+                Ok(parsed) => parsed,
+                Err(_) => continue,
+            };
+            stats.entries = stats.entries.saturating_add(1);
+            stats.size_bytes = stats.size_bytes.saturating_add(manifest.size_bytes);
+        }
+
+        stats
     }
 
     fn try_load<T>(

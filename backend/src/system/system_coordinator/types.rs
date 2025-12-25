@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use crate::data::loaders::config_bsl_modules::ModuleSignatureSnapshot;
 use crate::data::loaders::config_metadata_parser::UniversalMetadataObject;
+use serde::Serialize;
 
 /// Результат загрузки метаданных конфигурации
 #[derive(Debug, Clone)]
@@ -60,4 +61,44 @@ pub struct ConfigIndexCache {
     pub object_xml_map: HashMap<PathBuf, ObjectKey>,
     pub form_xml_map: HashMap<PathBuf, ObjectKey>,
     pub module_signatures: HashMap<PathBuf, ModuleSignatureSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheScope {
+    pub project_id: String,
+    pub config_set_id: String,
+    pub config_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheToggleResult {
+    pub requested: bool,
+    pub effective: bool,
+    pub env_disabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheClearReport {
+    pub scope: CacheScope,
+    pub disk: crate::system::disk_cache::CacheCleanupReport,
+    pub ast_cleared: bool,
+    pub ir_cleared: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiskCacheStatsReport {
+    pub runtime: crate::system::disk_cache::DiskCacheStatsSnapshot,
+    pub scope: crate::system::disk_cache::DiskCacheScopeStats,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheStatsReport {
+    pub cache_enabled: bool,
+    pub env_disabled: bool,
+    pub swr_enabled: bool,
+    pub cache_root: String,
+    pub scope: CacheScope,
+    pub disk: DiskCacheStatsReport,
+    pub ast: crate::system::ast_cache::AstCacheStats,
+    pub ir: crate::system::ir_cache::IrCacheStats,
 }

@@ -7,6 +7,7 @@ import { registerSearchCommands } from './search';
 import { registerIndexCommands } from './index-commands';
 import { registerConfigurationCommands } from './configuration';
 import { registerDebugCommands } from './debug';
+import { registerCacheCommands } from './cache';
 
 let outputChannel: vscode.OutputChannel;
 let commandsRegistered = false;
@@ -59,6 +60,7 @@ export async function registerCommands(context: vscode.ExtensionContext) {
     registerIndexCommands(context, boundSafeRegister, outputChannel);
     registerConfigurationCommands(context, boundSafeRegister, outputChannel);
     registerDebugCommands(context, boundSafeRegister, outputChannel);
+    registerCacheCommands(context, boundSafeRegister, outputChannel);
 
     // Parse Configuration (MILESTONE 2.17)
     // Регистрация через отдельный модуль для лучшей организации кода
@@ -85,3 +87,4 @@ export { registerSearchCommands } from './search';
 export { registerIndexCommands } from './index-commands';
 export { registerConfigurationCommands } from './configuration';
 export { registerDebugCommands } from './debug';
+export { registerCacheCommands } from './cache';

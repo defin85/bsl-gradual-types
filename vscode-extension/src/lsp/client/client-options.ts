@@ -17,13 +17,15 @@ export function buildClientOptions(
     const initializationOptions = {
         platformDocsArchive: BslAnalyzerConfig.platformDocsArchive,
         configurationPath: BslAnalyzerConfig.configurationPath,
-        platformVersion: BslAnalyzerConfig.platformVersion
+        platformVersion: BslAnalyzerConfig.platformVersion,
+        cacheEnabled: BslAnalyzerConfig.cacheEnabled
     };
 
     outputChannel.appendLine(`Sending initializationOptions to LSP:`);
     outputChannel.appendLine(`   platformDocsArchive: ${initializationOptions.platformDocsArchive || 'NOT SET'}`);
     outputChannel.appendLine(`   configurationPath: ${initializationOptions.configurationPath || 'NOT SET'}`);
     outputChannel.appendLine(`   platformVersion: ${initializationOptions.platformVersion || 'NOT SET'}`);
+    outputChannel.appendLine(`   cacheEnabled: ${initializationOptions.cacheEnabled}`);
 
     const clientOptions: LanguageClientOptions = {
         documentSelector: [

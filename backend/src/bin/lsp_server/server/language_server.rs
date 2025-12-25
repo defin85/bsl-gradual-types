@@ -13,15 +13,17 @@ use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
 use tracing::{debug, error, info, warn};
+use std::path::Path;
 
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 use bsl_backend::system::fs_utils::read_bsl_file;
 use bsl_shared::api::semantic_dtos::{GetSemanticHtmlRequest, GetSemanticTreeRequest};
 
 use crate::commands::{
-    handle_get_all_types, handle_get_semantic_html, handle_get_semantic_tree,
-    handle_get_type_repository_stats, handle_parse_configuration, handle_query_type,
-    handle_search_types, GetAllTypesRequest, ParseConfigurationParams, QueryTypeParams,
+    handle_cache_clear, handle_cache_set_enabled, handle_cache_stats, handle_get_all_types,
+    handle_get_semantic_html, handle_get_semantic_tree, handle_get_type_repository_stats,
+    handle_parse_configuration, handle_query_type, handle_search_types, CacheCommandParams,
+    CacheToggleParams, GetAllTypesRequest, ParseConfigurationParams, QueryTypeParams,
     SearchTypesRequest,
 };
 use crate::config::{BslSettings, LspConfig};
@@ -60,6 +62,13 @@ impl LanguageServer for BslLanguageServer {
                 Ok(config) => {
                     info!("LSP Config received: {:?}", config);
                     *self.config.write().await = Some(config.clone());
+                    if let Some(cache_enabled) = config.cache_enabled {
+                        let result = self.coordinator.set_cache_enabled(cache_enabled).await;
+                        info!(
+                            "Cache enabled updated: requested={}, effective={}, env_disabled={}",
+                            result.requested, result.effective, result.env_disabled
+                        );
+                    }
                     info!("Configuration saved, will reload types in initialized()");
                 }
                 Err(e) => {
@@ -106,6 +115,9 @@ impl LanguageServer for BslLanguageServer {
                         "bsl.getTypeRepositoryStats".to_string(),
                         "bsl.getWorkspaceStats".to_string(),
                         "bsl.parseConfiguration".to_string(),
+                        "bsl.cache.getStats".to_string(),
+                        "bsl.cache.clear".to_string(),
+                        "bsl.cache.setEnabled".to_string(),
                     ],
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
@@ -349,6 +361,43 @@ impl LanguageServer for BslLanguageServer {
         info!("Received didChangeConfiguration");
 
         if let Some(settings_value) = params.settings.as_object() {
+            if let Some(bsl_analyzer_value) = settings_value.get("bslAnalyzer") {
+                match serde_json::from_value::<LspConfig>(bsl_analyzer_value.clone()) {
+                    Ok(mut new_config) => {
+                        normalize_lsp_config(&mut new_config);
+                        let mut guard = self.config.write().await;
+                        let mut merged = guard.clone().unwrap_or_else(|| LspConfig {
+                            platform_docs_archive: None,
+                            configuration_path: None,
+                            platform_version: None,
+                            cache_enabled: None,
+                        });
+                        if new_config.platform_docs_archive.is_some() {
+                            merged.platform_docs_archive = new_config.platform_docs_archive;
+                        }
+                        if new_config.configuration_path.is_some() {
+                            merged.configuration_path = new_config.configuration_path;
+                        }
+                        if new_config.platform_version.is_some() {
+                            merged.platform_version = new_config.platform_version;
+                        }
+                        if new_config.cache_enabled.is_some() {
+                            merged.cache_enabled = new_config.cache_enabled;
+                        }
+                        *guard = Some(merged.clone());
+                        if let Some(cache_enabled) = merged.cache_enabled {
+                            let result = self.coordinator.set_cache_enabled(cache_enabled).await;
+                            info!(
+                                "Cache enabled updated via settings: requested={}, effective={}, env_disabled={}",
+                                result.requested, result.effective, result.env_disabled
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse BslAnalyzer settings: {}", e);
+                    }
+                }
+            }
             if let Some(bsl_value) = settings_value.get("bsl") {
                 match serde_json::from_value::<BslSettings>(bsl_value.clone()) {
                     Ok(new_settings) => {
@@ -799,10 +848,104 @@ impl LanguageServer for BslLanguageServer {
                         .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
                 ))
             }
+            "bsl.cache.getStats" => {
+                let config_path = resolve_cache_config_path(&params, &self.config).await?;
+                let scope = self
+                    .coordinator
+                    .cache_scope_for_config_path(Path::new(&config_path))
+                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+                let result = handle_cache_stats(self.coordinator.clone(), scope)
+                    .await
+                    .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+                Ok(Some(
+                    serde_json::to_value(result)
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+                ))
+            }
+            "bsl.cache.clear" => {
+                let config_path = resolve_cache_config_path(&params, &self.config).await?;
+                let scope = self
+                    .coordinator
+                    .cache_scope_for_config_path(Path::new(&config_path))
+                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+                let result = handle_cache_clear(self.coordinator.clone(), scope)
+                    .await
+                    .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+                Ok(Some(
+                    serde_json::to_value(result)
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+                ))
+            }
+            "bsl.cache.setEnabled" => {
+                if params.arguments.is_empty() {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                        "Missing enabled flag",
+                    ));
+                }
+
+                let request: CacheToggleParams =
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?;
+                let result =
+                    handle_cache_set_enabled(self.coordinator.clone(), request.enabled)
+                        .await
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+                Ok(Some(
+                    serde_json::to_value(result)
+                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+                ))
+            }
             _ => {
                 warn!("Unknown command: {}", params.command);
                 Err(tower_lsp::jsonrpc::Error::method_not_found())
             }
         }
     }
+}
+
+async fn resolve_cache_config_path(
+    params: &ExecuteCommandParams,
+    config: &tokio::sync::RwLock<Option<LspConfig>>,
+) -> JsonRpcResult<String> {
+    if !params.arguments.is_empty() {
+        let request: CacheCommandParams =
+            serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid parameters: {}", e))
+            })?;
+        if let Some(path) = request.configuration_path {
+            return Ok(path);
+        }
+    }
+
+    let config_guard = config.read().await;
+    if let Some(cfg) = config_guard.as_ref() {
+        if let Some(path) = cfg.configuration_path.clone() {
+            return Ok(path);
+        }
+    }
+
+    Err(tower_lsp::jsonrpc::Error::invalid_params(
+        "Missing configuration path",
+    ))
+}
+
+fn normalize_lsp_config(config: &mut LspConfig) {
+    config.platform_docs_archive = normalize_optional_string(config.platform_docs_archive.clone());
+    config.configuration_path = normalize_optional_string(config.configuration_path.clone());
+    config.platform_version = normalize_optional_string(config.platform_version.clone());
+}
+
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
 }

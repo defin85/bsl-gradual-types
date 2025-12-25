@@ -30,6 +30,7 @@ import { buildIndex } from './lsp/customRequests';
 import {
     BslOverviewProvider,
     BslDiagnosticsProvider,
+    CacheDashboardProvider,
     HierarchicalTypeIndexProvider,
     BslActionsWebviewProvider,
     TypeDetailsWebviewProvider,
@@ -366,6 +367,17 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
         context.subscriptions.push(overviewTreeView);
         outputChannel.appendLine('✅ Overview provider registered');
 
+        // Cache Dashboard provider
+        outputChannel.appendLine('📋 Creating Cache Dashboard provider...');
+        const cacheDashboardProvider = new CacheDashboardProvider(outputChannel);
+        const cacheDashboardTreeView = vscode.window.createTreeView('bslAnalyzer.cacheDashboard', {
+            treeDataProvider: cacheDashboardProvider,
+            showCollapseAll: true
+        });
+        context.subscriptions.push(cacheDashboardTreeView);
+        context.subscriptions.push(cacheDashboardProvider);
+        outputChannel.appendLine('✅ Cache Dashboard provider registered');
+
         // Diagnostics provider  
         outputChannel.appendLine('📋 Creating Diagnostics provider...');
         const diagnosticsProvider = new BslDiagnosticsProvider();
@@ -411,6 +423,13 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
             vscode.commands.registerCommand('bslAnalyzer.refreshOverview', () => {
                 outputChannel.appendLine('🔄 Refreshing Overview panel');
                 overviewProvider.refresh();
+            })
+        );
+
+        context.subscriptions.push(
+            vscode.commands.registerCommand('bslAnalyzer.refreshCacheDashboard', () => {
+                outputChannel.appendLine('🔄 Refreshing Cache Dashboard panel');
+                cacheDashboardProvider.refresh();
             })
         );
 

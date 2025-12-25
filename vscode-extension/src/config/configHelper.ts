@@ -73,6 +73,10 @@ export class BslAnalyzerConfig {
     static get enableMetrics(): boolean {
         return this.getConfig().get<boolean>('enableMetrics', true);
     }
+
+    static get cacheEnabled(): boolean {
+        return this.getConfig().get<boolean>('cacheEnabled', true);
+    }
     
     // Enhanced methods для новой функциональности
     static isValid(): boolean {
@@ -87,7 +91,8 @@ export class BslAnalyzerConfig {
             serverTcpPort: this.serverTcpPort,
             binaryPath: this.binaryPath,
             configurationPath: this.configurationPath,
-            enableRealTimeAnalysis: this.enableRealTimeAnalysis
+            enableRealTimeAnalysis: this.enableRealTimeAnalysis,
+            cacheEnabled: this.cacheEnabled
         };
     }
 }

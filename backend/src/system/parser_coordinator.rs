@@ -7,6 +7,7 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, error, warn};
 use tree_sitter::{InputEdit, Parser, Point};
 
@@ -21,6 +22,16 @@ use bsl_shared::parsing::Parser as ParserTrait; // Milestone 2.8: Parser trait
 
 fn ast_cache_key(content: &str) -> [u8; 32] {
     *blake3::hash(content.as_bytes()).as_bytes()
+}
+
+fn is_cache_disabled_env() -> bool {
+    matches!(
+        std::env::var("BSL_CACHE_DISABLE")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes"
+    )
 }
 
 /// Текстовое изменение для инкрементального парсинга (из LSP)
@@ -46,6 +57,7 @@ pub struct ParserCoordinator {
     ast_cache: AstCache,
     disk_cache: Arc<DiskCache>,
     cache_scope: Arc<RwLock<AstCacheScope>>,
+    cache_enabled: Arc<AtomicBool>,
     repository: Arc<dyn TypeRepository>,
     /// TypeResolver для резолюции типов с active_facet (Milestone 3.17)
     resolver: Option<Arc<TypeResolver>>,
@@ -86,6 +98,7 @@ impl ParserCoordinator {
             ast_cache: AstCache::new_from_env(),
             disk_cache: Arc::new(DiskCache::disabled(1)),
             cache_scope: Arc::new(RwLock::new(AstCacheScope::default())),
+            cache_enabled: Arc::new(AtomicBool::new(!is_cache_disabled_env())),
             repository,
             resolver: None,
         }
@@ -119,6 +132,7 @@ impl ParserCoordinator {
             ast_cache: AstCache::new_from_env(),
             disk_cache: Arc::new(DiskCache::disabled(1)),
             cache_scope: Arc::new(RwLock::new(AstCacheScope::default())),
+            cache_enabled: Arc::new(AtomicBool::new(!is_cache_disabled_env())),
             repository,
             resolver: Some(resolver),
         }
@@ -156,6 +170,7 @@ impl ParserCoordinator {
             ast_cache: AstCache::new_from_env(),
             disk_cache: Arc::new(DiskCache::disabled(1)),
             cache_scope: Arc::new(RwLock::new(AstCacheScope::default())),
+            cache_enabled: Arc::new(AtomicBool::new(!is_cache_disabled_env())),
             repository: empty_repo,
             resolver: None,
         }
@@ -164,6 +179,25 @@ impl ParserCoordinator {
     pub fn with_disk_cache(mut self, disk_cache: Arc<DiskCache>) -> Self {
         self.disk_cache = disk_cache;
         self
+    }
+
+    pub fn set_cache_enabled(&self, enabled: bool) {
+        self.cache_enabled.store(enabled, Ordering::Relaxed);
+        if !enabled {
+            self.ast_cache.clear();
+        }
+    }
+
+    pub fn cache_enabled(&self) -> bool {
+        self.cache_enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn clear_ast_cache(&self) {
+        self.ast_cache.clear();
+    }
+
+    pub fn ast_cache_stats(&self) -> crate::system::ast_cache::AstCacheStats {
+        self.ast_cache.stats()
     }
 
     pub fn set_cache_scope(&self, project_id: Option<String>, config_id: Option<String>) {
@@ -263,16 +297,20 @@ impl ParserCoordinator {
     ) -> Result<ParseResult, String> {
         let content_hash = ast_cache_key(content);
 
-        if let Some(cached) = self.ast_cache.get(content_hash) {
-            return Ok((*cached).clone());
+        if self.cache_enabled() {
+            if let Some(cached) = self.ast_cache.get(content_hash) {
+                return Ok((*cached).clone());
+            }
         }
 
-        if let Some(path) = file_path {
-            if Path::new(path).exists() {
-                if let Ok(Some(cached)) = self.try_load_ast_from_disk(path, content) {
-                    let cached_arc = Arc::new(cached.clone());
-                    self.ast_cache.put(content_hash, cached_arc);
-                    return Ok(cached);
+        if self.cache_enabled() {
+            if let Some(path) = file_path {
+                if Path::new(path).exists() {
+                    if let Ok(Some(cached)) = self.try_load_ast_from_disk(path, content) {
+                        let cached_arc = Arc::new(cached.clone());
+                        self.ast_cache.put(content_hash, cached_arc);
+                        return Ok(cached);
+                    }
                 }
             }
         }
@@ -316,8 +354,10 @@ impl ParserCoordinator {
     }
 
     fn store_ast_memory(&self, content_hash: [u8; 32], result: &ParseResult) {
-        self.ast_cache
-            .put(content_hash, Arc::new(result.clone()));
+        if self.cache_enabled() {
+            self.ast_cache
+                .put(content_hash, Arc::new(result.clone()));
+        }
     }
 
     fn try_load_ast_from_disk(
@@ -325,6 +365,9 @@ impl ParserCoordinator {
         file_path: &str,
         content: &str,
     ) -> Result<Option<ParseResult>, String> {
+        if !self.cache_enabled() {
+            return Ok(None);
+        }
         let key = self.build_ast_cache_key(file_path, content);
         self.disk_cache
             .try_get::<ParseResult>(&key)
@@ -337,6 +380,9 @@ impl ParserCoordinator {
         content: &str,
         result: &ParseResult,
     ) -> Result<(), String> {
+        if !self.cache_enabled() {
+            return Ok(());
+        }
         let key = self.build_ast_cache_key(file_path, content);
         self.disk_cache
             .get_or_build_with(&key, || Ok(result.clone()), |_| true)

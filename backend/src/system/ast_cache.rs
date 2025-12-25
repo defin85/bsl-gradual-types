@@ -10,11 +10,13 @@ use lru::LruCache;
 
 use crate::parsing::ParseResult;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct AstCacheStats {
     pub hits: usize,
     pub misses: usize,
     pub evictions: usize,
+    pub entries: usize,
+    pub capacity: usize,
 }
 
 pub struct AstCache {
@@ -74,7 +76,14 @@ impl AstCache {
 
     pub fn stats(&self) -> AstCacheStats {
         let stats = self.stats.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-        stats.clone()
+        let storage = self
+            .storage
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut snapshot = stats.clone();
+        snapshot.entries = storage.len();
+        snapshot.capacity = storage.cap().get();
+        snapshot
     }
 }
 

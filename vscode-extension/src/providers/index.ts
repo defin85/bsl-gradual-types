@@ -12,6 +12,7 @@ export {
 
 // Провайдеры для sidebar
 export { BslOverviewProvider } from './overviewProvider';
+export { CacheDashboardProvider } from './cacheDashboardProvider';
 export { BslDiagnosticsProvider } from './diagnosticsProvider';
 export { BslPlatformDocsProvider } from './platformDocs';
 export { BslTypeIndexProvider } from './typeIndexProvider';

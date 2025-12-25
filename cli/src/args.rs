@@ -79,6 +79,26 @@ pub enum Commands {
         #[arg(long)]
         show_symbols: bool,
     },
+
+    /// Cache management (per-project/per-config)
+    Cache {
+        /// Path to configuration root or Configuration.xml
+        #[arg(long)]
+        config_path: String,
+
+        /// Cache action
+        #[command(subcommand)]
+        action: CacheCommand,
+    },
+}
+
+/// Cache subcommands
+#[derive(Subcommand, Debug)]
+pub enum CacheCommand {
+    /// Show cache stats (JSON)
+    Stats,
+    /// Clear cache for project/config (JSON)
+    Clear,
 }
 
 /// Output format options

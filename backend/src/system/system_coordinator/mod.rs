@@ -18,7 +18,8 @@ mod types;
 // Реэкспорты публичного API
 pub use coordinator::SystemCoordinator;
 pub use types::{
-    ConfigIndexCache, LoadMetadataResult, ObjectKey, StartupError, SymbolInfo,
+    CacheClearReport, CacheScope, CacheStatsReport, CacheToggleResult, ConfigIndexCache,
+    DiskCacheStatsReport, LoadMetadataResult, ObjectKey, StartupError, SymbolInfo,
 };
 
 #[cfg(test)]

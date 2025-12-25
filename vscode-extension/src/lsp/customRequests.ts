@@ -125,6 +125,58 @@ export interface ExtractPlatformDocsResponse {
     message: string;
 }
 
+export interface CacheScopeDto {
+    project_id: string;
+    config_set_id: string;
+    config_ids: string[];
+}
+
+export interface DiskCacheRuntimeStats {
+    hit_count: number;
+    miss_count: number;
+    stale_hit_count: number;
+    load_time_ms_total: number;
+    build_time_ms_total: number;
+    stored_entries: number;
+    expired_entries: number;
+    evicted_entries: number;
+}
+
+export interface DiskCacheScopeStats {
+    entries: number;
+    size_bytes: number;
+}
+
+export interface DiskCacheStatsReport {
+    runtime: DiskCacheRuntimeStats;
+    scope: DiskCacheScopeStats;
+}
+
+export interface AstCacheStats {
+    hits: number;
+    misses: number;
+    evictions: number;
+    entries: number;
+    capacity: number;
+}
+
+export interface IrCacheStats {
+    hits: number;
+    misses: number;
+    evictions: number;
+}
+
+export interface CacheStatsResponse {
+    cache_enabled: boolean;
+    env_disabled: boolean;
+    swr_enabled: boolean;
+    cache_root: string;
+    scope: CacheScopeDto;
+    disk: DiskCacheStatsReport;
+    ast: AstCacheStats;
+    ir: IrCacheStats;
+}
+
 // ============================================================================
 // Search Types (LSP Integration для Quick Actions)
 // ============================================================================
@@ -468,6 +520,27 @@ export async function getWorkspaceStats(): Promise<WorkspaceStatsResponse | null
             return null;
         }
         logger.error('Failed to get workspace stats', error);
+        return null;
+    }
+}
+
+export async function getCacheStats(
+    configurationPath: string
+): Promise<CacheStatsResponse | null> {
+    const client = (await import('./client')).getLanguageClient();
+    if (!client) {
+        logger.warn('[Cache Stats] LSP client not available');
+        return null;
+    }
+
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.cache.getStats',
+            arguments: [{ configurationPath }]
+        });
+        return result as CacheStatsResponse || null;
+    } catch (error) {
+        logger.error('Failed to get cache stats', error);
         return null;
     }
 }

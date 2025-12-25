@@ -42,6 +42,39 @@ pub(crate) struct ConfigCombinedCacheMeta {
 }
 
 impl SystemCoordinator {
+    pub fn cache_scope_for_config_path(
+        &self,
+        config_path: &Path,
+    ) -> Result<super::types::CacheScope> {
+        use crate::data::loaders::config_metadata_parser::ConfigurationDiscovery;
+
+        let config_root = normalize_config_root(config_path);
+        let discovery = ConfigurationDiscovery::new(config_root.clone(), true);
+        let configurations = discovery
+            .discover_all_configurations()
+            .map_err(|e| anyhow::anyhow!("Ошибка обнаружения конфигураций: {}", e))?;
+        if configurations.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Конфигурации не найдены в {}",
+                config_root.display()
+            ));
+        }
+
+        let config_set_id = config_set_id_from_configs(&configurations);
+        let project_id = project_id_from_root(&config_root);
+        let mut config_ids: Vec<String> = configurations
+            .iter()
+            .map(|info| config_id_for_info(info))
+            .collect();
+        config_ids.sort();
+        config_ids.dedup();
+
+        Ok(super::types::CacheScope {
+            project_id,
+            config_set_id,
+            config_ids,
+        })
+    }
     fn apply_prefix_for_indexing(
         metadata: &[UniversalMetadataObject],
         prefix: Option<&str>,
@@ -1244,11 +1277,7 @@ fn config_cache_identity(
     let project_id = blake3::hash(canonical_root.to_string_lossy().as_bytes())
         .to_hex()
         .to_string();
-    let config_id = config_info.uuid.clone().unwrap_or_else(|| {
-        blake3::hash(canonical_config.to_string_lossy().as_bytes())
-            .to_hex()
-            .to_string()
-    });
+    let config_id = config_id_for_info(config_info);
 
     ConfigCacheIdentity {
         project_id,
@@ -1263,6 +1292,33 @@ fn project_id_from_root(root_path: &Path) -> String {
     blake3::hash(canonical_root.to_string_lossy().as_bytes())
         .to_hex()
         .to_string()
+}
+
+fn config_id_for_info(
+    config_info: &crate::data::loaders::config_metadata_parser::ConfigurationInfo,
+) -> String {
+    if let Some(uuid) = config_info.uuid.clone() {
+        return uuid;
+    }
+    let canonical_config =
+        std::fs::canonicalize(&config_info.path).unwrap_or_else(|_| config_info.path.clone());
+    blake3::hash(canonical_config.to_string_lossy().as_bytes())
+        .to_hex()
+        .to_string()
+}
+
+fn normalize_config_root(config_path: &Path) -> PathBuf {
+    if config_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        == Some("Configuration.xml")
+    {
+        return config_path
+            .parent()
+            .unwrap_or(config_path)
+            .to_path_buf();
+    }
+    config_path.to_path_buf()
 }
 
 fn extend_indexed_signatures(
@@ -1313,16 +1369,14 @@ fn config_fingerprint(config_path: &Path) -> Result<String> {
         }
     }
 
-    files.sort();
-
     let strict = cache_strict_fingerprint();
-    Ok(fingerprint_paths(&files, strict))
+    Ok(merkle_fingerprint_paths(config_path, &files, strict))
 }
 
 fn config_settings_fingerprint() -> String {
     let strict = cache_strict_fingerprint();
     format!(
-        "config_parser_v1;modules_indexing_v1;strict_fingerprint={}",
+        "config_parser_v2;modules_indexing_v1;strict_fingerprint={}",
         strict
     )
 }
@@ -1347,11 +1401,6 @@ fn config_layer_b_fingerprint(
         .collect();
 
     let module_paths = collect_module_paths(config_path, metadata_for_indexing);
-    for path in module_paths {
-        if path.is_file() {
-            files.push(path);
-        }
-    }
 
     if files.is_empty() {
         let config_xml = config_path.join("Configuration.xml");
@@ -1360,17 +1409,19 @@ fn config_layer_b_fingerprint(
         }
     }
 
-    files.sort();
-    files.dedup();
-
     let strict = cache_strict_fingerprint();
-    Ok(fingerprint_paths(&files, strict))
+    Ok(merkle_fingerprint_paths_with_modules(
+        config_path,
+        &files,
+        &module_paths,
+        strict,
+    ))
 }
 
 fn config_layer_b_settings_fingerprint() -> String {
     let strict = cache_strict_fingerprint();
     format!(
-        "config_layer_b_v1;modules_indexing_v1;strict_fingerprint={}",
+        "config_layer_b_v2;modules_indexing_v1;strict_fingerprint={}",
         strict
     )
 }
@@ -1378,7 +1429,7 @@ fn config_layer_b_settings_fingerprint() -> String {
 fn module_cache_settings_fingerprint() -> String {
     let strict = cache_strict_fingerprint();
     format!(
-        "config_module_parse_v1;strict_fingerprint={}",
+        "config_module_parse_v2;strict_fingerprint={}",
         strict
     )
 }
@@ -1387,33 +1438,207 @@ fn file_fingerprint(path: &Path, strict: bool) -> Result<String> {
     if !path.exists() {
         return Ok(String::new());
     }
-    Ok(fingerprint_paths(&[path.to_path_buf()], strict))
+    Ok(merkle_fingerprint_single(path, strict))
 }
 
-fn fingerprint_paths(paths: &[PathBuf], strict: bool) -> String {
-    let mut hasher = blake3::Hasher::new();
-    for path in paths {
-        let path_str = path.to_string_lossy();
-        hasher.update(path_str.as_bytes());
-        if let Ok(metadata) = std::fs::metadata(path) {
-            hasher.update(&metadata.len().to_le_bytes());
-            let modified = metadata
-                .modified()
-                .ok()
-                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|duration| duration.as_secs())
-                .unwrap_or(0);
-            hasher.update(&modified.to_le_bytes());
-        }
-        if strict {
-            if let Ok(contents) = std::fs::read(path) {
-                let content_hash = blake3::hash(&contents);
-                hasher.update(content_hash.as_bytes());
-            }
+struct MerkleArtifact {
+    kind: &'static str,
+    path: PathBuf,
+    path_norm: String,
+}
+
+fn merkle_fingerprint_paths(config_root: &Path, xml_paths: &[PathBuf], strict: bool) -> String {
+    let mut artifacts: Vec<MerkleArtifact> = xml_paths
+        .iter()
+        .filter(|path| path.is_file())
+        .map(|path| MerkleArtifact {
+            kind: "xml",
+            path: path.to_path_buf(),
+            path_norm: normalize_path(path, Some(config_root)),
+        })
+        .collect();
+
+    artifacts.sort_by(|a, b| {
+        a.kind
+            .cmp(b.kind)
+            .then_with(|| a.path_norm.cmp(&b.path_norm))
+    });
+    artifacts.dedup_by(|a, b| a.kind == b.kind && a.path_norm == b.path_norm);
+
+    merkle_root_for_artifacts(&artifacts, strict)
+}
+
+fn merkle_fingerprint_paths_with_modules(
+    config_root: &Path,
+    xml_paths: &[PathBuf],
+    module_paths: &[PathBuf],
+    strict: bool,
+) -> String {
+    let mut artifacts: Vec<MerkleArtifact> = Vec::new();
+
+    for path in xml_paths {
+        if path.is_file() {
+            artifacts.push(MerkleArtifact {
+                kind: "xml",
+                path: path.to_path_buf(),
+                path_norm: normalize_path(path, Some(config_root)),
+            });
         }
     }
 
+    for path in module_paths {
+        if path.is_file() {
+            artifacts.push(MerkleArtifact {
+                kind: "bsl",
+                path: path.to_path_buf(),
+                path_norm: normalize_path(path, Some(config_root)),
+            });
+        }
+    }
+
+    artifacts.sort_by(|a, b| {
+        a.kind
+            .cmp(b.kind)
+            .then_with(|| a.path_norm.cmp(&b.path_norm))
+    });
+    artifacts.dedup_by(|a, b| a.kind == b.kind && a.path_norm == b.path_norm);
+
+    merkle_root_for_artifacts(&artifacts, strict)
+}
+
+fn merkle_fingerprint_single(path: &Path, strict: bool) -> String {
+    let artifacts = [MerkleArtifact {
+        kind: "file",
+        path: path.to_path_buf(),
+        path_norm: normalize_path(path, None),
+    }];
+    merkle_root_for_artifacts(&artifacts, strict)
+}
+
+fn merkle_root_for_artifacts(artifacts: &[MerkleArtifact], strict: bool) -> String {
+    let mut leaves: Vec<blake3::Hash> = Vec::with_capacity(artifacts.len());
+    for artifact in artifacts {
+        if strict {
+            let content_hash = match std::fs::read(&artifact.path) {
+                Ok(contents) => blake3::hash(&contents),
+                Err(_) => blake3::hash(&[]),
+            };
+            leaves.push(merkle_leaf_hash_strict(
+                artifact.kind,
+                &artifact.path_norm,
+                &content_hash,
+            ));
+        } else {
+            let (size, mtime_ns) = file_metadata_fields(&artifact.path);
+            leaves.push(merkle_leaf_hash_fast(
+                artifact.kind,
+                &artifact.path_norm,
+                size,
+                mtime_ns,
+            ));
+        }
+    }
+
+    let root_raw = merkle_root_raw(&leaves);
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&[0x02]);
+    hasher.update(b"merkle-root-v1");
+    hasher.update(&[0x00]);
+    hasher.update(root_raw.as_bytes());
     hasher.finalize().to_hex().to_string()
+}
+
+fn merkle_leaf_hash_fast(kind: &str, path_norm: &str, size: u64, mtime_ns: u64) -> blake3::Hash {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&[0x00]);
+    hasher.update(kind.as_bytes());
+    hasher.update(&[0x00]);
+    hasher.update(path_norm.as_bytes());
+    hasher.update(&[0x00]);
+    hasher.update(&size.to_le_bytes());
+    hasher.update(&[0x00]);
+    hasher.update(&mtime_ns.to_le_bytes());
+    hasher.finalize()
+}
+
+fn merkle_leaf_hash_strict(kind: &str, path_norm: &str, content_hash: &blake3::Hash) -> blake3::Hash {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&[0x00]);
+    hasher.update(kind.as_bytes());
+    hasher.update(&[0x00]);
+    hasher.update(path_norm.as_bytes());
+    hasher.update(&[0x00]);
+    hasher.update(content_hash.as_bytes());
+    hasher.finalize()
+}
+
+fn merkle_root_raw(leaves: &[blake3::Hash]) -> blake3::Hash {
+    let empty = [0u8; 32];
+    if leaves.is_empty() {
+        return blake3::Hash::from(merkle_node_hash(&empty, &empty));
+    }
+
+    let mut level: Vec<[u8; 32]> = leaves.iter().map(|hash| *hash.as_bytes()).collect();
+    while level.len() > 1 {
+        let mut next_level: Vec<[u8; 32]> = Vec::with_capacity((level.len() + 1) / 2);
+        let mut idx = 0;
+        while idx < level.len() {
+            let left = level[idx];
+            let right = if idx + 1 < level.len() {
+                level[idx + 1]
+            } else {
+                left
+            };
+            next_level.push(merkle_node_hash(&left, &right));
+            idx += 2;
+        }
+        level = next_level;
+    }
+
+    blake3::Hash::from(level[0])
+}
+
+fn merkle_node_hash(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&[0x01]);
+    hasher.update(left);
+    hasher.update(right);
+    *hasher.finalize().as_bytes()
+}
+
+fn file_metadata_fields(path: &Path) -> (u64, u64) {
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let size = metadata.len();
+        let mtime_ns = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(duration_to_u64_nanos)
+            .unwrap_or(0);
+        (size, mtime_ns)
+    } else {
+        (0, 0)
+    }
+}
+
+fn duration_to_u64_nanos(duration: std::time::Duration) -> u64 {
+    let nanos = duration.as_nanos();
+    if nanos > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        nanos as u64
+    }
+}
+
+fn normalize_path(path: &Path, root: Option<&Path>) -> String {
+    let relative = root.and_then(|base| path.strip_prefix(base).ok()).unwrap_or(path);
+    let mut parts = Vec::new();
+    for component in relative.components() {
+        if let std::path::Component::Normal(value) = component {
+            parts.push(value.to_string_lossy().to_string());
+        }
+    }
+    parts.join("/")
 }
 
 fn config_set_id_from_configs(

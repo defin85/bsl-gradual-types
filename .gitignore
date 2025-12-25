@@ -23,6 +23,7 @@ Thumbs.db
 *.tmp
 node_modules/
 dist/
+.build-all.last-clean
 
 # Frontend WASM builds (generated files)
 backend/static/*.js

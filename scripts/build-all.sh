@@ -9,6 +9,7 @@
 #     --force-build-timestamp      принудительно обновлять BUILD_TIMESTAMP (вызывает перекомпиляцию)
 #     --clean-target               cargo clean перед сборкой (удалит весь target/)
 #     --prune-target-days N        удалить старые артефакты из target/debug (mtime > N дней)
+#     (по умолчанию выполняется cargo clean раз в 2 дня)
 # ============================================================================
 
 set -e  # Остановка при первой ошибке
@@ -76,11 +77,14 @@ AUTO_VERSION=true
 FORCE_BUILD_TIMESTAMP=false
 CLEAN_TARGET=false
 PRUNE_TARGET_DAYS=""
+AUTO_CLEAN_DAYS=2
+CLEAN_TARGET_REASON="manual"
 
 # Если скрипт запущен без аргументов в WSL — включаем мягкую уборку по умолчанию,
 # чтобы target/ не раздувался бесконтрольно.
 ORIGINAL_ARGC=$#
 DEFAULT_WSL_PRUNE_DAYS=14
+AUTO_CLEAN_MARKER=""
 
 # Парсинг аргументов
 while [[ $# -gt 0 ]]; do
@@ -205,6 +209,49 @@ log_section() {
     echo -e "${BLUE}============================================================${NC}"
 }
 
+# ============================================================================
+# Авто-очистка target раз в N дней
+# ============================================================================
+
+AUTO_CLEAN_MARKER="$PROJECT_ROOT/.build-all.last-clean"
+AUTO_CLEAN_INTERVAL_SECONDS=$((AUTO_CLEAN_DAYS * 24 * 60 * 60))
+
+file_mtime_epoch() {
+    local file="$1"
+    local ts=""
+
+    if ts=$(stat -c %Y "$file" 2>/dev/null); then
+        echo "$ts"
+        return 0
+    fi
+
+    if ts=$(stat -f %m "$file" 2>/dev/null); then
+        echo "$ts"
+        return 0
+    fi
+
+    echo 0
+}
+
+auto_clean_target_if_needed() {
+    if [ "$CLEAN_TARGET" = true ]; then
+        return 0
+    fi
+
+    local now
+    now=$(date +%s)
+
+    local last_clean=0
+    if [ -f "$AUTO_CLEAN_MARKER" ]; then
+        last_clean=$(file_mtime_epoch "$AUTO_CLEAN_MARKER")
+    fi
+
+    if [ "$last_clean" -eq 0 ] || [ $((now - last_clean)) -ge "$AUTO_CLEAN_INTERVAL_SECONDS" ]; then
+        CLEAN_TARGET=true
+        CLEAN_TARGET_REASON="auto"
+    fi
+}
+
 # Проверка состояния upstream
 check_git_upstream_ahead() {
     log_info "\n🔍 Проверка коммитов относительно @{u}..."
@@ -259,10 +306,17 @@ check_file() {
 # ============================================================================
 
 clean_or_prune_target() {
+    auto_clean_target_if_needed
+
     if [ "$CLEAN_TARGET" = true ]; then
         log_section "ЭТАП 0: Очистка target/ (cargo clean)"
-        log_warning "⚠️  Выполняется cargo clean — удалится весь target/ (сборка начнётся с нуля)"
+        if [ "$CLEAN_TARGET_REASON" = "auto" ]; then
+            log_warning "⚠️  Авто-очистка: прошло ${AUTO_CLEAN_DAYS} дней с последнего cargo clean"
+        else
+            log_warning "⚠️  Выполняется cargo clean — удалится весь target/ (сборка начнётся с нуля)"
+        fi
         measure_time cargo clean
+        touch "$AUTO_CLEAN_MARKER"
         return 0
     fi
 

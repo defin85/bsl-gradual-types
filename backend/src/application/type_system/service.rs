@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
 
@@ -15,10 +16,14 @@ use bsl_shared::domain::types::{ParseError, TypeDiagnostic, TypeResolution};
 use bsl_shared::domain::{CompletionItem, TypeMetadataLookup};
 use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::formatting::DetailLevel;
+use url::Url;
 
 use crate::application::TypeInferenceService;
 use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
-use crate::system::{AnalysisCache, CacheAnalysisResult, IrCache, IrCacheStats, ParserCoordinator};
+use crate::system::{
+    AnalysisCache, CacheAnalysisResult, IntellisenseIndexStore, IrCache, IrCacheStats,
+    ParserCoordinator,
+};
 
 use super::loaders::configuration_loader;
 use super::services::{
@@ -46,6 +51,7 @@ pub struct TypeSystemService {
     cache: Arc<AnalysisCache>,
     ir_cache: Arc<IrCache>, // Milestone 2.13: IR caching for LSP hover
     parser: Arc<ParserCoordinator>,
+    intellisense_index: Arc<IntellisenseIndexStore>,
 
     /// Mapping file URI -> content hash for smart cache invalidation.
     ///
@@ -70,6 +76,7 @@ impl TypeSystemService {
         cache: Arc<AnalysisCache>,
         parser: Arc<ParserCoordinator>,
         ir_cache: Arc<IrCache>, // Milestone 2.13: IR caching
+        intellisense_index: Arc<IntellisenseIndexStore>,
     ) -> Self {
         // Create TypeInferenceService based on AnalysisEngine
         let resolver = analysis_engine.get_resolver();
@@ -99,6 +106,7 @@ impl TypeSystemService {
             cache,
             ir_cache,
             parser,
+            intellisense_index,
             // MILESTONE 2.13: Initialize new fields
             uri_to_hash: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             hover_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -331,8 +339,16 @@ impl TypeSystemService {
     }
 
     /// Invalidate cache for changed file (MILESTONE 2.13)
-    pub async fn invalidate_file_cache(&self, file_uri: &str, new_content: &str) {
-        hover_service::invalidate_file_cache(&self.uri_to_hash, file_uri, new_content).await
+    pub async fn invalidate_file_cache(
+        &self,
+        file_uri: &str,
+        new_content: &str,
+        config_root: Option<&Path>,
+    ) {
+        hover_service::invalidate_file_cache(&self.uri_to_hash, file_uri, new_content).await;
+        let module_key = module_key_from_uri(file_uri, config_root);
+        self.intellisense_index
+            .invalidate_file(file_uri, module_key.as_deref());
     }
 
     // ============================================================================
@@ -517,6 +533,36 @@ impl TypeSystemService {
     /// MILESTONE 2.13: Get IR cache statistics
     pub async fn get_ir_cache_stats(&self) -> IrCacheStats {
         self.ir_cache.get_stats().await
+    }
+}
+
+fn module_key_from_uri(file_uri: &str, config_root: Option<&Path>) -> Option<String> {
+    let url = Url::parse(file_uri).ok()?;
+    let path = url.to_file_path().ok()?;
+    if let Some(root) = config_root {
+        let key_path = path.strip_prefix(root).unwrap_or(&path);
+        return Some(key_path.to_string_lossy().to_string());
+    }
+    Some(path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn module_key_from_uri_file_scheme() {
+        let uri = "file:///tmp/example/Module.bsl";
+        let key = module_key_from_uri(uri, None).expect("module key");
+        assert!(key.ends_with("Module.bsl"));
+    }
+
+    #[test]
+    fn module_key_from_uri_relative_to_root() {
+        let uri = "file:///tmp/example/Module.bsl";
+        let root = Path::new("/tmp");
+        let key = module_key_from_uri(uri, Some(root)).expect("module key");
+        assert_eq!(key, "example/Module.bsl");
     }
 }
 

@@ -6,7 +6,7 @@
 //! - fallback на локальное объявление в текущем файле
 
 use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
+use bsl_backend::system::{AnalysisCache, IntellisenseIndexStore, IrCache, ParserCoordinator};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::{
     ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
@@ -48,8 +48,12 @@ fn create_minimal_service() -> (TypeSystemService, Arc<InMemoryTypeRepository>) 
         repository.clone(),
         resolver,
     ));
+    let intellisense_index = Arc::new(IntellisenseIndexStore::new("test-config", "test-platform"));
 
-    (TypeSystemService::new(analysis_engine, cache, parser, ir_cache), repository_impl)
+    (
+        TypeSystemService::new(analysis_engine, cache, parser, ir_cache, intellisense_index),
+        repository_impl,
+    )
 }
 
 #[tokio::test]

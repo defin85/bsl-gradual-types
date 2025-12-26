@@ -42,7 +42,7 @@ async fn test_progress_updates_distributed_in_time() {
     if syntax_path.exists() {
         let tx_clone = progress_tx.clone();
         let result = coordinator
-            .start_with_paths(Some(syntax_path), None, Some(tx_clone))
+            .start_with_paths(Some(syntax_path), None, None, Some(tx_clone))
             .await;
 
         let duration = start.elapsed();
@@ -155,7 +155,7 @@ async fn test_event_loop_remains_responsive() {
     if syntax_path.exists() {
         // Запускаем парсинг
         let parse_result = coordinator
-            .start_with_paths(Some(syntax_path), None, Some(progress_tx.clone()))
+            .start_with_paths(Some(syntax_path), None, None, Some(progress_tx.clone()))
             .await;
 
         // Ждём завершения параллельной задачи
@@ -208,7 +208,7 @@ async fn test_progress_updates_data_validity() {
     if syntax_path.exists() {
         let tx_clone = progress_tx.clone();
         let result = coordinator
-            .start_with_paths(Some(syntax_path), None, Some(tx_clone))
+            .start_with_paths(Some(syntax_path), None, None, Some(tx_clone))
             .await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -281,7 +281,7 @@ async fn test_graceful_error_handling() {
     println!("\n📊 TEST 4: GRACEFUL ERROR HANDLING");
 
     let result = coordinator
-        .start_with_paths(Some(nonexistent_path), None, Some(progress_tx.clone()))
+        .start_with_paths(Some(nonexistent_path), None, None, Some(progress_tx.clone()))
         .await;
 
     match result {
@@ -317,7 +317,7 @@ async fn test_multiple_parse_runs_cleanup() {
             println!("  Run {}: Запускаем парсинг...", run);
 
             let result = coordinator
-                .start_with_paths(Some(syntax_path), None, Some(progress_tx.clone()))
+                .start_with_paths(Some(syntax_path), None, None, Some(progress_tx.clone()))
                 .await;
 
             match result {

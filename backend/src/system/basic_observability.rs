@@ -81,6 +81,23 @@ impl BasicObservability {
             .observe("analysis_duration_ms", duration.as_millis() as f64);
     }
 
+    pub fn record_index_warmup_hit(&self, duration: Duration) {
+        self.metrics.increment("index_warmup_hit_total");
+        self.metrics
+            .observe("index_warmup_hit_duration_ms", duration.as_millis() as f64);
+    }
+
+    pub fn record_index_warmup_miss(&self, duration: Duration) {
+        self.metrics.increment("index_warmup_miss_total");
+        self.metrics
+            .observe("index_warmup_miss_duration_ms", duration.as_millis() as f64);
+    }
+
+    pub fn record_index_warmup_skip(&self, reason: &str) {
+        self.metrics
+            .increment(&format!("index_warmup_skip_total_{}", reason));
+    }
+
     /// Простая проверка здоровья
     pub fn health_check(&self) -> HealthStatus {
         let uptime = self.start_time.elapsed();

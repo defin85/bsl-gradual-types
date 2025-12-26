@@ -178,6 +178,12 @@ impl SyntaxHelperLoader {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Не удалось прочитать файл {:?}", path))?;
         let document = Html::parse_document(&content);
+        if self.settings.collect_keywords && is_language_help_path(path) {
+            let keywords = self.document_parser.html_extractor().extract_keywords(&document);
+            for keyword in keywords {
+                self.keywords.insert(keyword);
+            }
+        }
 
         // Определяем тип файла по содержимому и пути
         let file_type = utils::detect_file_type(path, &document);
@@ -313,4 +319,9 @@ impl SyntaxHelperLoader {
             }
         }
     }
+}
+
+fn is_language_help_path(path: &Path) -> bool {
+    let path_str = path.to_string_lossy();
+    path_str.contains("rebuilt.shlang_ru")
 }

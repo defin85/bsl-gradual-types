@@ -277,6 +277,9 @@ pub struct ConfigurationInfo {
 
     /// UUID конфигурации (для диагностики)
     pub uuid: Option<String>,
+
+    /// Режим совместимости платформы (CompatibilityMode)
+    pub compatibility_mode: Option<String>,
 }
 
 impl ConfigurationInfo {
@@ -288,6 +291,7 @@ impl ConfigurationInfo {
             name,
             prefix: None,
             uuid: None,
+            compatibility_mode: None,
         }
     }
 
@@ -299,6 +303,7 @@ impl ConfigurationInfo {
             name,
             prefix,
             uuid: None,
+            compatibility_mode: None,
         }
     }
 

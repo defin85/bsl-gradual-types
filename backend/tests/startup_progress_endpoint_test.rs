@@ -9,7 +9,7 @@ use tower::ServiceExt;
 async fn startup_progress_endpoint_returns_json() {
     let coordinator = SystemCoordinator::new();
     coordinator
-        .start_with_paths_blocking(None, None, None)
+        .start_with_paths_blocking(None, None, None, None)
         .expect("startup");
 
     let type_service = coordinator
@@ -37,4 +37,3 @@ async fn startup_progress_endpoint_returns_json() {
     assert!(json.get("percentage").is_some(), "expected field `percentage`");
     assert!(json.get("done").is_some(), "expected field `done`");
 }
-

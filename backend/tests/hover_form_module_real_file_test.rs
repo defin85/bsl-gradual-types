@@ -35,7 +35,7 @@ fn target_file_path() -> PathBuf {
 async fn init_service_with_config(config_path: &Path) -> Arc<TypeSystemService> {
     let coordinator = SystemCoordinator::new();
     coordinator
-        .start_with_paths(None, Some(config_path), None)
+        .start_with_paths(None, Some(config_path), Some("8.3.25"), None)
         .await
         .expect("SystemCoordinator start_with_paths");
     coordinator
@@ -84,4 +84,3 @@ async fn hover_for_object_tabular_section_in_form_module_has_type() {
     // Полезно для ручной проверки через `cargo test -- --nocapture`
     println!("HOVER:\n{}", hover);
 }
-

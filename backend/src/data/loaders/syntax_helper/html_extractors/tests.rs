@@ -128,6 +128,32 @@ fn test_parse_title() {
 }
 
 #[test]
+fn test_extract_keywords_from_language_html() {
+    let html_content = r#"
+    <html>
+        <p><strong class="ControlElement">Если</strong></p>
+        <p><u>КонецЕсли<br></u></p>
+        <p><u>&lt;Логическое выражение&gt;<br></u></p>
+        <p><u>// Операторы<br></u></p>
+        <p><span class="SourceCode">#Если Сервер Тогда #КонецЕсли</span></p>
+        <p><strong class="ControlElement">ИначеЕсли — Тогда</strong></p>
+    </html>
+    "#;
+
+    let document = Html::parse_document(html_content);
+    let extractor = HtmlExtractor::new();
+    let keywords = extractor.extract_keywords(&document);
+
+    assert!(keywords.contains(&"Если".to_string()));
+    assert!(keywords.contains(&"КонецЕсли".to_string()));
+    assert!(keywords.contains(&"#Если".to_string()));
+    assert!(keywords.contains(&"#КонецЕсли".to_string()));
+    assert!(keywords.contains(&"Тогда".to_string()));
+    assert!(!keywords.contains(&"Логическое".to_string()));
+    assert!(!keywords.contains(&"Операторы".to_string()));
+}
+
+#[test]
 fn test_extract_return_info_from_value_table_insert() {
     // Реальная HTML структура из ValueTable.Insert
     let html_content = r#"

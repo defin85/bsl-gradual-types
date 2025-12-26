@@ -11,7 +11,7 @@ use anyhow::Result;
 
 /// Ключ для основного индекса типов
 const MAIN_INDEX_KEY: &str = "main";
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::path::Path;
@@ -54,6 +54,8 @@ pub struct SyntaxHelperLoader {
 
     /// Индексы для поиска (собираются после парсинга)
     pub(crate) type_index: Arc<DashMap<String, TypeIndex>>,
+    /// Ключевые слова языка
+    pub(crate) keywords: Arc<DashSet<String>>,
 
     /// Парсер документов (содержит html_extractor внутри)
     pub(crate) document_parser: DocumentParser,
@@ -98,6 +100,7 @@ impl SyntaxHelperLoader {
             categories: Arc::new(DashMap::new()),
             global_functions: Arc::new(DashMap::new()),
             type_index: Arc::new(DashMap::new()),
+            keywords: Arc::new(DashSet::new()),
             document_parser: DocumentParser::new(),
             settings,
             processed_files: Arc::new(AtomicUsize::new(0)),
@@ -457,6 +460,10 @@ impl SyntaxHelperLoader {
             db.global_functions
                 .insert(entry.key().clone(), entry.value().clone());
         }
+
+        let mut keywords: Vec<String> = self.keywords.iter().map(|k| k.clone()).collect();
+        keywords.sort();
+        db.keywords = keywords;
 
         db
     }

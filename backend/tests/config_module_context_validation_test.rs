@@ -3,7 +3,7 @@
 //! Минимальная проверка: серверный метод диагностируется при вызове из клиентского контекста.
 
 use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
+use bsl_backend::system::{AnalysisCache, IntellisenseIndexStore, IrCache, ParserCoordinator};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::{
     ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
@@ -67,7 +67,9 @@ async fn test_server_only_method_warns_in_client_context_for_form_module() {
 
     let cache = Arc::new(AnalysisCache::new(10));
     let ir_cache = Arc::new(IrCache::new(10));
-    let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
+    let intellisense_index = Arc::new(IntellisenseIndexStore::new("test-config", "test-platform"));
+    let service =
+        TypeSystemService::new(analysis_engine, cache, parser, ir_cache, intellisense_index);
     service.initialize().expect("initialize");
     let _metadata_lookup = TypeMetadataLookup::new(repository.clone());
 

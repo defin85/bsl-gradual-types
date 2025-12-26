@@ -10,7 +10,7 @@
 //! для простых переменных (Identifier), что позволяет корректно резолвить типы.
 
 use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::{AnalysisCache, ParserCoordinator};
+use bsl_backend::system::{AnalysisCache, IntellisenseIndexStore, ParserCoordinator};
 use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::engine::AnalysisEngine;
@@ -26,8 +26,9 @@ fn create_test_service() -> TypeSystemService {
     let cache = Arc::new(AnalysisCache::new(1000));
     let parser = Arc::new(ParserCoordinator::with_fallback());
     let ir_cache = Arc::new(IrCache::new(100));
+    let intellisense_index = Arc::new(IntellisenseIndexStore::new("test-config", "test-platform"));
 
-    TypeSystemService::new(analysis_engine, cache, parser, ir_cache)
+    TypeSystemService::new(analysis_engine, cache, parser, ir_cache, intellisense_index)
 }
 
 /// Главный тест Milestone 3.5: Flow-Sensitive Analysis

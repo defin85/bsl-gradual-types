@@ -183,6 +183,8 @@ pub struct SyntaxHelperDatabase {
     pub categories: HashMap<String, CategoryInfo>,
     #[serde(default)]
     pub global_functions: HashMap<String, GlobalFunctionInfo>,
+    #[serde(default)]
+    pub keywords: Vec<String>,
 }
 
 /// Индексы для поиска типов
@@ -210,6 +212,8 @@ pub struct OptimizationSettings {
     pub skip_dirs: Vec<String>,
     /// Использовать параллельное построение индексов
     pub parallel_indexing: bool,
+    /// Собирать ключевые слова из справки по языку
+    pub collect_keywords: bool,
 }
 
 impl Default for OptimizationSettings {
@@ -224,6 +228,7 @@ impl Default for OptimizationSettings {
                 "IndexPackLookup".to_string(),
             ],
             parallel_indexing: true,
+            collect_keywords: false,
         }
     }
 }

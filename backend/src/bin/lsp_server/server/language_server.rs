@@ -314,10 +314,16 @@ impl LanguageServer for BslLanguageServer {
                     .configuration_path
                     .as_ref()
                     .map(|s| std::path::Path::new(s.as_str()));
+                let platform_version_ref = cfg.platform_version.as_deref();
 
                 let result = self
                     .coordinator
-                    .start_with_paths(Some(syntax_path), config_path_ref, Some(progress_tx))
+                    .start_with_paths(
+                        Some(syntax_path),
+                        config_path_ref,
+                        platform_version_ref,
+                        Some(progress_tx),
+                    )
                     .await;
 
                 match result {
@@ -490,6 +496,15 @@ impl LanguageServer for BslLanguageServer {
             .await
             .insert(uri.clone(), updated_text.clone());
 
+        let config_root = {
+            let cache_lock = self.coordinator.config_index_cache();
+            let guard = cache_lock.read().unwrap_or_else(|poisoned| {
+                warn!("Config index cache RwLock poisoned (read), recovering");
+                poisoned.into_inner()
+            });
+            guard.as_ref().map(|cache| cache.config_root.clone())
+        };
+
         // Get diagnostics
         let settings = self.settings.read().await.clone();
         let diagnostics = handlers::handle_did_change(
@@ -497,6 +512,7 @@ impl LanguageServer for BslLanguageServer {
             &updated_text,
             &changes,
             self.get_type_service(),
+            config_root,
             &settings,
         )
         .await;

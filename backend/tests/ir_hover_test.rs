@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::{AnalysisCache, ParserCoordinator};
+use bsl_backend::system::{AnalysisCache, IntellisenseIndexStore, ParserCoordinator};
 use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::engine::AnalysisEngine;
@@ -21,8 +21,9 @@ fn create_test_service() -> TypeSystemService {
     let cache = Arc::new(AnalysisCache::new(100));
     let parser = Arc::new(ParserCoordinator::with_fallback());
     let ir_cache = Arc::new(IrCache::new(100)); // MILESTONE 2.13: IR Cache
+    let intellisense_index = Arc::new(IntellisenseIndexStore::new("test-config", "test-platform"));
 
-    TypeSystemService::new(engine, cache, parser, ir_cache)
+    TypeSystemService::new(engine, cache, parser, ir_cache, intellisense_index)
 }
 
 #[tokio::test]

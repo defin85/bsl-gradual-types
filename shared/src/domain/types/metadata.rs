@@ -12,7 +12,7 @@ use super::facets::FacetKind;
 use super::raw_data::RawAttributeData;
 
 /// Kind of 1C metadata object
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum MetadataKind {
     #[default]
     Unknown,

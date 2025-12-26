@@ -8,6 +8,7 @@
 //! - `property_detector` - детектор свойств и фасетов типов
 
 mod description_extractor;
+mod keyword_extractor;
 mod method_extractor;
 mod parameter_extractor;
 mod property_detector;
@@ -17,6 +18,7 @@ mod title_extractor;
 mod tests;
 
 pub use description_extractor::DescriptionExtractor;
+pub use keyword_extractor::KeywordExtractor;
 pub use method_extractor::MethodExtractor;
 pub use parameter_extractor::ParameterExtractor;
 pub use property_detector::PropertyDetector;
@@ -129,6 +131,14 @@ impl HtmlExtractor {
 
     pub fn extract_enum_values_from_html(&self, document: &Html) -> Vec<String> {
         MethodExtractor::extract_enum_values_from_html(document)
+    }
+
+    // =========================================================================
+    // KeywordExtractor делегаты
+    // =========================================================================
+
+    pub fn extract_keywords(&self, document: &Html) -> Vec<String> {
+        KeywordExtractor::extract_keywords(document)
     }
 
     // =========================================================================

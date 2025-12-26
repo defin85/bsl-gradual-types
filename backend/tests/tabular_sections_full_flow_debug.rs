@@ -13,7 +13,7 @@ mod full_flow_tests {
         // 2. Запускаем с конфигурацией
         let config_path = Path::new("../examples/conf/conf_test");
         coordinator
-            .start_with_paths(None, Some(config_path), None)
+            .start_with_paths(None, Some(config_path), Some("8.3.25"), None)
             .await
             .expect("Failed to start coordinator");
 

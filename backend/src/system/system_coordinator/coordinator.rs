@@ -3,12 +3,15 @@
 //! Единая точка координации всех компонентов системы типов согласно Simple Architecture
 
 use std::sync::{Arc, RwLock};
+use anyhow::Result;
 use tracing::warn;
 
 use crate::application::TypeSystemService;
 use crate::system::basic_observability::BasicObservability;
 use crate::system::disk_cache::DiskCache;
 use crate::system::ir_cache::IrCache;
+use crate::system::intellisense_index::IntellisenseIndexStore;
+use crate::system::intellisense_index_store::IntellisenseIndexDiskStore;
 use crate::system::parser_coordinator::ParserCoordinator;
 use crate::system::simple_cache::AnalysisCache;
 use bsl_shared::domain::repository::RepositoryStats;
@@ -52,6 +55,7 @@ pub struct SystemCoordinator {
     pub(crate) parser: Arc<RwLock<Arc<ParserCoordinator>>>,
     pub(crate) observability: Arc<BasicObservability>,
     pub(crate) disk_cache: Arc<DiskCache>,
+    pub(crate) intellisense_index: Arc<IntellisenseIndexStore>,
 
     // === ANALYSIS ENGINE CACHE ===
     // Используем Arc<RwLock> для оптимизации read-heavy паттернов
@@ -65,6 +69,9 @@ pub struct SystemCoordinator {
 
     // === CONFIG INDEX CACHE ===
     pub(crate) config_index_cache: Arc<RwLock<Option<ConfigIndexCache>>>,
+
+    // === PLATFORM VERSION (for platform docs matching) ===
+    pub(crate) platform_version: Arc<RwLock<Option<String>>>,
 }
 
 impl Default for SystemCoordinator {
@@ -93,26 +100,49 @@ impl SystemCoordinator {
             }
         };
 
+        let intellisense_index =
+            Arc::new(IntellisenseIndexStore::new("unknown-config", env!("CARGO_PKG_VERSION")));
+
         // 4. Simple parsing (будет обновлён с TypeResolver в start_with_paths_blocking)
         // Milestone 3.17: Используем RwLock для возможности обновления
-        let parser = Arc::new(RwLock::new(Arc::new(
-            ParserCoordinator::with_fallback().with_disk_cache(disk_cache.clone()),
-        )));
+        let parser_instance =
+            ParserCoordinator::with_fallback().with_disk_cache(disk_cache.clone());
+        parser_instance.set_intellisense_index(intellisense_index.clone());
+        let parser = Arc::new(RwLock::new(Arc::new(parser_instance)));
 
         // 5. Basic observability
         let observability = Arc::new(BasicObservability::default());
-
         Self {
             cache,
             ir_cache,
             parser,
             observability,
             disk_cache,
+            intellisense_index,
             analysis_engine_cache: Arc::new(RwLock::new(None)),
             type_service_cache: Arc::new(RwLock::new(None)),
             startup_progress: Arc::new(RwLock::new(StartupProgressDto::default())),
             config_index_cache: Arc::new(RwLock::new(None)),
+            platform_version: Arc::new(RwLock::new(None)),
         }
+    }
+
+    pub fn platform_version(&self) -> Option<String> {
+        self.platform_version
+            .read()
+            .unwrap_or_else(|poisoned| {
+                warn!("Platform version RwLock poisoned (read), recovering data.");
+                poisoned.into_inner()
+            })
+            .clone()
+    }
+
+    pub fn set_platform_version(&self, version: Option<String>) {
+        let mut guard = self.platform_version.write().unwrap_or_else(|poisoned| {
+            warn!("Platform version RwLock poisoned (write), recovering data.");
+            poisoned.into_inner()
+        });
+        *guard = version;
     }
 
     /// Клонирование для передачи в spawn_blocking
@@ -155,6 +185,27 @@ impl SystemCoordinator {
         self.disk_cache.clone()
     }
 
+    pub fn intellisense_index_store_for_scope(
+        &self,
+        scope: &CacheScope,
+    ) -> Result<IntellisenseIndexDiskStore> {
+        self.intellisense_index_store_for_ids(&scope.project_id, &scope.config_set_id)
+    }
+
+    pub fn intellisense_index_store_for_ids(
+        &self,
+        project_id: &str,
+        config_id: &str,
+    ) -> Result<IntellisenseIndexDiskStore> {
+        let root = self
+            .disk_cache
+            .root_path()
+            .join("index")
+            .join(project_id)
+            .join(config_id);
+        IntellisenseIndexDiskStore::new_with_root(root)
+    }
+
     /// Включить/выключить кэш с учетом ENV-приоритета
     pub async fn set_cache_enabled(&self, enabled: bool) -> CacheToggleResult {
         let env_disabled = self.disk_cache.env_disabled();
@@ -169,6 +220,7 @@ impl SystemCoordinator {
 
         if !effective {
             self.ir_cache.clear().await;
+            self.intellisense_index.invalidate_all();
         }
 
         CacheToggleResult {
@@ -233,6 +285,7 @@ impl SystemCoordinator {
             parser.clear_ast_cache();
         }
         self.ir_cache.clear().await;
+        self.intellisense_index.invalidate_all();
 
         Ok(CacheClearReport {
             scope: scope.clone(),
@@ -299,6 +352,7 @@ impl SystemCoordinator {
                 self.cache.clone(),
                 parser,
                 self.ir_cache.clone(), // Milestone 2.13: передаём IR Cache
+                self.intellisense_index.clone(),
             ));
 
             // Обновляем кеш (write lock - эксклюзивный)

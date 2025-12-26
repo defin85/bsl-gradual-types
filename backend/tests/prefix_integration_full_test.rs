@@ -26,7 +26,7 @@ fn search_types_by_substring(
 async fn setup_coordinator() -> SystemCoordinator {
     let coordinator = SystemCoordinator::new();
     coordinator
-        .start_with_paths(None, None, None)
+        .start_with_paths(None, None, None, None)
         .await
         .expect("Ошибка инициализации SystemCoordinator");
     coordinator

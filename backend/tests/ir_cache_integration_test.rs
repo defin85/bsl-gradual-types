@@ -7,7 +7,7 @@
 //! 4. Проверка статистики кеша
 
 use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
+use bsl_backend::system::{AnalysisCache, IntellisenseIndexStore, IrCache, ParserCoordinator};
 use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::engine::AnalysisEngine;
@@ -22,8 +22,9 @@ fn setup_service() -> TypeSystemService {
     let cache = Arc::new(AnalysisCache::new(1000));
     let parser = Arc::new(ParserCoordinator::with_fallback());
     let ir_cache = Arc::new(IrCache::new(100)); // MILESTONE 2.13: IR Cache
+    let intellisense_index = Arc::new(IntellisenseIndexStore::new("test-config", "test-platform"));
 
-    TypeSystemService::new(analysis_engine, cache, parser, ir_cache)
+    TypeSystemService::new(analysis_engine, cache, parser, ir_cache, intellisense_index)
 }
 
 #[tokio::test]
@@ -157,7 +158,7 @@ async fn test_ir_cache_modified_file() {
 
     // ✅ ИСПРАВЛЕНИЕ: После модификации файла инвалидируем кеш
     service
-        .invalidate_file_cache("file://test.bsl", code_v2)
+        .invalidate_file_cache("file://test.bsl", code_v2, None)
         .await;
 
     // Второй hover - должен быть cache MISS (файл изменился)

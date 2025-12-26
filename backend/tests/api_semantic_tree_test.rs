@@ -20,7 +20,7 @@ mod api_semantic_tree_tests {
         let syntax_helper_path = Path::new("examples/syntax_helper");
 
         coordinator
-            .start_with_paths(Some(syntax_helper_path), None, None)
+            .start_with_paths(Some(syntax_helper_path), None, None, None)
             .await
             .expect("Failed to start coordinator");
 

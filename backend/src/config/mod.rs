@@ -16,6 +16,8 @@ pub struct WebServerConfig {
     pub project_path: Option<PathBuf>,
     /// Path to 1C syntax helper directory
     pub syntax_helper_path: Option<PathBuf>,
+    /// 1C platform version (e.g., "8.3.25")
+    pub platform_version: Option<String>,
     /// Enable CORS for development
     pub enable_cors: bool,
     /// Log level
@@ -30,6 +32,7 @@ impl Default for WebServerConfig {
             static_files_path: None,
             project_path: None,
             syntax_helper_path: None,
+            platform_version: None,
             enable_cors: true,
             log_level: "info".to_string(),
         }
@@ -68,6 +71,9 @@ impl WebServerConfig {
         if let Ok(project_path) = std::env::var("BSL_PROJECT_PATH") {
             config.project_path = Some(PathBuf::from(project_path));
         }
+        if let Ok(platform_version) = std::env::var("BSL_PLATFORM_VERSION") {
+            config.platform_version = Some(platform_version);
+        }
 
         if let Ok(cors_str) = std::env::var("BSL_ENABLE_CORS") {
             config.enable_cors = cors_str.to_lowercase() == "true";
@@ -104,6 +110,9 @@ impl WebServerConfig {
         if let Some(syntax_helper_path) = cli_config.syntax_helper_path {
             self.syntax_helper_path = Some(syntax_helper_path);
         }
+        if let Some(platform_version) = cli_config.platform_version {
+            self.platform_version = Some(platform_version);
+        }
         if let Some(cors) = cli_config.enable_cors {
             self.enable_cors = cors;
         }
@@ -121,6 +130,7 @@ pub struct CliConfig {
     pub static_files_path: Option<PathBuf>,
     pub project_path: Option<PathBuf>,
     pub syntax_helper_path: Option<PathBuf>,
+    pub platform_version: Option<String>,
     pub enable_cors: Option<bool>,
     pub log_level: Option<String>,
     pub config_file: Option<PathBuf>,

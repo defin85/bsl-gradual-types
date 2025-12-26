@@ -36,6 +36,10 @@ struct Args {
     #[arg(long, value_name = "PATH")]
     syntax_helper_path: Option<PathBuf>,
 
+    /// 1C platform version (e.g., "8.3.25")
+    #[arg(long, value_name = "VERSION")]
+    platform_version: Option<String>,
+
     /// Enable CORS for development
     #[arg(long)]
     enable_cors: Option<bool>,
@@ -61,6 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         static_files_path: args.static_files_path,
         project_path: args.project_path,
         syntax_helper_path: args.syntax_helper_path,
+        platform_version: args.platform_version,
         enable_cors: args.enable_cors,
         log_level: args.log_level,
         config_file: args.config,
@@ -90,6 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .start_with_paths(
             config.syntax_helper_path.as_deref(),
             config.project_path.as_deref(),
+            config.platform_version.as_deref(),
             None, // ✅ MILESTONE 2.20.2.3: progress_tx для web сервера не требуется
         )
         .await?;

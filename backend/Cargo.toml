@@ -37,6 +37,7 @@ clap = { workspace = true }
 # Data structures
 serde = { workspace = true }
 serde_json = { workspace = true }
+bincode = { workspace = true }
 indexmap = { workspace = true }
 dashmap = { workspace = true }
 arc-swap = { workspace = true }

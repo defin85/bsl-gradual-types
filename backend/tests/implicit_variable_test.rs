@@ -3,7 +3,7 @@
 
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::helpers::hover_formatter::HoverFormatConfig;
-use bsl_backend::system::{AnalysisCache, IrCache, ParserCoordinator};
+use bsl_backend::system::{AnalysisCache, IntellisenseIndexStore, IrCache, ParserCoordinator};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawTypeData};
@@ -93,8 +93,10 @@ async fn test_implicit_variable_type_inference() {
     let cache = Arc::new(AnalysisCache::new(100));
     let ir_cache = Arc::new(IrCache::new(50));
     let parser = Arc::new(ParserCoordinator::new(repository.clone()));
+    let intellisense_index = Arc::new(IntellisenseIndexStore::new("test-config", "test-platform"));
 
-    let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
+    let service =
+        TypeSystemService::new(analysis_engine, cache, parser, ir_cache, intellisense_index);
 
     // Строка 3 (индекс 2), колонка 0 - переменная "Кол"
     // Помним что нумерация строк с 0 в коде
@@ -149,8 +151,10 @@ async fn test_explicit_vs_implicit_variables() {
     let cache = Arc::new(AnalysisCache::new(100));
     let ir_cache = Arc::new(IrCache::new(50));
     let parser = Arc::new(ParserCoordinator::new(repository.clone()));
+    let intellisense_index = Arc::new(IntellisenseIndexStore::new("test-config", "test-platform"));
 
-    let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
+    let service =
+        TypeSystemService::new(analysis_engine, cache, parser, ir_cache, intellisense_index);
 
     // Проверка явной переменной (строка 2, колонка 0)
     let explicit_hover = service.get_hover_info(code, 2, 0, None).await.unwrap();
@@ -191,8 +195,10 @@ async fn test_implicit_variable_with_method_chain() {
     let cache = Arc::new(AnalysisCache::new(100));
     let ir_cache = Arc::new(IrCache::new(50));
     let parser = Arc::new(ParserCoordinator::new(repository.clone()));
+    let intellisense_index = Arc::new(IntellisenseIndexStore::new("test-config", "test-platform"));
 
-    let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
+    let service =
+        TypeSystemService::new(analysis_engine, cache, parser, ir_cache, intellisense_index);
 
     // Проверка переменной "Результат" (строка 2, колонка 0)
     let result_hover = service.get_hover_info(code, 2, 0, None).await.unwrap();

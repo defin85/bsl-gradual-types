@@ -2,6 +2,7 @@
 //!
 //! Handles did_open, did_change, did_save, did_close notifications.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 use tracing::{debug, error, info, warn};
@@ -113,6 +114,7 @@ pub async fn handle_did_change(
     updated_text: &str,
     changes: &[TextDocumentContentChangeEvent],
     type_service: Option<Arc<TypeSystemService>>,
+    config_root: Option<PathBuf>,
     settings: &BslSettings,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -124,7 +126,9 @@ pub async fn handle_did_change(
     // Invalidate IR cache
     let uri_str = uri.to_string();
     if let Some(ref service) = type_service {
-        service.invalidate_file_cache(&uri_str, updated_text).await;
+        service
+            .invalidate_file_cache(&uri_str, updated_text, config_root.as_deref())
+            .await;
         debug!("File changed: {}, cache invalidated", uri_str);
     }
 

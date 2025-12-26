@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
+use anyhow::anyhow;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{RawDataSource, RawTypeData};
@@ -17,11 +18,13 @@ use serde::{Deserialize, Serialize};
 use crate::data::adapters::{convert_syntax_helper_global_functions, convert_syntax_helper_to_raw};
 use crate::data::loaders::{
     hbk_recovery, progress::ProgressUpdate, IndexedConfigSignatures, SyntaxHelperDatabase,
-    SyntaxHelperLoader,
+    SyntaxHelperLoader, OptimizationSettings,
 };
 use crate::system::parser_coordinator::ParserCoordinator;
+use crate::system::keyword_index::keyword_items_from_syntax_or_default;
 use crate::system::DiskCacheKey;
 use bsl_shared::api::StartupProgressDto;
+use crate::data::loaders::config_metadata_parser::ConfigurationDiscovery;
 
 use super::coordinator::SystemCoordinator;
 use super::config_loader::ConfigCombinedCacheMeta;
@@ -52,10 +55,42 @@ struct CombinedCachePayload {
     config_indexed: IndexedConfigSignatures,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+struct PlatformVersion {
+    major: u32,
+    minor: u32,
+    patch: u32,
+}
+
+impl std::fmt::Display for PlatformVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
+}
+
+fn format_platform_version(version: PlatformVersion) -> String {
+    version.to_string()
+}
+
+fn parse_platform_version(raw: &str) -> Option<PlatformVersion> {
+    let trimmed = raw.trim();
+    let without_prefix = trimmed.strip_prefix("Version").unwrap_or(trimmed);
+    let normalized = without_prefix.replace('_', ".");
+    let mut parts = normalized.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    Some(PlatformVersion {
+        major,
+        minor,
+        patch,
+    })
+}
+
 impl SystemCoordinator {
     /// Инициализация системы с реальным парсингом синтаксис-помощника
     pub async fn start(&self) -> Result<(), StartupError> {
-        self.start_with_paths(None, None, None).await
+        self.start_with_paths(None, None, None, None).await
     }
 
     /// Инициализация системы с настраиваемыми путями (async версия)
@@ -66,6 +101,7 @@ impl SystemCoordinator {
         &self,
         syntax_helper_path: Option<&Path>,
         config_path: Option<&Path>,
+        platform_version: Option<&str>,
         progress_tx: Option<mpsc::UnboundedSender<ProgressUpdate>>,
     ) -> Result<(), StartupError> {
         info!("Starting platform types parser in blocking thread...");
@@ -75,11 +111,13 @@ impl SystemCoordinator {
         let syntax_path_owned = syntax_helper_path.map(|p| p.to_path_buf());
         let config_path_owned = config_path.map(|p| p.to_path_buf());
 
+        let platform_version_owned = platform_version.map(str::to_string);
         let parser_handle = tokio::task::spawn_blocking(move || {
             info!("[BLOCKING THREAD] Parser started");
             let result = coordinator.start_with_paths_blocking(
                 syntax_path_owned.as_deref(),
                 config_path_owned.as_deref(),
+                platform_version_owned.as_deref(),
                 progress_tx,
             );
             info!("[BLOCKING THREAD] Parser finished");
@@ -105,6 +143,7 @@ impl SystemCoordinator {
         &self,
         syntax_helper_path: Option<&Path>,
         config_path: Option<&Path>,
+        platform_version: Option<&str>,
         progress_tx: Option<mpsc::UnboundedSender<ProgressUpdate>>,
     ) -> Result<(), StartupError> {
         self.observability.log_startup();
@@ -138,6 +177,47 @@ impl SystemCoordinator {
             }
         }
 
+        let required_platform_version = if let Some(path) = config_path {
+            Some(self.required_platform_version(path)?)
+        } else {
+            None
+        };
+
+        let parsed_platform_version = if let Some(version) = platform_version {
+            parse_platform_version(version).ok_or_else(|| {
+                StartupError::PlatformTypesError(anyhow!(
+                    "Некорректная версия платформы: {}",
+                    version
+                ))
+            })?
+        } else {
+            PlatformVersion::default()
+        };
+
+        if let Some(required) = required_platform_version {
+            if platform_version.is_none() {
+                return Err(StartupError::PlatformTypesError(anyhow!(
+                    "platform_version обязателен при загрузке конфигурации (CompatibilityMode={})",
+                    required
+                )));
+            }
+            if parsed_platform_version > required {
+                return Err(StartupError::PlatformTypesError(anyhow!(
+                    "Версия платформы {} выше CompatibilityMode {}",
+                    parsed_platform_version,
+                    required
+                )));
+            }
+        }
+
+        let normalized_platform_version =
+            platform_version.map(|_| format_platform_version(parsed_platform_version));
+
+        if syntax_helper_path.is_some() {
+            self.intellisense_index.invalidate_platform_types();
+        }
+        self.set_platform_version(normalized_platform_version.clone());
+
         // === PHASE 3: Infrastructure инициализация в SystemCoordinator ===
 
         // 1. Создаем Infrastructure компоненты (Data Layer)
@@ -150,13 +230,22 @@ impl SystemCoordinator {
                 message: Some(format!("Путь: {}", syntax_path.display())),
                 ..self.startup_progress()
             });
-            self.load_syntax_helper(syntax_path, &progress_tx)?
+            self.load_syntax_helper(
+                syntax_path,
+                normalized_platform_version.as_deref(),
+                &progress_tx,
+            )?
         } else {
             SyntaxHelperLoadResult {
                 database: SyntaxHelperDatabase::default(),
                 cache_meta: None,
             }
         };
+
+        let keyword_items = keyword_items_from_syntax_or_default(&syntax_result.database.keywords);
+        if !keyword_items.is_empty() {
+            self.intellisense_index.set_keywords(keyword_items);
+        }
 
         // 3. Создаем Domain Layer компоненты
         info!("SystemCoordinator: инициализация Domain Layer...");
@@ -179,10 +268,11 @@ impl SystemCoordinator {
 
         // MILESTONE 3.17: Обновляем ParserCoordinator с TypeResolver для резолюции active_facet
         {
-            let new_parser = Arc::new(
+            let new_parser_instance =
                 ParserCoordinator::new_with_resolver(repository.clone(), resolver.clone())
-                    .with_disk_cache(self.disk_cache()),
-            );
+                    .with_disk_cache(self.disk_cache());
+            new_parser_instance.set_intellisense_index(self.intellisense_index.clone());
+            let new_parser = Arc::new(new_parser_instance);
             let mut parser_guard = self.parser.write().unwrap_or_else(|poisoned| {
                 warn!("Parser RwLock poisoned (write), recovering data.");
                 poisoned.into_inner()
@@ -355,9 +445,13 @@ impl SystemCoordinator {
     fn load_syntax_helper(
         &self,
         syntax_path: &Path,
+        platform_version: Option<&str>,
         progress_tx: &Option<mpsc::UnboundedSender<ProgressUpdate>>,
     ) -> Result<SyntaxHelperLoadResult, StartupError> {
-        let syntax_parser = SyntaxHelperLoader::new();
+        let syntax_parser = SyntaxHelperLoader::with_settings(OptimizationSettings {
+            collect_keywords: true,
+            ..Default::default()
+        });
 
         // HBK Recovery: Восстанавливаем .hbk файлы перед парсингом
         info!("Проверяем наличие .hbk файлов для восстановления...");
@@ -418,7 +512,8 @@ impl SystemCoordinator {
 
         info!("Загружаем синтаксис-помощник: {}", syntax_path.display());
 
-        let cache_key = self.build_syntax_helper_cache_key(syntax_path, &syntax_parser)?;
+        let cache_key =
+            self.build_syntax_helper_cache_key(syntax_path, platform_version, &syntax_parser)?;
         let cache = self.disk_cache();
         let syntax_path = syntax_path.to_path_buf();
         let progress_tx = progress_tx.clone();
@@ -427,7 +522,10 @@ impl SystemCoordinator {
                 &cache_key,
                 move || {
                     let mut parse_ok = true;
-                    let mut syntax_parser = SyntaxHelperLoader::new();
+                    let mut syntax_parser = SyntaxHelperLoader::with_settings(OptimizationSettings {
+                        collect_keywords: true,
+                        ..Default::default()
+                    });
                     // MILESTONE 2.20.2.3: Парсим с прогрессом если передан callback
                     if let Some(ref tx) = progress_tx {
                         let tx_clone = tx.clone();
@@ -485,9 +583,48 @@ impl SystemCoordinator {
         })
     }
 
+    fn required_platform_version(&self, config_path: &Path) -> Result<PlatformVersion, StartupError> {
+        let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
+        let configurations = discovery
+            .discover_all_configurations()
+            .map_err(|e| {
+                StartupError::PlatformTypesError(anyhow!(
+                    "Не удалось обнаружить конфигурации: {}",
+                    e
+                ))
+            })?;
+
+        if configurations.is_empty() {
+            return Err(StartupError::PlatformTypesError(anyhow!(
+                "Конфигурации не найдены для определения CompatibilityMode"
+            )));
+        }
+
+        let mut required: Option<PlatformVersion> = None;
+        for config in configurations {
+            let raw_mode = config.compatibility_mode.as_deref().ok_or_else(|| {
+                StartupError::PlatformTypesError(anyhow!(
+                    "CompatibilityMode не найден для конфигурации {}",
+                    config.name
+                ))
+            })?;
+            let parsed = parse_platform_version(raw_mode).ok_or_else(|| {
+                StartupError::PlatformTypesError(anyhow!(
+                    "Некорректный CompatibilityMode '{}' для конфигурации {}",
+                    raw_mode,
+                    config.name
+                ))
+            })?;
+            required = Some(required.map_or(parsed, |current| current.max(parsed)));
+        }
+
+        Ok(required.expect("required platform version"))
+    }
+
     fn build_syntax_helper_cache_key(
         &self,
         syntax_path: &Path,
+        platform_version: Option<&str>,
         syntax_parser: &SyntaxHelperLoader,
     ) -> Result<DiskCacheKey, StartupError> {
         let canonical = fs::canonicalize(syntax_path).unwrap_or_else(|_| syntax_path.to_path_buf());
@@ -495,7 +632,12 @@ impl SystemCoordinator {
         let source_fingerprint =
             syntax_helper_fingerprint(syntax_parser, syntax_path)
                 .map_err(StartupError::PlatformTypesError)?;
-        let settings_fingerprint = syntax_helper_settings_fingerprint(syntax_parser);
+        let platform_version = platform_version.unwrap_or("unknown");
+        let settings_fingerprint = format!(
+            "{};platform_version={}",
+            syntax_helper_settings_fingerprint(syntax_parser),
+            platform_version
+        );
         let key_hash = blake3::hash(
             format!(
                 "{}|{}|{}",
@@ -839,13 +981,14 @@ fn syntax_helper_settings_fingerprint(syntax_parser: &SyntaxHelperLoader) -> Str
     let settings = &syntax_parser.settings;
     let strict = std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok();
     format!(
-        "syntax_helper_parser_v1;threads={:?};batch={};show={};limit={:?};skip={:?};parallel={};strict_fingerprint={}",
+        "syntax_helper_parser_v1;threads={:?};batch={};show={};limit={:?};skip={:?};parallel={};keywords={};strict_fingerprint={}",
         settings.max_threads,
         settings.batch_size,
         settings.show_progress,
         settings.file_limit,
         settings.skip_dirs,
         settings.parallel_indexing,
+        settings.collect_keywords,
         strict
     )
 }
@@ -855,6 +998,13 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
+    use std::fs;
+
+    fn write_configuration_xml(dir: &TempDir, body: &str) -> PathBuf {
+        let path = dir.path().join("Configuration.xml");
+        fs::write(&path, body).expect("write Configuration.xml");
+        path
+    }
 
     struct EnvGuard {
         key: &'static str,
@@ -900,7 +1050,7 @@ mod tests {
 
         let mut parser = SyntaxHelperLoader::new();
         let key = coordinator
-            .build_syntax_helper_cache_key(syntax_path, &parser)
+            .build_syntax_helper_cache_key(syntax_path, Some("8.3.25"), &parser)
             .unwrap();
         let entry = cache
             .get_or_build_with(
@@ -920,7 +1070,7 @@ mod tests {
 
         let mut parser = SyntaxHelperLoader::new();
         let key = coordinator
-            .build_syntax_helper_cache_key(syntax_path, &parser)
+            .build_syntax_helper_cache_key(syntax_path, Some("8.3.25"), &parser)
             .unwrap();
         let entry = cache
             .get_or_build_with(
@@ -953,7 +1103,9 @@ mod tests {
         let _cache_disable_guard = EnvGuard::remove("BSL_CACHE_DISABLE");
 
         let coordinator = SystemCoordinator::new();
-        let load_result = coordinator.load_syntax_helper(syntax_path, &None).unwrap();
+        let load_result = coordinator
+            .load_syntax_helper(syntax_path, Some("8.3.25"), &None)
+            .unwrap();
 
         let repository = Arc::new(InMemoryTypeRepository::new());
         coordinator
@@ -987,7 +1139,7 @@ mod tests {
 
         let coordinator = SystemCoordinator::new();
         let load_result = coordinator
-            .load_syntax_helper(syntax_path, &None)
+            .load_syntax_helper(syntax_path, Some("8.3.25"), &None)
             .unwrap();
         let platform_meta = match load_result.cache_meta.as_ref() {
             Some(meta) => meta.clone(),
@@ -995,7 +1147,7 @@ mod tests {
         };
 
         coordinator
-            .start_with_paths_blocking(Some(syntax_path), Some(config_path), None)
+            .start_with_paths_blocking(Some(syntax_path), Some(config_path), Some("8.3.25"), None)
             .unwrap();
 
         let config_meta = coordinator
@@ -1005,5 +1157,63 @@ mod tests {
         let cache = coordinator.disk_cache();
         let cached = cache.try_get::<CombinedCachePayload>(&key).unwrap();
         assert!(cached.is_some(), "Combined cache entry отсутствует");
+    }
+
+    #[test]
+    fn test_parse_platform_version() {
+        let direct = parse_platform_version("8.3.25").expect("direct");
+        assert_eq!(direct.to_string(), "8.3.25");
+
+        let prefixed = parse_platform_version("Version8_3_25").expect("prefixed");
+        assert_eq!(prefixed.to_string(), "8.3.25");
+    }
+
+    #[test]
+    fn test_parse_platform_version_invalid() {
+        assert!(parse_platform_version("Version8_3").is_none());
+        assert!(parse_platform_version("invalid").is_none());
+    }
+
+    #[test]
+    fn test_required_platform_version_missing_compatibility() {
+        let temp = TempDir::new().unwrap();
+        write_configuration_xml(
+            &temp,
+            r#"
+<MetaDataObject>
+  <Configuration>
+    <Properties>
+      <Name>Test</Name>
+    </Properties>
+  </Configuration>
+</MetaDataObject>
+"#,
+        );
+
+        let coordinator = SystemCoordinator::new();
+        let result = coordinator.required_platform_version(temp.path());
+        assert!(result.is_err(), "expected error for missing CompatibilityMode");
+    }
+
+    #[test]
+    fn test_required_platform_version_invalid_compatibility() {
+        let temp = TempDir::new().unwrap();
+        write_configuration_xml(
+            &temp,
+            r#"
+<MetaDataObject>
+  <Configuration>
+    <Properties>
+      <Name>Test</Name>
+      <CompatibilityMode>Version8_3</CompatibilityMode>
+    </Properties>
+  </Configuration>
+</MetaDataObject>
+"#,
+        );
+
+        let coordinator = SystemCoordinator::new();
+        let result = coordinator.required_platform_version(temp.path());
+        assert!(result.is_err(), "expected error for invalid CompatibilityMode");
     }
 }

@@ -65,7 +65,7 @@ fn startup_indexes_common_module_methods() {
 
     let coordinator = SystemCoordinator::new();
     coordinator
-        .start_with_paths_blocking(None, Some(Path::new(root)), None)
+        .start_with_paths_blocking(None, Some(Path::new(root)), Some("8.3.25"), None)
         .expect("startup");
 
     let engine = coordinator.analysis_engine().expect("analysis_engine");
@@ -80,4 +80,3 @@ fn startup_indexes_common_module_methods() {
         "expected method signature to be indexed at startup"
     );
 }
-

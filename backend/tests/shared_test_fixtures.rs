@@ -38,7 +38,7 @@ pub static SHARED_CONFIG_COORDINATOR: LazyLock<SystemCoordinator> = LazyLock::ne
     let coordinator = SystemCoordinator::new();
     let config_path = std::path::Path::new("../examples/conf/conf_test");
     coordinator
-        .start_with_paths_blocking(None, Some(config_path), None)
+        .start_with_paths_blocking(None, Some(config_path), Some("8.3.25"), None)
         .expect("Failed to start coordinator with config");
     coordinator
 });
@@ -99,12 +99,14 @@ fn create_test_service_internal() -> TypeSystemService {
     let analysis_engine = Arc::new(AnalysisEngine::new(resolver.clone(), repository.clone()));
     let cache = Arc::new(AnalysisCache::new(100));
     let ir_cache = Arc::new(IrCache::new(50));
+    let intellisense_index =
+        Arc::new(bsl_backend::system::IntellisenseIndexStore::new("test-config", "test-platform"));
     let parser = Arc::new(ParserCoordinator::new_with_resolver(
         repository.clone(),
         resolver,
     ));
 
-    let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache);
+    let service = TypeSystemService::new(analysis_engine, cache, parser, ir_cache, intellisense_index);
 
     // 8. Инициализируем сервис
     service

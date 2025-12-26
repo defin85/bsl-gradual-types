@@ -125,6 +125,8 @@ impl ConfigurationDiscovery {
         let mut has_config_extension_purpose = false;
         let mut name: Option<String> = None;
         let mut prefix: Option<String> = None;
+        let mut compatibility_mode: Option<String> = None;
+        let mut extension_compatibility_mode: Option<String> = None;
         let mut uuid: Option<String> = None;
 
         loop {
@@ -166,6 +168,17 @@ impl ConfigurationDiscovery {
                             "NamePrefix" if !text.is_empty() => {
                                 prefix = Some(text.clone());
                                 tracing::debug!("  🏷️ Префикс: {}", text);
+                            }
+                            "CompatibilityMode" if !text.is_empty() => {
+                                compatibility_mode = Some(text.clone());
+                                tracing::debug!("  ⚙️ CompatibilityMode: {}", text);
+                            }
+                            "ConfigurationExtensionCompatibilityMode" if !text.is_empty() => {
+                                extension_compatibility_mode = Some(text.clone());
+                                tracing::debug!(
+                                    "  ⚙️ ConfigurationExtensionCompatibilityMode: {}",
+                                    text
+                                );
                             }
                             _ => {}
                         }
@@ -210,6 +223,11 @@ impl ConfigurationDiscovery {
         };
 
         info.uuid = uuid;
+        info.compatibility_mode = if info.is_extension() {
+            extension_compatibility_mode.or(compatibility_mode)
+        } else {
+            compatibility_mode
+        };
 
         Ok(info)
     }

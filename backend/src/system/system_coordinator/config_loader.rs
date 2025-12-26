@@ -6,6 +6,7 @@ use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tracing::{info, warn};
 
 use crate::data::loaders::progress::{IndexingPhase, ProgressUpdate};
@@ -13,12 +14,15 @@ use crate::data::loaders::{
     collect_module_paths, index_configuration_bsl_modules_with_progress_parallel_cached,
     IndexedConfigSignatures, ModuleIndexProgress, ParsedModuleData, UniversalMetadataObject,
 };
-use bsl_shared::domain::types::RawTypeData;
+use bsl_shared::domain::types::{MetadataKind, RawTypeData};
 use serde::{Deserialize, Serialize};
 
 use super::coordinator::SystemCoordinator;
 use super::types::LoadMetadataResult;
-use crate::system::DiskCacheKey;
+use crate::system::{
+    DiskCacheKey, IndexItem, IndexItemKind, IndexKind, IndexSnapshotId, SymbolKind, SymbolScope,
+    TypeKind, Visibility,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ConfigLayerBCachePayload {
@@ -116,6 +120,11 @@ impl SystemCoordinator {
         let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
 
         let config_info = discover_single_config(&discovery, config_path);
+        if let Some(ref config_info) = config_info {
+            let project_id = project_id_from_root(config_path);
+            let config_set_id = config_set_id_from_single(config_info);
+            self.try_warmup_intellisense_index(config_path, &project_id, &config_set_id);
+        }
 
         let metadata_objects = if let Some(ref config_info) = config_info {
             let config_set_id = config_set_id_from_single(&config_info);
@@ -158,10 +167,11 @@ impl SystemCoordinator {
         let repository = engine.get_repository();
 
         let mut payload = None;
-        if let Some(config_info) = config_info {
+        let mut metadata_for_indexing = metadata_objects.clone();
+        if let Some(ref config_info) = config_info {
             let config_set_id = config_set_id_from_single(&config_info);
             let prefix = config_info.prefix.as_deref();
-            let metadata_for_indexing = Self::apply_prefix_for_indexing(&metadata_objects, prefix);
+            metadata_for_indexing = Self::apply_prefix_for_indexing(&metadata_objects, prefix);
 
             let cache_key = self.build_config_layer_b_cache_key(
                 config_path,
@@ -171,7 +181,7 @@ impl SystemCoordinator {
             )?;
             let cache = self.disk_cache();
             let coordinator = self.clone_for_blocking();
-            let config_path = config_path.to_path_buf();
+            let config_path_for_build = config_path.to_path_buf();
             let config_info = config_info.clone();
             let config_set_id = config_set_id.clone();
             let metadata_objects = metadata_objects.clone();
@@ -181,7 +191,7 @@ impl SystemCoordinator {
                 &cache_key,
                 move || {
                     coordinator.build_config_layer_b_payload(
-                        &config_path,
+                        &config_path_for_build,
                         &config_info,
                         &config_set_id,
                         &metadata_objects,
@@ -254,6 +264,24 @@ impl SystemCoordinator {
         repository.load_types(payload.raw_types)?;
 
         info!("Загружено {} типов из конфигурации", count);
+        self.update_intellisense_index_from_metadata(
+            config_path,
+            repository.get_all_types(),
+            &metadata_for_indexing,
+        );
+        let config_root = config_info
+            .as_ref()
+            .map(|info| info.path.as_path())
+            .unwrap_or(config_path);
+        self.update_intellisense_index_from_modules(
+            config_root,
+            &payload.indexed.module_signatures,
+        );
+        if let Some(ref config_info) = config_info {
+            let project_id = project_id_from_root(config_path);
+            let config_set_id = config_set_id_from_single(&config_info);
+            self.persist_intellisense_index_snapshot(&project_id, &config_set_id);
+        }
         Ok(count)
     }
 
@@ -341,6 +369,7 @@ impl SystemCoordinator {
         let mut base_count = 0;
         let mut ext_count = 0;
         let mut total_types = 0;
+        let mut all_metadata: Vec<UniversalMetadataObject> = Vec::new();
 
         // Получаем AnalysisEngine и TypeRepository один раз
         let engine = self.analysis_engine().ok_or_else(|| {
@@ -349,6 +378,8 @@ impl SystemCoordinator {
         let repository = engine.get_repository();
 
         let config_set_id = config_set_id_from_configs(&configurations);
+        let project_id = project_id_from_root(config_path);
+        self.try_warmup_intellisense_index(config_path, &project_id, &config_set_id);
 
         let mut combined_payload = if collect_payload {
             Some(CombinedConfigCachePayload {
@@ -405,6 +436,7 @@ impl SystemCoordinator {
 
             let prefix = config_info.prefix.as_deref();
             let metadata_for_indexing = Self::apply_prefix_for_indexing(&metadata, prefix);
+            all_metadata.extend(metadata_for_indexing.clone());
 
             // Для Web API startup progress (P7): отмечаем отдельную стадию индексации модулей BSL.
             let prev = self.startup_progress();
@@ -428,7 +460,7 @@ impl SystemCoordinator {
             )?;
             let cache = self.disk_cache();
             let coordinator = self.clone_for_blocking();
-            let config_path = config_path.to_path_buf();
+            let config_path_for_build = config_path.to_path_buf();
             let config_info_for_build = config_info.clone();
             let config_set_id = config_set_id.clone();
             let metadata = metadata.clone();
@@ -504,7 +536,7 @@ impl SystemCoordinator {
                     });
 
                     coordinator.build_config_layer_b_payload(
-                        &config_path,
+                        &config_path_for_build,
                         &config_info_for_build,
                         &config_set_id,
                         &metadata,
@@ -576,11 +608,23 @@ impl SystemCoordinator {
                 .load_types(payload.raw_types)
                 .map_err(|e| anyhow::anyhow!("Ошибка загрузки типов: {}", e))?;
 
+            self.update_intellisense_index_from_modules(
+                config_path,
+                &payload.indexed.module_signatures,
+            );
+
             match config_info.config_type {
                 ConfigurationType::Base => base_count += 1,
                 ConfigurationType::Extension => ext_count += 1,
             }
         }
+
+        self.update_intellisense_index_from_metadata(
+            config_path,
+            repository.get_all_types(),
+            &all_metadata,
+        );
+        self.persist_intellisense_index_snapshot(&project_id, &config_set_id);
 
         Ok((
             LoadMetadataResult {
@@ -643,6 +687,7 @@ impl SystemCoordinator {
         let mut base_count = 0;
         let mut ext_count = 0;
         let mut total_types = 0;
+        let all_metadata: Vec<UniversalMetadataObject> = Vec::new();
 
         // Получаем AnalysisEngine и TypeRepository один раз
         let engine = self.analysis_engine().ok_or_else(|| {
@@ -714,7 +759,7 @@ impl SystemCoordinator {
             )?;
             let cache = self.disk_cache();
             let coordinator = self.clone_for_blocking();
-            let config_path = config_path.to_path_buf();
+            let config_path_for_build = config_path.to_path_buf();
             let config_info_for_build = config_info.clone();
             let config_set_id = config_set_id.clone();
             let metadata = metadata.clone();
@@ -775,7 +820,7 @@ impl SystemCoordinator {
                     });
 
                     coordinator.build_config_layer_b_payload(
-                        &config_path,
+                        &config_path_for_build,
                         &config_info_for_build,
                         &config_set_id,
                         &metadata,
@@ -841,17 +886,224 @@ impl SystemCoordinator {
                 .load_types(payload.raw_types)
                 .map_err(|e| anyhow::anyhow!("Ошибка загрузки типов: {}", e))?;
 
+            self.update_intellisense_index_from_modules(
+                config_path,
+                &payload.indexed.module_signatures,
+            );
+
             match config_info.config_type {
                 ConfigurationType::Base => base_count += 1,
                 ConfigurationType::Extension => ext_count += 1,
             }
         }
 
+        self.update_intellisense_index_from_metadata(
+            config_path,
+            repository.get_all_types(),
+            &all_metadata,
+        );
+
         Ok(LoadMetadataResult {
             base_config_count: base_count,
             extensions_count: ext_count,
             total_types,
         })
+    }
+
+    fn update_intellisense_index_from_metadata(
+        &self,
+        config_path: &Path,
+        raw_types: Vec<RawTypeData>,
+        metadata: &[UniversalMetadataObject],
+    ) {
+        let config_fingerprint = match config_fingerprint(config_path) {
+            Ok(fingerprint) => fingerprint,
+            Err(err) => {
+                warn!(
+                    "Не удалось вычислить fingerprint конфигурации для индекса: {}",
+                    err
+                );
+                format!("path:{}", config_path.display())
+            }
+        };
+        let platform_version = self
+            .platform_version()
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+        self.intellisense_index
+            .update_snapshot_id(&config_fingerprint, &platform_version);
+        self.intellisense_index.invalidate_metadata();
+
+        for raw_type in raw_types.iter() {
+            if raw_type.source != bsl_shared::domain::types::RawDataSource::Configuration {
+                continue;
+            }
+            let mut item = IndexItem::new(
+                raw_type.name.clone(),
+                IndexItemKind::Type(TypeKind::from_raw_source(&raw_type.source)),
+                IndexKind::Type,
+            );
+            item.facets = raw_type.facets.clone();
+            self.intellisense_index.upsert_type(item);
+        }
+
+        let mut by_kind: std::collections::HashMap<MetadataKind, Vec<IndexItem>> =
+            std::collections::HashMap::new();
+        for obj in metadata {
+            let Some(kind) = obj.object_type else {
+                continue;
+            };
+            let mut item = IndexItem::new(
+                obj.name.clone(),
+                IndexItemKind::Metadata(kind),
+                IndexKind::Metadata,
+            );
+            item.facets = obj.facets.clone();
+            by_kind.entry(kind).or_default().push(item);
+        }
+        for (kind, items) in by_kind {
+            self.intellisense_index
+                .replace_metadata_for_kind(kind, items);
+        }
+    }
+
+    fn try_warmup_intellisense_index(
+        &self,
+        config_path: &Path,
+        project_id: &str,
+        config_set_id: &str,
+    ) {
+        if index_warmup_disabled() {
+            self.observability.record_index_warmup_skip("disabled");
+            return;
+        }
+        if self.disk_cache.is_disabled() {
+            self.observability.record_index_warmup_skip("disk_cache_disabled");
+            return;
+        }
+        let config_fingerprint = match config_fingerprint(config_path) {
+            Ok(fingerprint) => fingerprint,
+            Err(err) => {
+                warn!(
+                    "Не удалось вычислить fingerprint конфигурации для warmup индекса: {}",
+                    err
+                );
+                self.observability.record_index_warmup_skip("fingerprint_error");
+                return;
+            }
+        };
+        let snapshot_id = IndexSnapshotId::new(&config_fingerprint, env!("CARGO_PKG_VERSION"));
+        let store = match self.intellisense_index_store_for_ids(project_id, config_set_id) {
+            Ok(store) => store,
+            Err(err) => {
+                warn!("Не удалось инициализировать store индекса: {}", err);
+                self.observability.record_index_warmup_skip("store_init_error");
+                return;
+            }
+        };
+        let coordinator = self.clone_for_blocking();
+        let project_id = project_id.to_string();
+        let config_set_id = config_set_id.to_string();
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let observability = coordinator.observability.clone();
+            match store.load_snapshot(&snapshot_id) {
+                Ok(Some(snapshot)) => {
+                    let current = coordinator.intellisense_index.snapshot();
+                    if !should_apply_warmup(&current, &snapshot) {
+                        log_warmup_skip_reason(
+                            &current,
+                            &snapshot,
+                            &project_id,
+                            &config_set_id,
+                            &observability,
+                        );
+                        return;
+                    }
+                    let mut merged = snapshot;
+                    if merged.keyword_index.is_empty() && !current.keyword_index.is_empty() {
+                        merged.keyword_index = current.keyword_index;
+                    }
+                    coordinator.intellisense_index.replace_snapshot(merged);
+                    observability.record_index_warmup_hit(started.elapsed());
+                    info!(
+                        "Warmup индекса: hit project={}, config={} ({} ms)",
+                        project_id,
+                        config_set_id,
+                        started.elapsed().as_millis()
+                    );
+                }
+                Ok(None) => {
+                    observability.record_index_warmup_miss(started.elapsed());
+                    info!(
+                        "Warmup индекса: miss project={}, config={} ({} ms)",
+                        project_id,
+                        config_set_id,
+                        started.elapsed().as_millis()
+                    );
+                }
+                Err(err) => {
+                    warn!("Не удалось загрузить индекс из store: {}", err);
+                    observability.record_index_warmup_skip("load_error");
+                }
+            }
+        });
+    }
+
+    fn persist_intellisense_index_snapshot(&self, project_id: &str, config_set_id: &str) {
+        let store = match self.intellisense_index_store_for_ids(project_id, config_set_id) {
+            Ok(store) => store,
+            Err(err) => {
+                warn!("Не удалось инициализировать store индекса: {}", err);
+                return;
+            }
+        };
+        let snapshot = self.intellisense_index.snapshot();
+        if let Err(err) = store.store_snapshot(&snapshot) {
+            warn!("Не удалось сохранить индекс в store: {}", err);
+        }
+    }
+
+    fn update_intellisense_index_from_modules(
+        &self,
+        config_root: &Path,
+        module_signatures: &[crate::data::loaders::config_bsl_modules::ModuleSignatureSnapshot],
+    ) {
+        for module in module_signatures {
+            let module_key = module
+                .module_path
+                .strip_prefix(config_root)
+                .unwrap_or(&module.module_path)
+                .to_string_lossy()
+                .to_string();
+            let mut items = Vec::new();
+
+            for name in &module.method_names {
+                let mut item = IndexItem::new(
+                    name.clone(),
+                    IndexItemKind::Symbol(SymbolKind::Method),
+                    IndexKind::Module,
+                );
+                item.uri = Some(module_key.clone());
+                item.scope = Some(SymbolScope::Module);
+                item.visibility = Some(Visibility::Public);
+                items.push(item);
+            }
+
+            for name in &module.global_function_names {
+                let mut item = IndexItem::new(
+                    name.clone(),
+                    IndexItemKind::Symbol(SymbolKind::Function),
+                    IndexKind::Module,
+                );
+                item.uri = Some(module_key.clone());
+                item.scope = Some(SymbolScope::Global);
+                item.visibility = Some(Visibility::Public);
+                items.push(item);
+            }
+
+            self.intellisense_index
+                .replace_modules_for_key(&module_key, items);
+        }
     }
 
     fn build_config_layer_b_payload<F>(
@@ -1627,6 +1879,86 @@ fn duration_to_u64_nanos(duration: std::time::Duration) -> u64 {
         u64::MAX
     } else {
         nanos as u64
+    }
+}
+
+fn snapshot_is_empty(snapshot: &crate::system::IndexSnapshot) -> bool {
+    snapshot.type_index.is_empty()
+        && snapshot.symbol_index.is_empty()
+        && snapshot.module_index.is_empty()
+        && snapshot.metadata_index.is_empty()
+}
+
+fn should_apply_warmup(
+    current: &crate::system::IndexSnapshot,
+    candidate: &crate::system::IndexSnapshot,
+) -> bool {
+    current.id == candidate.id && snapshot_is_empty(current)
+}
+
+fn log_warmup_skip_reason(
+    current: &crate::system::IndexSnapshot,
+    candidate: &crate::system::IndexSnapshot,
+    project_id: &str,
+    config_set_id: &str,
+    observability: &crate::system::BasicObservability,
+) {
+    if current.id != candidate.id {
+        info!(
+            "Warmup индекса пропущен (snapshot_id изменился) project={}, config={}",
+            project_id, config_set_id
+        );
+        observability.record_index_warmup_skip("snapshot_changed");
+        return;
+    }
+    if !snapshot_is_empty(current) {
+        info!(
+            "Warmup индекса пропущен (индекс уже заполнен) project={}, config={}",
+            project_id, config_set_id
+        );
+        observability.record_index_warmup_skip("already_populated");
+        return;
+    }
+}
+
+fn index_warmup_disabled() -> bool {
+    matches!(
+        std::env::var("BSL_INDEX_WARMUP")
+            .unwrap_or_else(|_| "1".to_string())
+            .to_ascii_lowercase()
+            .as_str(),
+        "0" | "false" | "no"
+    )
+}
+
+#[cfg(test)]
+mod warmup_tests {
+    use super::*;
+    use crate::system::IndexSnapshot;
+
+    #[test]
+    fn warmup_skips_when_snapshot_id_changed() {
+        let current = IndexSnapshot::empty(IndexSnapshotId::from_hash("a"));
+        let candidate = IndexSnapshot::empty(IndexSnapshotId::from_hash("b"));
+        assert!(!should_apply_warmup(&current, &candidate));
+    }
+
+    #[test]
+    fn warmup_skips_when_current_has_data() {
+        let mut current = IndexSnapshot::empty(IndexSnapshotId::from_hash("a"));
+        current.type_index.insert(
+            "Type".to_string(),
+            IndexItem::new("Type", IndexItemKind::Type(TypeKind::Platform), IndexKind::Type),
+        );
+        let candidate = IndexSnapshot::empty(IndexSnapshotId::from_hash("a"));
+        assert!(!should_apply_warmup(&current, &candidate));
+    }
+
+    #[test]
+    fn warmup_applies_when_snapshot_matches_and_empty() {
+        let current = IndexSnapshot::empty(IndexSnapshotId::from_hash("a"));
+        let candidate = IndexSnapshot::empty(IndexSnapshotId::from_hash("a"));
+        assert!(should_apply_warmup(&current, &candidate));
     }
 }
 

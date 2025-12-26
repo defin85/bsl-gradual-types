@@ -1,0 +1,314 @@
+//! IntelliSense индексы и snapshot-консистентность (M2)
+
+use bsl_shared::domain::types::{FacetKind, MetadataKind, RawDataSource};
+use bsl_shared::ir::Span;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::RwLock;
+
+pub const INDEX_SCHEMA_VERSION: &str = "intellisense-index-v1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct IndexSnapshotId(String);
+
+impl IndexSnapshotId {
+    pub fn new(config_fingerprint: &str, platform_version: &str) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(config_fingerprint.as_bytes());
+        hasher.update(b"|");
+        hasher.update(platform_version.as_bytes());
+        hasher.update(b"|");
+        hasher.update(INDEX_SCHEMA_VERSION.as_bytes());
+        Self(hasher.finalize().to_hex().to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn from_hash(hash: impl Into<String>) -> Self {
+        Self(hash.into())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum IndexKind {
+    Type,
+    Symbol,
+    Module,
+    Metadata,
+    Keyword,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SymbolScope {
+    Local,
+    Module,
+    Global,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Visibility {
+    Public,
+    Private,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SymbolKind {
+    Variable,
+    Parameter,
+    Field,
+    Function,
+    Procedure,
+    Method,
+    Constant,
+    Module,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TypeKind {
+    Platform,
+    Configuration,
+    Primitive,
+    Faceted,
+    Generic,
+}
+
+impl TypeKind {
+    pub fn from_raw_source(source: &RawDataSource) -> Self {
+        match source {
+            RawDataSource::Platform => TypeKind::Platform,
+            RawDataSource::Configuration => TypeKind::Configuration,
+            RawDataSource::UserDefined => TypeKind::Generic,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum IndexItemKind {
+    Symbol(SymbolKind),
+    Type(TypeKind),
+    Metadata(MetadataKind),
+    Keyword,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexItem {
+    pub name: String,
+    pub kind: IndexItemKind,
+    pub source: IndexKind,
+    pub uri: Option<String>,
+    pub span: Option<Span>,
+    pub signature: Option<String>,
+    pub facets: Vec<FacetKind>,
+    pub visibility: Option<Visibility>,
+    pub scope: Option<SymbolScope>,
+    pub payload_version: u32,
+}
+
+impl IndexItem {
+    pub fn new(name: impl Into<String>, kind: IndexItemKind, source: IndexKind) -> Self {
+        Self {
+            name: name.into(),
+            kind,
+            source,
+            uri: None,
+            span: None,
+            signature: None,
+            facets: Vec::new(),
+            visibility: None,
+            scope: None,
+            payload_version: 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexSnapshot {
+    pub id: IndexSnapshotId,
+    pub type_index: HashMap<String, IndexItem>,
+    pub symbol_index: HashMap<String, Vec<IndexItem>>,
+    pub module_index: HashMap<String, Vec<IndexItem>>,
+    pub metadata_index: HashMap<MetadataKind, Vec<IndexItem>>,
+    pub keyword_index: Vec<IndexItem>,
+}
+
+impl IndexSnapshot {
+    pub fn empty(id: IndexSnapshotId) -> Self {
+        Self {
+            id,
+            type_index: HashMap::new(),
+            symbol_index: HashMap::new(),
+            module_index: HashMap::new(),
+            metadata_index: HashMap::new(),
+            keyword_index: Vec::new(),
+        }
+    }
+}
+
+pub struct IntellisenseIndexStore {
+    schema_version: &'static str,
+    inner: RwLock<IndexSnapshot>,
+}
+
+impl IntellisenseIndexStore {
+    pub fn new(config_fingerprint: &str, platform_version: &str) -> Self {
+        let id = IndexSnapshotId::new(config_fingerprint, platform_version);
+        Self {
+            schema_version: INDEX_SCHEMA_VERSION,
+            inner: RwLock::new(IndexSnapshot::empty(id)),
+        }
+    }
+
+    pub fn schema_version(&self) -> &'static str {
+        self.schema_version
+    }
+
+    pub fn snapshot(&self) -> IndexSnapshot {
+        self.inner.read().expect("index snapshot lock poisoned").clone()
+    }
+
+    pub fn replace_snapshot(&self, snapshot: IndexSnapshot) {
+        let mut guard = self.inner.write().expect("index snapshot lock poisoned");
+        *guard = snapshot;
+    }
+
+    pub fn update_snapshot_id(&self, config_fingerprint: &str, platform_version: &str) {
+        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
+        snapshot.id = IndexSnapshotId::new(config_fingerprint, platform_version);
+    }
+
+    pub fn upsert_type(&self, item: IndexItem) {
+        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
+        snapshot.type_index.insert(item.name.clone(), item);
+    }
+
+    pub fn replace_symbols_for_uri(&self, uri: &str, items: Vec<IndexItem>) {
+        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
+        snapshot.symbol_index.insert(uri.to_string(), items);
+    }
+
+    pub fn replace_modules_for_key(&self, module_key: &str, items: Vec<IndexItem>) {
+        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
+        snapshot
+            .module_index
+            .insert(module_key.to_string(), items);
+    }
+
+    pub fn replace_metadata_for_kind(&self, kind: MetadataKind, items: Vec<IndexItem>) {
+        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
+        snapshot.metadata_index.insert(kind, items);
+    }
+
+    pub fn set_keywords(&self, items: Vec<IndexItem>) {
+        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
+        snapshot.keyword_index = items;
+    }
+
+    pub fn invalidate_file(&self, uri: &str, module_key: Option<&str>) {
+        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
+        snapshot.symbol_index.remove(uri);
+        if let Some(key) = module_key {
+            snapshot.module_index.remove(key);
+        }
+    }
+
+    pub fn invalidate_metadata(&self) {
+        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
+        snapshot.metadata_index.clear();
+        snapshot.type_index.clear();
+    }
+
+    pub fn invalidate_platform_types(&self) {
+        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
+        snapshot.type_index.retain(|_, item| {
+            !matches!(item.kind, IndexItemKind::Type(TypeKind::Platform | TypeKind::Primitive))
+        });
+    }
+
+    pub fn invalidate_all(&self) {
+        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
+        snapshot.type_index.clear();
+        snapshot.symbol_index.clear();
+        snapshot.module_index.clear();
+        snapshot.metadata_index.clear();
+        snapshot.keyword_index.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_id_is_stable_for_same_inputs() {
+        let a = IndexSnapshotId::new("config-a", "platform-1");
+        let b = IndexSnapshotId::new("config-a", "platform-1");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn invalidate_file_removes_symbol_and_module() {
+        let store = IntellisenseIndexStore::new("cfg", "platform");
+        store.replace_symbols_for_uri("file:///a.bsl", vec![IndexItem::new(
+            "Var",
+            IndexItemKind::Symbol(SymbolKind::Variable),
+            IndexKind::Symbol,
+        )]);
+        store.replace_modules_for_key("module-a", vec![IndexItem::new(
+            "Proc",
+            IndexItemKind::Symbol(SymbolKind::Procedure),
+            IndexKind::Module,
+        )]);
+
+        store.invalidate_file("file:///a.bsl", Some("module-a"));
+
+        let snapshot = store.snapshot();
+        assert!(snapshot.symbol_index.is_empty());
+        assert!(snapshot.module_index.is_empty());
+    }
+
+    #[test]
+    fn invalidate_metadata_clears_type_and_metadata() {
+        let store = IntellisenseIndexStore::new("cfg", "platform");
+        store.upsert_type(IndexItem::new(
+            "Catalog",
+            IndexItemKind::Type(TypeKind::Configuration),
+            IndexKind::Type,
+        ));
+        store.replace_metadata_for_kind(MetadataKind::Catalog, vec![IndexItem::new(
+            "Контрагенты",
+            IndexItemKind::Metadata(MetadataKind::Catalog),
+            IndexKind::Metadata,
+        )]);
+
+        store.invalidate_metadata();
+
+        let snapshot = store.snapshot();
+        assert!(snapshot.type_index.is_empty());
+        assert!(snapshot.metadata_index.is_empty());
+    }
+
+    #[test]
+    fn invalidate_platform_types_keeps_config_types() {
+        let store = IntellisenseIndexStore::new("cfg", "platform");
+        store.upsert_type(IndexItem::new(
+            "ТаблицаЗначений",
+            IndexItemKind::Type(TypeKind::Platform),
+            IndexKind::Type,
+        ));
+        store.upsert_type(IndexItem::new(
+            "Справочник.Контрагенты",
+            IndexItemKind::Type(TypeKind::Configuration),
+            IndexKind::Type,
+        ));
+
+        store.invalidate_platform_types();
+
+        let snapshot = store.snapshot();
+        assert_eq!(snapshot.type_index.len(), 1);
+        assert!(snapshot
+            .type_index
+            .contains_key("Справочник.Контрагенты"));
+    }
+}

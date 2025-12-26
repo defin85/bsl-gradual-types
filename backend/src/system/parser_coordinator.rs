@@ -10,10 +10,15 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, error, warn};
 use tree_sitter::{InputEdit, Parser, Point};
+use url::Url;
 
 use crate::parsing::ParseResult;
+use crate::parsing::bsl::ast::{Program, Statement};
 use crate::system::ast_cache::AstCache;
 use crate::system::disk_cache::{DiskCache, DiskCacheKey};
+use crate::system::intellisense_index::{
+    IndexItem, IndexItemKind, IndexKind, IntellisenseIndexStore, SymbolKind, SymbolScope,
+};
 use crate::system::tree_cache::{hash_content, TreeCache};
 use crate::system::tree_sitter_adapter::TreeSitterAdapter;
 use bsl_shared::domain::repository::TypeRepository;
@@ -61,6 +66,7 @@ pub struct ParserCoordinator {
     repository: Arc<dyn TypeRepository>,
     /// TypeResolver для резолюции типов с active_facet (Milestone 3.17)
     resolver: Option<Arc<TypeResolver>>,
+    symbol_index: Arc<RwLock<Option<Arc<IntellisenseIndexStore>>>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -101,6 +107,7 @@ impl ParserCoordinator {
             cache_enabled: Arc::new(AtomicBool::new(!is_cache_disabled_env())),
             repository,
             resolver: None,
+            symbol_index: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -135,6 +142,7 @@ impl ParserCoordinator {
             cache_enabled: Arc::new(AtomicBool::new(!is_cache_disabled_env())),
             repository,
             resolver: Some(resolver),
+            symbol_index: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -173,12 +181,19 @@ impl ParserCoordinator {
             cache_enabled: Arc::new(AtomicBool::new(!is_cache_disabled_env())),
             repository: empty_repo,
             resolver: None,
+            symbol_index: Arc::new(RwLock::new(None)),
         }
     }
 
     pub fn with_disk_cache(mut self, disk_cache: Arc<DiskCache>) -> Self {
         self.disk_cache = disk_cache;
         self
+    }
+
+    pub fn set_intellisense_index(&self, index: Arc<IntellisenseIndexStore>) {
+        if let Ok(mut slot) = self.symbol_index.write() {
+            *slot = Some(index);
+        }
     }
 
     pub fn set_cache_enabled(&self, enabled: bool) {
@@ -246,6 +261,7 @@ impl ParserCoordinator {
                 debug!("Content unchanged, using cached tree");
                 let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
                 self.store_ast_memory(new_hash, &result);
+                self.update_symbol_index(&file_path, &result);
                 return Ok(result);
             }
 
@@ -299,6 +315,9 @@ impl ParserCoordinator {
 
         if self.cache_enabled() {
             if let Some(cached) = self.ast_cache.get(content_hash) {
+                if let Some(path) = file_path {
+                    self.update_symbol_index(Path::new(path), &cached);
+                }
                 return Ok((*cached).clone());
             }
         }
@@ -309,6 +328,7 @@ impl ParserCoordinator {
                     if let Ok(Some(cached)) = self.try_load_ast_from_disk(path, content) {
                         let cached_arc = Arc::new(cached.clone());
                         self.ast_cache.put(content_hash, cached_arc);
+                        self.update_symbol_index(Path::new(path), &cached);
                         return Ok(cached);
                     }
                 }
@@ -346,6 +366,7 @@ impl ParserCoordinator {
         self.store_ast_memory(content_hash, result);
 
         if let Some(path) = file_path {
+            self.update_symbol_index(path, result);
             if path.exists() {
                 let path_str = path.to_string_lossy();
                 let _ = self.store_ast_in_disk(&path_str, content, result);
@@ -358,6 +379,20 @@ impl ParserCoordinator {
             self.ast_cache
                 .put(content_hash, Arc::new(result.clone()));
         }
+    }
+
+    fn update_symbol_index(&self, file_path: &Path, result: &ParseResult) {
+        let index = self
+            .symbol_index
+            .read()
+            .ok()
+            .and_then(|slot| slot.clone());
+        let Some(index) = index else {
+            return;
+        };
+        let uri = path_to_uri(file_path);
+        let items = collect_symbol_items(&result.program, &uri);
+        index.replace_symbols_for_uri(&uri, items);
     }
 
     fn try_load_ast_from_disk(
@@ -540,6 +575,179 @@ impl ParserCoordinator {
 
         Ok(())
     }
+}
+
+fn path_to_uri(path: &Path) -> String {
+    let canonical = std::fs::canonicalize(path).ok();
+    if let Some(canonical) = canonical {
+        if let Ok(url) = Url::from_file_path(canonical) {
+            return url.to_string();
+        }
+    }
+    if let Ok(url) = Url::from_file_path(path) {
+        return url.to_string();
+    }
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    format!("file://{}", normalized)
+}
+
+fn collect_symbol_items(program: &Program, uri: &str) -> Vec<IndexItem> {
+    let mut items = Vec::new();
+    collect_symbol_items_from_statements(&program.statements, uri, true, &mut items);
+    items
+}
+
+fn collect_symbol_items_from_statements(
+    statements: &[Statement],
+    uri: &str,
+    is_top_level: bool,
+    items: &mut Vec<IndexItem>,
+) {
+    for statement in statements {
+        match statement {
+            Statement::VarDeclaration { name, span, .. } => {
+                let scope = if is_top_level {
+                    SymbolScope::Module
+                } else {
+                    SymbolScope::Local
+                };
+                items.push(symbol_item(
+                    name,
+                    SymbolKind::Variable,
+                    scope,
+                    Some(*span),
+                    uri,
+                ));
+            }
+            Statement::FunctionDecl {
+                name,
+                params,
+                body,
+                is_export,
+                span,
+                ..
+            } => {
+                let mut item = symbol_item(
+                    name,
+                    SymbolKind::Function,
+                    SymbolScope::Module,
+                    Some(*span),
+                    uri,
+                );
+                if *is_export {
+                    item.visibility = Some(crate::system::intellisense_index::Visibility::Public);
+                }
+                items.push(item);
+                for param in params {
+                    items.push(symbol_item(
+                        param,
+                        SymbolKind::Parameter,
+                        SymbolScope::Local,
+                        None,
+                        uri,
+                    ));
+                }
+                collect_symbol_items_from_statements(body, uri, false, items);
+            }
+            Statement::ProcedureDecl {
+                name,
+                params,
+                body,
+                is_export,
+                span,
+                ..
+            } => {
+                let mut item = symbol_item(
+                    name,
+                    SymbolKind::Procedure,
+                    SymbolScope::Module,
+                    Some(*span),
+                    uri,
+                );
+                if *is_export {
+                    item.visibility = Some(crate::system::intellisense_index::Visibility::Public);
+                }
+                items.push(item);
+                for param in params {
+                    items.push(symbol_item(
+                        param,
+                        SymbolKind::Parameter,
+                        SymbolScope::Local,
+                        None,
+                        uri,
+                    ));
+                }
+                collect_symbol_items_from_statements(body, uri, false, items);
+            }
+            Statement::For { variable, body, span, .. } => {
+                items.push(symbol_item(
+                    variable,
+                    SymbolKind::Variable,
+                    SymbolScope::Local,
+                    Some(*span),
+                    uri,
+                ));
+                collect_symbol_items_from_statements(body, uri, false, items);
+            }
+            Statement::ForEach { variable, body, span, .. } => {
+                items.push(symbol_item(
+                    variable,
+                    SymbolKind::Variable,
+                    SymbolScope::Local,
+                    Some(*span),
+                    uri,
+                ));
+                collect_symbol_items_from_statements(body, uri, false, items);
+            }
+            Statement::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_symbol_items_from_statements(then_body, uri, false, items);
+                if let Some(else_body) = else_body {
+                    collect_symbol_items_from_statements(else_body, uri, false, items);
+                }
+            }
+            Statement::While { body, .. } => {
+                collect_symbol_items_from_statements(body, uri, false, items);
+            }
+            Statement::Try {
+                try_body,
+                except_body,
+                ..
+            } => {
+                collect_symbol_items_from_statements(try_body, uri, false, items);
+                collect_symbol_items_from_statements(except_body, uri, false, items);
+            }
+            Statement::Assignment { .. }
+            | Statement::Return { .. }
+            | Statement::Call { .. }
+            | Statement::Break { .. }
+            | Statement::Continue { .. }
+            | Statement::Goto { .. }
+            | Statement::Label { .. }
+            | Statement::Execute { .. }
+            | Statement::RaiseError { .. }
+            | Statement::AddHandler { .. }
+            | Statement::RemoveHandler { .. }
+            | Statement::Await { .. } => {}
+        }
+    }
+}
+
+fn symbol_item(
+    name: &str,
+    kind: SymbolKind,
+    scope: SymbolScope,
+    span: Option<bsl_shared::ir::Span>,
+    uri: &str,
+) -> IndexItem {
+    let mut item = IndexItem::new(name, IndexItemKind::Symbol(kind), IndexKind::Symbol);
+    item.uri = Some(uri.to_string());
+    item.scope = Some(scope);
+    item.span = span;
+    item
 }
 
 impl TreeSitterParser {
@@ -761,5 +969,125 @@ mod parser_trait_tests {
     fn test_parser_trait_supports_incremental() {
         let parser = ParserCoordinator::with_fallback();
         assert!(ParserTrait::supports_incremental(&parser));
+    }
+}
+
+#[cfg(test)]
+mod symbol_index_tests {
+    use super::*;
+    use crate::parsing::bsl::ast::{Expression, Program, Statement};
+    use bsl_shared::ir::Span;
+
+    fn has_symbol(items: &[IndexItem], name: &str, kind: SymbolKind, scope: SymbolScope) -> bool {
+        items.iter().any(|item| {
+            item.name == name
+                && item.kind == IndexItemKind::Symbol(kind)
+                && item.scope == Some(scope)
+        })
+    }
+
+    #[test]
+    fn collect_symbol_items_from_program() {
+        let span = Span::new(1, 1, 1, 2);
+        let expr = Expression::Number {
+            value: 1.0,
+            span,
+        };
+        let program = Program {
+            statements: vec![
+                Statement::VarDeclaration {
+                    name: "x".to_string(),
+                    type_hint: None,
+                    span,
+                },
+                Statement::FunctionDecl {
+                    name: "Func".to_string(),
+                    params: vec!["a".to_string(), "b".to_string()],
+                    body: vec![
+                        Statement::VarDeclaration {
+                            name: "y".to_string(),
+                            type_hint: None,
+                            span,
+                        },
+                        Statement::For {
+                            variable: "i".to_string(),
+                            start: expr.clone(),
+                            end: expr.clone(),
+                            body: Vec::new(),
+                            span,
+                        },
+                    ],
+                    compiler_directive: None,
+                    is_export: false,
+                    span,
+                },
+                Statement::ProcedureDecl {
+                    name: "Proc".to_string(),
+                    params: vec!["p".to_string()],
+                    body: vec![Statement::ForEach {
+                        variable: "item".to_string(),
+                        collection: expr.clone(),
+                        body: Vec::new(),
+                        span,
+                    }],
+                    compiler_directive: None,
+                    is_export: true,
+                    span,
+                },
+                Statement::If {
+                    condition: expr.clone(),
+                    then_body: vec![Statement::VarDeclaration {
+                        name: "z".to_string(),
+                        type_hint: None,
+                        span,
+                    }],
+                    else_body: Some(vec![Statement::VarDeclaration {
+                        name: "w".to_string(),
+                        type_hint: None,
+                        span,
+                    }]),
+                    span,
+                },
+            ],
+        };
+
+        let items = collect_symbol_items(&program, "file:///test.bsl");
+
+        assert!(has_symbol(&items, "x", SymbolKind::Variable, SymbolScope::Module));
+        assert!(has_symbol(&items, "Func", SymbolKind::Function, SymbolScope::Module));
+        assert!(has_symbol(&items, "a", SymbolKind::Parameter, SymbolScope::Local));
+        assert!(has_symbol(&items, "b", SymbolKind::Parameter, SymbolScope::Local));
+        assert!(has_symbol(&items, "y", SymbolKind::Variable, SymbolScope::Local));
+        assert!(has_symbol(&items, "i", SymbolKind::Variable, SymbolScope::Local));
+        assert!(has_symbol(&items, "Proc", SymbolKind::Procedure, SymbolScope::Module));
+        assert!(has_symbol(&items, "p", SymbolKind::Parameter, SymbolScope::Local));
+        assert!(has_symbol(&items, "item", SymbolKind::Variable, SymbolScope::Local));
+        assert!(has_symbol(&items, "z", SymbolKind::Variable, SymbolScope::Local));
+        assert!(has_symbol(&items, "w", SymbolKind::Variable, SymbolScope::Local));
+    }
+
+    #[test]
+    fn update_symbol_index_on_parse() {
+        let parser = ParserCoordinator::with_fallback();
+        let index = Arc::new(IntellisenseIndexStore::new("cfg", "platform"));
+        parser.set_intellisense_index(index.clone());
+
+        let code = r#"Перем x;
+Процедура Test(p)
+    Перем y;
+КонецПроцедуры"#;
+        let file_path = "test.bsl";
+
+        let result = parser.parse_with_cache_for_file(code, file_path);
+        assert!(result.is_ok());
+
+        let uri = path_to_uri(Path::new(file_path));
+        let snapshot = index.snapshot();
+        let items = snapshot.symbol_index.get(&uri).expect("symbols missing");
+
+        assert!(has_symbol(items, "x", SymbolKind::Variable, SymbolScope::Module));
+        assert!(has_symbol(items, "Test", SymbolKind::Procedure, SymbolScope::Module));
+        assert!(has_symbol(items, "p", SymbolKind::Parameter, SymbolScope::Local));
+        assert!(has_symbol(items, "y", SymbolKind::Variable, SymbolScope::Local));
     }
 }

@@ -6,7 +6,10 @@ pub mod basic_observability;
 pub mod ast_cache;
 pub mod disk_cache; // Milestone D1: Disk cache API
 pub mod fs_utils; // Keep utility functions
+pub mod intellisense_index; // M2: IntelliSense indexes
+pub mod intellisense_index_store; // M2: IntelliSense indexes storage
 pub mod ir_cache; // Milestone 2.13: IR кеширование для LSP hover
+pub mod keyword_index; // M2: Keyword index sources
 pub mod parallel_analyzer; // Milestone 2.4: Параллельный анализ
 pub mod parser_coordinator;
 pub mod persistent_cache; // Milestone 2.4: Межсессионное кеширование
@@ -21,6 +24,13 @@ pub use ast_cache::{AstCache, AstCacheStats};
 pub use disk_cache::{
     CacheCleanupReport, CacheEntry, CacheManifest, DiskCache, DiskCacheKey,
     DiskCacheStatsSnapshot,
+};
+pub use intellisense_index::{
+    IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IndexSnapshotId, IntellisenseIndexStore,
+    SymbolKind, SymbolScope, TypeKind, Visibility, INDEX_SCHEMA_VERSION,
+};
+pub use intellisense_index_store::{
+    IndexStoreVersion, IntellisenseIndexDiskStore, INDEX_STORE_VERSION,
 };
 pub use ir_cache::{IrCache, IrCacheStats};
 pub use parallel_analyzer::{ParallelAnalyzer, PerformanceStats, ProjectAnalysisResult};

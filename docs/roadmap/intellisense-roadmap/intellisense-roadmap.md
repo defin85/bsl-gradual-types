@@ -142,12 +142,7 @@
 - стабильный индекс после изменения одного файла;
 - инвалидация работает корректно.
 
-**Фактический статус (по коду):**
-- реализованы `IndexSnapshotId`, `IndexItem`, `IndexKind` и in‑memory store (`backend/src/system/intellisense_index.rs`);
-- `TypeIndex`/`MetadataIndex` заполняются из metadata loader, `ModuleIndex` — из `module_signatures` (`backend/src/system/system_coordinator/config_loader.rs`);
-- `SymbolIndex` и `KeywordIndex` не наполняются;
-- нет persistence/warmup индексов; `IndexStoreVersion` отсутствует;
-- инвалидация есть, но `invalidate_file` вызывается без `module_key`, а `invalidate_platform_types` нигде не вызывается.
+**Фактический статус (по коду):** ✅ готово
 
 ---
 

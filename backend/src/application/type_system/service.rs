@@ -361,8 +361,32 @@ impl TypeSystemService {
         file_content: &str,
         line: u32,
         column: u32,
-    ) -> Result<Vec<CompletionItem>> {
-        completion_service::get_completion(&self.parser, file_content, line, column).await
+        file_uri: Option<&str>,
+    ) -> Result<completion_service::CompletionResult> {
+        completion_service::get_completion(
+            file_content,
+            line,
+            column,
+            file_uri,
+            &self.intellisense_index,
+            &self.metadata_lookup,
+        )
+        .await
+    }
+
+    pub fn resolve_type_completion(
+        &self,
+        type_name: &str,
+    ) -> Option<(Option<String>, Option<String>)> {
+        completion_service::resolve_type_details(type_name, &self.metadata_lookup)
+    }
+
+    pub fn resolve_method_completion(
+        &self,
+        owner_type: &str,
+        method_name: &str,
+    ) -> Option<(Option<String>, Option<String>)> {
+        completion_service::resolve_method_details(owner_type, method_name, &self.metadata_lookup)
     }
 
     /// Analyze completion context

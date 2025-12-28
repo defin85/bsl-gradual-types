@@ -20,8 +20,9 @@ use crate::data::loaders::{
     hbk_recovery, progress::ProgressUpdate, IndexedConfigSignatures, SyntaxHelperDatabase,
     SyntaxHelperLoader, OptimizationSettings,
 };
-use crate::system::parser_coordinator::ParserCoordinator;
 use crate::system::keyword_index::keyword_items_from_syntax_or_default;
+use crate::system::parser_coordinator::ParserCoordinator;
+use crate::system::{IndexItem, IndexItemKind, IndexKind, TypeKind};
 use crate::system::DiskCacheKey;
 use bsl_shared::api::StartupProgressDto;
 use crate::data::loaders::config_metadata_parser::ConfigurationDiscovery;
@@ -252,7 +253,7 @@ impl SystemCoordinator {
         let repository = Arc::new(InMemoryTypeRepository::new());
 
         // 4. Загружаем данные в репозиторий (через Adapters)
-        let _platform_raw_data = if !syntax_result.database.nodes.is_empty() {
+        let platform_raw_data = if !syntax_result.database.nodes.is_empty() {
             self.populate_repository_from_syntax_helper(
                 &repository,
                 syntax_result.database,
@@ -262,6 +263,21 @@ impl SystemCoordinator {
             // Загружаем базовые типы как fallback
             Self::load_fallback_types(&repository)?
         };
+
+        if !platform_raw_data.is_empty() {
+            for raw_type in &platform_raw_data {
+                if raw_type.source != RawDataSource::Platform {
+                    continue;
+                }
+                let mut item = IndexItem::new(
+                    raw_type.name.clone(),
+                    IndexItemKind::Type(TypeKind::from_raw_source(&raw_type.source)),
+                    IndexKind::Type,
+                );
+                item.facets = raw_type.facets.clone();
+                self.intellisense_index.upsert_type(item);
+            }
+        }
 
         // 5. Создаем Domain resolver
         let resolver = Arc::new(TypeResolver::new(repository.clone()));

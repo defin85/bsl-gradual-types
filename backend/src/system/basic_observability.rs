@@ -25,6 +25,7 @@ pub struct StructuredLogger {
 pub struct SimpleMetrics {
     counters: Arc<Mutex<HashMap<String, u64>>>,
     gauges: Arc<Mutex<HashMap<String, f64>>>,
+    histograms: Arc<Mutex<HashMap<String, Vec<f64>>>>,
     start_time: Instant,
 }
 
@@ -98,6 +99,16 @@ impl BasicObservability {
             .increment(&format!("index_warmup_skip_total_{}", reason));
     }
 
+    pub fn record_completion_latency(&self, duration: Duration) {
+        self.metrics.increment("completion_total");
+        self.metrics
+            .observe_histogram("completion_duration_ms", duration.as_millis() as f64);
+    }
+
+    pub fn record_completion_incomplete(&self) {
+        self.metrics.increment("completion_incomplete_total");
+    }
+
     /// Простая проверка здоровья
     pub fn health_check(&self) -> HealthStatus {
         let uptime = self.start_time.elapsed();
@@ -156,6 +167,7 @@ impl SimpleMetrics {
         Self {
             counters: Arc::new(Mutex::new(HashMap::new())),
             gauges: Arc::new(Mutex::new(HashMap::new())),
+            histograms: Arc::new(Mutex::new(HashMap::new())),
             start_time: Instant::now(),
         }
     }
@@ -169,6 +181,19 @@ impl SimpleMetrics {
     fn observe(&self, metric: &str, value: f64) {
         if let Ok(mut gauges) = self.gauges.lock() {
             gauges.insert(metric.to_string(), value);
+        }
+    }
+
+    fn observe_histogram(&self, metric: &str, value: f64) {
+        const MAX_SAMPLES: usize = 2000;
+
+        if let Ok(mut histograms) = self.histograms.lock() {
+            let values = histograms.entry(metric.to_string()).or_default();
+            values.push(value);
+            if values.len() > MAX_SAMPLES {
+                let overflow = values.len() - MAX_SAMPLES;
+                values.drain(0..overflow);
+            }
         }
     }
 
@@ -204,13 +229,49 @@ impl SimpleMetrics {
             .lock()
             .map(|g| g.clone())
             .unwrap_or_else(|_| HashMap::new());
+        let histograms = self
+            .histograms
+            .lock()
+            .map(|h| h.clone())
+            .unwrap_or_else(|_| HashMap::new());
+
+        let mut histogram_stats = HashMap::new();
+        for (name, mut values) in histograms {
+            if values.is_empty() {
+                continue;
+            }
+            values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let count = values.len();
+            let p50 = percentile_sorted(&values, 0.50);
+            let p95 = percentile_sorted(&values, 0.95);
+            let p99 = percentile_sorted(&values, 0.99);
+            histogram_stats.insert(
+                name,
+                json!({
+                    "count": count,
+                    "p50": p50,
+                    "p95": p95,
+                    "p99": p99
+                }),
+            );
+        }
 
         json!({
             "counters": counters,
             "gauges": gauges,
+            "histograms": histogram_stats,
             "uptime_seconds": self.uptime().as_secs()
         })
     }
+}
+
+fn percentile_sorted(values: &[f64], percentile: f64) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let clamped = percentile.clamp(0.0, 1.0);
+    let rank = ((values.len() - 1) as f64 * clamped).round() as usize;
+    values[rank]
 }
 
 // === COMPARISON WITH COMPLEX OBSERVABILITY ===

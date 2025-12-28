@@ -1,6 +1,6 @@
 # План реализации M3: LSP Completion MVP
 
-**Статус:** 🟡 ЧАСТИЧНО РЕАЛИЗОВАНО  
+**Статус:** 🟡 ЧАСТИЧНО РЕАЛИЗОВАНО (готовы handler/resolve/лимиты/тесты; не подтверждены P95/P99 и расширенная контекстная типизация)  
 **Цель:** базовое автодополнение через LSP с минимальным набором источников и стабильной задержкой.
 
 ---
@@ -17,7 +17,7 @@
 
 ## Пошаговый план
 
-### Шаг 1: LSP capabilities и эндпоинты 🟡
+### Шаг 1: LSP capabilities и эндпоинты ✅
 - Включить `completionProvider.resolveProvider = true`.
 - Установить `triggerCharacters = [".", "("]`.
 - Добавить обработчик `textDocument/completion`.
@@ -27,7 +27,7 @@
 
 ---
 
-### Шаг 2: Контекст запроса (`CompletionContext`) 🟡
+### Шаг 2: Контекст запроса (`CompletionContext`) ✅
 - Определить префикс, trigger, позицию.
 - Учесть базовый сценарий: после `.` и внутри выражений.
 - Резать контекст до безопасного окна (например, 128–256 символов).
@@ -36,7 +36,7 @@
 
 ---
 
-### Шаг 3: Источники кандидатов 🟡
+### Шаг 3: Источники кандидатов ✅
 - `KeywordIndex` → ключевые слова и директивы.
 - `TypeIndex` → типы платформы и их методы.
 - Для `.` приоритет: методы типов; без типа — только keywords.
@@ -45,7 +45,7 @@
 
 ---
 
-### Шаг 4: Фильтрация и ранжирование 🟡
+### Шаг 4: Фильтрация и ранжирование ✅
 - Префикс‑фильтр (case‑insensitive).
 - Ранжирование по источнику: типы/методы выше keywords.
 - Стабильный `sortText`.
@@ -54,7 +54,7 @@
 
 ---
 
-### Шаг 5: Маппинг в `CompletionItem` 🟡
+### Шаг 5: Маппинг в `CompletionItem` ✅
 - Минимальный набор полей: `label`, `kind`, `sortText`, `filterText`, `insertText`, `insertTextFormat`.
 - `detail`/`documentation` только в resolve.
 
@@ -62,7 +62,7 @@
 
 ---
 
-### Шаг 6: Лимиты, isIncomplete, метрики ⏳
+### Шаг 6: Лимиты, isIncomplete, метрики ✅
 - Ограничение `max_items = 200`.
 - При превышении — `isIncomplete = true`.
 - Метрики latency P95/P99 (без resolve).
@@ -71,7 +71,7 @@
 
 ---
 
-### Шаг 7: Тесты ⏳
+### Шаг 7: Тесты ✅
 - Unit: фильтрация по префиксу, лимит, ранжирование.
 - Integration: keywords + platform types в типовом файле.
 - Regression: корректная работа при пустом индексе.
@@ -90,17 +90,19 @@
 
 ## Фактический статус (по коду)
 
-- Обработчик LSP completion отсутствует или неполный.
-- `KeywordIndex` и `TypeIndex` доступны, но не используются в completion.
-- `completionItem/resolve` не реализован.
-- Метрики и тесты для completion отсутствуют.
+- `textDocument/completion` и `completionItem/resolve` реализованы, `resolveProvider=true`.
+- `triggerCharacters = [".", "("]`.
+- Pipeline использует `KeywordIndex`, `TypeIndex`, `SymbolIndex`, `ModuleIndex`, `MetadataIndex`; методы подтягиваются из `TypeMetadataLookup` для явного типа и metadata типов, поддерживается `Документы.`/`Справочники.`.
+- Есть prefix‑filter, сортировка через `sortText`, лимит `max_items=200`, `isIncomplete` при превышении.
+- В hot path возвращаются минимальные поля, `detail/documentation` добавляются в resolve.
+- Метрики latency считаются (P50/P95/P99 через BasicObservability), unit и integration/regression тесты есть.
 
 ---
 
 ## Задачи (тикеты) по M3
 
 ### T1: LSP completion endpoints ✅/⏳
-**Статус:** ⏳
+**Статус:** ✅
 **Цель:** подключить `textDocument/completion` и `completionItem/resolve`.
 **Где:** `backend/src/bin/lsp_server/...`.
 **DoD:**
@@ -109,7 +111,7 @@
 - resolve работает для одного item.
 
 ### T2: CompletionContext ✅/⏳
-**Статус:** ⏳
+**Статус:** ✅
 **Цель:** безопасное извлечение контекста и префикса.
 **Где:** новый модуль `backend/src/system/completion_context.rs` или рядом с LSP handler.
 **DoD:**
@@ -117,7 +119,7 @@
 - поддержка `.` и `(`.
 
 ### T3: Источники кандидатов ✅/⏳
-**Статус:** ⏳
+**Статус:** ✅
 **Цель:** соединить `KeywordIndex` + `TypeIndex`.
 **Где:** completion pipeline.
 **DoD:**
@@ -125,7 +127,7 @@
 - types и методы доступны в контексте `.`.
 
 ### T4: Фильтрация/ранжирование ✅/⏳
-**Статус:** ⏳
+**Статус:** ✅
 **Цель:** убрать мусор и стабилизировать порядок.
 **Где:** completion pipeline.
 **DoD:**
@@ -134,7 +136,7 @@
 - типы/методы выше keywords.
 
 ### T5: CompletionItem mapping + resolve ✅/⏳
-**Статус:** ⏳
+**Статус:** ✅
 **Цель:** минимальный item в hot path + resolve.
 **Где:** completion pipeline.
 **DoD:**
@@ -142,7 +144,7 @@
 - detail/documentation только в resolve.
 
 ### T6: Лимиты и метрики ✅/⏳
-**Статус:** ⏳
+**Статус:** ✅
 **Цель:** соблюдение latency и ограничений.
 **Где:** completion pipeline + метрики.
 **DoD:**
@@ -151,7 +153,7 @@
 - метрика P95/P99.
 
 ### T7: Тесты ✅/⏳
-**Статус:** ⏳
+**Статус:** ✅
 **Цель:** покрыть базовый функционал.
 **Где:** `backend/tests/...`.
 **DoD:**

@@ -14,6 +14,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
 use tracing::{debug, error, info, warn};
 use std::path::Path;
+use std::time::Instant;
 
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 use bsl_backend::system::fs_utils::read_bsl_file;
@@ -28,8 +29,8 @@ use crate::commands::{
 };
 use crate::config::{BslSettings, LspConfig};
 use crate::handlers::{
-    self, apply_text_edit, handle_completion, handle_goto_definition, handle_hover,
-    handle_signature_help,
+    self, apply_text_edit, handle_completion, handle_completion_resolve, handle_goto_definition,
+    handle_hover, handle_signature_help,
 };
 use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
@@ -101,7 +102,8 @@ impl LanguageServer for BslLanguageServer {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec![".".to_string(), " ".to_string()]),
+                    resolve_provider: Some(true),
+                    trigger_characters: Some(vec![".".to_string(), "(".to_string()]),
                     ..Default::default()
                 }),
                 diagnostic_provider: None,
@@ -564,7 +566,26 @@ impl LanguageServer for BslLanguageServer {
             },
         };
 
-        Ok(handle_completion(&file_content, position, self.get_type_service()).await)
+        let started = Instant::now();
+        let response =
+            handle_completion(&file_content, position, &uri, self.get_type_service()).await;
+        let elapsed = started.elapsed();
+        self.coordinator
+            .observability
+            .record_completion_latency(elapsed);
+        if let Some(CompletionResponse::List(list)) = &response {
+            if list.is_incomplete {
+                self.coordinator.observability.record_completion_incomplete();
+            }
+        }
+        Ok(response)
+    }
+
+    async fn completion_resolve(
+        &self,
+        item: CompletionItem,
+    ) -> JsonRpcResult<CompletionItem> {
+        Ok(handle_completion_resolve(item, self.get_type_service()).await)
     }
 
     async fn hover(&self, params: HoverParams) -> JsonRpcResult<Option<Hover>> {

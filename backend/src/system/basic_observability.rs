@@ -105,6 +105,22 @@ impl BasicObservability {
             .observe_histogram("completion_duration_ms", duration.as_millis() as f64);
     }
 
+    pub fn record_completion_resolve_latency(&self, duration: Duration) {
+        self.metrics.increment("completion_resolve_total");
+        self.metrics
+            .observe_histogram("completion_resolve_duration_ms", duration.as_millis() as f64);
+    }
+
+    pub fn record_signature_help_latency(&self, duration: Duration) {
+        self.metrics.increment("signature_help_total");
+        self.metrics
+            .observe_histogram("signature_help_duration_ms", duration.as_millis() as f64);
+    }
+
+    pub fn record_signature_help_empty(&self) {
+        self.metrics.increment("signature_help_empty_total");
+    }
+
     pub fn record_completion_incomplete(&self) {
         self.metrics.increment("completion_incomplete_total");
     }

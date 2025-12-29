@@ -622,7 +622,12 @@ impl LanguageServer for BslLanguageServer {
         item: CompletionItem,
     ) -> JsonRpcResult<CompletionItem> {
         let snippet_support = *self.completion_snippet_support.read().await;
-        Ok(handle_completion_resolve(item, self.get_type_service(), snippet_support).await)
+        let started = Instant::now();
+        let resolved =
+            handle_completion_resolve(item, self.get_type_service(), snippet_support).await;
+        let elapsed = started.elapsed();
+        self.coordinator.record_completion_resolve_latency(elapsed);
+        Ok(resolved)
     }
 
     async fn hover(&self, params: HoverParams) -> JsonRpcResult<Option<Hover>> {
@@ -709,12 +714,19 @@ impl LanguageServer for BslLanguageServer {
             }
         };
 
-        Ok(handle_signature_help(
+        let started = Instant::now();
+        let result = handle_signature_help(
             &file_content,
             position,
             self.coordinator.get_analysis_engine(),
         )
-        .await)
+        .await;
+        let elapsed = started.elapsed();
+        self.coordinator.record_signature_help_latency(elapsed);
+        if result.is_none() {
+            self.coordinator.record_signature_help_empty();
+        }
+        Ok(result)
     }
 
     // ========================================================================

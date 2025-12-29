@@ -165,8 +165,20 @@ impl SystemCoordinator {
         self.observability.record_completion_latency(duration);
     }
 
+    pub fn record_completion_resolve_latency(&self, duration: std::time::Duration) {
+        self.observability.record_completion_resolve_latency(duration);
+    }
+
     pub fn record_completion_incomplete(&self) {
         self.observability.record_completion_incomplete();
+    }
+
+    pub fn record_signature_help_latency(&self, duration: std::time::Duration) {
+        self.observability.record_signature_help_latency(duration);
+    }
+
+    pub fn record_signature_help_empty(&self) {
+        self.observability.record_signature_help_empty();
     }
 
     pub fn record_completion_quality(

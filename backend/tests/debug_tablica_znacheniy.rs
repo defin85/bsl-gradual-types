@@ -3,11 +3,11 @@
 use tree_sitter::Parser;
 
 #[test]
-#[ignore = "Debug test requires specific Windows file path"]
+#[ignore = "Debug test uses a large fixture and is not part of CI"]
 fn debug_tablica_znacheniy_ast() {
-    let code =
-        std::fs::read_to_string("C:\\1CProject\\bsl-gradual-types\\test_hover_milestone_2_11.bsl")
-            .expect("Failed to read test file");
+    let fixture_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/bsl/test_hover_milestone_2_11.bsl");
+    let code = std::fs::read_to_string(&fixture_path).expect("Failed to read test file");
 
     let mut parser = Parser::new();
     parser

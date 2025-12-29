@@ -33,7 +33,10 @@ impl GenericInference {
     ///
     /// # Примеры
     ///
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::generic_inference::GenericInference;
+    /// # use bsl_shared::domain::types::ConcreteType;
+    /// # let mut inference = GenericInference::new();
     /// // arr.Добавить("текст") → Массив<Строка>
     /// inference.infer_from_method_call("arr", "Добавить", &[ConcreteType::string()]);
     ///

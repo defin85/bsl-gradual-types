@@ -3,8 +3,8 @@
 //! Упрощает создание MethodSignature через цепочку вызовов вместо verbose конструкторов.
 //!
 //! # Example
-//! ```ignore
-//! use bsl_shared::domain::signature_index::MethodBuilder;
+//! ```rust,no_run
+//! use bsl_shared::domain::signature_index::{MethodBuilder, SignatureIndex};
 //! use bsl_shared::domain::type_id::TypeId;
 //!
 //! let type_id = TypeId::new("ТабличнаяЧасть");
@@ -68,8 +68,11 @@ impl MethodBuilder {
     /// Создать builder для указанного типа
     ///
     /// # Example
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodBuilder;
+    /// # use bsl_shared::domain::type_id::TypeId;
     /// let builder = MethodBuilder::for_type(&TypeId::new("Массив"));
+    /// # let _ = builder;
     /// ```
     pub fn for_type(type_id: &TypeId) -> Self {
         Self {
@@ -86,8 +89,11 @@ impl MethodBuilder {
     /// Установить имя метода
     ///
     /// # Example
-    /// ```ignore
-    /// builder.method("Добавить")
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodBuilder;
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// let builder = MethodBuilder::for_type(&TypeId::new("Массив"));
+    /// builder.method("Добавить");
     /// ```
     pub fn method(mut self, name: &str) -> Self {
         self.method_name = name.to_string();
@@ -97,8 +103,11 @@ impl MethodBuilder {
     /// Установить тип возвращаемого значения
     ///
     /// # Example
-    /// ```ignore
-    /// builder.returns("ТаблицаЗначений")
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodBuilder;
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// let builder = MethodBuilder::for_type(&TypeId::new("Массив")).method("Добавить");
+    /// builder.returns("ТаблицаЗначений");
     /// ```
     pub fn returns(mut self, type_name: &str) -> Self {
         self.return_type = Some(type_name.to_string());
@@ -110,8 +119,11 @@ impl MethodBuilder {
     /// Эквивалентно процедуре в 1С.
     ///
     /// # Example
-    /// ```ignore
-    /// builder.void()
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodBuilder;
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// let builder = MethodBuilder::for_type(&TypeId::new("Массив")).method("Очистить");
+    /// builder.void();
     /// ```
     pub fn void(mut self) -> Self {
         self.return_type = None;
@@ -124,8 +136,12 @@ impl MethodBuilder {
     /// ParamBuilder возвращает MethodBuilder через ownership transfer.
     ///
     /// # Example
-    /// ```ignore
-    /// builder.param("Индекс", "Число").required().desc("Индекс элемента")
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodBuilder;
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// MethodBuilder::for_type(&TypeId::new("Массив"))
+    ///     .method("Вставить")
+    ///     .param("Индекс", "Число").required().desc("Индекс элемента");
     /// ```
     pub fn param(mut self, name: &str, type_name: &str) -> ParamBuilder {
         let param = ParameterInfo {
@@ -146,8 +162,12 @@ impl MethodBuilder {
     /// Добавить параметр без типа (произвольный тип)
     ///
     /// # Example
-    /// ```ignore
-    /// builder.param_any("Значение").required().desc("Любое значение")
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodBuilder;
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// MethodBuilder::for_type(&TypeId::new("Массив"))
+    ///     .method("Добавить")
+    ///     .param_any("Значение").required().desc("Любое значение");
     /// ```
     pub fn param_any(mut self, name: &str) -> ParamBuilder {
         let param = ParameterInfo {
@@ -168,8 +188,13 @@ impl MethodBuilder {
     /// Установить facet возвращаемого типа
     ///
     /// # Example
-    /// ```ignore
-    /// builder.facet(FacetKind::Object)
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodBuilder;
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_shared::domain::types::FacetKind;
+    /// let builder = MethodBuilder::for_type(&TypeId::new("СправочникМенеджер"))
+    ///     .method("СоздатьЭлемент");
+    /// builder.facet(FacetKind::Object);
     /// ```
     pub fn facet(mut self, facet: FacetKind) -> Self {
         self.return_facet = Some(facet);
@@ -179,8 +204,13 @@ impl MethodBuilder {
     /// Установить требования к контексту выполнения
     ///
     /// # Example
-    /// ```ignore
-    /// builder.context(ContextRequirements::ServerOnly)
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodBuilder;
+    /// # use bsl_shared::domain::runtime_context::ContextRequirements;
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// let builder = MethodBuilder::for_type(&TypeId::new("Объект"))
+    ///     .method("Метод");
+    /// builder.context(ContextRequirements::ServerOnly);
     /// ```
     pub fn context(mut self, context: ContextRequirements) -> Self {
         self.context = context;
@@ -192,8 +222,12 @@ impl MethodBuilder {
     /// По умолчанию: Platform
     ///
     /// # Example
-    /// ```ignore
-    /// builder.source(SignatureSource::Configuration)
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::{MethodBuilder, SignatureSource};
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// let builder = MethodBuilder::for_type(&TypeId::new("Объект"))
+    ///     .method("Метод");
+    /// builder.source(SignatureSource::Configuration);
     /// ```
     pub fn source(mut self, source: SignatureSource) -> Self {
         self.source = source;
@@ -208,7 +242,11 @@ impl MethodBuilder {
     /// Если имя метода не установлено (пустая строка).
     ///
     /// # Example
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::{MethodBuilder, SignatureIndex};
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # let type_id = TypeId::new("ТабличнаяЧасть");
+    /// # let mut index = SignatureIndex::new();
     /// MethodBuilder::for_type(&type_id)
     ///     .method("Добавить")
     ///     .returns("СтрокаТабличнойЧасти")
@@ -267,8 +305,12 @@ impl ParamBuilder {
     /// Пометить параметр как опциональный
     ///
     /// # Example
-    /// ```ignore
-    /// builder.param("Колонки", "Строка").optional()
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodBuilder;
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// MethodBuilder::for_type(&TypeId::new("ТаблицаЗначений"))
+    ///     .method("Выгрузить")
+    ///     .param("Колонки", "Строка").optional();
     /// ```
     pub fn optional(mut self) -> Self {
         self.builder.params[self.param_index].is_optional = true;
@@ -278,8 +320,12 @@ impl ParamBuilder {
     /// Пометить параметр как обязательный (по умолчанию)
     ///
     /// # Example
-    /// ```ignore
-    /// builder.param("Значение", "Строка").required()
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodBuilder;
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// MethodBuilder::for_type(&TypeId::new("Массив"))
+    ///     .method("Добавить")
+    ///     .param("Значение", "Строка").required();
     /// ```
     pub fn required(mut self) -> Self {
         self.builder.params[self.param_index].is_optional = false;
@@ -289,8 +335,12 @@ impl ParamBuilder {
     /// Установить описание параметра
     ///
     /// # Example
-    /// ```ignore
-    /// builder.param("Индекс", "Число").desc("Индекс элемента")
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodBuilder;
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// MethodBuilder::for_type(&TypeId::new("Массив"))
+    ///     .method("Вставить")
+    ///     .param("Индекс", "Число").desc("Индекс элемента");
     /// ```
     pub fn desc(mut self, description: &str) -> Self {
         self.builder.params[self.param_index].description = Some(description.to_string());
@@ -300,8 +350,12 @@ impl ParamBuilder {
     /// Установить значение по умолчанию
     ///
     /// # Example
-    /// ```ignore
-    /// builder.param("Размер", "Число").default_value("0")
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodBuilder;
+    /// # use bsl_shared::domain::type_id::TypeId;
+    /// MethodBuilder::for_type(&TypeId::new("Массив"))
+    ///     .method("УстановитьРазмер")
+    ///     .param("Размер", "Число").default_value("0");
     /// ```
     pub fn default_value(mut self, value: &str) -> Self {
         self.builder.params[self.param_index].default_value = Some(value.to_string());

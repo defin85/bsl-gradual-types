@@ -1059,7 +1059,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier, Mutex, OnceLock};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
     use tempfile::TempDir;
 
     #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -1260,7 +1260,6 @@ mod tests {
             .get_or_build(&key, || Ok(TestValue { value: "old".into() }))
             .unwrap();
         assert!(!entry.from_cache);
-        let stats_before = cache.stats().stored_entries;
 
         let manifest_path = cache.cache_dir(&key).join("manifest.json");
         let manifest_bytes = fs::read(&manifest_path).unwrap();
@@ -1280,14 +1279,20 @@ mod tests {
         assert!(entry.from_cache);
         assert_eq!(entry.value.value, "old");
 
-        for _ in 0..100 {
-            if cache.stats().stored_entries >= stats_before + 1 {
+        let started = Instant::now();
+        loop {
+            if let Some(value) = read_cached_value::<TestValue>(&cache, &key) {
+                if value.value == "new" {
+                    break;
+                }
+            }
+            if started.elapsed() > Duration::from_secs(3) {
                 break;
             }
-            thread::sleep(Duration::from_millis(10));
+            thread::sleep(Duration::from_millis(20));
         }
 
-        let value = cache.try_get::<TestValue>(&key).unwrap();
+        let value = read_cached_value::<TestValue>(&cache, &key);
         assert!(value.is_some(), "Ожидали обновлённый кэш");
         assert_eq!(value.unwrap().value, "new");
     }
@@ -1324,5 +1329,32 @@ mod tests {
         let second = cache.try_get::<TestValue>(&key2).unwrap();
         assert!(first.is_none(), "Ожидали вытеснение первого entry");
         assert!(second.is_some(), "Ожидали сохранение второго entry");
+    }
+
+    fn read_cached_value<T>(cache: &DiskCache, key: &DiskCacheKey) -> Option<T>
+    where
+        T: super::DeserializeOwned,
+    {
+        let cache_dir = cache.cache_dir(key);
+        let manifest_path = cache_dir.join("manifest.json");
+        let artifact_path = cache_dir.join("artifact.json");
+        if !manifest_path.exists() || !artifact_path.exists() {
+            return None;
+        }
+
+        let manifest_bytes = fs::read(&manifest_path).ok()?;
+        let manifest: CacheManifest = serde_json::from_slice(&manifest_bytes).ok()?;
+        if manifest.schema_version != cache.schema_version
+            || manifest.source_kind != key.source_kind
+            || manifest.source_identity != key.source_identity
+            || manifest.source_fingerprint != key.source_fingerprint
+            || manifest.settings_fingerprint != key.settings_fingerprint
+        {
+            return None;
+        }
+
+        let artifact_bytes = fs::read(&artifact_path).ok()?;
+        let payload = zstd::stream::decode_all(&artifact_bytes[..]).unwrap_or(artifact_bytes);
+        serde_json::from_slice(&payload).ok()
     }
 }

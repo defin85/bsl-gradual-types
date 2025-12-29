@@ -42,15 +42,18 @@ pub use crate::domain::types::{
 ///
 /// # Примеры использования
 ///
-/// ```ignore
-/// use bsl_gradual_types::domain::metadata_lookup::TypeMetadataLookup;
-/// use bsl_gradual_types::domain::repository::TypeRepository;
+/// ```rust,no_run
+/// use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+/// use bsl_shared::domain::repository::TypeRepository;
+/// use bsl_shared::domain::types::TypeResolution;
 /// use std::sync::Arc;
 ///
+/// # let repository: Arc<dyn TypeRepository> = todo!();
 /// // Получить методы для TypeResolution
 /// let lookup = TypeMetadataLookup::new(repository);
-/// let resolution = resolver.resolve_expression_sync("Массив");
+/// let resolution = TypeResolution::unknown();
 /// let methods = lookup.get_methods(&resolution);
+/// # let _ = methods;
 ///
 /// // Проверить существование метода
 /// if !lookup.has_member(&resolution, "НеСуществующийМетод") {

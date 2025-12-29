@@ -155,13 +155,19 @@ impl NarrowingEngine {
     ///
     /// # Примеры
     ///
-    /// ```ignore
-    /// let engine = NarrowingEngine::new(cfg);
+    /// ```rust,no_run
+    /// # use bsl_shared::analysis::NarrowingEngine;
+    /// # use bsl_shared::domain::flow_analysis::ControlFlowGraph;
+    /// # use bsl_shared::domain::types::TypeResolution;
+    /// let cfg = ControlFlowGraph::new();
+    /// let mut engine = NarrowingEngine::new(cfg);
+    /// let current_type = TypeResolution::unknown();
     /// let narrowed = engine.narrow_type(
     ///     &current_type,
     ///     "ТипЗнч(Параметр) = Тип(\"Число\")"
     /// );
     /// // narrowed теперь имеет тип Число
+    /// # let _ = narrowed;
     /// ```
     pub fn narrow_type(&mut self, current: &TypeResolution, condition: &str) -> TypeResolution {
         // Обнаруживаем type guards в условии

@@ -41,7 +41,7 @@ impl Default for RenderOptions {
 /// Complete HTML document as a String
 ///
 /// # Example
-/// ```ignore
+/// ```text
 /// let html = generate_semantic_html(&program, "test.bsl", RenderOptions::default());
 /// ```
 pub fn generate_semantic_html(

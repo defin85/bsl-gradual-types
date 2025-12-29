@@ -202,9 +202,9 @@ impl SystemCoordinator {
                     required
                 )));
             }
-            if parsed_platform_version > required {
+            if parsed_platform_version < required {
                 return Err(StartupError::PlatformTypesError(anyhow!(
-                    "Версия платформы {} выше CompatibilityMode {}",
+                    "Версия платформы {} ниже CompatibilityMode {}",
                     parsed_platform_version,
                     required
                 )));
@@ -1231,5 +1231,28 @@ mod tests {
         let coordinator = SystemCoordinator::new();
         let result = coordinator.required_platform_version(temp.path());
         assert!(result.is_err(), "expected error for invalid CompatibilityMode");
+    }
+
+    #[test]
+    fn test_platform_version_below_compatibility_is_rejected() {
+        let temp = TempDir::new().unwrap();
+        write_configuration_xml(
+            &temp,
+            r#"
+<MetaDataObject>
+  <Configuration>
+    <Properties>
+      <Name>Test</Name>
+      <CompatibilityMode>Version8_3_25</CompatibilityMode>
+    </Properties>
+  </Configuration>
+</MetaDataObject>
+"#,
+        );
+
+        let coordinator = SystemCoordinator::new();
+        let result =
+            coordinator.start_with_paths_blocking(None, Some(temp.path()), Some("8.3.24"), None);
+        assert!(result.is_err(), "expected error for lower platform version");
     }
 }

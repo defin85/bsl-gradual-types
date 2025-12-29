@@ -48,7 +48,7 @@ pub fn find_preceding_directive(node: &Node, source: &str) -> Option<CompilerDir
         }
     }
 
-    None
+    scan_directive_in_source(node, source)
 }
 
 /// Парсит текст директивы в CompilerDirective enum
@@ -87,4 +87,45 @@ pub fn parse_directive(text: &str) -> Option<CompilerDirective> {
 
     debug!("Unknown compiler directive: '{}'", text);
     None
+}
+
+fn scan_directive_in_source(node: &Node, source: &str) -> Option<CompilerDirective> {
+    let start_row = node.start_position().row as isize;
+    if start_row < 0 {
+        return None;
+    }
+
+    let lines: Vec<&str> = source.lines().collect();
+    let mut row = start_row;
+    let mut allow_skip_routine_line = true;
+    while row >= 0 {
+        let trimmed = lines.get(row as usize)?.trim();
+        if trimmed.is_empty() {
+            row -= 1;
+            continue;
+        }
+        if trimmed.starts_with("//") {
+            row -= 1;
+            continue;
+        }
+        if trimmed.starts_with('&') {
+            return parse_directive(trimmed);
+        }
+        if allow_skip_routine_line && looks_like_routine_declaration(trimmed) {
+            allow_skip_routine_line = false;
+            row -= 1;
+            continue;
+        }
+        break;
+    }
+
+    None
+}
+
+fn looks_like_routine_declaration(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    lower.starts_with("процедура")
+        || lower.starts_with("функция")
+        || lower.starts_with("procedure")
+        || lower.starts_with("function")
 }

@@ -202,10 +202,22 @@ impl SessionManager {
     /// Выполнить операцию с сессией (с async closure)
     ///
     /// Пример использования:
-    /// ```ignore
-    /// manager.with_session(&session_id, |session| async {
-    ///     session.dap_client.next(thread_id).await
-    /// }).await?;
+    /// ```rust,no_run
+    /// # use mcp_debug_server::session::SessionManager;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// # let manager = SessionManager::new();
+    /// # let session_id = manager
+    /// #     .create_session("./target/debug/my_app".to_string(), "codelldb".to_string())
+    /// #     .await?;
+    /// manager
+    ///     .with_session(&session_id, |session| {
+    ///         Box::pin(async move {
+    ///             session.dap_client.next(1).await.map_err(anyhow::Error::from)
+    ///         })
+    ///     })
+    ///     .await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn with_session<'a, F, R>(&'a self, session_id: &SessionId, f: F) -> Result<R>
     where

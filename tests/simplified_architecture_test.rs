@@ -181,7 +181,9 @@ async fn test_simplified_architecture_flow() {
     assert!(hover_result.is_ok(), "LSP hover should work");
 
     // Web functionality
-    let completion_result = type_service.get_completion("test.bsl", 1, 5).await;
+    let completion_result = type_service
+        .get_completion("test.bsl", 1, 5, None)
+        .await;
     assert!(completion_result.is_ok(), "Web completion should work");
 
     // CLI functionality

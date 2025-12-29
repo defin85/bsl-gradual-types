@@ -8,6 +8,12 @@ use serde_json::json;
 use tracing::{error, info};
 
 use bsl_backend::application::TypeSystemService;
+use bsl_backend::application::CompletionStats;
+
+pub struct CompletionResponseWithStats {
+    pub response: CompletionResponse,
+    pub stats: Option<CompletionStats>,
+}
 
 /// Handle textDocument/completion request
 pub async fn handle_completion(
@@ -15,7 +21,7 @@ pub async fn handle_completion(
     position: Position,
     file_uri: &Url,
     type_service: Option<Arc<TypeSystemService>>,
-) -> Option<CompletionResponse> {
+) -> Option<CompletionResponseWithStats> {
     info!(
         "Completion requested at {}:{}",
         position.line, position.character
@@ -38,24 +44,33 @@ pub async fn handle_completion(
                     .map(|candidate| to_lsp_completion(candidate.item, candidate.owner_type))
                     .collect();
                 info!("Returning {} completions", lsp_completions.len());
-                Some(CompletionResponse::List(CompletionList {
-                    is_incomplete: result.is_incomplete,
-                    items: lsp_completions,
-                }))
+                Some(CompletionResponseWithStats {
+                    response: CompletionResponse::List(CompletionList {
+                        is_incomplete: result.is_incomplete,
+                        items: lsp_completions,
+                    }),
+                    stats: Some(result.stats),
+                })
             }
             Err(e) => {
                 error!("Failed to get completions: {}", e);
-                Some(CompletionResponse::List(CompletionList {
-                    is_incomplete: false,
-                    items: vec![],
-                }))
+                Some(CompletionResponseWithStats {
+                    response: CompletionResponse::List(CompletionList {
+                        is_incomplete: false,
+                        items: vec![],
+                    }),
+                    stats: None,
+                })
             }
         }
     } else {
-        Some(CompletionResponse::List(CompletionList {
-            is_incomplete: false,
-            items: vec![],
-        }))
+        Some(CompletionResponseWithStats {
+            response: CompletionResponse::List(CompletionList {
+                is_incomplete: false,
+                items: vec![],
+            }),
+            stats: None,
+        })
     }
 }
 

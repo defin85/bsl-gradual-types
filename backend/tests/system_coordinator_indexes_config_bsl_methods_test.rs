@@ -20,6 +20,7 @@ fn startup_indexes_common_module_methods() {
   <Configuration uuid="00000000-0000-0000-0000-000000000000">
     <Properties>
       <Name>TestConfig</Name>
+      <CompatibilityMode>Version8_3_25</CompatibilityMode>
     </Properties>
     <ChildObjects>
       <CommonModule>МойМодуль</CommonModule>

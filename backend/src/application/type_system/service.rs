@@ -389,39 +389,6 @@ impl TypeSystemService {
         completion_service::resolve_method_details(owner_type, method_name, &self.metadata_lookup)
     }
 
-    /// Analyze completion context
-    pub fn analyze_completion_context(
-        &self,
-        content: &str,
-        line: u32,
-        column: u32,
-    ) -> completion_service::CompletionContext {
-        completion_service::analyze_completion_context(content, line, column)
-    }
-
-    /// Get contextual completions based on context
-    pub fn get_contextual_completions(
-        &self,
-        context: &completion_service::CompletionContext,
-    ) -> Vec<CompletionItem> {
-        completion_service::get_contextual_completions(context)
-    }
-
-    /// Get basic BSL constructs
-    pub fn get_basic_bsl_constructs(&self) -> Vec<CompletionItem> {
-        completion_service::get_basic_bsl_constructs()
-    }
-
-    /// Get BSL data types
-    pub fn get_bsl_types(&self) -> Vec<CompletionItem> {
-        completion_service::get_bsl_types()
-    }
-
-    /// Get built-in BSL functions
-    pub fn get_builtin_functions(&self) -> Vec<CompletionItem> {
-        completion_service::get_builtin_functions()
-    }
-
     // ============================================================================
     // VALIDATION OPERATIONS
     // ============================================================================

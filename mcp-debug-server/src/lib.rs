@@ -15,23 +15,17 @@
 //!
 //! ## Quick Start
 //!
-//! ```ignore
+//! ```rust,no_run
 //! use mcp_debug_server::session::SessionManager;
-//! use std::sync::Arc;
-//! use tokio::sync::Mutex;
-//! use std::collections::HashMap;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
 //!     let manager = SessionManager::new();
-//!     let event_buffer = Arc::new(Mutex::new(HashMap::new()));
 //!
 //!     // Create debug session
-//!     let session_id = manager.create_session(
-//!         "./target/debug/my_app".to_string(),
-//!         "codelldb".to_string(),
-//!         event_buffer.clone(),
-//!     ).await?;
+//!     let session_id = manager
+//!         .create_session("./target/debug/my_app".to_string(), "codelldb".to_string())
+//!         .await?;
 //!
 //!     // Set breakpoint, launch, debug...
 //!     // See examples/simple_debug.rs for full workflow

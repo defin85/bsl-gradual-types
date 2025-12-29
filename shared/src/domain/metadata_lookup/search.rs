@@ -23,7 +23,12 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+    /// # use bsl_shared::domain::repository::TypeRepository;
+    /// # use bsl_shared::domain::types::MetadataKind;
+    /// # use std::sync::Arc;
+    /// # let repository: Arc<dyn TypeRepository> = todo!();
     /// let lookup = TypeMetadataLookup::new(repository);
     ///
     /// // Проверяем существующий справочник
@@ -58,7 +63,12 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+    /// # use bsl_shared::domain::repository::TypeRepository;
+    /// # use bsl_shared::domain::types::MetadataKind;
+    /// # use std::sync::Arc;
+    /// # let repository: Arc<dyn TypeRepository> = todo!();
     /// let lookup = TypeMetadataLookup::new(repository);
     ///
     /// // Опечатка: "Контрогенты" вместо "Контрагенты"
@@ -68,6 +78,7 @@ impl TypeMetadataLookup {
     ///     3
     /// );
     /// // -> ["Контрагенты"]
+    /// # let _ = suggestions;
     /// ```
     pub fn suggest_similar_names(
         &self,
@@ -114,7 +125,14 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+    /// # use bsl_shared::domain::repository::TypeRepository;
+    /// # use bsl_shared::domain::types::MetadataKind;
+    /// # use std::sync::Arc;
+    /// # let repository: Arc<dyn TypeRepository> = todo!();
+    /// # let kind = MetadataKind::Catalog;
+    /// # let name = "Контрагенты";
     /// let lookup = TypeMetadataLookup::new(repository);
     ///
     /// if lookup.is_configuration_loaded() {

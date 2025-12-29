@@ -36,6 +36,10 @@ pub fn collect_syntax_errors_cached(
             .utf8_text(source.as_bytes())
             .unwrap_or("<неизвестно>")
             .to_string();
+        let trimmed = text.trim_start();
+        if trimmed.starts_with('&') {
+            return errors;
+        }
 
         errors.push(ParseError {
             message: format!("Синтаксическая ошибка: неожиданный текст '{}'", text),

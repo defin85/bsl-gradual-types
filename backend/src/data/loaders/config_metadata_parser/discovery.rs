@@ -845,7 +845,7 @@ impl ConfigurationDiscovery {
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let (object_mod, manager_mod, record_set_mod) =
     ///     discovery.discover_object_modules("Catalogs", "Контрагенты");
     /// assert!(object_mod.is_some());

@@ -6,7 +6,7 @@ use bsl_backend::data::loaders::hbk_recovery::{
     auto_recover_directory, HbkRecovery, RecoveryOptions,
 };
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::path::Path;
 use tempfile::tempdir;
 
@@ -15,38 +15,20 @@ use tempfile::tempdir;
 // ============================================================================
 
 /// Создаёт минимальный валидный пустой ZIP архив
-/// Структура: Local File Header (пустой файл) + EOCD
 fn create_minimal_empty_zip() -> Vec<u8> {
-    let mut zip = Vec::new();
+    let mut cursor = Cursor::new(Vec::new());
+    let mut writer = zip::ZipWriter::new(&mut cursor);
+    let options = zip::write::FileOptions::<()>::default();
 
-    // Local File Header for empty file
-    zip.extend_from_slice(&[
-        0x50, 0x4B, 0x03, 0x04, // Local file header signature
-        0x14, 0x00, // Version needed to extract (2.0)
-        0x00, 0x00, // General purpose bit flag
-        0x00, 0x00, // Compression method (stored)
-        0x00, 0x00, // File modification time
-        0x00, 0x00, // File modification date
-        0x00, 0x00, 0x00, 0x00, // CRC-32
-        0x00, 0x00, 0x00, 0x00, // Compressed size
-        0x00, 0x00, 0x00, 0x00, // Uncompressed size
-        0x00, 0x00, // Filename length (0 = no filename)
-        0x00, 0x00, // Extra field length
-    ]);
+    writer
+        .start_file("empty.txt", options)
+        .expect("Failed to create ZIP entry");
+    writer
+        .write_all(b"")
+        .expect("Failed to write ZIP entry");
+    writer.finish().expect("Failed to finalize ZIP");
 
-    // EOCD (End of Central Directory)
-    zip.extend_from_slice(&[
-        0x50, 0x4B, 0x05, 0x06, // EOCD signature
-        0x00, 0x00, // Number of this disk
-        0x00, 0x00, // Number of the disk with the start of the central directory
-        0x00, 0x00, // Total number of entries in the central directory on this disk
-        0x00, 0x00, // Total number of entries in the central directory
-        0x00, 0x00, 0x00, 0x00, // Size of the central directory
-        0x00, 0x00, 0x00, 0x00, // Offset of the central directory
-        0x00, 0x00, // ZIP comment length
-    ]);
-
-    zip
+    cursor.into_inner()
 }
 
 /// Создаёт тестовый .hbk файл с "мусором" и пустым ZIP архивом

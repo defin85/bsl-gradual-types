@@ -156,7 +156,10 @@ impl<'a> TypeValidator<'a> {
     ///
     /// # Пример
     ///
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::validators::TypeValidator;
+    /// # use bsl_shared::domain::types::MetadataKind;
+    /// # let validator: TypeValidator = todo!();
     /// // Валидация: Справочники.Контрогенты (опечатка)
     /// if let Some(error) = validator.validate_metadata_object_exists(
     ///     MetadataKind::Catalog,
@@ -164,6 +167,7 @@ impl<'a> TypeValidator<'a> {
     ///     Some("спр".to_string()),
     /// ) {
     ///     // error = UnknownMetadataObject { kind: Catalog, name: "Контрогенты", suggestions: ["Контрагенты"], ... }
+    ///     # let _ = error;
     /// }
     /// ```
     pub fn validate_metadata_object_exists(
@@ -207,10 +211,14 @@ impl<'a> TypeValidator<'a> {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// let resolution = resolver.resolve_expression_sync("Справочники.Контрогенты");
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::validators::TypeValidator;
+    /// # use bsl_shared::domain::types::TypeResolution;
+    /// # let validator: TypeValidator = todo!();
+    /// let resolution = TypeResolution::unknown();
     /// if let Some(error) = validator.validate_from_resolution(&resolution) {
     ///     // error = UnknownMetadataObject { kind: Catalog, name: "Контрогенты", ... }
+    ///     # let _ = error;
     /// }
     /// ```
     pub fn validate_from_resolution(&self, resolution: &TypeResolution) -> Option<TypeErrorKind> {

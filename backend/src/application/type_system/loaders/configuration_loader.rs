@@ -135,7 +135,7 @@ pub fn get_module_paths_for_type(
 /// * `analysis_engine` - AnalysisEngine for type resolution
 ///
 /// # Example
-/// ```ignore
+/// ```text
 /// prewarm_signature_cache(analysis_engine);
 /// ```
 pub fn prewarm_signature_cache(analysis_engine: &AnalysisEngine) {

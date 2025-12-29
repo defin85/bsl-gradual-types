@@ -21,8 +21,11 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```ignore
-    /// let resolution = resolver.resolve_expression_sync("ТаблицаЗначений");
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+    /// # use bsl_shared::domain::types::TypeResolution;
+    /// # let lookup: TypeMetadataLookup = todo!();
+    /// let resolution = TypeResolution::unknown();
     /// if let Some(raw_type) = lookup.get_raw_type(&resolution) {
     ///     println!("Категория: {}", raw_type.category);
     ///     println!("Методов: {}", raw_type.methods.len());
@@ -45,8 +48,11 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```ignore
-    /// let resolution = resolver.resolve_expression_sync("Массив");
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+    /// # use bsl_shared::domain::types::TypeResolution;
+    /// # let lookup: TypeMetadataLookup = todo!();
+    /// let resolution = TypeResolution::unknown();
     /// let methods = lookup.get_methods(&resolution);
     /// for method in methods {
     ///     println!("Метод: {} -> {}", method.name, method.return_type);
@@ -226,8 +232,11 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```ignore
-    /// let resolution = resolver.resolve_expression_sync("HTTPСоединение");
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+    /// # use bsl_shared::domain::types::TypeResolution;
+    /// # let lookup: TypeMetadataLookup = todo!();
+    /// let resolution = TypeResolution::unknown();
     /// let properties = lookup.get_properties(&resolution);
     /// for prop in properties {
     ///     println!("Свойство: {} ({})", prop.name, prop.prop_type);
@@ -303,8 +312,11 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```ignore
-    /// let resolution = resolver.resolve_expression_sync("Документ.ЗаказНаряды");
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+    /// # use bsl_shared::domain::types::TypeResolution;
+    /// # let lookup: TypeMetadataLookup = todo!();
+    /// let resolution = TypeResolution::unknown();
     /// let tabular_sections = lookup.get_tabular_sections(&resolution);
     /// for ts in tabular_sections {
     ///     println!("Табличная часть: {} ({} колонок)", ts.name, ts.attributes.len());
@@ -337,8 +349,11 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```ignore
-    /// let resolution = resolver.resolve_expression_sync("ТаблицаЗначений");
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+    /// # use bsl_shared::domain::types::TypeResolution;
+    /// # let lookup: TypeMetadataLookup = todo!();
+    /// let resolution = TypeResolution::unknown();
     ///
     /// // Проверяем существующий метод
     /// assert!(lookup.has_member(&resolution, "Добавить"));
@@ -349,14 +364,23 @@ impl TypeMetadataLookup {
     ///
     /// # Использование для валидации
     ///
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
+    /// # use bsl_shared::domain::types::TypeResolution;
+    /// # use bsl_shared::domain::validators::TypeErrorKind;
+    /// # let metadata_lookup: TypeMetadataLookup = todo!();
+    /// # let resolution = TypeResolution::unknown();
     /// // В TypeValidator
-    /// if !metadata_lookup.has_member(&resolution, "Записать") {
-    ///     return Some(TypeErrorKind::NonExistentProperty {
+    /// let maybe_error = if !metadata_lookup.has_member(&resolution, "Записать") {
+    ///     Some(TypeErrorKind::NonExistentProperty {
     ///         object_type: format!("{:?}", resolution.result),
     ///         property_name: "Записать".to_string(),
-    ///     });
-    /// }
+    ///         variable_name: None,
+    ///     })
+    /// } else {
+    ///     None
+    /// };
+    /// # let _ = maybe_error;
     /// ```
     pub fn has_member(&self, resolution: &TypeResolution, member_name: &str) -> bool {
         let raw = match self.get_raw_type(resolution) {

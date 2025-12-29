@@ -161,6 +161,39 @@ impl SystemCoordinator {
         (self.cache.clone(), parser.clone())
     }
 
+    pub fn record_completion_latency(&self, duration: std::time::Duration) {
+        self.observability.record_completion_latency(duration);
+    }
+
+    pub fn record_completion_incomplete(&self) {
+        self.observability.record_completion_incomplete();
+    }
+
+    pub fn record_completion_quality(
+        &self,
+        total_candidates: usize,
+        dedup_removed: usize,
+        score_samples: &[f32],
+        prefix_exact: usize,
+        prefix_starts: usize,
+        prefix_contains: usize,
+        prefix_none: usize,
+        member_access: usize,
+        has_owner: usize,
+    ) {
+        self.observability.record_completion_quality(
+            total_candidates,
+            dedup_removed,
+            score_samples,
+            prefix_exact,
+            prefix_starts,
+            prefix_contains,
+            prefix_none,
+            member_access,
+            has_owner,
+        );
+    }
+
     /// Получить ParserCoordinator (Milestone 2.18: для синтаксических ошибок в LSP)
     pub fn parser_coordinator(&self) -> Option<Arc<ParserCoordinator>> {
         let parser = self.parser.read().unwrap_or_else(|poisoned| {

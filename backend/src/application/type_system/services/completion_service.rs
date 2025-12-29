@@ -3,7 +3,6 @@
 //! Functions for LSP completion requests and contextual auto-completion.
 
 use anyhow::Result;
-use std::collections::HashSet;
 use tracing::info;
 
 use bsl_shared::domain::metadata_constants::get_collection_kind;
@@ -12,8 +11,9 @@ use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, Typ
 use super::super::extractors::symbol_extractor::{
     extract_word_at_position, is_identifier_char, utf16_to_byte_offset,
 };
+use super::completion_ranking::{rank_candidates, RankingCandidate};
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
-use crate::system::{IndexItemKind, IndexSnapshot, IntellisenseIndexStore, TypeKind};
+use crate::system::{IndexItemKind, IndexSnapshot, IntellisenseIndexStore, SymbolScope, TypeKind};
 
 pub const COMPLETION_MAX_ITEMS: usize = 200;
 const CONTEXT_WINDOW_CHARS: usize = 256;
@@ -22,12 +22,27 @@ const CONTEXT_WINDOW_CHARS: usize = 256;
 pub struct CompletionCandidate {
     pub item: CompletionItem,
     pub owner_type: Option<String>,
+    pub score: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompletionStats {
+    pub total_candidates: usize,
+    pub dedup_removed: usize,
+    pub score_samples: Vec<f32>,
+    pub prefix_exact: usize,
+    pub prefix_starts: usize,
+    pub prefix_contains: usize,
+    pub prefix_none: usize,
+    pub member_access: usize,
+    pub has_owner: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct CompletionResult {
     pub items: Vec<CompletionCandidate>,
     pub is_incomplete: bool,
+    pub stats: CompletionStats,
 }
 
 /// LSP operations - get completion at position
@@ -78,34 +93,49 @@ pub async fn get_completion(
         add_keywords(&snapshot, &mut candidates, 4);
     }
 
-    let prefix = context.current_word.to_lowercase();
-    if !prefix.is_empty() {
-        candidates.retain(|candidate| {
-            candidate
-                .label_lower
-                .starts_with(prefix.as_str())
-        });
-    }
-
-    candidates.sort_by(|a, b| (a.priority, &a.label_lower).cmp(&(b.priority, &b.label_lower)));
-
-    let mut seen = HashSet::new();
-    candidates.retain(|candidate| {
-        let key = (candidate.label_lower.clone(), candidate.item.kind as u8);
-        seen.insert(key)
-    });
-
-    let is_incomplete = candidates.len() > COMPLETION_MAX_ITEMS;
-    let limited = candidates.into_iter().take(COMPLETION_MAX_ITEMS);
-
-    let items = limited
-        .map(|candidate| CompletionCandidate {
-            item: with_sort_text(candidate.item, candidate.priority, &candidate.label_lower),
+    let ranking_input: Vec<RankingCandidate> = candidates
+        .into_iter()
+        .map(|candidate| RankingCandidate {
+            item: candidate.item,
             owner_type: candidate.owner_type,
+            label_lower: candidate.label_lower,
+            source_priority: candidate.source_priority,
+            scope: candidate.scope,
         })
         .collect();
 
-    Ok(CompletionResult { items, is_incomplete })
+    let ranked = rank_candidates(ranking_input, &context);
+    let is_incomplete = ranked.candidates.len() > COMPLETION_MAX_ITEMS;
+    let limited = ranked.candidates.into_iter().take(COMPLETION_MAX_ITEMS);
+
+    let items = limited
+        .map(|candidate| CompletionCandidate {
+            item: with_sort_text(
+                candidate.item,
+                candidate.score,
+                candidate.source_priority,
+                &candidate.label_lower,
+            ),
+            owner_type: candidate.owner_type,
+            score: candidate.score,
+        })
+        .collect();
+
+    Ok(CompletionResult {
+        items,
+        is_incomplete,
+        stats: CompletionStats {
+            total_candidates: ranked.total_candidates,
+            dedup_removed: ranked.dedup_removed,
+            score_samples: ranked.score_samples,
+            prefix_exact: ranked.summary.prefix_exact,
+            prefix_starts: ranked.summary.prefix_starts,
+            prefix_contains: ranked.summary.prefix_contains,
+            prefix_none: ranked.summary.prefix_none,
+            member_access: ranked.summary.member_access,
+            has_owner: ranked.summary.has_owner,
+        },
+    })
 }
 
 /// Analyzes context for smart auto-completion
@@ -182,6 +212,7 @@ fn add_keywords(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>, priority:
                 CompletionItem::new((*keyword).to_string(), CompletionKind::Keyword),
                 priority,
                 None,
+                None,
             ));
         }
         return;
@@ -191,6 +222,7 @@ fn add_keywords(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>, priority:
         target.push(Candidate::new(
             CompletionItem::new(item.name.clone(), CompletionKind::Keyword),
             priority,
+            None,
             None,
         ));
     }
@@ -211,6 +243,7 @@ fn add_types(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>, priority: u8
             target.push(Candidate::new(
                 CompletionItem::new(item.name.clone(), CompletionKind::Type),
                 priority,
+                None,
                 None,
             ));
         }
@@ -272,8 +305,14 @@ fn trim_to_window(line_prefix: &str, window: usize) -> String {
     chars.into_iter().collect()
 }
 
-fn with_sort_text(mut item: CompletionItem, priority: u8, label_lower: &str) -> CompletionItem {
-    item.sort_text = Some(format!("{:02}-{}", priority, label_lower));
+fn with_sort_text(
+    mut item: CompletionItem,
+    score: f32,
+    source_priority: u8,
+    label_lower: &str,
+) -> CompletionItem {
+    let score_rank = ((1.0 - score).clamp(0.0, 1.0) * 1000.0) as u32;
+    item.sort_text = Some(format!("{:04}-{:02}-{}", score_rank, source_priority, label_lower));
     item
 }
 
@@ -290,6 +329,7 @@ fn add_methods(
             CompletionItem::new(method.name, CompletionKind::Method),
             priority,
             Some(type_name.to_string()),
+            None,
         ));
     }
 }
@@ -313,6 +353,7 @@ fn add_symbols(
             CompletionItem::new(item.name.clone(), kind),
             priority,
             None,
+            item.scope,
         ));
     }
 }
@@ -325,6 +366,7 @@ fn add_module_symbols(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>, pri
                 CompletionItem::new(item.name.clone(), kind),
                 priority,
                 None,
+                item.scope,
             ));
         }
     }
@@ -344,6 +386,7 @@ fn add_metadata_items(
                         CompletionItem::new(item.name.clone(), CompletionKind::Type),
                         priority,
                         None,
+                        None,
                     ));
                 }
             }
@@ -354,6 +397,7 @@ fn add_metadata_items(
                     target.push(Candidate::new(
                         CompletionItem::new(item.name.clone(), CompletionKind::Type),
                         priority,
+                        None,
                         None,
                     ));
                 }
@@ -388,19 +432,26 @@ fn completion_kind_from_index_item(item: &crate::system::IndexItem) -> Completio
 #[derive(Debug, Clone)]
 struct Candidate {
     item: CompletionItem,
-    priority: u8,
+    source_priority: u8,
     label_lower: String,
     owner_type: Option<String>,
+    scope: Option<SymbolScope>,
 }
 
 impl Candidate {
-    fn new(item: CompletionItem, priority: u8, owner_type: Option<String>) -> Self {
+    fn new(
+        item: CompletionItem,
+        source_priority: u8,
+        owner_type: Option<String>,
+        scope: Option<SymbolScope>,
+    ) -> Self {
         let label_lower = item.label.to_lowercase();
         Self {
             item,
-            priority,
+            source_priority,
             label_lower,
             owner_type,
+            scope,
         }
     }
 }
@@ -463,6 +514,7 @@ pub fn resolve_method_details(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::system::IndexItem;
     use std::sync::Arc;
     use bsl_shared::domain::repository::InMemoryTypeRepository;
 

@@ -223,9 +223,13 @@ pub trait TypeRepository: Send + Sync {
     ///
     /// # Примеры
     ///
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::repository::TypeRepository;
+    /// # use bsl_shared::domain::types::MetadataKind;
+    /// # let repository: &dyn TypeRepository = todo!();
     /// let catalogs = repository.get_metadata_objects_by_kind(MetadataKind::Catalog);
     /// // → ["Контрагенты", "Номенклатура", "Склады", ...]
+    /// # let _ = catalogs;
     /// ```
     fn get_metadata_objects_by_kind(&self, kind: MetadataKind) -> Vec<String>;
 
@@ -346,11 +350,20 @@ impl InMemoryTypeRepository {
     /// Используется с SignatureSourceRegistry для декларативной настройки.
     ///
     /// # Example
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::repository::InMemoryTypeRepository;
+    /// # use bsl_shared::domain::signature_registry::{SignatureDataSource, SignatureSourceRegistry};
+    /// # use bsl_shared::domain::types::RawTypeData;
+    /// # struct DummySource;
+    /// # impl SignatureDataSource for DummySource {
+    /// #     fn name(&self) -> &str { "dummy" }
+    /// #     fn priority(&self) -> u32 { 0 }
+    /// #     fn load(&self) -> Vec<RawTypeData> { Vec::new() }
+    /// # }
     /// let index = SignatureSourceRegistry::new()
-    ///     .register(SyntaxHelperSource::new(types))
-    ///     .register(PlatformFacetTypesSource)
+    ///     .register(DummySource)
     ///     .build();
+    /// let repository = InMemoryTypeRepository::new();
     /// repository.set_signature_index(index);
     /// ```
     pub fn set_signature_index(&self, index: SignatureIndex) {

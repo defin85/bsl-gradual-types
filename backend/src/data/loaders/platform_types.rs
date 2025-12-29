@@ -21,7 +21,7 @@ use bsl_shared::domain::types::{GenericInfo, InferenceMethodInfo};
 ///
 /// # Пример использования
 ///
-/// ```ignore
+/// ```text
 /// let registry = get_generic_info_registry();
 /// if let Some(info) = registry.get("Массив") {
 ///     repository.set_generic_info("Массив", info.clone());

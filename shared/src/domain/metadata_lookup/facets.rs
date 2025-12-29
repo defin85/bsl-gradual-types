@@ -122,7 +122,7 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```ignore
+    /// ```text
     /// // Документы.ЗаказНаряды + Manager фасет
     /// let methods = lookup.get_facet_methods(&resolution, FacetKind::Manager);
     /// // -> Ищет "ДокументМенеджер" -> Возвращает 12 методов
@@ -218,7 +218,7 @@ impl TypeMetadataLookup {
     ///
     /// # Примеры
     ///
-    /// ```ignore
+    /// ```text
     /// // Справочники.Контрагенты + Object фасет
     /// let props = lookup.get_facet_properties(&resolution, FacetKind::Object);
     /// // -> Ищет "СправочникОбъект" -> Возвращает платформенные + конфигурационные свойства

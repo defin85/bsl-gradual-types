@@ -284,15 +284,20 @@ impl SignatureIndex {
     /// - Если не найдено, извлекает базовый фасетный тип и ищет по нему
     ///
     /// # Примеры
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::SignatureIndex;
+    /// let index = SignatureIndex::new();
+    ///
     /// // Точный поиск
-    /// find_method("Массив", "Добавить") // -> найдёт "Массив.Добавить"
+    /// let exact = index.find_method("Массив", "Добавить");
+    /// // -> найдёт "Массив.Добавить" (если индекс заполнен)
     ///
     /// // Фасетный поиск
-    /// find_method("СправочникМенеджер.Контрагенты", "СоздатьЭлемент")
+    /// let facet = index.find_method("СправочникМенеджер.Контрагенты", "СоздатьЭлемент");
     /// // -> не найдёт по точному ключу
     /// // -> извлечёт базовый тип "СправочникМенеджер"
     /// // -> найдёт "СправочникМенеджер.СоздатьЭлемент"
+    /// # let _ = (exact, facet);
     /// ```
     pub fn find_method(&self, type_name: &str, method_name: &str) -> Option<&MethodSignature> {
         if tracing::enabled!(tracing::Level::DEBUG) {
@@ -433,7 +438,9 @@ impl SignatureIndex {
     /// Возвращает все платформенные и конфигурационные методы для типа.
     ///
     /// # Example
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::SignatureIndex;
+    /// let signature_index = SignatureIndex::new();
     /// let methods = signature_index.get_type_methods("Массив");
     /// for method in methods {
     ///     println!("{}", method.name);

@@ -45,13 +45,17 @@ impl TypeGuard {
     ///
     /// # Примеры
     ///
-    /// ```ignore
+    /// ```rust,no_run
+    /// # use bsl_shared::analysis::TypeGuard;
+    /// # use bsl_shared::domain::types::TypeResolution;
     /// let guard = TypeGuard::TypeCheck {
     ///     variable: "x".to_string(),
     ///     expected_type: "Строка".to_string(),
     /// };
+    /// let current_type = TypeResolution::unknown();
     /// let narrowed = guard.apply_narrowing(&current_type);
     /// // narrowed теперь имеет тип Строка вместо Any
+    /// # let _ = narrowed;
     /// ```
     pub fn apply_narrowing(&self, current: &TypeResolution) -> TypeResolution {
         match self {
@@ -197,9 +201,11 @@ impl TypeGuard {
 ///
 /// # Примеры
 ///
-/// ```ignore
+/// ```rust,no_run
+/// # use bsl_shared::analysis::detect_type_guards;
 /// let guards = detect_type_guards("ТипЗнч(Параметр) = Тип(\"Число\")");
 /// // Вернёт: vec![TypeGuard::TypeCheck { variable: "Параметр", expected_type: "Число" }]
+/// # let _ = guards;
 /// ```
 pub fn detect_type_guards(condition: &str) -> Vec<TypeGuard> {
     let mut guards = Vec::new();

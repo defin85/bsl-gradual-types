@@ -567,18 +567,36 @@ impl LanguageServer for BslLanguageServer {
         };
 
         let started = Instant::now();
-        let response =
-            handle_completion(&file_content, position, &uri, self.get_type_service()).await;
+        let completion = handle_completion(&file_content, position, &uri, self.get_type_service())
+            .await;
         let elapsed = started.elapsed();
-        self.coordinator
-            .observability
-            .record_completion_latency(elapsed);
-        if let Some(CompletionResponse::List(list)) = &response {
-            if list.is_incomplete {
-                self.coordinator.observability.record_completion_incomplete();
+        self.coordinator.record_completion_latency(elapsed);
+
+        if let Some(result) = &completion {
+            if let CompletionResponse::List(list) = &result.response {
+                if list.is_incomplete {
+                    self.coordinator.record_completion_incomplete();
+                }
+            }
+
+            if std::env::var("BSL_COMPLETION_QUALITY").is_ok() {
+                if let Some(stats) = &result.stats {
+                    self.coordinator.record_completion_quality(
+                        stats.total_candidates,
+                        stats.dedup_removed,
+                        &stats.score_samples,
+                        stats.prefix_exact,
+                        stats.prefix_starts,
+                        stats.prefix_contains,
+                        stats.prefix_none,
+                        stats.member_access,
+                        stats.has_owner,
+                    );
+                }
             }
         }
-        Ok(response)
+
+        Ok(completion.map(|result| result.response))
     }
 
     async fn completion_resolve(

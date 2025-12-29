@@ -32,10 +32,19 @@ pub trait SignatureDataSource: Send + Sync {
 /// и собирать SignatureIndex из всех зарегистрированных источников.
 ///
 /// # Пример
-/// ```ignore
+/// ```rust,no_run
+/// # use bsl_shared::domain::signature_registry::{SignatureDataSource, SignatureSourceRegistry};
+/// # use bsl_shared::domain::types::RawTypeData;
+/// # struct DummySource;
+/// # impl SignatureDataSource for DummySource {
+/// #     fn name(&self) -> &str { "dummy" }
+/// #     fn priority(&self) -> u32 { 0 }
+/// #     fn load(&self) -> Vec<RawTypeData> { Vec::new() }
+/// # }
 /// let index = SignatureSourceRegistry::new()
-///     .register(SyntaxHelperSource::new(platform_types))
+///     .register(DummySource)
 ///     .build();
+/// # let _ = index;
 /// ```
 pub struct SignatureSourceRegistry {
     sources: Vec<Box<dyn SignatureDataSource>>,
@@ -209,16 +218,10 @@ pub fn raw_method_to_constructor(
 /// - Методы конвертации (ПолучитьОбъект) -> Object, ServerOnly
 /// - Методы проверки (Пустая, ПустаяСсылка) -> Reference/Boolean, Universal
 fn infer_method_metadata(method: &RawMethodData) -> (Option<FacetKind>, ContextRequirements) {
-    // Если метаданные уже указаны в method, используем их
-    if let Some(facet) = method.return_facet {
-        let context = method.context_requirements.unwrap_or_default();
-        return (Some(facet), context);
-    }
-
     let method_name = method.name.to_lowercase();
     let return_type = method.return_type.to_lowercase();
 
-    let inferred = if method_name.starts_with("создать")
+    let mut inferred = if method_name.starts_with("создать")
         || method_name.starts_with("create")
         || method_name == "скопировать"
         || method_name == "copy"
@@ -264,8 +267,12 @@ fn infer_method_metadata(method: &RawMethodData) -> (Option<FacetKind>, ContextR
         (None, ContextRequirements::Universal)
     };
 
+    if let Some(facet_override) = method.return_facet {
+        inferred.0 = Some(facet_override);
+    }
+
     if let Some(context_override) = method.context_requirements {
-        return (inferred.0, context_override);
+        inferred.1 = context_override;
     }
 
     inferred

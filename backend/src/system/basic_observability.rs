@@ -109,6 +109,45 @@ impl BasicObservability {
         self.metrics.increment("completion_incomplete_total");
     }
 
+    pub fn record_completion_quality(
+        &self,
+        total_candidates: usize,
+        dedup_removed: usize,
+        score_samples: &[f32],
+        prefix_exact: usize,
+        prefix_starts: usize,
+        prefix_contains: usize,
+        prefix_none: usize,
+        member_access: usize,
+        has_owner: usize,
+    ) {
+        self.metrics
+            .add_counter("completion_candidates_total", total_candidates as u64);
+        self.metrics.add_counter(
+            "completion_dedup_removed_total",
+            dedup_removed as u64,
+        );
+        self.metrics.add_counter("completion_prefix_exact_total", prefix_exact as u64);
+        self.metrics.add_counter(
+            "completion_prefix_starts_total",
+            prefix_starts as u64,
+        );
+        self.metrics.add_counter(
+            "completion_prefix_contains_total",
+            prefix_contains as u64,
+        );
+        self.metrics.add_counter("completion_prefix_none_total", prefix_none as u64);
+        self.metrics
+            .add_counter("completion_member_access_total", member_access as u64);
+        self.metrics
+            .add_counter("completion_has_owner_total", has_owner as u64);
+
+        for score in score_samples {
+            self.metrics
+                .observe_histogram("completion_score", f64::from(*score));
+        }
+    }
+
     /// Простая проверка здоровья
     pub fn health_check(&self) -> HealthStatus {
         let uptime = self.start_time.elapsed();
@@ -215,6 +254,12 @@ impl SimpleMetrics {
             .ok()
             .and_then(|gauges| gauges.get(metric).copied())
             .unwrap_or(0.0)
+    }
+
+    fn add_counter(&self, metric: &str, value: u64) {
+        if let Ok(mut counters) = self.counters.lock() {
+            *counters.entry(metric.to_string()).or_insert(0) += value;
+        }
     }
 
     /// Экспорт всех метрик (для health endpoints)

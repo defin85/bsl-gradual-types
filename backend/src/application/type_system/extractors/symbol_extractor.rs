@@ -53,8 +53,17 @@ pub fn extract_word_at_position(file_content: &str, line: u32, column: u32) -> O
         char_index += 1;
     }
 
-    if chars.is_empty() || char_index >= chars.len() {
+    if chars.is_empty() {
         return None;
+    }
+
+    if char_index >= chars.len() {
+        let last_index = chars.len() - 1;
+        if is_identifier_char(chars[last_index]) {
+            char_index = last_index;
+        } else {
+            return None;
+        }
     }
 
     // Find word start

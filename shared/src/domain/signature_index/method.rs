@@ -158,10 +158,14 @@ impl MethodSignature {
     /// * `None` - если return_type = None (процедура без возвращаемого значения)
     ///
     /// # Example
-    /// ```ignore
-    /// let resolved = method.get_resolved_return_type(|type_str| {
-    ///     resolver.resolve_expression_sync(type_str)
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodSignature;
+    /// # use bsl_shared::domain::types::TypeResolution;
+    /// # let method: MethodSignature = todo!();
+    /// let resolved = method.get_resolved_return_type(|_type_str| {
+    ///     TypeResolution::unknown()
     /// });
+    /// # let _ = resolved;
     /// ```
     pub fn get_resolved_return_type<F>(&self, resolve_fn: F) -> Option<&TypeResolution>
     where
@@ -184,9 +188,12 @@ impl MethodSignature {
     /// Слайс пар (имя_параметра, TypeResolution)
     ///
     /// # Example
-    /// ```ignore
-    /// let params = method.get_resolved_params(|type_str| {
-    ///     resolver.resolve_expression_sync(type_str)
+    /// ```rust,no_run
+    /// # use bsl_shared::domain::signature_index::MethodSignature;
+    /// # use bsl_shared::domain::types::TypeResolution;
+    /// # let method: MethodSignature = todo!();
+    /// let params = method.get_resolved_params(|_type_str| {
+    ///     TypeResolution::unknown()
     /// });
     /// for (name, resolution) in params {
     ///     println!("{}: {:?}", name, resolution);

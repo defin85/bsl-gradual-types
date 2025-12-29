@@ -4,13 +4,13 @@
 mod lsp_completion_tests {
     use std::sync::Arc;
 
-    use bsl_backend::application::completion_service::get_completion;
+    use bsl_backend::application::get_completion;
     use bsl_backend::system::{
         keyword_index::default_keyword_items, IndexItem, IndexItemKind, IndexKind,
         IntellisenseIndexStore, TypeKind,
     };
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
-    use bsl_shared::domain::repository::InMemoryTypeRepository;
+    use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
     use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawTypeData};
 
     #[tokio::test]

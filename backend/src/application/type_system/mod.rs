@@ -33,6 +33,7 @@ mod services;
 
 // Main re-export
 pub use service::{CompletionContext, TypeSystemService};
+pub use services::completion_service::{get_completion, CompletionStats};
 
 // Re-export completion context for external usage
 pub use services::completion_service::CompletionContext as CompletionContextDetails;

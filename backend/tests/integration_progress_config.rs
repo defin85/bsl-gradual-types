@@ -62,7 +62,7 @@ mod progress_config_tests {
         assert_eq!(percent_50, 3.0); // Было 2.5, теперь округлено до 3.0
         assert_eq!(percent_100, 5.0);
 
-        // ConfigurationParsing: 5-85%
+        // ConfigurationParsing: 5-80%
         let percent_0 =
             ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 0, 100);
         let percent_50 =
@@ -71,23 +71,32 @@ mod progress_config_tests {
             ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 100, 100);
 
         assert_eq!(percent_0, 5.0);
-        assert_eq!(percent_50, 45.0);
-        assert_eq!(percent_100, 85.0);
+        assert_eq!(percent_50, 43.0);
+        assert_eq!(percent_100, 80.0);
 
-        // ConfigurationLinking: 85-95%
+        // ConfigurationLinking: 80-90%
         let percent_0 =
             ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationLinking, 0, 1);
         let percent_100 =
             ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationLinking, 1, 1);
 
-        assert_eq!(percent_0, 85.0);
-        assert_eq!(percent_100, 95.0);
+        assert_eq!(percent_0, 80.0);
+        assert_eq!(percent_100, 90.0);
 
-        // ConfigurationFinalizing: 95-100%
+        // ConfigurationFinalizing: 90-95%
         let percent_0 =
             ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationFinalizing, 0, 1);
         let percent_100 =
             ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationFinalizing, 1, 1);
+
+        assert_eq!(percent_0, 90.0);
+        assert_eq!(percent_100, 95.0);
+
+        // ConfigurationIndexingModules: 95-100%
+        let percent_0 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationIndexingModules, 0, 1);
+        let percent_100 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationIndexingModules, 1, 1);
 
         assert_eq!(percent_0, 95.0);
         assert_eq!(percent_100, 100.0);
@@ -99,7 +108,8 @@ mod progress_config_tests {
         let total_weight = IndexingPhase::ConfigurationDiscovery.weight()
             + IndexingPhase::ConfigurationParsing.weight()
             + IndexingPhase::ConfigurationLinking.weight()
-            + IndexingPhase::ConfigurationFinalizing.weight();
+            + IndexingPhase::ConfigurationFinalizing.weight()
+            + IndexingPhase::ConfigurationIndexingModules.weight();
 
         assert_eq!(total_weight, 100.0);
     }
@@ -133,11 +143,11 @@ mod progress_config_tests {
         // Если current > total, должны ограничить максимумом = base + weight
         let percent =
             ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 1000, 100);
-        assert_eq!(percent, 85.0); // 5% (base) + 100% (clamped) * 80% (weight)
+        assert_eq!(percent, 80.0); // 5% (base) + 100% (clamped) * 75% (weight)
 
         let percent =
             ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationFinalizing, 100, 1);
-        assert_eq!(percent, 100.0); // 95% + 100% (clamped) * 5% = 100%
+        assert_eq!(percent, 95.0); // 90% + 100% (clamped) * 5% = 95%
     }
 
     /// Тест 7: Проверка что throttling работает (обновления каждые 5 объектов)
@@ -169,7 +179,7 @@ mod progress_config_tests {
         let last = collected.last().unwrap();
         assert_eq!(last.current, 17);
         assert_eq!(last.total, 17);
-        assert!(last.percentage >= 85.0 && last.percentage <= 85.0); // Должен быть на конце фазы
+        assert!(last.percentage >= 80.0 && last.percentage <= 80.0); // Должен быть на конце фазы
     }
 
     /// Тест 8: Проверка что ProgressUpdate содержит корректные данные
@@ -185,7 +195,7 @@ mod progress_config_tests {
         assert_eq!(update.phase, IndexingPhase::ConfigurationParsing);
         assert_eq!(update.current, 42);
         assert_eq!(update.total, 100);
-        assert_eq!(update.percentage, 39.0); // 5 + 42% * 80% = 5 + 33.6 = 38.6, округлено до 39.0
+        assert_eq!(update.percentage, 37.0); // 5 + 42% * 75% = 5 + 31.5 = 36.5, округлено до 37.0
         assert_eq!(update.message, Some("TestCatalog".to_string()));
     }
 
@@ -217,11 +227,13 @@ mod progress_config_tests {
         let base_parsing = IndexingPhase::ConfigurationParsing.base_percentage();
         let base_linking = IndexingPhase::ConfigurationLinking.base_percentage();
         let base_finalizing = IndexingPhase::ConfigurationFinalizing.base_percentage();
+        let base_indexing = IndexingPhase::ConfigurationIndexingModules.base_percentage();
 
         assert!(base_discovery < base_parsing);
         assert!(base_parsing < base_linking);
         assert!(base_linking < base_finalizing);
-        assert_eq!(base_finalizing, 95.0); // Не 100%, т.к. финализация заканчивается на 100%
+        assert!(base_finalizing < base_indexing);
+        assert_eq!(base_indexing, 95.0); // Не 100%, т.к. индексация заканчивается на 100%
     }
 
     /// Тест 11: Проверка прогрессии всех 4 фаз конфигурации от 0% до 100%
@@ -241,27 +253,37 @@ mod progress_config_tests {
 
         // Середина Parsing
         let p4 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 50, 100);
-        assert_eq!(p4, 45.0);
+        assert_eq!(p4, 43.0);
 
         // Конец Parsing
         let p5 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationParsing, 100, 100);
-        assert_eq!(p5, 85.0);
+        assert_eq!(p5, 80.0);
 
         // Начало Linking
         let p6 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationLinking, 0, 1);
-        assert_eq!(p6, 85.0);
+        assert_eq!(p6, 80.0);
 
         // Конец Linking
         let p7 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationLinking, 1, 1);
-        assert_eq!(p7, 95.0);
+        assert_eq!(p7, 90.0);
 
         // Начало Finalizing
         let p8 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationFinalizing, 0, 1);
-        assert_eq!(p8, 95.0);
+        assert_eq!(p8, 90.0);
 
         // Конец Finalizing
         let p9 = ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationFinalizing, 1, 1);
-        assert_eq!(p9, 100.0);
+        assert_eq!(p9, 95.0);
+
+        // Начало IndexingModules
+        let p10 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationIndexingModules, 0, 1);
+        assert_eq!(p10, 95.0);
+
+        // Конец IndexingModules
+        let p11 =
+            ProgressUpdate::compute_percentage(IndexingPhase::ConfigurationIndexingModules, 1, 1);
+        assert_eq!(p11, 100.0);
 
         // Проверяем что прогрессия возрастает
         assert!(p1 < p2);
@@ -272,5 +294,7 @@ mod progress_config_tests {
         assert!(p6 < p7);
         assert!(p7 <= p8);
         assert!(p8 < p9);
+        assert!(p9 <= p10);
+        assert!(p10 < p11);
     }
 }

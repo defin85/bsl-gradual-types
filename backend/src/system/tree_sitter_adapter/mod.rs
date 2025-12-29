@@ -17,7 +17,7 @@
 //!
 //! # Пример использования
 //!
-//! ```ignore
+//! ```text
 //! use tree_sitter::Parser;
 //! use crate::system::tree_sitter_adapter::TreeSitterAdapter;
 //!
@@ -67,7 +67,7 @@ impl TreeSitterAdapter {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```text
     /// let result = TreeSitterAdapter::convert_tree(&tree, source)?;
     /// if result.has_errors() {
     ///     for error in result.errors() {

@@ -16,6 +16,7 @@ use bsl_shared::ir::walk_program;
 use crate::application::ast_to_ir::AstToIrConverter;
 use crate::application::semantic_validation_visitor::SemanticValidationVisitor;
 use crate::system::ParserCoordinator;
+use crate::system::tree_sitter_adapter::directives::parse_directive;
 
 /// Validates BSL code fragment via unified semantic validation
 ///
@@ -90,8 +91,10 @@ pub async fn validate_semantics_with_file_path(
         .parse_with_cache_for_file(code, file_path)
         .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
 
-    // 2. If syntax errors exist -> semantic validation is meaningless
-    if !parse_result.syntax_errors.is_empty() {
+    // 2. If syntax errors exist -> semantic validation is usually meaningless
+    if !parse_result.syntax_errors.is_empty()
+        && !syntax_errors_only_in_directives(code, &parse_result.syntax_errors)
+    {
         return Ok(Vec::new());
     }
 
@@ -107,7 +110,7 @@ pub async fn validate_semantics_with_file_path(
 
     // 6. Convert AST -> IR with TypeResolver for active_facet resolution (Milestone 3.17)
     tracing::info!("validate_semantics: converting AST to IR with resolver");
-    let ir = AstToIrConverter::convert_with_resolver(
+    let mut ir = AstToIrConverter::convert_with_resolver(
         parse_result.program,
         code.to_string(),
         file_path.to_string(),
@@ -119,6 +122,8 @@ pub async fn validate_semantics_with_file_path(
         "validate_semantics: IR created with {} nodes",
         ir.nodes.len()
     );
+
+    apply_compiler_directives(code, &mut ir.nodes);
 
     // 7. Create TypeValidator
     let validator = TypeValidator::new(metadata_lookup);
@@ -144,6 +149,69 @@ pub async fn validate_semantics_with_file_path(
 
     // 11. Return errors
     Ok(visitor.into_errors())
+}
+
+fn syntax_errors_only_in_directives(code: &str, errors: &[ParseError]) -> bool {
+    let lines: Vec<&str> = code.lines().collect();
+    errors.iter().all(|err| {
+        let line = lines.get(err.span.start_line as usize).unwrap_or(&"");
+        line.trim_start().starts_with('&')
+    })
+}
+
+fn apply_compiler_directives(code: &str, nodes: &mut [bsl_shared::ir::SemanticNode]) {
+    let lines: Vec<&str> = code.lines().collect();
+    for node in nodes.iter_mut() {
+        match &mut node.kind {
+            bsl_shared::ir::SemanticNodeKind::FunctionDeclaration {
+                compiler_directive,
+                ..
+            }
+            | bsl_shared::ir::SemanticNodeKind::ProcedureDeclaration {
+                compiler_directive,
+                ..
+            } => {
+                if compiler_directive.is_none() {
+                    *compiler_directive =
+                        infer_directive_from_lines(&lines, node.span.start_line);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn infer_directive_from_lines(
+    lines: &[&str],
+    start_line: u32,
+) -> Option<bsl_shared::domain::CompilerDirective> {
+    let mut row = start_line as isize;
+    let mut allow_skip_routine_line = true;
+    while row >= 0 {
+        let trimmed = lines.get(row as usize).unwrap_or(&"").trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            row -= 1;
+            continue;
+        }
+        if trimmed.starts_with('&') {
+            return parse_directive(trimmed);
+        }
+        if allow_skip_routine_line && looks_like_routine_declaration(trimmed) {
+            allow_skip_routine_line = false;
+            row -= 1;
+            continue;
+        }
+        break;
+    }
+    None
+}
+
+fn looks_like_routine_declaration(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    lower.starts_with("процедура")
+        || lower.starts_with("функция")
+        || lower.starts_with("procedure")
+        || lower.starts_with("function")
 }
 
 /// Parse and validate BSL code (Unified API for LSP/CLI)

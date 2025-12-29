@@ -32,6 +32,7 @@ pub struct RankedCandidate {
     pub scope: Option<SymbolScope>,
     pub score: f32,
     pub signals: RankingSignals,
+    pub origin_sources: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +96,7 @@ pub fn rank_candidates(
             scope: candidate.scope,
             score,
             signals,
+            origin_sources: vec![candidate.source_priority],
         });
     }
 
@@ -110,21 +112,23 @@ pub fn rank_candidates(
     let mut dedup_map: HashMap<String, RankedCandidate> = HashMap::new();
     for candidate in ranked {
         let key = dedup_key(&candidate);
-        match dedup_map.get(&key) {
-            Some(existing)
-                if is_better(
+        match dedup_map.remove(&key) {
+            Some(existing) => {
+                let (best, other) = if is_better(
                     candidate.score,
                     candidate.source_priority,
                     &candidate.label_lower,
-                    existing,
-                ) =>
-            {
-                dedup_map.insert(key, candidate);
+                    &existing,
+                ) {
+                    (candidate, existing)
+                } else {
+                    (existing, candidate)
+                };
+                dedup_map.insert(key, merge_candidates(best, other));
             }
             None => {
                 dedup_map.insert(key, candidate);
             }
-            _ => {}
         }
     }
 
@@ -225,11 +229,41 @@ fn dedup_key(candidate: &RankedCandidate) -> String {
         .scope
         .map(|scope| format!("{:?}", scope))
         .unwrap_or_else(|| "none".to_string());
-    let owner = candidate.owner_type.clone().unwrap_or_default();
-    format!(
-        "{}|{:?}|{}|{}",
-        candidate.label_lower, candidate.item.kind, scope, owner
-    )
+    format!("{}|{:?}|{}", candidate.label_lower, candidate.item.kind, scope)
+}
+
+fn merge_candidates(mut best: RankedCandidate, other: RankedCandidate) -> RankedCandidate {
+    if best.item.detail.is_none() {
+        best.item.detail = other.item.detail;
+    }
+    if best.item.documentation.is_none() {
+        best.item.documentation = other.item.documentation;
+    }
+    if best.item.insert_text.is_none() {
+        best.item.insert_text = other.item.insert_text;
+    }
+    if best.item.filter_text.is_none() {
+        best.item.filter_text = other.item.filter_text;
+    }
+    if best.item.sort_text.is_none() {
+        best.item.sort_text = other.item.sort_text;
+    }
+    if best.owner_type.is_none() {
+        best.owner_type = other.owner_type;
+    }
+
+    best.origin_sources = merge_sources(&best.origin_sources, &other.origin_sources);
+
+    best
+}
+
+fn merge_sources(left: &[u8], right: &[u8]) -> Vec<u8> {
+    let mut merged = Vec::with_capacity(left.len() + right.len());
+    merged.extend_from_slice(left);
+    merged.extend_from_slice(right);
+    merged.sort_unstable();
+    merged.dedup();
+    merged
 }
 
 fn stable_order(a: &RankedCandidate, b: &RankedCandidate) -> std::cmp::Ordering {
@@ -425,5 +459,46 @@ mod tests {
             ranked_first.candidates.first().unwrap().owner_type,
             ranked_second.candidates.first().unwrap().owner_type
         );
+    }
+
+    #[test]
+    fn dedup_merges_details_from_weaker_candidate() {
+        let ctx = CompletionContext {
+            current_word: "a".to_string(),
+            member_access: false,
+            member_base: None,
+            trigger_char: None,
+            can_add_statements: true,
+            expects_type: false,
+            can_add_functions: true,
+        };
+
+        let candidates = vec![
+            RankingCandidate {
+                item: CompletionItem::new("abc".to_string(), CompletionKind::Function),
+                owner_type: None,
+                label_lower: "abc".to_string(),
+                source_priority: 0,
+                scope: Some(SymbolScope::Global),
+            },
+            RankingCandidate {
+                item: CompletionItem::with_details(
+                    "abc".to_string(),
+                    CompletionKind::Function,
+                    Some("detail".to_string()),
+                    Some("doc".to_string()),
+                ),
+                owner_type: None,
+                label_lower: "abc".to_string(),
+                source_priority: 3,
+                scope: Some(SymbolScope::Global),
+            },
+        ];
+
+        let ranked = rank_candidates(candidates, &ctx);
+        let item = &ranked.candidates[0].item;
+        assert_eq!(ranked.candidates.len(), 1);
+        assert_eq!(item.detail.as_deref(), Some("detail"));
+        assert_eq!(item.documentation.as_deref(), Some("doc"));
     }
 }

@@ -23,6 +23,7 @@ pub struct CompletionCandidate {
     pub item: CompletionItem,
     pub owner_type: Option<String>,
     pub score: f32,
+    pub origin_sources: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +119,7 @@ pub async fn get_completion(
             ),
             owner_type: candidate.owner_type,
             score: candidate.score,
+            origin_sources: candidate.origin_sources,
         })
         .collect();
 
@@ -489,11 +491,19 @@ pub fn resolve_type_details(
     Some((detail, documentation))
 }
 
-pub fn resolve_method_details(
+#[derive(Debug, Clone)]
+pub struct CompletionResolveDetails {
+    pub detail: Option<String>,
+    pub documentation: Option<String>,
+    pub insert_text: Option<String>,
+}
+
+pub fn resolve_method_completion(
     owner_type: &str,
     method_name: &str,
     metadata_lookup: &TypeMetadataLookup,
-) -> Option<(Option<String>, Option<String>)> {
+    snippet_support: bool,
+) -> Option<CompletionResolveDetails> {
     let resolution = TypeResolution::explicit(owner_type);
     let methods = metadata_lookup.get_methods(&resolution);
     let lowered = method_name.to_lowercase();
@@ -507,8 +517,74 @@ pub fn resolve_method_details(
         Some(method.return_type)
     };
     let documentation = method.description;
+    let insert_text = if snippet_support {
+        build_method_snippet(&method)
+    } else {
+        None
+    };
 
-    Some((detail, documentation))
+    Some(CompletionResolveDetails {
+        detail,
+        documentation,
+        insert_text,
+    })
+}
+
+pub(crate) fn build_call_snippet(name: &str, params: &[(String, bool)]) -> Option<String> {
+    if params.is_empty() {
+        return None;
+    }
+
+    let mut required = Vec::new();
+    let mut optional = Vec::new();
+    for (param_name, is_optional) in params {
+        if *is_optional {
+            optional.push((param_name, true));
+        } else {
+            required.push((param_name, false));
+        }
+    }
+
+    let mut parts = Vec::with_capacity(params.len());
+    let mut index = 1;
+    for (param_name, is_optional) in required.into_iter().chain(optional) {
+        let placeholder = if is_optional {
+            format!("${{{}:}}", index)
+        } else {
+            let label = if param_name.is_empty() {
+                format!("param{}", index)
+            } else {
+                param_name
+            };
+            format!("${{{}:{}}}", index, escape_snippet_text(&label))
+        };
+        parts.push(placeholder);
+        index += 1;
+    }
+
+    let name = escape_snippet_text(name);
+    Some(format!("{}({})$0", name, parts.join(", ")))
+}
+
+fn build_method_snippet(method: &bsl_shared::domain::types::RawMethodData) -> Option<String> {
+    let mut params: Vec<(String, bool)> = Vec::with_capacity(method.params.len());
+    for param in &method.params {
+        params.push((param.name.clone(), param.is_optional));
+    }
+    build_call_snippet(&method.name, &params)
+}
+
+fn escape_snippet_text(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '$' => escaped.push_str("\\$"),
+            '}' => escaped.push_str("\\}"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 #[cfg(test)]
@@ -553,6 +629,23 @@ mod tests {
         let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
 
         assert_eq!(labels, vec!["Процедура".to_string()]);
+    }
+
+    #[test]
+    fn build_call_snippet_includes_optional_placeholders() {
+        let params = vec![
+            ("Путь".to_string(), false),
+            ("Режим".to_string(), true),
+        ];
+        let snippet = build_call_snippet("Открыть", &params).expect("snippet");
+        assert_eq!(snippet, "Открыть(${1:Путь}, ${2:})$0");
+    }
+
+    #[test]
+    fn build_call_snippet_escapes_special_chars() {
+        let params = vec![("Имя}".to_string(), false)];
+        let snippet = build_call_snippet("Функция$", &params).expect("snippet");
+        assert_eq!(snippet, "Функция\\$(${1:Имя\\}})$0");
     }
 
     #[tokio::test]

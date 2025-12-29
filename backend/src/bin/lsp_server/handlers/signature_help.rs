@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 use tracing::debug;
 
-use bsl_shared::domain::signature_index::MethodSignature;
+use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature};
 use bsl_shared::engine::AnalysisEngine;
 
 use crate::converters::position::{char_to_utf16_index, utf16_to_char_index};
@@ -16,6 +16,7 @@ use crate::converters::position::{char_to_utf16_index, utf16_to_char_index};
 pub struct CallContext {
     pub function_name: String,
     pub receiver_type: Option<String>,
+    pub is_constructor: bool,
     pub call_start: Position,
 }
 
@@ -42,6 +43,7 @@ pub async fn handle_signature_help(
     let signature_info = get_signature_for_function(
         &call_context.function_name,
         call_context.receiver_type.as_deref(),
+        call_context.is_constructor,
         analysis_engine,
     )?;
 
@@ -55,11 +57,6 @@ pub async fn handle_signature_help(
 /// Find function call context
 pub fn find_call_context(content: &str, position: Position) -> Option<CallContext> {
     let lines: Vec<&str> = content.lines().collect();
-
-    // Search for opening parenthesis, moving backwards from cursor
-    let mut paren_depth = 0;
-    let mut call_start: Option<(usize, usize)> = None; // (line_idx, char_idx)
-
     let max_line = if lines.is_empty() {
         return None;
     } else {
@@ -67,7 +64,11 @@ pub fn find_call_context(content: &str, position: Position) -> Option<CallContex
     };
     let search_until_line = position.line.min(max_line as u32) as usize;
 
-    for line_idx in (0..=search_until_line).rev() {
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    let mut in_string = false;
+    let mut in_block_comment = false;
+
+    for line_idx in 0..=search_until_line {
         let line = lines.get(line_idx)?;
 
         let end_char_idx = if line_idx == position.line as usize {
@@ -77,41 +78,76 @@ pub fn find_call_context(content: &str, position: Position) -> Option<CallContex
         };
 
         let chars: Vec<char> = line.chars().collect();
+        let mut char_idx = 0;
 
-        for char_idx in (0..end_char_idx).rev() {
-            let ch = chars.get(char_idx)?;
+        while char_idx < end_char_idx {
+            let ch = chars.get(char_idx).copied()?;
+            let next = chars.get(char_idx + 1).copied();
+
+            if in_string {
+                if ch == '"' {
+                    if next == Some('"') {
+                        char_idx += 2;
+                        continue;
+                    }
+                    in_string = false;
+                }
+                char_idx += 1;
+                continue;
+            }
+
+            if in_block_comment {
+                if ch == '*' && next == Some('/') {
+                    in_block_comment = false;
+                    char_idx += 2;
+                    continue;
+                }
+                char_idx += 1;
+                continue;
+            }
+
+            if ch == '/' && next == Some('/') {
+                break;
+            }
+
+            if ch == '/' && next == Some('*') {
+                in_block_comment = true;
+                char_idx += 2;
+                continue;
+            }
+
+            if ch == '"' {
+                in_string = true;
+                char_idx += 1;
+                continue;
+            }
 
             match ch {
-                ')' => paren_depth += 1,
-                '(' => {
-                    if paren_depth == 0 {
-                        call_start = Some((line_idx, char_idx));
-                        break;
-                    }
-                    paren_depth -= 1;
+                '(' => stack.push((line_idx, char_idx)),
+                ')' => {
+                    stack.pop();
                 }
                 _ => {}
             }
-        }
 
-        if call_start.is_some() {
-            break;
+            char_idx += 1;
         }
     }
 
-    let (line_idx, char_idx) = call_start?;
+    let (line_idx, char_idx) = stack.pop()?;
 
     // Extract function name before parenthesis
     let line = lines.get(line_idx)?;
     let before_paren: String = line.chars().take(char_idx).collect();
 
-    let (function_name, receiver_type) = extract_function_name(&before_paren)?;
+    let (function_name, receiver_type, is_constructor) = extract_function_name(&before_paren)?;
 
     let utf16_char = char_to_utf16_index(line, char_idx);
 
     Some(CallContext {
         function_name,
         receiver_type,
+        is_constructor,
         call_start: Position {
             line: line_idx as u32,
             character: utf16_char as u32,
@@ -120,27 +156,32 @@ pub fn find_call_context(content: &str, position: Position) -> Option<CallContex
 }
 
 /// Extract function name from text before parenthesis
-fn extract_function_name(text: &str) -> Option<(String, Option<String>)> {
+fn extract_function_name(text: &str) -> Option<(String, Option<String>, bool)> {
     let trimmed = text.trim_end();
+
+    if let Some(constructor_name) = extract_constructor_name(trimmed) {
+        return Some((constructor_name, None, true));
+    }
 
     // First search for dot (for object methods)
     if let Some(dot_byte_pos) = trimmed.rfind('.') {
-        let after_dot = &trimmed[dot_byte_pos + 1..];
+        let after_dot = trimmed[dot_byte_pos + 1..].trim_start();
 
         let method_name = after_dot
             .chars()
-            .take_while(|c| {
-                c.is_alphanumeric()
-                    || *c == '_'
-                    || (*c >= '\u{0410}' && *c <= '\u{044F}')
-                    || *c == '\u{0401}'
-                    || *c == '\u{0451}'
-            })
+            .take_while(|c| is_identifier_char(*c))
             .collect::<String>();
 
         if !method_name.is_empty() {
-            // TODO: determine receiver type through type inference
-            return Some((method_name, None));
+            let receiver = trimmed[..dot_byte_pos].trim_end();
+            let receiver_compact: String =
+                receiver.chars().filter(|c| !c.is_whitespace()).collect();
+            let receiver_type = if is_simple_receiver(&receiver_compact) {
+                Some(receiver_compact)
+            } else {
+                None
+            };
+            return Some((method_name, receiver_type, false));
         }
     }
 
@@ -148,23 +189,76 @@ fn extract_function_name(text: &str) -> Option<(String, Option<String>)> {
     let function_name = trimmed
         .chars()
         .rev()
-        .take_while(|c| {
-            c.is_alphanumeric()
-                || *c == '_'
-                || (*c >= '\u{0410}' && *c <= '\u{044F}')
-                || *c == '\u{0401}'
-                || *c == '\u{0451}'
-        })
+        .take_while(|c| is_identifier_char(*c))
         .collect::<String>()
         .chars()
         .rev()
         .collect::<String>();
 
     if !function_name.is_empty() {
-        Some((function_name, None))
+        if is_control_keyword(&function_name) {
+            return None;
+        }
+        Some((function_name, None, false))
     } else {
         None
     }
+}
+
+fn extract_constructor_name(text: &str) -> Option<String> {
+    let mut iter = text.split_whitespace();
+    let keyword = iter.next()?;
+    if keyword.to_lowercase() != "новый" {
+        return None;
+    }
+    let remainder: String = iter.collect::<Vec<_>>().join(" ");
+    if remainder.is_empty() {
+        return None;
+    }
+    let normalized: String = remainder.chars().filter(|c| !c.is_whitespace()).collect();
+    if is_simple_receiver(&normalized) {
+        Some(normalized)
+    } else {
+        None
+    }
+}
+
+fn is_control_keyword(value: &str) -> bool {
+    matches!(
+        value.to_lowercase().as_str(),
+        "если"
+            | "иначеесли"
+            | "пока"
+            | "для"
+            | "каждого"
+            | "попытка"
+            | "исключение"
+            | "конецесли"
+            | "конеццикла"
+            | "конецпопытки"
+            | "конецпроцедуры"
+            | "конецфункции"
+            | "возврат"
+            | "выбор"
+            | "когда"
+            | "иначе"
+    )
+}
+
+fn is_simple_receiver(text: &str) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+
+    text.chars().all(|c| c == '.' || is_identifier_char(c))
+}
+
+fn is_identifier_char(c: char) -> bool {
+    c.is_alphanumeric()
+        || c == '_'
+        || (c >= '\u{0410}' && c <= '\u{044F}')
+        || c == '\u{0401}'
+        || c == '\u{0451}'
 }
 
 /// Calculate active parameter index
@@ -173,6 +267,7 @@ pub fn calculate_active_parameter(content: &str, context: &CallContext, position
     let mut param_index = 0;
     let mut paren_depth = 0;
     let mut in_string = false;
+    let mut in_block_comment = false;
 
     for line_idx in context.call_start.line..=position.line {
         let line = match lines.get(line_idx as usize) {
@@ -193,18 +288,66 @@ pub fn calculate_active_parameter(content: &str, context: &CallContext, position
             chars.len()
         };
 
-        for char_idx in start_char_idx..end_char_idx {
-            if let Some(&ch) = chars.get(char_idx) {
-                match ch {
-                    '"' => in_string = !in_string,
-                    '(' if !in_string => paren_depth += 1,
-                    ')' if !in_string => paren_depth -= 1,
-                    ',' if !in_string && paren_depth == 0 => {
-                        param_index += 1;
+        let mut char_idx = start_char_idx;
+        while char_idx < end_char_idx {
+            let ch = match chars.get(char_idx) {
+                Some(ch) => *ch,
+                None => break,
+            };
+            let next = chars.get(char_idx + 1).copied();
+
+            if in_string {
+                if ch == '"' {
+                    if next == Some('"') {
+                        char_idx += 2;
+                        continue;
                     }
-                    _ => {}
+                    in_string = false;
                 }
+                char_idx += 1;
+                continue;
             }
+
+            if in_block_comment {
+                if ch == '*' && next == Some('/') {
+                    in_block_comment = false;
+                    char_idx += 2;
+                    continue;
+                }
+                char_idx += 1;
+                continue;
+            }
+
+            if ch == '/' && next == Some('/') {
+                break;
+            }
+
+            if ch == '/' && next == Some('*') {
+                in_block_comment = true;
+                char_idx += 2;
+                continue;
+            }
+
+            if ch == '"' {
+                in_string = true;
+                char_idx += 1;
+                continue;
+            }
+
+            match ch {
+                '(' => paren_depth += 1,
+                ')' => {
+                    if paren_depth > 0 {
+                        paren_depth -= 1;
+                    }
+                }
+                ',' if paren_depth == 0 => {
+                    param_index += 1;
+                }
+                _ => {}
+            }
+
+            char_idx += 1;
         }
     }
 
@@ -215,17 +358,90 @@ pub fn calculate_active_parameter(content: &str, context: &CallContext, position
 fn get_signature_for_function(
     function_name: &str,
     receiver_type: Option<&str>,
+    is_constructor: bool,
     analysis_engine: Option<Arc<AnalysisEngine>>,
-) -> Option<MethodSignature> {
+) -> Option<SignatureTarget> {
     let engine = analysis_engine?;
     let repo = engine.get_repository();
-    repo.find_method_signature(receiver_type, function_name)
+    if is_constructor {
+        return repo
+            .find_constructor(function_name)
+            .map(SignatureTarget::Constructor);
+    }
+
+    let owner_type = receiver_type.and_then(|expr| resolve_receiver_type(expr, &engine));
+    repo.find_method_signature(owner_type.as_deref(), function_name)
+        .map(SignatureTarget::Method)
+}
+
+fn resolve_receiver_type(expr: &str, engine: &AnalysisEngine) -> Option<String> {
+    let trimmed = expr.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let resolution = engine.resolve_type(trimmed);
+    if resolution.is_unknown() || resolution.is_dynamic() {
+        return None;
+    }
+
+    Some(resolution.type_name())
+}
+
+enum SignatureTarget {
+    Method(MethodSignature),
+    Constructor(ConstructorSignature),
 }
 
 /// Build LSP SignatureHelp response
-fn build_signature_help_response(signature: MethodSignature, active_param: u32) -> SignatureHelp {
-    let params_str = signature
-        .params
+fn build_signature_help_response(signature: SignatureTarget, active_param: u32) -> SignatureHelp {
+    match signature {
+        SignatureTarget::Method(signature) => {
+            build_method_signature_help(signature, active_param)
+        }
+        SignatureTarget::Constructor(signature) => {
+            build_constructor_signature_help(signature, active_param)
+        }
+    }
+}
+
+fn build_method_signature_help(signature: MethodSignature, active_param: u32) -> SignatureHelp {
+    let (label, parameters) = build_signature_labels(&signature.name, &signature.params);
+    SignatureHelp {
+        signatures: vec![SignatureInformation {
+            label,
+            documentation: None,
+            parameters: Some(parameters),
+            active_parameter: Some(active_param),
+        }],
+        active_signature: Some(0),
+        active_parameter: Some(active_param),
+    }
+}
+
+fn build_constructor_signature_help(
+    signature: ConstructorSignature,
+    active_param: u32,
+) -> SignatureHelp {
+    let name = format!("Новый {}", signature.type_name);
+    let (label, parameters) = build_signature_labels(&name, &signature.params);
+    SignatureHelp {
+        signatures: vec![SignatureInformation {
+            label,
+            documentation: None,
+            parameters: Some(parameters),
+            active_parameter: Some(active_param),
+        }],
+        active_signature: Some(0),
+        active_parameter: Some(active_param),
+    }
+}
+
+fn build_signature_labels(
+    name: &str,
+    params: &[bsl_shared::domain::types::ParameterInfo],
+) -> (String, Vec<ParameterInformation>) {
+    let params_str = params
         .iter()
         .map(|p| {
             let type_str = p.type_name.as_deref().unwrap_or("Any");
@@ -237,11 +453,9 @@ fn build_signature_help_response(signature: MethodSignature, active_param: u32) 
         })
         .collect::<Vec<_>>()
         .join(", ");
+    let label = format!("{}({})", name, params_str);
 
-    let label = format!("{}({})", signature.name, params_str);
-
-    let parameters = signature
-        .params
+    let parameters = params
         .iter()
         .map(|p| {
             let param_label = format!("{}: {}", p.name, p.type_name.as_deref().unwrap_or("Any"));
@@ -253,14 +467,151 @@ fn build_signature_help_response(signature: MethodSignature, active_param: u32) 
         })
         .collect();
 
-    SignatureHelp {
-        signatures: vec![SignatureInformation {
-            label,
-            documentation: None,
-            parameters: Some(parameters),
-            active_parameter: Some(active_param),
-        }],
-        active_signature: Some(0),
-        active_parameter: Some(active_param),
+    (label, parameters)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use bsl_shared::domain::repository::InMemoryTypeRepository;
+    use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource};
+    use bsl_shared::domain::types::{ParameterInfo, RawDataSource, RawTypeData};
+    use bsl_shared::engine::AnalysisEngine;
+    use bsl_shared::TypeResolver;
+
+    fn fixture_path(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join(name)
+    }
+
+    fn golden_path(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("golden")
+            .join(name)
+    }
+
+    fn read_fixture(name: &str) -> String {
+        fs::read_to_string(fixture_path(name)).expect("fixture read")
+    }
+
+    fn find_position(content: &str, marker: &str) -> Position {
+        let byte_index = content.find(marker).expect("marker not found");
+        let before = &content[..byte_index + marker.len()];
+        let line = before.lines().count() - 1;
+        let last_line = before.lines().last().unwrap_or("");
+        let character = last_line.chars().map(|ch| ch.len_utf16()).sum::<usize>();
+        Position {
+            line: line as u32,
+            character: character as u32,
+        }
+    }
+
+    fn assert_snapshot(name: &str, value: &serde_json::Value) {
+        let path = golden_path(name);
+        let json = serde_json::to_string_pretty(value).expect("snapshot json");
+        if std::env::var("UPDATE_GOLDEN").ok().as_deref() == Some("1") {
+            fs::create_dir_all(path.parent().expect("golden dir")).expect("create golden dir");
+            fs::write(&path, json).expect("write golden");
+            return;
+        }
+        let expected = fs::read_to_string(&path).expect("read golden");
+        assert_eq!(expected, json);
+    }
+
+    fn create_engine() -> Arc<AnalysisEngine> {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        let raw_type = RawTypeData {
+            name: "Массив".to_string(),
+            source: RawDataSource::Platform,
+            ..Default::default()
+        };
+        repository_impl
+            .load_types(vec![raw_type])
+            .expect("load types");
+
+        let mut index = SignatureIndex::new();
+        let method = MethodSignature::new(
+            "Добавить".to_string(),
+            Some("Массив".to_string()),
+            vec![
+                ParameterInfo {
+                    name: "Элемент".to_string(),
+                    type_name: Some("Число".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: None,
+                },
+                ParameterInfo {
+                    name: "Позиция".to_string(),
+                    type_name: Some("Число".to_string()),
+                    is_optional: true,
+                    default_value: None,
+                    description: None,
+                },
+            ],
+            Some("Булево".to_string()),
+            None,
+            None,
+            SignatureSource::Platform,
+            None,
+            Default::default(),
+        );
+        index.add_platform_method(bsl_shared::domain::type_id::TypeId::new("Массив"), method);
+        index.add_constructor(
+            bsl_shared::domain::type_id::TypeId::new("Массив"),
+            ConstructorSignature {
+                type_name: "Массив".to_string(),
+                params: vec![ParameterInfo {
+                    name: "Размер".to_string(),
+                    type_name: Some("Число".to_string()),
+                    is_optional: true,
+                    default_value: None,
+                    description: None,
+                }],
+                facet: None,
+                source: SignatureSource::Platform,
+                is_collection: true,
+                generic_params_count: 1,
+            },
+        );
+        repository_impl.set_signature_index(index);
+
+        let repository = repository_impl as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        Arc::new(AnalysisEngine::new(resolver, repository))
+    }
+
+    #[test]
+    fn m5_signature_help_snapshot() {
+        let content = read_fixture("m5_signature_help.bsl");
+        let engine = create_engine();
+
+        let constructor_pos = find_position(&content, "Новый Массив(1, ");
+        let constructor = handle_signature_help(&content, constructor_pos, Some(engine.clone()))
+            .expect("constructor signature help");
+
+        let method_pos = find_position(&content, "Массив.Добавить(1, ");
+        let method = handle_signature_help(&content, method_pos, Some(engine))
+            .expect("method signature help");
+
+        let snapshot = serde_json::json!({
+            "constructor": {
+                "label": constructor.signatures.first().map(|sig| sig.label.clone()),
+                "activeParameter": constructor.active_parameter,
+            },
+            "method": {
+                "label": method.signatures.first().map(|sig| sig.label.clone()),
+                "activeParameter": method.active_parameter,
+            },
+        });
+
+        assert_snapshot("m5_signature_help.json", &snapshot);
     }
 }

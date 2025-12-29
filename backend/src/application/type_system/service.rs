@@ -385,8 +385,71 @@ impl TypeSystemService {
         &self,
         owner_type: &str,
         method_name: &str,
-    ) -> Option<(Option<String>, Option<String>)> {
-        completion_service::resolve_method_details(owner_type, method_name, &self.metadata_lookup)
+        snippet_support: bool,
+    ) -> Option<completion_service::CompletionResolveDetails> {
+        let repository = self.analysis_engine.get_repository();
+        if let Some(signature) =
+            repository.find_method_signature(Some(owner_type), method_name)
+        {
+            let detail = signature
+                .return_type
+                .clone()
+                .filter(|value| !value.is_empty());
+            let documentation = signature.description.clone();
+            let params: Vec<(String, bool)> = signature
+                .params
+                .iter()
+                .map(|param| (param.name.clone(), param.is_optional))
+                .collect();
+            let insert_text = if snippet_support {
+                completion_service::build_call_snippet(&signature.name, &params)
+            } else {
+                None
+            };
+
+            return Some(completion_service::CompletionResolveDetails {
+                detail,
+                documentation,
+                insert_text,
+            });
+        }
+
+        completion_service::resolve_method_completion(
+            owner_type,
+            method_name,
+            &self.metadata_lookup,
+            snippet_support,
+        )
+    }
+
+    pub fn resolve_function_completion(
+        &self,
+        function_name: &str,
+        snippet_support: bool,
+    ) -> Option<completion_service::CompletionResolveDetails> {
+        let repository = self.analysis_engine.get_repository();
+        let signature = repository.find_method_signature(None, function_name)?;
+        let detail = signature
+            .return_type
+            .clone()
+            .filter(|value| !value.is_empty());
+        let documentation = signature.description.clone();
+        let params: Vec<(String, bool)> = signature
+            .params
+            .iter()
+            .map(|param| (param.name.clone(), param.is_optional))
+            .collect();
+        let insert_text = if snippet_support {
+            completion_service::build_call_snippet(&signature.name, &params)
+        } else {
+            None
+        };
+
+        Some(completion_service::CompletionResolveDetails {
+            detail,
+            documentation,
+            insert_text,
+        })
     }
 
     // ============================================================================

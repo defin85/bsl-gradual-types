@@ -31,6 +31,7 @@ pub struct BslLanguageServer {
     pub(crate) diagnostics_counts: Arc<RwLock<HashMap<Url, usize>>>,
     pub(crate) config: Arc<RwLock<Option<LspConfig>>>,
     pub(crate) settings: Arc<RwLock<BslSettings>>,
+    pub(crate) completion_snippet_support: Arc<RwLock<bool>>,
     pub(crate) auto_reindex_paused: Arc<RwLock<bool>>,
     pub(crate) coordinator: Arc<SystemCoordinator>,
 }

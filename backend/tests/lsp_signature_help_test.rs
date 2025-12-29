@@ -27,6 +27,7 @@ mod lsp_signature_help_tests {
     struct CallContext {
         function_name: String,
         receiver_type: Option<String>,
+        is_constructor: bool,
         call_start: Position,
     }
 
@@ -64,11 +65,6 @@ mod lsp_signature_help_tests {
     /// Парсит контекст вызова функции - находит открывающую скобку
     fn find_call_context(content: &str, position: Position) -> Option<CallContext> {
         let lines: Vec<&str> = content.lines().collect();
-        let mut paren_depth = 0;
-        let mut call_start: Option<(usize, usize)> = None; // (line_idx, char_idx)
-
-        // ИСПРАВЛЕНИЕ: если position.line выходит за границы (после последнего \n),
-        // используем последнюю существующую строку
         let max_line = if lines.is_empty() {
             return None;
         } else {
@@ -76,10 +72,13 @@ mod lsp_signature_help_tests {
         };
         let search_until_line = position.line.min(max_line as u32) as usize;
 
-        for line_idx in (0..=search_until_line).rev() {
+        let mut stack: Vec<(usize, usize)> = Vec::new();
+        let mut in_string = false;
+        let mut in_block_comment = false;
+
+        for line_idx in 0..=search_until_line {
             let line = lines.get(line_idx)?;
 
-            // ИСПРАВЛЕНИЕ: конвертируем UTF-16 позицию в char index
             let end_char_idx = if line_idx == position.line as usize {
                 utf16_to_char_index(line, position.character as usize)?
             } else {
@@ -90,37 +89,70 @@ mod lsp_signature_help_tests {
                 continue;
             }
 
-            // Итерируем по СИМВОЛАМ, не по байтам
             let chars: Vec<char> = line.chars().collect();
+            let mut char_idx = 0;
 
-            for char_idx in (0..end_char_idx).rev() {
-                let ch = chars.get(char_idx)?;
+            while char_idx < end_char_idx {
+                let ch = chars.get(char_idx).copied()?;
+                let next = chars.get(char_idx + 1).copied();
+
+                if in_string {
+                    if ch == '"' {
+                        if next == Some('"') {
+                            char_idx += 2;
+                            continue;
+                        }
+                        in_string = false;
+                    }
+                    char_idx += 1;
+                    continue;
+                }
+
+                if in_block_comment {
+                    if ch == '*' && next == Some('/') {
+                        in_block_comment = false;
+                        char_idx += 2;
+                        continue;
+                    }
+                    char_idx += 1;
+                    continue;
+                }
+
+                if ch == '/' && next == Some('/') {
+                    break;
+                }
+
+                if ch == '/' && next == Some('*') {
+                    in_block_comment = true;
+                    char_idx += 2;
+                    continue;
+                }
+
+                if ch == '"' {
+                    in_string = true;
+                    char_idx += 1;
+                    continue;
+                }
 
                 match ch {
-                    ')' => paren_depth += 1,
-                    '(' => {
-                        if paren_depth == 0 {
-                            call_start = Some((line_idx, char_idx));
-                            break;
-                        }
-                        paren_depth -= 1;
+                    '(' => stack.push((line_idx, char_idx)),
+                    ')' => {
+                        stack.pop();
                     }
                     _ => {}
                 }
-            }
 
-            if call_start.is_some() {
-                break;
+                char_idx += 1;
             }
         }
 
-        let (line_idx, char_idx) = call_start?;
+        let (line_idx, char_idx) = stack.pop()?;
         let line = lines.get(line_idx)?;
 
         // ИСПРАВЛЕНИЕ: используем char индексы для извлечения подстроки
         let before_paren: String = line.chars().take(char_idx).collect();
 
-        let (function_name, receiver_type) = extract_function_name(&before_paren)?;
+        let (function_name, receiver_type, is_constructor) = extract_function_name(&before_paren)?;
 
         // ИСПРАВЛЕНИЕ: конвертируем char index обратно в UTF-16 для LSP
         let utf16_char = char_to_utf16_index(line, char_idx);
@@ -128,6 +160,7 @@ mod lsp_signature_help_tests {
         Some(CallContext {
             function_name,
             receiver_type,
+            is_constructor,
             call_start: Position {
                 line: line_idx as u32,
                 character: utf16_char as u32,
@@ -136,28 +169,34 @@ mod lsp_signature_help_tests {
     }
 
     /// Извлечь имя функции из текста перед скобкой
-    fn extract_function_name(text: &str) -> Option<(String, Option<String>)> {
+    fn extract_function_name(text: &str) -> Option<(String, Option<String>, bool)> {
         let trimmed = text.trim_end();
+
+        if let Some(constructor_name) = extract_constructor_name(trimmed) {
+            return Some((constructor_name, None, true));
+        }
 
         // Сначала ищем точку (для методов объектов)
         if let Some(dot_pos) = trimmed.rfind('.') {
             // Метод объекта: "Объект.Метод"
-            let after_dot = &trimmed[dot_pos + 1..];
+            let after_dot = trimmed[dot_pos + 1..].trim_start();
 
             // Извлекаем только валидное имя идентификатора после точки
             let method_name = after_dot
                 .chars()
-                .take_while(|c| {
-                    c.is_alphanumeric()
-                        || *c == '_'
-                        || (*c >= '\u{0410}' && *c <= '\u{044F}')
-                        || *c == '\u{0401}'
-                        || *c == '\u{0451}'
-                })
+                .take_while(|c| is_identifier_char(*c))
                 .collect::<String>();
 
             if !method_name.is_empty() {
-                return Some((method_name, None));
+                let receiver = trimmed[..dot_pos].trim_end();
+                let receiver_compact: String =
+                    receiver.chars().filter(|c| !c.is_whitespace()).collect();
+                let receiver_type = if is_simple_receiver(&receiver_compact) {
+                    Some(receiver_compact)
+                } else {
+                    None
+                };
+                return Some((method_name, receiver_type, false));
             }
         }
 
@@ -166,23 +205,75 @@ mod lsp_signature_help_tests {
         let function_name = trimmed
             .chars()
             .rev()
-            .take_while(|c| {
-                c.is_alphanumeric()
-                    || *c == '_'
-                    || (*c >= '\u{0410}' && *c <= '\u{044F}')
-                    || *c == '\u{0401}'
-                    || *c == '\u{0451}'
-            })
+            .take_while(|c| is_identifier_char(*c))
             .collect::<String>()
             .chars()
             .rev()
             .collect::<String>();
 
         if !function_name.is_empty() {
-            Some((function_name, None))
+            if is_control_keyword(&function_name) {
+                return None;
+            }
+            Some((function_name, None, false))
         } else {
             None
         }
+    }
+
+    fn extract_constructor_name(text: &str) -> Option<String> {
+        let parts: Vec<&str> = text.split_whitespace().collect();
+        if parts.len() < 2 {
+            return None;
+        }
+        let keyword = parts[parts.len() - 2];
+        if keyword.to_lowercase() != "новый" {
+            return None;
+        }
+        let type_name = parts[parts.len() - 1];
+        if is_simple_receiver(type_name) {
+            Some(type_name.to_string())
+        } else {
+            None
+        }
+    }
+
+    fn is_control_keyword(value: &str) -> bool {
+        matches!(
+            value.to_lowercase().as_str(),
+            "если"
+                | "иначеесли"
+                | "пока"
+                | "для"
+                | "каждого"
+                | "попытка"
+                | "исключение"
+                | "конецесли"
+                | "конеццикла"
+                | "конецпопытки"
+                | "конецпроцедуры"
+                | "конецфункции"
+                | "возврат"
+                | "выбор"
+                | "когда"
+                | "иначе"
+        )
+    }
+
+    fn is_simple_receiver(text: &str) -> bool {
+        if text.is_empty() {
+            return false;
+        }
+
+        text.chars().all(|c| c == '.' || is_identifier_char(c))
+    }
+
+    fn is_identifier_char(c: char) -> bool {
+        c.is_alphanumeric()
+            || c == '_'
+            || (c >= '\u{0410}' && c <= '\u{044F}')
+            || c == '\u{0401}'
+            || c == '\u{0451}'
     }
 
     /// Определить индекс активного параметра
@@ -191,6 +282,7 @@ mod lsp_signature_help_tests {
         let mut param_index = 0;
         let mut paren_depth = 0;
         let mut in_string = false;
+        let mut in_block_comment = false;
 
         for line_idx in context.call_start.line..=position.line {
             let line = match lines.get(line_idx as usize) {
@@ -216,19 +308,66 @@ mod lsp_signature_help_tests {
                 continue;
             }
 
-            // Итерируем по символам
-            for char_idx in start_char_idx..end_char_idx {
-                if let Some(&ch) = chars.get(char_idx) {
-                    match ch {
-                        '"' => in_string = !in_string,
-                        '(' if !in_string => paren_depth += 1,
-                        ')' if !in_string => paren_depth -= 1,
-                        ',' if !in_string && paren_depth == 0 => {
-                            param_index += 1;
+            let mut char_idx = start_char_idx;
+            while char_idx < end_char_idx {
+                let ch = match chars.get(char_idx) {
+                    Some(ch) => *ch,
+                    None => break,
+                };
+                let next = chars.get(char_idx + 1).copied();
+
+                if in_string {
+                    if ch == '"' {
+                        if next == Some('"') {
+                            char_idx += 2;
+                            continue;
                         }
-                        _ => {}
+                        in_string = false;
                     }
+                    char_idx += 1;
+                    continue;
                 }
+
+                if in_block_comment {
+                    if ch == '*' && next == Some('/') {
+                        in_block_comment = false;
+                        char_idx += 2;
+                        continue;
+                    }
+                    char_idx += 1;
+                    continue;
+                }
+
+                if ch == '/' && next == Some('/') {
+                    break;
+                }
+
+                if ch == '/' && next == Some('*') {
+                    in_block_comment = true;
+                    char_idx += 2;
+                    continue;
+                }
+
+                if ch == '"' {
+                    in_string = true;
+                    char_idx += 1;
+                    continue;
+                }
+
+                match ch {
+                    '(' => paren_depth += 1,
+                    ')' => {
+                        if paren_depth > 0 {
+                            paren_depth -= 1;
+                        }
+                    }
+                    ',' if paren_depth == 0 => {
+                        param_index += 1;
+                    }
+                    _ => {}
+                }
+
+                char_idx += 1;
             }
         }
 
@@ -386,6 +525,19 @@ mod lsp_signature_help_tests {
     }
 
     #[test]
+    fn test_calculate_active_parameter_with_escaped_quote() {
+        let code = "Функция(\"a\"\"b\", ";
+        let position = Position {
+            line: 0,
+            character: utf16_len(code) as u32,
+        };
+
+        let context = find_call_context(code, position).unwrap();
+        let active_param = calculate_active_parameter(code, &context, position);
+        assert_eq!(active_param, 1);
+    }
+
+    #[test]
     fn test_calculate_active_parameter_with_nested_call() {
         let code = "Функция(Другая(), ";
         let position = Position {
@@ -398,6 +550,19 @@ mod lsp_signature_help_tests {
         assert_eq!(active_param, 1);
     }
 
+    #[test]
+    fn test_calculate_active_parameter_ignores_comment_commas() {
+        let code = "Функция(1, // коммент, \n 2, ";
+        let position = Position {
+            line: 1,
+            character: utf16_len(" 2, ") as u32,
+        };
+
+        let context = find_call_context(code, position).unwrap();
+        let active_param = calculate_active_parameter(code, &context, position);
+        assert_eq!(active_param, 2);
+    }
+
     // ============================================================================
     // ТЕСТЫ: extract_function_name
     // ============================================================================
@@ -407,9 +572,10 @@ mod lsp_signature_help_tests {
         let result = extract_function_name("Сообщить");
         assert!(result.is_some());
 
-        let (name, receiver) = result.unwrap();
+        let (name, receiver, is_constructor) = result.unwrap();
         assert_eq!(name, "Сообщить");
         assert_eq!(receiver, None);
+        assert!(!is_constructor);
     }
 
     #[test]
@@ -417,8 +583,33 @@ mod lsp_signature_help_tests {
         let result = extract_function_name("МойОбъект.Метод");
         assert!(result.is_some());
 
-        let (name, _receiver) = result.unwrap();
+        let (name, _receiver, is_constructor) = result.unwrap();
         assert_eq!(name, "Метод");
+        assert!(!is_constructor);
+    }
+
+    #[test]
+    fn test_extract_function_name_with_receiver_type() {
+        let result = extract_function_name("Справочники.Номенклатура.СоздатьЭлемент");
+        assert!(result.is_some());
+
+        let (name, receiver, is_constructor) = result.unwrap();
+        assert_eq!(name, "СоздатьЭлемент");
+        assert_eq!(receiver, Some("Справочники.Номенклатура".to_string()));
+        assert!(!is_constructor);
+    }
+
+    #[test]
+    fn test_find_call_context_ignores_comment_paren() {
+        let code = "// (\nФункция(";
+        let position = Position {
+            line: 1,
+            character: utf16_len("Функция(") as u32,
+        };
+
+        let context = find_call_context(code, position);
+        assert!(context.is_some());
+        assert_eq!(context.unwrap().function_name, "Функция");
     }
 
     #[test]
@@ -426,9 +617,10 @@ mod lsp_signature_help_tests {
         let result = extract_function_name("  Сообщить  ");
         assert!(result.is_some());
 
-        let (name, receiver) = result.unwrap();
+        let (name, receiver, is_constructor) = result.unwrap();
         assert_eq!(name, "Сообщить");
         assert_eq!(receiver, None);
+        assert!(!is_constructor);
     }
 
     #[test]
@@ -440,6 +632,45 @@ mod lsp_signature_help_tests {
         assert_eq!(result1.unwrap().0, "СООБЩИТЬ");
         assert_eq!(result2.unwrap().0, "Сообщить");
         assert_eq!(result3.unwrap().0, "сообщить");
+    }
+
+    #[test]
+    fn test_extract_function_name_with_spaces_around_dot() {
+        let result = extract_function_name("Справочники . Номенклатура . СоздатьЭлемент");
+        assert!(result.is_some());
+
+        let (name, receiver, is_constructor) = result.unwrap();
+        assert_eq!(name, "СоздатьЭлемент");
+        assert_eq!(receiver, Some("Справочники.Номенклатура".to_string()));
+        assert!(!is_constructor);
+    }
+
+    #[test]
+    fn test_extract_constructor_name() {
+        let result = extract_function_name("Новый Массив");
+        assert!(result.is_some());
+
+        let (name, receiver, is_constructor) = result.unwrap();
+        assert_eq!(name, "Массив");
+        assert!(receiver.is_none());
+        assert!(is_constructor);
+    }
+
+    #[test]
+    fn test_extract_constructor_name_qualified_with_spaces() {
+        let result = extract_function_name("Новый Справочники . Номенклатура");
+        assert!(result.is_some());
+
+        let (name, receiver, is_constructor) = result.unwrap();
+        assert_eq!(name, "Справочники.Номенклатура");
+        assert!(receiver.is_none());
+        assert!(is_constructor);
+    }
+
+    #[test]
+    fn test_extract_function_name_skips_control_keyword() {
+        let result = extract_function_name("Если");
+        assert!(result.is_none());
     }
 
     // ============================================================================

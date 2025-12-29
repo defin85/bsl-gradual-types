@@ -81,6 +81,17 @@ impl LanguageServer for BslLanguageServer {
             info!("No initializationOptions provided - using defaults (4 basic types only)");
         }
 
+        let snippet_support = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|td| td.completion.as_ref())
+            .and_then(|completion| completion.completion_item.as_ref())
+            .and_then(|item| item.snippet_support)
+            .unwrap_or(false);
+        *self.completion_snippet_support.write().await = snippet_support;
+        info!("Client snippet support: {}", snippet_support);
+
         // Version info for LSP Protocol
         let version = env!("CARGO_PKG_VERSION");
         let build_timestamp = env!("BUILD_TIMESTAMP");
@@ -567,8 +578,15 @@ impl LanguageServer for BslLanguageServer {
         };
 
         let started = Instant::now();
-        let completion = handle_completion(&file_content, position, &uri, self.get_type_service())
-            .await;
+        let snippet_support = *self.completion_snippet_support.read().await;
+        let completion = handle_completion(
+            &file_content,
+            position,
+            &uri,
+            self.get_type_service(),
+            snippet_support,
+        )
+        .await;
         let elapsed = started.elapsed();
         self.coordinator.record_completion_latency(elapsed);
 
@@ -603,7 +621,8 @@ impl LanguageServer for BslLanguageServer {
         &self,
         item: CompletionItem,
     ) -> JsonRpcResult<CompletionItem> {
-        Ok(handle_completion_resolve(item, self.get_type_service()).await)
+        let snippet_support = *self.completion_snippet_support.read().await;
+        Ok(handle_completion_resolve(item, self.get_type_service(), snippet_support).await)
     }
 
     async fn hover(&self, params: HoverParams) -> JsonRpcResult<Option<Hover>> {

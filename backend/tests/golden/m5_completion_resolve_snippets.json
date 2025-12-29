@@ -1,0 +1,22 @@
+{
+  "completion": {
+    "insertText": "Добавить",
+    "insertTextFormat": null,
+    "kind": "METHOD",
+    "label": "Добавить"
+  },
+  "resolveSnippetSupportFalse": {
+    "detail": "Булево",
+    "hasDocumentation": false,
+    "insertText": "Добавить",
+    "insertTextFormat": null,
+    "label": "Добавить"
+  },
+  "resolveSnippetSupportTrue": {
+    "detail": "Булево",
+    "hasDocumentation": false,
+    "insertText": "Добавить(${1:Элемент}, ${2:})$0",
+    "insertTextFormat": "SNIPPET",
+    "label": "Добавить"
+  }
+}

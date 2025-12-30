@@ -222,17 +222,18 @@ mod lsp_signature_help_tests {
     }
 
     fn extract_constructor_name(text: &str) -> Option<String> {
-        let parts: Vec<&str> = text.split_whitespace().collect();
-        if parts.len() < 2 {
-            return None;
-        }
-        let keyword = parts[parts.len() - 2];
+        let mut iter = text.split_whitespace();
+        let keyword = iter.next()?;
         if keyword.to_lowercase() != "новый" {
             return None;
         }
-        let type_name = parts[parts.len() - 1];
-        if is_simple_receiver(type_name) {
-            Some(type_name.to_string())
+        let remainder: String = iter.collect::<Vec<_>>().join(" ");
+        if remainder.is_empty() {
+            return None;
+        }
+        let normalized: String = remainder.chars().filter(|c| !c.is_whitespace()).collect();
+        if is_simple_receiver(&normalized) {
+            Some(normalized)
         } else {
             None
         }

@@ -591,6 +591,9 @@ impl LanguageServer for BslLanguageServer {
         self.coordinator.record_completion_latency(elapsed);
 
         if let Some(result) = &completion {
+            if result.had_error {
+                self.coordinator.record_completion_error();
+            }
             if let CompletionResponse::List(list) = &result.response {
                 if list.is_incomplete {
                     self.coordinator.record_completion_incomplete();

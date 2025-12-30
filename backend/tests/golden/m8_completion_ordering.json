@@ -1,0 +1,17 @@
+{
+  "isIncomplete": false,
+  "items": [
+    {
+      "insertText": "Абв",
+      "insertTextFormat": null,
+      "kind": "FUNCTION",
+      "label": "Абв"
+    },
+    {
+      "insertText": "Абг",
+      "insertTextFormat": null,
+      "kind": "FUNCTION",
+      "label": "Абг"
+    }
+  ]
+}

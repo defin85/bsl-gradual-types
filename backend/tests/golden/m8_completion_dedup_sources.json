@@ -1,0 +1,11 @@
+{
+  "isIncomplete": false,
+  "items": [
+    {
+      "insertText": "Дубль",
+      "insertTextFormat": null,
+      "kind": "FUNCTION",
+      "label": "Дубль"
+    }
+  ]
+}

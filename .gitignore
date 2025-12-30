@@ -48,6 +48,7 @@ vscode-extension/media/webview/
 # Test files
 *.bsl.test
 test-output/
+backend/tests/perf/reports/
 
 # Documentation build
 docs/_build/

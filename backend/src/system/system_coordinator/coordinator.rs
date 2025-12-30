@@ -3,7 +3,9 @@
 //! Единая точка координации всех компонентов системы типов согласно Simple Architecture
 
 use std::sync::{Arc, RwLock};
+
 use anyhow::Result;
+use serde_json::Value;
 use tracing::warn;
 
 use crate::application::TypeSystemService;
@@ -165,12 +167,20 @@ impl SystemCoordinator {
         self.observability.record_completion_latency(duration);
     }
 
+    pub fn record_completion_error(&self) {
+        self.observability.record_completion_error();
+    }
+
     pub fn record_completion_resolve_latency(&self, duration: std::time::Duration) {
         self.observability.record_completion_resolve_latency(duration);
     }
 
     pub fn record_completion_incomplete(&self) {
         self.observability.record_completion_incomplete();
+    }
+
+    pub fn observability_metrics(&self) -> Value {
+        self.observability.get_metrics().export_metrics()
     }
 
     pub fn record_signature_help_latency(&self, duration: std::time::Duration) {

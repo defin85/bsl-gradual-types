@@ -1,0 +1,33 @@
+{
+  "name": "large",
+  "syntax_helper_path": "examples/syntax_helper",
+  "config_path": "examples/conf_big",
+  "platform_version": "8.3.24",
+  "cases": [
+    {
+      "file": "examples/test_lsp.bsl",
+      "marker": "Arr.Add",
+      "label": "arr_add"
+    },
+    {
+      "file": "examples/test_lsp.bsl",
+      "marker": "Arr.Count",
+      "label": "arr_count"
+    },
+    {
+      "file": "examples/test_lsp.bsl",
+      "marker": "Arr.Clear",
+      "label": "arr_clear"
+    },
+    {
+      "file": "examples/test_lsp.bsl",
+      "marker": "Arr.add",
+      "label": "arr_add_lower"
+    },
+    {
+      "file": "examples/test_lsp.bsl",
+      "marker": "Arr.ADD",
+      "label": "arr_add_upper"
+    }
+  ]
+}

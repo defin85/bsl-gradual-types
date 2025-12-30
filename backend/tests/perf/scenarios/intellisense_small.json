@@ -1,0 +1,20 @@
+{
+  "name": "small",
+  "cases": [
+    {
+      "file": "examples/test_lsp.bsl",
+      "marker": "Arr.Add",
+      "label": "arr_add"
+    },
+    {
+      "file": "examples/test_lsp.bsl",
+      "marker": "Arr.Count",
+      "label": "arr_count"
+    },
+    {
+      "file": "examples/test_lsp.bsl",
+      "marker": "Arr.Clear",
+      "label": "arr_clear"
+    }
+  ]
+}

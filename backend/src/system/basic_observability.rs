@@ -105,6 +105,10 @@ impl BasicObservability {
             .observe_histogram("completion_duration_ms", duration.as_millis() as f64);
     }
 
+    pub fn record_completion_error(&self) {
+        self.metrics.increment("completion_error_total");
+    }
+
     pub fn record_completion_resolve_latency(&self, duration: Duration) {
         self.metrics.increment("completion_resolve_total");
         self.metrics
@@ -317,13 +321,37 @@ impl SimpleMetrics {
             );
         }
 
+        let mut rates = HashMap::new();
+        if let Some(rate) = compute_rate(&counters, "completion_incomplete_total", "completion_total")
+        {
+            rates.insert("completion_incomplete_rate".to_string(), rate);
+        }
+        if let Some(rate) = compute_rate(&counters, "completion_error_total", "completion_total") {
+            rates.insert("completion_error_rate".to_string(), rate);
+        }
+        if let Some(rate) =
+            compute_rate(&counters, "signature_help_empty_total", "signature_help_total")
+        {
+            rates.insert("signature_help_empty_rate".to_string(), rate);
+        }
+
         json!({
             "counters": counters,
             "gauges": gauges,
             "histograms": histogram_stats,
+            "rates": rates,
             "uptime_seconds": self.uptime().as_secs()
         })
     }
+}
+
+fn compute_rate(counters: &HashMap<String, u64>, numerator: &str, denominator: &str) -> Option<f64> {
+    let numerator = *counters.get(numerator)? as f64;
+    let denominator = *counters.get(denominator)? as f64;
+    if denominator == 0.0 {
+        return None;
+    }
+    Some(numerator / denominator)
 }
 
 fn percentile_sorted(values: &[f64], percentile: f64) -> f64 {

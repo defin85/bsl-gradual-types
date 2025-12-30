@@ -1,0 +1,11 @@
+{
+  "isIncomplete": false,
+  "items": [
+    {
+      "insertText": "Локальная",
+      "insertTextFormat": null,
+      "kind": "VARIABLE",
+      "label": "Локальная"
+    }
+  ]
+}

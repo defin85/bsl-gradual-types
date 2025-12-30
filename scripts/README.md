@@ -108,6 +108,56 @@ cargo build --release --bin bsl-lsp-server
 
 ---
 
+### `run-intellisense-perf.sh` - Perf suite для IntelliSense
+
+**Назначение:** регрессионные замеры completion latency (P95/P99) на профилях `small` и `medium`.
+
+**Использование:**
+```bash
+./scripts/run-intellisense-perf.sh
+```
+
+**Обновление baseline:**
+```bash
+UPDATE_BASELINE=1 ./scripts/run-intellisense-perf.sh
+```
+
+**Large профиль (ручной запуск):**
+```bash
+cargo run -p bsl-backend --bin intellisense_perf -- \
+  --scenario backend/tests/perf/scenarios/intellisense_large.json \
+  --baseline backend/tests/perf/baselines/intellisense_large.json \
+  --update-baseline \
+  --threshold-p95 1.10 \
+  --threshold-p99 1.15 \
+  --output backend/tests/perf/reports/intellisense_large.json
+```
+
+**Вывод:**
+- Baselines: `backend/tests/perf/baselines/`
+- Отчёты: `backend/tests/perf/reports/`
+
+---
+
+### `run-intellisense-tests.sh` - Smoke/full тесты IntelliSense
+
+**Назначение:** стабильный набор тестов M8 для shared CI и локального полного прогона.
+
+**Использование:**
+```bash
+# Быстрый smoke (без тяжёлых фикстур)
+./scripts/run-intellisense-tests.sh smoke
+
+# Полный прогон (включает Syntax Helper)
+./scripts/run-intellisense-tests.sh full
+```
+
+**Состав:**
+- `smoke`: unit‑тесты completion + golden + LSP интеграция.
+- `full`: smoke + shared fixtures (Syntax Helper).
+
+---
+
 ## 🔧 Разрешение проблем
 
 ### Ошибка: "EmptyStandbyList.exe не найдена"

@@ -478,6 +478,7 @@ mod tests {
     use std::sync::Arc;
 
     use bsl_shared::domain::repository::InMemoryTypeRepository;
+    use bsl_shared::TypeRepository;
     use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource};
     use bsl_shared::domain::types::{ParameterInfo, RawDataSource, RawTypeData};
     use bsl_shared::engine::AnalysisEngine;
@@ -588,18 +589,22 @@ mod tests {
         Arc::new(AnalysisEngine::new(resolver, repository))
     }
 
-    #[test]
-    fn m5_signature_help_snapshot() {
+    #[tokio::test]
+    async fn m5_signature_help_snapshot() {
         let content = read_fixture("m5_signature_help.bsl");
         let engine = create_engine();
 
         let constructor_pos = find_position(&content, "Новый Массив(1, ");
-        let constructor = handle_signature_help(&content, constructor_pos, Some(engine.clone()))
-            .expect("constructor signature help");
+        let constructor =
+            handle_signature_help(&content, constructor_pos, Some(engine.clone()))
+                .await
+                .expect("constructor signature help");
 
         let method_pos = find_position(&content, "Массив.Добавить(1, ");
-        let method = handle_signature_help(&content, method_pos, Some(engine))
-            .expect("method signature help");
+        let method =
+            handle_signature_help(&content, method_pos, Some(engine))
+                .await
+                .expect("method signature help");
 
         let snapshot = serde_json::json!({
             "constructor": {

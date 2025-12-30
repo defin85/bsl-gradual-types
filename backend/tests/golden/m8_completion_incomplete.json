@@ -1,0 +1,1205 @@
+{
+  "isIncomplete": true,
+  "items": [
+    {
+      "insertText": "Массив",
+      "insertTextFormat": null,
+      "kind": "TYPE",
+      "label": "Массив"
+    },
+    {
+      "insertText": "Строка",
+      "insertTextFormat": null,
+      "kind": "TYPE",
+      "label": "Строка"
+    },
+    {
+      "insertText": "Ключ0",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ0"
+    },
+    {
+      "insertText": "Ключ1",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ1"
+    },
+    {
+      "insertText": "Ключ10",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ10"
+    },
+    {
+      "insertText": "Ключ100",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ100"
+    },
+    {
+      "insertText": "Ключ101",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ101"
+    },
+    {
+      "insertText": "Ключ102",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ102"
+    },
+    {
+      "insertText": "Ключ103",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ103"
+    },
+    {
+      "insertText": "Ключ104",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ104"
+    },
+    {
+      "insertText": "Ключ105",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ105"
+    },
+    {
+      "insertText": "Ключ106",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ106"
+    },
+    {
+      "insertText": "Ключ107",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ107"
+    },
+    {
+      "insertText": "Ключ108",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ108"
+    },
+    {
+      "insertText": "Ключ109",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ109"
+    },
+    {
+      "insertText": "Ключ11",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ11"
+    },
+    {
+      "insertText": "Ключ110",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ110"
+    },
+    {
+      "insertText": "Ключ111",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ111"
+    },
+    {
+      "insertText": "Ключ112",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ112"
+    },
+    {
+      "insertText": "Ключ113",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ113"
+    },
+    {
+      "insertText": "Ключ114",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ114"
+    },
+    {
+      "insertText": "Ключ115",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ115"
+    },
+    {
+      "insertText": "Ключ116",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ116"
+    },
+    {
+      "insertText": "Ключ117",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ117"
+    },
+    {
+      "insertText": "Ключ118",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ118"
+    },
+    {
+      "insertText": "Ключ119",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ119"
+    },
+    {
+      "insertText": "Ключ12",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ12"
+    },
+    {
+      "insertText": "Ключ120",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ120"
+    },
+    {
+      "insertText": "Ключ121",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ121"
+    },
+    {
+      "insertText": "Ключ122",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ122"
+    },
+    {
+      "insertText": "Ключ123",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ123"
+    },
+    {
+      "insertText": "Ключ124",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ124"
+    },
+    {
+      "insertText": "Ключ125",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ125"
+    },
+    {
+      "insertText": "Ключ126",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ126"
+    },
+    {
+      "insertText": "Ключ127",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ127"
+    },
+    {
+      "insertText": "Ключ128",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ128"
+    },
+    {
+      "insertText": "Ключ129",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ129"
+    },
+    {
+      "insertText": "Ключ13",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ13"
+    },
+    {
+      "insertText": "Ключ130",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ130"
+    },
+    {
+      "insertText": "Ключ131",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ131"
+    },
+    {
+      "insertText": "Ключ132",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ132"
+    },
+    {
+      "insertText": "Ключ133",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ133"
+    },
+    {
+      "insertText": "Ключ134",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ134"
+    },
+    {
+      "insertText": "Ключ135",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ135"
+    },
+    {
+      "insertText": "Ключ136",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ136"
+    },
+    {
+      "insertText": "Ключ137",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ137"
+    },
+    {
+      "insertText": "Ключ138",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ138"
+    },
+    {
+      "insertText": "Ключ139",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ139"
+    },
+    {
+      "insertText": "Ключ14",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ14"
+    },
+    {
+      "insertText": "Ключ140",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ140"
+    },
+    {
+      "insertText": "Ключ141",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ141"
+    },
+    {
+      "insertText": "Ключ142",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ142"
+    },
+    {
+      "insertText": "Ключ143",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ143"
+    },
+    {
+      "insertText": "Ключ144",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ144"
+    },
+    {
+      "insertText": "Ключ145",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ145"
+    },
+    {
+      "insertText": "Ключ146",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ146"
+    },
+    {
+      "insertText": "Ключ147",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ147"
+    },
+    {
+      "insertText": "Ключ148",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ148"
+    },
+    {
+      "insertText": "Ключ149",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ149"
+    },
+    {
+      "insertText": "Ключ15",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ15"
+    },
+    {
+      "insertText": "Ключ150",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ150"
+    },
+    {
+      "insertText": "Ключ151",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ151"
+    },
+    {
+      "insertText": "Ключ152",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ152"
+    },
+    {
+      "insertText": "Ключ153",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ153"
+    },
+    {
+      "insertText": "Ключ154",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ154"
+    },
+    {
+      "insertText": "Ключ155",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ155"
+    },
+    {
+      "insertText": "Ключ156",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ156"
+    },
+    {
+      "insertText": "Ключ157",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ157"
+    },
+    {
+      "insertText": "Ключ158",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ158"
+    },
+    {
+      "insertText": "Ключ159",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ159"
+    },
+    {
+      "insertText": "Ключ16",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ16"
+    },
+    {
+      "insertText": "Ключ160",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ160"
+    },
+    {
+      "insertText": "Ключ161",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ161"
+    },
+    {
+      "insertText": "Ключ162",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ162"
+    },
+    {
+      "insertText": "Ключ163",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ163"
+    },
+    {
+      "insertText": "Ключ164",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ164"
+    },
+    {
+      "insertText": "Ключ165",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ165"
+    },
+    {
+      "insertText": "Ключ166",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ166"
+    },
+    {
+      "insertText": "Ключ167",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ167"
+    },
+    {
+      "insertText": "Ключ168",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ168"
+    },
+    {
+      "insertText": "Ключ169",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ169"
+    },
+    {
+      "insertText": "Ключ17",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ17"
+    },
+    {
+      "insertText": "Ключ170",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ170"
+    },
+    {
+      "insertText": "Ключ171",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ171"
+    },
+    {
+      "insertText": "Ключ172",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ172"
+    },
+    {
+      "insertText": "Ключ173",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ173"
+    },
+    {
+      "insertText": "Ключ174",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ174"
+    },
+    {
+      "insertText": "Ключ175",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ175"
+    },
+    {
+      "insertText": "Ключ176",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ176"
+    },
+    {
+      "insertText": "Ключ177",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ177"
+    },
+    {
+      "insertText": "Ключ178",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ178"
+    },
+    {
+      "insertText": "Ключ179",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ179"
+    },
+    {
+      "insertText": "Ключ18",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ18"
+    },
+    {
+      "insertText": "Ключ180",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ180"
+    },
+    {
+      "insertText": "Ключ181",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ181"
+    },
+    {
+      "insertText": "Ключ182",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ182"
+    },
+    {
+      "insertText": "Ключ183",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ183"
+    },
+    {
+      "insertText": "Ключ184",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ184"
+    },
+    {
+      "insertText": "Ключ185",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ185"
+    },
+    {
+      "insertText": "Ключ186",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ186"
+    },
+    {
+      "insertText": "Ключ187",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ187"
+    },
+    {
+      "insertText": "Ключ188",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ188"
+    },
+    {
+      "insertText": "Ключ189",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ189"
+    },
+    {
+      "insertText": "Ключ19",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ19"
+    },
+    {
+      "insertText": "Ключ190",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ190"
+    },
+    {
+      "insertText": "Ключ191",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ191"
+    },
+    {
+      "insertText": "Ключ192",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ192"
+    },
+    {
+      "insertText": "Ключ193",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ193"
+    },
+    {
+      "insertText": "Ключ194",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ194"
+    },
+    {
+      "insertText": "Ключ195",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ195"
+    },
+    {
+      "insertText": "Ключ196",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ196"
+    },
+    {
+      "insertText": "Ключ197",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ197"
+    },
+    {
+      "insertText": "Ключ198",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ198"
+    },
+    {
+      "insertText": "Ключ199",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ199"
+    },
+    {
+      "insertText": "Ключ2",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ2"
+    },
+    {
+      "insertText": "Ключ20",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ20"
+    },
+    {
+      "insertText": "Ключ200",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ200"
+    },
+    {
+      "insertText": "Ключ201",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ201"
+    },
+    {
+      "insertText": "Ключ202",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ202"
+    },
+    {
+      "insertText": "Ключ203",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ203"
+    },
+    {
+      "insertText": "Ключ204",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ204"
+    },
+    {
+      "insertText": "Ключ205",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ205"
+    },
+    {
+      "insertText": "Ключ206",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ206"
+    },
+    {
+      "insertText": "Ключ207",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ207"
+    },
+    {
+      "insertText": "Ключ208",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ208"
+    },
+    {
+      "insertText": "Ключ209",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ209"
+    },
+    {
+      "insertText": "Ключ21",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ21"
+    },
+    {
+      "insertText": "Ключ210",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ210"
+    },
+    {
+      "insertText": "Ключ211",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ211"
+    },
+    {
+      "insertText": "Ключ212",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ212"
+    },
+    {
+      "insertText": "Ключ213",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ213"
+    },
+    {
+      "insertText": "Ключ214",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ214"
+    },
+    {
+      "insertText": "Ключ215",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ215"
+    },
+    {
+      "insertText": "Ключ216",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ216"
+    },
+    {
+      "insertText": "Ключ217",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ217"
+    },
+    {
+      "insertText": "Ключ218",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ218"
+    },
+    {
+      "insertText": "Ключ219",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ219"
+    },
+    {
+      "insertText": "Ключ22",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ22"
+    },
+    {
+      "insertText": "Ключ220",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ220"
+    },
+    {
+      "insertText": "Ключ221",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ221"
+    },
+    {
+      "insertText": "Ключ222",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ222"
+    },
+    {
+      "insertText": "Ключ223",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ223"
+    },
+    {
+      "insertText": "Ключ224",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ224"
+    },
+    {
+      "insertText": "Ключ225",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ225"
+    },
+    {
+      "insertText": "Ключ226",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ226"
+    },
+    {
+      "insertText": "Ключ227",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ227"
+    },
+    {
+      "insertText": "Ключ228",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ228"
+    },
+    {
+      "insertText": "Ключ229",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ229"
+    },
+    {
+      "insertText": "Ключ23",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ23"
+    },
+    {
+      "insertText": "Ключ24",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ24"
+    },
+    {
+      "insertText": "Ключ25",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ25"
+    },
+    {
+      "insertText": "Ключ26",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ26"
+    },
+    {
+      "insertText": "Ключ27",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ27"
+    },
+    {
+      "insertText": "Ключ28",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ28"
+    },
+    {
+      "insertText": "Ключ29",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ29"
+    },
+    {
+      "insertText": "Ключ3",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ3"
+    },
+    {
+      "insertText": "Ключ30",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ30"
+    },
+    {
+      "insertText": "Ключ31",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ31"
+    },
+    {
+      "insertText": "Ключ32",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ32"
+    },
+    {
+      "insertText": "Ключ33",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ33"
+    },
+    {
+      "insertText": "Ключ34",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ34"
+    },
+    {
+      "insertText": "Ключ35",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ35"
+    },
+    {
+      "insertText": "Ключ36",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ36"
+    },
+    {
+      "insertText": "Ключ37",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ37"
+    },
+    {
+      "insertText": "Ключ38",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ38"
+    },
+    {
+      "insertText": "Ключ39",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ39"
+    },
+    {
+      "insertText": "Ключ4",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ4"
+    },
+    {
+      "insertText": "Ключ40",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ40"
+    },
+    {
+      "insertText": "Ключ41",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ41"
+    },
+    {
+      "insertText": "Ключ42",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ42"
+    },
+    {
+      "insertText": "Ключ43",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ43"
+    },
+    {
+      "insertText": "Ключ44",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ44"
+    },
+    {
+      "insertText": "Ключ45",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ45"
+    },
+    {
+      "insertText": "Ключ46",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ46"
+    },
+    {
+      "insertText": "Ключ47",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ47"
+    },
+    {
+      "insertText": "Ключ48",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ48"
+    },
+    {
+      "insertText": "Ключ49",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ49"
+    },
+    {
+      "insertText": "Ключ5",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ5"
+    },
+    {
+      "insertText": "Ключ50",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ50"
+    },
+    {
+      "insertText": "Ключ51",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ51"
+    },
+    {
+      "insertText": "Ключ52",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ52"
+    },
+    {
+      "insertText": "Ключ53",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ53"
+    },
+    {
+      "insertText": "Ключ54",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ54"
+    },
+    {
+      "insertText": "Ключ55",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ55"
+    },
+    {
+      "insertText": "Ключ56",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ56"
+    },
+    {
+      "insertText": "Ключ57",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ57"
+    },
+    {
+      "insertText": "Ключ58",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ58"
+    },
+    {
+      "insertText": "Ключ59",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ59"
+    },
+    {
+      "insertText": "Ключ6",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ6"
+    },
+    {
+      "insertText": "Ключ60",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ60"
+    },
+    {
+      "insertText": "Ключ61",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ61"
+    },
+    {
+      "insertText": "Ключ62",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ62"
+    },
+    {
+      "insertText": "Ключ63",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ63"
+    },
+    {
+      "insertText": "Ключ64",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ64"
+    },
+    {
+      "insertText": "Ключ65",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ65"
+    },
+    {
+      "insertText": "Ключ66",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ66"
+    },
+    {
+      "insertText": "Ключ67",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ67"
+    },
+    {
+      "insertText": "Ключ68",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ68"
+    },
+    {
+      "insertText": "Ключ69",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ69"
+    },
+    {
+      "insertText": "Ключ7",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Ключ7"
+    }
+  ]
+}

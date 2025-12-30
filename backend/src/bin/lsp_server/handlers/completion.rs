@@ -13,6 +13,7 @@ use bsl_backend::application::CompletionStats;
 pub struct CompletionResponseWithStats {
     pub response: CompletionResponse,
     pub stats: Option<CompletionStats>,
+    pub had_error: bool,
 }
 
 /// Handle textDocument/completion request
@@ -58,6 +59,7 @@ pub async fn handle_completion(
                         items: lsp_completions,
                     }),
                     stats: Some(result.stats),
+                    had_error: false,
                 })
             }
             Err(e) => {
@@ -68,6 +70,7 @@ pub async fn handle_completion(
                         items: vec![],
                     }),
                     stats: None,
+                    had_error: true,
                 })
             }
         }
@@ -78,6 +81,7 @@ pub async fn handle_completion(
                 items: vec![],
             }),
             stats: None,
+            had_error: false,
         })
     }
 }
@@ -239,6 +243,7 @@ mod tests {
 
     use bsl_backend::system::{AnalysisCache, IntellisenseIndexStore, IrCache, ParserCoordinator};
     use bsl_shared::domain::repository::InMemoryTypeRepository;
+    use bsl_shared::TypeRepository;
     use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource};
     use bsl_shared::domain::types::{ParameterInfo, RawTypeData, RawDataSource};
     use bsl_shared::engine::AnalysisEngine;

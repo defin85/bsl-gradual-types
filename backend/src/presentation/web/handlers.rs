@@ -8,6 +8,7 @@ use axum::{
     response::{IntoResponse, Json},
 };
 use serde::Deserialize;
+use serde_json::json;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -56,8 +57,12 @@ pub struct AppState {
 /// Get system metrics
 /// Phase 5: Thin handler - делегирует всю логику в TypeSystemService
 pub async fn get_metrics(State(state): State<AppState>) -> impl IntoResponse {
-    let metrics = state.type_service.get_metrics_summary();
-    Json(metrics)
+    let types = state.type_service.get_metrics_summary();
+    let observability = state.system_coordinator.observability_metrics();
+    Json(json!({
+        "types": types,
+        "observability": observability
+    }))
 }
 
 /// Get all types with pagination support

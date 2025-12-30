@@ -1,0 +1,15 @@
+{
+  "scenario": "medium",
+  "cases": 5,
+  "iterations": 200,
+  "warmup": 20,
+  "metrics": {
+    "total_requests": 1000,
+    "count": 1000,
+    "p50_ms": 0.072918,
+    "p95_ms": 0.127031,
+    "p99_ms": 0.152137,
+    "error_rate": 0.0,
+    "incomplete_rate": 0.0
+  }
+}

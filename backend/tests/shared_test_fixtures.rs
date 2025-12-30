@@ -143,26 +143,5 @@ fn create_repository_internal() -> Arc<InMemoryTypeRepository> {
     repository_impl
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_shared_service_initialization() {
-        // Проверяем что shared service инициализируется
-        let _service = get_test_service();
-        // Если дошли сюда без паники - всё работает
-        // Инициализация прошла без паники — считаем успешной.
-    }
-
-    #[test]
-    fn test_shared_repository_initialization() {
-        // Проверяем что shared repository инициализируется
-        let repo = get_test_repository();
-        // Если дошли сюда без паники - всё работает
-        assert!(repo
-            .get_signature_index_clone()
-            .find_method("Массив", "Добавить")
-            .is_some());
-    }
-}
+// Tests for shared fixtures live in integration tests to avoid heavy setup
+// for every test module that imports shared_test_fixtures.rs.

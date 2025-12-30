@@ -1,0 +1,17 @@
+{
+  "isIncomplete": false,
+  "items": [
+    {
+      "insertText": "Строка",
+      "insertTextFormat": null,
+      "kind": "TYPE",
+      "label": "Строка"
+    },
+    {
+      "insertText": "Старт",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Старт"
+    }
+  ]
+}

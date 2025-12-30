@@ -390,6 +390,25 @@ cargo run --bin bsl-profiler benchmark --iterations 10
 RUST_LOG=info cargo run --bin bsl-profiler benchmark --iterations 5
 ```
 
+### IntelliSense perf suite
+
+```bash
+# Прогон small/medium с порогами
+./scripts/run-intellisense-perf.sh
+
+# Обновление baseline
+UPDATE_BASELINE=1 ./scripts/run-intellisense-perf.sh
+
+# Large профиль (ручной запуск)
+cargo run -p bsl-backend --bin intellisense_perf -- \
+  --scenario backend/tests/perf/scenarios/intellisense_large.json \
+  --baseline backend/tests/perf/baselines/intellisense_large.json \
+  --update-baseline \
+  --threshold-p95 1.10 \
+  --threshold-p99 1.15 \
+  --output backend/tests/perf/reports/intellisense_large.json
+```
+
 ---
 
 ## 🐛 Отладка

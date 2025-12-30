@@ -880,11 +880,66 @@ curl -s -X POST http://localhost:3002/api/semantic-tree \
 
 ---
 
+## 📈 Метрики системы (observability)
+
+**Endpoint:** `GET /api/metrics`
+
+**Назначение:** Сводные метрики типов и производительности (completion/signatureHelp/resolve).
+
+#### Запрос
+
+```bash
+curl -s "http://127.0.0.1:3002/api/metrics" | jq '.'
+```
+
+#### Ответ
+
+```json
+{
+  "types": {
+    "total_types": 420,
+    "known_types": 380,
+    "inferred_types": 25,
+    "unknown_types": 15
+  },
+  "observability": {
+    "counters": {
+      "completion_total": 120,
+      "completion_incomplete_total": 4,
+      "signature_help_total": 32
+    },
+    "gauges": {
+      "analysis_duration_ms": 12.0
+    },
+    "histograms": {
+      "completion_duration_ms": {
+        "count": 120,
+        "p50": 12.0,
+        "p95": 38.0,
+        "p99": 49.0
+      }
+    },
+    "rates": {
+      "completion_incomplete_rate": 0.0333,
+      "signature_help_empty_rate": 0.125
+    },
+    "uptime_seconds": 3600
+  }
+}
+```
+
+**Примечания:**
+- `histograms` содержит агрегаты P50/P95/P99 и количество измерений.
+- `rates` вычисляются по счетчикам (например, `completion_incomplete_total / completion_total`).
+
+---
+
 ## 📊 Обновлённый статус endpoints
 
 | Endpoint | Метод | Статус | Milestone |
 |----------|-------|--------|-----------|
 | `/api/health` | GET | ✅ | - |
+| `/api/metrics` | GET | ✅ | M7 |
 | `/api/types` | GET | ✅ | - |
 | `/api/search` | GET | ✅ | 2.9, 2.18 |
 | `/api/validate` | POST | ✅ | 2.4, 2.18 |

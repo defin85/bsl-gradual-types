@@ -4,6 +4,8 @@ use crate::application::type_system::services::completion_service::CompletionCon
 use crate::system::SymbolScope;
 use bsl_shared::domain::{CompletionItem, CompletionKind};
 use std::collections::HashMap;
+use std::time::Instant;
+use tracing::{debug, Span};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrefixMatch {
@@ -63,21 +65,71 @@ pub struct RankingCandidate {
     pub scope: Option<SymbolScope>,
 }
 
+#[allow(dead_code)]
 pub fn rank_candidates(
-    mut candidates: Vec<RankingCandidate>,
+    candidates: Vec<RankingCandidate>,
     context: &CompletionContext,
 ) -> RankingOutput {
+    rank_candidates_with_trace(candidates, context, None)
+}
+
+pub fn rank_candidates_with_trace(
+    mut candidates: Vec<RankingCandidate>,
+    context: &CompletionContext,
+    request_id: Option<u64>,
+) -> RankingOutput {
+    let trace_enabled = request_id.is_some();
     let total_candidates = candidates.len();
     let prefix = context.current_word.to_lowercase();
     let member_access = context.member_access;
 
-    let mut ranked = Vec::with_capacity(candidates.len());
+    let filter_span = if let Some(request_id) = request_id {
+        tracing::debug_span!(
+            "completion.filter",
+            request_id = request_id,
+            prefix = %prefix
+        )
+    } else {
+        Span::none()
+    };
+    let _filter_guard = filter_span.enter();
+    let filter_started = if trace_enabled { Some(Instant::now()) } else { None };
+
+    let mut filtered = Vec::with_capacity(candidates.len());
     for candidate in candidates.drain(..) {
         let prefix_match = match_prefix(&candidate.label_lower, &prefix);
         if !prefix.is_empty() && prefix_match == PrefixMatch::None {
             continue;
         }
+        filtered.push(candidate);
+    }
 
+    if let (Some(request_id), Some(started)) = (request_id, filter_started) {
+        debug!(
+            request_id = request_id,
+            stage = "filter",
+            elapsed_ms = started.elapsed().as_millis(),
+            total_candidates = total_candidates,
+            filtered = filtered.len()
+        );
+    }
+    drop(_filter_guard);
+
+    let rank_span = if let Some(request_id) = request_id {
+        tracing::debug_span!(
+            "completion.rank",
+            request_id = request_id,
+            filtered = filtered.len()
+        )
+    } else {
+        Span::none()
+    };
+    let _rank_guard = rank_span.enter();
+    let rank_started = if trace_enabled { Some(Instant::now()) } else { None };
+
+    let mut ranked = Vec::with_capacity(filtered.len());
+    for candidate in filtered {
+        let prefix_match = match_prefix(&candidate.label_lower, &prefix);
         let signals = RankingSignals {
             prefix_match,
             source_priority: candidate.source_priority,
@@ -157,8 +209,20 @@ pub fn rank_candidates(
         }
     }
 
+    let dedup_removed = total_candidates.saturating_sub(unique.len());
+    if let (Some(request_id), Some(started)) = (request_id, rank_started) {
+        debug!(
+            request_id = request_id,
+            stage = "rank",
+            elapsed_ms = started.elapsed().as_millis(),
+            total_candidates = total_candidates,
+            dedup_removed = dedup_removed,
+            unique = unique.len()
+        );
+    }
+
     RankingOutput {
-        dedup_removed: total_candidates.saturating_sub(unique.len()),
+        dedup_removed,
         total_candidates,
         candidates: unique,
         score_samples,
@@ -319,6 +383,100 @@ mod tests {
     use super::*;
     use crate::system::SymbolScope;
     use bsl_shared::domain::{CompletionItem, CompletionKind};
+    use std::cmp::Ordering;
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::fmt::MakeWriter;
+
+    #[derive(Clone, Default)]
+    struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl SharedWriter {
+        fn contents(&self) -> String {
+            let guard = self.0.lock().expect("lock log buffer");
+            String::from_utf8_lossy(&guard).to_string()
+        }
+    }
+
+    struct SharedWriterGuard(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for SharedWriterGuard {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let mut guard = self.0.lock().map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::Other, "log buffer poisoned")
+            })?;
+            guard.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for SharedWriter {
+        type Writer = SharedWriterGuard;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            SharedWriterGuard(self.0.clone())
+        }
+    }
+
+    fn ctx(prefix: &str, member_access: bool) -> CompletionContext {
+        CompletionContext {
+            current_word: prefix.to_string(),
+            member_access,
+            member_base: None,
+            trigger_char: None,
+            can_add_statements: true,
+            expects_type: false,
+            can_add_functions: true,
+        }
+    }
+
+    fn candidate(
+        label: &str,
+        kind: CompletionKind,
+        source_priority: u8,
+        scope: Option<SymbolScope>,
+        owner_type: Option<&str>,
+    ) -> RankingCandidate {
+        RankingCandidate {
+            item: CompletionItem::new(label.to_string(), kind),
+            owner_type: owner_type.map(|value| value.to_string()),
+            label_lower: label.to_lowercase(),
+            source_priority,
+            scope,
+        }
+    }
+
+    fn ranked(
+        label: &str,
+        kind: CompletionKind,
+        source_priority: u8,
+        scope: Option<SymbolScope>,
+        owner_type: Option<&str>,
+        score: f32,
+    ) -> RankedCandidate {
+        let owner_type = owner_type.map(|value| value.to_string());
+        RankedCandidate {
+            item: CompletionItem::new(label.to_string(), kind),
+            owner_type: owner_type.clone(),
+            label_lower: label.to_lowercase(),
+            source_priority,
+            scope,
+            score,
+            signals: RankingSignals {
+                prefix_match: PrefixMatch::None,
+                source_priority,
+                scope,
+                kind,
+                member_access: false,
+                has_owner: owner_type.is_some(),
+            },
+            origin_sources: vec![source_priority],
+        }
+    }
 
     #[test]
     fn rank_prefers_exact_prefix() {
@@ -500,5 +658,308 @@ mod tests {
         assert_eq!(ranked.candidates.len(), 1);
         assert_eq!(item.detail.as_deref(), Some("detail"));
         assert_eq!(item.documentation.as_deref(), Some("doc"));
+    }
+
+    #[test]
+    fn match_prefix_empty_returns_none() {
+        assert_eq!(match_prefix("abc", ""), PrefixMatch::None);
+    }
+
+    #[test]
+    fn match_prefix_variants() {
+        assert_eq!(match_prefix("abc", "abc"), PrefixMatch::Exact);
+        assert_eq!(match_prefix("abcd", "abc"), PrefixMatch::StartsWith);
+        assert_eq!(match_prefix("xabc", "abc"), PrefixMatch::Contains);
+        assert_eq!(match_prefix("xyz", "abc"), PrefixMatch::None);
+    }
+
+    #[test]
+    fn filtering_drops_non_matching_when_prefix_present() {
+        let ctx = ctx("ab", false);
+        let candidates = vec![
+            candidate("ab", CompletionKind::Function, 1, None, None),
+            candidate("cab", CompletionKind::Function, 1, None, None),
+            candidate("xyz", CompletionKind::Function, 1, None, None),
+        ];
+
+        let ranked = rank_candidates(candidates, &ctx);
+        let labels: Vec<&str> = ranked
+            .candidates
+            .iter()
+            .map(|item| item.label_lower.as_str())
+            .collect();
+
+        assert!(labels.contains(&"ab"));
+        assert!(labels.contains(&"cab"));
+        assert!(!labels.contains(&"xyz"));
+        assert_eq!(ranked.summary.prefix_none, 0);
+    }
+
+    #[test]
+    fn filtering_keeps_all_when_prefix_empty() {
+        let ctx = ctx("", false);
+        let candidates = vec![
+            candidate("ab", CompletionKind::Function, 1, None, None),
+            candidate("xyz", CompletionKind::Function, 1, None, None),
+        ];
+
+        let ranked = rank_candidates(candidates, &ctx);
+        assert_eq!(ranked.candidates.len(), 2);
+        assert_eq!(ranked.summary.prefix_none, 2);
+    }
+
+    #[test]
+    fn score_candidate_member_access_bonus_only_for_member_kinds() {
+        let mut signals = RankingSignals {
+            prefix_match: PrefixMatch::StartsWith,
+            source_priority: 2,
+            scope: Some(SymbolScope::Global),
+            kind: CompletionKind::Keyword,
+            member_access: true,
+            has_owner: false,
+        };
+        let keyword_score = score_candidate(&signals, "abc");
+        signals.kind = CompletionKind::Method;
+        let method_score = score_candidate(&signals, "abc");
+
+        assert!(method_score > keyword_score);
+    }
+
+    #[test]
+    fn score_candidate_clamps_to_one() {
+        let signals = RankingSignals {
+            prefix_match: PrefixMatch::Exact,
+            source_priority: 0,
+            scope: Some(SymbolScope::Local),
+            kind: CompletionKind::Method,
+            member_access: true,
+            has_owner: true,
+        };
+        let score = score_candidate(&signals, "x");
+        assert!((score - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn score_candidate_does_not_go_negative() {
+        let signals = RankingSignals {
+            prefix_match: PrefixMatch::None,
+            source_priority: 10,
+            scope: None,
+            kind: CompletionKind::Keyword,
+            member_access: false,
+            has_owner: false,
+        };
+        let label = "a".repeat(1000);
+        let score = score_candidate(&signals, &label);
+        assert_eq!(score, 0.0);
+    }
+
+    #[test]
+    fn dedup_key_differs_by_scope_and_kind() {
+        let base = ranked(
+            "abc",
+            CompletionKind::Function,
+            1,
+            Some(SymbolScope::Local),
+            None,
+            0.5,
+        );
+        let diff_scope = ranked(
+            "abc",
+            CompletionKind::Function,
+            1,
+            Some(SymbolScope::Global),
+            None,
+            0.5,
+        );
+        let diff_kind = ranked(
+            "abc",
+            CompletionKind::Method,
+            1,
+            Some(SymbolScope::Local),
+            None,
+            0.5,
+        );
+
+        assert_ne!(dedup_key(&base), dedup_key(&diff_scope));
+        assert_ne!(dedup_key(&base), dedup_key(&diff_kind));
+    }
+
+    #[test]
+    fn merge_sources_dedup_and_sort() {
+        let merged = merge_sources(&[3, 1, 1], &[2, 3]);
+        assert_eq!(merged, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn stable_order_prefers_lower_source_priority() {
+        let a = ranked(
+            "abc",
+            CompletionKind::Function,
+            1,
+            Some(SymbolScope::Global),
+            None,
+            0.5,
+        );
+        let b = ranked(
+            "abc",
+            CompletionKind::Function,
+            2,
+            Some(SymbolScope::Global),
+            None,
+            0.5,
+        );
+
+        assert_eq!(stable_order(&a, &b), Ordering::Less);
+    }
+
+    #[test]
+    fn stable_order_prefers_lexicographic_label() {
+        let a = ranked(
+            "aaa",
+            CompletionKind::Function,
+            1,
+            Some(SymbolScope::Global),
+            None,
+            0.5,
+        );
+        let b = ranked(
+            "bbb",
+            CompletionKind::Function,
+            1,
+            Some(SymbolScope::Global),
+            None,
+            0.5,
+        );
+
+        assert_eq!(stable_order(&a, &b), Ordering::Less);
+    }
+
+    #[test]
+    fn stable_order_prefers_kind_rank() {
+        let a = ranked(
+            "abc",
+            CompletionKind::Method,
+            1,
+            Some(SymbolScope::Global),
+            None,
+            0.5,
+        );
+        let b = ranked(
+            "abc",
+            CompletionKind::Keyword,
+            1,
+            Some(SymbolScope::Global),
+            None,
+            0.5,
+        );
+
+        assert_eq!(stable_order(&a, &b), Ordering::Less);
+    }
+
+    #[test]
+    fn stable_order_prefers_scope_rank() {
+        let a = ranked(
+            "abc",
+            CompletionKind::Function,
+            1,
+            Some(SymbolScope::Local),
+            None,
+            0.5,
+        );
+        let b = ranked(
+            "abc",
+            CompletionKind::Function,
+            1,
+            Some(SymbolScope::Global),
+            None,
+            0.5,
+        );
+
+        assert_eq!(stable_order(&a, &b), Ordering::Less);
+    }
+
+    #[test]
+    fn stable_order_prefers_none_owner_type() {
+        let a = ranked(
+            "abc",
+            CompletionKind::Function,
+            1,
+            Some(SymbolScope::Global),
+            None,
+            0.5,
+        );
+        let b = ranked(
+            "abc",
+            CompletionKind::Function,
+            1,
+            Some(SymbolScope::Global),
+            Some("Owner"),
+            0.5,
+        );
+
+        assert_eq!(stable_order(&a, &b), Ordering::Less);
+    }
+
+    #[test]
+    fn summary_counts_prefix_member_and_owner() {
+        let ctx = ctx("ab", true);
+        let candidates = vec![
+            candidate("ab", CompletionKind::Function, 1, None, None),
+            candidate("abx", CompletionKind::Function, 1, None, None),
+            candidate("cab", CompletionKind::Function, 1, None, Some("Owner")),
+        ];
+
+        let ranked = rank_candidates(candidates, &ctx);
+
+        assert_eq!(ranked.summary.prefix_exact, 1);
+        assert_eq!(ranked.summary.prefix_starts, 1);
+        assert_eq!(ranked.summary.prefix_contains, 1);
+        assert_eq!(ranked.summary.prefix_none, 0);
+        assert_eq!(ranked.summary.member_access, 3);
+        assert_eq!(ranked.summary.has_owner, 1);
+    }
+
+    #[test]
+    fn rank_candidates_emits_trace_logs_with_request_id() {
+        let ctx = CompletionContext {
+            current_word: "a".to_string(),
+            member_access: false,
+            member_base: None,
+            trigger_char: None,
+            can_add_statements: true,
+            expects_type: false,
+            can_add_functions: true,
+        };
+
+        let candidates = vec![RankingCandidate {
+            item: CompletionItem::new("abc".to_string(), CompletionKind::Function),
+            owner_type: None,
+            label_lower: "abc".to_string(),
+            source_priority: 2,
+            scope: Some(SymbolScope::Global),
+        }];
+
+        let writer = SharedWriter::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(writer.clone())
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            let _ = rank_candidates_with_trace(candidates, &ctx, Some(7));
+        });
+
+        let output = writer.contents();
+        assert!(
+            output.contains("stage=\"filter\"") || output.contains("stage=filter"),
+            "expected filter stage in trace logs: {}",
+            output
+        );
+        assert!(
+            output.contains("stage=\"rank\"") || output.contains("stage=rank"),
+            "expected rank stage in trace logs: {}",
+            output
+        );
     }
 }

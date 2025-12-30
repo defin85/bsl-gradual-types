@@ -3,7 +3,10 @@
 //! Functions for LSP completion requests and contextual auto-completion.
 
 use anyhow::Result;
-use tracing::info;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
+use std::time::Instant;
+use tracing::{debug, info, Span};
 
 use bsl_shared::domain::metadata_constants::get_collection_kind;
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
@@ -11,12 +14,23 @@ use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, Typ
 use super::super::extractors::symbol_extractor::{
     extract_word_at_position, is_identifier_char, utf16_to_byte_offset,
 };
-use super::completion_ranking::{rank_candidates, RankingCandidate};
+use super::completion_ranking::{rank_candidates_with_trace, RankingCandidate};
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
 use crate::system::{IndexItemKind, IndexSnapshot, IntellisenseIndexStore, SymbolScope, TypeKind};
 
 pub const COMPLETION_MAX_ITEMS: usize = 200;
 const CONTEXT_WINDOW_CHARS: usize = 256;
+static COMPLETION_TRACE_ENABLED: OnceLock<bool> = OnceLock::new();
+static COMPLETION_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+
+fn completion_trace_enabled() -> bool {
+    *COMPLETION_TRACE_ENABLED
+        .get_or_init(|| std::env::var("BSL_COMPLETION_TRACE").is_ok())
+}
+
+fn next_completion_request_id() -> u64 {
+    COMPLETION_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone)]
 pub struct CompletionCandidate {
@@ -65,12 +79,52 @@ pub async fn get_completion(
     index: &IntellisenseIndexStore,
     metadata_lookup: &TypeMetadataLookup,
 ) -> Result<CompletionResult> {
-    info!("Completion request: line {}, column {}", line, column);
-
+    let trace_request_id = if completion_trace_enabled() {
+        Some(next_completion_request_id())
+    } else {
+        None
+    };
     let context = analyze_completion_context(file_content, line, column);
     let snapshot = index.snapshot();
 
+    if let Some(request_id) = trace_request_id {
+        info!(
+            request_id = request_id,
+            line = line,
+            column = column,
+            "Completion request"
+        );
+    } else {
+        info!("Completion request: line {}, column {}", line, column);
+    }
+
+    let request_span = if let Some(request_id) = trace_request_id {
+        tracing::debug_span!(
+            "completion.request",
+            request_id = request_id,
+            line = line,
+            column = column,
+            member_access = context.member_access,
+            trigger_char = ?context.trigger_char
+        )
+    } else {
+        Span::none()
+    };
+    let _request_guard = request_span.enter();
+
     let mut candidates: Vec<Candidate> = Vec::new();
+
+    let collect_span = if let Some(request_id) = trace_request_id {
+        tracing::debug_span!("completion.collect", request_id = request_id)
+    } else {
+        Span::none()
+    };
+    let _collect_guard = collect_span.enter();
+    let collect_started = if trace_request_id.is_some() {
+        Some(Instant::now())
+    } else {
+        None
+    };
 
     if context.member_access {
         if let Some(base_name) = context.member_base.as_deref() {
@@ -93,6 +147,15 @@ pub async fn get_completion(
         add_types(&snapshot, &mut candidates, 3);
         add_keywords(&snapshot, &mut candidates, 4);
     }
+    if let (Some(request_id), Some(started)) = (trace_request_id, collect_started) {
+        debug!(
+            request_id = request_id,
+            stage = "collect",
+            elapsed_ms = started.elapsed().as_millis(),
+            candidates = candidates.len()
+        );
+    }
+    drop(_collect_guard);
 
     let ranking_input: Vec<RankingCandidate> = candidates
         .into_iter()
@@ -105,11 +168,23 @@ pub async fn get_completion(
         })
         .collect();
 
-    let ranked = rank_candidates(ranking_input, &context);
+    let ranked = rank_candidates_with_trace(ranking_input, &context, trace_request_id);
     let is_incomplete = ranked.candidates.len() > COMPLETION_MAX_ITEMS;
     let limited = ranked.candidates.into_iter().take(COMPLETION_MAX_ITEMS);
 
-    let items = limited
+    let format_span = if let Some(request_id) = trace_request_id {
+        tracing::debug_span!("completion.format", request_id = request_id)
+    } else {
+        Span::none()
+    };
+    let _format_guard = format_span.enter();
+    let format_started = if trace_request_id.is_some() {
+        Some(Instant::now())
+    } else {
+        None
+    };
+
+    let items: Vec<CompletionCandidate> = limited
         .map(|candidate| CompletionCandidate {
             item: with_sort_text(
                 candidate.item,
@@ -122,6 +197,17 @@ pub async fn get_completion(
             origin_sources: candidate.origin_sources,
         })
         .collect();
+
+    if let (Some(request_id), Some(started)) = (trace_request_id, format_started) {
+        debug!(
+            request_id = request_id,
+            stage = "format",
+            elapsed_ms = started.elapsed().as_millis(),
+            returned = items.len(),
+            is_incomplete = is_incomplete
+        );
+    }
+    drop(_format_guard);
 
     Ok(CompletionResult {
         items,
@@ -514,9 +600,9 @@ pub fn resolve_method_completion(
     let detail = if method.return_type.is_empty() {
         None
     } else {
-        Some(method.return_type)
+        Some(method.return_type.clone())
     };
-    let documentation = method.description;
+    let documentation = method.description.clone();
     let insert_text = if snippet_support {
         build_method_snippet(&method)
     } else {
@@ -535,13 +621,13 @@ pub(crate) fn build_call_snippet(name: &str, params: &[(String, bool)]) -> Optio
         return None;
     }
 
-    let mut required = Vec::new();
-    let mut optional = Vec::new();
+    let mut required: Vec<(String, bool)> = Vec::new();
+    let mut optional: Vec<(String, bool)> = Vec::new();
     for (param_name, is_optional) in params {
         if *is_optional {
-            optional.push((param_name, true));
+            optional.push((param_name.clone(), true));
         } else {
-            required.push((param_name, false));
+            required.push((param_name.clone(), false));
         }
     }
 
@@ -605,6 +691,84 @@ mod tests {
     fn extract_member_base_simple() {
         let base = extract_member_base("Объект.").unwrap();
         assert_eq!(base, "Объект");
+    }
+
+    fn utf16_column(content: &str, marker: &str) -> (u32, u32) {
+        let byte_index = content
+            .find(marker)
+            .unwrap_or_else(|| panic!("Marker not found: {}", marker));
+        let before = &content[..byte_index];
+        let line = before.lines().count().saturating_sub(1) as u32;
+        let last_line = before.lines().last().unwrap_or("");
+        let column = last_line.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        (line, column)
+    }
+
+    #[test]
+    fn completion_context_detects_member_access_and_trigger_char() {
+        let content = "Объект.";
+        let (line, column) = utf16_column(content, ".");
+        let ctx = analyze_completion_context(content, line, column + 1);
+
+        assert!(ctx.member_access);
+        assert_eq!(ctx.member_base.as_deref(), Some("Объект"));
+        assert_eq!(ctx.trigger_char, Some('.'));
+    }
+
+    #[test]
+    fn completion_context_detects_trigger_char_for_call() {
+        let content = "Функция(";
+        let (line, column) = utf16_column(content, "(");
+        let ctx = analyze_completion_context(content, line, column + 1);
+
+        assert!(!ctx.member_access);
+        assert_eq!(ctx.trigger_char, Some('('));
+    }
+
+    #[test]
+    fn completion_context_reads_current_word_with_utf16_column() {
+        let content = "Перем a😀b";
+        let (line, column) = utf16_column(content, "b");
+        let ctx = analyze_completion_context(content, line, column + 1);
+
+        assert_eq!(ctx.current_word, "b");
+    }
+
+    #[test]
+    fn completion_context_can_add_statements_flags() {
+        let content = "Если Истина Тогда";
+        let ctx = analyze_completion_context(content, 0, content.len() as u32);
+        assert!(ctx.can_add_statements);
+
+        let content = "Перем Значение";
+        let ctx = analyze_completion_context(content, 0, content.len() as u32);
+        assert!(!ctx.can_add_statements);
+    }
+
+    #[test]
+    fn completion_context_expects_type_flags() {
+        let content = "Перем Значение: ";
+        let ctx = analyze_completion_context(content, 0, content.len() as u32);
+        assert!(ctx.expects_type);
+
+        let content = "Тип(";
+        let ctx = analyze_completion_context(content, 0, content.len() as u32);
+        assert!(ctx.expects_type);
+    }
+
+    #[test]
+    fn completion_context_can_add_functions_flags() {
+        let content = "Процедура Тест()";
+        let ctx = analyze_completion_context(content, 0, content.len() as u32);
+        assert!(!ctx.can_add_functions);
+
+        let content = "Функция Тест()";
+        let ctx = analyze_completion_context(content, 0, content.len() as u32);
+        assert!(!ctx.can_add_functions);
+
+        let content = "Перем Значение";
+        let ctx = analyze_completion_context(content, 0, content.len() as u32);
+        assert!(ctx.can_add_functions);
     }
 
     #[tokio::test]

@@ -580,7 +580,7 @@ pub async fn invalidate_file_cache(
 ///
 /// Searches for the last assignment to the variable BEFORE the specified line,
 /// to show the actual type at cursor position.
-fn find_variable_type_at_position(
+pub(crate) fn find_variable_type_at_position(
     ir_program: &SemanticProgram,
     var_name: &str,
     target_scope: ScopeId,

@@ -363,13 +363,29 @@ impl TypeSystemService {
         column: u32,
         file_uri: Option<&str>,
     ) -> Result<completion_service::CompletionResult> {
-        completion_service::get_completion(
+        let file_path = file_uri
+            .and_then(|uri| Url::parse(uri).ok())
+            .and_then(|url| url.to_file_path().ok())
+            .map(|path| path.to_string_lossy().to_string())
+            .or_else(|| file_uri.map(|uri| uri.to_string()));
+
+        let analysis_ctx = file_path.as_deref().map(|path| {
+            completion_service::CompletionAnalysisContext {
+                parser: self.parser.as_ref(),
+                analysis_engine: self.analysis_engine.as_ref(),
+                ir_cache: self.ir_cache.as_ref(),
+                file_path: path,
+            }
+        });
+
+        completion_service::get_completion_with_analysis(
             file_content,
             line,
             column,
             file_uri,
             &self.intellisense_index,
             &self.metadata_lookup,
+            analysis_ctx.as_ref(),
         )
         .await
     }

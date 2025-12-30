@@ -4,19 +4,27 @@
 
 use anyhow::Result;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Instant;
-use tracing::{debug, info, Span};
+use tracing::{debug, info, warn, Span};
 
 use bsl_shared::domain::metadata_constants::get_collection_kind;
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
+use bsl_shared::engine::AnalysisEngine;
+use bsl_shared::ir::{ScopeId, SemanticProgram};
+use bsl_shared::utils::hash::hash_content;
 
 use super::super::extractors::symbol_extractor::{
     extract_word_at_position, is_identifier_char, utf16_to_byte_offset,
 };
 use super::completion_ranking::{rank_candidates_with_trace, RankingCandidate};
+use super::hover_service::find_variable_type_at_position;
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
-use crate::system::{IndexItemKind, IndexSnapshot, IntellisenseIndexStore, SymbolScope, TypeKind};
+use crate::system::{
+    IndexItemKind, IndexSnapshot, IntellisenseIndexStore, IrCache, ParserCoordinator, SymbolScope,
+    TypeKind,
+};
 
 pub const COMPLETION_MAX_ITEMS: usize = 200;
 const CONTEXT_WINDOW_CHARS: usize = 256;
@@ -60,6 +68,13 @@ pub struct CompletionResult {
     pub stats: CompletionStats,
 }
 
+pub(crate) struct CompletionAnalysisContext<'a> {
+    pub parser: &'a ParserCoordinator,
+    pub analysis_engine: &'a AnalysisEngine,
+    pub ir_cache: &'a IrCache,
+    pub file_path: &'a str,
+}
+
 /// LSP operations - get completion at position
 ///
 /// # Arguments
@@ -78,6 +93,27 @@ pub async fn get_completion(
     file_uri: Option<&str>,
     index: &IntellisenseIndexStore,
     metadata_lookup: &TypeMetadataLookup,
+) -> Result<CompletionResult> {
+    get_completion_with_analysis(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index,
+        metadata_lookup,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn get_completion_with_analysis(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index: &IntellisenseIndexStore,
+    metadata_lookup: &TypeMetadataLookup,
+    analysis: Option<&CompletionAnalysisContext<'_>>,
 ) -> Result<CompletionResult> {
     let trace_request_id = if completion_trace_enabled() {
         Some(next_completion_request_id())
@@ -128,12 +164,27 @@ pub async fn get_completion(
 
     if context.member_access {
         if let Some(base_name) = context.member_base.as_deref() {
-            if let Some(type_name) =
-                resolve_type_name(&snapshot, base_name, metadata_lookup)
-            {
+            if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup) {
                 add_methods(metadata_lookup, &type_name, &mut candidates, 0);
+                add_properties_from_resolution(
+                    metadata_lookup,
+                    &TypeResolution::explicit(&type_name),
+                    &mut candidates,
+                    1,
+                );
             } else if let Some(kind) = get_collection_kind(base_name) {
                 add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
+            } else if let Some(resolution) = resolve_member_owner_type(
+                analysis,
+                file_content,
+                line,
+                column,
+                base_name,
+            )
+            .await
+            {
+                add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
+                add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
             }
         }
 
@@ -422,6 +473,159 @@ fn add_methods(
     }
 }
 
+fn add_methods_from_resolution(
+    metadata_lookup: &TypeMetadataLookup,
+    resolution: &TypeResolution,
+    target: &mut Vec<Candidate>,
+    priority: u8,
+) {
+    let owner_type = resolution.type_name();
+    let methods = metadata_lookup.get_methods(resolution);
+    for method in methods {
+        target.push(Candidate::new(
+            CompletionItem::new(method.name, CompletionKind::Method),
+            priority,
+            Some(owner_type.clone()),
+            None,
+        ));
+    }
+}
+
+fn add_properties_from_resolution(
+    metadata_lookup: &TypeMetadataLookup,
+    resolution: &TypeResolution,
+    target: &mut Vec<Candidate>,
+    priority: u8,
+) {
+    let owner_type = resolution.type_name();
+    let properties = metadata_lookup.get_properties(resolution);
+    for property in properties {
+        target.push(Candidate::new(
+            CompletionItem::new(property.name, CompletionKind::Property),
+            priority,
+            Some(owner_type.clone()),
+            None,
+        ));
+    }
+}
+
+async fn resolve_member_owner_type(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    base_name: &str,
+) -> Option<TypeResolution> {
+    let ctx = analysis?;
+    let cache_key = hash_content(&format!("{}\n{}", ctx.file_path, file_content));
+    let ir_program = if let Some(cached) = ctx.ir_cache.get(cache_key).await {
+        cached
+    } else {
+        let ir = match ctx.parser.parse_to_ir(file_content, ctx.file_path) {
+            Ok(program) => program,
+            Err(err) => {
+                warn!("Completion IR parse failed: {}", err);
+                return None;
+            }
+        };
+        let ir_arc = Arc::new(ir);
+        ctx.ir_cache.put(cache_key, ir_arc.clone()).await;
+        ir_arc
+    };
+
+    let scope_id = resolve_scope_for_member(&ir_program, line, column);
+    if let Some(flow_type) =
+        find_variable_type_at_position(&ir_program, base_name, scope_id, line)
+    {
+        return Some(flow_type);
+    }
+
+    let resolver = ctx.analysis_engine.get_resolver();
+    let mut resolved =
+        resolver.resolve_variable_with_context(base_name, &ir_program.symbols, scope_id);
+    if resolved.is_unknown() {
+        if let Some(best_effort) =
+            find_variable_resolution_best_effort(&ir_program.symbols, base_name, line)
+        {
+            resolved = best_effort;
+        }
+    }
+
+    Some(resolved)
+}
+
+fn resolve_scope_for_member(ir_program: &SemanticProgram, line: u32, column: u32) -> ScopeId {
+    ir_program
+        .find_node_at_position(line, column)
+        .map(|node| node.scope_id)
+        .or_else(|| {
+            column
+                .checked_sub(1)
+                .and_then(|col| ir_program.find_node_at_position(line, col).map(|node| node.scope_id))
+        })
+        .or_else(|| find_scope_by_line(ir_program, line))
+        .or_else(|| find_scope_before_position(ir_program, line, column))
+        .unwrap_or(ir_program.symbols.root_scope)
+}
+
+fn find_scope_by_line(ir_program: &SemanticProgram, line: u32) -> Option<ScopeId> {
+    ir_program
+        .nodes
+        .iter()
+        .filter(|node| node.span.start_line <= line && line <= node.span.end_line)
+        .min_by_key(|node| {
+            let lines = node.span.end_line.saturating_sub(node.span.start_line);
+            let cols = node.span.end_column.saturating_sub(node.span.start_column);
+            (lines, cols)
+        })
+        .map(|node| node.scope_id)
+}
+
+fn find_scope_before_position(
+    ir_program: &SemanticProgram,
+    line: u32,
+    column: u32,
+) -> Option<ScopeId> {
+    ir_program
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.span.end_line < line
+                || (node.span.end_line == line && node.span.end_column <= column)
+        })
+        .max_by_key(|node| (node.span.end_line, node.span.end_column))
+        .map(|node| node.scope_id)
+}
+
+fn find_variable_resolution_best_effort(
+    symbols: &bsl_shared::ir::SymbolTable,
+    name: &str,
+    line: u32,
+) -> Option<TypeResolution> {
+    let target = name.to_lowercase();
+    let mut best: Option<(u32, TypeResolution)> = None;
+
+    for scope in symbols.scopes.values() {
+        for (var_name, state) in &scope.variables {
+            if var_name.to_lowercase() != target {
+                continue;
+            }
+            if state.declaration_span.start_line > line {
+                continue;
+            }
+            let candidate_line = state.declaration_span.start_line;
+            match &best {
+                Some((best_line, _)) if *best_line > candidate_line => continue,
+                _ => {
+                    best = Some((candidate_line, state.resolution.clone()));
+                }
+            }
+        }
+    }
+
+    best.map(|(_, resolution)| resolution)
+}
+
 fn add_symbols(
     snapshot: &IndexSnapshot,
     file_uri: Option<&str>,
@@ -677,8 +881,13 @@ fn escape_snippet_text(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::system::IndexItem;
+    use crate::system::IrCache;
     use std::sync::Arc;
-    use bsl_shared::domain::repository::InMemoryTypeRepository;
+    use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+    use bsl_shared::domain::resolver::TypeResolver;
+    use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawPropertyData, RawTypeData};
+    use bsl_shared::engine::AnalysisEngine;
+    use crate::system::ParserCoordinator;
 
     #[test]
     fn trim_to_window_keeps_tail() {
@@ -835,5 +1044,88 @@ mod tests {
 
         assert!(result.is_incomplete);
         assert_eq!(result.items.len(), COMPLETION_MAX_ITEMS);
+    }
+
+    #[tokio::test]
+    async fn completion_resolves_variable_type_for_member_access() {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository
+            .load_types(vec![RawTypeData {
+                name: "ТаблицаЗначений".to_string(),
+                source: RawDataSource::Platform,
+                methods: vec![RawMethodData {
+                    name: "Добавить".to_string(),
+                    return_type: "Булево".to_string(),
+                    ..Default::default()
+                }],
+                properties: vec![RawPropertyData {
+                    name: "Количество".to_string(),
+                    prop_type: "Число".to_string(),
+                    is_readonly: true,
+                }],
+                ..Default::default()
+            }])
+            .expect("load types");
+
+        let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> =
+            repository.clone();
+        let resolver = Arc::new(TypeResolver::new(repo.clone()));
+        let analysis_engine = AnalysisEngine::new(resolver.clone(), repo.clone());
+        let parser = ParserCoordinator::new_with_resolver(repo.clone(), resolver);
+        let ir_cache = IrCache::new(4);
+        let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+        let index = IntellisenseIndexStore::new("cfg", "platform");
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    ТаблЗнач = Новый ТаблицаЗначений;\n",
+            "    ТаблЗнач.\n",
+            "КонецПроцедуры\n"
+        );
+        let line = 2;
+        let line_text = "    ТаблЗнач.";
+        let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+        let ctx = CompletionAnalysisContext {
+            parser: &parser,
+            analysis_engine: &analysis_engine,
+            ir_cache: &ir_cache,
+            file_path: "completion_test.bsl",
+        };
+
+        let resolved = resolve_member_owner_type(
+            Some(&ctx),
+            content,
+            line,
+            column,
+            "ТаблЗнач",
+        )
+        .await
+        .expect("member type");
+        assert_eq!(resolved.type_name(), "ТаблицаЗначений");
+
+        let result = get_completion_with_analysis(
+            content,
+            line,
+            column,
+            Some("completion_test.bsl"),
+            &index,
+            &metadata_lookup,
+            Some(&ctx),
+        )
+        .await
+        .expect("completion ok");
+
+        let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+        assert!(
+            labels.contains(&"Добавить".to_string()),
+            "labels: {:?}",
+            labels
+        );
+        assert!(
+            labels.contains(&"Количество".to_string()),
+            "labels: {:?}",
+            labels
+        );
     }
 }

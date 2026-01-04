@@ -22,7 +22,7 @@ Merkle‑фингерпринт реализован и используется
 
 - Merkle‑сборка (leaf/node/root + версия `"merkle-root-v1"`) реализована в `backend/src/system/system_coordinator/config_loader.rs`.
 - `config_fingerprint()` и `config_layer_b_fingerprint()` используют Merkle root для `source_fingerprint` (DiskCache keys): `backend/src/system/system_coordinator/config_loader.rs`.
-- Тесты Merkle root (стабильность/изменение одного файла/odd-count/порядок/дедуп/XML+BSL) добавлены в `backend/src/system/system_coordinator/config_loader.rs` и проходят: `cargo test -p bsl-backend merkle_`.
+- Тесты Merkle root (пустой набор, odd-count, порядок, дедуп, mixed XML+BSL, `artifact_kind`, `normalize_path`) добавлены в `backend/src/system/system_coordinator/config_loader.rs` и проходят: `cargo test -p bsl-backend merkle_`.
 - Интеграционная проверка DiskCache reuse проходит: `cargo test -p bsl-backend config_metadata_disk_cache_reuse`.
 
 ---

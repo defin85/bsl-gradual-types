@@ -2036,6 +2036,79 @@ mod merkle_tests {
 
         assert_ne!(no_modules, with_modules);
     }
+
+    #[test]
+    fn normalize_path_strips_root_and_uses_forward_slashes() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let path = root
+            .join("CommonModules")
+            .join("M")
+            .join("Ext")
+            .join("Module.bsl");
+        write_file(&path, ""); // файл должен существовать для реалистичного кейса
+
+        assert_eq!(
+            normalize_path(&path, Some(root)),
+            "CommonModules/M/Ext/Module.bsl"
+        );
+    }
+
+    #[test]
+    fn merkle_root_depends_on_artifact_kind_strict() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let path = root.join("A.any");
+        write_file(&path, "same");
+
+        let fp_one = merkle_root_for_artifacts(
+            &[MerkleArtifact {
+                kind: "xml",
+                path: path.clone(),
+                path_norm: "A".to_string(),
+            }],
+            true,
+        );
+        let fp_two = merkle_root_for_artifacts(
+            &[
+                MerkleArtifact {
+                    kind: "xml",
+                    path: path.clone(),
+                    path_norm: "A".to_string(),
+                },
+                MerkleArtifact {
+                    kind: "bsl",
+                    path,
+                    path_norm: "A".to_string(),
+                },
+            ],
+            true,
+        );
+
+        assert_ne!(fp_one, fp_two);
+    }
+
+    #[test]
+    fn merkle_fingerprint_paths_with_modules_dedups_duplicate_bsl_paths_strict() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let xml = root.join("Configuration.xml");
+        let bsl = root.join("CommonModules").join("M").join("Module.bsl");
+        write_file(&xml, "<Configuration/>");
+        write_file(&bsl, "Процедура X() Экспорт\nКонецПроцедуры\n");
+
+        let xml_paths = [xml];
+
+        let fp_unique =
+            merkle_fingerprint_paths_with_modules(root, &xml_paths, &[bsl.clone()], true);
+        let fp_dup =
+            merkle_fingerprint_paths_with_modules(root, &xml_paths, &[bsl.clone(), bsl], true);
+
+        assert_eq!(fp_unique, fp_dup);
+    }
 }
 
 fn snapshot_is_empty(snapshot: &crate::system::IndexSnapshot) -> bool {

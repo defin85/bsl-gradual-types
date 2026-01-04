@@ -1882,6 +1882,162 @@ fn duration_to_u64_nanos(duration: std::time::Duration) -> u64 {
     }
 }
 
+#[cfg(test)]
+mod merkle_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn write_file(path: &Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, contents.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn merkle_root_for_empty_artifacts_matches_spec() {
+        let artifacts: Vec<MerkleArtifact> = Vec::new();
+        let root = merkle_root_for_artifacts(&artifacts, true);
+
+        let empty = [0u8; 32];
+        let root_raw = blake3::Hash::from(merkle_node_hash(&empty, &empty));
+
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&[0x02]);
+        hasher.update(b"merkle-root-v1");
+        hasher.update(&[0x00]);
+        hasher.update(root_raw.as_bytes());
+        let expected = hasher.finalize().to_hex().to_string();
+
+        assert_eq!(root, expected);
+    }
+
+    #[test]
+    fn merkle_root_raw_duplicates_last_leaf_for_odd_count() {
+        let a = blake3::hash(b"a");
+        let b = blake3::hash(b"b");
+        let c = blake3::hash(b"c");
+
+        let raw3 = merkle_root_raw(&[a, b, c]);
+        let raw4 = merkle_root_raw(&[a, b, c, c]);
+
+        assert_eq!(raw3, raw4);
+    }
+
+    #[test]
+    fn merkle_fingerprint_paths_is_order_independent_strict() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let a = root.join("A.xml");
+        let b = root.join("B.xml");
+        write_file(&a, "<a/>");
+        write_file(&b, "<b/>");
+
+        let fp1 = merkle_fingerprint_paths(root, &[b.clone(), a.clone()], true);
+        let fp2 = merkle_fingerprint_paths(root, &[a.clone(), b.clone()], true);
+        let fp3 = merkle_fingerprint_paths(root, &[a, b], true);
+
+        assert_eq!(fp1, fp2);
+        assert_eq!(fp1, fp3);
+    }
+
+    #[test]
+    fn merkle_fingerprint_paths_is_stable_for_same_inputs_strict() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let a = root.join("A.xml");
+        let b = root.join("B.xml");
+        write_file(&a, "<a/>");
+        write_file(&b, "<b/>");
+
+        let paths = [a, b];
+        let fp1 = merkle_fingerprint_paths(root, &paths, true);
+        let fp2 = merkle_fingerprint_paths(root, &paths, true);
+
+        assert_eq!(fp1, fp2);
+    }
+
+    #[test]
+    fn merkle_fingerprint_changes_when_one_file_changes_strict() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let a = root.join("A.xml");
+        let b = root.join("B.xml");
+        write_file(&a, "<a/>");
+        write_file(&b, "<b/>");
+
+        let paths = [a.clone(), b.clone()];
+        let before = merkle_fingerprint_paths(root, &paths, true);
+
+        write_file(&b, "<b>changed</b>");
+        let after = merkle_fingerprint_paths(root, &paths, true);
+
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn merkle_fingerprint_paths_dedups_duplicates_strict() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let a = root.join("A.xml");
+        write_file(&a, "<a/>");
+
+        let fp_unique = merkle_fingerprint_paths(root, &[a.clone()], true);
+        let fp_dup = merkle_fingerprint_paths(root, &[a.clone(), a], true);
+
+        assert_eq!(fp_unique, fp_dup);
+    }
+
+    #[test]
+    fn merkle_fingerprint_paths_with_modules_matches_paths_when_no_modules_strict() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let a = root.join("A.xml");
+        write_file(&a, "<a/>");
+        let xml_paths = [a];
+
+        let empty_modules: Vec<PathBuf> = Vec::new();
+        let fp_xml = merkle_fingerprint_paths(root, &xml_paths, true);
+        let fp_with =
+            merkle_fingerprint_paths_with_modules(root, &xml_paths, &empty_modules, true);
+
+        assert_eq!(fp_xml, fp_with);
+    }
+
+    #[test]
+    fn merkle_fingerprint_paths_with_modules_includes_bsl_artifacts_strict() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let xml = root.join("Configuration.xml");
+        let bsl = root
+            .join("CommonModules")
+            .join("M")
+            .join("Ext")
+            .join("Module.bsl");
+        write_file(&xml, "<Configuration/>");
+        write_file(
+            &bsl,
+            "Процедура X() Экспорт\nКонецПроцедуры\n",
+        );
+
+        let xml_paths = [xml];
+
+        let empty_modules: Vec<PathBuf> = Vec::new();
+        let no_modules =
+            merkle_fingerprint_paths_with_modules(root, &xml_paths, &empty_modules, true);
+        let with_modules =
+            merkle_fingerprint_paths_with_modules(root, &xml_paths, &[bsl], true);
+
+        assert_ne!(no_modules, with_modules);
+    }
+}
+
 fn snapshot_is_empty(snapshot: &crate::system::IndexSnapshot) -> bool {
     snapshot.type_index.is_empty()
         && snapshot.symbol_index.is_empty()

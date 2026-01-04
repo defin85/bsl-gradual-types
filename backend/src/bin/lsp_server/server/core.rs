@@ -65,7 +65,7 @@ impl BslLanguageServer {
                             errors.len(),
                             uri
                         );
-                        diagnostics.extend(syntax_errors_to_diagnostics(&errors));
+                        diagnostics.extend(syntax_errors_to_diagnostics(&errors, uri));
                     }
                 }
                 Err(e) => {

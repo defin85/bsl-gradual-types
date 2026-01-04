@@ -1,6 +1,6 @@
 # Roadmap: Merkle-фингерпринт конфигурации (XML + BSL)
 
-**Статус:** 🔴 ПЛАН  
+**Статус:** ✅ РЕАЛИЗОВАНО  
 **Приоритет:** HIGH  
 **Цель:** привести фингерпринт конфигурации к Merkle-дереву по артефактам (XML + BSL), чтобы обеспечить per-artifact invalidation и соответствие требованиям `disk-cache-platform-config-parsing-roadmap.md`.
 
@@ -8,7 +8,22 @@
 
 ## Контекст
 
-В текущей реализации фингерпринт конфигурации строится плоским blake3 по путям/mtime/size (опционально по содержимому). Это не обеспечивает Merkle‑семантику и не дает per‑artifact доказуемую инвалидацию.
+Merkle‑фингерпринт реализован и используется в ключах DiskCache для конфигурации:
+- `config_fingerprint` (слой A) — Merkle по XML метаданным;
+- `config_layer_b_fingerprint` (слой B) — Merkle по XML + *.bsl модулям, извлечённым из метаданных.
+
+Поддерживаются режимы:
+- fast (mtime/size) — по умолчанию;
+- strict (content hash) — через `BSL_CACHE_STRICT_FINGERPRINT`.
+
+---
+
+## Фактический статус (по коду): ✅
+
+- Merkle‑сборка (leaf/node/root + версия `"merkle-root-v1"`) реализована в `backend/src/system/system_coordinator/config_loader.rs`.
+- `config_fingerprint()` и `config_layer_b_fingerprint()` используют Merkle root для `source_fingerprint` (DiskCache keys): `backend/src/system/system_coordinator/config_loader.rs`.
+- Тесты Merkle root (стабильность/изменение одного файла/odd-count/порядок/дедуп/XML+BSL) добавлены в `backend/src/system/system_coordinator/config_loader.rs` и проходят: `cargo test -p bsl-backend merkle_`.
+- Интеграционная проверка DiskCache reuse проходит: `cargo test -p bsl-backend config_metadata_disk_cache_reuse`.
 
 ---
 
@@ -35,7 +50,7 @@
 ## Архитектура (предпочтительный вариант)
 
 1) Собираем список файлов (XML + BSL + доп. артефакты), сортируем канонически.  
-2) Для каждого файла строим leaf‑hash (path + size + mtime + content_hash?) и сохраняем в структуру `MerkleLeaf`.  
+2) Для каждого файла строим leaf‑hash (path + size + mtime + content_hash?) и сохраняем в структуру `MerkleArtifact` (kind + path_norm).  
 3) Собираем дерево снизу вверх попарным хешированием.  
 4) Root используется в `config_fingerprint`/`config_layer_b_fingerprint`.
 
@@ -43,7 +58,7 @@
 
 ## Milestones
 
-### M1: Спецификация формата Merkle‑листов
+### M1: Спецификация формата Merkle‑листов ✅
 **Цель:** утвердить формулу leaf‑hash и каноническую сортировку.
 **Критерии успеха:**
 - документирован формат leaf;
@@ -84,19 +99,19 @@
 **Версионирование формата:**
 - в расчёт root включать префикс версии: root = H( 0x02 || encode("merkle-root-v1") || 0x00 || root_raw ).
 
-### M2: Реализация Merkle‑фингерпринта
+### M2: Реализация Merkle‑фингерпринта ✅
 **Цель:** внедрить Merkle‑root в `config_fingerprint` и `config_layer_b_fingerprint`.
 **Критерии успеха:**
 - отдельный модуль/функции для Merkle‑сборки;
 - возможность переключать режим (fast vs strict).
 
-### M3: Интеграция с DiskCache
+### M3: Интеграция с DiskCache ✅
 **Цель:** использовать Merkle‑root в ключах кэша конфигурации.
 **Критерии успеха:**
 - ключи config cache используют Merkle‑root;
 - инвалидация по изменению одного файла влияет только на root.
 
-### M4: Тесты и проверка
+### M4: Тесты и проверка ✅
 **Цель:** доказать корректность и полезность Merkle‑схемы.
 **Критерии успеха:**
 - unit‑тест на стабильность root;
@@ -107,7 +122,7 @@
 
 ## Definition of Done
 
-- Merkle‑root применяется для config fingerprints.
-- Документирован формат листов и дерево.
-- Покрытие тестами (unit + интеграционные).
-- Обновлены факты в основном roadmap.
+- ✅ Merkle‑root применяется для config fingerprints.
+- ✅ Документирован формат листов и дерево.
+- ✅ Покрытие тестами (unit + интеграционные): `cargo test -p bsl-backend merkle_`, `cargo test -p bsl-backend config_metadata_disk_cache_reuse`.
+- ✅ Обновлён статус и факты (по коду/тестам).

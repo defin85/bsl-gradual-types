@@ -39,12 +39,12 @@ pub async fn handle_did_open(
         };
         match parse_result {
             Ok(errors) => {
-                if !errors.is_empty() {
-                    info!("Found {} syntax errors in {}", errors.len(), uri);
-                    diagnostics.extend(syntax_errors_to_diagnostics(&errors));
-                } else {
-                    info!("No syntax errors in {}", uri);
-                }
+                    if !errors.is_empty() {
+                        info!("Found {} syntax errors in {}", errors.len(), uri);
+                        diagnostics.extend(syntax_errors_to_diagnostics(&errors, uri));
+                    } else {
+                        info!("No syntax errors in {}", uri);
+                    }
             }
             Err(e) => {
                 error!("Failed to parse document {}: {}", uri, e);
@@ -176,12 +176,12 @@ pub async fn handle_did_change(
         };
         match parse_result {
             Ok(errors) => {
-                if !errors.is_empty() {
-                    info!("Found {} syntax errors in {}", errors.len(), uri);
-                    diagnostics.extend(syntax_errors_to_diagnostics(&errors));
-                } else {
-                    info!("No syntax errors in {}", uri);
-                }
+                    if !errors.is_empty() {
+                        info!("Found {} syntax errors in {}", errors.len(), uri);
+                        diagnostics.extend(syntax_errors_to_diagnostics(&errors, uri));
+                    } else {
+                        info!("No syntax errors in {}", uri);
+                    }
             }
             Err(e) => {
                 error!("Failed to parse document {}: {}", uri, e);

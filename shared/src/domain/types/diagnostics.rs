@@ -52,6 +52,13 @@ pub enum ErrorType {
     UnexpectedToken,
 }
 
+/// Related diagnostic location (for unclosed blocks, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelatedInformation {
+    pub message: String,
+    pub span: crate::ir::Span,
+}
+
 /// Syntax error from parser
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParseError {
@@ -61,6 +68,9 @@ pub struct ParseError {
     pub message: String,
     /// Error position in source code
     pub span: crate::ir::Span,
+    /// Related locations (e.g., opening token for missing end)
+    #[serde(default)]
+    pub related: Vec<RelatedInformation>,
 }
 
 impl ParseError {
@@ -70,6 +80,7 @@ impl ParseError {
             error_type: ErrorType::MissingToken,
             message,
             span,
+            related: Vec::new(),
         }
     }
 
@@ -79,6 +90,7 @@ impl ParseError {
             error_type: ErrorType::InvalidSyntax,
             message,
             span,
+            related: Vec::new(),
         }
     }
 
@@ -88,6 +100,7 @@ impl ParseError {
             error_type: ErrorType::UnexpectedToken,
             message,
             span,
+            related: Vec::new(),
         }
     }
 
@@ -97,6 +110,7 @@ impl ParseError {
             error_type: ErrorType::ParseError,
             message,
             span,
+            related: Vec::new(),
         }
     }
 }

@@ -5,7 +5,7 @@
 //! - Проверки отсутствующих токенов (например, точек с запятой)
 //! - Формирования диагностических сообщений
 
-use bsl_shared::domain::types::{ErrorType, ParseError};
+use bsl_shared::domain::types::{ErrorType, ParseError, RelatedInformation};
 use bsl_shared::ir::Span;
 use tree_sitter::Node;
 
@@ -45,16 +45,21 @@ pub fn collect_syntax_errors_cached(
             message: format!("Синтаксическая ошибка: неожиданный текст '{}'", text),
             span,
             error_type: ErrorType::ParseError,
+            related: Vec::new(),
         });
     }
 
     // Проверяем node.is_missing() для пропущенных токенов
     if node.is_missing() {
         let span = node_to_span_cached(node, source, line_index);
+        let related = missing_token_related_info(node, source, line_index)
+            .into_iter()
+            .collect();
         errors.push(ParseError {
             message: format!("Отсутствует обязательный элемент: {}", node.kind()),
             span,
             error_type: ErrorType::MissingToken,
+            related,
         });
     }
 
@@ -155,6 +160,7 @@ fn check_function_body_semicolons(
                 ),
                 span: error_span,
                 error_type: ErrorType::MissingToken,
+                related: Vec::new(),
             });
         }
     }
@@ -209,12 +215,98 @@ pub fn check_incomplete_new_expressions(
             message: "Отсутствует тип после 'Новый'".to_string(),
             span: Span::from_positions((row_u32, col_utf16), (row_u32, col_utf16)),
             error_type: ErrorType::MissingToken,
+            related: Vec::new(),
         });
     }
 
     // suppress unused warning for `source` if we later expand the heuristic
     let _ = source;
     errors
+}
+
+fn missing_token_related_info(
+    node: &Node,
+    source: &str,
+    line_index: &LineIndex,
+) -> Option<RelatedInformation> {
+    match node.kind() {
+        "ENDIF_KEYWORD" => find_related(
+            node,
+            source,
+            line_index,
+            &[("if_statement", "Начало блока: Если")],
+        ),
+        "ENDDO_KEYWORD" => find_related(
+            node,
+            source,
+            line_index,
+            &[
+                ("while_statement", "Начало блока: Пока"),
+                ("for_statement", "Начало блока: Для"),
+                ("for_each_statement", "Начало блока: Для каждого"),
+            ],
+        ),
+        "ENDTRY_KEYWORD" => find_related(
+            node,
+            source,
+            line_index,
+            &[("try_statement", "Начало блока: Попытка")],
+        ),
+        "ENDFUNCTION_KEYWORD" => find_related(
+            node,
+            source,
+            line_index,
+            &[("function_definition", "Начало блока: Функция")],
+        ),
+        "ENDPROCEDURE_KEYWORD" => find_related(
+            node,
+            source,
+            line_index,
+            &[("procedure_definition", "Начало блока: Процедура")],
+        ),
+        "PREPROC_ENDIF_KEYWORD" => find_related(
+            node,
+            source,
+            line_index,
+            &[("preprocessor", "Начало директивы: #Если")],
+        ),
+        "PREPROC_ENDREGION_KEYWORD" => find_related(
+            node,
+            source,
+            line_index,
+            &[("preprocessor", "Начало директивы: #Область")],
+        ),
+        _ => None,
+    }
+}
+
+fn find_related(
+    node: &Node,
+    source: &str,
+    line_index: &LineIndex,
+    ancestors: &[(&str, &str)],
+) -> Option<RelatedInformation> {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if let Some((_, message)) = ancestors.iter().find(|(kind, _)| *kind == parent.kind()) {
+            let span = span_at_node_start(&parent, source, line_index);
+            return Some(RelatedInformation {
+                message: (*message).to_string(),
+                span,
+            });
+        }
+        current = parent.parent();
+    }
+    None
+}
+
+fn span_at_node_start(node: &Node, source: &str, line_index: &LineIndex) -> Span {
+    let start = node.start_position();
+    let start_column = line_index.byte_offset_to_utf16(source, start.row, start.column);
+    Span::from_positions(
+        (start.row as u32, start_column),
+        (start.row as u32, start_column),
+    )
 }
 
 /// Проверить наличие точки с запятой как дочернего узла

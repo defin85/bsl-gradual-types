@@ -163,12 +163,53 @@ pub(crate) async fn get_completion_with_analysis(
     };
 
     if context.member_access {
-        if let Some(base_name) = context.member_base.as_deref() {
+        if let Some(receiver_chain) = extract_member_receiver_chain(file_content, line, column) {
+            if receiver_chain.len() == 1 {
+                let base_name = receiver_chain[0].as_str();
+                if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup) {
+                    let resolution = TypeResolution::explicit(&type_name);
+                    add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
+                    add_properties_from_resolution(
+                        metadata_lookup,
+                        &resolution,
+                        &mut candidates,
+                        1,
+                    );
+                } else if let Some(kind) = get_collection_kind(base_name) {
+                    add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
+                } else if let Some(resolution) = resolve_member_owner_type(
+                    analysis,
+                    file_content,
+                    line,
+                    column,
+                    base_name,
+                )
+                .await
+                {
+                    add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
+                    add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
+                }
+            } else if let Some(resolution) = resolve_member_chain_owner_type(
+                analysis,
+                file_content,
+                line,
+                column,
+                &receiver_chain,
+                &snapshot,
+                metadata_lookup,
+            )
+            .await
+            {
+                add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
+                add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
+            }
+        } else if let Some(base_name) = context.member_base.as_deref() {
             if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup) {
-                add_methods(metadata_lookup, &type_name, &mut candidates, 0);
+                let resolution = TypeResolution::explicit(&type_name);
+                add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
                 add_properties_from_resolution(
                     metadata_lookup,
-                    &TypeResolution::explicit(&type_name),
+                    &resolution,
                     &mut candidates,
                     1,
                 );
@@ -436,6 +477,139 @@ fn extract_member_base(line_prefix: &str) -> Option<String> {
     Some(chars[start..end].iter().collect())
 }
 
+fn extract_member_receiver_chain(
+    content: &str,
+    line: u32,
+    column: u32,
+) -> Option<Vec<String>> {
+    let lines: Vec<&str> = content.lines().collect();
+    let line_content = *lines.get(line as usize)?;
+    let column_index = utf16_to_byte_offset(line_content, column);
+    let line_prefix = trim_to_window(&line_content[..column_index], CONTEXT_WINDOW_CHARS);
+    let trimmed = line_prefix.trim_end();
+    let dot_pos = trimmed.rfind('.')?;
+    let receiver_expr = trimmed[..dot_pos].trim_end();
+    if receiver_expr.is_empty() {
+        return None;
+    }
+    extract_identifier_chain_tail(receiver_expr)
+}
+
+fn extract_identifier_chain_tail(expr: &str) -> Option<Vec<String>> {
+    let chars: Vec<char> = expr.chars().collect();
+    if chars.is_empty() {
+        return None;
+    }
+
+    let mut end = chars.len();
+    let mut parts_rev: Vec<String> = Vec::new();
+
+    loop {
+        while end > 0 && chars[end - 1].is_whitespace() {
+            end -= 1;
+        }
+        if end == 0 {
+            break;
+        }
+
+        let mut start = end;
+        while start > 0 && is_identifier_char(chars[start - 1]) {
+            start -= 1;
+        }
+        if start == end {
+            return None;
+        }
+        parts_rev.push(chars[start..end].iter().collect());
+
+        end = start;
+        while end > 0 && chars[end - 1].is_whitespace() {
+            end -= 1;
+        }
+        if end == 0 {
+            break;
+        }
+        if chars[end - 1] != '.' {
+            break;
+        }
+        end -= 1;
+    }
+
+    if parts_rev.is_empty() {
+        return None;
+    }
+    parts_rev.reverse();
+    Some(parts_rev)
+}
+
+async fn resolve_member_chain_owner_type(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    receiver_chain: &[String],
+    snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+) -> Option<TypeResolution> {
+    if receiver_chain.is_empty() {
+        return None;
+    }
+
+    let base_name = receiver_chain[0].as_str();
+    let mut owner = if let Some(type_name) = resolve_type_name(snapshot, base_name, metadata_lookup) {
+        TypeResolution::explicit(&type_name)
+    } else {
+        resolve_member_owner_type(analysis, file_content, line, column, base_name).await?
+    };
+
+    let resolver = analysis.map(|ctx| ctx.analysis_engine.get_resolver());
+    for member_name in receiver_chain.iter().skip(1) {
+        if owner.is_unknown() {
+            return None;
+        }
+        let member_lower = member_name.to_lowercase();
+
+        if let Some(property) = metadata_lookup
+            .get_properties(&owner)
+            .into_iter()
+            .find(|item| item.name.to_lowercase() == member_lower)
+        {
+            if property.prop_type.trim().is_empty() {
+                return None;
+            }
+            owner = if let Some(resolver) = resolver.as_ref() {
+                resolver.resolve_expression_sync(&property.prop_type)
+            } else {
+                TypeResolution::explicit(&property.prop_type)
+            };
+            continue;
+        }
+
+        if let Some(method) = metadata_lookup
+            .get_methods(&owner)
+            .into_iter()
+            .find(|item| item.name.to_lowercase() == member_lower)
+        {
+            if method.return_type.trim().is_empty() {
+                return None;
+            }
+            owner = if let Some(resolver) = resolver.as_ref() {
+                resolver.resolve_expression_sync(&method.return_type)
+            } else {
+                TypeResolution::explicit(&method.return_type)
+            };
+            continue;
+        }
+
+        return None;
+    }
+
+    if owner.is_unknown() {
+        None
+    } else {
+        Some(owner)
+    }
+}
+
 fn trim_to_window(line_prefix: &str, window: usize) -> String {
     let mut chars: Vec<char> = line_prefix.chars().collect();
     if chars.len() > window {
@@ -453,24 +627,6 @@ fn with_sort_text(
     let score_rank = ((1.0 - score).clamp(0.0, 1.0) * 1000.0) as u32;
     item.sort_text = Some(format!("{:04}-{:02}-{}", score_rank, source_priority, label_lower));
     item
-}
-
-fn add_methods(
-    metadata_lookup: &TypeMetadataLookup,
-    type_name: &str,
-    target: &mut Vec<Candidate>,
-    priority: u8,
-) {
-    let resolution = TypeResolution::explicit(type_name);
-    let methods = metadata_lookup.get_methods(&resolution);
-    for method in methods {
-        target.push(Candidate::new(
-            CompletionItem::new(method.name, CompletionKind::Method),
-            priority,
-            Some(type_name.to_string()),
-            None,
-        ));
-    }
 }
 
 fn add_methods_from_resolution(
@@ -1127,5 +1283,74 @@ mod tests {
             "labels: {:?}",
             labels
         );
+    }
+
+    #[tokio::test]
+    async fn completion_resolves_nested_member_access_chain() {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository
+            .load_types(vec![
+                RawTypeData {
+                    name: "ТаблицаЗначений".to_string(),
+                    source: RawDataSource::Platform,
+                    properties: vec![RawPropertyData {
+                        name: "Колонки".to_string(),
+                        prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                        is_readonly: true,
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                    source: RawDataSource::Platform,
+                    methods: vec![RawMethodData {
+                        name: "Добавить".to_string(),
+                        return_type: "КолонкаТаблицыЗначений".to_string(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+        let resolver = Arc::new(TypeResolver::new(repo.clone()));
+        let analysis_engine = AnalysisEngine::new(resolver.clone(), repo.clone());
+        let parser = ParserCoordinator::new_with_resolver(repo.clone(), resolver);
+        let ir_cache = IrCache::new(4);
+        let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+        let index = IntellisenseIndexStore::new("cfg", "platform");
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    ТаблЗнач = Новый ТаблицаЗначений;\n",
+            "    ТаблЗнач.Колонки.\n",
+            "КонецПроцедуры\n"
+        );
+        let line = 2;
+        let line_text = "    ТаблЗнач.Колонки.";
+        let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+        let ctx = CompletionAnalysisContext {
+            parser: &parser,
+            analysis_engine: &analysis_engine,
+            ir_cache: &ir_cache,
+            file_path: "completion_nested_chain_test.bsl",
+        };
+
+        let result = get_completion_with_analysis(
+            content,
+            line,
+            column,
+            Some("completion_nested_chain_test.bsl"),
+            &index,
+            &metadata_lookup,
+            Some(&ctx),
+        )
+        .await
+        .expect("completion ok");
+
+        let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+        assert!(labels.contains(&"Добавить".to_string()), "labels: {:?}", labels);
     }
 }

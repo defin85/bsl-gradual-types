@@ -33,6 +33,7 @@ fn test_missing_endif_detected() {
         "Должны быть синтаксические ошибки"
     );
 
+    let mut related_checked = false;
     // Проверяем детали ошибок
     for (idx, error) in parse_result.syntax_errors.iter().enumerate() {
         println!("\nОшибка #{}: {:?}", idx + 1, error.error_type);
@@ -44,6 +45,24 @@ fn test_missing_endif_detected() {
             error.span.end_line,
             error.span.end_column
         );
+        if error.error_type == ErrorType::MissingToken
+            && error.message.contains("ENDIF_KEYWORD")
+        {
+            assert!(
+                !error.related.is_empty(),
+                "Для MissingToken ENDIF ожидается related информация"
+            );
+            let related = &error.related[0];
+            assert!(
+                related.message.contains("Если"),
+                "Сообщение related должно указывать на начало Если"
+            );
+            assert!(
+                related.span.start_line <= error.span.start_line,
+                "Related позиция должна быть на строке открытия блока"
+            );
+            related_checked = true;
+        }
 
         // Проверяем, что координаты валидные
         assert!(error.span.start_line > 0, "start_line должен быть > 0");
@@ -52,6 +71,11 @@ fn test_missing_endif_detected() {
             "end_line >= start_line"
         );
     }
+
+    assert!(
+        related_checked,
+        "MissingToken для ENDIF_KEYWORD не найден"
+    );
 
     println!("===================================\n");
 }

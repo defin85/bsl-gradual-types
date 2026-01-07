@@ -1,8 +1,11 @@
 # Roadmap: IntelliSense для BSL (Completion/Signature Help/Snippets)
 
-**Статус:** 🔴 ПЛАН  
+**Статус:** ✅ РЕАЛИЗОВАНО  
 **Приоритет:** HIGH  
 **Цель:** реализовать полнофункциональный IntelliSense на базе LSP: контекстное автодополнение, подписи методов, релевантное ранжирование и вставку импортов/using.
+
+**Проверка (smoke):** `./scripts/run-intellisense-tests.sh smoke`  
+**Проверка (perf):** `./scripts/run-intellisense-perf.sh`  
 
 ---
 

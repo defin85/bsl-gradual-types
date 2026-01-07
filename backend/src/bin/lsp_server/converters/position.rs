@@ -8,15 +8,7 @@
 /// LSP protocol uses UTF-16 code units for positions, but Rust strings use UTF-8.
 /// This function correctly converts UTF-16 offset to byte offset for working with &str[..].
 pub fn utf16_to_byte_offset(line: &str, utf16_offset: u32) -> usize {
-    let mut utf16_count = 0;
-    for (byte_offset, ch) in line.char_indices() {
-        if utf16_count >= utf16_offset {
-            return byte_offset;
-        }
-        // Cyrillic and other non-ASCII characters occupy 2 UTF-16 code units
-        utf16_count += ch.len_utf16() as u32;
-    }
-    line.len() // If offset is beyond the string, return end
+    bsl_backend::system::utf16_to_byte_offset(line, utf16_offset)
 }
 
 /// Converts UTF-16 code unit index to char index

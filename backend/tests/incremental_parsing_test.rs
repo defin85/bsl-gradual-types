@@ -4,10 +4,52 @@ use bsl_backend::system::parser_coordinator::{ParserCoordinator, TextEdit};
 use std::path::PathBuf;
 use std::time::Instant;
 
+fn utf16_position_at_byte(source: &str, byte_index: usize) -> (u32, u32) {
+    let mut line = 0u32;
+    let mut last_line_start = 0usize;
+
+    for (idx, b) in source.as_bytes().iter().enumerate() {
+        if idx >= byte_index {
+            break;
+        }
+        if *b == b'\n' {
+            line += 1;
+            last_line_start = idx + 1;
+        }
+    }
+
+    let col_utf16 = source[last_line_start..byte_index]
+        .encode_utf16()
+        .count() as u32;
+    (line, col_utf16)
+}
+
+fn assert_incremental_matches_full(
+    file_path: PathBuf,
+    original_code: &str,
+    modified_code: &str,
+    edits: Vec<TextEdit>,
+) {
+    let coordinator = ParserCoordinator::with_fallback();
+    coordinator
+        .parse_incremental(file_path.clone(), original_code.to_string(), vec![])
+        .expect("initial parse ok");
+
+    let incremental = coordinator
+        .parse_incremental(file_path, modified_code.to_string(), edits)
+        .expect("incremental parse ok");
+
+    let full = ParserCoordinator::with_fallback()
+        .parse(modified_code)
+        .expect("full parse ok");
+
+    let incr_json = serde_json::to_value(&incremental).expect("serialize incremental");
+    let full_json = serde_json::to_value(&full).expect("serialize full");
+    assert_eq!(incr_json, full_json, "incremental parse must match full parse");
+}
+
 #[test]
 fn test_incremental_simple_insertion() {
-    let coordinator = ParserCoordinator::with_fallback();
-
     // Исходный код
     let original_code = r#"
 Функция Тест()
@@ -25,35 +67,20 @@ fn test_incremental_simple_insertion() {
 
     let file_path = PathBuf::from("test.bsl");
 
-    // Первый парсинг
-    let result1 =
-        coordinator.parse_incremental(file_path.clone(), original_code.to_string(), vec![]);
-    assert!(result1.is_ok(), "Первый парсинг должен пройти успешно");
-
     // Инкрементальное обновление
     let edits = vec![TextEdit {
         start_line: 2,
-        start_column: 4,
+        start_utf16_column: 4,
         old_end_line: 2,
-        old_end_column: 4,
-        new_end_line: 3,
-        new_end_column: 4,
+        old_end_utf16_column: 4,
         new_text: "Перем А;\n    ".to_string(),
     }];
 
-    let result2 = coordinator.parse_incremental(file_path, modified_code.to_string(), edits);
-
-    assert!(
-        result2.is_ok(),
-        "Инкрементальный парсинг должен пройти успешно: {:?}",
-        result2
-    );
+    assert_incremental_matches_full(file_path, original_code, modified_code, edits);
 }
 
 #[test]
 fn test_incremental_deletion() {
-    let coordinator = ParserCoordinator::with_fallback();
-
     let original_code = r#"
 Функция Тест()
     Перем А;
@@ -71,55 +98,35 @@ fn test_incremental_deletion() {
 
     let file_path = PathBuf::from("test2.bsl");
 
-    // Первый парсинг
-    let result1 =
-        coordinator.parse_incremental(file_path.clone(), original_code.to_string(), vec![]);
-    assert!(result1.is_ok());
-
     // Удаление строки "Перем А;"
     let edits = vec![TextEdit {
         start_line: 2,
-        start_column: 4,
+        start_utf16_column: 4,
         old_end_line: 3,
-        old_end_column: 4,
-        new_end_line: 2,
-        new_end_column: 4,
+        old_end_utf16_column: 4,
         new_text: "".to_string(),
     }];
 
-    let result2 = coordinator.parse_incremental(file_path, modified_code.to_string(), edits);
-
-    assert!(result2.is_ok(), "Инкрементальное удаление должно работать");
+    assert_incremental_matches_full(file_path, original_code, modified_code, edits);
 }
 
 #[test]
 fn test_incremental_replacement() {
-    let coordinator = ParserCoordinator::with_fallback();
-
     let original_code = r#"Функция Старое() Возврат 1; КонецФункции"#;
     let modified_code = r#"Функция Новое() Возврат 2; КонецФункции"#;
 
     let file_path = PathBuf::from("test3.bsl");
 
-    // Первый парсинг
-    coordinator
-        .parse_incremental(file_path.clone(), original_code.to_string(), vec![])
-        .unwrap();
-
     // Замена имени функции
     let edits = vec![TextEdit {
         start_line: 0,
-        start_column: 8,
+        start_utf16_column: 8,
         old_end_line: 0,
-        old_end_column: 14, // "Старое"
-        new_end_line: 0,
-        new_end_column: 13, // "Новое"
+        old_end_utf16_column: 14, // "Старое"
         new_text: "Новое".to_string(),
     }];
 
-    let result = coordinator.parse_incremental(file_path, modified_code.to_string(), edits);
-
-    assert!(result.is_ok());
+    assert_incremental_matches_full(file_path, original_code, modified_code, edits);
 }
 
 #[test]
@@ -152,11 +159,9 @@ fn test_incremental_performance_comparison() {
 
     let edits = vec![TextEdit {
         start_line: 3000,
-        start_column: 0,
+        start_utf16_column: 0,
         old_end_line: 3000,
-        old_end_column: 0,
-        new_end_line: 3002,
-        new_end_column: 0,
+        old_end_utf16_column: 0,
         new_text: "Функция НоваяФункция()\n    Возврат 999;\nКонецФункции\n".to_string(),
     }];
 
@@ -204,5 +209,88 @@ fn test_cache_reuse() {
     assert!(
         duration2 < duration1,
         "Кешированный парсинг должен быть быстрее"
+    );
+}
+
+#[test]
+fn test_incremental_unicode_emoji_insertion_after_emoji_utf16() {
+    let original_code = "Процедура Тест()\n    Сообщить(\"a😀b\");\nКонецПроцедуры\n";
+    let modified_code = "Процедура Тест()\n    Сообщить(\"a😀Xb\");\nКонецПроцедуры\n";
+    let file_path = PathBuf::from("unicode_emoji_insert.bsl");
+
+    let marker = "\"a😀b\"";
+    let start = original_code.find(marker).expect("marker exists");
+    let after_emoji_byte = start + "\"".len() + "a😀".len();
+    let (line, col_utf16) = utf16_position_at_byte(original_code, after_emoji_byte);
+
+    let edits = vec![TextEdit {
+        start_line: line,
+        start_utf16_column: col_utf16,
+        old_end_line: line,
+        old_end_utf16_column: col_utf16,
+        new_text: "X".to_string(),
+    }];
+
+    assert_incremental_matches_full(file_path, original_code, modified_code, edits);
+}
+
+#[test]
+fn test_incremental_unicode_multiline_insert_with_cyrillic_tail() {
+    let original_code = "Процедура Тест()\n    Возврат;\nКонецПроцедуры\n";
+    let modified_code =
+        "Процедура Тест()\n    Перем Я;\n    Возврат;\nКонецПроцедуры\n";
+    let file_path = PathBuf::from("unicode_multiline_insert.bsl");
+
+    let insert_at = original_code
+        .find("    Возврат;")
+        .expect("anchor exists");
+    let (line, col_utf16) = utf16_position_at_byte(original_code, insert_at);
+
+    let edits = vec![TextEdit {
+        start_line: line,
+        start_utf16_column: col_utf16,
+        old_end_line: line,
+        old_end_utf16_column: col_utf16,
+        new_text: "    Перем Я;\n".to_string(),
+    }];
+
+    assert_incremental_matches_full(file_path, original_code, modified_code, edits);
+}
+
+#[test]
+fn test_incremental_two_edits_with_line_shift() {
+    let original_code = "Процедура Тест()\n    Сообщить(\"a😀b\");\n    Сообщить(\"ok\");\nКонецПроцедуры\n";
+    let modified_code = "Процедура Тест()\n    Перем Значение;\n    Сообщить(\"a😀Xb\");\n    Сообщить(\"ok\");\nКонецПроцедуры\n";
+    let file_path = PathBuf::from("unicode_two_edits.bsl");
+
+    // Edit 1: insert a new line at the beginning of the body (line 1, column 0).
+    let edits_line_insert = TextEdit {
+        start_line: 1,
+        start_utf16_column: 0,
+        old_end_line: 1,
+        old_end_utf16_column: 0,
+        new_text: "    Перем Значение;\n".to_string(),
+    };
+
+    // Edit 2: insert after emoji in the (shifted) Сообщить line.
+    let marker = "\"a😀b\"";
+    let start = original_code.find(marker).expect("marker exists");
+    let after_emoji_byte = start + "\"".len() + "a😀".len();
+    let (orig_line, col_utf16) = utf16_position_at_byte(original_code, after_emoji_byte);
+    let shifted_line = orig_line + 1;
+
+    let edits_emoji_insert = TextEdit {
+        start_line: shifted_line,
+        start_utf16_column: col_utf16,
+        old_end_line: shifted_line,
+        old_end_utf16_column: col_utf16,
+        new_text: "X".to_string(),
+    };
+
+    assert_incremental_matches_full(
+        file_path,
+        original_code,
+        modified_code,
+        vec![edits_line_insert, edits_emoji_insert],
     );
 }

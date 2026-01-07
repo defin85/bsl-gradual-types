@@ -3,6 +3,8 @@
 //! Provides functions to extract identifiers and symbols from source code
 //! at specific positions, handling UTF-16 to UTF-8 conversion for LSP compatibility.
 
+use crate::system::positioning;
+
 /// Converts UTF-16 offset (LSP character) to UTF-8 byte offset
 ///
 /// LSP protocol uses UTF-16 code units for positions, but Rust strings are UTF-8.
@@ -15,15 +17,7 @@
 /// # Returns
 /// The corresponding byte offset in the UTF-8 string
 pub fn utf16_to_byte_offset(line: &str, utf16_offset: u32) -> usize {
-    let mut utf16_count = 0;
-    for (byte_offset, ch) in line.char_indices() {
-        if utf16_count >= utf16_offset {
-            return byte_offset;
-        }
-        // Cyrillic and other non-ASCII characters take 2 UTF-16 code units
-        utf16_count += ch.len_utf16() as u32;
-    }
-    line.len() // If offset is beyond the line, return end
+    positioning::utf16_to_byte_offset(line, utf16_offset)
 }
 
 /// Extracts the word at the specified position (line, column)

@@ -138,15 +138,9 @@ pub async fn handle_did_change(
         .filter_map(|change| {
             change.range.map(|range| TextEdit {
                 start_line: range.start.line,
-                start_column: range.start.character,
+                start_utf16_column: range.start.character,
                 old_end_line: range.end.line,
-                old_end_column: range.end.character,
-                new_end_line: range.start.line + change.text.matches('\n').count() as u32,
-                new_end_column: if change.text.contains('\n') {
-                    change.text.lines().last().unwrap_or("").len() as u32
-                } else {
-                    range.start.character + change.text.len() as u32
-                },
+                old_end_utf16_column: range.end.character,
                 new_text: change.text.clone(),
             })
         })

@@ -42,15 +42,12 @@ fn is_cache_disabled_env() -> bool {
 /// Текстовое изменение для инкрементального парсинга (из LSP)
 #[derive(Debug, Clone)]
 pub struct TextEdit {
-    /// Начальная позиция изменения
+    /// Начальная позиция изменения (UTF-16 code units, как в LSP)
     pub start_line: u32,
-    pub start_column: u32,
-    /// Конечная позиция в старом тексте
+    pub start_utf16_column: u32,
+    /// Конечная позиция в старом тексте (UTF-16 code units, как в LSP)
     pub old_end_line: u32,
-    pub old_end_column: u32,
-    /// Конечная позиция в новом тексте
-    pub new_end_line: u32,
-    pub new_end_column: u32,
+    pub old_end_utf16_column: u32,
     /// Новый текст (вставленный/замененный)
     pub new_text: String,
 }
@@ -292,11 +289,11 @@ impl ParserCoordinator {
 
         // Fallback: полный парсинг (Milestone 2.8: только Tree-sitter)
         debug!("Full parse for file: {:?}", file_path);
-        match self.tree_sitter.parse(&new_content) {
-            Ok(program) => {
+        match self.tree_sitter.parse_with_tree(&new_content) {
+            Ok((tree, program)) => {
                 self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
-                // Кешируем дерево для будущих инкрементальных обновлений
-                // TODO: получить tree из парсера
+                self.tree_cache
+                    .set(file_path, tree, new_content.clone(), new_tree_hash);
                 Ok(program)
             }
             Err(e) => {
@@ -767,6 +764,10 @@ impl TreeSitterParser {
     }
 
     fn parse(&self, content: &str) -> Result<ParseResult, String> {
+        self.parse_with_tree(content).map(|(_, program)| program)
+    }
+
+    fn parse_with_tree(&self, content: &str) -> Result<(tree_sitter::Tree, ParseResult), String> {
         // Парсинг с использованием tree-sitter-bsl
         let mut parser = self
             .parser
@@ -786,7 +787,8 @@ impl TreeSitterParser {
         );
 
         // Конвертация tree-sitter AST → ParseResult через TreeSitterAdapter
-        TreeSitterAdapter::convert_tree(&tree, content)
+        let result = TreeSitterAdapter::convert_tree(&tree, content)?;
+        Ok((tree, result))
     }
 
     /// Инкрементальный парсинг с использованием старого дерева (Milestone 2.7 Task 3)
@@ -804,10 +806,22 @@ impl TreeSitterParser {
 
         // Применяем редактирования к старому дереву
         if let Some(mut tree) = old_tree.cloned() {
+            if edits.is_empty() {
+                return Err("No edits provided for incremental parsing".to_string());
+            }
+
+            let mut current_source = old_source.to_string();
             for edit in edits {
-                let input_edit = Self::text_edit_to_input_edit(&edit, old_source, new_content)?;
+                let (input_edit, start_byte, old_end_byte) =
+                    Self::text_edit_to_input_edit(&edit, &current_source)?;
                 tree.edit(&input_edit);
                 debug!("Applied edit: {:?}", input_edit);
+
+                current_source = apply_edit_to_source(&current_source, start_byte, old_end_byte, &edit.new_text);
+            }
+
+            if current_source != new_content {
+                return Err("Edits do not match new content".to_string());
             }
 
             // Парсим с использованием отредактированного дерева
@@ -837,58 +851,75 @@ impl TreeSitterParser {
     /// Конвертировать TextEdit → tree-sitter InputEdit
     fn text_edit_to_input_edit(
         edit: &TextEdit,
-        old_source: &str,
-        new_source: &str,
-    ) -> Result<InputEdit, String> {
-        // Вычисляем байтовые офсеты из позиций (line, column)
-        let start_byte = Self::position_to_byte(old_source, edit.start_line, edit.start_column)?;
-        let old_end_byte =
-            Self::position_to_byte(old_source, edit.old_end_line, edit.old_end_column)?;
-        let new_end_byte =
-            Self::position_to_byte(new_source, edit.new_end_line, edit.new_end_column)?;
+        source: &str,
+    ) -> Result<(InputEdit, usize, usize), String> {
+        use crate::system::positioning::LineIndex;
 
-        Ok(InputEdit {
+        let index = LineIndex::new(source);
+        let start_byte =
+            index.utf16_position_to_byte_offset(source, edit.start_line, edit.start_utf16_column);
+        let old_end_byte = index.utf16_position_to_byte_offset(
+            source,
+            edit.old_end_line,
+            edit.old_end_utf16_column,
+        );
+
+        let start_position = index.utf16_position_to_point(source, edit.start_line, edit.start_utf16_column);
+        let old_end_position =
+            index.utf16_position_to_point(source, edit.old_end_line, edit.old_end_utf16_column);
+
+        let inserted_bytes = edit.new_text.as_bytes().len();
+        let new_end_byte = start_byte + inserted_bytes;
+        let new_end_position = apply_text_to_point(start_position, &edit.new_text);
+
+        Ok((
+            InputEdit {
+                start_byte,
+                old_end_byte,
+                new_end_byte,
+                start_position,
+                old_end_position,
+                new_end_position,
+            },
             start_byte,
             old_end_byte,
-            new_end_byte,
-            start_position: Point::new(edit.start_line as usize, edit.start_column as usize),
-            old_end_position: Point::new(edit.old_end_line as usize, edit.old_end_column as usize),
-            new_end_position: Point::new(edit.new_end_line as usize, edit.new_end_column as usize),
-        })
+        ))
     }
+}
 
-    /// Конвертировать (line, column) → byte offset
-    fn position_to_byte(source: &str, line: u32, column: u32) -> Result<usize, String> {
-        let mut current_line = 0u32;
-        let mut byte_offset = 0usize;
-
-        for (idx, ch) in source.char_indices() {
-            if current_line == line {
-                // Нашли нужную строку, считаем колонки
-                if column == 0 {
-                    return Ok(byte_offset);
-                }
-
-                let mut current_column = 0u32;
-                for (col_idx, _) in source[byte_offset..].char_indices() {
-                    if current_column == column {
-                        return Ok(byte_offset + col_idx);
-                    }
-                    current_column += 1;
-                }
-
-                return Ok(byte_offset + source[byte_offset..].len());
-            }
-
-            if ch == '\n' {
-                current_line += 1;
-                byte_offset = idx + 1;
-            }
+fn apply_text_to_point(start: Point, text: &str) -> Point {
+    let mut row = start.row;
+    let mut column = start.column;
+    let mut last_line_start = 0usize;
+    for (idx, b) in text.as_bytes().iter().enumerate() {
+        if *b == b'\n' {
+            row += 1;
+            last_line_start = idx + 1;
         }
-
-        // Если не нашли строку, возвращаем конец файла
-        Ok(source.len())
     }
+
+    if row == start.row {
+        column += text.as_bytes().len();
+    } else {
+        column = text.as_bytes().len().saturating_sub(last_line_start);
+    }
+
+    Point::new(row, column)
+}
+
+fn apply_edit_to_source(source: &str, start_byte: usize, old_end_byte: usize, new_text: &str) -> String {
+    let start = start_byte.min(source.len());
+    let end = old_end_byte.min(source.len());
+
+    let mut result = String::with_capacity(
+        source.len().saturating_sub(end.saturating_sub(start)) + new_text.len(),
+    );
+    result.push_str(&source[..start]);
+    result.push_str(new_text);
+    if end < source.len() {
+        result.push_str(&source[end..]);
+    }
+    result
 }
 
 // === Milestone 2.8 Task 7: RegexParser удалён ===

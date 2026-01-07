@@ -4,76 +4,9 @@
 //! Этот модуль предоставляет функции для корректной конвертации.
 
 use bsl_shared::ir::Span;
+pub use crate::system::positioning::{LineIndex, byte_offset_to_utf16};
 use tracing::debug;
 use tree_sitter::Node;
-
-#[derive(Debug, Clone)]
-pub struct LineIndex {
-    line_starts: Vec<usize>,
-}
-
-impl LineIndex {
-    pub fn new(source: &str) -> Self {
-        let mut line_starts = Vec::new();
-        line_starts.push(0);
-        for (idx, b) in source.bytes().enumerate() {
-            if b == b'\n' {
-                line_starts.push(idx + 1);
-            }
-        }
-        Self { line_starts }
-    }
-
-    pub fn line_count(&self) -> usize {
-        self.line_starts.len()
-    }
-
-    pub fn line_text<'a>(&self, source: &'a str, line: usize) -> &'a str {
-        let (start, end) = self.line_bounds(line, source.len());
-        &source[start..end]
-    }
-
-    pub fn byte_offset_to_utf16(&self, source: &str, line: usize, byte_offset: usize) -> u32 {
-        let (start, end) = self.line_bounds(line, source.len());
-        let mut capped = start.saturating_add(byte_offset);
-        if capped > end {
-            capped = end;
-        }
-        while capped > start && !source.is_char_boundary(capped) {
-            capped -= 1;
-        }
-        let prefix = &source[start..capped];
-        prefix.encode_utf16().count() as u32
-    }
-
-    fn line_bounds(&self, line: usize, source_len: usize) -> (usize, usize) {
-        let start = self
-            .line_starts
-            .get(line)
-            .copied()
-            .unwrap_or(source_len);
-        let end = self
-            .line_starts
-            .get(line + 1)
-            .copied()
-            .unwrap_or(source_len);
-        (start, end)
-    }
-}
-
-/// Конвертировать byte offset (UTF-8) в UTF-16 code units
-///
-/// LSP использует UTF-16 code units для позиций, а tree-sitter использует byte offsets (UTF-8).
-/// Эта функция корректно преобразует byte offset в UTF-16 offset для кириллицы и других non-ASCII символов.
-///
-/// # Milestone 2.18 Task 1: КРИТИЧНОЕ ИСПРАВЛЕНИЕ
-pub fn byte_offset_to_utf16(line: &str, byte_offset: usize) -> u32 {
-    let mut capped = byte_offset.min(line.len());
-    while capped > 0 && !line.is_char_boundary(capped) {
-        capped -= 1;
-    }
-    line[..capped].chars().map(|c| c.len_utf16() as u32).sum()
-}
 
 /// Извлечь Span из tree-sitter Node с конвертацией в UTF-16 координаты
 ///

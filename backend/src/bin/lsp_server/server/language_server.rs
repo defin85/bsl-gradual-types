@@ -664,6 +664,24 @@ impl LanguageServer for BslLanguageServer {
                 ),
             }
 
+            let observed_byte_offset = analysis
+                .utf16_position_to_byte_offset(file_id, position.line, position.character)
+                .ok()
+                .flatten();
+            let observed_point = analysis
+                .utf16_position_to_point(file_id, position.line, position.character)
+                .ok()
+                .flatten();
+            debug!(
+                "Completion v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
+                uri,
+                file_id.0,
+                position.line,
+                position.character,
+                observed_byte_offset,
+                observed_point,
+            );
+
             Some(crate::handlers::CompletionResponseWithStats {
                 response: CompletionResponse::List(CompletionList {
                     is_incomplete: false,
@@ -778,6 +796,24 @@ impl LanguageServer for BslLanguageServer {
                 observed_deps_id.as_ref().map(|v| v.as_str()),
                 observed_settings_id.as_ref().map(|v| v.as_str()),
             );
+
+            let observed_byte_offset = analysis
+                .utf16_position_to_byte_offset(file_id, position.line, position.character)
+                .ok()
+                .flatten();
+            let observed_point = analysis
+                .utf16_position_to_point(file_id, position.line, position.character)
+                .ok()
+                .flatten();
+            debug!(
+                "Hover v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
+                uri,
+                file_id.0,
+                position.line,
+                position.character,
+                observed_byte_offset,
+                observed_point,
+            );
         }
 
         let settings = self.settings.read().await;
@@ -840,6 +876,53 @@ impl LanguageServer for BslLanguageServer {
                 return Ok(None);
             }
         };
+
+        if self.use_salsa_v2 {
+            let file_id = self.get_or_create_file_id_v2(&uri).await;
+            self.sync_v2_globals().await;
+
+            {
+                let mut host = self.analysis_host_v2.lock().await;
+                if !host.has_file(file_id) {
+                    host.apply_change(bsl_analysis_v2::Change::SetFile {
+                        file_id,
+                        text: Arc::from(file_content.clone()),
+                        version: 0,
+                    });
+                }
+            }
+
+            let analysis = { self.analysis_host_v2.lock().await.analysis() };
+            let observed_file_version = analysis.file_version(file_id).ok().flatten();
+            let observed_deps_id = analysis.deps_id().ok();
+            let observed_settings_id = analysis.settings_id().ok();
+            debug!(
+                "SignatureHelp v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
+                uri,
+                file_id.0,
+                observed_file_version,
+                observed_deps_id.as_ref().map(|v| v.as_str()),
+                observed_settings_id.as_ref().map(|v| v.as_str()),
+            );
+
+            let observed_byte_offset = analysis
+                .utf16_position_to_byte_offset(file_id, position.line, position.character)
+                .ok()
+                .flatten();
+            let observed_point = analysis
+                .utf16_position_to_point(file_id, position.line, position.character)
+                .ok()
+                .flatten();
+            debug!(
+                "SignatureHelp v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
+                uri,
+                file_id.0,
+                position.line,
+                position.character,
+                observed_byte_offset,
+                observed_point,
+            );
+        }
 
         let started = Instant::now();
         let result = handle_signature_help(

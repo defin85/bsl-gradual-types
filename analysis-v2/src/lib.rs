@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use salsa::Setter;
 
+pub use bsl_line_index::{LineIndex, byte_offset_to_utf16, utf16_to_byte_offset};
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FileId(pub u32);
 
@@ -100,6 +102,11 @@ pub struct SettingsSnapshot {
 #[salsa::tracked]
 pub fn file_text_len(db: &dyn salsa::Database, file: SourceFile) -> usize {
     file.text(db).len()
+}
+
+#[salsa::tracked]
+pub fn line_index(db: &dyn salsa::Database, file: SourceFile) -> Arc<LineIndex> {
+    Arc::new(LineIndex::new(file.text(db)))
 }
 
 #[salsa::db]
@@ -218,6 +225,47 @@ impl AnalysisV2 {
             return Ok(None);
         };
         cancellable(|| file_text_len(&self.db, file)).map(Some)
+    }
+
+    pub fn line_index(&self, file_id: FileId) -> Cancellable<Option<Arc<LineIndex>>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| line_index(&self.db, file)).map(Some)
+    }
+
+    pub fn utf16_position_to_byte_offset(
+        &self,
+        file_id: FileId,
+        line: u32,
+        character: u32,
+    ) -> Cancellable<Option<usize>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| {
+            let text = file.text(&self.db);
+            let index = line_index(&self.db, file);
+            index.utf16_position_to_byte_offset(text, line, character)
+        })
+        .map(Some)
+    }
+
+    pub fn utf16_position_to_point(
+        &self,
+        file_id: FileId,
+        line: u32,
+        character: u32,
+    ) -> Cancellable<Option<(usize, usize)>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| {
+            let text = file.text(&self.db);
+            let index = line_index(&self.db, file);
+            index.utf16_position_to_point(text, line, character)
+        })
+        .map(Some)
     }
 
     pub fn deps_id(&self) -> Cancellable<DepsSnapshotId> {
@@ -345,5 +393,32 @@ mod tests {
         let analysis_b = host.lock().unwrap().snapshot();
         assert_eq!(analysis_b.deps_id().unwrap().as_str(), "deps-b");
         assert_eq!(analysis_b.settings_id().unwrap().as_str(), "settings-b");
+    }
+
+    #[test]
+    fn line_index_and_positioning_are_read_from_snapshot() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("abc\ndef"),
+            version: 1,
+        });
+
+        let analysis = host.snapshot();
+        let index = analysis.line_index(file_id).unwrap().unwrap();
+        assert_eq!(index.line_count(), 2);
+
+        assert_eq!(
+            analysis
+                .utf16_position_to_byte_offset(file_id, 0, 999)
+                .unwrap(),
+            Some(3)
+        );
+        assert_eq!(
+            analysis.utf16_position_to_point(file_id, 0, 999).unwrap(),
+            Some((0, 3))
+        );
     }
 }

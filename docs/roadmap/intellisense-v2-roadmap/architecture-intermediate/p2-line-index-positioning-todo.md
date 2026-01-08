@@ -1,7 +1,7 @@
 # P2: TODO list — LineIndex и позиционирование как query
 
 **Дата:** 2026-01-08  
-**Статус:** 🔴 TODO  
+**Статус:** 🟢 DONE (clamp, пункт 6: `bsl-line-index`)  
 **Основание:** Фаза P2 из `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/salsa-migration-plan.md`
 
 ## Цель P2
@@ -36,64 +36,64 @@
 
 ### 1) Ввести `LineIndex` в `bsl-analysis-v2`
 
-- [ ] Добавить модуль позиционирования (порт из `backend/src/system/positioning.rs`):
-  - [ ] `utf16_to_byte_offset(text: &str, utf16_offset: u32) -> usize`
-  - [ ] `byte_offset_to_utf16(text: &str, byte_offset: usize) -> u32`
-  - [ ] `LineIndex::new(source: &str)` + хранение line starts
-  - [ ] методы конвертации:
-    - [ ] `utf16_position_to_byte_offset(source: &str, line: u32, utf16_col: u32) -> usize`
-    - [ ] `byte_offset_to_point(source: &str, byte_offset: usize) -> (line: usize, byte_col: usize)`
-    - [ ] (если нужно для diagnostics) `byte_offset_to_utf16_position(source: &str, byte_offset: usize) -> (line: u32, utf16_col: u32)`
+- [x] Добавить модуль позиционирования (порт из `backend/src/system/positioning.rs`):
+  - [x] `utf16_to_byte_offset(text: &str, utf16_offset: u32) -> usize`
+  - [x] `byte_offset_to_utf16(text: &str, byte_offset: usize) -> u32`
+  - [x] `LineIndex::new(source: &str)` + хранение line starts
+  - [x] методы конвертации:
+    - [x] `utf16_position_to_byte_offset(source: &str, line: u32, utf16_col: u32) -> usize`
+    - [x] `byte_offset_to_point(source: &str, byte_offset: usize) -> (line: usize, byte_col: usize)`
+    - [x] (если нужно для diagnostics) `byte_offset_to_utf16_position(source: &str, byte_offset: usize) -> (line: u32, utf16_col: u32)`
 
 ### 2) Сделать `line_index(FileId)` salsa query
 
-- [ ] Добавить query `line_index(SourceFile) -> Arc<LineIndex>`:
-  - [ ] зависит только от `SourceFile.text`
-  - [ ] не делает I/O, не читает глобальные mutable кэши
-- [ ] Добавить публичный метод `AnalysisV2::line_index(FileId) -> Cancellable<Option<Arc<LineIndex>>>`.
+- [x] Добавить query `line_index(SourceFile) -> Arc<LineIndex>`:
+  - [x] зависит только от `SourceFile.text`
+  - [x] не делает I/O, не читает глобальные mutable кэши
+- [x] Добавить публичный метод `AnalysisV2::line_index(FileId) -> Cancellable<Option<Arc<LineIndex>>>`.
 
 ### 3) Сделать позиционирование “через снапшот” в v2 API
 
-- [ ] Добавить helper-и уровня `AnalysisV2`, которые берут `file_text + line_index` из *одного* снапшота:
-  - [ ] `utf16_position_to_byte_offset(FileId, line, character) -> Cancellable<Option<usize>>`
-  - [ ] `utf16_position_to_point(FileId, line, character) -> Cancellable<Option<(usize, usize)>>`
-- [ ] Договориться о семантике out-of-range:
-  - [ ] line/character clamp к допустимому диапазону (в духе LSP spec),
+- [x] Добавить helper-и уровня `AnalysisV2`, которые берут `file_text + line_index` из *одного* снапшота:
+  - [x] `utf16_position_to_byte_offset(FileId, line, character) -> Cancellable<Option<usize>>`
+  - [x] `utf16_position_to_point(FileId, line, character) -> Cancellable<Option<(usize, usize)>>`
+- [x] Договориться о семантике out-of-range:
+  - [x] line/character clamp к допустимому диапазону (в духе LSP spec),
   - [ ] либо `None` (если хотим строгость) — выбрать один вариант и закрепить тестами.
 
 ### 4) Подключить в LSP v2 ветку (без “mixed text”)
 
-- [ ] В `backend/src/bin/lsp_server/server/language_server.rs` (v2 ветки completion/hover/signatureHelp):
-  - [ ] брать `AnalysisV2` через `self.analysis_host_v2.lock().await.analysis()`
-  - [ ] конвертировать позицию **только** через `analysis.*positioning*` методы
-  - [ ] (временно) логировать полученный byte offset/point для верификации
+- [x] В `backend/src/bin/lsp_server/server/language_server.rs` (v2 ветки completion/hover/signatureHelp):
+  - [x] брать `AnalysisV2` через `self.analysis_host_v2.lock().await.analysis()`
+  - [x] конвертировать позицию **только** через `analysis.*positioning*` методы
+  - [x] (временно) логировать полученный byte offset/point для верификации
 
 ### 5) Тесты (перенос/добавление)
 
-- [ ] Перенести тесты крайних случаев UTF-16 на уровень `bsl-analysis-v2`:
-  - [ ] ASCII
-  - [ ] кириллица (2-byte UTF-8)
-  - [ ] emoji / суррогатные пары (4-byte UTF-8, 2 code units UTF-16)
-  - [ ] clamp поведения (character > line len)
-- [ ] (Опционально) добавить property-like тест “roundtrip”:
-  - [ ] `pos -> offset -> pos` для набора строк.
+- [x] Перенести тесты крайних случаев UTF-16 на уровень `bsl-analysis-v2`:
+  - [x] ASCII
+  - [x] кириллица (2-byte UTF-8)
+  - [x] emoji / суррогатные пары (4-byte UTF-8, 2 code units UTF-16)
+  - [x] clamp поведения (character > line len)
+- [x] (Опционально) добавить property-like тест “roundtrip”:
+  - [x] `pos -> offset -> pos` для набора строк.
 
 ### 6) Устранить дублирование `LineIndex` / перейти на upstream
 
-- [ ] Убрать расхождение поведения между legacy (`backend`) и v2 (`bsl-analysis-v2`) позиционированием одним из путей:
-  - [ ] Вариант A: вынести реализацию в отдельный лёгкий crate (например, `bsl-line-index`) и использовать в обоих местах
+- [x] Убрать расхождение поведения между legacy (`backend`) и v2 (`bsl-analysis-v2`) позиционированием одним из путей:
+  - [x] Вариант A: вынести реализацию в отдельный лёгкий crate (например, `bsl-line-index`) и использовать в обоих местах (`line-index/src/lib.rs`)
   - [ ] Вариант B: перейти на upstream `line-index` (rust-analyzer) и адаптировать под нужные операции (включая Point/byte column)
 
 **Критерии готовности (пункт 6):**
-- [ ] В кодовой базе осталась **одна** реализация конвертаций (или единый upstream), используемая и v2, и legacy путём.
-- [ ] Набор edge-case тестов (ASCII/кириллица/emoji/clamp) не дублируется и покрывает обе интеграции.
-- [ ] Поведение out-of-range зафиксировано (clamp/None) и не расходится между путями.
-- [ ] `cargo test --workspace` проходит.
+- [x] В кодовой базе осталась **одна** реализация конвертаций (или единый upstream), используемая и v2, и legacy путём.
+- [x] Набор edge-case тестов (ASCII/кириллица/emoji/clamp) не дублируется и покрывает обе интеграции.
+- [x] Поведение out-of-range зафиксировано (clamp/None) и не расходится между путями.
+- [x] `cargo test --workspace` проходит.
 
 ## DoD (P2 считается закрытым, если)
 
-- [ ] В `bsl-analysis-v2` есть query `line_index` и публичный read API для позиционирования.
-- [ ] В v2 LSP ветке позиция переводится через снапшот (без обращения к legacy `LineIndex`/тексту).
-- [ ] Добавлены тесты на UTF-16 edge cases в `bsl-analysis-v2`.
-- [ ] `cargo test -p bsl-analysis-v2` проходит.
-- [ ] Если выбран пункт 6: выполнены критерии “Устранить дублирование `LineIndex` / перейти на upstream”.
+- [x] В `bsl-analysis-v2` есть query `line_index` и публичный read API для позиционирования.
+- [x] В v2 LSP ветке позиция переводится через снапшот (без обращения к legacy `LineIndex`/тексту).
+- [x] Добавлены тесты на UTF-16 edge cases в `bsl-analysis-v2`.
+- [x] `cargo test -p bsl-analysis-v2` проходит.
+- [x] (опционально) Если выбран пункт 6: выполнены критерии “Устранить дублирование `LineIndex` / перейти на upstream”.

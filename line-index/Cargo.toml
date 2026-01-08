@@ -1,0 +1,14 @@
+[package]
+name = "bsl-line-index"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "UTF-16 (LSP) <-> UTF-8 byte offset line indexing helpers"
+
+[lib]
+name = "bsl_line_index"
+path = "src/lib.rs"
+
+[dependencies]
+

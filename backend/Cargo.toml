@@ -26,6 +26,7 @@ path = "src/bin/lsp_server/main.rs"
 [dependencies]
 bsl-shared = { workspace = true }
 bsl-analysis-v2 = { workspace = true }
+bsl-line-index = { workspace = true }
 bsl-type-visualization = { path = "../type-visualization" }
 
 # Core dependencies

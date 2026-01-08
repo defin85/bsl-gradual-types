@@ -12,6 +12,7 @@ mod core;
 mod language_server;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use tokio::sync::{Mutex, RwLock};
@@ -24,6 +25,14 @@ use crate::config::{BslSettings, LspConfig};
 
 // Re-export Url for use in submodules
 pub use tower_lsp::lsp_types::Url;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum V2FileKey {
+    /// Preferred key: filesystem path derived from `Url::to_file_path()`.
+    Path(PathBuf),
+    /// Fallback key for non-file documents.
+    Url(String),
+}
 
 /// BSL Language Server backend - CLEAN ARCHITECTURE
 #[derive(Clone)]
@@ -39,6 +48,8 @@ pub struct BslLanguageServer {
 
     pub(crate) use_salsa_v2: bool,
     pub(crate) analysis_host_v2: Arc<Mutex<AnalysisHostV2>>,
-    pub(crate) url_to_file_id_v2: Arc<RwLock<HashMap<Url, V2FileId>>>,
+    /// Session-stable mapping: once a `FileId` is assigned for a key, it is not revoked for the
+    /// lifetime of the server process (even if the document is closed and re-opened).
+    pub(crate) file_key_to_file_id_v2: Arc<RwLock<HashMap<V2FileKey, V2FileId>>>,
     pub(crate) next_file_id_v2: Arc<AtomicU32>,
 }

@@ -343,6 +343,9 @@ impl LanguageServer for BslLanguageServer {
                 match result {
                     Ok(()) => {
                         info!("Platform types loaded successfully");
+                        if self.use_salsa_v2 {
+                            self.sync_v2_globals().await;
+                        }
                         let _ = result_tx.send(Ok(()));
                         self.client
                             .log_message(
@@ -432,6 +435,10 @@ impl LanguageServer for BslLanguageServer {
                     }
                 }
             }
+        }
+
+        if self.use_salsa_v2 {
+            self.sync_v2_globals().await;
         }
     }
 
@@ -567,7 +574,7 @@ impl LanguageServer for BslLanguageServer {
         self.documents.write().await.remove(&uri);
 
         if self.use_salsa_v2 {
-            if let Some(file_id) = self.take_file_id_v2(&uri).await {
+            if let Some(file_id) = self.get_file_id_v2(&uri).await {
                 self.analysis_host_v2
                     .lock()
                     .await
@@ -615,6 +622,7 @@ impl LanguageServer for BslLanguageServer {
         let snippet_support = *self.completion_snippet_support.read().await;
         let completion = if self.use_salsa_v2 {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
+            self.sync_v2_globals().await;
 
             {
                 let mut host = self.analysis_host_v2.lock().await;
@@ -630,6 +638,17 @@ impl LanguageServer for BslLanguageServer {
             let analysis = {
                 self.analysis_host_v2.lock().await.analysis()
             };
+            let observed_file_version = analysis.file_version(file_id).ok().flatten();
+            let observed_deps_id = analysis.deps_id().ok();
+            let observed_settings_id = analysis.settings_id().ok();
+            debug!(
+                "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
+                uri,
+                file_id.0,
+                observed_file_version,
+                observed_deps_id.as_ref().map(|v| v.as_str()),
+                observed_settings_id.as_ref().map(|v| v.as_str()),
+            );
             match analysis.file_text_len(file_id) {
                 Ok(Some(len)) => debug!(
                     "Completion v2 (salsa) active: uri={}, file_id={}, text_len={}",
@@ -731,6 +750,35 @@ impl LanguageServer for BslLanguageServer {
                 Err(_) => return Ok(None),
             },
         };
+
+        if self.use_salsa_v2 {
+            let file_id = self.get_or_create_file_id_v2(&uri).await;
+            self.sync_v2_globals().await;
+
+            {
+                let mut host = self.analysis_host_v2.lock().await;
+                if !host.has_file(file_id) {
+                    host.apply_change(bsl_analysis_v2::Change::SetFile {
+                        file_id,
+                        text: Arc::from(file_content.clone()),
+                        version: 0,
+                    });
+                }
+            }
+
+            let analysis = { self.analysis_host_v2.lock().await.analysis() };
+            let observed_file_version = analysis.file_version(file_id).ok().flatten();
+            let observed_deps_id = analysis.deps_id().ok();
+            let observed_settings_id = analysis.settings_id().ok();
+            debug!(
+                "Hover v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
+                uri,
+                file_id.0,
+                observed_file_version,
+                observed_deps_id.as_ref().map(|v| v.as_str()),
+                observed_settings_id.as_ref().map(|v| v.as_str()),
+            );
+        }
 
         let settings = self.settings.read().await;
         Ok(handle_hover(

@@ -164,6 +164,14 @@ impl IntellisenseIndexStore {
         self.schema_version
     }
 
+    pub fn snapshot_id(&self) -> IndexSnapshotId {
+        self.inner
+            .read()
+            .expect("index snapshot lock poisoned")
+            .id
+            .clone()
+    }
+
     pub fn snapshot(&self) -> IndexSnapshot {
         self.inner.read().expect("index snapshot lock poisoned").clone()
     }

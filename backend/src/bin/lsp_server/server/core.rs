@@ -7,14 +7,14 @@ use tokio::sync::{Mutex, RwLock};
 use tower_lsp::Client;
 use tracing::{info, warn};
 
-use bsl_analysis_v2::{AnalysisHostV2, FileId as V2FileId};
+use bsl_analysis_v2::{AnalysisHostV2, DepsSnapshotId, FileId as V2FileId, SettingsId};
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::system::SystemCoordinator;
 
 use crate::config::BslSettings;
 use crate::converters::{semantic_error_to_diagnostic, syntax_errors_to_diagnostics};
 
-use super::{BslLanguageServer, Url};
+use super::{BslLanguageServer, Url, V2FileKey};
 
 impl BslLanguageServer {
     pub fn new(client: Client, coordinator: Arc<SystemCoordinator>) -> Self {
@@ -27,6 +27,14 @@ impl BslLanguageServer {
         );
         info!("IntelliSense v2 salsa enabled: {}", use_salsa_v2);
 
+        let mut analysis_host_v2 = AnalysisHostV2::default();
+        analysis_host_v2.apply_change(bsl_analysis_v2::Change::SetDepsId {
+            deps_id: compute_deps_id_v2(&coordinator),
+        });
+        analysis_host_v2.apply_change(bsl_analysis_v2::Change::SetSettingsId {
+            settings_id: compute_settings_id_v2(&BslSettings::default()),
+        });
+
         Self {
             client,
             documents: Arc::new(RwLock::new(HashMap::new())),
@@ -38,8 +46,8 @@ impl BslLanguageServer {
             coordinator,
 
             use_salsa_v2,
-            analysis_host_v2: Arc::new(Mutex::new(AnalysisHostV2::default())),
-            url_to_file_id_v2: Arc::new(RwLock::new(HashMap::new())),
+            analysis_host_v2: Arc::new(Mutex::new(analysis_host_v2)),
+            file_key_to_file_id_v2: Arc::new(RwLock::new(HashMap::new())),
             next_file_id_v2: Arc::new(std::sync::atomic::AtomicU32::new(1)),
         }
     }
@@ -148,22 +156,73 @@ impl BslLanguageServer {
     }
 
     pub(crate) async fn get_or_create_file_id_v2(&self, uri: &Url) -> V2FileId {
-        if let Some(&file_id) = self.url_to_file_id_v2.read().await.get(uri) {
+        let key = match uri.to_file_path() {
+            Ok(path) => V2FileKey::Path(path),
+            Err(_) => V2FileKey::Url(uri.to_string()),
+        };
+
+        if let Some(&file_id) = self.file_key_to_file_id_v2.read().await.get(&key) {
             return file_id;
         }
 
-        let mut map = self.url_to_file_id_v2.write().await;
-        if let Some(&file_id) = map.get(uri) {
+        let mut map = self.file_key_to_file_id_v2.write().await;
+        if let Some(&file_id) = map.get(&key) {
             return file_id;
         }
 
         let raw = self.next_file_id_v2.fetch_add(1, Ordering::Relaxed);
         let file_id = V2FileId(raw);
-        map.insert(uri.clone(), file_id);
+        map.insert(key, file_id);
         file_id
     }
 
-    pub(crate) async fn take_file_id_v2(&self, uri: &Url) -> Option<V2FileId> {
-        self.url_to_file_id_v2.write().await.remove(uri)
+    pub(crate) async fn get_file_id_v2(&self, uri: &Url) -> Option<V2FileId> {
+        let key = match uri.to_file_path() {
+            Ok(path) => V2FileKey::Path(path),
+            Err(_) => V2FileKey::Url(uri.to_string()),
+        };
+        self.file_key_to_file_id_v2.read().await.get(&key).copied()
     }
+
+    pub(crate) async fn sync_v2_globals(&self) {
+        if !self.use_salsa_v2 {
+            return;
+        }
+
+        let deps_id = compute_deps_id_v2(&self.coordinator);
+        let settings = self.settings.read().await.clone();
+        let settings_id = compute_settings_id_v2(&settings);
+
+        let mut host = self.analysis_host_v2.lock().await;
+        if host.deps_id() != deps_id {
+            host.apply_change(bsl_analysis_v2::Change::SetDepsId { deps_id });
+        }
+        if host.settings_id() != settings_id {
+            host.apply_change(bsl_analysis_v2::Change::SetSettingsId { settings_id });
+        }
+    }
+}
+
+fn compute_deps_id_v2(coordinator: &SystemCoordinator) -> DepsSnapshotId {
+    let snapshot_id = coordinator.intellisense_index_snapshot_id();
+    let payload = format!(
+        "schema={};index_snapshot_id={}",
+        bsl_analysis_v2::DEPS_SCHEMA_VERSION,
+        snapshot_id.as_str()
+    );
+    DepsSnapshotId::from_hash(blake3::hash(payload.as_bytes()).to_hex().to_string())
+}
+
+fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
+    let payload = format!(
+        "schema={};hover.detail_level={};hover.max_methods={};hover.max_properties={};hover.show_certainty={};diagnostics.detail_level={};diagnostics.show_hints={}",
+        bsl_analysis_v2::SETTINGS_SCHEMA_VERSION,
+        settings.hover.detail_level,
+        settings.hover.max_methods,
+        settings.hover.max_properties,
+        settings.hover.show_certainty,
+        settings.diagnostics.detail_level,
+        settings.diagnostics.show_hints
+    );
+    SettingsId::from_hash(blake3::hash(payload.as_bytes()).to_hex().to_string())
 }

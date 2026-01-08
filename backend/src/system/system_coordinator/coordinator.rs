@@ -240,6 +240,10 @@ impl SystemCoordinator {
         self.disk_cache.clone()
     }
 
+    pub fn intellisense_index_snapshot_id(&self) -> crate::system::IndexSnapshotId {
+        self.intellisense_index.snapshot_id()
+    }
+
     pub fn intellisense_index_store_for_scope(
         &self,
         scope: &CacheScope,

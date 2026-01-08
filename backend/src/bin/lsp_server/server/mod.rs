@@ -13,9 +13,11 @@ mod language_server;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::atomic::AtomicU32;
+use tokio::sync::{Mutex, RwLock};
 use tower_lsp::Client;
 
+use bsl_analysis_v2::{AnalysisHostV2, FileId as V2FileId};
 use bsl_backend::system::SystemCoordinator;
 
 use crate::config::{BslSettings, LspConfig};
@@ -34,4 +36,9 @@ pub struct BslLanguageServer {
     pub(crate) completion_snippet_support: Arc<RwLock<bool>>,
     pub(crate) auto_reindex_paused: Arc<RwLock<bool>>,
     pub(crate) coordinator: Arc<SystemCoordinator>,
+
+    pub(crate) use_salsa_v2: bool,
+    pub(crate) analysis_host_v2: Arc<Mutex<AnalysisHostV2>>,
+    pub(crate) url_to_file_id_v2: Arc<RwLock<HashMap<Url, V2FileId>>>,
+    pub(crate) next_file_id_v2: Arc<AtomicU32>,
 }

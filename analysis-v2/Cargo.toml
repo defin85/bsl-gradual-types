@@ -1,0 +1,15 @@
+[package]
+name = "bsl-analysis-v2"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Salsa-based analysis core for IntelliSense v2"
+
+[lib]
+name = "bsl_analysis_v2"
+path = "src/lib.rs"
+
+[dependencies]
+salsa = { workspace = true }
+

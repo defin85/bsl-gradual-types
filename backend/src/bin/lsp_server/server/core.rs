@@ -2,10 +2,12 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::atomic::Ordering;
+use tokio::sync::{Mutex, RwLock};
 use tower_lsp::Client;
 use tracing::{info, warn};
 
+use bsl_analysis_v2::{AnalysisHostV2, FileId as V2FileId};
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::system::SystemCoordinator;
 
@@ -16,6 +18,15 @@ use super::{BslLanguageServer, Url};
 
 impl BslLanguageServer {
     pub fn new(client: Client, coordinator: Arc<SystemCoordinator>) -> Self {
+        let use_salsa_v2 = matches!(
+            std::env::var("BSL_INTELLISENSE_V2_SALSA")
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .as_str(),
+            "1" | "true" | "yes" | "on"
+        );
+        info!("IntelliSense v2 salsa enabled: {}", use_salsa_v2);
+
         Self {
             client,
             documents: Arc::new(RwLock::new(HashMap::new())),
@@ -25,6 +36,11 @@ impl BslLanguageServer {
             completion_snippet_support: Arc::new(RwLock::new(false)),
             auto_reindex_paused: Arc::new(RwLock::new(false)),
             coordinator,
+
+            use_salsa_v2,
+            analysis_host_v2: Arc::new(Mutex::new(AnalysisHostV2::default())),
+            url_to_file_id_v2: Arc::new(RwLock::new(HashMap::new())),
+            next_file_id_v2: Arc::new(std::sync::atomic::AtomicU32::new(1)),
         }
     }
 
@@ -129,5 +145,25 @@ impl BslLanguageServer {
         } else {
             counts.insert(uri.clone(), count);
         }
+    }
+
+    pub(crate) async fn get_or_create_file_id_v2(&self, uri: &Url) -> V2FileId {
+        if let Some(&file_id) = self.url_to_file_id_v2.read().await.get(uri) {
+            return file_id;
+        }
+
+        let mut map = self.url_to_file_id_v2.write().await;
+        if let Some(&file_id) = map.get(uri) {
+            return file_id;
+        }
+
+        let raw = self.next_file_id_v2.fetch_add(1, Ordering::Relaxed);
+        let file_id = V2FileId(raw);
+        map.insert(uri.clone(), file_id);
+        file_id
+    }
+
+    pub(crate) async fn take_file_id_v2(&self, uri: &Url) -> Option<V2FileId> {
+        self.url_to_file_id_v2.write().await.remove(uri)
     }
 }

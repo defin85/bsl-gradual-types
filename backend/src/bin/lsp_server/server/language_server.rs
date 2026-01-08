@@ -14,6 +14,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
 use tracing::{debug, error, info, warn};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
@@ -449,6 +450,18 @@ impl LanguageServer for BslLanguageServer {
             .await
             .insert(uri.clone(), text.clone());
 
+        if self.use_salsa_v2 {
+            let file_id = self.get_or_create_file_id_v2(&uri).await;
+            self.analysis_host_v2
+                .lock()
+                .await
+                .apply_change(bsl_analysis_v2::Change::SetFile {
+                    file_id,
+                    text: Arc::from(text.clone()),
+                    version,
+                });
+        }
+
         // Preheat IR cache
         if let Some(service) = self.get_type_service() {
             match service.get_hover_info(&text, 0, 0, None).await {
@@ -509,6 +522,18 @@ impl LanguageServer for BslLanguageServer {
             .await
             .insert(uri.clone(), updated_text.clone());
 
+        if self.use_salsa_v2 {
+            let file_id = self.get_or_create_file_id_v2(&uri).await;
+            self.analysis_host_v2
+                .lock()
+                .await
+                .apply_change(bsl_analysis_v2::Change::SetFile {
+                    file_id,
+                    text: Arc::from(updated_text.clone()),
+                    version,
+                });
+        }
+
         let config_root = {
             let cache_lock = self.coordinator.config_index_cache();
             let guard = cache_lock.read().unwrap_or_else(|poisoned| {
@@ -540,6 +565,15 @@ impl LanguageServer for BslLanguageServer {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         self.documents.write().await.remove(&uri);
+
+        if self.use_salsa_v2 {
+            if let Some(file_id) = self.take_file_id_v2(&uri).await {
+                self.analysis_host_v2
+                    .lock()
+                    .await
+                    .apply_change(bsl_analysis_v2::Change::RemoveFile { file_id });
+            }
+        }
 
         // Clear diagnostics
         self.client
@@ -579,14 +613,56 @@ impl LanguageServer for BslLanguageServer {
 
         let started = Instant::now();
         let snippet_support = *self.completion_snippet_support.read().await;
-        let completion = handle_completion(
-            &file_content,
-            position,
-            &uri,
-            self.get_type_service(),
-            snippet_support,
-        )
-        .await;
+        let completion = if self.use_salsa_v2 {
+            let file_id = self.get_or_create_file_id_v2(&uri).await;
+
+            {
+                let mut host = self.analysis_host_v2.lock().await;
+                if !host.has_file(file_id) {
+                    host.apply_change(bsl_analysis_v2::Change::SetFile {
+                        file_id,
+                        text: Arc::from(file_content.clone()),
+                        version: 0,
+                    });
+                }
+            }
+
+            let analysis = {
+                self.analysis_host_v2.lock().await.analysis()
+            };
+            match analysis.file_text_len(file_id) {
+                Ok(Some(len)) => debug!(
+                    "Completion v2 (salsa) active: uri={}, file_id={}, text_len={}",
+                    uri, file_id.0, len
+                ),
+                Ok(None) => debug!(
+                    "Completion v2 (salsa) active: uri={}, file_id={} (file not found)",
+                    uri, file_id.0
+                ),
+                Err(_) => debug!(
+                    "Completion v2 (salsa) cancelled: uri={}, file_id={}",
+                    uri, file_id.0
+                ),
+            }
+
+            Some(crate::handlers::CompletionResponseWithStats {
+                response: CompletionResponse::List(CompletionList {
+                    is_incomplete: false,
+                    items: vec![],
+                }),
+                stats: None,
+                had_error: false,
+            })
+        } else {
+            handle_completion(
+                &file_content,
+                position,
+                &uri,
+                self.get_type_service(),
+                snippet_support,
+            )
+            .await
+        };
         let elapsed = started.elapsed();
         self.coordinator.record_completion_latency(elapsed);
 

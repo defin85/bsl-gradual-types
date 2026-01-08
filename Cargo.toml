@@ -12,6 +12,7 @@ categories = ["development-tools", "parser-implementations"]
 [workspace]
 members = [
     "shared",
+    "analysis-v2",
     "backend",
     "frontend",
     "cli",
@@ -34,6 +35,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 bincode = "1.3"
 indexmap = "2.0"
+salsa = "0.25.2"
 clap = { version = "4.4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -92,6 +94,7 @@ insta = "1.34"
 
 # Internal crates (defined here for workspace reference)
 bsl-shared = { path = "shared", default-features = true }
+bsl-analysis-v2 = { path = "analysis-v2" }
 bsl-backend = { path = "backend" }
 bsl-frontend = { path = "frontend" }
 bsl-cli = { path = "cli" }

@@ -3,12 +3,12 @@
 //! Эти statements являются специфичными для языка 1С
 //! и не содержат вложенных блоков кода.
 
-use crate::parsing::bsl::ast::Statement;
+use crate::ast::Statement;
 use tree_sitter::Node;
 
-use crate::system::tree_sitter_adapter::expression_converter::convert_expression;
-use crate::system::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
-use crate::system::tree_sitter_adapter::utils::node_text;
+use crate::tree_sitter_adapter::expression_converter::convert_expression;
+use crate::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
+use crate::tree_sitter_adapter::utils::node_text;
 
 /// Конвертировать goto_statement с использованием кеша строк (Milestone 2.19)
 pub(crate) fn convert_goto_statement_cached(

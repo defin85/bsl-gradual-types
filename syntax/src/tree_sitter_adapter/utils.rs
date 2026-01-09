@@ -1,6 +1,6 @@
 //! Вспомогательные функции для работы с tree-sitter nodes
 
-use crate::parsing::bsl::ast::Expression;
+use crate::ast::Expression;
 use tree_sitter::Node;
 
 /// Получить текст узла из исходного кода

@@ -11,7 +11,7 @@ use tracing::{debug, info, warn, Span};
 
 use bsl_shared::domain::metadata_constants::get_collection_kind;
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
-use bsl_shared::engine::AnalysisEngine;
+use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::ir::{ScopeId, SemanticProgram};
 use bsl_shared::utils::hash::hash_content;
 
@@ -69,9 +69,10 @@ pub struct CompletionResult {
 }
 
 pub(crate) struct CompletionAnalysisContext<'a> {
-    pub parser: &'a ParserCoordinator,
-    pub analysis_engine: &'a AnalysisEngine,
-    pub ir_cache: &'a IrCache,
+    pub parser: Option<&'a ParserCoordinator>,
+    pub ir_cache: Option<&'a IrCache>,
+    pub ir_program: Option<Arc<SemanticProgram>>,
+    pub resolver: &'a TypeResolver,
     pub file_path: &'a str,
 }
 
@@ -102,6 +103,37 @@ pub async fn get_completion(
         index,
         metadata_lookup,
         None,
+    )
+    .await
+}
+
+pub async fn get_completion_with_semantic_program(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index: &IntellisenseIndexStore,
+    metadata_lookup: &TypeMetadataLookup,
+    file_path: &str,
+    resolver: &TypeResolver,
+    ir_program: Arc<SemanticProgram>,
+) -> Result<CompletionResult> {
+    let analysis = CompletionAnalysisContext {
+        parser: None,
+        ir_cache: None,
+        ir_program: Some(ir_program),
+        resolver,
+        file_path,
+    };
+
+    get_completion_with_analysis(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index,
+        metadata_lookup,
+        Some(&analysis),
     )
     .await
 }
@@ -561,7 +593,7 @@ async fn resolve_member_chain_owner_type(
         resolve_member_owner_type(analysis, file_content, line, column, base_name).await?
     };
 
-    let resolver = analysis.map(|ctx| ctx.analysis_engine.get_resolver());
+    let resolver = analysis.map(|ctx| ctx.resolver);
     for member_name in receiver_chain.iter().skip(1) {
         if owner.is_unknown() {
             return None;
@@ -576,7 +608,7 @@ async fn resolve_member_chain_owner_type(
             if property.prop_type.trim().is_empty() {
                 return None;
             }
-            owner = if let Some(resolver) = resolver.as_ref() {
+            owner = if let Some(resolver) = resolver {
                 resolver.resolve_expression_sync(&property.prop_type)
             } else {
                 TypeResolution::explicit(&property.prop_type)
@@ -592,7 +624,7 @@ async fn resolve_member_chain_owner_type(
             if method.return_type.trim().is_empty() {
                 return None;
             }
-            owner = if let Some(resolver) = resolver.as_ref() {
+            owner = if let Some(resolver) = resolver {
                 resolver.resolve_expression_sync(&method.return_type)
             } else {
                 TypeResolution::explicit(&method.return_type)
@@ -673,20 +705,27 @@ async fn resolve_member_owner_type(
     base_name: &str,
 ) -> Option<TypeResolution> {
     let ctx = analysis?;
-    let cache_key = hash_content(&format!("{}\n{}", ctx.file_path, file_content));
-    let ir_program = if let Some(cached) = ctx.ir_cache.get(cache_key).await {
-        cached
+    let ir_program = if let Some(program) = &ctx.ir_program {
+        program.clone()
     } else {
-        let ir = match ctx.parser.parse_to_ir(file_content, ctx.file_path) {
-            Ok(program) => program,
-            Err(err) => {
-                warn!("Completion IR parse failed: {}", err);
-                return None;
-            }
-        };
-        let ir_arc = Arc::new(ir);
-        ctx.ir_cache.put(cache_key, ir_arc.clone()).await;
-        ir_arc
+        let cache_key = hash_content(&format!("{}\n{}", ctx.file_path, file_content));
+        let ir_cache = ctx.ir_cache?;
+        let parser = ctx.parser?;
+
+        if let Some(cached) = ir_cache.get(cache_key).await {
+            cached
+        } else {
+            let ir = match parser.parse_to_ir(file_content, ctx.file_path) {
+                Ok(program) => program,
+                Err(err) => {
+                    warn!("Completion IR parse failed: {}", err);
+                    return None;
+                }
+            };
+            let ir_arc = Arc::new(ir);
+            ir_cache.put(cache_key, ir_arc.clone()).await;
+            ir_arc
+        }
     };
 
     let scope_id = resolve_scope_for_member(&ir_program, line, column);
@@ -696,9 +735,8 @@ async fn resolve_member_owner_type(
         return Some(flow_type);
     }
 
-    let resolver = ctx.analysis_engine.get_resolver();
     let mut resolved =
-        resolver.resolve_variable_with_context(base_name, &ir_program.symbols, scope_id);
+        ctx.resolver.resolve_variable_with_context(base_name, &ir_program.symbols, scope_id);
     if resolved.is_unknown() {
         if let Some(best_effort) =
             find_variable_resolution_best_effort(&ir_program.symbols, base_name, line)
@@ -1042,7 +1080,6 @@ mod tests {
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
     use bsl_shared::domain::resolver::TypeResolver;
     use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawPropertyData, RawTypeData};
-    use bsl_shared::engine::AnalysisEngine;
     use crate::system::ParserCoordinator;
 
     #[test]
@@ -1226,8 +1263,7 @@ mod tests {
         let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> =
             repository.clone();
         let resolver = Arc::new(TypeResolver::new(repo.clone()));
-        let analysis_engine = AnalysisEngine::new(resolver.clone(), repo.clone());
-        let parser = ParserCoordinator::new_with_resolver(repo.clone(), resolver);
+        let parser = ParserCoordinator::new_with_resolver(repo.clone(), resolver.clone());
         let ir_cache = IrCache::new(4);
         let metadata_lookup = TypeMetadataLookup::new(repo.clone());
 
@@ -1243,9 +1279,10 @@ mod tests {
         let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
 
         let ctx = CompletionAnalysisContext {
-            parser: &parser,
-            analysis_engine: &analysis_engine,
-            ir_cache: &ir_cache,
+            parser: Some(&parser),
+            ir_cache: Some(&ir_cache),
+            ir_program: None,
+            resolver: resolver.as_ref(),
             file_path: "completion_test.bsl",
         };
 
@@ -1315,8 +1352,7 @@ mod tests {
 
         let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
         let resolver = Arc::new(TypeResolver::new(repo.clone()));
-        let analysis_engine = AnalysisEngine::new(resolver.clone(), repo.clone());
-        let parser = ParserCoordinator::new_with_resolver(repo.clone(), resolver);
+        let parser = ParserCoordinator::new_with_resolver(repo.clone(), resolver.clone());
         let ir_cache = IrCache::new(4);
         let metadata_lookup = TypeMetadataLookup::new(repo.clone());
 
@@ -1332,9 +1368,10 @@ mod tests {
         let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
 
         let ctx = CompletionAnalysisContext {
-            parser: &parser,
-            analysis_engine: &analysis_engine,
-            ir_cache: &ir_cache,
+            parser: Some(&parser),
+            ir_cache: Some(&ir_cache),
+            ir_program: None,
+            resolver: resolver.as_ref(),
             file_path: "completion_nested_chain_test.bsl",
         };
 

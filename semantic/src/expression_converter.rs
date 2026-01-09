@@ -7,11 +7,11 @@ use anyhow::Result;
 use bsl_shared::domain::types::{FacetKind, TypeResolution};
 use bsl_shared::ir::{MemberAccessKind, SemanticNode, SemanticNodeKind, Span};
 
-use crate::parsing::bsl::ast::Expression;
+use bsl_syntax::ast::Expression;
 
 use super::converter::AstToIrConverter;
 use super::global_collections::{get_manager_type_for_metadata, is_global_collection};
-use crate::application::semantic_validation_visitor::helpers::collection_name_to_metadata_kind;
+use crate::metadata_helpers::collection_name_to_metadata_kind;
 
 impl AstToIrConverter {
     /// Создаёт IR-узлы для hover внутри выражений
@@ -285,7 +285,7 @@ impl AstToIrConverter {
         &mut self,
         object: &Expression,
         property: &str,
-        ast_span: crate::parsing::bsl::ast::Span,
+        ast_span: Span,
     ) -> Result<Option<usize>> {
         let span = self.ast_span_to_ir_span(ast_span);
 

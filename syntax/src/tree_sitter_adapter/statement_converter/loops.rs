@@ -3,13 +3,13 @@
 //! Модуль содержит конвертеры для циклических конструкций.
 //! Использует dispatcher для рекурсивной обработки тела цикла.
 
-use crate::parsing::bsl::ast::{Expression, Statement};
+use crate::ast::{Expression, Statement};
 use bsl_shared::ir::Span;
 use tree_sitter::Node;
 
-use crate::system::tree_sitter_adapter::expression_converter::convert_expression;
-use crate::system::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
-use crate::system::tree_sitter_adapter::utils::node_text;
+use crate::tree_sitter_adapter::expression_converter::convert_expression;
+use crate::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
+use crate::tree_sitter_adapter::utils::node_text;
 
 /// Конвертировать for_statement с использованием кеша строк (Milestone 2.19)
 pub(crate) fn convert_for_statement_cached(

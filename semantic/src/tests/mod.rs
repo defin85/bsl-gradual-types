@@ -12,7 +12,7 @@ use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::ir::SemanticNodeKind;
 
-use crate::parsing::bsl::ast::{Expression, Program, Span as AstSpan, Statement};
+use bsl_syntax::ast::{Expression, Program, Span as AstSpan, Statement};
 
 use super::AstToIrConverter;
 

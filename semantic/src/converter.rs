@@ -6,7 +6,7 @@
 //! # Архитектура
 //!
 //! ```text
-//! AST (backend) -> AstToIrConverter -> SemanticProgram (shared)
+//! AST (bsl-syntax) -> AstToIrConverter -> SemanticProgram (bsl-shared)
 //! ```
 
 use anyhow::Result;
@@ -22,7 +22,7 @@ use bsl_shared::utils::hash::hash_content;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::parsing::bsl::ast::{Program, Statement};
+use bsl_syntax::ast::{Program, Statement};
 
 /// Конвертер AST -> IR
 ///
@@ -86,8 +86,8 @@ impl AstToIrConverter {
     /// # Примеры
     ///
     /// ```no_run
-    /// use bsl_backend::application::ast_to_ir::AstToIrConverter;
-    /// use bsl_backend::parsing::bsl::ast::Program;
+    /// use bsl_semantic::AstToIrConverter;
+    /// use bsl_syntax::ast::Program;
     /// use bsl_shared::domain::repository::InMemoryTypeRepository;
     /// use bsl_shared::domain::signature_index::SignatureIndex;
     /// use std::sync::Arc;
@@ -298,22 +298,18 @@ impl AstToIrConverter {
     ///
     /// Передаёт реальные координаты из tree-sitter AST в семантический IR.
     /// Это позволяет `find_node_at_position()` корректно находить узлы по позиции курсора.
-    pub(crate) fn ast_span_to_ir_span(&self, ast_span: crate::parsing::bsl::ast::Span) -> Span {
+    pub(crate) fn ast_span_to_ir_span(&self, ast_span: Span) -> Span {
         use tracing::debug;
-
-        let span = Span {
-            start_line: ast_span.start_line,
-            start_column: ast_span.start_column,
-            end_line: ast_span.end_line,
-            end_column: ast_span.end_column,
-        };
 
         // Milestone 2.11 Task B1: DEBUG логи для AST -> IR конвертации
         debug!(
             "AST -> IR Span conversion: {}:{} - {}:{}",
-            span.start_line, span.start_column, span.end_line, span.end_column
+            ast_span.start_line,
+            ast_span.start_column,
+            ast_span.end_line,
+            ast_span.end_column
         );
 
-        span
+        ast_span
     }
 }

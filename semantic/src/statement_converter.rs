@@ -6,9 +6,10 @@
 use anyhow::Result;
 use bsl_shared::domain::code_location::CompilerDirective;
 use bsl_shared::domain::types::TypeResolution;
+use bsl_shared::ir::Span;
 use bsl_shared::ir::{Parameter, ScopeKind, SemanticNode, SemanticNodeKind};
 
-use crate::parsing::bsl::ast::{Expression, Statement};
+use bsl_syntax::ast::{Expression, Statement};
 
 use super::converter::AstToIrConverter;
 
@@ -183,7 +184,7 @@ impl AstToIrConverter {
         &mut self,
         target: Expression,
         value: Expression,
-        ast_span: crate::parsing::bsl::ast::Span,
+        ast_span: Span,
     ) -> Result<Option<usize>> {
         if let Expression::Identifier { name: var_name, .. } = target {
             // ИСПРАВЛЕНИЕ Milestone 3.5 + 3.16: Обрабатываем value expression ПЕРЕД Assignment
@@ -299,7 +300,7 @@ impl AstToIrConverter {
         condition: Expression,
         then_body: Vec<Statement>,
         else_body: Option<Vec<Statement>>,
-        ast_span: crate::parsing::bsl::ast::Span,
+        ast_span: Span,
     ) -> Result<Option<usize>> {
         self.convert_expression_for_hover(&condition)?;
 
@@ -360,7 +361,7 @@ impl AstToIrConverter {
         &mut self,
         condition: Expression,
         body: Vec<Statement>,
-        ast_span: crate::parsing::bsl::ast::Span,
+        ast_span: Span,
     ) -> Result<Option<usize>> {
         self.convert_expression_for_hover(&condition)?;
 
@@ -402,7 +403,7 @@ impl AstToIrConverter {
         start: Expression,
         end: Expression,
         body: Vec<Statement>,
-        ast_span: crate::parsing::bsl::ast::Span,
+        ast_span: Span,
     ) -> Result<Option<usize>> {
         self.convert_expression_for_hover(&start)?;
         self.convert_expression_for_hover(&end)?;
@@ -457,7 +458,7 @@ impl AstToIrConverter {
         variable: String,
         collection: Expression,
         body: Vec<Statement>,
-        ast_span: crate::parsing::bsl::ast::Span,
+        ast_span: Span,
     ) -> Result<Option<usize>> {
         self.convert_expression_for_hover(&collection)?;
 
@@ -498,7 +499,7 @@ impl AstToIrConverter {
         &mut self,
         try_body: Vec<Statement>,
         except_body: Vec<Statement>,
-        ast_span: crate::parsing::bsl::ast::Span,
+        ast_span: Span,
     ) -> Result<Option<usize>> {
         let span = self.ast_span_to_ir_span(ast_span);
 
@@ -551,7 +552,7 @@ impl AstToIrConverter {
         params: Vec<String>,
         body: Vec<Statement>,
         compiler_directive: Option<CompilerDirective>,
-        ast_span: crate::parsing::bsl::ast::Span,
+        ast_span: Span,
     ) -> Result<Option<usize>> {
         let span = self.ast_span_to_ir_span(ast_span);
         // Function scope для корректной регистрации переменных (видны во всём теле функции)
@@ -619,7 +620,7 @@ impl AstToIrConverter {
         params: Vec<String>,
         body: Vec<Statement>,
         compiler_directive: Option<CompilerDirective>,
-        ast_span: crate::parsing::bsl::ast::Span,
+        ast_span: Span,
     ) -> Result<Option<usize>> {
         let span = self.ast_span_to_ir_span(ast_span);
         // Function scope для корректной регистрации переменных (видны во всём теле процедуры)

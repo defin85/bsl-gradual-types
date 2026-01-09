@@ -35,7 +35,7 @@ mod loops;
 mod simple;
 mod special;
 
-use crate::parsing::bsl::ast::Statement;
+use crate::ast::Statement;
 use tracing::debug;
 use tree_sitter::Node;
 

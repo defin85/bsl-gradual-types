@@ -3,12 +3,12 @@
 //! Эти statements не содержат вложенных блоков кода,
 //! поэтому не требуют рекурсивного вызова dispatcher.
 
-use crate::parsing::bsl::ast::{Expression, Statement};
+use crate::ast::{Expression, Statement};
 use bsl_shared::ir::Span;
 use tree_sitter::Node;
 
-use crate::system::tree_sitter_adapter::expression_converter::convert_expression;
-use crate::system::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
+use crate::tree_sitter_adapter::expression_converter::convert_expression;
+use crate::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
 
 /// Конвертировать assignment_statement с использованием кеша строк (Milestone 2.19)
 pub(crate) fn convert_assignment_cached(

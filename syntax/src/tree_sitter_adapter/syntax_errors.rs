@@ -302,7 +302,7 @@ fn find_related(
 
 fn span_at_node_start(node: &Node, source: &str, line_index: &LineIndex) -> Span {
     let start = node.start_position();
-    let start_column = line_index.byte_offset_to_utf16(source, start.row, start.column);
+    let start_column = line_index.byte_column_to_utf16(source, start.row, start.column);
     Span::from_positions(
         (start.row as u32, start_column),
         (start.row as u32, start_column),

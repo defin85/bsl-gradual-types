@@ -8,6 +8,7 @@ use tracing::{debug, info, warn};
 use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
 use bsl_shared::domain::TypeMetadataLookup;
+use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::ir::{ScopeId, SemanticNodeKind, SemanticProgram};
 use bsl_shared::utils::hash::hash_content;
@@ -62,6 +63,31 @@ pub async fn get_hover_info(
         hover_config,
     )
     .await
+}
+
+/// Hover по уже готовому `SemanticProgram` (без legacy парсинга/IR build).
+///
+/// Используется в IntelliSense v2 (salsa) hot path.
+pub fn get_hover_info_with_semantic_program(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    metadata_lookup: &TypeMetadataLookup,
+    hover_formatter: &HoverFormatter,
+    hover_config: Option<HoverFormatConfig>,
+    resolver: &TypeResolver,
+    ir_program: std::sync::Arc<SemanticProgram>,
+) -> Option<String> {
+    compute_hover_info_from_ir(
+        ir_program.as_ref(),
+        resolver,
+        metadata_lookup,
+        hover_formatter,
+        file_content,
+        line,
+        column,
+        hover_config,
+    )
 }
 
 /// Hover с учётом пути к файлу.
@@ -140,6 +166,53 @@ pub async fn get_hover_info_with_file_path(
     let lookup_start = std::time::Instant::now();
 
     // Milestone 2.11 Task B1: DEBUG logs for node search
+    let resolver = analysis_engine.get_resolver();
+    let result = compute_hover_info_from_ir(
+        ir_program.as_ref(),
+        resolver.as_ref(),
+        metadata_lookup,
+        hover_formatter,
+        file_content,
+        line,
+        column,
+        hover_config,
+    );
+
+    // MILESTONE 2.13: Log performance metrics
+    let lookup_time = lookup_start.elapsed();
+    let total_time = start.elapsed();
+
+    info!(
+        "Hover performance: total={:?}, cache_hit={}, parse={:?}, lookup={:?}",
+        total_time, cache_hit, parse_time, lookup_time
+    );
+
+    // MILESTONE 2.13: Periodic cache stats output (every 100 hovers)
+    let current_count = hover_count.fetch_add(1, Ordering::Relaxed);
+    if current_count.is_multiple_of(100) {
+        let stats = ir_cache.get_stats().await;
+        let hit_rate = ir_cache.get_hit_rate().await;
+        info!(
+            "IR Cache stats after {} hovers: hit_rate={:.1}%, hits={}, misses={}, evictions={}",
+            current_count, hit_rate, stats.hits, stats.misses, stats.evictions
+        );
+    }
+
+    Ok(result)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compute_hover_info_from_ir(
+    ir_program: &SemanticProgram,
+    resolver: &TypeResolver,
+    metadata_lookup: &TypeMetadataLookup,
+    hover_formatter: &HoverFormatter,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    hover_config: Option<HoverFormatConfig>,
+) -> Option<String> {
+    // Milestone 2.11 Task B1: DEBUG logs for node search
     debug!("Looking for node at position {}:{}", line, column);
 
     let node_at_position = ir_program.find_node_at_position(line, column);
@@ -161,12 +234,10 @@ pub async fn get_hover_info_with_file_path(
                     extract_word_at_position(file_content, line, column)
                 {
                     if word_under_cursor.eq_ignore_ascii_case(member_name) {
-                        let resolver = analysis_engine.get_resolver();
-
                         // 1) Тип объекта-владельца (flow-sensitive, если объект - переменная)
                         let owner_resolution = if let Some(obj_name) = object_name.as_deref() {
                             if let Some(flow_type) = find_variable_type_at_position(
-                                &ir_program,
+                                ir_program,
                                 obj_name,
                                 node.scope_id,
                                 line,
@@ -202,13 +273,13 @@ pub async fn get_hover_info_with_file_path(
                             hover_formatter.clone()
                         };
 
-                        return Ok(Some(formatter.format_property(
+                        return Some(formatter.format_property(
                             object_name.as_deref(),
                             &owner_resolution,
                             member_name,
                             &property_resolution,
                             is_readonly,
-                        )));
+                        ));
                     }
                 }
             }
@@ -216,7 +287,7 @@ pub async fn get_hover_info_with_file_path(
     }
 
     // Direction 2: Use find_variable_with_scope() for Generic inference
-    let result = if let Some((var_name, _type_hint, scope_id)) =
+    if let Some((var_name, _type_hint, scope_id)) =
         ir_program.find_variable_with_scope(line, column)
     {
         info!(
@@ -226,7 +297,7 @@ pub async fn get_hover_info_with_file_path(
 
         // FLOW-SENSITIVE: Find type at specific position (not final!)
         let resolution = if let Some(flow_type) =
-            find_variable_type_at_position(&ir_program, &var_name, scope_id, line)
+            find_variable_type_at_position(ir_program, &var_name, scope_id, line)
         {
             info!(
                 "Flow-sensitive type for '{}' at line {}: {}",
@@ -237,101 +308,67 @@ pub async fn get_hover_info_with_file_path(
             flow_type
         } else {
             // Fallback: use SymbolTable (final type)
-            let resolver = analysis_engine.get_resolver();
             resolver.resolve_variable_with_context(&var_name, &ir_program.symbols, scope_id)
         };
 
         // MILESTONE 3.6 Phase 1: Use passed config or default
-        let formatter = if let Some(config) = hover_config {
+        let formatter = if let Some(config) = hover_config.clone() {
             HoverFormatter::new(config, metadata_lookup.clone())
         } else {
             hover_formatter.clone()
         };
 
         // Format hover via TypeResolution (instead of old TypeHint enum)
-        Some(formatter.format_variable(&var_name, &resolution))
-    } else {
-        // Milestone 2.11 Task B1: Logs when variable not found
-        debug!(
-            "find_variable_with_scope({}, {}) did not find variable",
-            line, column
-        );
-
-        // Fallback 1: Try find_node_at_position for other nodes (functions, loops, etc.)
-        if let Some(node) = node_at_position {
-            info!(
-                "find_node_at_position({}, {}) found node (not variable): span={:?}",
-                line, column, node.span
-            );
-            debug!("Found node: {:?} at span {:?}", node.kind, node.span);
-            if let SemanticNodeKind::FunctionCall {
-                function_name,
-                object_type,
-                ..
-            } = &node.kind
-            {
-                if let Some(signature) = metadata_lookup
-                    .find_method_signature_for_call(object_type.as_ref(), function_name)
-                {
-                    let formatter = if let Some(config) = hover_config.clone() {
-                        HoverFormatter::new(config, metadata_lookup.clone())
-                    } else {
-                        hover_formatter.clone()
-                    };
-                    let label = if object_type.is_some() { "Метод" } else { "Функция" };
-                    return Ok(Some(
-                        formatter.format_function_signature(label, &signature),
-                    ));
-                }
-            }
-            Some(format_semantic_node_info(
-                node,
-                file_content,
-                metadata_lookup,
-            ))
-        } else {
-            // Milestone 2.11 Task B1: Warning when node not found
-            warn!("No node found at position {}:{} in IR", line, column);
-
-            // Fallback 2: old logic by variable name (without AST, since IR cache is used now)
-            if let Some(symbol_info) = extract_enhanced_symbol_info(
-                analysis_engine,
-                metadata_lookup,
-                file_content,
-                line,
-                column,
-                None,
-            ) {
-                debug!("Fallback: using extract_enhanced_symbol_info");
-                Some(symbol_info)
-            } else {
-                warn!("Fallback also failed, returning generic BSL symbol message");
-                Some(format!("BSL symbol at position {}:{}", line, column))
-            }
-        }
-    };
-
-    // MILESTONE 2.13: Log performance metrics
-    let lookup_time = lookup_start.elapsed();
-    let total_time = start.elapsed();
-
-    info!(
-        "Hover performance: total={:?}, cache_hit={}, parse={:?}, lookup={:?}",
-        total_time, cache_hit, parse_time, lookup_time
-    );
-
-    // MILESTONE 2.13: Periodic cache stats output (every 100 hovers)
-    let current_count = hover_count.fetch_add(1, Ordering::Relaxed);
-    if current_count.is_multiple_of(100) {
-        let stats = ir_cache.get_stats().await;
-        let hit_rate = ir_cache.get_hit_rate().await;
-        info!(
-            "IR Cache stats after {} hovers: hit_rate={:.1}%, hits={}, misses={}, evictions={}",
-            current_count, hit_rate, stats.hits, stats.misses, stats.evictions
-        );
+        return Some(formatter.format_variable(&var_name, &resolution));
     }
 
-    Ok(result)
+    // Milestone 2.11 Task B1: Logs when variable not found
+    debug!(
+        "find_variable_with_scope({}, {}) did not find variable",
+        line, column
+    );
+
+    // Fallback 1: Try find_node_at_position for other nodes (functions, loops, etc.)
+    if let Some(node) = node_at_position {
+        info!(
+            "find_node_at_position({}, {}) found node (not variable): span={:?}",
+            line, column, node.span
+        );
+        debug!("Found node: {:?} at span {:?}", node.kind, node.span);
+        if let SemanticNodeKind::FunctionCall {
+            function_name,
+            object_type,
+            ..
+        } = &node.kind
+        {
+            if let Some(signature) =
+                metadata_lookup.find_method_signature_for_call(object_type.as_ref(), function_name)
+            {
+                let formatter = if let Some(config) = hover_config.clone() {
+                    HoverFormatter::new(config, metadata_lookup.clone())
+                } else {
+                    hover_formatter.clone()
+                };
+                let label = if object_type.is_some() { "Метод" } else { "Функция" };
+                return Some(formatter.format_function_signature(label, &signature));
+            }
+        }
+        return Some(format_semantic_node_info(node, file_content, metadata_lookup));
+    }
+
+    // Milestone 2.11 Task B1: Warning when node not found
+    warn!("No node found at position {}:{} in IR", line, column);
+
+    // Fallback 2: old logic by variable name (without AST, since IR cache is used now)
+    if let Some(symbol_info) =
+        extract_enhanced_symbol_info(resolver, file_content, line, column, None)
+    {
+        debug!("Fallback: using extract_enhanced_symbol_info");
+        return Some(symbol_info);
+    }
+
+    warn!("Fallback also failed, returning generic BSL symbol message");
+    Some(format!("BSL symbol at position {}:{}", line, column))
 }
 
 /// Get TypeResolution for symbol at specified position (Go To Definition)
@@ -647,8 +684,7 @@ fn is_scope_visible(
 
 /// Extract symbol information at specified position from AST
 fn extract_enhanced_symbol_info(
-    analysis_engine: &AnalysisEngine,
-    _metadata_lookup: &TypeMetadataLookup,
+    resolver: &TypeResolver,
     file_content: &str,
     line: u32,
     column: u32,
@@ -673,8 +709,8 @@ fn extract_enhanced_symbol_info(
                         if var_name == &word_under_cursor {
                             // Application Layer: Map AST -> type name
                             if let Some(type_name) = expression_to_type_name(value) {
-                                // Domain Layer: Resolve via AnalysisEngine
-                                let resolution = analysis_engine.resolve_type(&type_name);
+                                // Domain Layer: Resolve via TypeResolver
+                                let resolution = resolver.resolve_expression_sync(&type_name);
                                 let type_info = format_type_for_hover(&type_name, &resolution);
                                 return Some(format!(
                                     "**Присваивание:** `{} = ...`\n\n{}",
@@ -729,19 +765,19 @@ fn extract_enhanced_symbol_info(
         }
     }
 
-    // Step 3: Fallback - try to resolve type for identifier via AnalysisEngine
-    resolve_type_for_identifier(analysis_engine, &word_under_cursor)
+    // Step 3: Fallback - try to resolve type for identifier via TypeResolver
+    resolve_type_for_identifier(resolver, &word_under_cursor)
 }
 
-/// Try to resolve type for identifier via AnalysisEngine
+/// Try to resolve type for identifier via TypeResolver
 fn resolve_type_for_identifier(
-    analysis_engine: &AnalysisEngine,
+    resolver: &TypeResolver,
     identifier: &str,
 ) -> Option<String> {
     use bsl_shared::domain::types::Certainty;
 
-    // Domain Layer: Resolve via AnalysisEngine
-    let resolution = analysis_engine.resolve_type(identifier);
+    // Domain Layer: Resolve via TypeResolver
+    let resolution = resolver.resolve_expression_sync(identifier);
 
     // Check if type was found
     if !matches!(resolution.certainty, Certainty::Unknown) {

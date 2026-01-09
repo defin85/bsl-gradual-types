@@ -4,7 +4,6 @@
 //! Включает как простой строковый вывод (`infer_expression_type`),
 //! так и полный вывод с TypeResolution (`infer_type_resolution`).
 
-use crate::parsing::bsl::ast::Expression;
 use bsl_shared::domain::is_configuration_type_pattern;
 use bsl_shared::domain::resolver::GenericStrategy;
 use bsl_shared::domain::signature_index::SignatureIndex;
@@ -12,6 +11,7 @@ use bsl_shared::domain::types::{
     Certainty, ConcreteType, GenericType, PlatformType, ResolutionResult, TypeResolution,
     UncertaintyReason,
 };
+use bsl_syntax::ast::Expression;
 
 use super::converter::AstToIrConverter;
 use super::global_collections::{is_global_collection, lookup_global_collection};

@@ -1,0 +1,20 @@
+[package]
+name = "bsl-syntax"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Syntax layer (AST + tree-sitter adapter) for BSL"
+
+[lib]
+name = "bsl_syntax"
+path = "src/lib.rs"
+
+[dependencies]
+bsl-shared = { workspace = true }
+bsl-line-index = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-bsl = { workspace = true }

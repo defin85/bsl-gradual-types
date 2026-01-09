@@ -3,12 +3,12 @@
 //! Модуль содержит конвертеры для объявлений функций, процедур и переменных.
 //! Использует dispatcher для рекурсивной обработки тела функций.
 
-use crate::parsing::bsl::ast::Statement;
+use crate::ast::Statement;
 use tree_sitter::Node;
 
-use crate::system::tree_sitter_adapter::directives::find_preceding_directive;
-use crate::system::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
-use crate::system::tree_sitter_adapter::utils::{convert_parameters, node_text};
+use crate::tree_sitter_adapter::directives::find_preceding_directive;
+use crate::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
+use crate::tree_sitter_adapter::utils::{convert_parameters, node_text};
 
 /// Конвертировать function_definition с использованием кеша строк (Milestone 2.19)
 ///

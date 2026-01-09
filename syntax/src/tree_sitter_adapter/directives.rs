@@ -6,7 +6,7 @@
 //! - &НаСервереБезКонтекста / &AtServerNoContext
 //! - &НаКлиентеНаСервереБезКонтекста / &AtClientAtServerNoContext
 
-use crate::parsing::bsl::ast::CompilerDirective;
+use crate::ast::CompilerDirective;
 use tracing::debug;
 use tree_sitter::Node;
 

@@ -3,11 +3,11 @@
 //! Модуль содержит конвертеры для конструкций обработки ошибок.
 //! Использует dispatcher для рекурсивной обработки блоков try/except.
 
-use crate::parsing::bsl::ast::Statement;
+use crate::ast::Statement;
 use tree_sitter::Node;
 
-use crate::system::tree_sitter_adapter::expression_converter::convert_expression;
-use crate::system::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
+use crate::tree_sitter_adapter::expression_converter::convert_expression;
+use crate::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
 
 /// Конвертировать try_statement с использованием кеша строк (Milestone 2.19)
 pub(crate) fn convert_try_statement_cached(

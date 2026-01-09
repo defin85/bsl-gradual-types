@@ -7,6 +7,8 @@ use tower_lsp::lsp_types::*;
 use tracing::debug;
 
 use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature};
+use bsl_shared::domain::repository::TypeRepository;
+use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::engine::AnalysisEngine;
 
 use crate::converters::position::{char_to_utf16_index, utf16_to_char_index};
@@ -40,15 +42,61 @@ pub async fn handle_signature_help(
     );
 
     // Get signature from repository
-    let signature_info = get_signature_for_function(
-        &call_context.function_name,
-        call_context.receiver_type.as_deref(),
-        call_context.is_constructor,
-        analysis_engine,
-    )?;
+    let signature_info = {
+        let engine = analysis_engine?;
+        let repo = engine.get_repository();
+        let resolver = engine.get_resolver();
+        get_signature_for_function_with_repository(
+            &call_context.function_name,
+            call_context.receiver_type.as_deref(),
+            call_context.is_constructor,
+            &repo,
+            Some(resolver.as_ref()),
+        )?
+    };
 
     // Calculate active parameter
     let active_param = calculate_active_parameter(file_content, &call_context, position);
+
+    // Build response
+    Some(build_signature_help_response(signature_info, active_param))
+}
+
+pub async fn handle_signature_help_v2(
+    file_content: Arc<str>,
+    position: Position,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+) -> Option<SignatureHelp> {
+    debug!(
+        "SignatureHelp v2 requested at {}:{}",
+        position.line, position.character
+    );
+
+    // Find call context
+    let call_context = find_call_context(file_content.as_ref(), position)?;
+
+    debug!(
+        "Found call context (v2): function={}, receiver={:?}",
+        call_context.function_name, call_context.receiver_type
+    );
+
+    let resolver = deps
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
+
+    // Get signature from repository
+    let signature_info = get_signature_for_function_with_repository(
+        &call_context.function_name,
+        call_context.receiver_type.as_deref(),
+        call_context.is_constructor,
+        &deps.repository,
+        Some(resolver.as_ref()),
+    )?;
+
+    // Calculate active parameter
+    let active_param =
+        calculate_active_parameter(file_content.as_ref(), &call_context, position);
 
     // Build response
     Some(build_signature_help_response(signature_info, active_param))
@@ -355,32 +403,33 @@ pub fn calculate_active_parameter(content: &str, context: &CallContext, position
 }
 
 /// Get function signature from TypeRepository
-fn get_signature_for_function(
+fn get_signature_for_function_with_repository(
     function_name: &str,
     receiver_type: Option<&str>,
     is_constructor: bool,
-    analysis_engine: Option<Arc<AnalysisEngine>>,
+    repository: &Arc<dyn TypeRepository>,
+    resolver: Option<&TypeResolver>,
 ) -> Option<SignatureTarget> {
-    let engine = analysis_engine?;
-    let repo = engine.get_repository();
     if is_constructor {
-        return repo
+        return repository
             .find_constructor(function_name)
             .map(SignatureTarget::Constructor);
     }
 
-    let owner_type = receiver_type.and_then(|expr| resolve_receiver_type(expr, &engine));
-    repo.find_method_signature(owner_type.as_deref(), function_name)
+    let owner_type = receiver_type.and_then(|expr| resolve_receiver_type(expr, resolver));
+    repository
+        .find_method_signature(owner_type.as_deref(), function_name)
         .map(SignatureTarget::Method)
 }
 
-fn resolve_receiver_type(expr: &str, engine: &AnalysisEngine) -> Option<String> {
+fn resolve_receiver_type(expr: &str, resolver: Option<&TypeResolver>) -> Option<String> {
     let trimmed = expr.trim();
     if trimmed.is_empty() {
         return None;
     }
 
-    let resolution = engine.resolve_type(trimmed);
+    let resolver = resolver?;
+    let resolution = resolver.resolve_expression_sync(trimmed);
     if resolution.is_unknown() || resolution.is_dynamic() {
         return None;
     }
@@ -526,7 +575,12 @@ mod tests {
         assert_eq!(expected, json);
     }
 
-    fn create_engine() -> Arc<AnalysisEngine> {
+    struct TestDeps {
+        engine: Arc<AnalysisEngine>,
+        deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    }
+
+    fn create_test_deps() -> TestDeps {
         let repository_impl = Arc::new(InMemoryTypeRepository::new());
         let raw_type = RawTypeData {
             name: "Массив".to_string(),
@@ -586,34 +640,63 @@ mod tests {
 
         let repository = repository_impl as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
         let resolver = Arc::new(TypeResolver::new(repository.clone()));
-        Arc::new(AnalysisEngine::new(resolver, repository))
+        let engine = Arc::new(AnalysisEngine::new(resolver.clone(), repository.clone()));
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            signature_index: repository.get_signature_index_clone(),
+            resolver: Some(resolver),
+            repository,
+        });
+
+        TestDeps { engine, deps }
     }
 
     #[tokio::test]
     async fn m5_signature_help_snapshot() {
         let content = read_fixture("m5_signature_help.bsl");
-        let engine = create_engine();
+        let test_deps = create_test_deps();
 
         let constructor_pos = find_position(&content, "Новый Массив(1, ");
-        let constructor =
-            handle_signature_help(&content, constructor_pos, Some(engine.clone()))
+        let constructor_legacy =
+            handle_signature_help(&content, constructor_pos, Some(test_deps.engine.clone()))
                 .await
-                .expect("constructor signature help");
+                .expect("constructor signature help (legacy)");
+        let constructor_v2 = handle_signature_help_v2(
+            Arc::from(content.clone()),
+            constructor_pos,
+            test_deps.deps.clone(),
+        )
+        .await
+        .expect("constructor signature help (v2)");
 
         let method_pos = find_position(&content, "Массив.Добавить(1, ");
-        let method =
-            handle_signature_help(&content, method_pos, Some(engine))
+        let method_legacy =
+            handle_signature_help(&content, method_pos, Some(test_deps.engine))
                 .await
-                .expect("method signature help");
+                .expect("method signature help (legacy)");
+        let method_v2 =
+            handle_signature_help_v2(Arc::from(content), method_pos, test_deps.deps)
+                .await
+                .expect("method signature help (v2)");
+
+        assert_eq!(constructor_legacy.active_parameter, constructor_v2.active_parameter);
+        assert_eq!(
+            constructor_legacy.signatures.first().map(|sig| sig.label.clone()),
+            constructor_v2.signatures.first().map(|sig| sig.label.clone())
+        );
+        assert_eq!(method_legacy.active_parameter, method_v2.active_parameter);
+        assert_eq!(
+            method_legacy.signatures.first().map(|sig| sig.label.clone()),
+            method_v2.signatures.first().map(|sig| sig.label.clone())
+        );
 
         let snapshot = serde_json::json!({
             "constructor": {
-                "label": constructor.signatures.first().map(|sig| sig.label.clone()),
-                "activeParameter": constructor.active_parameter,
+                "label": constructor_legacy.signatures.first().map(|sig| sig.label.clone()),
+                "activeParameter": constructor_legacy.active_parameter,
             },
             "method": {
-                "label": method.signatures.first().map(|sig| sig.label.clone()),
-                "activeParameter": method.active_parameter,
+                "label": method_legacy.signatures.first().map(|sig| sig.label.clone()),
+                "activeParameter": method_legacy.active_parameter,
             },
         });
 

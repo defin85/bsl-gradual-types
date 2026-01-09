@@ -1,0 +1,18 @@
+[package]
+name = "bsl-semantic"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Semantic layer (AST -> IR) for BSL"
+
+[lib]
+name = "bsl_semantic"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+bsl-shared = { workspace = true }
+bsl-syntax = { workspace = true }

@@ -10,7 +10,7 @@
 //! - New выражения
 //! - Await выражения
 
-use crate::parsing::bsl::ast::Expression;
+use crate::ast::Expression;
 use tracing::debug;
 use tree_sitter::Node;
 

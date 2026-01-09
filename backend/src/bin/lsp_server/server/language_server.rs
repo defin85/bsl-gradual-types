@@ -31,7 +31,7 @@ use crate::commands::{
 use crate::config::{BslSettings, LspConfig};
 use crate::handlers::{
     self, apply_text_edit, handle_completion, handle_completion_resolve, handle_goto_definition,
-    handle_hover, handle_signature_help,
+    handle_hover, handle_hover_v2, handle_signature_help, handle_signature_help_v2,
 };
 use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
@@ -459,6 +459,10 @@ impl LanguageServer for BslLanguageServer {
 
         if self.use_salsa_v2 {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
+            let path = match uri.to_file_path() {
+                Ok(path) => path.to_string_lossy().to_string(),
+                Err(_) => uri.to_string(),
+            };
             self.analysis_host_v2
                 .lock()
                 .await
@@ -466,6 +470,7 @@ impl LanguageServer for BslLanguageServer {
                     file_id,
                     text: Arc::from(text.clone()),
                     version,
+                    path: Arc::from(path),
                 });
         }
 
@@ -531,6 +536,10 @@ impl LanguageServer for BslLanguageServer {
 
         if self.use_salsa_v2 {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
+            let path = match uri.to_file_path() {
+                Ok(path) => path.to_string_lossy().to_string(),
+                Err(_) => uri.to_string(),
+            };
             self.analysis_host_v2
                 .lock()
                 .await
@@ -538,6 +547,7 @@ impl LanguageServer for BslLanguageServer {
                     file_id,
                     text: Arc::from(updated_text.clone()),
                     version,
+                    path: Arc::from(path),
                 });
         }
 
@@ -627,29 +637,45 @@ impl LanguageServer for BslLanguageServer {
             {
                 let mut host = self.analysis_host_v2.lock().await;
                 if !host.has_file(file_id) {
+                    let path = match uri.to_file_path() {
+                        Ok(path) => path.to_string_lossy().to_string(),
+                        Err(_) => uri.to_string(),
+                    };
                     host.apply_change(bsl_analysis_v2::Change::SetFile {
                         file_id,
                         text: Arc::from(file_content.clone()),
                         version: 0,
+                        path: Arc::from(path),
                     });
                 }
             }
 
-            let analysis = {
-                self.analysis_host_v2.lock().await.analysis()
+            let empty = || {
+                Some(crate::handlers::CompletionResponseWithStats {
+                    response: CompletionResponse::List(CompletionList {
+                        is_incomplete: false,
+                        items: vec![],
+                    }),
+                    stats: None,
+                    had_error: false,
+                })
             };
-            let observed_file_version = analysis.file_version(file_id).ok().flatten();
-            let observed_deps_id = analysis.deps_id().ok();
-            let observed_settings_id = analysis.settings_id().ok();
-            debug!(
-                "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
-                uri,
-                file_id.0,
-                observed_file_version,
-                observed_deps_id.as_ref().map(|v| v.as_str()),
-                observed_settings_id.as_ref().map(|v| v.as_str()),
-            );
-            match analysis.file_text_len(file_id) {
+
+            let (file_content, file_path, deps, ir_program) = {
+                let analysis = { self.analysis_host_v2.lock().await.analysis() };
+
+                let observed_file_version = analysis.file_version(file_id).ok().flatten();
+                let observed_deps_id = analysis.deps_id().ok();
+                let observed_settings_id = analysis.settings_id().ok();
+                debug!(
+                    "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
+                    uri,
+                    file_id.0,
+                    observed_file_version,
+                    observed_deps_id.as_ref().map(|v| v.as_str()),
+                    observed_settings_id.as_ref().map(|v| v.as_str()),
+                );
+                match analysis.file_text_len(file_id) {
                 Ok(Some(len)) => debug!(
                     "Completion v2 (salsa) active: uri={}, file_id={}, text_len={}",
                     uri, file_id.0, len
@@ -664,32 +690,81 @@ impl LanguageServer for BslLanguageServer {
                 ),
             }
 
-            let observed_byte_offset = analysis
+                let observed_byte_offset = analysis
                 .utf16_position_to_byte_offset(file_id, position.line, position.character)
                 .ok()
                 .flatten();
-            let observed_point = analysis
+                let observed_point = analysis
                 .utf16_position_to_point(file_id, position.line, position.character)
                 .ok()
                 .flatten();
-            debug!(
-                "Completion v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
-                uri,
-                file_id.0,
-                position.line,
-                position.character,
-                observed_byte_offset,
-                observed_point,
-            );
+                debug!(
+                    "Completion v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
+                    uri,
+                    file_id.0,
+                    position.line,
+                    position.character,
+                    observed_byte_offset,
+                    observed_point,
+                );
 
-            Some(crate::handlers::CompletionResponseWithStats {
-                response: CompletionResponse::List(CompletionList {
-                    is_incomplete: false,
-                    items: vec![],
-                }),
-                stats: None,
-                had_error: false,
-            })
+                if std::env::var("BSL_INTELLISENSE_V2_P3_SMOKE").is_ok() {
+                    match analysis.parse_result(file_id) {
+                        Ok(Some(parsed)) => debug!(
+                            "Completion v2 parse_result: uri={}, file_id={}, syntax_errors={}",
+                            uri,
+                            file_id.0,
+                            parsed.syntax_errors.len()
+                        ),
+                        Ok(None) => debug!(
+                            "Completion v2 parse_result: uri={}, file_id={} (file not found)",
+                            uri, file_id.0
+                        ),
+                        Err(_) => debug!(
+                            "Completion v2 parse_result cancelled: uri={}, file_id={}",
+                            uri, file_id.0
+                        ),
+                    }
+                }
+
+                let file_content = analysis.file_text(file_id).ok().flatten();
+                let file_path = analysis.file_path(file_id).ok().flatten();
+                let deps = analysis.deps_data().ok();
+                let ir_program = analysis.ir(file_id).ok().flatten();
+
+                if std::env::var("BSL_INTELLISENSE_V2_P4_SMOKE").is_ok() {
+                    match ir_program.as_ref() {
+                        Some(program) => debug!(
+                            "Completion v2 ir: uri={}, file_id={}, deps_id={:?}, nodes={}",
+                            uri,
+                            file_id.0,
+                            observed_deps_id.as_ref().map(|v| v.as_str()),
+                            program.nodes.len()
+                        ),
+                        None => debug!("Completion v2 ir: uri={}, file_id={} (unavailable)", uri, file_id.0),
+                    }
+                }
+
+                (file_content, file_path, deps, ir_program)
+            };
+
+            match (file_content, file_path, deps, ir_program) {
+                (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
+                    let index = self.coordinator.intellisense_index();
+                    crate::handlers::handle_completion_v2(
+                        file_content,
+                        file_path,
+                        ir_program,
+                        deps,
+                        position,
+                        &uri,
+                        index.as_ref(),
+                        snippet_support,
+                    )
+                    .await
+                }
+                _ => empty(),
+            }
         } else {
             handle_completion(
                 &file_content,
@@ -776,44 +851,77 @@ impl LanguageServer for BslLanguageServer {
             {
                 let mut host = self.analysis_host_v2.lock().await;
                 if !host.has_file(file_id) {
+                    let path = match uri.to_file_path() {
+                        Ok(path) => path.to_string_lossy().to_string(),
+                        Err(_) => uri.to_string(),
+                    };
                     host.apply_change(bsl_analysis_v2::Change::SetFile {
                         file_id,
                         text: Arc::from(file_content.clone()),
                         version: 0,
+                        path: Arc::from(path),
                     });
                 }
             }
 
-            let analysis = { self.analysis_host_v2.lock().await.analysis() };
-            let observed_file_version = analysis.file_version(file_id).ok().flatten();
-            let observed_deps_id = analysis.deps_id().ok();
-            let observed_settings_id = analysis.settings_id().ok();
-            debug!(
-                "Hover v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
-                uri,
-                file_id.0,
-                observed_file_version,
-                observed_deps_id.as_ref().map(|v| v.as_str()),
-                observed_settings_id.as_ref().map(|v| v.as_str()),
-            );
+            let (file_content, file_path, deps, ir_program) = {
+                let analysis = { self.analysis_host_v2.lock().await.analysis() };
+                let observed_file_version = analysis.file_version(file_id).ok().flatten();
+                let observed_deps_id = analysis.deps_id().ok();
+                let observed_settings_id = analysis.settings_id().ok();
+                debug!(
+                    "Hover v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
+                    uri,
+                    file_id.0,
+                    observed_file_version,
+                    observed_deps_id.as_ref().map(|v| v.as_str()),
+                    observed_settings_id.as_ref().map(|v| v.as_str()),
+                );
 
-            let observed_byte_offset = analysis
-                .utf16_position_to_byte_offset(file_id, position.line, position.character)
-                .ok()
-                .flatten();
-            let observed_point = analysis
-                .utf16_position_to_point(file_id, position.line, position.character)
-                .ok()
-                .flatten();
-            debug!(
-                "Hover v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
-                uri,
-                file_id.0,
-                position.line,
-                position.character,
-                observed_byte_offset,
-                observed_point,
-            );
+                let observed_byte_offset = analysis
+                    .utf16_position_to_byte_offset(file_id, position.line, position.character)
+                    .ok()
+                    .flatten();
+                let observed_point = analysis
+                    .utf16_position_to_point(file_id, position.line, position.character)
+                    .ok()
+                    .flatten();
+                debug!(
+                    "Hover v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
+                    uri,
+                    file_id.0,
+                    position.line,
+                    position.character,
+                    observed_byte_offset,
+                    observed_point,
+                );
+
+                let file_content = analysis.file_text(file_id).ok().flatten();
+                let file_path = analysis.file_path(file_id).ok().flatten();
+                let deps = analysis.deps_data().ok();
+                let ir_program = analysis.ir(file_id).ok().flatten();
+
+                (file_content, file_path, deps, ir_program)
+            };
+
+            let settings = self.settings.read().await;
+            let result = match (file_content, file_path, deps, ir_program) {
+                (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
+                    handle_hover_v2(
+                        file_content,
+                        file_path,
+                        ir_program,
+                        deps,
+                        position,
+                        &uri,
+                        &settings.hover,
+                    )
+                    .await
+                }
+                _ => None,
+            };
+
+            return Ok(result);
         }
 
         let settings = self.settings.read().await;
@@ -884,44 +992,70 @@ impl LanguageServer for BslLanguageServer {
             {
                 let mut host = self.analysis_host_v2.lock().await;
                 if !host.has_file(file_id) {
+                    let path = match uri.to_file_path() {
+                        Ok(path) => path.to_string_lossy().to_string(),
+                        Err(_) => uri.to_string(),
+                    };
                     host.apply_change(bsl_analysis_v2::Change::SetFile {
                         file_id,
                         text: Arc::from(file_content.clone()),
                         version: 0,
+                        path: Arc::from(path),
                     });
                 }
             }
 
-            let analysis = { self.analysis_host_v2.lock().await.analysis() };
-            let observed_file_version = analysis.file_version(file_id).ok().flatten();
-            let observed_deps_id = analysis.deps_id().ok();
-            let observed_settings_id = analysis.settings_id().ok();
-            debug!(
-                "SignatureHelp v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
-                uri,
-                file_id.0,
-                observed_file_version,
-                observed_deps_id.as_ref().map(|v| v.as_str()),
-                observed_settings_id.as_ref().map(|v| v.as_str()),
-            );
+            let (file_content, deps) = {
+                let analysis = { self.analysis_host_v2.lock().await.analysis() };
+                let observed_file_version = analysis.file_version(file_id).ok().flatten();
+                let observed_deps_id = analysis.deps_id().ok();
+                let observed_settings_id = analysis.settings_id().ok();
+                debug!(
+                    "SignatureHelp v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
+                    uri,
+                    file_id.0,
+                    observed_file_version,
+                    observed_deps_id.as_ref().map(|v| v.as_str()),
+                    observed_settings_id.as_ref().map(|v| v.as_str()),
+                );
 
-            let observed_byte_offset = analysis
-                .utf16_position_to_byte_offset(file_id, position.line, position.character)
-                .ok()
-                .flatten();
-            let observed_point = analysis
-                .utf16_position_to_point(file_id, position.line, position.character)
-                .ok()
-                .flatten();
-            debug!(
-                "SignatureHelp v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
-                uri,
-                file_id.0,
-                position.line,
-                position.character,
-                observed_byte_offset,
-                observed_point,
-            );
+                let observed_byte_offset = analysis
+                    .utf16_position_to_byte_offset(file_id, position.line, position.character)
+                    .ok()
+                    .flatten();
+                let observed_point = analysis
+                    .utf16_position_to_point(file_id, position.line, position.character)
+                    .ok()
+                    .flatten();
+                debug!(
+                    "SignatureHelp v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
+                    uri,
+                    file_id.0,
+                    position.line,
+                    position.character,
+                    observed_byte_offset,
+                    observed_point,
+                );
+
+                let file_content = analysis.file_text(file_id).ok().flatten();
+                let deps = analysis.deps_data().ok();
+
+                (file_content, deps)
+            };
+
+            let started = Instant::now();
+            let result = match (file_content, deps) {
+                (Some(file_content), Some(deps)) => {
+                    handle_signature_help_v2(file_content, position, deps).await
+                }
+                _ => None,
+            };
+            let elapsed = started.elapsed();
+            self.coordinator.record_signature_help_latency(elapsed);
+            if result.is_none() {
+                self.coordinator.record_signature_help_empty();
+            }
+            return Ok(result);
         }
 
         let started = Instant::now();

@@ -4,6 +4,13 @@ use std::sync::Arc;
 use salsa::Setter;
 
 pub use bsl_line_index::{LineIndex, byte_offset_to_utf16, utf16_to_byte_offset};
+use bsl_semantic::AstToIrConverter;
+use bsl_syntax::ParseOptions;
+use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::signature_index::SignatureIndex;
+use bsl_shared::ir::SemanticProgram;
+use bsl_shared::utils::hash::hash_content;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FileId(pub u32);
@@ -49,18 +56,53 @@ impl std::fmt::Display for SettingsId {
     }
 }
 
+pub struct SemanticDeps {
+    pub repository: Arc<dyn TypeRepository>,
+    pub signature_index: SignatureIndex,
+    pub resolver: Option<Arc<TypeResolver>>,
+}
+
+impl std::fmt::Debug for SemanticDeps {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SemanticDeps")
+            .field("has_resolver", &self.resolver.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DepsDataSnapshot(pub Arc<SemanticDeps>);
+
+impl PartialEq for DepsDataSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for DepsDataSnapshot {}
+
+unsafe impl salsa::Update for DepsDataSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Change {
     SetFile {
         file_id: FileId,
         text: Arc<str>,
         version: i32,
+        path: Arc<str>,
     },
     RemoveFile {
         file_id: FileId,
     },
-    SetDepsId {
+    SetDepsSnapshot {
         deps_id: DepsSnapshotId,
+        deps: Arc<SemanticDeps>,
     },
     SetSettingsId {
         settings_id: SettingsId,
@@ -85,18 +127,62 @@ pub struct SourceFile {
     #[returns(ref)]
     pub text: Arc<str>,
     pub version: i32,
+    #[returns(ref)]
+    pub path: Arc<str>,
 }
 
 #[salsa::input]
 pub struct DepsSnapshot {
     #[returns(ref)]
     pub id: DepsSnapshotId,
+    #[returns(ref)]
+    pub data: DepsDataSnapshot,
 }
 
 #[salsa::input]
 pub struct SettingsSnapshot {
     #[returns(ref)]
     pub id: SettingsId,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParseResultSnapshot(Arc<bsl_syntax::ast::ParseResult>);
+
+impl PartialEq for ParseResultSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for ParseResultSnapshot {}
+
+unsafe impl salsa::Update for ParseResultSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        // Always treat the parse result as updated. This avoids coupling the syntax layer
+        // to salsa (via `Update`/`PartialEq` requirements) and is safe for correctness.
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SemanticProgramSnapshot(Arc<SemanticProgram>);
+
+impl PartialEq for SemanticProgramSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for SemanticProgramSnapshot {}
+
+unsafe impl salsa::Update for SemanticProgramSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
 }
 
 #[salsa::tracked]
@@ -107,6 +193,63 @@ pub fn file_text_len(db: &dyn salsa::Database, file: SourceFile) -> usize {
 #[salsa::tracked]
 pub fn line_index(db: &dyn salsa::Database, file: SourceFile) -> Arc<LineIndex> {
     Arc::new(LineIndex::new(file.text(db)))
+}
+
+#[salsa::tracked]
+pub fn parse_result(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    settings: SettingsSnapshot,
+) -> ParseResultSnapshot {
+    let _settings_id = settings.id(db);
+    let text = file.text(db);
+    let options = ParseOptions::default();
+    match bsl_syntax::parse(text, &options) {
+        Ok(parsed) => ParseResultSnapshot(Arc::new(parsed)),
+        Err(err) => ParseResultSnapshot(Arc::new(bsl_syntax::ast::ParseResult::with_errors(
+            bsl_syntax::ast::Program {
+                statements: Vec::new(),
+            },
+            vec![bsl_syntax::ast::ParseError {
+                message: err.to_string(),
+                span: bsl_syntax::ast::Span::stub(),
+                error_type: bsl_syntax::ast::ErrorType::ParseError,
+                related: Vec::new(),
+            }],
+        ))),
+    }
+}
+
+#[salsa::tracked]
+pub fn ir(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    deps: DepsSnapshot,
+    settings: SettingsSnapshot,
+) -> SemanticProgramSnapshot {
+    let _deps_id = deps.id(db);
+    let deps_data = deps.data(db).0.clone();
+
+    let parsed = parse_result(db, file, settings).0;
+    let source = file.text(db).to_string();
+    let file_path = file.path(db).to_string();
+
+    match AstToIrConverter::convert_with_resolver(
+        parsed.program.clone(),
+        source,
+        file_path.clone(),
+        deps_data.repository.clone(),
+        deps_data.signature_index.clone(),
+        deps_data.resolver.clone(),
+    ) {
+        Ok(program) => SemanticProgramSnapshot(Arc::new(program)),
+        Err(_err) => {
+            let mut program = SemanticProgram::new();
+            program.source_info.path = file_path;
+            program.source_info.content_hash = hash_content(file.text(db));
+            SemanticProgramSnapshot(Arc::new(program))
+        }
+    }
 }
 
 #[salsa::db]
@@ -128,7 +271,18 @@ pub struct AnalysisHostV2 {
 impl Default for AnalysisHostV2 {
     fn default() -> Self {
         let db = AnalysisDatabase::default();
-        let deps = DepsSnapshot::new(&db, DepsSnapshotId::from_hash(""));
+        let repository =
+            Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+        let deps_data = Arc::new(SemanticDeps {
+            signature_index: repository.get_signature_index_clone(),
+            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+            repository,
+        });
+        let deps = DepsSnapshot::new(
+            &db,
+            DepsSnapshotId::from_hash(""),
+            DepsDataSnapshot(deps_data),
+        );
         let settings = SettingsSnapshot::new(&db, SettingsId::from_hash(""));
         Self {
             db,
@@ -146,12 +300,14 @@ impl AnalysisHostV2 {
                 file_id,
                 text,
                 version,
-            } => self.set_file(file_id, text, version),
+                path,
+            } => self.set_file(file_id, text, version, path),
             Change::RemoveFile { file_id } => {
                 self.files.remove(&file_id);
             }
-            Change::SetDepsId { deps_id } => {
+            Change::SetDepsSnapshot { deps_id, deps } => {
                 self.deps.set_id(&mut self.db).to(deps_id);
+                self.deps.set_data(&mut self.db).to(DepsDataSnapshot(deps));
             }
             Change::SetSettingsId { settings_id } => {
                 self.settings.set_id(&mut self.db).to(settings_id);
@@ -159,14 +315,14 @@ impl AnalysisHostV2 {
         }
     }
 
-    pub fn set_file(&mut self, file_id: FileId, text: Arc<str>, version: i32) {
+    pub fn set_file(&mut self, file_id: FileId, text: Arc<str>, version: i32, path: Arc<str>) {
         match self.files.get(&file_id).copied() {
             Some(file) => {
                 file.set_text(&mut self.db).to(text);
                 file.set_version(&mut self.db).to(version);
             }
             None => {
-                let file = SourceFile::new(&self.db, file_id.0, text, version);
+                let file = SourceFile::new(&self.db, file_id.0, text, version, path);
                 self.files.insert(file_id, file);
             }
         }
@@ -220,6 +376,13 @@ impl AnalysisV2 {
         cancellable(|| file.version(&self.db)).map(Some)
     }
 
+    pub fn file_path(&self, file_id: FileId) -> Cancellable<Option<Arc<str>>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| file.path(&self.db).clone()).map(Some)
+    }
+
     pub fn file_text_len(&self, file_id: FileId) -> Cancellable<Option<usize>> {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
@@ -232,6 +395,23 @@ impl AnalysisV2 {
             return Ok(None);
         };
         cancellable(|| line_index(&self.db, file)).map(Some)
+    }
+
+    pub fn parse_result(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<Arc<bsl_syntax::ast::ParseResult>>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| parse_result(&self.db, file, self.settings).0).map(Some)
+    }
+
+    pub fn ir(&self, file_id: FileId) -> Cancellable<Option<Arc<SemanticProgram>>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| ir(&self.db, file, self.deps, self.settings).0).map(Some)
     }
 
     pub fn utf16_position_to_byte_offset(
@@ -272,6 +452,10 @@ impl AnalysisV2 {
         cancellable(|| self.deps.id(&self.db).clone())
     }
 
+    pub fn deps_data(&self) -> Cancellable<Arc<SemanticDeps>> {
+        cancellable(|| self.deps.data(&self.db).0.clone())
+    }
+
     pub fn settings_id(&self) -> Cancellable<SettingsId> {
         cancellable(|| self.settings.id(&self.db).clone())
     }
@@ -307,6 +491,7 @@ mod tests {
             file_id,
             text: Arc::from("abc"),
             version: 1,
+            path: Arc::from("test.bsl"),
         });
 
         {
@@ -320,6 +505,7 @@ mod tests {
             file_id,
             text: Arc::from("abcd"),
             version: 2,
+            path: Arc::from("test.bsl"),
         });
 
         {
@@ -339,6 +525,7 @@ mod tests {
             file_id,
             text: Arc::from("abc"),
             version: 1,
+            path: Arc::from("test.bsl"),
         });
         host.apply_change(Change::RemoveFile { file_id });
 
@@ -354,9 +541,16 @@ mod tests {
         use std::time::Duration;
 
         let host = Arc::new(Mutex::new(AnalysisHostV2::default()));
-        host.lock().unwrap().apply_change(Change::SetDepsId {
-            deps_id: DepsSnapshotId::from_hash("deps-a"),
-        });
+        host.lock()
+            .unwrap()
+            .apply_change(Change::SetDepsSnapshot {
+                deps_id: DepsSnapshotId::from_hash("deps-a"),
+                deps: Arc::new(SemanticDeps {
+                    repository: Arc::new(InMemoryTypeRepository::new()),
+                    signature_index: SignatureIndex::new(),
+                    resolver: None,
+                }),
+            });
         host.lock().unwrap().apply_change(Change::SetSettingsId {
             settings_id: SettingsId::from_hash("settings-a"),
         });
@@ -371,8 +565,13 @@ mod tests {
         let update_thread = std::thread::spawn(move || {
             let mut host = host_for_update.lock().unwrap();
             locked_tx.send(()).unwrap();
-            host.apply_change(Change::SetDepsId {
+            host.apply_change(Change::SetDepsSnapshot {
                 deps_id: DepsSnapshotId::from_hash("deps-b"),
+                deps: Arc::new(SemanticDeps {
+                    repository: Arc::new(InMemoryTypeRepository::new()),
+                    signature_index: SignatureIndex::new(),
+                    resolver: None,
+                }),
             });
             host.apply_change(Change::SetSettingsId {
                 settings_id: SettingsId::from_hash("settings-b"),
@@ -404,6 +603,7 @@ mod tests {
             file_id,
             text: Arc::from("abc\ndef"),
             version: 1,
+            path: Arc::from("test.bsl"),
         });
 
         let analysis = host.snapshot();
@@ -420,5 +620,234 @@ mod tests {
             analysis.utf16_position_to_point(file_id, 0, 999).unwrap(),
             Some((0, 3))
         );
+    }
+
+    #[test]
+    fn parse_result_recomputes_when_file_text_changes() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test()\nEndProcedure"),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+
+        let parsed_a = {
+            let analysis = host.snapshot();
+            analysis.parse_result(file_id).unwrap().unwrap()
+        };
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test(\nEndProcedure"),
+            version: 2,
+            path: Arc::from("test.bsl"),
+        });
+
+        let parsed_b = {
+            let analysis = host.snapshot();
+            analysis.parse_result(file_id).unwrap().unwrap()
+        };
+
+        assert!(!Arc::ptr_eq(&parsed_a, &parsed_b));
+        assert!(parsed_a.syntax_errors.is_empty());
+        assert!(!parsed_b.syntax_errors.is_empty());
+    }
+
+    #[test]
+    fn parse_result_recomputes_when_settings_id_changes() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test()\nEndProcedure"),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+
+        let parsed_a = {
+            let analysis = host.snapshot();
+            analysis.parse_result(file_id).unwrap().unwrap()
+        };
+
+        host.apply_change(Change::SetSettingsId {
+            settings_id: SettingsId::from_hash("settings-b"),
+        });
+
+        let parsed_b = {
+            let analysis = host.snapshot();
+            analysis.parse_result(file_id).unwrap().unwrap()
+        };
+
+        assert!(!Arc::ptr_eq(&parsed_a, &parsed_b));
+    }
+
+    #[test]
+    fn remove_file_makes_parse_result_return_none() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test()\nEndProcedure"),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+        host.apply_change(Change::RemoveFile { file_id });
+
+        let analysis = host.snapshot();
+        assert!(analysis.parse_result(file_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn ir_recomputes_when_file_text_changes() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test()\nEndProcedure"),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+
+        let ir_a = {
+            let analysis = host.snapshot();
+            analysis.ir(file_id).unwrap().unwrap()
+        };
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test(\nEndProcedure"),
+            version: 2,
+            path: Arc::from("test.bsl"),
+        });
+
+        let ir_b = {
+            let analysis = host.snapshot();
+            analysis.ir(file_id).unwrap().unwrap()
+        };
+
+        assert!(!Arc::ptr_eq(&ir_a, &ir_b));
+    }
+
+    #[test]
+    fn ir_recomputes_when_deps_id_changes() {
+        use salsa::Setter;
+
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test()\nEndProcedure"),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+
+        let ir_a = {
+            let analysis = host.snapshot();
+            analysis.ir(file_id).unwrap().unwrap()
+        };
+
+        host.deps
+            .set_id(&mut host.db)
+            .to(DepsSnapshotId::from_hash("deps-b"));
+
+        let ir_b = {
+            let analysis = host.snapshot();
+            analysis.ir(file_id).unwrap().unwrap()
+        };
+
+        assert!(!Arc::ptr_eq(&ir_a, &ir_b));
+    }
+
+    #[test]
+    fn ir_recomputes_when_settings_id_changes() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test()\nEndProcedure"),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+
+        let ir_a = {
+            let analysis = host.snapshot();
+            analysis.ir(file_id).unwrap().unwrap()
+        };
+
+        host.apply_change(Change::SetSettingsId {
+            settings_id: SettingsId::from_hash("settings-b"),
+        });
+
+        let ir_b = {
+            let analysis = host.snapshot();
+            analysis.ir(file_id).unwrap().unwrap()
+        };
+
+        assert!(!Arc::ptr_eq(&ir_a, &ir_b));
+    }
+
+    #[test]
+    fn ir_is_deterministic_for_same_input_across_hosts() {
+        let file_id = FileId(1);
+        let text: Arc<str> = Arc::from(
+            "Procedure Test()\n\
+             x = 1;\n\
+             x = x + 1;\n\
+             EndProcedure",
+        );
+        let path: Arc<str> = Arc::from("test.bsl");
+
+        let program_a = {
+            let mut host = AnalysisHostV2::default();
+            host.apply_change(Change::SetFile {
+                file_id,
+                text: text.clone(),
+                version: 1,
+                path: path.clone(),
+            });
+            let analysis = host.snapshot();
+            analysis.ir(file_id).unwrap().unwrap()
+        };
+
+        let program_b = {
+            let mut host = AnalysisHostV2::default();
+            host.apply_change(Change::SetFile {
+                file_id,
+                text: text.clone(),
+                version: 1,
+                path: path.clone(),
+            });
+            let analysis = host.snapshot();
+            analysis.ir(file_id).unwrap().unwrap()
+        };
+
+        let json_a = serde_json::to_string(&*program_a).expect("serialize SemanticProgram");
+        let json_b = serde_json::to_string(&*program_b).expect("serialize SemanticProgram");
+        assert_eq!(json_a, json_b);
+    }
+
+    #[test]
+    fn remove_file_makes_ir_return_none() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test()\nEndProcedure"),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+        host.apply_change(Change::RemoveFile { file_id });
+
+        let analysis = host.snapshot();
+        assert!(analysis.ir(file_id).unwrap().is_none());
     }
 }

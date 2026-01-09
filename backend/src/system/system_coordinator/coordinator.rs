@@ -244,6 +244,10 @@ impl SystemCoordinator {
         self.intellisense_index.snapshot_id()
     }
 
+    pub fn intellisense_index(&self) -> Arc<IntellisenseIndexStore> {
+        self.intellisense_index.clone()
+    }
+
     pub fn intellisense_index_store_for_scope(
         &self,
         scope: &CacheScope,

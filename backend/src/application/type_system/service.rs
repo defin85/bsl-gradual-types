@@ -363,6 +363,7 @@ impl TypeSystemService {
         column: u32,
         file_uri: Option<&str>,
     ) -> Result<completion_service::CompletionResult> {
+        let resolver = self.analysis_engine.get_resolver();
         let file_path = file_uri
             .and_then(|uri| Url::parse(uri).ok())
             .and_then(|url| url.to_file_path().ok())
@@ -371,9 +372,10 @@ impl TypeSystemService {
 
         let analysis_ctx = file_path.as_deref().map(|path| {
             completion_service::CompletionAnalysisContext {
-                parser: self.parser.as_ref(),
-                analysis_engine: self.analysis_engine.as_ref(),
-                ir_cache: self.ir_cache.as_ref(),
+                parser: Some(self.parser.as_ref()),
+                ir_cache: Some(self.ir_cache.as_ref()),
+                ir_program: None,
+                resolver: resolver.as_ref(),
                 file_path: path,
             }
         });

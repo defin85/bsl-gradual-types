@@ -7,9 +7,13 @@ use tokio::sync::{Mutex, RwLock};
 use tower_lsp::Client;
 use tracing::{info, warn};
 
-use bsl_analysis_v2::{AnalysisHostV2, DepsSnapshotId, FileId as V2FileId, SettingsId};
+use bsl_analysis_v2::{
+    AnalysisHostV2, DepsSnapshotId, FileId as V2FileId, SemanticDeps, SettingsId,
+};
 use bsl_backend::application::TypeSystemService;
 use bsl_backend::system::SystemCoordinator;
+use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+use bsl_shared::domain::resolver::TypeResolver;
 
 use crate::config::BslSettings;
 use crate::converters::{semantic_error_to_diagnostic, syntax_errors_to_diagnostics};
@@ -28,8 +32,9 @@ impl BslLanguageServer {
         info!("IntelliSense v2 salsa enabled: {}", use_salsa_v2);
 
         let mut analysis_host_v2 = AnalysisHostV2::default();
-        analysis_host_v2.apply_change(bsl_analysis_v2::Change::SetDepsId {
+        analysis_host_v2.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
             deps_id: compute_deps_id_v2(&coordinator),
+            deps: compute_semantic_deps_v2(&coordinator),
         });
         analysis_host_v2.apply_change(bsl_analysis_v2::Change::SetSettingsId {
             settings_id: compute_settings_id_v2(&BslSettings::default()),
@@ -195,7 +200,10 @@ impl BslLanguageServer {
 
         let mut host = self.analysis_host_v2.lock().await;
         if host.deps_id() != deps_id {
-            host.apply_change(bsl_analysis_v2::Change::SetDepsId { deps_id });
+            host.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
+                deps_id,
+                deps: compute_semantic_deps_v2(&self.coordinator),
+            });
         }
         if host.settings_id() != settings_id {
             host.apply_change(bsl_analysis_v2::Change::SetSettingsId { settings_id });
@@ -211,6 +219,31 @@ fn compute_deps_id_v2(coordinator: &SystemCoordinator) -> DepsSnapshotId {
         snapshot_id.as_str()
     );
     DepsSnapshotId::from_hash(blake3::hash(payload.as_bytes()).to_hex().to_string())
+}
+
+fn compute_semantic_deps_v2(coordinator: &SystemCoordinator) -> Arc<SemanticDeps> {
+    match coordinator.analysis_engine() {
+        Some(engine) => {
+            let repository = engine.get_repository();
+            let signature_index = repository.get_signature_index_clone();
+            let resolver = Some(engine.get_resolver());
+            Arc::new(SemanticDeps {
+                repository,
+                signature_index,
+                resolver,
+            })
+        }
+        None => {
+            let repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
+            let signature_index = repository.get_signature_index_clone();
+            let resolver = Some(Arc::new(TypeResolver::new(repository.clone())));
+            Arc::new(SemanticDeps {
+                repository,
+                signature_index,
+                resolver,
+            })
+        }
+    }
 }
 
 fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {

@@ -120,10 +120,7 @@ fn infer_context_requirements(method_name: &str) -> Option<bsl_shared::domain::C
 /// Converts ValidationResult to TypeDiagnostic (Milestone 3.10)
 /// TODO: Use in future for detailed parameter diagnostics
 #[allow(dead_code)]
-pub fn validation_result_to_diagnostic(
-    result: &ValidationResult,
-    span: Span,
-) -> Option<TypeDiagnostic> {
+pub fn validation_result_to_diagnostic(result: &ValidationResult, span: Span) -> Option<TypeDiagnostic> {
     match result {
         ValidationResult::Ok(_) => None,
         ValidationResult::NotFound => None, // Already handled in validate_method_exists
@@ -170,3 +167,4 @@ pub fn validation_result_to_diagnostic(
         }),
     }
 }
+

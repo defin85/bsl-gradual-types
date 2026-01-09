@@ -13,10 +13,8 @@ use bsl_shared::ir::{
     FlowContext, MemberAccessKind, SemanticNode, SemanticNodeKind, SemanticProgram, SemanticVisitor,
 };
 
-use crate::application::semantic_validation_visitor::helpers::{
-    collection_name_to_metadata_kind, is_metadata_collection_name,
-};
-use crate::application::semantic_validation_visitor::validators::{
+use crate::helpers::{collection_name_to_metadata_kind, is_metadata_collection_name};
+use crate::validators::{
     validate_global_function_call_context, validate_method_call_context,
     validation_result_v2_to_diagnostic,
 };

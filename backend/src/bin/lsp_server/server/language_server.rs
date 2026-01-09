@@ -458,6 +458,7 @@ impl LanguageServer for BslLanguageServer {
             .insert(uri.clone(), text.clone());
 
         if self.use_salsa_v2 {
+            self.sync_v2_globals().await;
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             let path = match uri.to_file_path() {
                 Ok(path) => path.to_string_lossy().to_string(),
@@ -472,6 +473,16 @@ impl LanguageServer for BslLanguageServer {
                     version,
                     path: Arc::from(path),
                 });
+
+            self.schedule_diagnostics_v2(uri.clone(), file_id, version).await;
+
+            self.client
+                .log_message(
+                    MessageType::INFO,
+                    format!("Opened document (v2 diagnostics scheduled): {}", uri),
+                )
+                .await;
+            return;
         }
 
         // Preheat IR cache
@@ -535,6 +546,7 @@ impl LanguageServer for BslLanguageServer {
             .insert(uri.clone(), updated_text.clone());
 
         if self.use_salsa_v2 {
+            self.sync_v2_globals().await;
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             let path = match uri.to_file_path() {
                 Ok(path) => path.to_string_lossy().to_string(),
@@ -549,6 +561,9 @@ impl LanguageServer for BslLanguageServer {
                     version,
                     path: Arc::from(path),
                 });
+
+            self.schedule_diagnostics_v2(uri.clone(), file_id, version).await;
+            return;
         }
 
         let config_root = {
@@ -585,6 +600,7 @@ impl LanguageServer for BslLanguageServer {
 
         if self.use_salsa_v2 {
             if let Some(file_id) = self.get_file_id_v2(&uri).await {
+                self.cancel_diagnostics_v2(file_id).await;
                 self.analysis_host_v2
                     .lock()
                     .await

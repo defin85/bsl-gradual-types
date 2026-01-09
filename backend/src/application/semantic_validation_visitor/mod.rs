@@ -1,22 +1,12 @@
-//! Semantic Validation Visitor Module
+//! Compatibility module: semantic diagnostics visitor.
 //!
-//! This module provides semantic validation for BSL code.
-//! It validates type correctness, method/property existence,
-//! and metadata object access.
-//!
-//! # Module Structure
-//!
-//! - `visitor` - Main SemanticValidationVisitor struct and SemanticVisitor implementation
-//! - `validators` - Validation logic (type validation, call validation)
-//! - `helpers` - Helper functions for metadata collection detection
+//! The implementation is extracted into `bsl-semantic-diagnostics` crate to keep `bsl-analysis-v2`
+//! independent from backend.
 
-pub mod helpers;
-mod validators;
-mod visitor;
+pub use bsl_semantic_diagnostics::SemanticValidationVisitor;
 
-// Re-export main types for public API
-pub use visitor::SemanticValidationVisitor;
-
-// Re-export helpers for use in tests
-#[cfg(test)]
-pub use helpers::{collection_name_to_metadata_kind, is_metadata_collection_name};
+pub mod helpers {
+    pub use bsl_semantic_diagnostics::helpers::{
+        collection_name_to_metadata_kind, is_metadata_collection_name,
+    };
+}

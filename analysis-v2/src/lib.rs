@@ -5,11 +5,17 @@ use salsa::Setter;
 
 pub use bsl_line_index::{LineIndex, byte_offset_to_utf16, utf16_to_byte_offset};
 use bsl_semantic::AstToIrConverter;
+use bsl_semantic_diagnostics::SemanticValidationVisitor;
 use bsl_syntax::ParseOptions;
+use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
+use bsl_shared::domain::types::{DiagnosticSeverity, ParseError, TypeDiagnostic};
+use bsl_shared::domain::validators::TypeValidator;
+use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticProgram;
+use bsl_shared::ir::walk_program;
 use bsl_shared::utils::hash::hash_content;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -104,8 +110,9 @@ pub enum Change {
         deps_id: DepsSnapshotId,
         deps: Arc<SemanticDeps>,
     },
-    SetSettingsId {
+    SetSettingsSnapshot {
         settings_id: SettingsId,
+        diagnostics_detail_level: DetailLevel,
     },
 }
 
@@ -143,6 +150,7 @@ pub struct DepsSnapshot {
 pub struct SettingsSnapshot {
     #[returns(ref)]
     pub id: SettingsId,
+    pub diagnostics_detail_level: DetailLevel,
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +186,44 @@ impl PartialEq for SemanticProgramSnapshot {
 impl Eq for SemanticProgramSnapshot {}
 
 unsafe impl salsa::Update for SemanticProgramSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SyntaxDiagnosticsSnapshot(Arc<Vec<ParseError>>);
+
+impl PartialEq for SyntaxDiagnosticsSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for SyntaxDiagnosticsSnapshot {}
+
+unsafe impl salsa::Update for SyntaxDiagnosticsSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SemanticDiagnosticsSnapshot(Arc<Vec<TypeDiagnostic>>);
+
+impl PartialEq for SemanticDiagnosticsSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for SemanticDiagnosticsSnapshot {}
+
+unsafe impl salsa::Update for SemanticDiagnosticsSnapshot {
     unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
         let old_value: &mut Self = unsafe { &mut *old_pointer };
         *old_value = new_value;
@@ -252,6 +298,91 @@ pub fn ir(
     }
 }
 
+#[salsa::tracked]
+pub fn syntax_diagnostics(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    settings: SettingsSnapshot,
+) -> SyntaxDiagnosticsSnapshot {
+    let _settings_id = settings.id(db);
+    let parsed = parse_result(db, file, settings).0;
+    SyntaxDiagnosticsSnapshot(Arc::new(parsed.syntax_errors.clone()))
+}
+
+#[salsa::tracked]
+pub fn semantic_diagnostics(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    deps: DepsSnapshot,
+    settings: SettingsSnapshot,
+) -> SemanticDiagnosticsSnapshot {
+    let _deps_id = deps.id(db);
+    let _settings_id = settings.id(db);
+    let deps_data = deps.data(db).0.clone();
+
+    let parsed = parse_result(db, file, settings).0;
+    if !parsed.syntax_errors.is_empty()
+        && !syntax_errors_only_in_directives(file.text(db), &parsed.syntax_errors)
+    {
+        return SemanticDiagnosticsSnapshot(Arc::new(Vec::new()));
+    }
+
+    let program = ir(db, file, deps, settings).0;
+
+    let resolver = deps_data
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
+    let metadata_lookup = TypeMetadataLookup::new(deps_data.repository.clone());
+    let validator = TypeValidator::new(&metadata_lookup);
+
+    let detail_level = settings.diagnostics_detail_level(db);
+    let mut visitor = SemanticValidationVisitor::with_detail_level(
+        &validator,
+        &program,
+        resolver.as_ref(),
+        &deps_data.signature_index,
+        detail_level,
+    );
+    walk_program(&program, &mut visitor);
+
+    let mut diagnostics = visitor.into_errors();
+    diagnostics.sort_by(|a, b| {
+        let severity_key = |severity: DiagnosticSeverity| match severity {
+            DiagnosticSeverity::Error => 0_u8,
+            DiagnosticSeverity::Warning => 1_u8,
+            DiagnosticSeverity::Info => 2_u8,
+            DiagnosticSeverity::Hint => 3_u8,
+        };
+        (
+            a.line,
+            a.column,
+            a.end_line,
+            a.end_column,
+            severity_key(a.severity),
+            &a.message,
+        )
+            .cmp(&(
+                b.line,
+                b.column,
+                b.end_line,
+                b.end_column,
+                severity_key(b.severity),
+                &b.message,
+            ))
+    });
+
+    SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
+}
+
+fn syntax_errors_only_in_directives(code: &str, errors: &[ParseError]) -> bool {
+    let lines: Vec<&str> = code.lines().collect();
+    errors.iter().all(|err| {
+        let line = lines.get(err.span.start_line as usize).unwrap_or(&"");
+        line.trim_start().starts_with('&')
+    })
+}
+
 #[salsa::db]
 #[derive(Clone, Default)]
 pub struct AnalysisDatabase {
@@ -283,7 +414,7 @@ impl Default for AnalysisHostV2 {
             DepsSnapshotId::from_hash(""),
             DepsDataSnapshot(deps_data),
         );
-        let settings = SettingsSnapshot::new(&db, SettingsId::from_hash(""));
+        let settings = SettingsSnapshot::new(&db, SettingsId::from_hash(""), DetailLevel::Full);
         Self {
             db,
             files: HashMap::new(),
@@ -309,8 +440,14 @@ impl AnalysisHostV2 {
                 self.deps.set_id(&mut self.db).to(deps_id);
                 self.deps.set_data(&mut self.db).to(DepsDataSnapshot(deps));
             }
-            Change::SetSettingsId { settings_id } => {
+            Change::SetSettingsSnapshot {
+                settings_id,
+                diagnostics_detail_level,
+            } => {
                 self.settings.set_id(&mut self.db).to(settings_id);
+                self.settings
+                    .set_diagnostics_detail_level(&mut self.db)
+                    .to(diagnostics_detail_level);
             }
         }
     }
@@ -414,6 +551,26 @@ impl AnalysisV2 {
         cancellable(|| ir(&self.db, file, self.deps, self.settings).0).map(Some)
     }
 
+    pub fn syntax_diagnostics(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<Arc<Vec<ParseError>>>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| syntax_diagnostics(&self.db, file, self.settings).0).map(Some)
+    }
+
+    pub fn semantic_diagnostics(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<Arc<Vec<TypeDiagnostic>>>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| semantic_diagnostics(&self.db, file, self.deps, self.settings).0).map(Some)
+    }
+
     pub fn utf16_position_to_byte_offset(
         &self,
         file_id: FileId,
@@ -481,6 +638,29 @@ impl AnalysisV2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn normalize_json(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut entries: Vec<(String, serde_json::Value)> =
+                    std::mem::take(map).into_iter().collect();
+                entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+                let mut sorted = serde_json::Map::new();
+                for (key, mut value) in entries {
+                    normalize_json(&mut value);
+                    sorted.insert(key, value);
+                }
+                *map = sorted;
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    normalize_json(item);
+                }
+            }
+            _ => {}
+        }
+    }
 
     #[test]
     fn file_text_and_version_update_after_set_file() {
@@ -551,8 +731,9 @@ mod tests {
                     resolver: None,
                 }),
             });
-        host.lock().unwrap().apply_change(Change::SetSettingsId {
+        host.lock().unwrap().apply_change(Change::SetSettingsSnapshot {
             settings_id: SettingsId::from_hash("settings-a"),
+            diagnostics_detail_level: DetailLevel::Full,
         });
 
         let analysis_a = host.lock().unwrap().snapshot();
@@ -573,8 +754,9 @@ mod tests {
                     resolver: None,
                 }),
             });
-            host.apply_change(Change::SetSettingsId {
+            host.apply_change(Change::SetSettingsSnapshot {
                 settings_id: SettingsId::from_hash("settings-b"),
+                diagnostics_detail_level: DetailLevel::Full,
             });
             done_tx.send(()).unwrap();
         });
@@ -673,8 +855,9 @@ mod tests {
             analysis.parse_result(file_id).unwrap().unwrap()
         };
 
-        host.apply_change(Change::SetSettingsId {
+        host.apply_change(Change::SetSettingsSnapshot {
             settings_id: SettingsId::from_hash("settings-b"),
+            diagnostics_detail_level: DetailLevel::Full,
         });
 
         let parsed_b = {
@@ -782,8 +965,9 @@ mod tests {
             analysis.ir(file_id).unwrap().unwrap()
         };
 
-        host.apply_change(Change::SetSettingsId {
+        host.apply_change(Change::SetSettingsSnapshot {
             settings_id: SettingsId::from_hash("settings-b"),
+            diagnostics_detail_level: DetailLevel::Full,
         });
 
         let ir_b = {
@@ -829,8 +1013,10 @@ mod tests {
             analysis.ir(file_id).unwrap().unwrap()
         };
 
-        let json_a = serde_json::to_string(&*program_a).expect("serialize SemanticProgram");
-        let json_b = serde_json::to_string(&*program_b).expect("serialize SemanticProgram");
+        let mut json_a = serde_json::to_value(&*program_a).expect("serialize SemanticProgram");
+        let mut json_b = serde_json::to_value(&*program_b).expect("serialize SemanticProgram");
+        normalize_json(&mut json_a);
+        normalize_json(&mut json_b);
         assert_eq!(json_a, json_b);
     }
 
@@ -849,5 +1035,134 @@ mod tests {
 
         let analysis = host.snapshot();
         assert!(analysis.ir(file_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn syntax_diagnostics_are_read_from_parse_result() {
+        let file_id = FileId(1);
+
+        let syntax_a = {
+            let mut host = AnalysisHostV2::default();
+            host.apply_change(Change::SetFile {
+                file_id,
+                text: Arc::from("Procedure Test(\nEndProcedure"),
+                version: 1,
+                path: Arc::from("test.bsl"),
+            });
+            let analysis = host.snapshot();
+            analysis.syntax_diagnostics(file_id).unwrap().unwrap()
+        };
+
+        let syntax_b = {
+            let mut host = AnalysisHostV2::default();
+            host.apply_change(Change::SetFile {
+                file_id,
+                text: Arc::from("Procedure Test(\nEndProcedure"),
+                version: 1,
+                path: Arc::from("test.bsl"),
+            });
+            let analysis = host.snapshot();
+            analysis.syntax_diagnostics(file_id).unwrap().unwrap()
+        };
+
+        assert!(!syntax_a.is_empty());
+        let json_a = serde_json::to_string(&*syntax_a).expect("serialize syntax diagnostics");
+        let json_b = serde_json::to_string(&*syntax_b).expect("serialize syntax diagnostics");
+        assert_eq!(json_a, json_b);
+    }
+
+    #[test]
+    fn semantic_diagnostics_skip_when_syntax_errors_present() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test(\nEndProcedure"),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+
+        let analysis = host.snapshot();
+        let semantic = analysis.semantic_diagnostics(file_id).unwrap().unwrap();
+        assert!(semantic.is_empty());
+    }
+
+    #[test]
+    fn semantic_diagnostics_depend_on_deps_id() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test()\nEndProcedure"),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+
+        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+        let deps = Arc::new(SemanticDeps {
+            signature_index: repository.get_signature_index_clone(),
+            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+            repository,
+        });
+
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("deps-a"),
+            deps: deps.clone(),
+        });
+        let diagnostics_a = host.analysis().semantic_diagnostics(file_id).unwrap().unwrap();
+
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("deps-b"),
+            deps,
+        });
+        let diagnostics_b = host.analysis().semantic_diagnostics(file_id).unwrap().unwrap();
+
+        assert!(
+            !Arc::ptr_eq(&diagnostics_a, &diagnostics_b),
+            "semantic diagnostics should be recomputed when deps_id changes"
+        );
+    }
+
+    #[test]
+    fn semantic_diagnostics_respect_diagnostics_detail_level() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from(
+                "Procedure Test()\n\
+                 x = 1;\n\
+                 x.UnknownMethod();\n\
+                 EndProcedure",
+            ),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("settings-compact"),
+            diagnostics_detail_level: DetailLevel::Compact,
+        });
+        let compact = host.analysis().semantic_diagnostics(file_id).unwrap().unwrap();
+        assert!(!compact.is_empty());
+
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("settings-detailed"),
+            diagnostics_detail_level: DetailLevel::Detailed,
+        });
+        let detailed = host.analysis().semantic_diagnostics(file_id).unwrap().unwrap();
+        assert_eq!(compact.len(), detailed.len());
+        assert_ne!(compact[0].message, detailed[0].message);
+    }
+
+    #[test]
+    fn cancellable_propagates_panics() {
+        let result = std::panic::catch_unwind(|| {
+            let _: Cancellable<()> = cancellable(|| panic!("test panic"));
+        });
+        assert!(result.is_err());
     }
 }

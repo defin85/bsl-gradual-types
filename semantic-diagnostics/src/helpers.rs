@@ -142,3 +142,4 @@ mod tests {
         assert_eq!(collection_name_to_metadata_kind("Unknown"), None);
     }
 }
+

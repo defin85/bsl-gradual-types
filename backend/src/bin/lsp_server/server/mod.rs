@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use tokio::sync::{Mutex, RwLock};
+use tokio::task::JoinHandle;
 use tower_lsp::Client;
 
 use bsl_analysis_v2::{AnalysisHostV2, FileId as V2FileId};
@@ -52,4 +53,5 @@ pub struct BslLanguageServer {
     /// lifetime of the server process (even if the document is closed and re-opened).
     pub(crate) file_key_to_file_id_v2: Arc<RwLock<HashMap<V2FileKey, V2FileId>>>,
     pub(crate) next_file_id_v2: Arc<AtomicU32>,
+    pub(crate) diagnostics_tasks_v2: Arc<Mutex<HashMap<V2FileId, (i32, JoinHandle<()>)>>>,
 }

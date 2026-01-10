@@ -13,7 +13,7 @@ use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
 use tracing::{debug, error, info, warn};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -344,6 +344,12 @@ impl LanguageServer for BslLanguageServer {
                     Ok(()) => {
                         info!("Platform types loaded successfully");
                         if self.use_salsa_v2 {
+                            self.deps_update_v2(
+                                "start_with_paths",
+                                Some(syntax_path.to_path_buf()),
+                                config_path_ref.map(|path| path.to_path_buf()),
+                            )
+                            .await;
                             self.sync_v2_globals().await;
                         }
                         let _ = result_tx.send(Ok(()));
@@ -464,15 +470,18 @@ impl LanguageServer for BslLanguageServer {
                 Ok(path) => path.to_string_lossy().to_string(),
                 Err(_) => uri.to_string(),
             };
-            self.analysis_host_v2
-                .lock()
+
+            self.latest_received_file_versions_v2
+                .write()
                 .await
-                .apply_change(bsl_analysis_v2::Change::SetFile {
-                    file_id,
-                    text: Arc::from(text.clone()),
-                    version,
-                    path: Arc::from(path),
-                });
+                .insert(file_id, version);
+
+            self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                file_id,
+                text: Arc::from(text.clone()),
+                version,
+                path: Arc::from(path),
+            }]);
 
             self.schedule_diagnostics_v2(uri.clone(), file_id, version).await;
 
@@ -552,15 +561,18 @@ impl LanguageServer for BslLanguageServer {
                 Ok(path) => path.to_string_lossy().to_string(),
                 Err(_) => uri.to_string(),
             };
-            self.analysis_host_v2
-                .lock()
+
+            self.latest_received_file_versions_v2
+                .write()
                 .await
-                .apply_change(bsl_analysis_v2::Change::SetFile {
-                    file_id,
-                    text: Arc::from(updated_text.clone()),
-                    version,
-                    path: Arc::from(path),
-                });
+                .insert(file_id, version);
+
+            self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                file_id,
+                text: Arc::from(updated_text.clone()),
+                version,
+                path: Arc::from(path),
+            }]);
 
             self.schedule_diagnostics_v2(uri.clone(), file_id, version).await;
             return;
@@ -601,10 +613,12 @@ impl LanguageServer for BslLanguageServer {
         if self.use_salsa_v2 {
             if let Some(file_id) = self.get_file_id_v2(&uri).await {
                 self.cancel_diagnostics_v2(file_id).await;
-                self.analysis_host_v2
-                    .lock()
+                self.latest_received_file_versions_v2
+                    .write()
                     .await
-                    .apply_change(bsl_analysis_v2::Change::RemoveFile { file_id });
+                    .remove(&file_id);
+                self.analysis_v2
+                    .apply_changes(vec![bsl_analysis_v2::Change::RemoveFile { file_id }]);
             }
         }
 
@@ -650,21 +664,12 @@ impl LanguageServer for BslLanguageServer {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             self.sync_v2_globals().await;
 
-            {
-                let mut host = self.analysis_host_v2.lock().await;
-                if !host.has_file(file_id) {
-                    let path = match uri.to_file_path() {
-                        Ok(path) => path.to_string_lossy().to_string(),
-                        Err(_) => uri.to_string(),
-                    };
-                    host.apply_change(bsl_analysis_v2::Change::SetFile {
-                        file_id,
-                        text: Arc::from(file_content.clone()),
-                        version: 0,
-                        path: Arc::from(path),
-                    });
-                }
-            }
+            let expected_version = self
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied();
 
             let empty = || {
                 Some(crate::handlers::CompletionResponseWithStats {
@@ -677,109 +682,188 @@ impl LanguageServer for BslLanguageServer {
                 })
             };
 
-            let (file_content, file_path, deps, ir_program) = {
-                let analysis = { self.analysis_host_v2.lock().await.analysis() };
+            let wait_started = Instant::now();
+            let ready = if let Some(expected_version) = expected_version {
+                self.analysis_v2
+                    .wait_for_file_version(file_id, expected_version)
+                    .await
+            } else {
+                let path = match uri.to_file_path() {
+                    Ok(path) => path.to_string_lossy().to_string(),
+                    Err(_) => uri.to_string(),
+                };
+                self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                    file_id,
+                    text: Arc::from(file_content.clone()),
+                    version: 0,
+                    path: Arc::from(path),
+                }]);
 
-                let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                let observed_deps_id = analysis.deps_id().ok();
-                let observed_settings_id = analysis.settings_id().ok();
-                debug!(
-                    "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
-                    uri,
-                    file_id.0,
-                    observed_file_version,
-                    observed_deps_id.as_ref().map(|v| v.as_str()),
-                    observed_settings_id.as_ref().map(|v| v.as_str()),
-                );
-                match analysis.file_text_len(file_id) {
-                Ok(Some(len)) => debug!(
-                    "Completion v2 (salsa) active: uri={}, file_id={}, text_len={}",
-                    uri, file_id.0, len
-                ),
-                Ok(None) => debug!(
-                    "Completion v2 (salsa) active: uri={}, file_id={} (file not found)",
-                    uri, file_id.0
-                ),
-                Err(_) => debug!(
-                    "Completion v2 (salsa) cancelled: uri={}, file_id={}",
-                    uri, file_id.0
-                ),
+                self.analysis_v2.wait_for_file_version(file_id, 0).await
+            };
+            let wait_elapsed = wait_started.elapsed();
+            self.coordinator.record_intellisense_v2_wait_for_file_version(
+                "completion",
+                wait_elapsed,
+            );
+            if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
+                if wait_elapsed >= threshold {
+                    warn!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        expected_version = expected_version.unwrap_or(0),
+                        wait_ms = wait_elapsed.as_millis(),
+                        threshold_ms = threshold.as_millis(),
+                        "Completion v2: wait_for_file_version is slow"
+                    );
+                }
             }
 
-                let observed_byte_offset = analysis
-                .utf16_position_to_byte_offset(file_id, position.line, position.character)
-                .ok()
-                .flatten();
-                let observed_point = analysis
-                .utf16_position_to_point(file_id, position.line, position.character)
-                .ok()
-                .flatten();
-                debug!(
-                    "Completion v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
-                    uri,
-                    file_id.0,
-                    position.line,
-                    position.character,
-                    observed_byte_offset,
-                    observed_point,
-                );
+            if !ready {
+                empty()
+            } else {
+                let (file_content, file_path, deps, ir_program, index_snapshot) = {
+                    let snapshot_started = Instant::now();
+                    let (analysis, index_snapshot, deps_id) =
+                        self.analysis_v2.snapshot_with_deps().await;
+                    let snapshot_elapsed = snapshot_started.elapsed();
+                    self.coordinator.record_intellisense_v2_snapshot_latency(
+                        "completion",
+                        snapshot_elapsed,
+                    );
+                    if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
+                        if snapshot_elapsed >= threshold {
+                            warn!(
+                                uri = %uri,
+                                file_id = file_id.0,
+                                snapshot_ms = snapshot_elapsed.as_millis(),
+                                threshold_ms = threshold.as_millis(),
+                                "Completion v2: snapshot acquisition is slow"
+                            );
+                        }
+                    }
 
-                if std::env::var("BSL_INTELLISENSE_V2_P3_SMOKE").is_ok() {
-                    match analysis.parse_result(file_id) {
-                        Ok(Some(parsed)) => debug!(
-                            "Completion v2 parse_result: uri={}, file_id={}, syntax_errors={}",
-                            uri,
-                            file_id.0,
-                            parsed.syntax_errors.len()
+                    let observed_file_version = analysis.file_version(file_id).ok().flatten();
+                    let observed_deps_id = Some(deps_id);
+                    let observed_settings_id = analysis.settings_id().ok();
+                    debug!(
+                        "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
+                        uri,
+                        file_id.0,
+                        observed_file_version,
+                        observed_deps_id.as_ref().map(|v| v.as_str()),
+                        observed_settings_id.as_ref().map(|v| v.as_str()),
+                        index_snapshot.id.as_str(),
+                    );
+                    match analysis.file_text_len(file_id) {
+                        Ok(Some(len)) => debug!(
+                            "Completion v2 (salsa) active: uri={}, file_id={}, text_len={}",
+                            uri, file_id.0, len
                         ),
                         Ok(None) => debug!(
-                            "Completion v2 parse_result: uri={}, file_id={} (file not found)",
+                            "Completion v2 (salsa) active: uri={}, file_id={} (file not found)",
                             uri, file_id.0
                         ),
                         Err(_) => debug!(
-                            "Completion v2 parse_result cancelled: uri={}, file_id={}",
+                            "Completion v2 (salsa) cancelled: uri={}, file_id={}",
                             uri, file_id.0
                         ),
                     }
-                }
 
-                let file_content = analysis.file_text(file_id).ok().flatten();
-                let file_path = analysis.file_path(file_id).ok().flatten();
-                let deps = analysis.deps_data().ok();
-                let ir_program = analysis.ir(file_id).ok().flatten();
+                    let observed_byte_offset = analysis
+                        .utf16_position_to_byte_offset(file_id, position.line, position.character)
+                        .ok()
+                        .flatten();
+                    let observed_point = analysis
+                        .utf16_position_to_point(file_id, position.line, position.character)
+                        .ok()
+                        .flatten();
+                    debug!(
+                        "Completion v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
+                        uri,
+                        file_id.0,
+                        position.line,
+                        position.character,
+                        observed_byte_offset,
+                        observed_point,
+                    );
 
-                if std::env::var("BSL_INTELLISENSE_V2_P4_SMOKE").is_ok() {
-                    match ir_program.as_ref() {
-                        Some(program) => debug!(
-                            "Completion v2 ir: uri={}, file_id={}, deps_id={:?}, nodes={}",
-                            uri,
-                            file_id.0,
-                            observed_deps_id.as_ref().map(|v| v.as_str()),
-                            program.nodes.len()
-                        ),
-                        None => debug!("Completion v2 ir: uri={}, file_id={} (unavailable)", uri, file_id.0),
+                    if std::env::var("BSL_INTELLISENSE_V2_P3_SMOKE").is_ok() {
+                        match analysis.parse_result(file_id) {
+                            Ok(Some(parsed)) => debug!(
+                                "Completion v2 parse_result: uri={}, file_id={}, syntax_errors={}",
+                                uri,
+                                file_id.0,
+                                parsed.syntax_errors.len()
+                            ),
+                            Ok(None) => debug!(
+                                "Completion v2 parse_result: uri={}, file_id={} (file not found)",
+                                uri, file_id.0
+                            ),
+                            Err(_) => debug!(
+                                "Completion v2 parse_result cancelled: uri={}, file_id={}",
+                                uri, file_id.0
+                            ),
+                        }
                     }
-                }
 
-                (file_content, file_path, deps, ir_program)
-            };
+                    let file_content = analysis.file_text(file_id).ok().flatten();
+                    let file_path = analysis.file_path(file_id).ok().flatten();
+                    let deps = analysis.deps_data().ok();
+                    let ir_started = Instant::now();
+                    let ir_program = analysis.ir(file_id).ok().flatten();
+                    let ir_elapsed = ir_started.elapsed();
+                    self.coordinator.record_intellisense_v2_ir_query_latency(
+                        "completion",
+                        ir_elapsed,
+                    );
+                    if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
+                        if ir_elapsed >= threshold {
+                            warn!(
+                                uri = %uri,
+                                file_id = file_id.0,
+                                ir_ms = ir_elapsed.as_millis(),
+                                threshold_ms = threshold.as_millis(),
+                                "Completion v2: ir query is slow"
+                            );
+                        }
+                    }
 
-            match (file_content, file_path, deps, ir_program) {
-                (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
-                    let index = self.coordinator.intellisense_index();
-                    crate::handlers::handle_completion_v2(
-                        file_content,
-                        file_path,
-                        ir_program,
-                        deps,
-                        position,
-                        &uri,
-                        index.as_ref(),
-                        snippet_support,
-                    )
-                    .await
+                    if std::env::var("BSL_INTELLISENSE_V2_P4_SMOKE").is_ok() {
+                        match ir_program.as_ref() {
+                            Some(program) => debug!(
+                                "Completion v2 ir: uri={}, file_id={}, deps_id={:?}, nodes={}",
+                                uri,
+                                file_id.0,
+                                observed_deps_id.as_ref().map(|v| v.as_str()),
+                                program.nodes.len()
+                            ),
+                            None => debug!(
+                                "Completion v2 ir: uri={}, file_id={} (unavailable)",
+                                uri, file_id.0
+                            ),
+                        }
+                    }
+
+                    (file_content, file_path, deps, ir_program, index_snapshot)
+                };
+
+                match (file_content, file_path, deps, ir_program) {
+                    (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
+                        crate::handlers::handle_completion_v2(
+                            file_content,
+                            file_path,
+                            ir_program,
+                            deps,
+                            position,
+                            &uri,
+                            index_snapshot.as_ref(),
+                            snippet_support,
+                        )
+                        .await
+                    }
+                    _ => empty(),
                 }
-                _ => empty(),
             }
         } else {
             handle_completion(
@@ -864,34 +948,79 @@ impl LanguageServer for BslLanguageServer {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             self.sync_v2_globals().await;
 
-            {
-                let mut host = self.analysis_host_v2.lock().await;
-                if !host.has_file(file_id) {
-                    let path = match uri.to_file_path() {
-                        Ok(path) => path.to_string_lossy().to_string(),
-                        Err(_) => uri.to_string(),
-                    };
-                    host.apply_change(bsl_analysis_v2::Change::SetFile {
-                        file_id,
-                        text: Arc::from(file_content.clone()),
-                        version: 0,
-                        path: Arc::from(path),
-                    });
+            let expected_version = self
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied();
+
+            let wait_started = Instant::now();
+            let ok = if let Some(expected_version) = expected_version {
+                self.analysis_v2
+                    .wait_for_file_version(file_id, expected_version)
+                    .await
+            } else {
+                let path = match uri.to_file_path() {
+                    Ok(path) => path.to_string_lossy().to_string(),
+                    Err(_) => uri.to_string(),
+                };
+                self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                    file_id,
+                    text: Arc::from(file_content.clone()),
+                    version: 0,
+                    path: Arc::from(path),
+                }]);
+
+                self.analysis_v2.wait_for_file_version(file_id, 0).await
+            };
+            let wait_elapsed = wait_started.elapsed();
+            self.coordinator
+                .record_intellisense_v2_wait_for_file_version("hover", wait_elapsed);
+            if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
+                if wait_elapsed >= threshold {
+                    warn!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        expected_version = expected_version.unwrap_or(0),
+                        wait_ms = wait_elapsed.as_millis(),
+                        threshold_ms = threshold.as_millis(),
+                        "Hover v2: wait_for_file_version is slow"
+                    );
                 }
+            }
+            if !ok {
+                return Ok(None);
             }
 
             let (file_content, file_path, deps, ir_program) = {
-                let analysis = { self.analysis_host_v2.lock().await.analysis() };
+                let snapshot_started = Instant::now();
+                let (analysis, index_snapshot, deps_id) = self.analysis_v2.snapshot_with_deps().await;
+                let snapshot_elapsed = snapshot_started.elapsed();
+                self.coordinator
+                    .record_intellisense_v2_snapshot_latency("hover", snapshot_elapsed);
+                if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
+                    if snapshot_elapsed >= threshold {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            snapshot_ms = snapshot_elapsed.as_millis(),
+                            threshold_ms = threshold.as_millis(),
+                            "Hover v2: snapshot acquisition is slow"
+                        );
+                    }
+                }
                 let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                let observed_deps_id = analysis.deps_id().ok();
+                let observed_deps_id = Some(deps_id);
                 let observed_settings_id = analysis.settings_id().ok();
                 debug!(
-                    "Hover v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
+                    "Hover v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
                     uri,
                     file_id.0,
                     observed_file_version,
                     observed_deps_id.as_ref().map(|v| v.as_str()),
                     observed_settings_id.as_ref().map(|v| v.as_str()),
+                    index_snapshot.id.as_str(),
                 );
 
                 let observed_byte_offset = analysis
@@ -915,7 +1044,22 @@ impl LanguageServer for BslLanguageServer {
                 let file_content = analysis.file_text(file_id).ok().flatten();
                 let file_path = analysis.file_path(file_id).ok().flatten();
                 let deps = analysis.deps_data().ok();
+                let ir_started = Instant::now();
                 let ir_program = analysis.ir(file_id).ok().flatten();
+                let ir_elapsed = ir_started.elapsed();
+                self.coordinator
+                    .record_intellisense_v2_ir_query_latency("hover", ir_elapsed);
+                if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
+                    if ir_elapsed >= threshold {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            ir_ms = ir_elapsed.as_millis(),
+                            threshold_ms = threshold.as_millis(),
+                            "Hover v2: ir query is slow"
+                        );
+                    }
+                }
 
                 (file_content, file_path, deps, ir_program)
             };
@@ -1005,34 +1149,83 @@ impl LanguageServer for BslLanguageServer {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             self.sync_v2_globals().await;
 
-            {
-                let mut host = self.analysis_host_v2.lock().await;
-                if !host.has_file(file_id) {
-                    let path = match uri.to_file_path() {
-                        Ok(path) => path.to_string_lossy().to_string(),
-                        Err(_) => uri.to_string(),
-                    };
-                    host.apply_change(bsl_analysis_v2::Change::SetFile {
-                        file_id,
-                        text: Arc::from(file_content.clone()),
-                        version: 0,
-                        path: Arc::from(path),
-                    });
+            let expected_version = self
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied();
+
+            let wait_started = Instant::now();
+            let ok = if let Some(expected_version) = expected_version {
+                self.analysis_v2
+                    .wait_for_file_version(file_id, expected_version)
+                    .await
+            } else {
+                let path = match uri.to_file_path() {
+                    Ok(path) => path.to_string_lossy().to_string(),
+                    Err(_) => uri.to_string(),
+                };
+                self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                    file_id,
+                    text: Arc::from(file_content.clone()),
+                    version: 0,
+                    path: Arc::from(path),
+                }]);
+
+                self.analysis_v2.wait_for_file_version(file_id, 0).await
+            };
+            let wait_elapsed = wait_started.elapsed();
+            self.coordinator.record_intellisense_v2_wait_for_file_version(
+                "signature_help",
+                wait_elapsed,
+            );
+            if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
+                if wait_elapsed >= threshold {
+                    warn!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        expected_version = expected_version.unwrap_or(0),
+                        wait_ms = wait_elapsed.as_millis(),
+                        threshold_ms = threshold.as_millis(),
+                        "SignatureHelp v2: wait_for_file_version is slow"
+                    );
                 }
+            }
+            if !ok {
+                return Ok(None);
             }
 
             let (file_content, deps) = {
-                let analysis = { self.analysis_host_v2.lock().await.analysis() };
+                let snapshot_started = Instant::now();
+                let (analysis, index_snapshot, deps_id) = self.analysis_v2.snapshot_with_deps().await;
+                let snapshot_elapsed = snapshot_started.elapsed();
+                self.coordinator.record_intellisense_v2_snapshot_latency(
+                    "signature_help",
+                    snapshot_elapsed,
+                );
+                if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
+                    if snapshot_elapsed >= threshold {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            snapshot_ms = snapshot_elapsed.as_millis(),
+                            threshold_ms = threshold.as_millis(),
+                            "SignatureHelp v2: snapshot acquisition is slow"
+                        );
+                    }
+                }
                 let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                let observed_deps_id = analysis.deps_id().ok();
+                let observed_deps_id = Some(deps_id);
                 let observed_settings_id = analysis.settings_id().ok();
                 debug!(
-                    "SignatureHelp v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
+                    "SignatureHelp v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
                     uri,
                     file_id.0,
                     observed_file_version,
                     observed_deps_id.as_ref().map(|v| v.as_str()),
                     observed_settings_id.as_ref().map(|v| v.as_str()),
+                    index_snapshot.id.as_str(),
                 );
 
                 let observed_byte_offset = analysis
@@ -1280,6 +1473,15 @@ impl LanguageServer for BslLanguageServer {
                         ))
                     })?;
 
+                let platform_docs_root = {
+                    let config = self.config.read().await;
+                    config
+                        .as_ref()
+                        .and_then(|cfg| cfg.platform_docs_archive.as_deref())
+                        .map(PathBuf::from)
+                };
+                let config_root = PathBuf::from(&request.config_path);
+
                 let result = handle_parse_configuration(
                     request,
                     self.coordinator.get_analysis_engine(),
@@ -1289,6 +1491,17 @@ impl LanguageServer for BslLanguageServer {
                     Some(self.coordinator.clone()),
                 )
                 .await;
+
+                if result.success && self.use_salsa_v2 {
+                    self.deps_update_v2(
+                        "parseConfiguration",
+                        platform_docs_root,
+                        Some(config_root),
+                    )
+                    .await;
+                    self.sync_v2_globals().await;
+                }
+
                 Ok(Some(
                     serde_json::to_value(result)
                         .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,

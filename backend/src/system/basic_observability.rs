@@ -129,6 +129,137 @@ impl BasicObservability {
         self.metrics.increment("completion_incomplete_total");
     }
 
+    pub fn record_intellisense_v2_wait_for_file_version(&self, kind: &str, duration: Duration) {
+        let (total_metric, histogram_metric) = match kind {
+            "completion" => (
+                "intellisense_v2_wait_for_file_version_completion_total",
+                "intellisense_v2_wait_for_file_version_completion_ms",
+            ),
+            "hover" => (
+                "intellisense_v2_wait_for_file_version_hover_total",
+                "intellisense_v2_wait_for_file_version_hover_ms",
+            ),
+            "signature_help" => (
+                "intellisense_v2_wait_for_file_version_signature_help_total",
+                "intellisense_v2_wait_for_file_version_signature_help_ms",
+            ),
+            "diagnostics" => (
+                "intellisense_v2_wait_for_file_version_diagnostics_total",
+                "intellisense_v2_wait_for_file_version_diagnostics_ms",
+            ),
+            _ => (
+                "intellisense_v2_wait_for_file_version_other_total",
+                "intellisense_v2_wait_for_file_version_other_ms",
+            ),
+        };
+
+        self.metrics.increment(total_metric);
+        self.metrics.observe_histogram(
+            histogram_metric,
+            duration.as_millis() as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_snapshot_latency(&self, kind: &str, duration: Duration) {
+        let (total_metric, histogram_metric) = match kind {
+            "completion" => (
+                "intellisense_v2_snapshot_completion_total",
+                "intellisense_v2_snapshot_completion_ms",
+            ),
+            "hover" => (
+                "intellisense_v2_snapshot_hover_total",
+                "intellisense_v2_snapshot_hover_ms",
+            ),
+            "signature_help" => (
+                "intellisense_v2_snapshot_signature_help_total",
+                "intellisense_v2_snapshot_signature_help_ms",
+            ),
+            "diagnostics" => (
+                "intellisense_v2_snapshot_diagnostics_total",
+                "intellisense_v2_snapshot_diagnostics_ms",
+            ),
+            _ => (
+                "intellisense_v2_snapshot_other_total",
+                "intellisense_v2_snapshot_other_ms",
+            ),
+        };
+
+        self.metrics.increment(total_metric);
+        self.metrics.observe_histogram(
+            histogram_metric,
+            duration.as_millis() as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_ir_query_latency(&self, kind: &str, duration: Duration) {
+        let (total_metric, histogram_metric) = match kind {
+            "completion" => (
+                "intellisense_v2_ir_query_completion_total",
+                "intellisense_v2_ir_query_completion_ms",
+            ),
+            "hover" => (
+                "intellisense_v2_ir_query_hover_total",
+                "intellisense_v2_ir_query_hover_ms",
+            ),
+            _ => (
+                "intellisense_v2_ir_query_other_total",
+                "intellisense_v2_ir_query_other_ms",
+            ),
+        };
+
+        self.metrics.increment(total_metric);
+        self.metrics.observe_histogram(
+            histogram_metric,
+            duration.as_millis() as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_syntax_diagnostics_query_latency(&self, duration: Duration) {
+        self.metrics
+            .increment("intellisense_v2_syntax_diagnostics_query_total");
+        self.metrics.observe_histogram(
+            "intellisense_v2_syntax_diagnostics_query_ms",
+            duration.as_millis() as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_semantic_diagnostics_query_latency(&self, duration: Duration) {
+        self.metrics
+            .increment("intellisense_v2_semantic_diagnostics_query_total");
+        self.metrics.observe_histogram(
+            "intellisense_v2_semantic_diagnostics_query_ms",
+            duration.as_millis() as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_deps_update_build_latency(&self, duration: Duration) {
+        self.metrics
+            .increment("intellisense_v2_deps_update_build_total");
+        self.metrics.observe_histogram(
+            "intellisense_v2_deps_update_build_ms",
+            duration.as_millis() as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_deps_update_apply_latency(&self, duration: Duration) {
+        self.metrics
+            .increment("intellisense_v2_deps_update_apply_total");
+        self.metrics.observe_histogram(
+            "intellisense_v2_deps_update_apply_ms",
+            duration.as_millis() as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_deps_update_success(&self) {
+        self.metrics
+            .increment("intellisense_v2_deps_update_success_total");
+    }
+
+    pub fn record_intellisense_v2_deps_update_error(&self) {
+        self.metrics
+            .increment("intellisense_v2_deps_update_error_total");
+    }
+
     pub fn record_completion_quality(
         &self,
         total_candidates: usize,

@@ -10,22 +10,28 @@
 mod command_handlers;
 mod core;
 mod language_server;
+mod analysis_v2_runtime;
+mod deps_v2;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic::AtomicU32;
+use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tower_lsp::Client;
 
-use bsl_analysis_v2::{AnalysisHostV2, FileId as V2FileId};
+use bsl_analysis_v2::{DepsSnapshotId, FileId as V2FileId, SettingsId};
 use bsl_backend::system::SystemCoordinator;
 
 use crate::config::{BslSettings, LspConfig};
 
 // Re-export Url for use in submodules
 pub use tower_lsp::lsp_types::Url;
+
+use self::analysis_v2_runtime::AnalysisV2Runtime;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum V2FileKey {
@@ -48,10 +54,43 @@ pub struct BslLanguageServer {
     pub(crate) coordinator: Arc<SystemCoordinator>,
 
     pub(crate) use_salsa_v2: bool,
-    pub(crate) analysis_host_v2: Arc<Mutex<AnalysisHostV2>>,
+    pub(crate) analysis_v2: AnalysisV2Runtime,
     /// Session-stable mapping: once a `FileId` is assigned for a key, it is not revoked for the
     /// lifetime of the server process (even if the document is closed and re-opened).
     pub(crate) file_key_to_file_id_v2: Arc<RwLock<HashMap<V2FileKey, V2FileId>>>,
     pub(crate) next_file_id_v2: Arc<AtomicU32>,
     pub(crate) diagnostics_tasks_v2: Arc<Mutex<HashMap<V2FileId, (i32, JoinHandle<()>)>>>,
+    pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
+    pub(crate) last_deps_id_v2: Arc<RwLock<Option<DepsSnapshotId>>>,
+    pub(crate) last_settings_id_v2: Arc<RwLock<Option<SettingsId>>>,
+}
+
+fn parse_env_duration_ms(var: &str) -> Option<Duration> {
+    let raw = std::env::var(var).ok()?;
+    let parsed = raw.parse::<u64>().ok()?;
+    if parsed == 0 {
+        return None;
+    }
+    Some(Duration::from_millis(parsed))
+}
+
+static INTELLISENSE_V2_SLOW_WAIT_WARN_THRESHOLD: LazyLock<Option<Duration>> =
+    LazyLock::new(|| parse_env_duration_ms("BSL_INTELLISENSE_V2_SLOW_WAIT_WARN_MS"));
+
+static INTELLISENSE_V2_SLOW_SNAPSHOT_WARN_THRESHOLD: LazyLock<Option<Duration>> =
+    LazyLock::new(|| parse_env_duration_ms("BSL_INTELLISENSE_V2_SLOW_SNAPSHOT_WARN_MS"));
+
+static INTELLISENSE_V2_SLOW_QUERY_WARN_THRESHOLD: LazyLock<Option<Duration>> =
+    LazyLock::new(|| parse_env_duration_ms("BSL_INTELLISENSE_V2_SLOW_QUERY_WARN_MS"));
+
+pub(crate) fn intellisense_v2_slow_wait_warn_threshold() -> Option<Duration> {
+    *INTELLISENSE_V2_SLOW_WAIT_WARN_THRESHOLD
+}
+
+pub(crate) fn intellisense_v2_slow_snapshot_warn_threshold() -> Option<Duration> {
+    *INTELLISENSE_V2_SLOW_SNAPSHOT_WARN_THRESHOLD
+}
+
+pub(crate) fn intellisense_v2_slow_query_warn_threshold() -> Option<Duration> {
+    *INTELLISENSE_V2_SLOW_QUERY_WARN_THRESHOLD
 }

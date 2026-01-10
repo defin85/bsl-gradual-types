@@ -26,6 +26,22 @@ use crate::system::{
     TypeKind,
 };
 
+pub trait IndexSnapshotSource: Sync {
+    fn snapshot(&self) -> IndexSnapshot;
+}
+
+impl IndexSnapshotSource for IntellisenseIndexStore {
+    fn snapshot(&self) -> IndexSnapshot {
+        IntellisenseIndexStore::snapshot(self)
+    }
+}
+
+impl IndexSnapshotSource for IndexSnapshot {
+    fn snapshot(&self) -> IndexSnapshot {
+        self.clone()
+    }
+}
+
 pub const COMPLETION_MAX_ITEMS: usize = 200;
 const CONTEXT_WINDOW_CHARS: usize = 256;
 static COMPLETION_TRACE_ENABLED: OnceLock<bool> = OnceLock::new();
@@ -138,12 +154,43 @@ pub async fn get_completion_with_semantic_program(
     .await
 }
 
+pub async fn get_completion_with_semantic_program_snapshot(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index_snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    file_path: &str,
+    resolver: &TypeResolver,
+    ir_program: Arc<SemanticProgram>,
+) -> Result<CompletionResult> {
+    let analysis = CompletionAnalysisContext {
+        parser: None,
+        ir_cache: None,
+        ir_program: Some(ir_program),
+        resolver,
+        file_path,
+    };
+
+    get_completion_with_analysis(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index_snapshot,
+        metadata_lookup,
+        Some(&analysis),
+    )
+    .await
+}
+
 pub(crate) async fn get_completion_with_analysis(
     file_content: &str,
     line: u32,
     column: u32,
     file_uri: Option<&str>,
-    index: &IntellisenseIndexStore,
+    index: &dyn IndexSnapshotSource,
     metadata_lookup: &TypeMetadataLookup,
     analysis: Option<&CompletionAnalysisContext<'_>>,
 ) -> Result<CompletionResult> {

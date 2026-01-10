@@ -385,7 +385,7 @@ impl TypeSystemService {
             line,
             column,
             file_uri,
-            &self.intellisense_index,
+            self.intellisense_index.as_ref(),
             &self.metadata_lookup,
             analysis_ctx.as_ref(),
         )

@@ -8,9 +8,9 @@ use serde_json::json;
 use tracing::{error, info};
 
 use bsl_backend::application::TypeSystemService;
-use bsl_backend::application::get_completion_with_semantic_program;
+use bsl_backend::application::get_completion_with_semantic_program_snapshot;
 use bsl_backend::application::CompletionStats;
-use bsl_backend::system::IntellisenseIndexStore;
+use bsl_backend::system::IndexSnapshot;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::ir::SemanticProgram;
@@ -28,7 +28,7 @@ pub async fn handle_completion_v2(
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     position: Position,
     file_uri: &Url,
-    index: &IntellisenseIndexStore,
+    index_snapshot: &IndexSnapshot,
     snippet_support: bool,
 ) -> Option<CompletionResponseWithStats> {
     let resolver = deps
@@ -37,12 +37,12 @@ pub async fn handle_completion_v2(
         .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
 
-    match get_completion_with_semantic_program(
+    match get_completion_with_semantic_program_snapshot(
         file_content.as_ref(),
         position.line,
         position.character,
         Some(file_uri.as_str()),
-        index,
+        index_snapshot,
         &metadata_lookup,
         file_path.as_ref(),
         resolver.as_ref(),
@@ -543,6 +543,7 @@ mod tests {
         let env = create_test_env();
         let service = env.service.clone();
         let index = env.index.clone();
+        let index_snapshot = index.snapshot();
         let deps = env.deps.clone();
 
         let legacy = handle_completion(&content, position, &uri, Some(service), true)
@@ -563,7 +564,7 @@ mod tests {
             deps.clone(),
             position,
             &uri,
-            index.as_ref(),
+            &index_snapshot,
             true,
         )
         .await
@@ -586,7 +587,7 @@ mod tests {
             deps,
             position,
             &uri,
-            index.as_ref(),
+            &index_snapshot,
             true,
         )
         .await

@@ -35,6 +35,7 @@ mod services;
 pub use service::{CompletionContext, TypeSystemService};
 pub use services::completion_service::{get_completion, CompletionStats};
 pub use services::completion_service::get_completion_with_semantic_program;
+pub use services::completion_service::get_completion_with_semantic_program_snapshot;
 pub use services::hover_service::get_hover_info_with_semantic_program;
 
 // Re-export completion context for external usage

@@ -99,6 +99,11 @@ impl BslLanguageServer {
             });
         };
 
+        let platform_docs_root = cfg
+            .platform_docs_archive
+            .as_deref()
+            .map(PathBuf::from);
+
         let Some(config_path) = cfg.configuration_path else {
             return Ok(BuildIndexResponse {
                 success: false,
@@ -106,6 +111,8 @@ impl BslLanguageServer {
                 message: "configurationPath is not configured".to_string(),
             });
         };
+
+        let config_root = PathBuf::from(&config_path);
 
         let resp = handle_parse_configuration(
             ParseConfigurationParams { config_path },
@@ -116,6 +123,12 @@ impl BslLanguageServer {
             Some(self.coordinator.clone()),
         )
         .await;
+
+        if resp.success && self.use_salsa_v2 {
+            self.deps_update_v2("bsl/buildIndex", platform_docs_root, Some(config_root))
+                .await;
+            self.sync_v2_globals().await;
+        }
 
         Ok(BuildIndexResponse {
             success: resp.success,
@@ -150,8 +163,27 @@ impl BslLanguageServer {
             }
         }
 
+        let platform_docs_root = {
+            let config = self.config.read().await;
+            config
+                .as_ref()
+                .and_then(|cfg| cfg.platform_docs_archive.as_deref())
+                .map(PathBuf::from)
+        };
+        let config_root = PathBuf::from(&params.config_path);
+
         let resp =
             handle_incremental_update(params, self.coordinator.clone(), self.client.clone()).await;
+
+        if resp.success && self.use_salsa_v2 {
+            self.deps_update_v2(
+                "bsl/incrementalUpdate",
+                platform_docs_root,
+                Some(config_root),
+            )
+            .await;
+            self.sync_v2_globals().await;
+        }
 
         Ok(IncrementalUpdateResponse {
             success: resp.success,

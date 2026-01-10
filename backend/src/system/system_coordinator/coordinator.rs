@@ -191,6 +191,60 @@ impl SystemCoordinator {
         self.observability.record_signature_help_empty();
     }
 
+    pub fn record_intellisense_v2_wait_for_file_version(
+        &self,
+        kind: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_wait_for_file_version(kind, duration);
+    }
+
+    pub fn record_intellisense_v2_snapshot_latency(&self, kind: &str, duration: std::time::Duration) {
+        self.observability
+            .record_intellisense_v2_snapshot_latency(kind, duration);
+    }
+
+    pub fn record_intellisense_v2_ir_query_latency(&self, kind: &str, duration: std::time::Duration) {
+        self.observability
+            .record_intellisense_v2_ir_query_latency(kind, duration);
+    }
+
+    pub fn record_intellisense_v2_syntax_diagnostics_query_latency(
+        &self,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_syntax_diagnostics_query_latency(duration);
+    }
+
+    pub fn record_intellisense_v2_semantic_diagnostics_query_latency(
+        &self,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_semantic_diagnostics_query_latency(duration);
+    }
+
+    pub fn record_intellisense_v2_deps_update_build_latency(&self, duration: std::time::Duration) {
+        self.observability
+            .record_intellisense_v2_deps_update_build_latency(duration);
+    }
+
+    pub fn record_intellisense_v2_deps_update_apply_latency(&self, duration: std::time::Duration) {
+        self.observability
+            .record_intellisense_v2_deps_update_apply_latency(duration);
+    }
+
+    pub fn record_intellisense_v2_deps_update_success(&self) {
+        self.observability
+            .record_intellisense_v2_deps_update_success();
+    }
+
+    pub fn record_intellisense_v2_deps_update_error(&self) {
+        self.observability.record_intellisense_v2_deps_update_error();
+    }
+
     pub fn record_completion_quality(
         &self,
         total_candidates: usize,

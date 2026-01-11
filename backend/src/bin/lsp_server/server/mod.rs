@@ -53,7 +53,6 @@ pub struct BslLanguageServer {
     pub(crate) auto_reindex_paused: Arc<RwLock<bool>>,
     pub(crate) coordinator: Arc<SystemCoordinator>,
 
-    pub(crate) use_salsa_v2: bool,
     pub(crate) analysis_v2: AnalysisV2Runtime,
     /// Session-stable mapping: once a `FileId` is assigned for a key, it is not revoked for the
     /// lifetime of the server process (even if the document is closed and re-opened).

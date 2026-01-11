@@ -30,8 +30,8 @@ use crate::commands::{
 };
 use crate::config::{BslSettings, LspConfig};
 use crate::handlers::{
-    self, apply_text_edit, handle_completion, handle_completion_resolve, handle_goto_definition,
-    handle_hover, handle_hover_v2, handle_signature_help, handle_signature_help_v2,
+    apply_text_edit, handle_completion_resolve, handle_goto_definition_v2, handle_hover_v2,
+    handle_signature_help_v2,
 };
 use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
@@ -340,10 +340,9 @@ impl LanguageServer for BslLanguageServer {
                     )
                     .await;
 
-                match result {
-                    Ok(()) => {
-                        info!("Platform types loaded successfully");
-                        if self.use_salsa_v2 {
+                    match result {
+                        Ok(()) => {
+                            info!("Platform types loaded successfully");
                             self.deps_update_v2(
                                 "start_with_paths",
                                 Some(syntax_path.to_path_buf()),
@@ -351,12 +350,11 @@ impl LanguageServer for BslLanguageServer {
                             )
                             .await;
                             self.sync_v2_globals().await;
-                        }
-                        let _ = result_tx.send(Ok(()));
-                        self.client
-                            .log_message(
-                                MessageType::INFO,
-                                format!("Platform documentation loaded from: {}", platform_docs),
+                            let _ = result_tx.send(Ok(()));
+                            self.client
+                                .log_message(
+                                    MessageType::INFO,
+                                    format!("Platform documentation loaded from: {}", platform_docs),
                             )
                             .await;
                     }
@@ -443,9 +441,7 @@ impl LanguageServer for BslLanguageServer {
             }
         }
 
-        if self.use_salsa_v2 {
-            self.sync_v2_globals().await;
-        }
+        self.sync_v2_globals().await;
     }
 
     // ========================================================================
@@ -463,61 +459,31 @@ impl LanguageServer for BslLanguageServer {
             .await
             .insert(uri.clone(), text.clone());
 
-        if self.use_salsa_v2 {
-            self.sync_v2_globals().await;
-            let file_id = self.get_or_create_file_id_v2(&uri).await;
-            let path = match uri.to_file_path() {
-                Ok(path) => path.to_string_lossy().to_string(),
-                Err(_) => uri.to_string(),
-            };
+        self.sync_v2_globals().await;
+        let file_id = self.get_or_create_file_id_v2(&uri).await;
+        let path = match uri.to_file_path() {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(_) => uri.to_string(),
+        };
 
-            self.latest_received_file_versions_v2
-                .write()
-                .await
-                .insert(file_id, version);
+        self.latest_received_file_versions_v2
+            .write()
+            .await
+            .insert(file_id, version);
 
-            self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                file_id,
-                text: Arc::from(text.clone()),
-                version,
-                path: Arc::from(path),
-            }]);
+        self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+            file_id,
+            text: Arc::from(text.clone()),
+            version,
+            path: Arc::from(path),
+        }]);
 
-            self.schedule_diagnostics_v2(uri.clone(), file_id, version).await;
-
-            self.client
-                .log_message(
-                    MessageType::INFO,
-                    format!("Opened document (v2 diagnostics scheduled): {}", uri),
-                )
-                .await;
-            return;
-        }
-
-        // Preheat IR cache
-        if let Some(service) = self.get_type_service() {
-            match service.get_hover_info(&text, 0, 0, None).await {
-                Ok(_) => info!("IR cache preheated for {}", uri),
-                Err(e) => error!("Failed to preheat IR cache for {}: {}", uri, e),
-            }
-        }
-
-        // Get diagnostics
-        let settings = self.settings.read().await.clone();
-        let diagnostics =
-            handlers::handle_did_open(&uri, &text, version, self.get_type_service(), &settings)
-                .await;
-
-        let diagnostics_len = diagnostics.len();
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, Some(version))
-            .await;
-        self.update_diagnostics_count(&uri, diagnostics_len).await;
+        self.schedule_diagnostics_v2(uri.clone(), file_id, version).await;
 
         self.client
             .log_message(
                 MessageType::INFO,
-                format!("Opened and analyzed document: {}", uri),
+                format!("Opened document (v2 diagnostics scheduled): {}", uri),
             )
             .await;
     }
@@ -554,72 +520,40 @@ impl LanguageServer for BslLanguageServer {
             .await
             .insert(uri.clone(), updated_text.clone());
 
-        if self.use_salsa_v2 {
-            self.sync_v2_globals().await;
-            let file_id = self.get_or_create_file_id_v2(&uri).await;
-            let path = match uri.to_file_path() {
-                Ok(path) => path.to_string_lossy().to_string(),
-                Err(_) => uri.to_string(),
-            };
-
-            self.latest_received_file_versions_v2
-                .write()
-                .await
-                .insert(file_id, version);
-
-            self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                file_id,
-                text: Arc::from(updated_text.clone()),
-                version,
-                path: Arc::from(path),
-            }]);
-
-            self.schedule_diagnostics_v2(uri.clone(), file_id, version).await;
-            return;
-        }
-
-        let config_root = {
-            let cache_lock = self.coordinator.config_index_cache();
-            let guard = cache_lock.read().unwrap_or_else(|poisoned| {
-                warn!("Config index cache RwLock poisoned (read), recovering");
-                poisoned.into_inner()
-            });
-            guard.as_ref().map(|cache| cache.config_root.clone())
+        self.sync_v2_globals().await;
+        let file_id = self.get_or_create_file_id_v2(&uri).await;
+        let path = match uri.to_file_path() {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(_) => uri.to_string(),
         };
 
-        // Get diagnostics
-        let settings = self.settings.read().await.clone();
-        let diagnostics = handlers::handle_did_change(
-            &uri,
-            &updated_text,
-            &changes,
-            self.get_type_service(),
-            config_root,
-            &settings,
-        )
-        .await;
+        self.latest_received_file_versions_v2
+            .write()
+            .await
+            .insert(file_id, version);
 
-        let diagnostics_len = diagnostics.len();
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, Some(version))
-            .await;
-        self.update_diagnostics_count(&uri, diagnostics_len).await;
+        self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+            file_id,
+            text: Arc::from(updated_text.clone()),
+            version,
+            path: Arc::from(path),
+        }]);
+
+        self.schedule_diagnostics_v2(uri.clone(), file_id, version).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         self.documents.write().await.remove(&uri);
 
-        if self.use_salsa_v2 {
-            if let Some(file_id) = self.get_file_id_v2(&uri).await {
-                self.cancel_diagnostics_v2(file_id).await;
-                self.latest_received_file_versions_v2
-                    .write()
-                    .await
-                    .remove(&file_id);
-                self.analysis_v2
-                    .apply_changes(vec![bsl_analysis_v2::Change::RemoveFile { file_id }]);
-            }
+        if let Some(file_id) = self.get_file_id_v2(&uri).await {
+            self.cancel_diagnostics_v2(file_id).await;
+            self.latest_received_file_versions_v2
+                .write()
+                .await
+                .remove(&file_id);
+            self.analysis_v2
+                .apply_changes(vec![bsl_analysis_v2::Change::RemoveFile { file_id }]);
         }
 
         // Clear diagnostics
@@ -660,7 +594,7 @@ impl LanguageServer for BslLanguageServer {
 
         let started = Instant::now();
         let snippet_support = *self.completion_snippet_support.read().await;
-        let completion = if self.use_salsa_v2 {
+        let completion = {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             self.sync_v2_globals().await;
 
@@ -865,15 +799,6 @@ impl LanguageServer for BslLanguageServer {
                     _ => empty(),
                 }
             }
-        } else {
-            handle_completion(
-                &file_content,
-                position,
-                &uri,
-                self.get_type_service(),
-                snippet_support,
-            )
-            .await
         };
         let elapsed = started.elapsed();
         self.coordinator.record_completion_latency(elapsed);
@@ -944,7 +869,7 @@ impl LanguageServer for BslLanguageServer {
             },
         };
 
-        if self.use_salsa_v2 {
+        {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             self.sync_v2_globals().await;
 
@@ -1083,16 +1008,6 @@ impl LanguageServer for BslLanguageServer {
 
             return Ok(result);
         }
-
-        let settings = self.settings.read().await;
-        Ok(handle_hover(
-            &uri,
-            &file_content,
-            position,
-            self.get_type_service(),
-            &settings.hover,
-        )
-        .await)
     }
 
     async fn goto_definition(
@@ -1116,18 +1031,122 @@ impl LanguageServer for BslLanguageServer {
             },
         };
 
-        let file_path_string = uri
-            .to_file_path()
-            .ok()
-            .map(|p| p.to_string_lossy().into_owned());
+        {
+            let file_id = self.get_or_create_file_id_v2(&uri).await;
+            self.sync_v2_globals().await;
 
-        Ok(handle_goto_definition(
-            &file_content,
-            file_path_string.as_deref(),
-            position,
-            self.get_type_service(),
-        )
-        .await)
+            let expected_version = self
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied();
+
+            let wait_started = Instant::now();
+            let ok = if let Some(expected_version) = expected_version {
+                self.analysis_v2
+                    .wait_for_file_version(file_id, expected_version)
+                    .await
+            } else {
+                let path = match uri.to_file_path() {
+                    Ok(path) => path.to_string_lossy().to_string(),
+                    Err(_) => uri.to_string(),
+                };
+                self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                    file_id,
+                    text: Arc::from(file_content.clone()),
+                    version: 0,
+                    path: Arc::from(path),
+                }]);
+
+                self.analysis_v2.wait_for_file_version(file_id, 0).await
+            };
+            let wait_elapsed = wait_started.elapsed();
+            self.coordinator.record_intellisense_v2_wait_for_file_version(
+                "definition",
+                wait_elapsed,
+            );
+            if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
+                if wait_elapsed >= threshold {
+                    warn!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        expected_version = expected_version.unwrap_or(0),
+                        wait_ms = wait_elapsed.as_millis(),
+                        threshold_ms = threshold.as_millis(),
+                        "Definition v2: wait_for_file_version is slow"
+                    );
+                }
+            }
+            if !ok {
+                return Ok(None);
+            }
+
+            let (file_path, deps, ir_program) = {
+                let snapshot_started = Instant::now();
+                let (analysis, index_snapshot, deps_id) =
+                    self.analysis_v2.snapshot_with_deps().await;
+                let snapshot_elapsed = snapshot_started.elapsed();
+                self.coordinator.record_intellisense_v2_snapshot_latency(
+                    "definition",
+                    snapshot_elapsed,
+                );
+                if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
+                    if snapshot_elapsed >= threshold {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            snapshot_ms = snapshot_elapsed.as_millis(),
+                            threshold_ms = threshold.as_millis(),
+                            "Definition v2: snapshot acquisition is slow"
+                        );
+                    }
+                }
+
+                let observed_file_version = analysis.file_version(file_id).ok().flatten();
+                let observed_deps_id = Some(deps_id);
+                let observed_settings_id = analysis.settings_id().ok();
+                debug!(
+                    "Definition v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
+                    uri,
+                    file_id.0,
+                    observed_file_version,
+                    observed_deps_id.as_ref().map(|v| v.as_str()),
+                    observed_settings_id.as_ref().map(|v| v.as_str()),
+                    index_snapshot.id.as_str(),
+                );
+
+                let file_path = analysis.file_path(file_id).ok().flatten();
+                let deps = analysis.deps_data().ok();
+                let ir_started = Instant::now();
+                let ir_program = analysis.ir(file_id).ok().flatten();
+                let ir_elapsed = ir_started.elapsed();
+                self.coordinator
+                    .record_intellisense_v2_ir_query_latency("definition", ir_elapsed);
+                if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
+                    if ir_elapsed >= threshold {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            ir_ms = ir_elapsed.as_millis(),
+                            threshold_ms = threshold.as_millis(),
+                            "Definition v2: ir query is slow"
+                        );
+                    }
+                }
+
+                (file_path, deps, ir_program)
+            };
+
+            let result = match (file_path, deps, ir_program) {
+                (Some(file_path), Some(deps), Some(ir_program)) => {
+                    handle_goto_definition_v2(file_path, ir_program, deps, position, &uri).await
+                }
+                _ => None,
+            };
+
+            return Ok(result);
+        }
     }
 
     async fn signature_help(
@@ -1145,7 +1164,7 @@ impl LanguageServer for BslLanguageServer {
             }
         };
 
-        if self.use_salsa_v2 {
+        {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             self.sync_v2_globals().await;
 
@@ -1266,20 +1285,6 @@ impl LanguageServer for BslLanguageServer {
             }
             return Ok(result);
         }
-
-        let started = Instant::now();
-        let result = handle_signature_help(
-            &file_content,
-            position,
-            self.coordinator.get_analysis_engine(),
-        )
-        .await;
-        let elapsed = started.elapsed();
-        self.coordinator.record_signature_help_latency(elapsed);
-        if result.is_none() {
-            self.coordinator.record_signature_help_empty();
-        }
-        Ok(result)
     }
 
     // ========================================================================
@@ -1492,7 +1497,7 @@ impl LanguageServer for BslLanguageServer {
                 )
                 .await;
 
-                if result.success && self.use_salsa_v2 {
+                if result.success {
                     self.deps_update_v2(
                         "parseConfiguration",
                         platform_docs_root,

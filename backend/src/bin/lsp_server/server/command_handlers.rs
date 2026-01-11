@@ -124,7 +124,7 @@ impl BslLanguageServer {
         )
         .await;
 
-        if resp.success && self.use_salsa_v2 {
+        if resp.success {
             self.deps_update_v2("bsl/buildIndex", platform_docs_root, Some(config_root))
                 .await;
             self.sync_v2_globals().await;
@@ -175,7 +175,7 @@ impl BslLanguageServer {
         let resp =
             handle_incremental_update(params, self.coordinator.clone(), self.client.clone()).await;
 
-        if resp.success && self.use_salsa_v2 {
+        if resp.success {
             self.deps_update_v2(
                 "bsl/incrementalUpdate",
                 platform_docs_root,

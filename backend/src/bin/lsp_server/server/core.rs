@@ -24,15 +24,6 @@ use super::deps_v2::{DepsBundleV2, DepsBundleV2Meta, build_deps_bundle_v2};
 
 impl BslLanguageServer {
     pub fn new(client: Client, coordinator: Arc<SystemCoordinator>) -> Self {
-        let use_salsa_v2 = matches!(
-            std::env::var("BSL_INTELLISENSE_V2_SALSA")
-                .unwrap_or_default()
-                .to_ascii_lowercase()
-                .as_str(),
-            "1" | "true" | "yes" | "on"
-        );
-        info!("IntelliSense v2 salsa enabled: {}", use_salsa_v2);
-
         let default_settings = BslSettings::default();
         let default_diagnostics_detail_level =
             bsl_shared::formatting::DetailLevel::parse(&default_settings.diagnostics.detail_level);
@@ -92,7 +83,6 @@ impl BslLanguageServer {
             auto_reindex_paused: Arc::new(RwLock::new(false)),
             coordinator,
 
-            use_salsa_v2,
             analysis_v2,
             file_key_to_file_id_v2: Arc::new(RwLock::new(HashMap::new())),
             next_file_id_v2: Arc::new(std::sync::atomic::AtomicU32::new(1)),
@@ -236,10 +226,6 @@ impl BslLanguageServer {
     }
 
     pub(crate) async fn sync_v2_globals(&self) {
-        if !self.use_salsa_v2 {
-            return;
-        }
-
         let settings = self.settings.read().await.clone();
         let settings_id = compute_settings_id_v2(&settings);
         let diagnostics_detail_level =
@@ -267,10 +253,6 @@ impl BslLanguageServer {
         platform_docs_root: Option<PathBuf>,
         config_root: Option<PathBuf>,
     ) {
-        if !self.use_salsa_v2 {
-            return;
-        }
-
         let build_started = Instant::now();
         let coordinator = self.coordinator.clone();
         let bundle_result = tokio::task::spawn_blocking(move || {
@@ -364,10 +346,6 @@ impl BslLanguageServer {
         file_id: V2FileId,
         expected_version: i32,
     ) {
-        if !self.use_salsa_v2 {
-            return;
-        }
-
         {
             let mut tasks = self.diagnostics_tasks_v2.lock().await;
             if let Some((_version, handle)) = tasks.remove(&file_id) {
@@ -717,9 +695,6 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
 
     #[tokio::test]
         async fn p6_fast_did_change_series_publish_diagnostics_is_monotonic() {
-        let old_flag = std::env::var("BSL_INTELLISENSE_V2_SALSA").ok();
-        std::env::set_var("BSL_INTELLISENSE_V2_SALSA", "1");
-
         let coordinator = Arc::new(SystemCoordinator::new());
 
         let (mut service, mut socket) = LspService::build({
@@ -907,18 +882,10 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
         }
 
         drain_task.abort();
-
-        match old_flag {
-            Some(value) => std::env::set_var("BSL_INTELLISENSE_V2_SALSA", value),
-            None => std::env::remove_var("BSL_INTELLISENSE_V2_SALSA"),
-        }
     }
 
     #[tokio::test]
     async fn p7_completion_after_did_change_does_not_hang() {
-        let old_flag = std::env::var("BSL_INTELLISENSE_V2_SALSA").ok();
-        std::env::set_var("BSL_INTELLISENSE_V2_SALSA", "1");
-
         let coordinator = Arc::new(SystemCoordinator::new());
 
         let (mut service, mut socket) = LspService::build({
@@ -1033,11 +1000,6 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
         assert!(completion_response.is_some(), "completion should return a response");
 
         drain_task.abort();
-
-        match old_flag {
-            Some(value) => std::env::set_var("BSL_INTELLISENSE_V2_SALSA", value),
-            None => std::env::remove_var("BSL_INTELLISENSE_V2_SALSA"),
-        }
     }
 
     #[tokio::test]
@@ -1065,9 +1027,6 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
                 }
             }
         }
-
-        let old_flag = std::env::var("BSL_INTELLISENSE_V2_SALSA").ok();
-        std::env::set_var("BSL_INTELLISENSE_V2_SALSA", "1");
 
         let coordinator = Arc::new(SystemCoordinator::new());
         let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -1236,10 +1195,5 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
         );
 
         drain_task.abort();
-
-        match old_flag {
-            Some(value) => std::env::set_var("BSL_INTELLISENSE_V2_SALSA", value),
-            None => std::env::remove_var("BSL_INTELLISENSE_V2_SALSA"),
-        }
     }
 }

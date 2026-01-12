@@ -26,7 +26,7 @@
 | **TypeMetadataLookup** | `shared/src/domain/metadata_lookup.rs` | Мост TypeResolution ↔ RawTypeData |
 | **SignatureIndex** | `shared/src/domain/signature_index.rs` | Индекс сигнатур методов |
 | **TypeResolver** | `shared/src/domain/resolver.rs` | `is_type_compatible()`, `resolve_expression_sync()` |
-| **TypeSystemService** | `backend/src/application/type_system_service.rs` | Application-level сервис (кэширование, оркестрация) |
+| **Type system facade** | `backend/src/application/type_system/` | Application-level сервис (оркестрация) |
 | **CodeLocation** | `shared/src/domain/code_location.rs` | Контекст выполнения кода (Server/Client) |
 
 ### Архитектурные слои (по диаграмме)
@@ -34,7 +34,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ Application Layer: backend/src/application/                │
-│   - TypeSystemService (сервисы с кэшированием)              │
+│   - Type system facade (сервисы)                            │
 │   - SemanticValidationVisitor                               │
 ├─────────────────────────────────────────────────────────────┤
 │ Domain Layer: shared/src/domain/                           │
@@ -933,7 +933,7 @@ impl MethodSignature {
 ```rust
 // backend/src/application/type_system_service.rs — расширение
 
-impl TypeSystemService {
+impl TypeSystemFacade {
     /// Предварительно резолвить типы для всех сигнатур
     pub fn prewarm_signature_cache(&self) {
         let signature_index = self.repository.get_signature_index_clone();
@@ -978,7 +978,7 @@ impl TypeSystemService {
 ### Архитектурные принципы
 
 1. ✅ **НЕ создаём ResolvedType** — расширяем существующий TypeResolution
-2. ✅ **НЕ создаём TypeResolutionService** — используем TypeResolver + TypeSystemService
+2. ✅ **НЕ создаём TypeResolutionService** — используем TypeResolver + type-system facade
 3. ✅ **TypeDefinitionLocation ≠ CodeLocation** — разные концепции (где определён тип vs где код)
 4. ✅ **Lazy lookup через TypeRef и OnceCell** — не загружаем всё в память
 5. ✅ **Обратная совместимость** — старые API (is_type_compatible) продолжают работать

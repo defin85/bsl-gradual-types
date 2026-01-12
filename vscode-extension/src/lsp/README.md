@@ -318,9 +318,9 @@ LSP Protocol (JSON-RPC over stdio)
       ↓
 LSP Server (backend/src/bin/lsp_server/)
       ↓
-TypeSystemService (backend/src/application/)
+v2 analysis host (salsa)
       ↓
-AnalysisEngine (shared/src/engine/)
+IR + deps snapshot
       ↓
 TypeRepository (shared/src/domain/)
       ↓
@@ -357,7 +357,7 @@ VSCode UI (результат отображается)
 ```rust
 // backend/src/bin/lsp_server/handlers/hover.rs
 pub fn handle_hover(params: HoverParams) -> Option<Hover> {
-    // TypeSystemService::get_hover()
+    // v2 hover entrypoint
 }
 ```
 

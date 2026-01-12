@@ -4,7 +4,7 @@
 **Статус:** 🟢 DONE  
 **Основание:** Фаза P5 из `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/salsa-migration-plan.md`
 
-**Примечание (P9):** runtime feature-flag `BSL_INTELLISENSE_V2_SALSA` удалён; LSP всегда использует v2 путь.
+**Примечание (P9):** runtime feature-flag (env var, удалён) убран; LSP всегда использует v2 путь.
 
 ## Цель P5
 
@@ -52,8 +52,8 @@
 
 ### 1) Стратегия миграции: strangler (исторически под флагом)
 
-- (P5–P8, исторически) `BSL_INTELLISENSE_V2_SALSA=0` → legacy путь без изменений.
-- (P5–P8, исторически) `BSL_INTELLISENSE_V2_SALSA=1` → LSP фичи используют:
+- (P5–P8, исторически) env-flag выключен → legacy путь без изменений.
+- (P5–P8, исторически) env-flag включён → LSP фичи используют:
   1) `analysis_host_v2.snapshot()`/`analysis()` как источник текста/версии,
   2) v2 queries (`line_index/parse_result/ir`) как источник синтаксиса/IR,
   3) существующую “бизнес-логику” (completion/hover/signatureHelp), но **без** вызовов legacy IR build.
@@ -106,8 +106,8 @@
   - [x] `analysis.line_index(file_id)`/позиционирование через `analysis.utf16_position_to_*` (где нужно),
   - [x] `analysis.ir(file_id)` как единственный источник IR.
 - [x] Переиспользовать `completion_service` алгоритм без legacy IR build:
-  - [x] entrypoint `get_completion_with_semantic_program(...)` принимает `Arc<SemanticProgram>` + `resolver/repository` из deps snapshot (без `ParserCoordinator/IrCache`).
-  - [x] v2 путь не вызывает `parse_to_ir`/`parse_with_cache_for_file` и не трогает `IrCache` (проверено `rg` по обработчикам).
+  - [x] entrypoint `get_completion_with_semantic_program(...)` принимает `Arc<SemanticProgram>` + `resolver/repository` из deps snapshot (без `ParserCoordinator`/legacy IR cache).
+  - [x] v2 путь не вызывает `parse_to_ir`/`parse_with_cache_for_file` и не трогает legacy IR cache (проверено `rg` по обработчикам).
 - [x] Детерминизм completion результата:
   - [x] total ordering уже задан в `completion_ranking` (tie-breakers по source/label/kind/scope/owner),
   - [x] `origin_sources` стабилизированы (sort+dedup),
@@ -120,7 +120,7 @@
   чтобы можно было покрыть тестами без поднятия всего сервера.
 - [x] В v2 hover использовать:
   - [x] `analysis.file_text(file_id)` + `analysis.file_path(file_id)`,
-  - [x] `analysis.ir(file_id)` как источник IR (без legacy `IrCache`),
+  - [x] `analysis.ir(file_id)` как источник IR (без legacy IR cache),
   - [x] deps snapshot (`repository/resolver/signature_index`) через `deps_data()`.
 - [x] Переиспользовать форматирование hover (существующие `HoverFormatter`/`format_semantic_node_info`) без IR build внутри.
 - [x] Проверить критичный кейс: form modules (зависимость от `file_path`/`CodeLocation`) — `file_path` берём из snapshot и пробрасываем в IR query (AstToIrConverter тот же).
@@ -154,7 +154,7 @@
   - [x] два запуска completion на одинаковом входе → одинаковый список (включая `sortText` и `data`),
   - [ ] (опционально) два `AnalysisHostV2` (две базы) на одном input → одинаковый результат.
 - [x] Фактическая верификация “нет legacy IR build в v2 hot path”:
-  - [x] `rg` по `parse_to_ir|parse_with_cache_for_file|IrCache` в v2 ветках обработчиков,
+  - [x] `rg` по `parse_to_ir|parse_with_cache_for_file|ir_cache\\.rs` в v2 ветках обработчиков,
   - [x] логи observed ids показывают `deps_id/settings_id/file_version`.
 
 ## DoD (P5 считается закрытым, если)

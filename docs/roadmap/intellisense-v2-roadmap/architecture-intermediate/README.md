@@ -12,7 +12,7 @@
 ## 1. Контекст и проблема
 
 Сейчас часть семантики строится "на лету" внутри LSP запросов:
-- `completion`: при необходимости строит IR из текста (`parse_to_ir`) и кладёт в `IrCache`
+- `completion`: при необходимости строит IR из текста (`parse_to_ir`) и кладёт в legacy IR cache
   (см. `backend/src/application/type_system/services/completion_service.rs`).
 - `hover`: аналогично при cache miss строит IR в запросе
   (см. `backend/src/application/type_system/services/hover_service.rs`).

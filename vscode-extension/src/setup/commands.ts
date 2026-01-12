@@ -53,8 +53,8 @@ export function registerEnhancedCommands(
 
     // Команда для cache управления
     context.subscriptions.push(
-        vscode.commands.registerCommand('bsl.clearAnalysisCache', async () => {
-            await clearAnalysisCache(languageClient, outputChannel);
+        vscode.commands.registerCommand('bsl.clearCache', async () => {
+            await clearCache(languageClient, outputChannel);
         })
     );
 
@@ -245,7 +245,7 @@ async function configureTypeHints(): Promise<void> {
 /**
  * Очистка cache анализа
  */
-async function clearAnalysisCache(
+async function clearCache(
     languageClient: EnhancedLspClient,
     outputChannel: vscode.OutputChannel
 ): Promise<void> {
@@ -254,10 +254,10 @@ async function clearAnalysisCache(
 
         if (result?.success) {
             vscode.window.showInformationMessage(
-                `Analysis cache cleared. Freed ${result.freedBytes} bytes.`
+                `Cache cleared. Freed ${result.freedBytes} bytes.`
             );
         } else {
-            vscode.window.showWarningMessage('Failed to clear analysis cache');
+            vscode.window.showWarningMessage('Failed to clear cache');
         }
 
     } catch (error) {
@@ -293,8 +293,8 @@ export function getEnhancedPackageContributions() {
                 category: "BSL"
             },
             {
-                command: "bsl.clearAnalysisCache",
-                title: "Clear Analysis Cache",
+                command: "bsl.clearCache",
+                title: "Clear Cache",
                 category: "BSL"
             }
         ],

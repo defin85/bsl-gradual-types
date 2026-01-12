@@ -59,14 +59,14 @@ graph TB
     end
 
     subgraph "Application Layer"
-        TypeSystemService["TypeSystemService<br/>Orchestration"]
+        TypeSystemFacade["TypeSystemFacade<br/>Orchestration"]
         AstToIr["AstToIrConverter<br/>AST → IR"]
     end
 
     subgraph "System Layer"
         SystemCoordinator["SystemCoordinator<br/>Lifecycle"]
         ParserCoordinator["ParserCoordinator<br/>TreeSitter + Regex"]
-        AnalysisCache["AnalysisCache<br/>Caching"]
+        DiskCache["DiskCache<br/>Caching"]
     end
 
     subgraph "Domain Layer (in shared)"
@@ -81,18 +81,18 @@ graph TB
     end
 
     %% Flows
-    LSP --> TypeSystemService
-    Web --> TypeSystemService
+    LSP --> TypeSystemFacade
+    Web --> TypeSystemFacade
 
-    TypeSystemService --> SystemCoordinator
-    TypeSystemService --> AstToIr
+    TypeSystemFacade --> SystemCoordinator
+    TypeSystemFacade --> AstToIr
 
     SystemCoordinator --> ParserCoordinator
-    SystemCoordinator --> AnalysisCache
+    SystemCoordinator --> DiskCache
 
     AstToIr --> ParserCoordinator
-    TypeSystemService --> TypeResolver
-    TypeSystemService --> TypeMetadataLookup
+    TypeSystemFacade --> TypeResolver
+    TypeSystemFacade --> TypeMetadataLookup
 
     TypeResolver --> TypeRepository
     TypeMetadataLookup --> TypeRepository
@@ -108,8 +108,8 @@ graph TB
     classDef data fill:#f5f5f5,stroke:#616161,stroke-width:2px
 
     class LSP,Web presentation
-    class TypeSystemService,AstToIr application
-    class SystemCoordinator,ParserCoordinator,AnalysisCache system
+    class TypeSystemFacade,AstToIr application
+    class SystemCoordinator,ParserCoordinator,DiskCache system
     class TypeResolver,TypeRepository,TypeMetadataLookup domain
     class SyntaxHelper,ConfigParser data
 ```

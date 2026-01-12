@@ -47,5 +47,5 @@ fn test_coordinator_creation() {
 
     // Если дошли сюда без panic - уже хорошо
     println!("✅ SystemCoordinator создан успешно");
-    println!("✅ TypeSystemService получен успешно");
+    println!("✅ Type system API получен успешно");
 }

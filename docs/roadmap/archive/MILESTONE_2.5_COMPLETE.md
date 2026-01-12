@@ -90,7 +90,7 @@ tracing_subscriber::fmt()
 ```
 INFO Starting BSL Language Server - Clean Architecture
 INFO SystemCoordinator: инициализация System Layer...
-INFO TypeSystemService инициализирован
+INFO type-system facade инициализирован
 INFO Starting LSP server loop (listening on STDIO)...
 INFO Hover requested at 5:13 ← ✅ Работает!
 ```
@@ -98,7 +98,7 @@ INFO Hover requested at 5:13 ← ✅ Работает!
 **Функциональность:**
 - ✅ Hover tooltips работают
 - ✅ File parsing работает (Tree-sitter)
-- ✅ TypeSystemService инициализирован
+- ✅ type-system facade инициализирован
 - ✅ State: Running стабильно
 
 **Известные ограничения (не критично):**
@@ -124,10 +124,10 @@ pub struct SystemCoordinator {
 - Простое управление зависимостями
 - Переиспользование AnalysisEngine в Web и LSP
 
-### Единый TypeSystemService
+### Единый type-system facade
 
 ```rust
-impl TypeSystemService {
+impl TypeSystemFacade {
     pub async fn get_types(&self, limit: usize, offset: usize) -> Result<Vec<TypeInfo>>
     pub async fn search_types(&self, query: &str) -> Result<Vec<TypeInfo>>
     pub async fn analyze_code(&self, code: &str) -> Result<AnalysisResult>
@@ -235,7 +235,7 @@ serverOptions = { run, debug: run };
 ### Производительность
 
 - **SystemCoordinator init:** ~3ms
-- **TypeSystemService init:** < 1ms
+- **type-system facade init:** < 1ms
 - **API response time:** < 10ms
 - **LSP hover response:** < 5ms
 - **Tree-sitter parsing:** ~1ms (50 nodes)

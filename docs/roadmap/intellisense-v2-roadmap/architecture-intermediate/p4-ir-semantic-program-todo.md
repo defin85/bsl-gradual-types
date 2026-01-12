@@ -167,10 +167,10 @@ AST→IR может вернуть ошибку (например, несовм�
   - [x] (если IR зависит от настроек) смена `settings_id` инвалидирует `ir`.
   - [x] (Опционально) тест на детерминизм: два вызова `ir` на одинаковом входе дают одинаковую “стабильную сводку” (hash/JSON с сортировкой).
 
-### 6) Роль legacy `IrCache`
+### 6) Роль legacy IR cache
 
 - [x] Зафиксировать правило: v2 queries (`bsl-analysis-v2`/`bsl-semantic`) **не используют** `backend/src/system/ir_cache.rs` (legacy-only).
-- [x] Решение: `IrCache` остаётся в legacy/CLI/Web путях до полной миграции LSP hot path на v2 (P5+); v2 получает IR через salsa query `ir`.
+- [x] Решение: legacy IR cache остаётся в legacy/CLI/Web путях до полной миграции LSP hot path на v2 (P5+); v2 получает IR через salsa query `ir`.
 
 ## DoD (P4 считается закрытым, если)
 

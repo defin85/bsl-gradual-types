@@ -41,7 +41,7 @@ BSL Gradual Type System - система градуальной типизаци
 graph TB
     subgraph "🎯 System Layer (в `backend/src/system`)"
         SystemCoordinator["🎯 SystemCoordinator"]
-        AnalysisCache["💾 AnalysisCache"]
+        DiskCache["💾 DiskCache"]
         ParserCoordinator["🎨 ParserCoordinator<br/>- TreeSitter + Regex<br/>✅ ПОСЛЕ 2.8: → IR через AstToIrConverter"]
         BasicObservability["📊 BasicObservability"]
     end
@@ -67,7 +67,7 @@ graph TB
 
     subgraph "🔧 Application Layer"
         subgraph "`backend/src/application`"
-            TypeSystemService["🎭 TypeSystemService<br/>✅ LSP hover через AST → IR"]
+            TypeSystemFacade["🎭 TypeSystemFacade<br/>✅ LSP hover через AST → IR"]
             AstToIr["🔄 AstToIrConverter<br/>✅ ПОСЛЕ 2.8: AST → IR bridge<br/>- Конвертирует синтаксис в семантику<br/>- Строит SymbolTable"]
         end
         subgraph "`shared/src/engine`"
@@ -98,17 +98,17 @@ graph TB
     end
 
     %% System coordination
-    SystemCoordinator --> AnalysisCache
+    SystemCoordinator --> DiskCache
     SystemCoordinator --> ParserCoordinator
     SystemCoordinator --> BasicObservability
-    SystemCoordinator --> TypeSystemService
+    SystemCoordinator --> TypeSystemFacade
 
     %% Presentation → Application
-    LSPServer --> TypeSystemService
-    WebServer --> TypeSystemService
+    LSPServer --> TypeSystemFacade
+    WebServer --> TypeSystemFacade
     WebServer --> SemanticRoutes
     LSPServer -.->|"custom request<br/>bsl/getSemanticHtml"| SemanticRoutes
-    SemanticRoutes --> TypeSystemService
+    SemanticRoutes --> TypeSystemFacade
     VSCode --> LSPServer
     Frontend --> WebServer
     CLITool --> AnalysisEngine
@@ -118,9 +118,9 @@ graph TB
     TypeViz -.-> DTOs
 
     %% Application → Semantic Layer (КЛЮЧЕВОЕ ИЗМЕНЕНИЕ 2.8)
-    TypeSystemService --> AnalysisEngine
-    TypeSystemService --> AstToIr
-    TypeSystemService --> ParserCoordinator
+    TypeSystemFacade --> AnalysisEngine
+    TypeSystemFacade --> AstToIr
+    TypeSystemFacade --> ParserCoordinator
 
     ParserCoordinator -.->|"✅ ПОСЛЕ 2.8: converts AST"| AstToIr
     AstToIr -.->|"produces"| IR
@@ -139,7 +139,7 @@ graph TB
     %% Domain layer
     TypeResolver --> TypeRepository
     TypeMetadataLookup --> TypeRepository
-    TypeSystemService -.-> TypeMetadataLookup
+    TypeSystemFacade -.-> TypeMetadataLookup
     AnalysisEngine -.-> TypeMetadataLookup
 
     TypeRepository --> PlatformTypes
@@ -149,8 +149,8 @@ graph TB
     SystemCoordinator -.->|"🔧 auto-recovery<br/>при старте"| HbkRecovery
     HbkRecovery -.->|"восстанавливает<br/>.hbk → .zip"| PlatformTypes
 
-    TypeSystemService --> DTOs
-    TypeSystemService --> AnalysisCache
+    TypeSystemFacade --> DTOs
+    TypeSystemFacade --> DiskCache
 
     %% Styling
     classDef systemStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
@@ -162,10 +162,10 @@ graph TB
     classDef dataStyle fill:#fce4ec,stroke:#c2185b,stroke-width:2px
     classDef dtoStyle fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
 
-    class SystemCoordinator,AnalysisCache,ParserCoordinator,BasicObservability systemStyle
+    class SystemCoordinator,DiskCache,ParserCoordinator,BasicObservability systemStyle
     class LSPServer,WebServer,Frontend,VSCode,CLITool,SemanticRoutes presentationStyle
     class TypeViz helperStyle
-    class TypeSystemService,AstToIr,AnalysisEngine applicationStyle
+    class TypeSystemFacade,AstToIr,AnalysisEngine applicationStyle
     class IR,ParserTrait semanticStyle
     class TypeResolver,TypeMetadataLookup,TypeRepository domainStyle
     class PlatformTypes,ConfigData,HbkRecovery dataStyle
@@ -175,14 +175,14 @@ graph TB
 ### 📊 Описание потоков данных
 
 **Presentation → Application:**
-- LSP Server, Web Server → TypeSystemService
-- **Semantic Routes** → TypeSystemService (для получения семантического дерева)
+- LSP Server, Web Server → TypeSystemFacade
+- **Semantic Routes** → TypeSystemFacade (для получения семантического дерева)
 - Web Server → Semantic Routes (маршрутизация `/api/semantic/:file_path`)
 - LSP Server → Semantic Routes (custom request `bsl/getSemanticHtml` для VSCode)
 - CLI Tool → AnalysisEngine (напрямую, через LightweightParser)
 
 **Application → Semantic IR (✅ НОВОЕ после Milestone 2.8):**
-- TypeSystemService → ParserCoordinator → AstToIrConverter → SemanticProgram
+- TypeSystemFacade → ParserCoordinator → AstToIrConverter → SemanticProgram
 - CLI Tool → LightweightParser (реализует Parser trait) → SemanticProgram
 - AnalysisEngine работает с SemanticProgram вместо AST
 
@@ -489,7 +489,7 @@ pub struct TypeDto {
 | **TypeValidator** | Domain | Валидация использования типов | Правила типизации | Откуда брать methods/properties |
 | **TypeRepository** | Data | Хранение и поиск типов | RawTypeData, индексы | Логику анализа |
 | **TypeInferenceService** | Application | Оркестрация для Web/LSP | TypeResolver, Repository | Детали LSP |
-| **TypeSystemService** | Application | Высокоуровневый API + кэш | AnalysisEngine, Cache | Внутренности Domain |
+| **TypeSystemFacade** | Application | Высокоуровневый API + кэш | AnalysisEngine, Cache | Внутренности Domain |
 | **TypeDto** | API | Передача данных клиенту | Формат JSON, contracts | Внутренние структуры |
 
 ---
@@ -585,7 +585,7 @@ pub struct TypeDto {
 │   facets: [Collection]                                          │
 └─────────────────────────────────────────────────────────────────┘
                             ↓
-       [TypeSystemService::get_all_types()]
+       [TypeSystemFacade::get_all_types()]
                             ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │ TypeDto {                                                       │
@@ -900,18 +900,18 @@ pub fn validate_property_access_with_lookup(
 }
 ```
 
-**Использование в TypeSystemService:**
+**Использование в TypeSystemFacade:**
 ```rust
 // backend/src/application/type_system_service.rs
 
 use shared::domain::metadata_lookup::TypeMetadataLookup;
 
-pub struct TypeSystemService {
+pub struct TypeSystemFacade {
     // ...
     metadata_lookup: TypeMetadataLookup,
 }
 
-impl TypeSystemService {
+impl TypeSystemFacade {
     pub fn get_all_types(&self) -> Vec<TypeDto> {
         // ...
         for (name, res) in &resolutions {
@@ -994,7 +994,7 @@ impl TypeResolver {
 - ✅ **TypeResolution остается легковесным** - не раздувается данными
 - ✅ **Явный запрос метаданных** - только когда действительно нужно
 - ✅ **Легко тестировать** - mock Repository для тестов
-- ✅ **Переиспользуемый** - можно использовать в TypeValidator, TypeSystemService, LSP
+- ✅ **Переиспользуемый** - можно использовать в TypeValidator, TypeSystemFacade, LSP
 
 **Недостатки:**
 - ⚠️ Дополнительный lookup при валидации (но быстрый - HashMap)
@@ -1080,7 +1080,7 @@ assert!(error.is_some()); // Должна быть ошибка NonExistentPrope
 
 ---
 
-### Phase 3: Обновление TypeSystemService — ✅ **ЗАВЕРШЕНА**
+### Phase 3: Обновление TypeSystemFacade — ✅ **ЗАВЕРШЕНА**
 
 **Статус:** ✅ Полностью реализовано (2025-10-03)
 
@@ -1166,7 +1166,7 @@ let description = raw_type.as_ref()
 |-----------|--------|-----------|-------------|
 | TypeMetadataLookup | ✅ **Реализован** | 🔥 Критичный | [shared/src/domain/metadata_lookup.rs](../../shared/src/domain/metadata_lookup.rs) - полностью реализован с тестами |
 | TypeValidator integration | ⚠️ **Частично** | 🔥 Критичный | TypeValidator существует, но не использует TypeMetadataLookup для валидации |
-| TypeSystemService update | ✅ **Реализован** | 🔥 Критичный | [backend/src/application/type_system_service.rs](../../backend/src/application/type_system_service.rs) - использует реальные данные через TypeMetadataLookup |
+| TypeSystemFacade update | ✅ **Реализован** | 🔥 Критичный | [backend/src/application/type_system_service.rs](../../backend/src/application/type_system_service.rs) - использует реальные данные через TypeMetadataLookup |
 | Web UI update | ❓ **Не проверено** | ⚠️ Высокий | Требует тестирования отображения методов в веб-интерфейсе |
 | LSP integration | ⏳ Не начато | 📅 Будущее | Планируется после завершения Web UI |
 
@@ -1185,7 +1185,7 @@ let description = raw_type.as_ref()
 
 **✅ Критичные проблемы РЕШЕНЫ:**
 - ✅ **TypeMetadataLookup реализован** — мост между TypeResolution и RawTypeData работает
-- ✅ **TypeSystemService обновлён** — реальные данные вместо hardcoded значений
+- ✅ **TypeSystemFacade обновлён** — реальные данные вместо hardcoded значений
 - ✅ **Simplified Architecture реализована** — SystemCoordinator, AnalysisEngine, все System Layer компоненты
 
 **⚠️ Требует доработки:**
@@ -1195,7 +1195,7 @@ let description = raw_type.as_ref()
 **📊 Общий прогресс:**
 - **Phase 1 (TypeMetadataLookup):** ✅ 100% завершено
 - **Phase 2 (TypeValidator integration):** ⚠️ 30% завершено (структура есть, интеграция нет)
-- **Phase 3 (TypeSystemService):** ✅ 100% завершено
+- **Phase 3 (TypeSystemFacade):** ✅ 100% завершено
 - **Phase 4 (Web UI):** ❓ 50% завершено (backend готов, frontend не проверен)
 - **Phase 5 (LSP integration):** ⏳ 0% (планируется в будущем)
 

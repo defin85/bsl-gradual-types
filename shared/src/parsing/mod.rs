@@ -41,7 +41,7 @@ pub trait Parser: Send + Sync {
     /// Парсинг с кешированием (опциональная оптимизация)
     ///
     /// По умолчанию просто вызывает parse_to_ir, но backend может переопределить
-    /// для использования AnalysisCache
+    /// для использования кэша анализа
     fn parse_to_ir_cached(&self, content: &str, file_path: &str) -> Result<SemanticProgram> {
         self.parse_to_ir(content, file_path)
     }

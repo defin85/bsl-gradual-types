@@ -47,7 +47,7 @@ COMPACT_TEMPLATES = {
 - ✅ Полная конвертация tree-sitter AST → BSL IR
 - ✅ Поддержка всех конструкций 1С (функции, циклы, условия)
 - ✅ Обработка ошибок парсинга с fallback на regex
-- ✅ Интеграция с `TypeSystemService` для hover
+- ✅ Интеграция с фасадом системы типов для hover
 
 **Ключевые файлы:**
 - [backend/src/system/tree_sitter_adapter.rs](backend/src/system/tree_sitter_adapter.rs)
@@ -76,7 +76,7 @@ COMPACT_TEMPLATES = {
 **Что сделано:**
 - ✅ Inline Scope Analysis — анализ типов локальных переменных "на лету" при hover
 - ✅ `SemanticProgram.find_variable_at_position()` для поиска переменных
-- ✅ `TypeSystemService.get_hover_info_ir()` использует IR вместо AST
+- ✅ v2 hover entrypoint использует IR вместо AST
 - ✅ Работает в пределах одной процедуры/функции (достаточно для MVP)
 - ✅ Type Index в Extension временно отключён (показывается заглушка)
 

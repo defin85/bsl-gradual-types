@@ -26,7 +26,7 @@ mod semantic_visualization_tests {
         // и публично доступен
 
         // Проверяем, что функция создания router доступна
-        // (не вызываем её, так как требуется TypeSystemService)
+        // (не вызываем её: в этом тесте нет v2 host setup)
         assert_eq!(2 + 2, 4); // Placeholder для успешной компиляции
     }
 
@@ -59,18 +59,18 @@ mod semantic_visualization_tests {
         // MVP: просто проверяем, что тест компилируется
     }
 
-    /// Тест 4: Проверка интеграции с TypeSystemService (TODO)
+    /// Тест 4: Проверка интеграции с v2 entrypoints (TODO)
     ///
-    /// Полная интеграция с TypeSystemService будет реализована
+    /// Полная интеграция с v2 entrypoints будет реализована
     /// после базового тестирования MVP.
     ///
     /// План:
-    /// 1. Создать mock TypeSystemService
+    /// 1. Поднять host/snapshot для v2
     /// 2. Вызвать get_semantic_tree с реальным BSL кодом
     /// 3. Проверить, что SemanticProgram конвертируется в DTO
     /// 4. Проверить, что HTML рендерится корректно
     #[test]
-    #[ignore = "TODO: Полная интеграция с TypeSystemService"]
+    #[ignore = "TODO: Полная интеграция с v2 entrypoints"]
     fn test_type_system_service_integration() {
         // TODO (следующая итерация):
         // let service = create_mock_type_service();
@@ -151,7 +151,7 @@ mod semantic_visualization_tests {
 // - Проверка парсинга query параметров
 //
 // ## Integration Tests (⏳ TODO - следующая итерация)
-// - Полная интеграция с TypeSystemService
+// - Полная интеграция с v2 entrypoints
 // - HTTP-тесты через reqwest
 // - LSP custom requests тесты
 // - VSCode Extension E2E тесты

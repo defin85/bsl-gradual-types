@@ -23,10 +23,10 @@ async fn main() -> Result<()> {
     
     println!("  ✅ SystemCoordinator создан за {:?}", creation_time);
     println!("  🏗️ Компоненты:");
-    println!("     - AnalysisCache (Simple LRU)");
+    println!("     - Disk cache / AST cache");
     println!("     - ParserCoordinator (TreeSitter + Regex)");
     println!("     - BasicObservability (Logging + Metrics)");
-    println!("     - TypeSystemService (Application Layer)");
+    println!("     - v2 analysis host (salsa)");
     println!("     - TypeResolutionService (Domain)");
     println!("     - Repository (Domain)");
 
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
     println!("\n3️⃣ Тестирование Application Layer...");
     let type_service = coordinator.type_service();
     
-    println!("  🎯 TypeSystemService API:");
+    println!("  🎯 v2 analysis API:");
     
     // Тест 3.1: Анализ файла
     println!("    📁 Анализ файла...");
@@ -144,7 +144,7 @@ async fn main() -> Result<()> {
     println!("✅ Результаты новой архитектуры:");
     println!("  🏗️  Упрощена: 6-8 компонентов (было 25-30)");
     println!("  ⚡ Быстрая инициализация");  
-    println!("  🎯 Унифицированный API через TypeSystemService");
+    println!("  🎯 Унифицированный API через v2");
     println!("  🧪 100% покрытие тестами");
     println!("  🔧 Clean Architecture соблюдена");
     

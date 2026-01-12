@@ -124,7 +124,7 @@ graph TB
   subgraph Server["Semantic Server (deployable)"]
     API["Semantic API<br/>(HTTP/gRPC)"]
     Sessions["Workspace Session Manager<br/>(stateful)"]
-    Cache["AnalysisCache / DiskCache"]
+    Cache["analysis cache / DiskCache"]
     Parser["ParserCoordinator"]
     AstToIr["AstToIrConverter"]
     IR["Semantic IR<br/>(SemanticProgram)"]

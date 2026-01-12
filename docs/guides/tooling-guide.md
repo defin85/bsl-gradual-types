@@ -119,7 +119,7 @@ rename_symbol(
 **3. Проверка совместимости API**
 
 ```bash
-# Проверить, что TypeSystemService использует AnalysisEngine корректно
+# Проверить, что application фасад использует AnalysisEngine корректно
 hover(backend/src/application/type_system_service.rs, line: 120, column: 25)
 
 # Проверить сигнатуру метода
@@ -333,7 +333,7 @@ ast-grep run -p "pub fn" -l rust . | head -20
 
 ```bash
 # Ключевые компоненты системы
-ast-grep run -p "SystemCoordinator\|TypeSystemService\|ParserCoordinator" -l rust .
+ast-grep run -p "SystemCoordinator\|AnalysisHostV2\|ParserCoordinator" -l rust .
 
 # Доменные типы
 ast-grep run -p "enum" -l rust shared/src/domain/

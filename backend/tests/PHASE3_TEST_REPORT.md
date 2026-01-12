@@ -90,7 +90,7 @@ test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured
 - ✅ API использует **camelCase** для JSON полей (currentPage, pageSize)
 - ✅ Backend корректно конвертирует `page` → `offset` для внутреннего использования
 - ✅ Валидация параметров работает на уровне handlers.rs (строки 52-53)
-- ✅ PaginationDto генерируется корректно в TypeSystemService (строки 332-339)
+- ✅ PaginationDto генерируется корректно в application фасаде (строки 332-339)
 
 ---
 
@@ -135,7 +135,7 @@ curl "http://localhost:3002/api/search?q=Массив" | jq '.types | length'
 
 **Приоритет:** LOW (вне скоупа Phase 3)
 
-**Рекомендация:** Проверить реализацию `search_types_as_dto` в TypeSystemService.
+**Рекомендация:** Проверить реализацию `search_types_as_dto` в application фасаде.
 
 ---
 

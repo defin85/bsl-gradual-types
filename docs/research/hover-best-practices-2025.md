@@ -230,7 +230,7 @@
 
 ✅ **Для BSL:**
 - Поддержка markdown в описаниях методов/свойств
-- Асинхронная генерация hover (уже есть async/await в TypeSystemService)
+- Асинхронная генерация hover (уже есть async/await в application фасаде)
 
 ---
 
@@ -524,7 +524,7 @@ tokio::spawn(async move {
 
 **Решение 2: Caching**
 ```rust
-// TypeSystemService уже использует AnalysisCache
+// application фасад уже использует cache layer
 let cache_key = format!("hover:{}:{}", file_path, position);
 if let Some(cached) = cache.get(&cache_key) {
     return cached;
@@ -881,7 +881,7 @@ fn add_documentation_links(mut self, resolution: &TypeResolution) -> Self {
 
 2. **LSP Server** (`backend/src/bin/lsp_server.rs`)
    ```rust
-   // Передавать settings из LSP client → TypeSystemService
+   // Передавать settings из LSP client → application фасад
    let config = HoverFormatConfig {
        max_methods: settings.get("bsl.hover.maxMethods").unwrap_or(10),
        max_properties: settings.get("bsl.hover.maxProperties").unwrap_or(5),
@@ -1198,11 +1198,11 @@ fn add_documentation_links(mut self, resolution: &TypeResolution) -> Self {
    }
    ```
 
-2. Обновить `TypeSystemService` чтобы принимать settings:
+2. Обновить application фасад, чтобы принимать settings:
    ```rust
    // В LSP server state
    struct ServerState {
-       type_system_service: Arc<TypeSystemService>,
+       analysis_host: Arc<AnalysisHostV2>,
        hover_settings: Arc<RwLock<BslHoverSettings>>,
    }
 
@@ -1595,7 +1595,7 @@ fn add_documentation_links(mut self, resolution: &TypeResolution) -> Self {
 
 3. Передать `syntax_helper_path` из LSP server:
    ```rust
-   // В lsp_server.rs при создании TypeSystemService
+   // В lsp_server.rs при создании v2 host runtime
    let syntax_helper_path = std::env::var("BSL_SYNTAX_HELPER_PATH")
        .ok()
        .map(PathBuf::from);
@@ -1780,8 +1780,8 @@ Calculate the sum of a list of numbers.
 #### C.1 Caching Strategy
 
 **Текущее состояние:**
-- ✅ `AnalysisCache` для результатов анализа
-- ✅ `IrCache` для Intermediate Representation
+- ✅ analysis cache для результатов анализа
+- ✅ IR cache для Intermediate Representation
 - ❌ Нет кеширования hover content
 
 **Предложение:**

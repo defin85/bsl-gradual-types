@@ -14,10 +14,10 @@
 
 ### Основные компоненты:
 - **SystemCoordinator**: Единая точка координации, управляющая жизненным циклом и зависимостями.
-- **AnalysisCache**: Простое кеширование в памяти (LRU) для результатов анализа.
+- **Cache layer**: Дисковый кэш + AST кэш для ускорения повторных запросов.
 - **ParserCoordinator**: Координатор парсинга, использующий `TreeSitter` как основной парсер и `Regex` в качестве запасного варианта.
 - **BasicObservability**: Обеспечивает базовые возможности для логирования и сбора метрик.
-- **TypeSystemService**: Высокоуровневый API, предоставляющий единый интерфейс для внешних клиентов (LSP, Web, CLI).
+- **v2 analysis host (salsa)**: Единый путь анализа через inputs/queries и консистентные снапшоты.
 - **TypeResolver**: Ядро системы, отвечающее за анализ и разрешение типов.
 - **TypeRepository**: Абстракция для хранения и получения данных о типах.
 
@@ -27,7 +27,7 @@ graph TB
     subgraph "🎯 System Layer (Simplified)"
         SystemCoordinator["🎯 SystemCoordinator<br/>- Single coordination point<br/>- DI management<br/>- Lifecycle control"]
         
-        AnalysisCache["💾 AnalysisCache<br/>- Simple LRU in-memory<br/>- File hash keys<br/>- TTL eviction"]
+        CacheLayer["💾 Cache layer<br/>- Disk cache<br/>- AST cache<br/>- Scope-aware"]
         
         ParserCoordinator["🎨 ParserCoordinator<br/>- TreeSitter (primary)<br/>- Regex fallback<br/>- Simple selection logic"]
         
@@ -43,7 +43,7 @@ graph TB
     end
 
     subgraph "🔧 Application Layer" 
-        TypeSystemService["🎭 TypeSystemService<br/>- High-level API<br/>- Business operations<br/>- Unified interface"]
+        AnalysisHostV2["🎭 v2 analysis host (salsa)<br/>- inputs / queries<br/>- snapshots<br/>- single source of truth"]
     end
 
     subgraph "🧠 Domain Layer"
@@ -59,17 +59,17 @@ graph TB
     end
 
     %% Simple flow
-    SystemCoordinator --> AnalysisCache
+    SystemCoordinator --> CacheLayer
     SystemCoordinator --> ParserCoordinator  
     SystemCoordinator --> BasicObservability
-    SystemCoordinator --> TypeSystemService
+    SystemCoordinator --> AnalysisHostV2
     
-    LSPServer --> TypeSystemService
-    WebInterface --> TypeSystemService
-    CLITool --> TypeSystemService
+    LSPServer --> AnalysisHostV2
+    WebInterface --> AnalysisHostV2
+    CLITool --> AnalysisHostV2
     
-    TypeSystemService --> AnalysisCache
-    TypeSystemService --> TypeResolver
+    AnalysisHostV2 --> CacheLayer
+    AnalysisHostV2 --> TypeResolver
     
     TypeResolver --> TypeRepository
     TypeRepository --> PlatformTypes

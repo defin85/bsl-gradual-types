@@ -39,13 +39,13 @@
 struct SimplifiedBSLTypeSystem {
     // 1. System Layer (в backend)
     system_coordinator: SystemCoordinator,
-    cache: AnalysisCache,
+    cache: DiskCache,
     parser_coordinator: ParserCoordinator,
     observability: BasicObservability,
     
     // 2. Application Layer (в shared и backend)
     analysis_engine: AnalysisEngine,       // НОВОЕ: Чистый оркестратор анализа
-    type_service: TypeSystemService,       // Обёртка для API (Web/LSP)
+    analysis_host: AnalysisHostV2,         // v2 (salsa) host + snapshots
     
     // 3. Core Domain (без изменений)
     type_resolver: TypeResolver,
@@ -62,7 +62,7 @@ graph TB
     subgraph "🎯 System Layer (в `backend`)"
         SystemCoordinator["🎯 SystemCoordinator<br/>- Single coordination point<br/>- DI management<br/>- Lifecycle control"]
         
-        AnalysisCache["💾 AnalysisCache<br/>- Simple LRU in-memory<br/>- File hash keys<br/>- TTL eviction"]
+        DiskCache["💾 DiskCache<br/>- Persistent cache<br/>- Scope-aware<br/>- Optional SWR"]
         
         ParserCoordinator["🎨 ParserCoordinator<br/>- TreeSitter (primary)<br/>- Regex fallback<br/>- Simple selection logic"]
         
@@ -79,7 +79,7 @@ graph TB
 
     subgraph "🔧 Application Layer" 
         subgraph "`backend`"
-            TypeSystemService["🎭 TypeSystemService<br/>- High-level API (Web, LSP)<br/>- Управляет кэшем<br/>- **Использует AnalysisEngine**"]
+            AnalysisHostV2["🎭 AnalysisHostV2<br/>- inputs / queries / snapshots<br/>- single source of truth<br/>- v2-only"]
         end
         subgraph "`shared`"
             AnalysisEngine["🚀 AnalysisEngine<br/>- **Чистая оркестрация анализа**<br/>- Use Case: 'Analyze File'<br/>- Не зависит от Web/CLI"]
@@ -101,16 +101,16 @@ graph TB
     end
 
     %% Flow
-    SystemCoordinator --> AnalysisCache
+    SystemCoordinator --> DiskCache
     SystemCoordinator --> ParserCoordinator  
     SystemCoordinator --> BasicObservability
-    SystemCoordinator --> TypeSystemService
+    SystemCoordinator --> AnalysisHostV2
     
-    LSPServer --> TypeSystemService
-    WebInterface --> TypeSystemService
+    LSPServer --> AnalysisHostV2
+    WebInterface --> AnalysisHostV2
     
-    TypeSystemService --> AnalysisEngine
-    TypeSystemService --> AnalysisCache
+    AnalysisHostV2 --> AnalysisEngine
+    AnalysisHostV2 --> DiskCache
 
     CLITool --> AnalysisEngine
     
@@ -123,7 +123,7 @@ graph TB
     TypeRepository --> ConfigData
 
     %% TypeMetadataLookup используется для получения методов/свойств
-    TypeSystemService -.-> TypeMetadataLookup
+    AnalysisHostV2 -.-> TypeMetadataLookup
     AnalysisEngine -.-> TypeMetadataLookup
     
     %% Styling
@@ -133,9 +133,9 @@ graph TB
     classDef domainStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px
     classDef dataStyle fill:#fce4ec,stroke:#c2185b,stroke-width:2px
     
-    class SystemCoordinator,AnalysisCache,ParserCoordinator,BasicObservability systemStyle
+    class SystemCoordinator,DiskCache,ParserCoordinator,BasicObservability systemStyle
     class LSPServer,WebInterface,CLITool presentationStyle
-    class TypeSystemService,AnalysisEngine applicationStyle
+    class AnalysisHostV2,AnalysisEngine applicationStyle
     class TypeResolver,TypeMetadataLookup,TypeRepository domainStyle
     class PlatformTypes,ConfigData dataStyle
 ```
@@ -145,15 +145,15 @@ graph TB
 ## 🔧 Component Details (Актуализированы и Упрощены)
 
 ### **🎯 SystemCoordinator** (в `backend`)
--   **Структура:** Содержит экземпляры всех ключевых системных сервисов (`AnalysisCache`, `ParserCoordinator`, `BasicObservability`, `TypeSystemService`).
+-   **Структура:** Содержит экземпляры всех ключевых системных сервисов (`DiskCache`, `ParserCoordinator`, `BasicObservability`, `AnalysisHostV2`).
 -   **Назначение:** Является "точкой сборки" (Composition Root) и управляет жизненным циклом серверного приложения.
 
 ### **🚀 AnalysisEngine** (в `shared`)
 -   **Структура:** Содержит `TypeResolver` и `ParserCoordinator`. Не зависит от `backend`.
 -   **Назначение:** Реализует чистый сценарий "проанализировать файл". Является переиспользуемым ядром для всех адаптеров (`cli`, `backend`).
 
-### **🎭 TypeSystemService** (в `backend`)
--   **Структура:** Содержит `AnalysisEngine` и специфичные для `backend` компоненты (`AnalysisCache`, `TypeMetadataLookup`).
+### **🎭 AnalysisHostV2** (в `analysis-v2`/`backend` wiring)
+-   **Структура:** v2 host + snapshots + inputs/queries; использует deps snapshot и настройки.
 -   **Назначение:** Предоставляет высокоуровневый API для `LSP Server` и `Web Interface`. Использует `AnalysisEngine` для выполнения анализа, добавляя поверх него логику кэширования и обработки сетевых запросов. Использует `TypeMetadataLookup` для обогащения данных методами/свойствами из RawTypeData.
 
 ### **🔍 TypeMetadataLookup** (в `shared`)
@@ -165,7 +165,7 @@ graph TB
     - `get_raw_type(resolution)` - получить полную RawTypeData
     - `has_member(resolution, name)` - проверить существование метода/свойства
 
-### **💾 AnalysisCache (Simple)**
+### **💾 DiskCache**
 -   **Структура:** Основан на LRU-кэше (`LruCache`) с отслеживанием времени жизни (TTL).
 -   **Назначение:** Кэширует в памяти результаты анализа файлов для ускорения повторных запросов.
 
@@ -204,8 +204,8 @@ shared/          # Domain + Application (Core Analysis Logic)
 └── engine/      # НОВОЕ: AnalysisEngine (чистый оркестратор анализа)
 
 backend/         # System + Application (Web/LSP Specific) + Presentation (server)  
-├── system/      # SystemCoordinator, AnalysisCache
-├── application/ # TypeSystemService (использует shared::engine::AnalysisEngine)
+├── system/      # SystemCoordinator, DiskCache
+├── application/ # v2-only entrypoints поверх AnalysisHostV2/deps snapshots
 ├── parsing/     # ParserCoordinator (или его инициализация/использование)
 ├── presentation/# LSP Server, Web routes
 └── data/        # Platform types, Config

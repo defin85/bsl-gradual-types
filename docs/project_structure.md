@@ -53,7 +53,7 @@
     -   `analysis_cache.rs`: Реализация кэширования результатов анализа.
     -   `parser_coordinator.rs`: Управляет процессом парсинга исходного кода.
 -   `src/application/`: **Прикладной слой.**
-    -   `type_system_service.rs`: Реализует `TypeSystemService`, предоставляя высокоуровневые бизнес-операции (например, "проверить файл").
+    -   `type_system/`: v2-only сервисы и entrypoints поверх `AnalysisHostV2`/deps snapshots.
 -   `src/data/`: **Слой данных.**
     -   `loaders/`: Конкретные реализации `TypeRepository` для загрузки XML-конфигураций 1С и других данных.
 -   `src/presentation/`: **Презентационный слой (серверная часть).**

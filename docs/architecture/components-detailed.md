@@ -19,10 +19,10 @@
 **Структура:**
 ```rust
 pub struct SystemCoordinator {
-    analysis_cache: Arc<AnalysisCache>,
+    disk_cache: Arc<DiskCache>,
     parser_coordinator: Arc<ParserCoordinator>,
     observability: Arc<BasicObservability>,
-    type_system_service: Arc<TypeSystemService>,
+    analysis_host_v2: Arc<AnalysisHostV2>,
 }
 ```
 
@@ -35,18 +35,18 @@ pub struct SystemCoordinator {
 **Пример использования:**
 ```rust
 let coordinator = SystemCoordinator::new();
-let service = coordinator.get_type_system_service();
+let engine = coordinator.analysis_engine();
 ```
 
 ---
 
-### AnalysisCache
+### DiskCache
 
 **Назначение:** LRU-кэш для результатов анализа файлов
 
 **Структура:**
 ```rust
-pub struct AnalysisCache {
+pub struct DiskCache {
     cache: Arc<RwLock<LruCache<FileHash, CachedAnalysis>>>,
     ttl: Duration,
 }
@@ -63,7 +63,7 @@ pub struct AnalysisCache {
 - TTL (Time To Live) для автоматической инвалидации
 - File hash для быстрого lookup
 
-**Файл:** [backend/src/system/analysis_cache.rs](../../backend/src/system/analysis_cache.rs)
+**Файл:** [backend/src/system/disk_cache.rs](../../backend/src/system/disk_cache.rs)
 
 ---
 
@@ -142,15 +142,15 @@ pub fn analyze_program(&self, program: &SemanticProgram)
 
 ---
 
-### TypeSystemService (backend/src/application/)
+### TypeSystemFacade (backend/src/application/)
 
 **Назначение:** Высокоуровневый API для LSP/Web с кэшированием
 
 **Структура:**
 ```rust
-pub struct TypeSystemService {
+pub struct TypeSystemFacade {
     engine: AnalysisEngine,
-    cache: Arc<AnalysisCache>,
+    disk_cache: Arc<DiskCache>,
     parser: Arc<dyn Parser>,
     converter: AstToIrConverter,
 }

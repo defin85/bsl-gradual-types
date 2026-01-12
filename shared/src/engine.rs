@@ -86,7 +86,7 @@ impl AnalysisEngine {
         })
     }
 
-    /// Получить resolver для TypeSystemService
+    /// Получить resolver для application слоя
     pub fn get_resolver(&self) -> Arc<TypeResolver> {
         self.resolver.clone()
     }
@@ -116,7 +116,7 @@ impl AnalysisEngine {
     /// Принимает имя типа (например: "Число", "Массив", "Справочники.Контрагенты")
     /// и возвращает полный TypeResolution с метаданными.
     ///
-    /// Это основной entry point для Application Layer (TypeSystemService)
+    /// Это основной entry point для Application Layer
     /// после маппинга AST Expression → имя типа.
     pub fn resolve_type(&self, type_name: &str) -> TypeResolution {
         self.resolver.resolve_expression_sync(type_name)

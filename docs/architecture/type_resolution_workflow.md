@@ -13,7 +13,7 @@ flowchart TB
     end
 
     subgraph "APPLICATION LAYER"
-        TSS["TypeSystemService<br/>service.rs:70"]
+        HostV2["AnalysisHostV2<br/>analysis-v2"]
         HoverSvc["hover_service.rs<br/>get_hover_info()"]
         ValidSvc["validation_service.rs<br/>validate_semantics()"]
     end

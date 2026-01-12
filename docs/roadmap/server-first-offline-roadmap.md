@@ -89,7 +89,7 @@
 - Определить минимальный RPC/HTTP контракт (DTO для LSP‑запросов).
 
 ### Phase 2: Remote inference API
-- Вынести текущие операции `TypeSystemService` в серверные handler‑ы.
+- Вынести текущие операции application фасада в серверные handler‑ы.
 - Реализовать `RemoteGateway` для LSP/CLI.
 
 ### Phase 3: Workspace/sync и индекс

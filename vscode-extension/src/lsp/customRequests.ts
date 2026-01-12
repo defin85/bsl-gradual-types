@@ -160,7 +160,7 @@ export interface AstCacheStats {
     capacity: number;
 }
 
-export interface IrCacheStats {
+export interface IrStats {
     hits: number;
     misses: number;
     evictions: number;
@@ -174,7 +174,7 @@ export interface CacheStatsResponse {
     scope: CacheScopeDto;
     disk: DiskCacheStatsReport;
     ast: AstCacheStats;
-    ir: IrCacheStats;
+    ir: IrStats;
 }
 
 // ============================================================================

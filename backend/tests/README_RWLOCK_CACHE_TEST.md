@@ -17,7 +17,7 @@
 - Статус: **PASS**
 
 ### 2. test_type_service_caching_and_lock_order
-Проверяет кеширование `TypeSystemService` и соблюдение lock order:
+Проверяет кеширование application фасада и соблюдение lock order:
 - First call: `None` (engine not initialized)
 - Second call: `None` (still no engine)
 - Нет deadlock при повторных вызовах
@@ -114,7 +114,7 @@ cargo test --test rwlock_cache_test -p bsl-backend -- --nocapture
 
 Ключевые части:
 - Lines 59: `analysis_engine_cache: Arc<RwLock<Option<Arc<AnalysisEngine>>>>`
-- Lines 62: `type_service_cache: Arc<RwLock<Option<Arc<TypeSystemService>>>>`
+- Lines 62: `analysis_host_cache: Arc<RwLock<Option<Arc<AnalysisHostV2>>>>`
 - Lines 165-270: Graceful error handling с unwrap_or_else
 - Lines 26-44: Lock order convention documentation
 

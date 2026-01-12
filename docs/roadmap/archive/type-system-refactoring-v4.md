@@ -43,7 +43,7 @@
 ```
 ✅ РЕАЛЬНОСТЬ: Единый путь с делегацией
 
-TypeSystemService
+Type system facade
        │
        ▼
 AnalysisEngine

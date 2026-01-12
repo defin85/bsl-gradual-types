@@ -8,11 +8,15 @@ mod formatters;
 
 use clap::Parser;
 use colored::*;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use args::{CacheCommand, CliArgs, CliOutputFormat, Commands};
+use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_shared::engine::AnalysisEngine;
+use bsl_shared::formatting::DetailLevel;
 use formatters::CliFormatter;
 
 use bsl_backend::application::TypeInferenceService;
@@ -167,7 +171,7 @@ async fn complete_command(
         expression.cyan()
     );
 
-    // v2-only: используем deps bundle (SemanticDeps snapshot) вместо TypeSystemService.
+    // v2-only: используем deps bundle (SemanticDeps snapshot) вместо legacy фасада системы типов.
     let coordinator = SystemCoordinator::new();
     coordinator.start().await?;
 
@@ -195,7 +199,7 @@ async fn info_command(expression: &str, format: &CliOutputFormat) -> anyhow::Res
         expression.cyan()
     );
 
-    // v2-only: используем deps bundle (SemanticDeps snapshot) вместо TypeSystemService.
+    // v2-only: используем deps bundle (SemanticDeps snapshot) вместо legacy фасада системы типов.
     let coordinator = SystemCoordinator::new();
     coordinator.start().await?;
 
@@ -228,58 +232,86 @@ async fn analyze_ir_command(
     println!("{} {}", "🎯 IR-based анализ:".green().bold(), path.cyan());
 
     // 1. Создаем координатор
-    let coordinator = bsl_backend::system::SystemCoordinator::new();
+    let coordinator = SystemCoordinator::new();
     coordinator.start().await?;
 
-    let engine = coordinator
-        .analysis_engine()
-        .ok_or_else(|| anyhow::anyhow!("AnalysisEngine не доступен"))?;
+    let deps_bundle = build_deps_bundle_v2(&coordinator, None, None)?;
 
-    // 2. Получаем Parser через backend (полный ParserCoordinator)
-    // Согласно CLAUDE.md: CLI всегда использует полный backend (~7-8 MB)
-    let parser = std::sync::Arc::new(bsl_backend::system::ParserCoordinator::with_fallback());
-
-    // 3. Читаем файл
+    // 2. Читаем файл
     let content = std::fs::read_to_string(path)?;
 
-    // 4. Парсинг → IR → Type Analysis через AnalysisEngine
+    // 3. Парсинг → IR через v2 (salsa)
     println!("📝 Парсинг → IR...");
-    let ir_result = engine.parse_and_analyze(parser.as_ref(), &content, path)?;
+
+    let file_id = V2FileId(1);
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: deps_bundle.deps_id.clone(),
+        deps: deps_bundle.semantic_deps.clone(),
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("cli"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id,
+        text: Arc::from(content),
+        version: 0,
+        path: Arc::from(path.to_string()),
+    });
+
+    let analysis = host.analysis();
+
+    let parse_start = Instant::now();
+    analysis
+        .parse_result(file_id)
+        .map_err(|_| anyhow::anyhow!("v2 parse_result cancelled"))?
+        .ok_or_else(|| anyhow::anyhow!("v2 parse_result unavailable"))?;
+    let parse_duration_ms = parse_start.elapsed().as_millis();
+
+    let analysis_start = Instant::now();
+    let ir = analysis
+        .ir(file_id)
+        .map_err(|_| anyhow::anyhow!("v2 ir cancelled"))?
+        .ok_or_else(|| anyhow::anyhow!("v2 ir unavailable"))?;
+    let analysis_duration_ms = analysis_start.elapsed().as_millis();
+
+    let type_resolutions = collect_ir_type_resolutions(&ir);
 
     // 4. Вывод результатов
     println!("\n{}", "✅ Результаты анализа:".green().bold());
     println!(
         "   • Узлов IR: {}",
-        ir_result.ir.nodes.len().to_string().cyan()
+        ir.nodes.len().to_string().cyan()
     );
     println!(
         "   • Типов разрешено: {}",
-        ir_result.type_resolutions.len().to_string().cyan()
+        type_resolutions.len().to_string().cyan()
     );
     println!(
         "   • Время парсинга: {}ms",
-        ir_result.parse_duration_ms.to_string().yellow()
+        parse_duration_ms.to_string().yellow()
     );
     println!(
         "   • Время анализа: {}ms",
-        ir_result.analysis_duration_ms.to_string().yellow()
+        analysis_duration_ms.to_string().yellow()
     );
 
     // 5. SymbolTable
     if show_symbols || verbose {
         println!("\n{}", "📋 Symbol Table:".blue().bold());
-        println!("   • Scopes: {}", ir_result.ir.symbols.scopes.len());
+        println!("   • Scopes: {}", ir.symbols.scopes.len());
         println!(
             "   • Функции: {}",
-            ir_result.ir.symbols.global_functions.len()
+            ir.symbols.global_functions.len()
         );
         println!(
             "   • Процедуры: {}",
-            ir_result.ir.symbols.global_procedures.len()
+            ir.symbols.global_procedures.len()
         );
 
         if verbose {
-            for (name, sig) in &ir_result.ir.symbols.global_functions {
+            for (name, sig) in &ir.symbols.global_functions {
                 // Phase 3: type_hint теперь Option<TypeResolution>
                 let params = sig
                     .params
@@ -299,7 +331,7 @@ async fn analyze_ir_command(
                 println!("     - Функция {}({})", name.cyan(), params);
             }
 
-            for (name, sig) in &ir_result.ir.symbols.global_procedures {
+            for (name, sig) in &ir.symbols.global_procedures {
                 // Phase 3: type_hint теперь Option<TypeResolution>
                 let params = sig
                     .params
@@ -324,11 +356,11 @@ async fn analyze_ir_command(
     // 6. IR структура
     if show_ir {
         println!("\n{}", "🔍 IR Nodes:".magenta().bold());
-        for (idx, node) in ir_result.ir.nodes.iter().enumerate().take(10) {
+        for (idx, node) in ir.nodes.iter().enumerate().take(10) {
             let node_type = format!("{:?}", node.kind);
             let first_line = node_type.lines().next().unwrap_or("?");
 
-            if let Some(resolution) = ir_result.type_resolutions.get(&idx) {
+            if let Some(resolution) = type_resolutions.get(&idx) {
                 println!(
                     "   [{:2}] {} → {:?}",
                     idx,
@@ -339,8 +371,8 @@ async fn analyze_ir_command(
                 println!("   [{:2}] {}", idx, first_line.dimmed());
             }
         }
-        if ir_result.ir.nodes.len() > 10 {
-            println!("   ... и ещё {} узлов", ir_result.ir.nodes.len() - 10);
+        if ir.nodes.len() > 10 {
+            println!("   ... и ещё {} узлов", ir.nodes.len() - 10);
         }
     }
 
@@ -348,15 +380,61 @@ async fn analyze_ir_command(
     if matches!(format, CliOutputFormat::Json) {
         let json = serde_json::json!({
             "file": path,
-            "nodes": ir_result.ir.nodes.len(),
-            "types_resolved": ir_result.type_resolutions.len(),
-            "parse_time_ms": ir_result.parse_duration_ms,
-            "analysis_time_ms": ir_result.analysis_duration_ms,
+            "nodes": ir.nodes.len(),
+            "types_resolved": type_resolutions.len(),
+            "parse_time_ms": parse_duration_ms,
+            "analysis_time_ms": analysis_duration_ms,
         });
         println!("\n{}", serde_json::to_string_pretty(&json)?);
     }
 
     Ok(())
+}
+
+fn collect_ir_type_resolutions(
+    ir: &bsl_shared::ir::SemanticProgram,
+) -> HashMap<usize, bsl_shared::domain::types::TypeResolution> {
+    use bsl_shared::domain::types::TypeResolution;
+    use bsl_shared::ir::SemanticNodeKind;
+
+    let mut resolutions = HashMap::new();
+    for (idx, node) in ir.nodes.iter().enumerate() {
+        let resolution = match &node.kind {
+            SemanticNodeKind::VariableDeclaration {
+                type_hint: Some(type_hint),
+                ..
+            } => type_hint.clone(),
+            SemanticNodeKind::VariableDeclaration {
+                type_hint: None,
+                initial_value_type: Some(initial_value_type),
+                ..
+            } => initial_value_type.clone(),
+            SemanticNodeKind::VariableDeclaration { .. } => TypeResolution::unknown(),
+            SemanticNodeKind::Assignment { value_type, .. } => value_type.clone(),
+            SemanticNodeKind::FunctionDeclaration {
+                return_type: Some(return_type),
+                ..
+            } => return_type.clone(),
+            SemanticNodeKind::IfStatement { condition_type, .. } => condition_type.clone(),
+            SemanticNodeKind::WhileLoop { condition_type, .. } => condition_type.clone(),
+            SemanticNodeKind::ForLoop { range_type, .. } => range_type.clone(),
+            SemanticNodeKind::ForEachLoop {
+                collection_type, ..
+            } => collection_type.clone(),
+            SemanticNodeKind::Return {
+                value_type: Some(value_type),
+            } => value_type.clone(),
+            SemanticNodeKind::GlobalPropertyAccess { result_type, .. } => result_type.clone(),
+            SemanticNodeKind::MemberAccess { result_type, .. } => result_type.clone(),
+            SemanticNodeKind::FunctionCall { result_type, .. } => result_type.clone(),
+            SemanticNodeKind::NewExpression { result_type, .. } => result_type.clone(),
+            _ => continue,
+        };
+
+        resolutions.insert(idx, resolution);
+    }
+
+    resolutions
 }
 
 async fn cache_command(config_path: &str, action: CacheCommand) -> anyhow::Result<()> {

@@ -1,4 +1,4 @@
-//! Integration tests for tabular sections support - via TypeSystemService
+//! Integration tests for tabular sections support - via v2 entrypoints
 //!
 //! Tests verify that TabularSectionDto structures are correctly used
 //! in the API responses

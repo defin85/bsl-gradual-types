@@ -385,8 +385,8 @@
                 "category": "BSL Gradual Types"
             },
             {
-                "command": "bsl.clearAnalysisCache",
-                "title": "Clear Analysis Cache",
+                "command": "bsl.clearCache",
+                "title": "Clear Cache",
                 "category": "BSL Gradual Types"
             },
             {

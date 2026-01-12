@@ -186,7 +186,7 @@ LSP hover(file, line, column):
 **Архитектура:**
 - Initialization options передают пути к Syntax Helper
 - TypeRepository загружается асинхронно при старте LSP
-- Custom requests обрабатываются через TypeSystemService
+- Custom requests обрабатываются через type-system facade
 
 ---
 
@@ -267,21 +267,21 @@ pub async fn get_hover_info(&self, file_content: &str, line: u32, column: u32) -
 
 **Task 1: IR Caching по file_hash** (2-3 дня)
 
-**Добавить в TypeSystemService:**
+**Добавить в type-system facade:**
 ```rust
 // backend/src/application/type_system_service.rs
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub struct TypeSystemService {
+pub struct TypeSystemFacade {
     // ... существующие поля
 
     // ✅ НОВОЕ: Кеш IR программ по хешу содержимого
     ir_cache: Arc<RwLock<HashMap<u64, Arc<SemanticProgram>>>>,
 }
 
-impl TypeSystemService {
+impl TypeSystemFacade {
     pub async fn get_hover_info(&self, file_content: &str, line: u32, column: u32) -> Result<Option<String>> {
         // 1. Хешируем содержимое (уже есть метод hash_content)
         let content_hash = self.hash_content(file_content);
@@ -961,7 +961,7 @@ TypeValidator уже реализован и работает в Web API, но *
 **Реализованные задачи:**
 
 - ✅ **Task 1:** Создан `SemanticValidationVisitor` для обхода `SemanticProgram`
-- ✅ **Task 2:** Интегрирован в `TypeSystemService` через `validate_semantics()`
+- ✅ **Task 2:** Интегрирован в type-system facade через `validate_semantics()`
 - ✅ **Task 3:** Обновлены `did_open()` и `did_change()` в LSP Server
 - ✅ **Task 4:** Реализованы 3+ интеграционных теста
 

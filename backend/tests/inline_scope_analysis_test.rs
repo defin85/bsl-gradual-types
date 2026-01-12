@@ -1,6 +1,6 @@
 //! Интеграционный тест для Milestone 2.9: Inline Scope Analysis
 //!
-//! Проверяем, что TypeSystemService.get_hover_info_ir() корректно:
+//! Проверяем, что v2 hover entrypoint корректно:
 //! 1. Находит локальные переменные через find_variable_at_position()
 //! 2. Резолвит типы переменных через TypeRepository (Platform/Config)
 //! 3. Возвращает методы и свойства через TypeMetadataLookup

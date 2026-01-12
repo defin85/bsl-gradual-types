@@ -205,10 +205,10 @@
 **Результат:** единый путь вычислений, меньше дублирования и меньше риск mixed state.
 
 - [ ] Удалить/задепрекейтить старые пути построения IR в LSP сервисах.
-- [ ] Пересмотреть `IrCache`/`AnalysisCache`:
+- [ ] Пересмотреть legacy IR cache / legacy analysis cache:
   - [ ] либо удалить,
   - [ ] либо оставить только для CLI/Web сценариев, но без участия в LSP v2.
-- [ ] Упростить `TypeSystemService` до фасада над v2 host/snapshots (или разделить API по клиентам).
+- [ ] Упростить legacy type-system facade до фасада над v2 host/snapshots (или разделить API по клиентам).
 
 **Верификация:**
 - [ ] Отсутствуют обращения `parse_to_ir` из hot path LSP (по `rg`/CI).

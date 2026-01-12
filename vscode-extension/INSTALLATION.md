@@ -49,7 +49,7 @@ tail -f vscode-extension/rust_lsp_server.log
 
 ✅ **Hover tooltips** — показывает информацию о типах при наведении
 ✅ **File parsing** — Tree-sitter парсит BSL синтаксис
-✅ **TypeSystemService** — система типов инициализирована
+✅ **v2 analysis** — система типов инициализирована
 
 ### Известные ограничения
 

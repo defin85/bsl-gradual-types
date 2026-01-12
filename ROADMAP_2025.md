@@ -26,7 +26,7 @@
 #### Backend (Rust)
 - **Right-Sized Architecture** — 6-8 компонентов вместо 25-30 ✅
 - **SystemCoordinator** — единая точка координации и DI management ✅
-- **TypeSystemService** — application layer с бизнес-логикой ✅
+- **Type system facade** — application layer с бизнес-логикой ✅
 - **TypeResolver** — чистая доменная логика без I/O ✅
 - **TypeMetadataLookup** — bridge для валидации методов/свойств ✅
 - **SyntaxHelperParser** — 3927 типов платформы из документации ✅
@@ -93,7 +93,7 @@
 | 2.16 Semantic Tree Visualization | ✅ | 2025-10-17 | VSCode webview, LSP custom request `bsl.getSemanticHtml`, HTML/CSS expand/collapse | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-216-semantic-tree-visualization--2025-10-17) |
 | 2.18 LSP Syntax Error Diagnostics | ✅ | 2025-10-18 | Синтаксические ошибки в LSP Diagnostics, UTF-16 координаты, ~300× ускорение парсинга, 40 тестов | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-218-lsp-syntax-error-diagnostics--2025-10-18) |
 | 2.17 Configuration Metadata Parser | ✅ | 2025-11-07 | Парсинг Configuration.xml, загрузка типов конфигурации, LSP команда `bsl.parseConfiguration`, батчевая загрузка | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-217-configuration-metadata-parser--2025-11-07) |
-| 2.19 Architectural Improvements | ✅ | 2025-11-07 | Unified ParseError (SSOT), TypeSystemService::parse_and_validate() API, Clean Architecture восстановлена, ~97 строк удалено | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-219-architectural-improvements--2025-11-07) |
+| 2.19 Architectural Improvements | ✅ | 2025-11-07 | Unified ParseError (SSOT), type-system facade parse_and_validate() API, Clean Architecture восстановлена, ~97 строк удалено | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-219-architectural-improvements--2025-11-07) |
 | 2.20 Enhanced Status Bar | ✅ | 2025-11-07 | Расширенная строка статуса с прогрессом LSP/индексации, контекстом редактора, статистикой TypeRepository | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-220-enhanced-status-bar--2025-11-07) |
 | 2.21 WASM Webviews Migration | ✅ | 2025-11-08 | Полная миграция VSCode Extension webviews на Leptos/WASM, устранение дублирования кода (100% DRY), Security +50%, 10 unit тестов | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-221-wasm-webviews-migration--2025-11-08) |
 | 3.5 Flow-Sensitive Analysis | ✅ | 2025-11-08 | Исправлен критический баг hover на вызовах методов, реализован flow-sensitive анализ для отслеживания типов через цепочки вызовов | [Архив](ROADMAP_ARCHIVE_2025.md#-milestone-35-flow-sensitive-analysis-) |
@@ -169,7 +169,7 @@ impl PersistentCache {
 
 **Интеграция с Milestone 2.13 (IR Cache):**
 ```rust
-// TypeSystemService::get_hover_info()
+// type-system facade: get_hover_info()
 // 1. Проверяем in-memory cache (Milestone 2.13)
 // 2. MISS → проверяем persistent cache (Milestone 2.4)
 // 3. MISS → парсим и кешируем в оба слоя
@@ -189,7 +189,7 @@ use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 
 pub struct BatchAnalyzer {
-    type_service: Arc<TypeSystemService>,
+    type_service: Arc<TypeSystemFacade>,
     thread_pool_size: usize,  // По умолчанию num_cpus
 }
 
@@ -512,7 +512,7 @@ pub struct TypeResolution {
 - [ ] **Task 1.2:** Extended Diagnostics API
   - `LlmDiagnostic` — расширенная структура с impact analysis
   - `ImpactSeverity` — Low/Medium/High/Critical на основе радиуса поражения
-  - `validate_for_llm()` в TypeSystemService
+  - `validate_for_llm()` в type-system facade
 
 - [ ] **Task 1.3:** Type Coverage Calculator
   - `TypeCoverageReport` — % кода с проверенными типами
@@ -761,10 +761,10 @@ impl AnalysisPipeline {
 }
 ```
 
-**Интеграция с TypeSystemService:**
+**Интеграция с type-system facade:**
 ```rust
 // backend/src/application/type_system_service.rs
-impl TypeSystemService {
+impl TypeSystemFacade {
     pub fn analyze_with_advanced_passes(&self, code: &str) -> Result<AnalysisReport> {
         // 1. Парсинг в Semantic IR (уже есть)
         let program = self.parse(code)?;

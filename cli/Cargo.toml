@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 bsl-shared = { workspace = true }
 bsl-backend = { workspace = true }
+bsl-analysis-v2 = { workspace = true }
 colored = { workspace = true }
 
 # CLI dependencies

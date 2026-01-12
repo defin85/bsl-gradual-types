@@ -17,6 +17,7 @@ pub fn utf16_to_byte_offset(line: &str, utf16_offset: u32) -> usize {
 /// while Rust strings use UTF-8 bytes and char indices.
 /// This function converts UTF-16 position to char index for safe
 /// work with chars() iterator.
+#[cfg(test)]
 pub fn utf16_to_char_index(text: &str, utf16_index: usize) -> Option<usize> {
     let mut current_utf16 = 0;
 
@@ -38,6 +39,7 @@ pub fn utf16_to_char_index(text: &str, utf16_index: usize) -> Option<usize> {
 /// Converts char index to UTF-16 code unit index
 ///
 /// Reverse operation: char index -> UTF-16 position for LSP.
+#[cfg(test)]
 pub fn char_to_utf16_index(text: &str, char_index: usize) -> usize {
     text.chars().take(char_index).map(|ch| ch.len_utf16()).sum()
 }

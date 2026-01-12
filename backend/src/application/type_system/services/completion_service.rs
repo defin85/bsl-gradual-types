@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Instant;
-use tracing::{debug, info, warn, Span};
+use tracing::{debug, info, Span};
 
 use bsl_shared::domain::metadata_constants::get_collection_kind;
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
@@ -191,24 +191,35 @@ pub(crate) async fn get_completion_with_analysis(
     } else {
         None
     };
+    let analysis_file_path = analysis.map(|analysis| analysis.file_path);
     let context = analyze_completion_context(file_content, line, column);
     let snapshot = index.snapshot();
 
     if let Some(request_id) = trace_request_id {
         info!(
             request_id = request_id,
+            file_uri = ?file_uri,
+            file_path = ?analysis_file_path,
             line = line,
             column = column,
             "Completion request"
         );
     } else {
-        info!("Completion request: line {}, column {}", line, column);
+        info!(
+            file_uri = ?file_uri,
+            file_path = ?analysis_file_path,
+            line = line,
+            column = column,
+            "Completion request"
+        );
     }
 
     let request_span = if let Some(request_id) = trace_request_id {
         tracing::debug_span!(
             "completion.request",
             request_id = request_id,
+            file_uri = ?file_uri,
+            file_path = ?analysis_file_path,
             line = line,
             column = column,
             member_access = context.member_access,

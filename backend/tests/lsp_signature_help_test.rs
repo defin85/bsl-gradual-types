@@ -393,6 +393,7 @@ mod lsp_signature_help_tests {
         let ctx = context.unwrap();
         assert_eq!(ctx.function_name, "Сообщить");
         assert_eq!(ctx.receiver_type, None);
+        assert!(!ctx.is_constructor);
     }
 
     #[test]

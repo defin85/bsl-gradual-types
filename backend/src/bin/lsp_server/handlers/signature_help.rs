@@ -6,17 +6,22 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 use tracing::debug;
 
-use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature};
-use bsl_shared::domain::repository::TypeRepository;
-use bsl_shared::domain::resolver::TypeResolver;
-use bsl_shared::engine::AnalysisEngine;
-
 use bsl_backend::application::type_system;
 
+#[cfg(test)]
+use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature};
+#[cfg(test)]
+use bsl_shared::domain::repository::TypeRepository;
+#[cfg(test)]
+use bsl_shared::domain::resolver::TypeResolver;
+#[cfg(test)]
+use bsl_shared::engine::AnalysisEngine;
+#[cfg(test)]
 use crate::converters::position::{char_to_utf16_index, utf16_to_char_index};
 
 /// Context of a function call
 #[derive(Debug)]
+#[cfg(test)]
 pub struct CallContext {
     pub function_name: String,
     pub receiver_type: Option<String>,
@@ -25,6 +30,7 @@ pub struct CallContext {
 }
 
 /// Handle textDocument/signatureHelp request
+#[cfg(test)]
 pub async fn handle_signature_help(
     file_content: &str,
     position: Position,
@@ -103,6 +109,7 @@ pub async fn handle_signature_help_v2(
 }
 
 /// Find function call context
+#[cfg(test)]
 pub fn find_call_context(content: &str, position: Position) -> Option<CallContext> {
     let lines: Vec<&str> = content.lines().collect();
     let max_line = if lines.is_empty() {
@@ -204,6 +211,7 @@ pub fn find_call_context(content: &str, position: Position) -> Option<CallContex
 }
 
 /// Extract function name from text before parenthesis
+#[cfg(test)]
 fn extract_function_name(text: &str) -> Option<(String, Option<String>, bool)> {
     let trimmed = text.trim_end();
 
@@ -253,6 +261,7 @@ fn extract_function_name(text: &str) -> Option<(String, Option<String>, bool)> {
     }
 }
 
+#[cfg(test)]
 fn extract_constructor_name(text: &str) -> Option<String> {
     let mut iter = text.split_whitespace();
     let keyword = iter.next()?;
@@ -271,6 +280,7 @@ fn extract_constructor_name(text: &str) -> Option<String> {
     }
 }
 
+#[cfg(test)]
 fn is_control_keyword(value: &str) -> bool {
     matches!(
         value.to_lowercase().as_str(),
@@ -293,6 +303,7 @@ fn is_control_keyword(value: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 fn is_simple_receiver(text: &str) -> bool {
     if text.is_empty() {
         return false;
@@ -301,6 +312,7 @@ fn is_simple_receiver(text: &str) -> bool {
     text.chars().all(|c| c == '.' || is_identifier_char(c))
 }
 
+#[cfg(test)]
 fn is_identifier_char(c: char) -> bool {
     c.is_alphanumeric()
         || c == '_'
@@ -310,6 +322,7 @@ fn is_identifier_char(c: char) -> bool {
 }
 
 /// Calculate active parameter index
+#[cfg(test)]
 pub fn calculate_active_parameter(content: &str, context: &CallContext, position: Position) -> u32 {
     let lines: Vec<&str> = content.lines().collect();
     let mut param_index = 0;
@@ -403,6 +416,7 @@ pub fn calculate_active_parameter(content: &str, context: &CallContext, position
 }
 
 /// Get function signature from TypeRepository
+#[cfg(test)]
 fn get_signature_for_function_with_repository(
     function_name: &str,
     receiver_type: Option<&str>,
@@ -422,6 +436,7 @@ fn get_signature_for_function_with_repository(
         .map(SignatureTarget::Method)
 }
 
+#[cfg(test)]
 fn resolve_receiver_type(expr: &str, resolver: Option<&TypeResolver>) -> Option<String> {
     let trimmed = expr.trim();
     if trimmed.is_empty() {
@@ -437,12 +452,14 @@ fn resolve_receiver_type(expr: &str, resolver: Option<&TypeResolver>) -> Option<
     Some(resolution.type_name())
 }
 
+#[cfg(test)]
 enum SignatureTarget {
     Method(MethodSignature),
     Constructor(ConstructorSignature),
 }
 
 /// Build LSP SignatureHelp response
+#[cfg(test)]
 fn build_signature_help_response(signature: SignatureTarget, active_param: u32) -> SignatureHelp {
     match signature {
         SignatureTarget::Method(signature) => {
@@ -454,6 +471,7 @@ fn build_signature_help_response(signature: SignatureTarget, active_param: u32) 
     }
 }
 
+#[cfg(test)]
 fn build_method_signature_help(signature: MethodSignature, active_param: u32) -> SignatureHelp {
     let (label, parameters) = build_signature_labels(&signature.name, &signature.params);
     SignatureHelp {
@@ -468,6 +486,7 @@ fn build_method_signature_help(signature: MethodSignature, active_param: u32) ->
     }
 }
 
+#[cfg(test)]
 fn build_constructor_signature_help(
     signature: ConstructorSignature,
     active_param: u32,
@@ -486,6 +505,7 @@ fn build_constructor_signature_help(
     }
 }
 
+#[cfg(test)]
 fn build_signature_labels(
     name: &str,
     params: &[bsl_shared::domain::types::ParameterInfo],

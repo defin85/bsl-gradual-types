@@ -2,7 +2,6 @@
 
 mod support;
 
-use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::types::{
     Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult, ResolutionSource,
     TypeResolution,

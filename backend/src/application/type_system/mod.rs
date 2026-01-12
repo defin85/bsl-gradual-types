@@ -20,7 +20,7 @@
 //! │   └── type_extractor.rs   # Type extraction from AST
 //! ```
 
-mod extractors;
+pub mod extractors;
 mod formatters;
 mod services;
 

@@ -130,6 +130,7 @@ insta = { workspace = true }
 tokio = { workspace = true }
 bsl-backend = { path = "backend" }
 bsl-shared = { path = "shared" }
+bsl-analysis-v2 = { workspace = true }
 
 # === Performance Profiles ===
 [profile.dev]

@@ -8,14 +8,11 @@ use anyhow::Result;
 use serde_json::Value;
 use tracing::warn;
 
-use crate::application::TypeSystemService;
 use crate::system::basic_observability::BasicObservability;
 use crate::system::disk_cache::DiskCache;
-use crate::system::ir_cache::IrCache;
 use crate::system::intellisense_index::IntellisenseIndexStore;
 use crate::system::intellisense_index_store::IntellisenseIndexDiskStore;
 use crate::system::parser_coordinator::ParserCoordinator;
-use crate::system::simple_cache::AnalysisCache;
 use bsl_shared::domain::repository::RepositoryStats;
 use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::api::StartupProgressDto;
@@ -24,35 +21,12 @@ use super::types::{
     DiskCacheStatsReport,
 };
 
-// ============================================================================
-// LOCK ORDER CONVENTION
-// ============================================================================
-//
-// To prevent deadlocks, ALWAYS acquire RwLocks in this order:
-//
-// 1. analysis_engine_cache (first)
-// 2. type_service_cache (second)
-//
-// NEVER acquire locks in reverse order!
-//
-// Example of CORRECT usage:
-//   let engine = self.analysis_engine_cache.read().unwrap_or_else(...);
-//   let service = self.type_service_cache.read().unwrap_or_else(...);
-//
-// Example of INCORRECT usage (DEADLOCK RISK):
-//   let service = self.type_service_cache.read().unwrap_or_else(...);  // WRONG ORDER
-//   let engine = self.analysis_engine_cache.read().unwrap_or_else(...);
-//
-// ============================================================================
-
 /// Упрощенный системный координатор
 ///
 /// Заменяет CentralTypeSystem, координирует только System Layer компоненты
 #[derive(Clone)]
 pub struct SystemCoordinator {
     // === SYSTEM LAYER COMPONENTS ONLY ===
-    pub(crate) cache: Arc<AnalysisCache>,
-    pub(crate) ir_cache: Arc<IrCache>, // Milestone 2.13: IR кеширование для LSP hover
     /// ParserCoordinator обёрнут в RwLock для обновления с TypeResolver (Milestone 3.17)
     pub(crate) parser: Arc<RwLock<Arc<ParserCoordinator>>>,
     pub(crate) observability: Arc<BasicObservability>,
@@ -62,9 +36,6 @@ pub struct SystemCoordinator {
     // === ANALYSIS ENGINE CACHE ===
     // Используем Arc<RwLock> для оптимизации read-heavy паттернов
     pub(crate) analysis_engine_cache: Arc<RwLock<Option<Arc<AnalysisEngine>>>>,
-
-    // === TYPE SERVICE CACHE ===
-    pub(crate) type_service_cache: Arc<RwLock<Option<Arc<TypeSystemService>>>>,
 
     // === STARTUP PROGRESS (WEB API) ===
     pub(crate) startup_progress: Arc<RwLock<StartupProgressDto>>,
@@ -87,13 +58,7 @@ impl SystemCoordinator {
     pub fn new() -> Self {
         // ТОЛЬКО System Layer компоненты согласно архитектурной диаграмме
 
-        // 1. Simple caching
-        let cache = Arc::new(AnalysisCache::new(1000)); // Simple LRU
-
-        // 2. IR caching (Milestone 2.13)
-        let ir_cache = Arc::new(IrCache::new(100)); // 100 файлов (~10 MB RAM)
-
-        // 3. Disk cache (Milestone D1)
+        // 1. Disk cache (Milestone D1)
         let disk_cache = match DiskCache::new(1) {
             Ok(cache) => Arc::new(cache),
             Err(err) => {
@@ -105,24 +70,21 @@ impl SystemCoordinator {
         let intellisense_index =
             Arc::new(IntellisenseIndexStore::new("unknown-config", env!("CARGO_PKG_VERSION")));
 
-        // 4. Simple parsing (будет обновлён с TypeResolver в start_with_paths_blocking)
+        // 2. Simple parsing (будет обновлён с TypeResolver в start_with_paths_blocking)
         // Milestone 3.17: Используем RwLock для возможности обновления
         let parser_instance =
             ParserCoordinator::with_fallback().with_disk_cache(disk_cache.clone());
         parser_instance.set_intellisense_index(intellisense_index.clone());
         let parser = Arc::new(RwLock::new(Arc::new(parser_instance)));
 
-        // 5. Basic observability
+        // 3. Basic observability
         let observability = Arc::new(BasicObservability::default());
         Self {
-            cache,
-            ir_cache,
             parser,
             observability,
             disk_cache,
             intellisense_index,
             analysis_engine_cache: Arc::new(RwLock::new(None)),
-            type_service_cache: Arc::new(RwLock::new(None)),
             startup_progress: Arc::new(RwLock::new(StartupProgressDto::default())),
             config_index_cache: Arc::new(RwLock::new(None)),
             platform_version: Arc::new(RwLock::new(None)),
@@ -152,15 +114,6 @@ impl SystemCoordinator {
     /// Все поля уже обёрнуты в Arc, так что это дешёвая операция
     pub(crate) fn clone_for_blocking(&self) -> Self {
         self.clone()
-    }
-
-    /// Получить компоненты для создания TypeSystemService
-    pub fn get_system_components(&self) -> (Arc<AnalysisCache>, Arc<ParserCoordinator>) {
-        let parser = self.parser.read().unwrap_or_else(|poisoned| {
-            warn!("Parser RwLock poisoned (read), recovering data.");
-            poisoned.into_inner()
-        });
-        (self.cache.clone(), parser.clone())
     }
 
     pub fn record_completion_latency(&self, duration: std::time::Duration) {
@@ -284,11 +237,6 @@ impl SystemCoordinator {
         self.config_index_cache.clone()
     }
 
-    /// Получить IR Cache
-    pub fn ir_cache(&self) -> Arc<IrCache> {
-        self.ir_cache.clone()
-    }
-
     /// Получить DiskCache (Milestone D1)
     pub fn disk_cache(&self) -> Arc<DiskCache> {
         self.disk_cache.clone()
@@ -336,7 +284,6 @@ impl SystemCoordinator {
         }
 
         if !effective {
-            self.ir_cache.clear().await;
             self.intellisense_index.invalidate_all();
         }
 
@@ -368,7 +315,6 @@ impl SystemCoordinator {
             .parser_coordinator()
             .map(|parser| parser.ast_cache_stats())
             .unwrap_or_default();
-        let ir_stats = self.ir_cache.get_stats().await;
 
         Ok(CacheStatsReport {
             cache_enabled: self.disk_cache.is_enabled(),
@@ -381,7 +327,6 @@ impl SystemCoordinator {
                 scope: disk_scope,
             },
             ast: ast_stats,
-            ir: ir_stats,
         })
     }
 
@@ -401,14 +346,12 @@ impl SystemCoordinator {
         if let Some(parser) = self.parser_coordinator() {
             parser.clear_ast_cache();
         }
-        self.ir_cache.clear().await;
         self.intellisense_index.invalidate_all();
 
         Ok(CacheClearReport {
             scope: scope.clone(),
             disk,
             ast_cleared: true,
-            ir_cleared: true,
         })
     }
 
@@ -420,72 +363,6 @@ impl SystemCoordinator {
                 poisoned.into_inner()
             });
         cache.clone()
-    }
-
-    /// Создать TypeSystemService (singleton)
-    ///
-    /// Согласно архитектуре: TypeSystemService использует AnalysisEngine для доступа к Domain Layer
-    ///
-    /// # Lock Order
-    /// Соблюдает lock order convention: analysis_engine_cache -> type_service_cache
-    pub fn type_service(&self) -> Option<Arc<TypeSystemService>> {
-        // Сначала пробуем прочитать из кеша (read lock - быстро)
-        {
-            let cache = self.type_service_cache.read()
-                .unwrap_or_else(|poisoned| {
-                    warn!("Type service cache RwLock poisoned (read), recovering data. This indicates a panic in another thread.");
-                    poisoned.into_inner()
-                });
-            if let Some(service) = cache.as_ref() {
-                return Some(service.clone());
-            }
-        } // Освобождаем read lock
-
-        // Кеш пуст, нужно создать service
-
-        // Читаем analysis_engine (read lock, соблюдаем lock order)
-        let analysis_engine = {
-            let engine_cache = self.analysis_engine_cache.read()
-                .unwrap_or_else(|poisoned| {
-                    warn!("Analysis engine cache RwLock poisoned (read), recovering data. This indicates a panic in another thread.");
-                    poisoned.into_inner()
-                });
-            engine_cache.clone()
-        }; // Освобождаем read lock
-
-        if let Some(engine) = analysis_engine {
-            // TypeSystemService теперь использует AnalysisEngine вместо прямого доступа к Domain Layer
-            // Milestone 3.17: Получаем ParserCoordinator через RwLock
-            let parser = {
-                let parser_guard = self.parser.read().unwrap_or_else(|poisoned| {
-                    warn!("Parser RwLock poisoned (read), recovering data.");
-                    poisoned.into_inner()
-                });
-                parser_guard.clone()
-            };
-
-            let service = Arc::new(TypeSystemService::new(
-                engine,
-                self.cache.clone(),
-                parser,
-                self.ir_cache.clone(), // Milestone 2.13: передаём IR Cache
-                self.intellisense_index.clone(),
-            ));
-
-            // Обновляем кеш (write lock - эксклюзивный)
-            {
-                let mut cache = self.type_service_cache.write()
-                    .unwrap_or_else(|poisoned| {
-                        warn!("Type service cache RwLock poisoned (write), recovering data. This indicates a panic in another thread.");
-                        poisoned.into_inner()
-                    });
-                *cache = Some(service.clone());
-            } // Освобождаем write lock
-
-            Some(service)
-        } else {
-            None
-        }
     }
 
     /// Получить AnalysisEngine для CLI/прямого использования

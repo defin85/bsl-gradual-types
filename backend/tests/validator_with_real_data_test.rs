@@ -1,6 +1,6 @@
 //! Интеграционный тест TypeValidator с реальными данными платформы 1С
 
-mod shared_test_fixtures;
+mod support;
 
 use bsl_shared::domain::types::{
     Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult, ResolutionSource,
@@ -8,12 +8,11 @@ use bsl_shared::domain::types::{
 };
 use bsl_shared::domain::validators::TypeValidator;
 use bsl_shared::domain::TypeMetadataLookup;
-use shared_test_fixtures::get_test_repository;
 
 #[test]
 fn test_validate_array_methods_with_real_data() {
-    // Получаем shared repository
-    let repository = get_test_repository();
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let repository = deps_bundle.semantic_deps.repository.clone();
 
     // Создаем TypeMetadataLookup и TypeValidator
     let lookup = TypeMetadataLookup::new(repository.clone());
@@ -65,8 +64,8 @@ fn test_validate_array_methods_with_real_data() {
 
 #[test]
 fn test_validate_value_table_properties_with_real_data() {
-    // Получаем shared repository
-    let repository = get_test_repository();
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let repository = deps_bundle.semantic_deps.repository.clone();
 
     // Создаем TypeMetadataLookup и TypeValidator
     let lookup = TypeMetadataLookup::new(repository.clone());
@@ -114,7 +113,8 @@ fn test_validate_value_table_properties_with_real_data() {
 #[test]
 fn test_validate_http_connection_complex_type() {
     // Тестируем более сложный тип с множеством методов и свойств
-    let repository = get_test_repository();
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let repository = deps_bundle.semantic_deps.repository.clone();
 
     let lookup = TypeMetadataLookup::new(repository.clone());
     let validator = TypeValidator::new(&lookup);

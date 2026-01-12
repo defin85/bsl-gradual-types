@@ -3,20 +3,11 @@
 //! Проверяет, что система честно сообщает об уровне уверенности (certainty) для типов,
 //! когда метаданные конфигурации не загружены (Inferred 50% вместо Unknown).
 
-use bsl_backend::system::SystemCoordinator;
+mod support;
 
 #[tokio::test]
 async fn test_hover_shows_unknown_type_warning_for_configuration_types() {
-    // Инициализация системы (только базовые типы, без Syntax Helper)
-    let coordinator = SystemCoordinator::new();
-    coordinator
-        .start_with_paths(None, None, None, None) // без Syntax Helper и Configuration
-        .await
-        .expect("Failed to start SystemCoordinator");
-
-    let type_system_service = coordinator
-        .type_service()
-        .expect("TypeSystemService not available");
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     // Тестовый код: переменная с типом из конфигурации (не загружен)
     let source = r#"
@@ -25,17 +16,11 @@ async fn test_hover_shows_unknown_type_warning_for_configuration_types() {
     СправочникКонтрагенты = Справочники.Контрагенты;
     Возврат СправочникКонтрагенты;
 КонецФункции
-"#;
+    "#;
 
     // Hover на переменной "СправочникКонтрагенты" в строке 3 (присваивание)
-    let hover_result = type_system_service
-        .get_hover_info(source, 3, 10, None) // колонка 10 = внутри "СправочникКонтрагенты"
-        .await
-        .expect("get_hover_info failed");
-
-    assert!(hover_result.is_some(), "Hover должен вернуть информацию");
-
-    let hover_text = hover_result.unwrap();
+    let hover_text = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", source, 3, 10)
+        .expect("Hover должен вернуть информацию");
     eprintln!("=== HOVER TEXT ===\n{}\n==================", hover_text);
 
     // ✅ НОВОЕ ПОВЕДЕНИЕ: Система показывает InferredWeak (50%) для конфигурационных типов без метаданных
@@ -70,21 +55,7 @@ async fn test_hover_shows_unknown_type_warning_for_configuration_types() {
 
 #[tokio::test]
 async fn test_hover_shows_correct_info_for_platform_types() {
-    // Инициализация системы с Platform Types (Syntax Helper)
-    let coordinator = SystemCoordinator::new();
-    coordinator
-        .start_with_paths(
-            Some(std::path::Path::new("examples/syntax_helper")),
-            None,
-            None,
-            None,
-        )
-        .await
-        .expect("Failed to start SystemCoordinator");
-
-    let type_system_service = coordinator
-        .type_service()
-        .expect("TypeSystemService not available");
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
 
     // Тестовый код: переменная с существующим Platform Type
     let source = r#"
@@ -93,17 +64,11 @@ async fn test_hover_shows_correct_info_for_platform_types() {
     МассивДанных = Новый Массив;
     Возврат МассивДанных;
 КонецФункции
-"#;
+    "#;
 
     // Hover на переменной "МассивДанных" в строке 3
-    let hover_result = type_system_service
-        .get_hover_info(source, 3, 10, None) // колонка 10 = внутри "МассивДанных"
-        .await
-        .expect("get_hover_info failed");
-
-    assert!(hover_result.is_some(), "Hover должен вернуть информацию");
-
-    let hover_text = hover_result.unwrap();
+    let hover_text = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", source, 3, 10)
+        .expect("Hover должен вернуть информацию");
 
     // ✅ Проверяем, что hover показывает корректную информацию для Platform Type
     assert!(
@@ -133,20 +98,7 @@ async fn test_hover_shows_correct_info_for_platform_types() {
 
 #[tokio::test]
 async fn test_hover_differentiates_platform_and_configuration_types() {
-    let coordinator = SystemCoordinator::new();
-    coordinator
-        .start_with_paths(
-            Some(std::path::Path::new("examples/syntax_helper")),
-            None,
-            None,
-            None,
-        )
-        .await
-        .expect("Failed to start SystemCoordinator");
-
-    let type_system_service = coordinator
-        .type_service()
-        .expect("TypeSystemService not available");
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
 
     let source = r#"
 Функция ТестРазныхТипов()
@@ -156,25 +108,15 @@ async fn test_hover_differentiates_platform_and_configuration_types() {
     МассивДанных = Новый Массив;           // Platform Type
     ДокументЗаказ = Документы.ЗаказКлиента; // Configuration Type (не загружен)
 КонецФункции
-"#;
+    "#;
 
     // 1. Hover на Platform Type (Массив)
-    let hover_platform = type_system_service
-        .get_hover_info(source, 5, 10, None)
-        .await
-        .expect("get_hover_info failed for platform type");
-
-    assert!(hover_platform.is_some());
-    let platform_text = hover_platform.unwrap();
+    let platform_text = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", source, 5, 10)
+        .expect("platform hover");
 
     // 2. Hover на Configuration Type (Документы)
-    let hover_config = type_system_service
-        .get_hover_info(source, 6, 10, None)
-        .await
-        .expect("get_hover_info failed for config type");
-
-    assert!(hover_config.is_some());
-    let config_text = hover_config.unwrap();
+    let config_text = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", source, 6, 10)
+        .expect("config hover");
 
     // ✅ Проверяем, что hover показывает РАЗНУЮ информацию
     assert_ne!(

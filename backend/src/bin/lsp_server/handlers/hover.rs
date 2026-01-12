@@ -4,9 +4,8 @@
 
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
-use tracing::{debug, error};
+use tracing::debug;
 
-use bsl_backend::application::TypeSystemService;
 use bsl_backend::application::get_hover_info_with_semantic_program;
 use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverOutputFormat};
 use bsl_backend::helpers::hover_formatter::HoverFormatter;
@@ -86,78 +85,6 @@ pub async fn handle_hover_v2(
     })
 }
 
-/// Handle textDocument/hover request
-pub async fn handle_hover(
-    uri: &Url,
-    file_content: &str,
-    position: Position,
-    type_service: Option<Arc<TypeSystemService>>,
-    settings: &HoverSettings,
-) -> Option<Hover> {
-    // Get syntax_helper path from environment or standard locations
-    let syntax_helper_path = std::env::var("BSL_SYNTAX_HELPER_PATH")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            let candidates = vec![
-                std::path::PathBuf::from("examples/syntax_helper"),
-                std::path::PathBuf::from("../examples/syntax_helper"),
-                std::path::PathBuf::from("C:/examples/syntax_helper"),
-            ];
-            candidates.into_iter().find(|p| p.exists())
-        });
-
-    let detail_level = DetailLevel::parse(&settings.detail_level);
-
-    debug!(
-        "Hover request: detailLevel={:?}, maxMethods={}, maxProperties={}, showCertainty={}, syntax_helper={:?}",
-        detail_level,
-        settings.max_methods,
-        settings.max_properties,
-        settings.show_certainty,
-        syntax_helper_path.as_ref().map(|p| p.display().to_string())
-    );
-
-    let hover_config = HoverFormatConfig {
-        max_methods: settings.max_methods,
-        max_properties: settings.max_properties,
-        detail_level,
-        show_certainty: settings.show_certainty,
-        syntax_helper_path,
-        output_format: HoverOutputFormat::Markdown,
-        ..Default::default()
-    };
-
-    if let Some(service) = type_service {
-        let file_path = uri
-            .to_file_path()
-            .ok()
-            .map(|p| p.to_string_lossy().to_string());
-
-        match service
-            .get_hover_info_for_file(
-                file_content,
-                file_path.as_deref().unwrap_or("hover_request.bsl"),
-                position.line,
-                position.character,
-                Some(hover_config),
-            )
-            .await
-        {
-            Ok(hover_info) => hover_info.map(|info| Hover {
-                contents: HoverContents::Scalar(MarkedString::String(info)),
-                range: None,
-            }),
-            Err(e) => {
-                error!("Failed to get hover info: {}", e);
-                None
-            }
-        }
-    } else {
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,13 +92,11 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use bsl_backend::system::{AnalysisCache, IntellisenseIndexStore, IrCache, ParserCoordinator};
     use bsl_shared::domain::repository::InMemoryTypeRepository;
     use bsl_shared::domain::signature_index::{
         ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource,
     };
     use bsl_shared::domain::types::{ParameterInfo, RawDataSource, RawTypeData};
-    use bsl_shared::engine::AnalysisEngine;
     use bsl_shared::TypeRepository;
     use bsl_shared::TypeResolver;
 
@@ -199,7 +124,6 @@ mod tests {
     }
 
     struct TestEnv {
-        service: Arc<TypeSystemService>,
         deps: Arc<bsl_analysis_v2::SemanticDeps>,
     }
 
@@ -254,22 +178,6 @@ mod tests {
         let repository =
             repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
         let resolver = Arc::new(TypeResolver::new(repository.clone()));
-        let analysis_engine = Arc::new(AnalysisEngine::new(resolver.clone(), repository.clone()));
-
-        let cache = Arc::new(AnalysisCache::new(16));
-        let ir_cache = Arc::new(IrCache::new(16));
-        let intellisense_index = Arc::new(IntellisenseIndexStore::new("test", "test"));
-        let parser = Arc::new(ParserCoordinator::new_with_resolver(
-            repository.clone(),
-            resolver.clone(),
-        ));
-        let service = Arc::new(TypeSystemService::new(
-            analysis_engine,
-            cache,
-            parser,
-            ir_cache,
-            intellisense_index,
-        ));
 
         let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
             signature_index: repository.get_signature_index_clone(),
@@ -277,7 +185,7 @@ mod tests {
             repository,
         });
 
-        TestEnv { service, deps }
+        TestEnv { deps }
     }
 
     fn build_v2_ir(
@@ -329,7 +237,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn m5_hover_v2_matches_legacy() {
+    async fn m5_hover_v2_is_deterministic() {
         let content = read_fixture("m5_snippets_resolve.bsl");
         let mut position = find_position(&content, "    Массив");
         position.character = position.character.saturating_sub(1);
@@ -342,19 +250,6 @@ mod tests {
             max_properties: 5,
             show_certainty: false,
         };
-
-        let legacy = handle_hover(&uri, &content, position, Some(env.service.clone()), &settings)
-            .await
-            .expect("hover legacy");
-        let legacy_text = hover_text(legacy);
-        assert!(
-            legacy_text.contains("Переменная"),
-            "expected hover to contain variable header"
-        );
-        assert!(
-            legacy_text.contains("Массив"),
-            "expected hover to contain type name"
-        );
 
         let (file_content, file_path, ir_program) =
             build_v2_ir(&content, &uri, env.deps.clone());
@@ -370,7 +265,11 @@ mod tests {
         .await
         .expect("hover v2");
         let v2_text = hover_text(v2);
-        assert_eq!(legacy_text, v2_text);
+        assert!(
+            v2_text.contains("Переменная"),
+            "expected hover to contain variable header"
+        );
+        assert!(v2_text.contains("Массив"), "expected hover to contain type name");
 
         // Determinism smoke: same input -> same output twice.
         let v2_second = handle_hover_v2(

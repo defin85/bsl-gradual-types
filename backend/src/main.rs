@@ -4,7 +4,7 @@
 use bsl_backend::{
     config::{load_config, CliConfig},
     presentation::web::{create_router, AppState},
-    system::SystemCoordinator,
+    system::{DepsBundleV2, DepsBundleV2Meta, SystemCoordinator, build_deps_bundle_v2},
 };
 #[cfg(feature = "web-ui")]
 use clap::Parser;
@@ -100,16 +100,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
-    // Create TypeSystemService using SystemCoordinator's singleton method
-    let type_service = system_coord.type_service().ok_or_else(|| {
-        let err: Box<dyn std::error::Error> =
-            "AnalysisEngine should be initialized after start_with_paths".into();
-        err
-    })?;
+    let deps_bundle_v2 = build_deps_bundle_v2(
+        system_coord.as_ref(),
+        config.syntax_helper_path.as_deref(),
+        config.project_path.as_deref(),
+    )
+    .unwrap_or_else(|err| {
+        tracing::warn!("Failed to build deps bundle v2 for web: {}", err);
+
+        let repository: Arc<dyn bsl_shared::domain::repository::TypeRepository> =
+            Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+        let signature_index = repository.get_signature_index_clone();
+        let resolver = Some(Arc::new(bsl_shared::domain::resolver::TypeResolver::new(
+            repository.clone(),
+        )));
+
+        let semantic_deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            repository,
+            signature_index,
+            resolver,
+        });
+
+        let index_snapshot = Arc::new(system_coord.intellisense_index().snapshot());
+        let index_snapshot_id = index_snapshot.id.as_str().to_string();
+
+        DepsBundleV2 {
+            deps_id: bsl_analysis_v2::DepsSnapshotId::from_hash(""),
+            semantic_deps,
+            index_snapshot,
+            meta: DepsBundleV2Meta {
+                platform_version: env!("CARGO_PKG_VERSION").to_string(),
+                platform_fingerprint: None,
+                config_fingerprint: None,
+                index_snapshot_id,
+                strict_fingerprint: false,
+            },
+        }
+    });
 
     let app_state = AppState {
-        type_service: type_service.clone(),
-        system_coordinator: system_coord.clone(), // ВРЕМЕННО для отладки
+        deps_bundle_v2: Arc::new(deps_bundle_v2),
+        system_coordinator: system_coord.clone(),
+        syntax_helper_path: config.syntax_helper_path.clone(),
     };
 
     // Static SPA from configured path or default

@@ -3,13 +3,19 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
-use bsl_backend::system::SystemCoordinator;
+use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
+use bsl_backend::application::get_completion_with_semantic_program_snapshot;
+use bsl_backend::system::{SystemCoordinator, build_deps_bundle_v2};
+use bsl_shared::domain::TypeMetadataLookup;
+use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::formatting::DetailLevel;
 
 #[derive(Debug, Parser)]
 #[command(name = "intellisense-perf")]
@@ -95,8 +101,9 @@ struct ScenarioCase {
 
 #[derive(Debug)]
 struct PreparedCase {
+    file_id: V2FileId,
     file_uri: String,
-    content: String,
+    content: Arc<str>,
     line: u32,
     column: u32,
 }
@@ -184,19 +191,62 @@ async fn main() -> Result<()> {
         )
         .context("startup failed")?;
 
-    let type_service = coordinator
-        .type_service()
-        .context("TypeSystemService unavailable after startup")?;
+    let deps_bundle = build_deps_bundle_v2(
+        &coordinator,
+        syntax_helper_path.as_deref(),
+        config_path.as_deref(),
+    )
+    .context("build_deps_bundle_v2")?;
+
+    let deps = deps_bundle.semantic_deps.clone();
+    let resolver = deps
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
+    let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: deps_bundle.deps_id.clone(),
+        deps: deps.clone(),
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("intellisense-perf"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+
+    for case in &prepared {
+        host.apply_change(ChangeV2::SetFile {
+            file_id: case.file_id,
+            text: case.content.clone(),
+            version: 0,
+            path: Arc::from(case.file_uri.clone()),
+        });
+    }
+
+    let analysis = host.analysis();
 
     if args.warmup > 0 {
-        run_iterations(&type_service, &prepared, args.warmup, None).await?;
+        run_iterations(
+            &analysis,
+            deps_bundle.index_snapshot.as_ref(),
+            &metadata_lookup,
+            resolver.as_ref(),
+            &prepared,
+            args.warmup,
+            None,
+        )
+        .await?;
     }
 
     let mut durations_ms = Vec::new();
     let mut errors = 0usize;
     let mut incomplete = 0usize;
     run_iterations(
-        &type_service,
+        &analysis,
+        deps_bundle.index_snapshot.as_ref(),
+        &metadata_lookup,
+        resolver.as_ref(),
         &prepared,
         args.iterations,
         Some(OutputTargets {
@@ -353,9 +403,11 @@ fn prepare_cases(cases: &[ScenarioCase], base_dir: &Path) -> Result<Vec<Prepared
         })?;
 
         let file_uri = file.to_string_lossy().into_owned();
+        let file_id = V2FileId((prepared.len() + 1) as u32);
         prepared.push(PreparedCase {
+            file_id,
             file_uri,
-            content,
+            content: Arc::from(content),
             line,
             column,
         });
@@ -377,7 +429,10 @@ fn find_position(content: &str, marker: &str) -> Option<(u32, u32)> {
 }
 
 async fn run_iterations(
-    type_service: &bsl_backend::application::TypeSystemService,
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    index_snapshot: &bsl_backend::system::IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    resolver: &TypeResolver,
     cases: &[PreparedCase],
     iterations: usize,
     mut output: Option<OutputTargets<'_>>,
@@ -385,14 +440,24 @@ async fn run_iterations(
     for _ in 0..iterations {
         for case in cases {
             let started = Instant::now();
-            let result = type_service
-                .get_completion(
-                    &case.content,
-                    case.line,
-                    case.column,
-                    Some(case.file_uri.as_str()),
-                )
-                .await;
+
+            let ir_program = analysis
+                .ir(case.file_id)
+                .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+                .context("ir unavailable")?;
+
+            let result = get_completion_with_semantic_program_snapshot(
+                case.content.as_ref(),
+                case.line,
+                case.column,
+                Some(case.file_uri.as_str()),
+                index_snapshot,
+                metadata_lookup,
+                case.file_uri.as_str(),
+                resolver,
+                ir_program,
+            )
+            .await;
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
 
             if let Some(targets) = output.as_mut() {

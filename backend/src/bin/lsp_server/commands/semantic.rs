@@ -2,84 +2,32 @@
 //!
 //! MILESTONE 2.12: Handles bsl/getSemanticTree and bsl/getSemanticHtml commands.
 
-use std::sync::Arc;
-use tower_lsp::lsp_types::Url;
-use tracing::{error, info};
+use tracing::info;
 
-use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::fs_utils::read_bsl_file;
 use bsl_shared::api::semantic_dtos::{
-    GetSemanticHtmlRequest, GetSemanticTreeRequest, RenderedHtmlDto, SemanticNodeDto,
-    SemanticTreeDto,
+    RenderedHtmlDto, SemanticNodeDto, SemanticTreeDto,
 };
 use bsl_type_visualization::{HtmlRenderer, RenderOptions, ThemeMode};
 
-/// Handle bsl/getSemanticTree command
-pub async fn handle_get_semantic_tree(
-    params: GetSemanticTreeRequest,
-    type_service: Option<Arc<TypeSystemService>>,
-    get_document_content: impl Fn(&Url) -> Option<String>,
-) -> Result<SemanticTreeDto, String> {
-    info!("Custom request: bsl/getSemanticTree - {}", params.uri);
-
-    let uri = Url::parse(&params.uri).map_err(|e| format!("Invalid URI: {}", e))?;
-
-    let file_path = uri
-        .to_file_path()
-        .map_err(|_| "Could not convert URI to file path")?;
-
-    let file_path_str = file_path.to_string_lossy().to_string();
-
-    // Read file content (from cache or disk)
-    let file_content = get_document_content(&uri)
-        .or_else(|| read_bsl_file(&file_path).ok())
-        .ok_or("Could not read file content")?;
-
-    let service = type_service.ok_or("TypeSystemService not initialized")?;
-
-    match service
-        .get_semantic_tree(&file_content, &file_path_str, false, true, true)
-        .await
-    {
-        Ok(dto) => {
-            info!(
-                "Semantic tree generated: {} nodes, {} symbols",
-                dto.root_nodes.len(),
-                dto.symbol_table.len()
-            );
-            Ok(dto)
-        }
-        Err(e) => {
-            error!("Failed to generate semantic tree: {}", e);
-            Err(format!("Failed to generate semantic tree: {}", e))
-        }
-    }
+pub fn semantic_tree_from_ir(
+    ir_program: &bsl_shared::ir::SemanticProgram,
+    include_call_graph: bool,
+    include_flow_sensitive: bool,
+) -> SemanticTreeDto {
+    info!(
+        "Building semantic tree from IR (call_graph={}, flow_sensitive={})",
+        include_call_graph, include_flow_sensitive
+    );
+    ir_program.to_dto(include_call_graph, include_flow_sensitive)
 }
 
-/// Handle bsl/getSemanticHtml command
-pub async fn handle_get_semantic_html(
-    params: GetSemanticHtmlRequest,
-    type_service: Option<Arc<TypeSystemService>>,
-    get_document_content: impl Fn(&Url) -> Option<String>,
-) -> Result<RenderedHtmlDto, String> {
-    info!(
-        "Custom request: bsl/getSemanticHtml - {} (theme: {:?})",
-        params.uri, params.theme
-    );
-
-    // First get semantic tree
-    let tree_request = GetSemanticTreeRequest {
-        uri: params.uri.clone(),
-        include_call_graph: true,
-        include_flow_sensitive: true,
-        max_depth: None,
-    };
-
-    let semantic_tree =
-        handle_get_semantic_tree(tree_request, type_service, get_document_content).await?;
-
+pub fn semantic_html_from_tree(
+    semantic_tree: &SemanticTreeDto,
+    theme: Option<&str>,
+    compact: bool,
+) -> RenderedHtmlDto {
     // Determine theme
-    let theme_mode = match params.theme.as_deref() {
+    let theme_mode = match theme {
         Some("dark") => ThemeMode::Dark,
         Some("light") => ThemeMode::Light,
         Some("high-contrast") => ThemeMode::HighContrast,
@@ -91,22 +39,22 @@ pub async fn handle_get_semantic_html(
         theme: theme_mode.clone(),
         syntax_highlight: true,
         enable_links: true,
-        compact: params.compact,
+        compact,
     });
 
     // Generate HTML body
-    let body = format_semantic_tree_html(&semantic_tree);
+    let body = format_semantic_tree_html(semantic_tree);
 
     // Generate full HTML document
     let html = renderer.render_document("BSL Semantic Analysis", &body);
 
-    Ok(RenderedHtmlDto {
+    RenderedHtmlDto {
         file_path: semantic_tree.file_path.clone(),
         html,
         metrics: semantic_tree.metrics.clone(),
         generated_at: chrono::Utc::now().to_rfc3339(),
         theme: Some(format!("{:?}", theme_mode)),
-    })
+    }
 }
 
 /// Format SemanticTreeDto as HTML

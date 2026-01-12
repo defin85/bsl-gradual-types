@@ -1,21 +1,7 @@
 /// Комплексные integration тесты для Generic типов табличных частей
 ///
 /// Упрощённая версия с правильным использованием API
-use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::SystemCoordinator;
-use std::sync::Arc;
-
-/// Helper для создания TypeSystemService
-async fn setup_service() -> Arc<TypeSystemService> {
-    let coordinator = SystemCoordinator::new();
-    coordinator
-        .start()
-        .await
-        .expect("Failed to start SystemCoordinator");
-    coordinator
-        .type_service()
-        .expect("TypeSystemService should be initialized")
-}
+mod support;
 
 // ============================================================================
 // E2E тесты: полный flow через TypeSystemService
@@ -23,7 +9,7 @@ async fn setup_service() -> Arc<TypeSystemService> {
 
 #[tokio::test]
 async fn test_e2e_array_generic_type() {
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Функция ТестМассива()
@@ -34,11 +20,7 @@ async fn test_e2e_array_generic_type() {
     "#;
 
     // Hover на переменной "МассивДанных"
-    let hover = service
-        .get_hover_info(code, 2, 5, None)
-        .await
-        .ok()
-        .flatten();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 5);
 
     if let Some(hover_text) = hover {
         println!("✓ Hover на 'МассивДанных':\n{}", hover_text);
@@ -57,7 +39,7 @@ async fn test_e2e_array_generic_type() {
 
 #[tokio::test]
 async fn test_e2e_structure_type() {
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Процедура Тест()
@@ -67,11 +49,7 @@ async fn test_e2e_structure_type() {
     "#;
 
     // Hover на переменной "НоваяСтруктура"
-    let hover = service
-        .get_hover_info(code, 2, 5, None)
-        .await
-        .ok()
-        .flatten();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 5);
 
     if let Some(hover_text) = hover {
         println!("✓ Hover на 'НоваяСтруктура':\n{}", hover_text);
@@ -85,7 +63,7 @@ async fn test_e2e_structure_type() {
 
 #[tokio::test]
 async fn test_e2e_tabular_value_table() {
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Функция СоздатьТаблицу()
@@ -97,11 +75,7 @@ async fn test_e2e_tabular_value_table() {
     "#;
 
     // Hover на переменной "ТЗ"
-    let hover = service
-        .get_hover_info(code, 2, 5, None)
-        .await
-        .ok()
-        .flatten();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 5);
 
     if let Some(hover_text) = hover {
         println!("✓ Hover на 'ТЗ' (ТаблицаЗначений):\n{}", hover_text);
@@ -110,7 +84,7 @@ async fn test_e2e_tabular_value_table() {
 
 #[tokio::test]
 async fn test_e2e_unicode_handling() {
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Процедура ПроцедураСКириллицей()
@@ -121,11 +95,7 @@ async fn test_e2e_unicode_handling() {
     "#;
 
     // Hover на длинной кириллической переменной
-    let hover = service
-        .get_hover_info(code, 2, 5, None)
-        .await
-        .ok()
-        .flatten();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 5);
 
     if let Some(hover_text) = hover {
         println!("✓ Unicode hover:\n{}", hover_text);
@@ -140,7 +110,7 @@ async fn test_e2e_unicode_handling() {
 
 #[tokio::test]
 async fn test_e2e_multiple_variables_in_scope() {
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Процедура Тест()
@@ -155,21 +125,9 @@ async fn test_e2e_multiple_variables_in_scope() {
     "#;
 
     // Hover на каждой переменной - все должны возвращать разную информацию
-    let hover1 = service
-        .get_hover_info(code, 2, 5, None)
-        .await
-        .ok()
-        .flatten();
-    let hover2 = service
-        .get_hover_info(code, 3, 5, None)
-        .await
-        .ok()
-        .flatten();
-    let hover3 = service
-        .get_hover_info(code, 4, 5, None)
-        .await
-        .ok()
-        .flatten();
+    let hover1 = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 5);
+    let hover2 = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 3, 5);
+    let hover3 = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 4, 5);
 
     if let (Some(h1), Some(h2), Some(h3)) = (hover1, hover2, hover3) {
         println!("✓ Hover на Переменная1:\n{}", h1);
@@ -183,7 +141,7 @@ async fn test_e2e_multiple_variables_in_scope() {
 
 #[tokio::test]
 async fn test_e2e_error_handling_invalid_code() {
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     // Невалидный BSL код
     let invalid_code = r#"
@@ -193,22 +151,11 @@ async fn test_e2e_error_handling_invalid_code() {
     "#;
 
     // Hover не должен паниковать на невалидном коде
-    let result = service.get_hover_info(invalid_code, 2, 5, None).await;
-
-    match result {
-        Ok(hover) => {
-            if let Some(text) = hover {
-                println!(
-                    "✓ Hover вернул результат даже для невалидного кода: {}",
-                    text
-                );
-            } else {
-                println!("✓ Hover корректно вернул None для невалидного кода");
-            }
-        }
-        Err(e) => {
-            println!("✓ Hover вернул ошибку (это допустимо): {:?}", e);
-        }
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", invalid_code, 2, 5);
+    if let Some(text) = hover {
+        println!("✓ Hover returned result for invalid code: {}", text);
+    } else {
+        println!("✓ Hover returned None for invalid code");
     }
 
     // Главное - не должно быть panic!
@@ -216,23 +163,22 @@ async fn test_e2e_error_handling_invalid_code() {
 
 #[tokio::test]
 async fn test_e2e_empty_code() {
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let empty_code = "";
 
     // Пустой код не должен паниковать
-    let result = service.get_hover_info(empty_code, 0, 0, None).await;
-
-    match result {
-        Ok(None) => println!("✓ Пустой код корректно вернул None"),
-        Ok(Some(text)) => println!("✓ Hover вернул: {}", text),
-        Err(e) => println!("✓ Ошибка при обработке пустого кода: {:?}", e),
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", empty_code, 0, 0);
+    if let Some(text) = hover {
+        println!("✓ Hover returned: {}", text);
+    } else {
+        println!("✓ Empty code returned None");
     }
 }
 
 #[tokio::test]
 async fn test_e2e_out_of_bounds_position() {
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Процедура Тест()
@@ -241,18 +187,17 @@ async fn test_e2e_out_of_bounds_position() {
     "#;
 
     // Позиция за пределами кода
-    let result = service.get_hover_info(code, 1000, 1000, None).await;
-
-    match result {
-        Ok(None) => println!("✓ Out of bounds позиция корректно вернула None"),
-        Ok(Some(text)) => println!("✓ Hover вернул: {}", text),
-        Err(e) => println!("✓ Ошибка для out of bounds: {:?}", e),
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 1000, 1000);
+    if let Some(text) = hover {
+        println!("✓ Hover returned: {}", text);
+    } else {
+        println!("✓ Out of bounds returned None");
     }
 }
 
 #[tokio::test]
 async fn test_e2e_very_long_code() {
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     // Генерируем большой BSL файл
     let mut code = String::from("Процедура ТестБольшогоФайла()\n");
@@ -264,11 +209,7 @@ async fn test_e2e_very_long_code() {
     println!("Размер тестового кода: {} символов", code.len());
 
     // Hover на переменной в середине файла
-    let hover = service
-        .get_hover_info(&code, 250, 10, None)
-        .await
-        .ok()
-        .flatten();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", &code, 250, 10);
 
     if let Some(hover_text) = hover {
         println!(
@@ -284,7 +225,7 @@ async fn test_e2e_very_long_code() {
 
 #[tokio::test]
 async fn test_e2e_nested_constructions() {
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Процедура ВложенныеКонструкции()
@@ -303,11 +244,7 @@ async fn test_e2e_nested_constructions() {
     "#;
 
     // Hover на переменной внутри вложенных конструкций
-    let hover = service
-        .get_hover_info(code, 6, 25, None)
-        .await
-        .ok()
-        .flatten();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 6, 25);
 
     if let Some(hover_text) = hover {
         println!("✓ Hover для вложенных конструкций:\n{}", hover_text);
@@ -316,7 +253,7 @@ async fn test_e2e_nested_constructions() {
 
 #[tokio::test]
 async fn test_e2e_comments_handling() {
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 // Это комментарий
@@ -327,11 +264,7 @@ async fn test_e2e_comments_handling() {
     "#;
 
     // Hover на переменной должен игнорировать комментарии
-    let hover = service
-        .get_hover_info(code, 4, 5, None)
-        .await
-        .ok()
-        .flatten();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 4, 5);
 
     if let Some(hover_text) = hover {
         println!("✓ Hover с комментариями:\n{}", hover_text);
@@ -346,7 +279,7 @@ async fn test_e2e_comments_handling() {
 async fn test_service_reusability() {
     // Проверяем, что один экземпляр сервиса может обработать несколько запросов
 
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     for i in 0..10 {
         let code = format!(
@@ -358,11 +291,7 @@ async fn test_service_reusability() {
             i
         );
 
-        let hover = service
-            .get_hover_info(&code, 2, 5, None)
-            .await
-            .ok()
-            .flatten();
+        let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", &code, 2, 5);
 
         assert!(
             hover.is_some() || hover.is_none(),
@@ -378,7 +307,7 @@ async fn test_service_reusability() {
 async fn test_concurrent_requests() {
     // Проверяем параллельную обработку запросов
 
-    let service = setup_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Процедура Тест()
@@ -390,13 +319,12 @@ async fn test_concurrent_requests() {
     let mut handles = vec![];
 
     for i in 0..5 {
-        let service_clone = service.clone();
+        let deps_clone = deps_bundle.clone();
         let code_clone = code.to_string();
 
         let handle = tokio::spawn(async move {
-            let result = service_clone.get_hover_info(&code_clone, 2, 5, None).await;
             println!("✓ Параллельный запрос {} завершён", i);
-            result
+            support::hover_for_code(deps_clone.as_ref(), "inline.bsl", &code_clone, 2, 5)
         });
 
         handles.push(handle);

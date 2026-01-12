@@ -11,7 +11,6 @@ mod command_handlers;
 mod core;
 mod language_server;
 mod analysis_v2_runtime;
-mod deps_v2;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -45,7 +44,6 @@ pub(crate) enum V2FileKey {
 #[derive(Clone)]
 pub struct BslLanguageServer {
     pub(crate) client: Client,
-    pub(crate) documents: Arc<RwLock<HashMap<Url, String>>>,
     pub(crate) diagnostics_counts: Arc<RwLock<HashMap<Url, usize>>>,
     pub(crate) config: Arc<RwLock<Option<LspConfig>>>,
     pub(crate) settings: Arc<RwLock<BslSettings>>,
@@ -54,6 +52,9 @@ pub struct BslLanguageServer {
     pub(crate) coordinator: Arc<SystemCoordinator>,
 
     pub(crate) analysis_v2: AnalysisV2Runtime,
+    /// Serializes `didOpen/didChange/didClose` updates so that incremental changes are applied
+    /// against a consistent base text (source of truth lives in `analysis-v2` inputs).
+    pub(crate) text_sync_v2: Arc<Mutex<()>>,
     /// Session-stable mapping: once a `FileId` is assigned for a key, it is not revoked for the
     /// lifetime of the server process (even if the document is closed and re-opened).
     pub(crate) file_key_to_file_id_v2: Arc<RwLock<HashMap<V2FileKey, V2FileId>>>,

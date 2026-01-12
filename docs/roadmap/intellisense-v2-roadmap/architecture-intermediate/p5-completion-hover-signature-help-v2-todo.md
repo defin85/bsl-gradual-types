@@ -4,6 +4,8 @@
 **Статус:** 🟢 DONE  
 **Основание:** Фаза P5 из `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/salsa-migration-plan.md`
 
+**Примечание (P9):** runtime feature-flag `BSL_INTELLISENSE_V2_SALSA` удалён; LSP всегда использует v2 путь.
+
 ## Цель P5
 
 - Перевести `textDocument/completion`, `textDocument/hover`, `textDocument/signatureHelp` на путь **v2 snapshot → queries → результат**, без обращения к legacy-парсингу/IR в hot path.
@@ -12,7 +14,7 @@
 
 ## Контракт (инварианты)
 
-- **Single source of truth:** при включённом `BSL_INTELLISENSE_V2_SALSA=1` LSP фичи читают данные только из `AnalysisHostV2::analysis()` (текст/версия/позиционирование/IR/parse_result + observed ids).
+- **Single source of truth:** LSP фичи читают данные только из `AnalysisHostV2::analysis()` (текст/версия/позиционирование/IR/parse_result + observed ids).
 - **No legacy IR build:** в v2 пути запрещены `parse_to_ir`, `parse_with_cache_for_file` и `backend/src/system/ir_cache.rs` (можно оставить legacy-only).
 - **Deps correctness:** семантика и LSP ответы должны соответствовать одному снапшоту deps (observed `deps_id`) — без mixed deps.
 - **Determinism:** одинаковые `(file_text, file_version, deps_id, settings_id)` → одинаковые результаты (включая порядок и `sortText`).
@@ -31,9 +33,9 @@
 
 ## Локальные референсы (в репо)
 
-- v2 host wiring + feature flag:
-  - `backend/src/bin/lsp_server/server/core.rs` (`BSL_INTELLISENSE_V2_SALSA`, `sync_v2_globals`)
-  - `backend/src/bin/lsp_server/server/language_server.rs` (ветки `if self.use_salsa_v2`)
+- v2 host wiring (feature flag удалён в P9):
+  - `backend/src/bin/lsp_server/server/core.rs` (v2 runtime init)
+  - `backend/src/bin/lsp_server/server/language_server.rs` (v2-only handlers)
 - Legacy LSP handlers:
   - `backend/src/bin/lsp_server/handlers/completion.rs`
   - `backend/src/bin/lsp_server/handlers/hover.rs`
@@ -48,13 +50,15 @@
 
 ## Решения P5 (фиксируем перед кодом)
 
-### 1) Стратегия миграции: strangler под флагом
+### 1) Стратегия миграции: strangler (исторически под флагом)
 
-- `BSL_INTELLISENSE_V2_SALSA=0` → legacy путь без изменений.
-- `BSL_INTELLISENSE_V2_SALSA=1` → LSP фичи используют:
+- (P5–P8, исторически) `BSL_INTELLISENSE_V2_SALSA=0` → legacy путь без изменений.
+- (P5–P8, исторически) `BSL_INTELLISENSE_V2_SALSA=1` → LSP фичи используют:
   1) `analysis_host_v2.snapshot()`/`analysis()` как источник текста/версии,
   2) v2 queries (`line_index/parse_result/ir`) как источник синтаксиса/IR,
   3) существующую “бизнес-логику” (completion/hover/signatureHelp), но **без** вызовов legacy IR build.
+
+- (P9) флаг удалён, LSP всегда использует v2 путь.
 
 ### 2) Где живёт вычисление результата
 
@@ -155,7 +159,7 @@
 
 ## DoD (P5 считается закрытым, если)
 
-- [x] При `BSL_INTELLISENSE_V2_SALSA=1` completion/hover/signatureHelp возвращают реальный результат (не заглушки) и не обращаются к legacy IR build.
+- [x] В v2 пути completion/hover/signatureHelp возвращают реальный результат (не заглушки) и не обращаются к legacy IR build.
 - [x] Детерминизм: порядок + `sortText` (и выбранный вариант для `candidate_id`) стабильны.
 - [x] Golden/fixture тесты для completion/hover/signatureHelp проходят в двух режимах и сравниваются.
 - [x] `cargo test --workspace` проходит.

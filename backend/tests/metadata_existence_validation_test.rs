@@ -7,17 +7,24 @@
 //! 4. HoverFormatter integration with unknown metadata objects
 //! 5. Graceful degradation without configuration
 
-mod shared_test_fixtures;
+mod support;
 
 #[cfg(test)]
 mod metadata_existence_validation_tests {
-    use super::shared_test_fixtures::get_test_repository;
+    use super::support;
     use bsl_shared::domain::types::{
         Certainty, ConcreteType, ConfigurationType, MetadataKind, ResolutionMetadata,
         ResolutionResult, ResolutionSource, TypeResolution,
     };
+    use bsl_shared::domain::repository::TypeRepository;
     use bsl_shared::domain::TypeMetadataLookup;
     use bsl_shared::utils::string_utils::{levenshtein_distance, similarity};
+    use std::sync::Arc;
+
+    fn get_test_repository() -> Arc<dyn TypeRepository> {
+        let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+        deps_bundle.semantic_deps.repository.clone()
+    }
 
     /// Test 1: Levenshtein algorithm detects typos in Russian metadata names
     #[test]

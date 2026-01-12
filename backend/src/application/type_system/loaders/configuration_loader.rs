@@ -30,8 +30,8 @@ use crate::data::loaders::progress::ProgressUpdate;
 ///
 /// # Note
 /// This function ensures proper layer separation:
-/// - LSP Server (Presentation) -> TypeSystemService (Application) -> TypeRepository (Domain)
-/// - Instead of: LSP Server -> TypeRepository (bypassing Application Layer)
+/// - Presentation (LSP/Web/CLI) -> Application loader -> TypeRepository (Domain)
+/// - Instead of: Presentation -> TypeRepository (bypassing Application Layer)
 pub fn load_configuration_types(
     analysis_engine: &AnalysisEngine,
     config_path: &std::path::Path,

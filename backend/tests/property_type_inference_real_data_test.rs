@@ -1,12 +1,10 @@
 //! Интеграционный тест: типизация свойства из Syntax Helper (без хардкода)
 
-mod shared_test_fixtures;
-
-use shared_test_fixtures::get_test_service;
+mod support;
 
 #[tokio::test]
 async fn test_value_table_columns_property_type_is_resolved() {
-    let service = get_test_service();
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
 
     let code = r#"
 Процедура Тест()
@@ -15,10 +13,8 @@ async fn test_value_table_columns_property_type_is_resolved() {
 КонецПроцедуры
 "#;
 
-    let result = service
-        .get_semantic_tree(code, "test.bsl", false, true, true)
-        .await
-        .expect("Failed to get semantic tree");
+    let ir_program = support::ir_program_for_code(deps_bundle.as_ref(), "test.bsl", code);
+    let result = ir_program.to_dto(false, true);
 
     let resolved = result
         .symbol_table

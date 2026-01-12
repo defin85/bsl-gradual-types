@@ -5,20 +5,13 @@
 /// - `Новый ТаблицаЗначений()` (со скобками)
 ///
 /// Проверяем что оба варианта корректно парсятся и сохраняют TypeResolution.
-mod shared_test_fixtures;
+mod support;
 
-use bsl_backend::application::TypeSystemService;
-use shared_test_fixtures::get_test_service;
-
-/// Helper: создать TypeSystemService для тестов WITH PLATFORM TYPES LOADED
-fn create_test_service() -> &'static TypeSystemService {
-    get_test_service()
-}
+use bsl_shared::domain::types::DiagnosticSeverity;
 
 #[tokio::test]
 async fn test_constructor_without_parentheses() {
-    // Arrange: создаём TypeSystemService с платформенными типами
-    let service = create_test_service();
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
 
     // Act: парсим код БЕЗ скобок
     let code = r#"
@@ -28,32 +21,29 @@ async fn test_constructor_without_parentheses() {
 КонецФункции
 "#;
 
-    let parse_result = service.parse_and_validate(code).unwrap();
+    let parse_result = support::syntax_diagnostics_for_code(deps_bundle.as_ref(), "test.bsl", code);
     assert!(
         parse_result.is_empty(),
         "Не должно быть syntax errors для 'Новый ТаблицаЗначений'"
     );
 
     // Проверяем что semantic validation НЕ выдаёт ошибку
-    let semantic_errors = service.validate_semantics(code, None).await.unwrap();
-
-    // DEBUG: выводим ошибки если есть
-    if !semantic_errors.is_empty() {
-        for error in &semantic_errors {
-            eprintln!("ERROR: {:?}", error);
-        }
-    }
+    let semantic_diagnostics =
+        support::semantic_diagnostics_for_code(deps_bundle.as_ref(), "test.bsl", code);
+    let errors: Vec<_> = semantic_diagnostics
+        .iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .collect();
 
     assert!(
-        semantic_errors.is_empty(),
+        errors.is_empty(),
         "❌ Метод 'Количество' должен быть найден для 'ТаблицаЗначений'"
     );
 }
 
 #[tokio::test]
 async fn test_constructor_with_parentheses() {
-    // Arrange
-    let service = create_test_service();
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
 
     // Act: парсим код СО скобками
     let code = r#"
@@ -63,32 +53,29 @@ async fn test_constructor_with_parentheses() {
 КонецФункции
 "#;
 
-    let parse_result = service.parse_and_validate(code).unwrap();
+    let parse_result = support::syntax_diagnostics_for_code(deps_bundle.as_ref(), "test.bsl", code);
     assert!(
         parse_result.is_empty(),
         "Не должно быть syntax errors для 'Новый ТаблицаЗначений()'"
     );
 
     // Проверяем что semantic validation НЕ выдаёт ошибку
-    let semantic_errors = service.validate_semantics(code, None).await.unwrap();
-
-    // DEBUG: выводим ошибки если есть
-    if !semantic_errors.is_empty() {
-        for error in &semantic_errors {
-            eprintln!("ERROR: {:?}", error);
-        }
-    }
+    let semantic_diagnostics =
+        support::semantic_diagnostics_for_code(deps_bundle.as_ref(), "test.bsl", code);
+    let errors: Vec<_> = semantic_diagnostics
+        .iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .collect();
 
     assert!(
-        semantic_errors.is_empty(),
+        errors.is_empty(),
         "✅ Метод 'Количество' должен быть найден для 'ТаблицаЗначений()'"
     );
 }
 
 #[tokio::test]
 async fn test_both_constructors_in_one_function() {
-    // Arrange
-    let service = create_test_service();
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
 
     // Act: парсим код с ОБОИМИ вариантами
     let code = r#"
@@ -103,20 +90,18 @@ async fn test_both_constructors_in_one_function() {
 КонецФункции
 "#;
 
-    let parse_result = service.parse_and_validate(code).unwrap();
+    let parse_result = support::syntax_diagnostics_for_code(deps_bundle.as_ref(), "test.bsl", code);
     assert!(parse_result.is_empty(), "Не должно быть syntax errors");
 
-    let semantic_errors = service.validate_semantics(code, None).await.unwrap();
-
-    // DEBUG: выводим ошибки если есть
-    if !semantic_errors.is_empty() {
-        for error in &semantic_errors {
-            eprintln!("ERROR: {:?}", error);
-        }
-    }
+    let semantic_diagnostics =
+        support::semantic_diagnostics_for_code(deps_bundle.as_ref(), "test.bsl", code);
+    let errors: Vec<_> = semantic_diagnostics
+        .iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .collect();
 
     assert!(
-        semantic_errors.is_empty(),
+        errors.is_empty(),
         "❌ Оба конструктора должны работать одинаково!"
     );
 }

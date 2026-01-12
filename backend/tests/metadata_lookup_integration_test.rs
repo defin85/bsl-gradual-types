@@ -1,6 +1,6 @@
 //! Integration test для TypeMetadataLookup с реальными данными из SyntaxHelper
 
-mod shared_test_fixtures;
+mod support;
 
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::types::{
@@ -8,12 +8,11 @@ use bsl_shared::domain::types::{
     TypeResolution,
 };
 use bsl_shared::domain::TypeMetadataLookup;
-use shared_test_fixtures::get_test_repository;
 
 #[test]
 fn test_metadata_lookup_with_real_syntax_helper() {
-    // 1. Получаем shared repository
-    let repository = get_test_repository();
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let repository = deps_bundle.semantic_deps.repository.clone();
 
     let stats = repository.get_stats();
     println!("📊 Repository stats: {} total types", stats.total_types);
@@ -75,7 +74,8 @@ fn test_metadata_lookup_with_real_syntax_helper() {
 #[test]
 fn test_repository_content_sample() {
     // Быстрый тест - просто посмотрим что есть в repository
-    let repository = get_test_repository();
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let repository = deps_bundle.semantic_deps.repository.clone();
 
     let all_types = repository.get_all_types();
 

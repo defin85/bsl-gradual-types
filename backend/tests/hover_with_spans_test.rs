@@ -5,26 +5,7 @@
 //! 2. find_variable_at_position() работает корректно
 //! 3. Hover показывает разную информацию для разных переменных (не одинаковую)
 
-use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::SystemCoordinator;
-use std::sync::Arc;
-
-/// Setup функция для создания TypeSystemService с загруженными типами платформы
-async fn setup_type_system_service() -> Arc<TypeSystemService> {
-    // Создаём SystemCoordinator, который инициализирует все компоненты
-    let coordinator = SystemCoordinator::new();
-
-    // Инициализируем систему (загрузка типов платформы)
-    coordinator
-        .start()
-        .await
-        .expect("Failed to start SystemCoordinator");
-
-    // Получаем TypeSystemService из координатора
-    coordinator
-        .type_service()
-        .expect("TypeSystemService should be initialized after start()")
-}
+mod support;
 
 #[tokio::test]
 async fn test_hover_on_variable_declaration() {
@@ -37,11 +18,11 @@ async fn test_hover_on_variable_declaration() {
 КонецФункции
 "#;
 
-    let service = setup_type_system_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     // Hover на "МойМассив" в строке 2 (declaration)
     // Координаты (line=2, column=5) должны попасть в span переменной "МойМассив"
-    let hover1 = service.get_hover_info(code, 2, 5, None).await.unwrap();
+    let hover1 = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 5);
 
     assert!(
         hover1.is_some(),
@@ -65,10 +46,10 @@ async fn test_hover_on_variable_usage() {
 КонецФункции
 "#;
 
-    let service = setup_type_system_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     // Hover на "МойМассив" в строке 3 (method call)
-    let hover2 = service.get_hover_info(code, 3, 5, None).await.unwrap();
+    let hover2 = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 3, 5);
 
     assert!(
         hover2.is_some(),
@@ -97,27 +78,18 @@ async fn test_hover_shows_different_info_for_different_variables() {
 КонецПроцедуры
 "#;
 
-    let service = setup_type_system_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     // Hover на "МойМассив" в строке 2
-    let hover1 = service
-        .get_hover_info(code, 2, 5, None)
-        .await
-        .unwrap()
+    let hover1 = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 5)
         .unwrap_or_default();
 
     // Hover на "МояСтрока" в строке 3
-    let hover2 = service
-        .get_hover_info(code, 3, 5, None)
-        .await
-        .unwrap()
+    let hover2 = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 3, 5)
         .unwrap_or_default();
 
     // Hover на "МоеЧисло" в строке 4
-    let hover3 = service
-        .get_hover_info(code, 4, 5, None)
-        .await
-        .unwrap()
+    let hover3 = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 4, 5)
         .unwrap_or_default();
 
     // КЛЮЧЕВАЯ ПРОВЕРКА: hover НЕ должен быть одинаковым для всех переменных
@@ -163,10 +135,10 @@ async fn test_hover_on_function_parameter() {
 КонецФункции
 "#;
 
-    let service = setup_type_system_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     // Hover на "Число1" в строке 2 (usage in assignment)
-    let hover = service.get_hover_info(code, 2, 16, None).await.unwrap();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 16);
 
     assert!(
         hover.is_some(),
@@ -192,11 +164,11 @@ async fn test_hover_on_method_name() {
 КонецПроцедуры
 "#;
 
-    let service = setup_type_system_service().await;
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     // Hover на "Добавить" в строке 3
     // Координаты (line=3, column=12) должны попасть в span метода "Добавить"
-    let hover = service.get_hover_info(code, 3, 12, None).await.unwrap();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 3, 12);
 
     assert!(
         hover.is_some(),

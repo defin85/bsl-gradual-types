@@ -22,7 +22,7 @@ Backend реализует многослойную архитектуру с ч
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │ SystemCoordinator - координация всех подсистем      │   │
 │  ├──────────────────────────────────────────────────────┤   │
-│  │ AnalysisCache - кеширование результатов анализа     │   │
+│  │ DiskCache / AstCache - кеширование артефактов       │   │
 │  ├──────────────────────────────────────────────────────┤   │
 │  │ ParserCoordinator - управление парсингом            │   │
 │  └──────────────────────────────────────────────────────┘   │
@@ -31,7 +31,7 @@ Backend реализует многослойную архитектуру с ч
 ┌─────────────────────────────────────────────────────────────┐
 │                   Application Layer                         │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │ TypeSystemService - единая точка входа для LSP/API  │   │
+│  │ type_system - entrypoints для LSP/Web/CLI           │   │
 │  ├──────────────────────────────────────────────────────┤   │
 │  │ Services: hover, completion, diagnostics, etc.      │   │
 │  ├──────────────────────────────────────────────────────┤   │
@@ -79,15 +79,15 @@ Backend реализует многослойную архитектуру с ч
 Бизнес-логика типизации и LSP функций.
 
 **Ключевые компоненты:**
-- `type_system/` - TypeSystemService и services (hover, completion, diagnostics)
+- `type_system/` - entrypoints и services (hover, completion, web_api)
 - `semantic_validation_visitor/` - валидация семантических правил
 - `ast_to_ir/` - конвертация AST → Intermediate Representation
 - `type_inference_service.rs` - вывод типов выражений
 
 **Точки входа:**
-- `TypeSystemService::get_hover()` - информация при наведении
-- `TypeSystemService::get_completion()` - автодополнение
-- `TypeSystemService::validate_semantics()` - семантическая валидация
+- `application::get_hover_info_with_semantic_program()` - hover по IR снапшоту
+- `application::get_completion_with_semantic_program_snapshot()` - completion по IR + index snapshot
+- `bsl_analysis_v2::AnalysisV2::{syntax_diagnostics, semantic_diagnostics}` - диагностики (salsa queries)
 
 ### `domain/` - Domain Layer (backend-specific)
 
@@ -128,8 +128,8 @@ Backend-специфичная доменная логика.
 Координация подсистем и кеширование.
 
 **Компоненты:**
-- `coordinator/` - SystemCoordinator - главный координатор
-- `cache/` - AnalysisCache - кеширование результатов
+- `system_coordinator/` - SystemCoordinator - главный координатор
+- `disk_cache.rs` / `ast_cache.rs` - кеширование артефактов (не влияет на корректность)
 - `parser_coordinator/` - ParserCoordinator - управление парсингом
 - `observability/` - BasicObservability - метрики и мониторинг
 
@@ -180,20 +180,17 @@ API endpoints и адаптеры для клиентов.
 2. LSP Server (bin/lsp_server/handlers/hover.rs)
    - Получает позицию в документе
            ↓
-3. SystemCoordinator.parse_file()
-   - ParserCoordinator → TreeSitterAdapter → AST
+3. `analysis_v2_runtime.snapshot()`
+   - v2 snapshot (writer thread + observed ids)
            ↓
-4. AstToIrConverter.convert()
-   - AST → Intermediate Representation (IR)
+4. salsa queries: `analysis.ir(file_id)`
+   - `SemanticProgram` (IR) из снапшота
            ↓
-5. TypeSystemService.get_hover()
-   - Анализ IR
-   - AnalysisEngine.infer_type()
-   - TypeResolver.resolve_type()
+5. `application::get_hover_info_with_semantic_program()`
+   - IR + deps snapshot + metadata lookup
            ↓
-6. TypeRepository.get_type_info()
-   - Поиск метаданных типа
-   - Данные из ConfigLoader / SyntaxHelperLoader
+6. `TypeRepository` (из deps snapshot)
+   - метаданные типов платформы/конфигурации
            ↓
 7. HoverFormatter.format()
    - Форматирование hover текста
@@ -206,15 +203,10 @@ API endpoints и адаптеры для клиентов.
 ```
 1. Web API POST /api/diagnostics
            ↓
-2. SystemCoordinator.validate_file()
-   - Парсинг → AST → IR
+2. `presentation/web/handlers.rs`
+   - snapshot + queries (`syntax_diagnostics`, `semantic_diagnostics`)
            ↓
-3. TypeSystemService.validate_semantics()
-   - SemanticValidationVisitor.visit(IR)
-   - Проверка:
-     - Несоответствие типов параметров
-     - Неизвестные методы/свойства
-     - Некорректные операции над типами
+3. Диагностики конвертируются в DTO/JSON
            ↓
 4. Semantic errors → JSON response
 ```
@@ -225,24 +217,24 @@ API endpoints и адаптеры для клиентов.
 
 **Начните с этих файлов (в порядке приоритета):**
 
-1. `application/type_system/service.rs` - главная точка входа
-2. `system/coordinator/mod.rs` - координация подсистем
-3. `bin/lsp_server/main.rs` - LSP server entry point
-4. `data/loaders/mod.rs` - загрузка данных
-5. `application/ast_to_ir/converter.rs` - конвертация AST → IR
+1. `bin/lsp_server/server/analysis_v2_runtime.rs` - v2 runtime (writer thread + snapshots)
+2. `application/type_system/services/completion_service.rs` - completion логика
+3. `application/type_system/services/hover_service.rs` - hover логика
+4. `system/deps_bundle_v2.rs` - deps snapshot (P8/P9)
+5. `system/system_coordinator/` - загрузка типов платформы/конфигурации
 
 ### Для добавления новой LSP функции
 
 1. Добавить handler в `bin/lsp_server/handlers/`
 2. Добавить service метод в `application/type_system/services/`
-3. Использовать `TypeSystemService` для доступа к типам
+3. Использовать v2 снапшот (IR + deps bundle) и entrypoints из `application/type_system`
 4. Обновить `bin/lsp_server/server/language_server.rs`
 
 ### Для добавления нового типа валидации
 
 1. Расширить `SemanticValidationVisitor` в `application/semantic_validation_visitor/`
 2. Добавить новый тип ошибки в `shared/src/domain/semantic_error.rs`
-3. Добавить тест в `backend/tests/semantic_diagnostics_lsp_test.rs`
+3. Добавить тест в `backend/tests/context_diagnostics_lsp_test.rs`
 
 ## Связанные документы
 

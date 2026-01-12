@@ -23,7 +23,7 @@ use bsl_shared::api::semantic_dtos::{GetSemanticHtmlRequest, GetSemanticTreeRequ
 
 use crate::commands::{
     handle_cache_clear, handle_cache_set_enabled, handle_cache_stats, handle_get_all_types,
-    handle_get_semantic_html, handle_get_semantic_tree, handle_get_type_repository_stats,
+    handle_get_type_repository_stats, semantic_html_from_tree, semantic_tree_from_ir,
     handle_parse_configuration, handle_query_type, handle_search_types, CacheCommandParams,
     CacheToggleParams, GetAllTypesRequest, ParseConfigurationParams, QueryTypeParams,
     SearchTypesRequest,
@@ -287,24 +287,39 @@ impl LanguageServer for BslLanguageServer {
                                 .send_notification::<ServerStatus>(ServerStatusParams::ready())
                                 .await;
 
-                            // Revalidate all open documents
-                            info!("Revalidating all open documents with full platform types...");
-                            let documents_to_revalidate: Vec<_> = {
-                                let docs = self_clone.documents.read().await;
-                                docs.iter()
-                                    .map(|(uri, text)| (uri.clone(), text.clone()))
+                            // Reschedule diagnostics for open documents so they are recomputed
+                            // against the latest deps snapshot.
+                            info!("Rescheduling v2 diagnostics for open documents after deps update...");
+                            let open_versions: Vec<(bsl_analysis_v2::FileId, i32)> = {
+                                self_clone
+                                    .latest_received_file_versions_v2
+                                    .read()
+                                    .await
+                                    .iter()
+                                    .map(|(file_id, version)| (*file_id, *version))
                                     .collect()
                             };
+                            let keys = self_clone.file_key_to_file_id_v2.read().await.clone();
 
-                            for (uri, text) in documents_to_revalidate {
-                                if let Err(e) = self_clone.revalidate_document(&uri, &text).await {
-                                    warn!("Failed to revalidate {}: {}", uri, e);
+                            for (file_id, version) in open_versions {
+                                let uri = keys.iter().find_map(|(key, mapped)| {
+                                    if *mapped != file_id {
+                                        return None;
+                                    }
+                                    match key {
+                                        super::V2FileKey::Path(path) => {
+                                            Url::from_file_path(path).ok()
+                                        }
+                                        super::V2FileKey::Url(raw) => Url::parse(raw).ok(),
+                                    }
+                                });
+
+                                if let Some(uri) = uri {
+                                    self_clone
+                                        .schedule_diagnostics_v2(uri, file_id, version)
+                                        .await;
                                 }
                             }
-
-                            // Clear IR cache
-                            let ir_cache = self_clone.coordinator.ir_cache();
-                            ir_cache.clear().await;
                         }
                         Ok(Err(error_msg)) => {
                             // ERROR: Send WorkDoneProgressEnd with error
@@ -453,11 +468,7 @@ impl LanguageServer for BslLanguageServer {
         let text = params.text_document.text.clone();
         let version = params.text_document.version;
 
-        // Cache text
-        self.documents
-            .write()
-            .await
-            .insert(uri.clone(), text.clone());
+        let _sync_guard = self.text_sync_v2.lock().await;
 
         self.sync_v2_globals().await;
         let file_id = self.get_or_create_file_id_v2(&uri).await;
@@ -493,38 +504,46 @@ impl LanguageServer for BslLanguageServer {
         let version = params.text_document.version;
         let changes = params.content_changes;
 
-        // Apply changes
-        let updated_text = if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
-            full_change.text.clone()
-        } else {
-            let existing_text = self
-                .documents
-                .read()
-                .await
-                .get(&uri)
-                .cloned()
-                .unwrap_or_default();
-
-            let mut current_text = existing_text;
-            for change in &changes {
-                if let Some(range) = change.range {
-                    current_text = apply_text_edit(&current_text, range, &change.text);
-                }
-            }
-            current_text
-        };
-
-        // Cache text
-        self.documents
-            .write()
-            .await
-            .insert(uri.clone(), updated_text.clone());
+        let _sync_guard = self.text_sync_v2.lock().await;
 
         self.sync_v2_globals().await;
         let file_id = self.get_or_create_file_id_v2(&uri).await;
         let path = match uri.to_file_path() {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(_) => uri.to_string(),
+        };
+
+        let prev_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+        if let Some(prev_version) = prev_version {
+            let _ = self.analysis_v2.wait_for_file_version(file_id, prev_version).await;
+        }
+
+        // Apply changes
+        let updated_text = if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
+            full_change.text.clone()
+        } else {
+            let base_text = self
+                .analysis_v2
+                .snapshot()
+                .await
+                .file_text(file_id)
+                .ok()
+                .flatten()
+                .map(|text| text.to_string())
+                .unwrap_or_default();
+
+            let mut current_text = base_text;
+            for change in &changes {
+                if let Some(range) = change.range {
+                    current_text = apply_text_edit(&current_text, range, &change.text);
+                }
+            }
+            current_text
         };
 
         self.latest_received_file_versions_v2
@@ -544,7 +563,8 @@ impl LanguageServer for BslLanguageServer {
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
-        self.documents.write().await.remove(&uri);
+
+        let _sync_guard = self.text_sync_v2.lock().await;
 
         if let Some(file_id) = self.get_file_id_v2(&uri).await {
             self.cancel_diagnostics_v2(file_id).await;
@@ -577,20 +597,6 @@ impl LanguageServer for BslLanguageServer {
     ) -> JsonRpcResult<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-
-        let file_content = match self.documents.read().await.get(&uri) {
-            Some(content) => content.clone(),
-            None => match uri.to_file_path() {
-                Ok(path) => match read_bsl_file(&path) {
-                    Ok(content) => content,
-                    Err(e) => {
-                        error!("Failed to read file for completion: {}", e);
-                        return Ok(Some(CompletionResponse::Array(vec![])));
-                    }
-                },
-                Err(_) => return Ok(Some(CompletionResponse::Array(vec![]))),
-            },
-        };
 
         let started = Instant::now();
         let snippet_support = *self.completion_snippet_support.read().await;
@@ -626,14 +632,29 @@ impl LanguageServer for BslLanguageServer {
                     Ok(path) => path.to_string_lossy().to_string(),
                     Err(_) => uri.to_string(),
                 };
-                self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                    file_id,
-                    text: Arc::from(file_content.clone()),
-                    version: 0,
-                    path: Arc::from(path),
-                }]);
+                let file_content = match uri.to_file_path() {
+                    Ok(path) => match read_bsl_file(&path) {
+                        Ok(content) => Some(content),
+                        Err(e) => {
+                            error!("Failed to read file for completion: {}", e);
+                            None
+                        }
+                    },
+                    Err(_) => None,
+                };
+                match file_content {
+                    Some(file_content) => {
+                        self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                            file_id,
+                            text: Arc::from(file_content),
+                            version: 0,
+                            path: Arc::from(path),
+                        }]);
 
-                self.analysis_v2.wait_for_file_version(file_id, 0).await
+                        self.analysis_v2.wait_for_file_version(file_id, 0).await
+                    }
+                    None => false,
+                }
             };
             let wait_elapsed = wait_started.elapsed();
             self.coordinator.record_intellisense_v2_wait_for_file_version(
@@ -839,8 +860,8 @@ impl LanguageServer for BslLanguageServer {
     ) -> JsonRpcResult<CompletionItem> {
         let snippet_support = *self.completion_snippet_support.read().await;
         let started = Instant::now();
-        let resolved =
-            handle_completion_resolve(item, self.get_type_service(), snippet_support).await;
+        let deps = self.analysis_v2.snapshot().await.deps_data().ok();
+        let resolved = handle_completion_resolve(item, deps, snippet_support).await;
         let elapsed = started.elapsed();
         self.coordinator.record_completion_resolve_latency(elapsed);
         Ok(resolved)
@@ -854,20 +875,6 @@ impl LanguageServer for BslLanguageServer {
             "Hover requested at {}:{}",
             position.line, position.character
         );
-
-        let file_content = match self.documents.read().await.get(&uri) {
-            Some(content) => content.clone(),
-            None => match uri.to_file_path() {
-                Ok(path) => match read_bsl_file(&path) {
-                    Ok(content) => content,
-                    Err(e) => {
-                        error!("Failed to read file for hover: {}", e);
-                        return Ok(None);
-                    }
-                },
-                Err(_) => return Ok(None),
-            },
-        };
 
         {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
@@ -890,14 +897,29 @@ impl LanguageServer for BslLanguageServer {
                     Ok(path) => path.to_string_lossy().to_string(),
                     Err(_) => uri.to_string(),
                 };
-                self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                    file_id,
-                    text: Arc::from(file_content.clone()),
-                    version: 0,
-                    path: Arc::from(path),
-                }]);
+                let file_content = match uri.to_file_path() {
+                    Ok(path) => match read_bsl_file(&path) {
+                        Ok(content) => Some(content),
+                        Err(e) => {
+                            error!("Failed to read file for hover: {}", e);
+                            None
+                        }
+                    },
+                    Err(_) => None,
+                };
+                match file_content {
+                    Some(file_content) => {
+                        self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                            file_id,
+                            text: Arc::from(file_content),
+                            version: 0,
+                            path: Arc::from(path),
+                        }]);
 
-                self.analysis_v2.wait_for_file_version(file_id, 0).await
+                        self.analysis_v2.wait_for_file_version(file_id, 0).await
+                    }
+                    None => false,
+                }
             };
             let wait_elapsed = wait_started.elapsed();
             self.coordinator
@@ -1017,20 +1039,6 @@ impl LanguageServer for BslLanguageServer {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let file_content = match self.documents.read().await.get(&uri) {
-            Some(content) => content.clone(),
-            None => match uri.to_file_path() {
-                Ok(path) => match read_bsl_file(&path) {
-                    Ok(content) => content,
-                    Err(e) => {
-                        error!("Failed to read file for definition: {}", e);
-                        return Ok(None);
-                    }
-                },
-                Err(_) => return Ok(None),
-            },
-        };
-
         {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             self.sync_v2_globals().await;
@@ -1052,14 +1060,29 @@ impl LanguageServer for BslLanguageServer {
                     Ok(path) => path.to_string_lossy().to_string(),
                     Err(_) => uri.to_string(),
                 };
-                self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                    file_id,
-                    text: Arc::from(file_content.clone()),
-                    version: 0,
-                    path: Arc::from(path),
-                }]);
+                let file_content = match uri.to_file_path() {
+                    Ok(path) => match read_bsl_file(&path) {
+                        Ok(content) => Some(content),
+                        Err(e) => {
+                            error!("Failed to read file for definition: {}", e);
+                            None
+                        }
+                    },
+                    Err(_) => None,
+                };
+                match file_content {
+                    Some(file_content) => {
+                        self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                            file_id,
+                            text: Arc::from(file_content),
+                            version: 0,
+                            path: Arc::from(path),
+                        }]);
 
-                self.analysis_v2.wait_for_file_version(file_id, 0).await
+                        self.analysis_v2.wait_for_file_version(file_id, 0).await
+                    }
+                    None => false,
+                }
             };
             let wait_elapsed = wait_started.elapsed();
             self.coordinator.record_intellisense_v2_wait_for_file_version(
@@ -1156,14 +1179,6 @@ impl LanguageServer for BslLanguageServer {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let file_content = match self.get_document_content(&uri).await {
-            Ok(content) => content,
-            Err(e) => {
-                warn!("Failed to get document content: {}", e);
-                return Ok(None);
-            }
-        };
-
         {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             self.sync_v2_globals().await;
@@ -1185,14 +1200,30 @@ impl LanguageServer for BslLanguageServer {
                     Ok(path) => path.to_string_lossy().to_string(),
                     Err(_) => uri.to_string(),
                 };
-                self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                    file_id,
-                    text: Arc::from(file_content.clone()),
-                    version: 0,
-                    path: Arc::from(path),
-                }]);
+                let file_content = match uri.to_file_path() {
+                    Ok(path) => match read_bsl_file(&path) {
+                        Ok(content) => Some(content),
+                        Err(e) => {
+                            error!("Failed to read file for signatureHelp: {}", e);
+                            None
+                        }
+                    },
+                    Err(_) => None,
+                };
 
-                self.analysis_v2.wait_for_file_version(file_id, 0).await
+                match file_content {
+                    Some(file_content) => {
+                        self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                            file_id,
+                            text: Arc::from(file_content),
+                            version: 0,
+                            path: Arc::from(path),
+                        }]);
+
+                        self.analysis_v2.wait_for_file_version(file_id, 0).await
+                    }
+                    None => false,
+                }
             };
             let wait_elapsed = wait_started.elapsed();
             self.coordinator.record_intellisense_v2_wait_for_file_version(
@@ -1317,16 +1348,71 @@ impl LanguageServer for BslLanguageServer {
                         ))
                     })?;
 
-                let documents = self.documents.clone();
-                let result = handle_get_semantic_html(request, self.get_type_service(), |uri| {
-                    // This is a sync closure, so we need to use try_read
-                    documents
-                        .try_read()
-                        .ok()
-                        .and_then(|docs| docs.get(uri).cloned())
-                })
-                .await
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+                let uri = Url::parse(&request.uri).map_err(|e| {
+                    tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e))
+                })?;
+
+                self.sync_v2_globals().await;
+                let file_id = self.get_or_create_file_id_v2(&uri).await;
+
+                let expected_version = self
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied();
+
+                let ok = if let Some(expected_version) = expected_version {
+                    self.analysis_v2
+                        .wait_for_file_version(file_id, expected_version)
+                        .await
+                } else {
+                    let path = match uri.to_file_path() {
+                        Ok(path) => path.to_string_lossy().to_string(),
+                        Err(_) => uri.to_string(),
+                    };
+                    let file_content = match uri.to_file_path() {
+                        Ok(path) => match read_bsl_file(&path) {
+                            Ok(content) => Some(content),
+                            Err(e) => {
+                                error!("Failed to read file for getSemanticHtml: {}", e);
+                                None
+                            }
+                        },
+                        Err(_) => None,
+                    };
+
+                    match file_content {
+                        Some(file_content) => {
+                            self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                                file_id,
+                                text: Arc::from(file_content),
+                                version: 0,
+                                path: Arc::from(path),
+                            }]);
+                            self.analysis_v2.wait_for_file_version(file_id, 0).await
+                        }
+                        None => false,
+                    }
+                };
+
+                if !ok {
+                    return Err(tower_lsp::jsonrpc::Error::internal_error());
+                }
+
+                let analysis = self.analysis_v2.snapshot().await;
+                let ir_program = analysis
+                    .ir(file_id)
+                    .ok()
+                    .flatten()
+                    .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
+
+                let semantic_tree = semantic_tree_from_ir(ir_program.as_ref(), true, true);
+                let result = semantic_html_from_tree(
+                    &semantic_tree,
+                    request.theme.as_deref(),
+                    request.compact,
+                );
 
                 Ok(Some(
                     serde_json::to_value(result)
@@ -1348,15 +1434,70 @@ impl LanguageServer for BslLanguageServer {
                         ))
                     })?;
 
-                let documents = self.documents.clone();
-                let result = handle_get_semantic_tree(request, self.get_type_service(), |uri| {
-                    documents
-                        .try_read()
-                        .ok()
-                        .and_then(|docs| docs.get(uri).cloned())
-                })
-                .await
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+                let uri = Url::parse(&request.uri).map_err(|e| {
+                    tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e))
+                })?;
+
+                self.sync_v2_globals().await;
+                let file_id = self.get_or_create_file_id_v2(&uri).await;
+
+                let expected_version = self
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied();
+
+                let ok = if let Some(expected_version) = expected_version {
+                    self.analysis_v2
+                        .wait_for_file_version(file_id, expected_version)
+                        .await
+                } else {
+                    let path = match uri.to_file_path() {
+                        Ok(path) => path.to_string_lossy().to_string(),
+                        Err(_) => uri.to_string(),
+                    };
+                    let file_content = match uri.to_file_path() {
+                        Ok(path) => match read_bsl_file(&path) {
+                            Ok(content) => Some(content),
+                            Err(e) => {
+                                error!("Failed to read file for getSemanticTree: {}", e);
+                                None
+                            }
+                        },
+                        Err(_) => None,
+                    };
+
+                    match file_content {
+                        Some(file_content) => {
+                            self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                                file_id,
+                                text: Arc::from(file_content),
+                                version: 0,
+                                path: Arc::from(path),
+                            }]);
+                            self.analysis_v2.wait_for_file_version(file_id, 0).await
+                        }
+                        None => false,
+                    }
+                };
+
+                if !ok {
+                    return Err(tower_lsp::jsonrpc::Error::internal_error());
+                }
+
+                let analysis = self.analysis_v2.snapshot().await;
+                let ir_program = analysis
+                    .ir(file_id)
+                    .ok()
+                    .flatten()
+                    .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
+
+                let result = semantic_tree_from_ir(
+                    ir_program.as_ref(),
+                    request.include_call_graph,
+                    request.include_flow_sensitive,
+                );
 
                 Ok(Some(
                     serde_json::to_value(result)

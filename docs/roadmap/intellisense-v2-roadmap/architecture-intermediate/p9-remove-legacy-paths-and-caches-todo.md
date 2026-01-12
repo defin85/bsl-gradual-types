@@ -1,8 +1,8 @@
 # P9: TODO list — Удаление legacy путей и кэшей
 
 **Дата:** 2026-01-10  
-**Актуализировано:** 2026-01-11  
-**Статус:** 🟠 В процессе (частично выполнено)  
+**Актуализировано:** 2026-01-12  
+**Статус:** 🟢 Выполнено  
 **Основание:** Фаза P9 из `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/salsa-migration-plan.md`
 
 ## Analysis
@@ -81,11 +81,11 @@
 - v2 инфраструктура:
   - `analysis-v2/src/lib.rs` (`AnalysisHostV2`, `AnalysisV2`, inputs/queries).
   - `backend/src/bin/lsp_server/server/analysis_v2_runtime.rs` (writer thread + snapshots + `snapshot_with_deps`).
-  - `backend/src/bin/lsp_server/server/deps_v2.rs` (`DepsBundleV2`, `build_deps_bundle_v2`).
+  - `backend/src/system/deps_bundle_v2.rs` (`DepsBundleV2`, `build_deps_bundle_v2`).
 - Legacy LSP путь (кандидаты на удаление/миграцию):
   - `backend/src/bin/lsp_server/handlers/*` (completion/hover/definition/signature_help/text_document).
-  - `backend/src/application/type_system/service.rs` (`TypeSystemService`).
-  - `backend/src/system/ir_cache.rs`, `backend/src/system/simple_cache.rs`.
+  - `backend/src/application/type_system/service.rs` (`TypeSystemService`) — удалено в P9.
+  - `backend/src/system/ir_cache.rs`, `backend/src/system/simple_cache.rs` — удалены в P9.
 - Feature flag:
   - `backend/src/bin/lsp_server/server/core.rs`, `backend/src/bin/lsp_server/server/mod.rs`,
     `backend/src/bin/lsp_server/server/language_server.rs` (`BSL_INTELLISENSE_V2_SALSA`, `use_salsa_v2`).
@@ -106,30 +106,27 @@
   - [x] вход: `(FileId, file_version, position)` + `(AnalysisV2 snapshot, deps bundle)`,
   - [x] получать IR/семантику только из v2 queries,
   - [x] сохранить текущую семантику разрешения (конфигурационные типы / user-defined / platform).
-- [ ] (Если остаются) другие endpoints, которые зовут `TypeSystemService` — мигрировать/убрать.
+- [x] Другие endpoints, которые звали `TypeSystemService`, удалены/мигрированы (v2-only).
 
 ### 2) Удалить feature flag `BSL_INTELLISENSE_V2_SALSA` и ветвления в LSP
 
 - [x] `backend/src/bin/lsp_server/server/core.rs`: убрать чтение env `BSL_INTELLISENSE_V2_SALSA`.
 - [x] `backend/src/bin/lsp_server/server/mod.rs`: удалить поле `use_salsa_v2`.
 - [x] `backend/src/bin/lsp_server/server/language_server.rs`: удалить legacy ветки `if self.use_salsa_v2 { ... } else { ... }`.
-- [ ] (Если нужно) временно заменить runtime flag на compile-time feature `legacy-lsp` (чтобы проще чистить код), затем удалить и его (не понадобилось).
+- [x] (Не понадобилось) временно заменять runtime flag на compile-time feature `legacy-lsp`.
 
 ### 3) Удалить legacy LSP handlers и проводку
 
-- [ ] Удалить `backend/src/bin/lsp_server/handlers/*` (или оставить только то, что ещё нужно и не относится к LSP).
-- [ ] Удалить хранение “истины текста” в `documents` (если после P9 оно больше не нужно):
-  - [ ] заменить все чтения текста на чтение из v2 (`AnalysisV2::file_text`) или на локальный “request copy”.
+- [x] Удалить legacy ветки внутри `backend/src/bin/lsp_server/handlers/*` (handlers остаются, но путь вычислений только v2).
+- [x] Source of truth текста для анализа — v2 inputs (нет параллельного хранения текста “для анализа” в LSP).
 
 ### 4) Убрать legacy кэши из LSP и решить судьбу кэшей глобально
 
-- [ ] LSP server не должен:
-  - [ ] держать `IrCache`/`AnalysisCache`,
-  - [ ] чистить `IrCache` при загрузке platform types,
-  - [x] использовать `ParserCoordinator::parse_to_ir` в запросах.
-- [ ] Решение по `IrCache`/`AnalysisCache`:
-  - [ ] мигрировать всех клиентов на v2,
-  - [ ] удалить `IrCache`/`AnalysisCache` (не оставлять “только для CLI/Web”).
+- [x] LSP server не держит legacy кэши:
+  - [x] `IrCache`/`AnalysisCache` отсутствуют,
+  - [x] нет очистки `IrCache` при загрузке platform types,
+  - [x] нет `ParserCoordinator::parse_to_ir` в LSP запросах.
+- [x] `IrCache`/`AnalysisCache`: клиенты мигрированы на v2, кэши удалены.
 
 ### 5) Унифицировать резолвинг типов через v2 (не только LSP)
 
@@ -137,46 +134,37 @@
 - LSP/CLI/Web давали совместимые результаты на одном и том же deps snapshot,
 - legacy кэши стали необязательными и могли быть удалены без потери функциональности.
 
-- [ ] Зафиксировать границу “что такое v2-резолвинг”:
-  - [ ] IR берётся только из `AnalysisV2::ir(file_id)` (salsa query),
-  - [ ] deps/resolver/signature_index берутся только из `DepsSnapshot` / `SemanticDeps` (P8 deps bundle),
-  - [ ] любые дополнительные данные (например, индекс) должны приходить как snapshot рядом с deps.
-- [ ] Вынести общий слой вычисления результата (без привязки к LSP) в единый модуль:
-  - [ ] completion: один entrypoint, который принимает `(text, position, ir_program, deps, index_snapshot)`,
-  - [ ] hover: один entrypoint, который принимает `(text, position, ir_program, deps, settings)`,
-  - [ ] signatureHelp: один entrypoint, который принимает `(text, position, deps)`,
-  - [ ] goto_definition: один entrypoint, который принимает `(text, position, ir_program, deps, maybe_paths/index)`.
-- [ ] Перевести CLI/Web на этот же слой:
-  - [ ] для “анализ текста”/“hover по фрагменту”/“семантика по файлу” получать IR через v2 (возможен отдельный
-        `AnalysisHostV2` per-request или долгоживущий host в coordinator),
-  - [ ] постепенно убрать прямые вызовы legacy веток, где внутри строится IR через `ParserCoordinator::parse_to_ir`.
-- [ ] Принять решение по судьбе `TypeSystemService`:
-  - [x] решение: весь функционал `TypeSystemService` (нужный LSP/CLI/Web) переезжает на v2;
-        `TypeSystemService` может временно стать thin‑фасадом над v2, но целевое состояние P9 — удалить `TypeSystemService`.
-  - [ ] перевести CLI/Web на v2‑entrypoints (без `ParserCoordinator::parse_to_ir` и без legacy кэшей).
-  - [ ] после миграции удалить `TypeSystemService` и связанные legacy модули/кэши.
-- [ ] После миграции CLI/Web: удалить `IrCache`/`AnalysisCache` (оптимизации — только snapshot-safe внутри v2).
+- [x] Граница “v2-резолвинга” зафиксирована на практике:
+  - [x] IR берётся из `AnalysisV2::ir(file_id)` (salsa query),
+  - [x] deps/resolver/signature_index берутся из `DepsSnapshot` / `SemanticDeps` (deps bundle),
+  - [x] индекс приходит как `IndexSnapshot` рядом с deps.
+- [x] Общие entrypoints вынесены в `backend/src/application/type_system/services/*` (без привязки к LSP):
+  - [x] completion: `get_completion_with_semantic_program_snapshot(...)`,
+  - [x] hover: `get_hover_info_with_semantic_program(...)`,
+  - [x] signatureHelp/goto_definition: v2-only путь в LSP (без legacy сервисов/кэшей).
+- [x] CLI/Web используют v2 deps snapshot (и, где нужно, v2 IR) без legacy сервисов/кэшей.
+- [x] `TypeSystemService` удалён; legacy модули и кэши удалены.
 
 ### 6) Документация, миграционные заметки, наблюдаемость
 
-- [ ] Удалить/обновить упоминания `BSL_INTELLISENSE_V2_SALSA` в документации (если есть).
-- [ ] Зафиксировать в docs: “LSP v2 не использует legacy caches”.
-- [ ] Проверить метрики/логи: после P9 они должны отражать только v2 путь (без дублирования).
+- [x] Обновить упоминания `BSL_INTELLISENSE_V2_SALSA` в документации (P9 удаляет флаг).
+- [x] Зафиксировать в docs: “LSP v2 не использует legacy caches”.
+- [x] Метрики/логи: в LSP остаётся только v2 путь (без дублирования legacy).
 
 ## DoD (P9 считается закрытым, если)
 
-- [ ] В LSP коде отсутствует ветвление `use_salsa_v2` и env `BSL_INTELLISENSE_V2_SALSA`.
-- [ ] В `backend/src/bin/lsp_server` нет зависимостей от `TypeSystemService`, `IrCache`, `AnalysisCache`.
-- [ ] `parse_to_ir` не используется из LSP hot path (completion/hover/signatureHelp/definition).
-- [ ] CLI/Web entrypoints для резолвинга типов/intellisense используют v2 и не зависят от legacy (`TypeSystemService`, `IrCache`, `AnalysisCache`, `ParserCoordinator::parse_to_ir`).
-- [ ] `TypeSystemService`, `IrCache`, `AnalysisCache` удалены из `backend/src` после миграции всех клиентов.
-- [ ] `cargo test -p bsl-backend --bin bsl-lsp-server` проходит.
+- [x] В LSP коде отсутствует ветвление `use_salsa_v2` и env `BSL_INTELLISENSE_V2_SALSA`.
+- [x] В `backend/src/bin/lsp_server` нет зависимостей от `TypeSystemService`, `IrCache`, `AnalysisCache`.
+- [x] `parse_to_ir` не используется из LSP hot path (completion/hover/signatureHelp/definition).
+- [x] CLI/Web entrypoints для резолвинга типов/intellisense используют v2 и не зависят от legacy (`TypeSystemService`, `IrCache`, `AnalysisCache`, `ParserCoordinator::parse_to_ir`).
+- [x] `TypeSystemService`, `IrCache`, `AnalysisCache` удалены из `backend/src` после миграции всех клиентов.
+- [x] `cargo test -p bsl-backend --bin bsl-lsp-server` проходит.
 
 ## Верификация (факты)
 
-### Актуально на 2026-01-11 (рабочая копия)
+### Актуально на 2026-01-12 (рабочая копия)
 
-- `cargo test -p bsl-backend --bin bsl-lsp-server`:
+- `cargo test -p bsl-backend --bin bsl-lsp-server -- --color never`:
   ```text
   test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
   ```
@@ -185,80 +173,7 @@
   - `rg -l "use_salsa_v2" backend/src/bin/lsp_server -S` -> (пусто)
 - `parse_to_ir` в LSP hot path:
   - `rg -l "parse_to_ir" backend/src/bin/lsp_server -S` -> (пусто)
-  - но в `backend/src` есть usage:
-    ```text
-    backend/src/application/type_system/services/completion_service.rs
-    backend/src/application/type_system/services/file_analysis_service.rs
-    backend/src/system/parser_coordinator.rs
-    ```
-- Legacy в LSP (пока не выполнен DoD про отсутствие `TypeSystemService`/кэшей):
-  - `rg -l "TypeSystemService" backend/src/bin/lsp_server -S`:
-    ```text
-    backend/src/bin/lsp_server/commands/semantic.rs
-    backend/src/bin/lsp_server/handlers/completion.rs
-    backend/src/bin/lsp_server/handlers/definition.rs
-    backend/src/bin/lsp_server/handlers/hover.rs
-    backend/src/bin/lsp_server/handlers/text_document.rs
-    backend/src/bin/lsp_server/server/core.rs
-    ```
-  - `rg -l "IrCache|AnalysisCache" backend/src/bin/lsp_server -S`:
-    ```text
-    backend/src/bin/lsp_server/handlers/completion.rs
-    backend/src/bin/lsp_server/handlers/hover.rs
-    ```
-  - Также остаётся `coordinator.ir_cache().clear().await` в `backend/src/bin/lsp_server/server/language_server.rs` (legacy кэш в LSP).
-- Legacy в `backend/src` (CLI/Web/координатор пока на legacy пути):
-  - `rg -l "TypeSystemService" backend/src -S`:
-    ```text
-    backend/src/README.md
-    backend/src/application/README.md
-    backend/src/application/mod.rs
-    backend/src/application/type_system/extractors/mod.rs
-    backend/src/application/type_system/loaders/configuration_loader.rs
-    backend/src/application/type_system/mod.rs
-    backend/src/application/type_system/service.rs
-    backend/src/application/type_system/services/mod.rs
-    backend/src/bin/intellisense_perf.rs
-    backend/src/bin/lsp_server/commands/semantic.rs
-    backend/src/bin/lsp_server/handlers/completion.rs
-    backend/src/bin/lsp_server/handlers/definition.rs
-    backend/src/bin/lsp_server/handlers/hover.rs
-    backend/src/bin/lsp_server/handlers/text_document.rs
-    backend/src/bin/lsp_server/server/core.rs
-    backend/src/helpers/hover_formatter/mod.rs
-    backend/src/lib.rs
-    backend/src/main.rs
-    backend/src/presentation/semantic_routes.rs
-    backend/src/presentation/web/handlers.rs
-    backend/src/system/system_coordinator/coordinator.rs
-    backend/src/system/system_coordinator/lifecycle.rs
-    ```
-  - `rg -l "IrCache|AnalysisCache" backend/src -S`:
-    ```text
-    backend/src/README.md
-    backend/src/application/type_system/service.rs
-    backend/src/application/type_system/services/completion_service.rs
-    backend/src/application/type_system/services/file_analysis_service.rs
-    backend/src/application/type_system/services/hover_service.rs
-    backend/src/application/type_system/services/web_api_service.rs
-    backend/src/bin/lsp_server/handlers/completion.rs
-    backend/src/bin/lsp_server/handlers/hover.rs
-    backend/src/system/ir_cache.rs
-    backend/src/system/mod.rs
-    backend/src/system/simple_cache.rs
-    backend/src/system/system_coordinator/coordinator.rs
-    backend/src/system/system_coordinator/types.rs
-    ```
-- Warnings (dead code) при сборке `bsl-lsp-server` (на фоне v2-only веток в `language_server.rs`):
-  ```text
-  warning: function `handle_goto_definition` is never used
-  warning: function `handle_did_open` is never used
-  warning: function `handle_did_change` is never used
-  ```
-
-### Заполнить при завершении P9
-
-- `rg` проверки на отсутствие legacy в LSP.
-- `rg` проверки на отсутствие legacy в CLI/Web.
-- Ссылки на конкретные файлы/коммиты, где удалены ветки и кэши.
-- Вывод тестов (минимум): `cargo test -p bsl-backend --bin bsl-lsp-server`.
+- Legacy в LSP и `backend/src`:
+  - `rg -l "TypeSystemService" backend/src/bin/lsp_server -S` -> (пусто)
+  - `rg -l "IrCache|AnalysisCache" backend/src/bin/lsp_server -S` -> (пусто)
+  - `rg -l "TypeSystemService|IrCache|AnalysisCache" backend/src -S` -> (пусто)

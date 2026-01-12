@@ -82,7 +82,6 @@ pub struct CacheClearReport {
     pub scope: CacheScope,
     pub disk: crate::system::disk_cache::CacheCleanupReport,
     pub ast_cleared: bool,
-    pub ir_cleared: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -100,5 +99,4 @@ pub struct CacheStatsReport {
     pub scope: CacheScope,
     pub disk: DiskCacheStatsReport,
     pub ast: crate::system::ast_cache::AstCacheStats,
-    pub ir: crate::system::ir_cache::IrCacheStats,
 }

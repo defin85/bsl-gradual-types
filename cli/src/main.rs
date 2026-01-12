@@ -9,10 +9,16 @@ mod formatters;
 use clap::Parser;
 use colored::*;
 use std::path::Path;
+use std::sync::Arc;
 
 use args::{CacheCommand, CliArgs, CliOutputFormat, Commands};
 use bsl_shared::engine::AnalysisEngine;
 use formatters::CliFormatter;
+
+use bsl_backend::application::TypeInferenceService;
+use bsl_backend::application::type_system::web_api_service;
+use bsl_backend::system::{SystemCoordinator, build_deps_bundle_v2};
+use bsl_shared::TypeResolver;
 
 #[tokio::main]
 async fn main() {
@@ -161,15 +167,19 @@ async fn complete_command(
         expression.cyan()
     );
 
-    // Phase 4+: используем SystemCoordinator и TypeSystemService
-    let coordinator = bsl_backend::system::SystemCoordinator::new();
+    // v2-only: используем deps bundle (SemanticDeps snapshot) вместо TypeSystemService.
+    let coordinator = SystemCoordinator::new();
     coordinator.start().await?;
 
-    let type_service = coordinator
-        .type_service()
-        .ok_or_else(|| anyhow::anyhow!("TypeSystemService не доступен"))?;
+    let deps_bundle = build_deps_bundle_v2(&coordinator, None, None)?;
+    let deps = deps_bundle.semantic_deps;
+    let resolver = deps
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
+    let inference_service = TypeInferenceService::new(resolver, deps.repository.clone());
 
-    let completions = type_service.get_type_completions(expression).await?;
+    let completions = web_api_service::get_type_completions(&inference_service, expression).await?;
 
     let output = CliFormatter::format_completions(&completions, format, limit);
     println!("{}", output);
@@ -185,16 +195,19 @@ async fn info_command(expression: &str, format: &CliOutputFormat) -> anyhow::Res
         expression.cyan()
     );
 
-    // Phase 4+: используем SystemCoordinator и TypeSystemService
-    let coordinator = bsl_backend::system::SystemCoordinator::new();
+    // v2-only: используем deps bundle (SemanticDeps snapshot) вместо TypeSystemService.
+    let coordinator = SystemCoordinator::new();
     coordinator.start().await?;
 
-    let type_service = coordinator
-        .type_service()
-        .ok_or_else(|| anyhow::anyhow!("TypeSystemService не доступен"))?;
+    let deps_bundle = build_deps_bundle_v2(&coordinator, None, None)?;
+    let deps = deps_bundle.semantic_deps;
+    let resolver = deps
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
+    let inference_service = TypeInferenceService::new(resolver, deps.repository.clone());
 
-    let resolution = type_service
-        .get_type_details(expression)
+    let resolution = web_api_service::get_type_details(&inference_service, expression)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Тип '{}' не найден", expression))?;
 

@@ -8,14 +8,11 @@
 //! - &НаСервере + СоздатьЭлемент() → OK
 //! - Unknown context → OK (не блокируем)
 
-mod shared_test_fixtures;
+mod support;
 
-use bsl_backend::application::TypeSystemService;
-use shared_test_fixtures::get_test_service;
-
-/// Helper: создать TypeSystemService для тестов WITH PLATFORM TYPES LOADED
-fn create_test_service() -> &'static TypeSystemService {
-    get_test_service()
+fn semantic_diagnostics(code: &str) -> Vec<bsl_shared::domain::types::TypeDiagnostic> {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    support::semantic_diagnostics_for_code(deps_bundle.as_ref(), "inline.bsl", code)
 }
 
 /// Проверяет что код НЕ содержит semantic/context warnings
@@ -66,8 +63,6 @@ fn assert_single_context_warning(
 // ========================================
 #[tokio::test]
 async fn test_server_only_method_in_client_context_warning() {
-    let service = create_test_service();
-
     let code = r#"
         &НаКлиенте
         Процедура Test()
@@ -75,10 +70,7 @@ async fn test_server_only_method_in_client_context_warning() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok(), "validate_semantics должна возвращать Ok");
-
-    let diagnostics = result.unwrap();
+    let diagnostics = semantic_diagnostics(code);
 
     // Должен быть 1 warning для НайтиПоКоду (ServerOnly метод)
     assert_single_context_warning(&diagnostics, "НайтиПоКоду");
@@ -89,8 +81,6 @@ async fn test_server_only_method_in_client_context_warning() {
 // ========================================
 #[tokio::test]
 async fn test_server_method_in_server_context_no_warning() {
-    let service = create_test_service();
-
     let code = r#"
         &НаСервере
         Процедура Test()
@@ -98,10 +88,7 @@ async fn test_server_method_in_server_context_no_warning() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok());
-
-    let diagnostics = result.unwrap();
+    let diagnostics = semantic_diagnostics(code);
 
     // Не должно быть warnings (серверный контекст)
     assert_no_context_warnings(&diagnostics);
@@ -112,8 +99,6 @@ async fn test_server_method_in_server_context_no_warning() {
 // ========================================
 #[tokio::test]
 async fn test_universal_method_in_any_context() {
-    let service = create_test_service();
-
     let code = r#"
         &НаКлиенте
         Процедура Test()
@@ -121,10 +106,7 @@ async fn test_universal_method_in_any_context() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok());
-
-    let diagnostics = result.unwrap();
+    let diagnostics = semantic_diagnostics(code);
 
     // Не должно быть warnings (ПустаяСсылка - Universal)
     assert_no_context_warnings(&diagnostics);
@@ -135,8 +117,6 @@ async fn test_universal_method_in_any_context() {
 // ========================================
 #[tokio::test]
 async fn test_multiple_context_violations() {
-    let service = create_test_service();
-
     let code = r#"
         &НаКлиенте
         Процедура Test()
@@ -146,10 +126,7 @@ async fn test_multiple_context_violations() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok());
-
-    let diagnostics = result.unwrap();
+    let diagnostics = semantic_diagnostics(code);
 
     use bsl_shared::domain::types::DiagnosticSeverity;
 
@@ -176,8 +153,6 @@ async fn test_multiple_context_violations() {
 // ========================================
 #[tokio::test]
 async fn test_unknown_context_no_warning() {
-    let service = create_test_service();
-
     // Без директивы - Unknown контекст
     let code = r#"
         Процедура Test()
@@ -185,10 +160,7 @@ async fn test_unknown_context_no_warning() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok());
-
-    let diagnostics = result.unwrap();
+    let diagnostics = semantic_diagnostics(code);
 
     // Если контекст неизвестен - не показываем warning
     assert_no_context_warnings(&diagnostics);
@@ -199,8 +171,6 @@ async fn test_unknown_context_no_warning() {
 // ========================================
 #[tokio::test]
 async fn test_server_no_context_allows_all() {
-    let service = create_test_service();
-
     let code = r#"
         &НаСервереБезКонтекста
         Процедура Test()
@@ -208,10 +178,7 @@ async fn test_server_no_context_allows_all() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok());
-
-    let diagnostics = result.unwrap();
+    let diagnostics = semantic_diagnostics(code);
 
     // Не должно быть warnings (серверный контекст)
     assert_no_context_warnings(&diagnostics);
@@ -222,8 +189,6 @@ async fn test_server_no_context_allows_all() {
 // ========================================
 #[tokio::test]
 async fn test_universal_context_blocks_server_only() {
-    let service = create_test_service();
-
     let code = r#"
         &НаКлиентеНаСервереБезКонтекста
         Процедура Test()
@@ -231,10 +196,7 @@ async fn test_universal_context_blocks_server_only() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok());
-
-    let diagnostics = result.unwrap();
+    let diagnostics = semantic_diagnostics(code);
 
     // Должен быть warning (универсальный контекст запрещает ServerOnly)
     assert_single_context_warning(&diagnostics, "НайтиПоКоду");
@@ -245,8 +207,6 @@ async fn test_universal_context_blocks_server_only() {
 // ========================================
 #[tokio::test]
 async fn test_document_methods_context_validation() {
-    let service = create_test_service();
-
     let code = r#"
         &НаКлиенте
         Процедура Test()
@@ -254,10 +214,7 @@ async fn test_document_methods_context_validation() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok());
-
-    let diagnostics = result.unwrap();
+    let diagnostics = semantic_diagnostics(code);
 
     // Если СоздатьДокумент ServerOnly - должен быть warning
     // (зависит от platform types)
@@ -273,8 +230,6 @@ async fn test_document_methods_context_validation() {
 // ========================================
 #[tokio::test]
 async fn test_nested_function_inherits_context() {
-    let service = create_test_service();
-
     // Пока что просто проверяем что не падает
     let code = r#"
         &НаКлиенте
@@ -286,8 +241,7 @@ async fn test_nested_function_inherits_context() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok(), "Не должно падать на nested functions");
+    let _ = semantic_diagnostics(code);
 }
 
 // ========================================
@@ -295,8 +249,6 @@ async fn test_nested_function_inherits_context() {
 // ========================================
 #[tokio::test]
 async fn test_method_chain_context_validation() {
-    let service = create_test_service();
-
     let code = r#"
         &НаКлиенте
         Процедура Test()
@@ -304,10 +256,7 @@ async fn test_method_chain_context_validation() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok());
-
-    let diagnostics = result.unwrap();
+    let diagnostics = semantic_diagnostics(code);
 
     // Должен быть warning для СоздатьЭлемент
     assert_single_context_warning(&diagnostics, "СоздатьЭлемент");
@@ -318,8 +267,6 @@ async fn test_method_chain_context_validation() {
 // ========================================
 #[tokio::test]
 async fn test_diagnostic_severity_is_warning() {
-    let service = create_test_service();
-
     let code = r#"
         &НаКлиенте
         Процедура Test()
@@ -327,10 +274,7 @@ async fn test_diagnostic_severity_is_warning() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok());
-
-    let diagnostics = result.unwrap();
+    let diagnostics = semantic_diagnostics(code);
 
     use bsl_shared::domain::types::DiagnosticSeverity;
 
@@ -353,8 +297,6 @@ async fn test_diagnostic_severity_is_warning() {
 // ========================================
 #[tokio::test]
 async fn test_english_directive_names() {
-    let service = create_test_service();
-
     // Пока что просто проверяем что не падает
     let code = r#"
         Процедура Test()
@@ -362,8 +304,7 @@ async fn test_english_directive_names() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok(), "Не должно падать на английские директивы");
+    let _ = semantic_diagnostics(code);
 }
 
 // ========================================
@@ -371,8 +312,6 @@ async fn test_english_directive_names() {
 // ========================================
 #[tokio::test]
 async fn test_case_insensitive_directives() {
-    let service = create_test_service();
-
     // Пока что просто проверяем что не падает
     let code = r#"
         &НАКЛИЕНТЕ
@@ -381,8 +320,7 @@ async fn test_case_insensitive_directives() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok(), "Не должно падать на разный регистр");
+    let _ = semantic_diagnostics(code);
 }
 
 // ========================================
@@ -390,8 +328,6 @@ async fn test_case_insensitive_directives() {
 // ========================================
 #[tokio::test]
 async fn test_no_false_positives_for_custom_methods() {
-    let service = create_test_service();
-
     // Кастомный метод пользователя
     let code = r#"
         &НаКлиенте
@@ -404,10 +340,7 @@ async fn test_no_false_positives_for_custom_methods() {
         КонецФункции
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok());
-
-    let diagnostics = result.unwrap();
+    let diagnostics = semantic_diagnostics(code);
 
     // Не должно быть warnings для кастомных методов
     assert!(
@@ -423,8 +356,6 @@ async fn test_no_false_positives_for_custom_methods() {
 // ========================================
 #[tokio::test]
 async fn test_diagnostic_location_accuracy() {
-    let service = create_test_service();
-
     let code = r#"
         &НаКлиенте
         Процедура Test()
@@ -432,10 +363,7 @@ async fn test_diagnostic_location_accuracy() {
         КонецПроцедуры
     "#;
 
-    let result = service.validate_semantics(code, None).await;
-    assert!(result.is_ok());
-
-    let diagnostics = result.unwrap();
+    let diagnostics = semantic_diagnostics(code);
 
     use bsl_shared::domain::types::DiagnosticSeverity;
 
@@ -463,8 +391,6 @@ async fn test_diagnostic_location_accuracy() {
 // ========================================
 #[tokio::test]
 async fn test_multiple_files_different_contexts() {
-    let service = create_test_service();
-
     // Просто проверяем что сервис может обработать несколько запросов
     let code1 = r#"
         &НаКлиенте
@@ -480,14 +406,8 @@ async fn test_multiple_files_different_contexts() {
         КонецПроцедуры
     "#;
 
-    let result1 = service.validate_semantics(code1, None).await;
-    let result2 = service.validate_semantics(code2, None).await;
-
-    assert!(result1.is_ok());
-    assert!(result2.is_ok());
-
-    let diag1 = result1.unwrap();
-    let diag2 = result2.unwrap();
+    let diag1 = semantic_diagnostics(code1);
+    let diag2 = semantic_diagnostics(code2);
 
     // code1 должен иметь warning, code2 - нет
     assert!(diag1.iter().any(|d| d.message.contains("недоступен")));

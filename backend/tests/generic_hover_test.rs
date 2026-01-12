@@ -5,26 +5,7 @@
 //! - Отображение методов коллекции с подставленными типами
 //! - Отображение атрибутов строки табличной части
 
-use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::SystemCoordinator;
-use std::sync::Arc;
-
-/// Setup функция для создания TypeSystemService с загруженными типами платформы
-async fn setup_type_system_service() -> Arc<TypeSystemService> {
-    // Создаём SystemCoordinator, который инициализирует все компоненты
-    let coordinator = SystemCoordinator::new();
-
-    // Инициализируем систему (загрузка типов платформы)
-    coordinator
-        .start()
-        .await
-        .expect("Failed to start SystemCoordinator");
-
-    // Получаем TypeSystemService из координатора
-    coordinator
-        .type_service()
-        .expect("TypeSystemService should be initialized after start()")
-}
+mod support;
 
 #[tokio::test]
 async fn test_generic_tabular_section_hover() {
@@ -37,13 +18,10 @@ async fn test_generic_tabular_section_hover() {
 КонецПроцедуры
     "#;
 
-    let service = setup_type_system_service().await;
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
 
     // Hover на переменной "ТабличнаяЧасть" (строка 2)
-    let hover = service
-        .get_hover_info(code, 2, 5, None)
-        .await
-        .expect("get_hover_info should succeed");
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 5);
 
     // Проверяем что hover не пустой
     assert!(
@@ -77,13 +55,10 @@ async fn test_generic_array_hover() {
 КонецФункции
     "#;
 
-    let service = setup_type_system_service().await;
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
 
     // Hover на переменной "МойМассив" (строка 2)
-    let hover = service
-        .get_hover_info(code, 2, 5, None)
-        .await
-        .expect("get_hover_info should succeed");
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 5);
 
     assert!(
         hover.is_some(),
@@ -119,13 +94,10 @@ async fn test_generic_method_return_type() {
 КонецПроцедуры
     "#;
 
-    let service = setup_type_system_service().await;
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
 
     // Hover на переменной "Элемент" (строка 6)
-    let hover = service
-        .get_hover_info(code, 6, 5, None)
-        .await
-        .expect("get_hover_info should succeed");
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 6, 5);
 
     // Проверяем что hover не пустой
     if let Some(hover_text) = hover {
@@ -153,8 +125,8 @@ async fn test_format_generic_hover_directly() {
 КонецПроцедуры
     "#;
 
-    let service = setup_type_system_service().await;
-    let hover = service.get_hover_info(code, 2, 5, None).await.unwrap();
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 5);
 
     if let Some(hover_text) = hover {
         // Проверяем структуру hover:

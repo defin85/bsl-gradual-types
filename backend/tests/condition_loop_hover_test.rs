@@ -1,7 +1,4 @@
-#[path = "shared_test_fixtures.rs"]
-mod shared_test_fixtures;
-
-use shared_test_fixtures::get_test_service;
+mod support;
 
 const CODE: &str = "Процедура Тест()\n\
     МассивДанных = Новый Массив();\n\
@@ -20,11 +17,8 @@ const CODE: &str = "Процедура Тест()\n\
 КонецПроцедуры";
 
 async fn hover_at(line: u32, column: u32) -> String {
-    let service = get_test_service();
-    service
-        .get_hover_info(CODE, line, column, None)
-        .await
-        .expect("hover request failed")
+    let deps_bundle = support::deps_bundle_v2_fallback();
+    support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", CODE, line, column)
         .expect("hover should exist")
 }
 

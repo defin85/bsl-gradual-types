@@ -9,14 +9,6 @@ use serde_json::Value;
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat};
 use bsl_shared::domain::{CompletionItem as DomainCompletionItem, CompletionKind as DomainCompletionKind};
 
-use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::SystemCoordinator;
-use bsl_shared::domain::repository::InMemoryTypeRepository;
-use std::sync::Arc;
-
-#[path = "shared_test_fixtures.rs"]
-mod shared_test_fixtures;
-
 pub const UPDATE_GOLDEN_ENV: &str = "UPDATE_GOLDEN";
 
 pub fn fixtures_dir() -> PathBuf {
@@ -120,18 +112,6 @@ pub fn find_marker_position(content: &str, marker: &str) -> (u32, u32) {
     let last_line = before.lines().last().unwrap_or("");
     let column = last_line.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
     (line, column)
-}
-
-pub fn get_test_service() -> &'static TypeSystemService {
-    shared_test_fixtures::get_test_service()
-}
-
-pub fn get_test_repository() -> Arc<InMemoryTypeRepository> {
-    shared_test_fixtures::get_test_repository()
-}
-
-pub fn get_config_coordinator() -> &'static SystemCoordinator {
-    shared_test_fixtures::get_config_coordinator()
 }
 
 fn completion_kind(kind: Option<CompletionItemKind>) -> Option<&'static str> {

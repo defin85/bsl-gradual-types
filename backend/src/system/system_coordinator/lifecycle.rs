@@ -156,25 +156,18 @@ impl SystemCoordinator {
             ..StartupProgressDto::default()
         });
 
-        // КРИТИЧЕСКИ ВАЖНО: Очищаем кеши при повторной инициализации
-        // Это гарантирует, что TypeSystemService получит НОВЫЙ AnalysisEngine с НОВЫМ TypeRepository
-        // Соблюдаем lock order convention: analysis_engine_cache -> type_service_cache
+        // КРИТИЧЕСКИ ВАЖНО: Очищаем кеш при повторной инициализации
+        // Это гарантирует, что новая инициализация получит НОВЫЙ AnalysisEngine с НОВЫМ TypeRepository
         {
             let mut engine_cache = self.analysis_engine_cache.write()
                 .unwrap_or_else(|poisoned| {
                     warn!("Analysis engine cache RwLock poisoned (write), recovering data. This indicates a panic in another thread.");
                     poisoned.into_inner()
                 });
-            let mut service_cache = self.type_service_cache.write()
-                .unwrap_or_else(|poisoned| {
-                    warn!("Type service cache RwLock poisoned (write), recovering data. This indicates a panic in another thread.");
-                    poisoned.into_inner()
-                });
 
-            if engine_cache.is_some() || service_cache.is_some() {
-                info!("[BLOCKING THREAD] Очищаем кеши AnalysisEngine и TypeSystemService для повторной инициализации");
+            if engine_cache.is_some() {
+                info!("[BLOCKING THREAD] Очищаем кеш AnalysisEngine для повторной инициализации");
                 *engine_cache = None;
-                *service_cache = None;
             }
         }
 
@@ -440,9 +433,6 @@ impl SystemCoordinator {
                 }
             }
         }
-
-        info!("[BLOCKING THREAD] SystemCoordinator: прогрев кеша...");
-        self.cache.warm_cache()?;
 
         self.set_startup_progress(StartupProgressDto {
             phase: "Готово".to_string(),

@@ -16,8 +16,8 @@ Application layer содержит высокоуровневую логику �
 
 ```
 application/
-├── type_system/              # Модульная архитектура TypeSystemService
-│   ├── service.rs            # TypeSystemService - единая точка входа
+├── type_system/              # Entry points и services для LSP/Web/CLI
+│   ├── mod.rs                # re-exports / public API
 │   ├── services/             # LSP services (hover, completion, etc.)
 │   ├── loaders/              # Загрузчики метаданных
 │   ├── extractors/           # Извлечение информации из AST/IR
@@ -35,50 +35,25 @@ application/
 
 ## Ключевые компоненты
 
-### TypeSystemService
+### type_system (entrypoints)
 
-**Файл:** `type_system/service.rs`
+**Папка:** `type_system/`
 
-Единая точка входа для всех клиентов (LSP, Web API, CLI).
+Канонический набор entrypoints и services для LSP/Web/CLI.
+В IntelliSense v2 путь вычисления работает на:
+- `SemanticProgram` (IR) из `bsl-analysis-v2` (salsa queries),
+- `DepsBundleV2` / `SemanticDeps` (атомарный deps snapshot),
+- `IndexSnapshot` (snapshot индекса).
 
-**Основные методы:**
+**Основные функции:**
+- `get_hover_info_with_semantic_program(...) -> Option<String>`
+- `get_completion_with_semantic_program_snapshot(...) -> Result<CompletionResult>`
+- `web_api_service::*` — helpers для Web API (DTO/semantic tree/etc.)
 
-```rust
-// Hover информация
-pub fn get_hover(
-    &self,
-    file_uri: &str,
-    position: Position
-) -> Result<Option<Hover>>
-
-// Автодополнение
-pub fn get_completion(
-    &self,
-    file_uri: &str,
-    position: Position,
-    context: CompletionContext
-) -> Result<Vec<CompletionItem>>
-
-// Семантическая валидация
-pub fn validate_semantics(
-    &self,
-    file_uri: &str,
-    ast: &Node
-) -> Vec<SemanticError>
-
-// Определение типа по позиции
-pub fn get_type_at_position(
-    &self,
-    file_uri: &str,
-    position: Position
-) -> Result<Option<TypeInfo>>
-```
-
-**Архитектура:** Модульная (после Milestone 4.1)
-- `service.rs` - core service
-- `services/` - специализированные сервисы (hover, completion, diagnostics, etc.)
-- `loaders/` - загрузка TypeRepository и метаданных
-- `extractors/` - извлечение данных из AST/IR
+**Структура:**
+- `services/` - hover/completion/web api
+- `loaders/` - загрузка TypeRepository/метаданных
+- `extractors/` - извлечение данных из source/IR
 - `formatters/` - форматирование ответов
 
 ### SemanticValidationVisitor
@@ -173,11 +148,9 @@ LSP textDocument/hover
       ↓
 bin/lsp_server/handlers/hover.rs
       ↓
-TypeSystemService::get_hover()
+analysis_v2_runtime.snapshot() + ir(file_id)
       ↓
-HoverService::provide_hover()
-      ↓
-TypeResolver::resolve_type()
+application::get_hover_info_with_semantic_program()
 ```
 
 **2. Completion** (`type_system/services/completion_service.rs`):
@@ -187,25 +160,23 @@ LSP textDocument/completion
       ↓
 bin/lsp_server/handlers/completion.rs
       ↓
-TypeSystemService::get_completion()
+analysis_v2_runtime.snapshot() + ir(file_id)
       ↓
-CompletionService::provide_completion()
-      ↓
-TypeRepository::search_types()
+application::get_completion_with_semantic_program_snapshot()
 ```
 
-**3. Diagnostics** (`type_system/services/diagnostics_service.rs`):
+**3. Diagnostics** (v2, queries):
 
 ```
 LSP textDocument/didOpen
       ↓
 bin/lsp_server/handlers/text_document.rs
       ↓
-TypeSystemService::validate_semantics()
+analysis_v2_runtime.snapshot()
       ↓
-SemanticValidationVisitor::visit()
+analysis.syntax_diagnostics(file_id) + analysis.semantic_diagnostics(file_id)
       ↓
-Собранные SemanticError → LSP Diagnostic
+DTO/LSP Diagnostic
 ```
 
 ### Для Web API
@@ -215,9 +186,9 @@ SemanticValidationVisitor::visit()
 ```
 Web API endpoint
       ↓
-presentation/web_api/handlers/hover.rs
+presentation/web/handlers.rs
       ↓
-TypeSystemService::get_hover()
+web_api_service + v2 snapshot
       ↓
 JSON response
 ```
@@ -227,9 +198,9 @@ JSON response
 ```
 Web API endpoint
       ↓
-presentation/web_api/handlers/diagnostics.rs
+presentation/web/handlers.rs
       ↓
-TypeSystemService::validate_semantics()
+v2 snapshot + diagnostics queries
       ↓
 JSON response
 ```
@@ -250,11 +221,13 @@ let result = analysis_engine.analyze_program(&ir_program)?;
 ### С System Layer
 
 ```rust
-use crate::system::SystemCoordinator;
+use crate::system::{SystemCoordinator, build_deps_bundle_v2};
 
-// SystemCoordinator координирует Application services
-let coordinator = SystemCoordinator::new(config);
-let type_service = coordinator.type_system_service();
+// SystemCoordinator инициализирует TypeRepository/TypeResolver (startup),
+// затем строится deps snapshot для IntelliSense v2.
+let coordinator = SystemCoordinator::new();
+coordinator.start().await?;
+let deps_bundle = build_deps_bundle_v2(&coordinator, None, None)?;
 ```
 
 ### С Data Layer
@@ -263,16 +236,16 @@ let type_service = coordinator.type_system_service();
 use crate::data::loaders::{ConfigLoader, SyntaxHelperLoader};
 
 // Application НЕ использует Data напрямую
-// Data → Domain (TypeRepository) → Application (TypeSystemService)
+// Data → Domain (TypeRepository) → Application (entrypoints/services)
 ```
 
 ## Ключевые файлы для изучения
 
 **В порядке приоритета:**
 
-1. **`type_system/service.rs`** - начните здесь
-   - Главная точка входа
-   - Все публичные методы LSP/API
+1. **`type_system/mod.rs`** - начните здесь
+   - Публичные entrypoints и ре-экспорты
+   - Ссылки на `services/*`
 
 2. **`semantic_validation_visitor/visitor.rs`** - семантические проверки
    - Как работает валидация
@@ -309,12 +282,12 @@ impl MyService {
 }
 ```
 
-**2. Добавить метод в TypeSystemService:**
+**2. Добавить публичный entrypoint:**
 
 ```rust
-// type_system/service.rs
-pub fn my_feature(&self, params: MyParams) -> Result<MyResult> {
-    self.my_service.provide_my_feature(params)
+// type_system/mod.rs (ре-экспорт) или services/<...>.rs
+pub async fn my_feature(/* deps + ir + params */) -> Result<MyResult> {
+    // ...
 }
 ```
 
@@ -323,14 +296,13 @@ pub fn my_feature(&self, params: MyParams) -> Result<MyResult> {
 ```rust
 // bin/lsp_server/handlers/my_feature.rs
 pub fn handle_my_feature(
-    service: &TypeSystemService,
     params: lsp_types::MyParams
 ) -> Result<lsp_types::MyResult> {
     // Конвертация LSP types → internal types
     let internal_params = convert_params(params);
 
-    // Вызов service
-    let result = service.my_feature(internal_params)?;
+    // Вызов entrypoint (на v2 снапшоте)
+    let result = my_feature(internal_params)?;
 
     // Конвертация internal types → LSP types
     Ok(convert_result(result))
@@ -370,7 +342,7 @@ impl SemanticValidationVisitor {
 **3. Добавить тест:**
 
 ```rust
-// backend/tests/semantic_diagnostics_lsp_test.rs
+// backend/tests/context_diagnostics_lsp_test.rs
 #[tokio::test]
 async fn test_my_new_error() {
     let diagnostics = validate_code(r#"
@@ -391,7 +363,7 @@ async fn test_my_new_error() {
 ## Статус
 
 **Application Layer статус:**
-- ✅ TypeSystemService (модульная архитектура, Milestone 4.1)
+- ✅ type_system entrypoints (v2-only path)
 - ✅ SemanticValidationVisitor (MVP, Milestone 3.7)
 - ✅ AstToIrConverter (реализован, Milestone 2.8)
 - ✅ LSP Services: hover, completion, diagnostics, signature help

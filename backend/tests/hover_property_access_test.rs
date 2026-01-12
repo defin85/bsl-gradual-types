@@ -1,11 +1,10 @@
-mod shared_test_fixtures;
-
 use bsl_backend::helpers::hover_formatter::HoverFormatConfig;
-use shared_test_fixtures::get_test_service;
+
+mod support;
 
 #[tokio::test]
 async fn test_hover_on_property_name_shows_property_type() {
-    let service = get_test_service();
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
 
     let code = "Процедура Тест()\n\
     ТаблЗнч = Новый ТаблицаЗначений;\n\
@@ -14,11 +13,15 @@ async fn test_hover_on_property_name_shows_property_type() {
 
     // line/column: 0-based, column UTF-16.
     // В строке 'КолонкиТаблЗнач = ТаблЗнч.Колонки;' имя свойства начинается с колонки 30.
-    let hover = service
-        .get_hover_info(code, 2, 30, Some(HoverFormatConfig::default()))
-        .await
-        .expect("hover request failed")
-        .expect("hover should exist");
+    let hover = support::hover_for_code_with_config(
+        deps_bundle.as_ref(),
+        "inline.bsl",
+        code,
+        2,
+        30,
+        Some(HoverFormatConfig::default()),
+    )
+    .expect("hover should exist");
 
     assert!(
         hover.contains("**Свойство:**"),

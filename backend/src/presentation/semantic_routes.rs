@@ -5,12 +5,13 @@ use axum::{
     routing::get,
     Router,
 };
+use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::application::TypeSystemService;
 use crate::presentation::semantic_html_generator::{generate_semantic_html, RenderOptions, Theme};
 use crate::system::fs_utils::read_bsl_file;
+use crate::system::DepsBundleV2;
 
 /// Query параметры для semantic API
 #[derive(Debug, Deserialize)]
@@ -54,10 +55,10 @@ pub struct ErrorResponse {
 /// GET /api/semantic/test.bsl?format=json
 /// GET /api/semantic/test.bsl?format=html&theme=dark
 /// ```
-pub fn semantic_routes(type_service: Arc<TypeSystemService>) -> Router {
+pub fn semantic_routes(deps_bundle_v2: Arc<DepsBundleV2>) -> Router {
     Router::new()
         .route("/api/semantic/:file_path", get(get_semantic_tree))
-        .with_state(type_service)
+        .with_state(deps_bundle_v2)
 }
 
 /// Handler для получения семантического дерева
@@ -79,7 +80,7 @@ pub fn semantic_routes(type_service: Arc<TypeSystemService>) -> Router {
 async fn get_semantic_tree(
     Path(file_path): Path<String>,
     Query(params): Query<SemanticQuery>,
-    State(type_service): State<Arc<TypeSystemService>>,
+    State(deps_bundle_v2): State<Arc<DepsBundleV2>>,
 ) -> impl IntoResponse {
     // Step 1: Read the file
     let source = match read_bsl_file(std::path::Path::new(&file_path)) {
@@ -89,16 +90,38 @@ async fn get_semantic_tree(
         }
     };
 
-    // Step 2: Parse to SemanticProgram
-    let program = match type_service.parse_semantic_program(&source).await {
-        Ok(p) => p,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Parse error: {}", e),
-            )
-                .into_response()
-        }
+    // Step 2: Parse to SemanticProgram via v2 (salsa)
+    let deps_bundle = deps_bundle_v2.clone();
+    let source_for_ir = source.clone();
+    let file_path_for_ir = file_path.clone();
+
+    let program = match tokio::task::spawn_blocking(move || -> anyhow::Result<Arc<bsl_shared::ir::SemanticProgram>> {
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: deps_bundle.deps_id.clone(),
+            deps: deps_bundle.semantic_deps.clone(),
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: bsl_analysis_v2::SettingsId::from_hash(""),
+            diagnostics_detail_level: bsl_shared::formatting::DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(source_for_ir),
+            version: 0,
+            path: Arc::from(file_path_for_ir),
+        });
+
+        let analysis = host.analysis();
+        analysis
+            .ir(V2FileId(1))
+            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))
+    })
+    .await {
+        Ok(Ok(program)) => program,
+        Ok(Err(e)) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Parse error: {}", e)).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
 
     // Step 3: Generate HTML or JSON
@@ -111,7 +134,7 @@ async fn get_semantic_tree(
             theme,
             compact: params.compact,
         };
-        let html = generate_semantic_html(&program, &file_path, options);
+        let html = generate_semantic_html(program.as_ref(), &file_path, options);
         (StatusCode::OK, Html(html)).into_response()
     } else {
         // JSON response - using public API methods for encapsulation

@@ -1,7 +1,7 @@
 //! Extractors - stateless helper functions for symbol and type extraction
 //!
 //! These functions extract information from source code and AST without
-//! requiring access to TypeSystemService state.
+//! requiring access to any stateful application service.
 
 pub mod symbol_extractor;
 pub mod type_extractor;

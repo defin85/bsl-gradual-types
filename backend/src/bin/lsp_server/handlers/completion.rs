@@ -5,11 +5,13 @@
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 use serde_json::json;
-use tracing::{error, info};
+use tracing::error;
 
-use bsl_backend::application::TypeSystemService;
 use bsl_backend::application::get_completion_with_semantic_program_snapshot;
 use bsl_backend::application::CompletionStats;
+use bsl_backend::application::type_system::{
+    build_call_snippet, resolve_method_completion, resolve_type_details,
+};
 use bsl_backend::system::IndexSnapshot;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::resolver::TypeResolver;
@@ -86,103 +88,81 @@ pub async fn handle_completion_v2(
     }
 }
 
-/// Handle textDocument/completion request
-pub async fn handle_completion(
-    file_content: &str,
-    position: Position,
-    file_uri: &Url,
-    type_service: Option<Arc<TypeSystemService>>,
-    snippet_support: bool,
-) -> Option<CompletionResponseWithStats> {
-    info!(
-        "Completion requested at {}:{}",
-        position.line, position.character
-    );
-
-    if let Some(service) = type_service {
-        match service
-            .get_completion(
-                file_content,
-                position.line,
-                position.character,
-                Some(file_uri.as_str()),
-            )
-            .await
-        {
-            Ok(result) => {
-                let lsp_completions: Vec<CompletionItem> = result
-                    .items
-                    .into_iter()
-                    .map(|candidate| {
-                        to_lsp_completion(
-                            candidate.item,
-                            candidate.owner_type,
-                            candidate.origin_sources,
-                            snippet_support,
-                        )
-                    })
-                    .collect();
-                info!("Returning {} completions", lsp_completions.len());
-                Some(CompletionResponseWithStats {
-                    response: CompletionResponse::List(CompletionList {
-                        is_incomplete: result.is_incomplete,
-                        items: lsp_completions,
-                    }),
-                    stats: Some(result.stats),
-                    had_error: false,
-                })
-            }
-            Err(e) => {
-                error!("Failed to get completions: {}", e);
-                Some(CompletionResponseWithStats {
-                    response: CompletionResponse::List(CompletionList {
-                        is_incomplete: false,
-                        items: vec![],
-                    }),
-                    stats: None,
-                    had_error: true,
-                })
-            }
-        }
-    } else {
-        Some(CompletionResponseWithStats {
-            response: CompletionResponse::List(CompletionList {
-                is_incomplete: false,
-                items: vec![],
-            }),
-            stats: None,
-            had_error: false,
-        })
-    }
-}
-
 pub async fn handle_completion_resolve(
     mut item: CompletionItem,
-    type_service: Option<Arc<TypeSystemService>>,
+    deps: Option<Arc<bsl_analysis_v2::SemanticDeps>>,
     snippet_support: bool,
 ) -> CompletionItem {
     if item.detail.is_some() && item.documentation.is_some() && !snippet_support {
         return item;
     }
 
-    let service = match type_service {
-        Some(service) => service,
+    let deps = match deps {
+        Some(deps) => deps,
         None => return item,
     };
 
+    let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+
     let (kind, owner_type) = parse_completion_data(&item);
     let resolved = match (kind.as_deref(), owner_type.as_deref()) {
-        (Some("method"), Some(owner)) => service
-            .resolve_method_completion(owner, &item.label, snippet_support)
-            .map(|details| (details.detail, details.documentation, details.insert_text)),
-        (Some("function"), _) => service
-            .resolve_function_completion(&item.label, snippet_support)
-            .map(|details| (details.detail, details.documentation, details.insert_text)),
-        (Some("type"), _) => service
-            .resolve_type_completion(&item.label)
+        (Some("method"), Some(owner)) => {
+            if let Some(signature) =
+                deps.repository.find_method_signature(Some(owner), &item.label)
+            {
+                let detail = signature
+                    .return_type
+                    .clone()
+                    .filter(|value| !value.is_empty());
+                let documentation = signature.description.clone();
+                let params: Vec<(String, bool)> = signature
+                    .params
+                    .iter()
+                    .map(|param| (param.name.clone(), param.is_optional))
+                    .collect();
+                let insert_text = if snippet_support {
+                    build_call_snippet(&signature.name, &params)
+                } else {
+                    None
+                };
+
+                Some((detail, documentation, insert_text))
+            } else {
+                resolve_method_completion(
+                    owner,
+                    &item.label,
+                    &metadata_lookup,
+                    snippet_support,
+                )
+                .map(|details| (details.detail, details.documentation, details.insert_text))
+            }
+        }
+        (Some("function"), _) => {
+            deps.repository
+                .find_method_signature(None, &item.label)
+                .map(|signature| {
+                    let detail = signature
+                        .return_type
+                        .clone()
+                        .filter(|value| !value.is_empty());
+                    let documentation = signature.description.clone();
+                    let params: Vec<(String, bool)> = signature
+                        .params
+                        .iter()
+                        .map(|param| (param.name.clone(), param.is_optional))
+                        .collect();
+                    let insert_text = if snippet_support {
+                        build_call_snippet(&signature.name, &params)
+                    } else {
+                        None
+                    };
+
+                    (detail, documentation, insert_text)
+                })
+        }
+        (Some("type"), _) => resolve_type_details(&item.label, &metadata_lookup)
             .map(|(detail, documentation)| (detail, documentation, None)),
-        _ => service
-            .resolve_type_completion(&item.label)
+        _ => resolve_type_details(&item.label, &metadata_lookup)
             .map(|(detail, documentation)| (detail, documentation, None)),
     };
 
@@ -311,12 +291,11 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use bsl_backend::system::{AnalysisCache, IntellisenseIndexStore, IrCache, ParserCoordinator};
+    use bsl_backend::system::IntellisenseIndexStore;
     use bsl_shared::domain::repository::InMemoryTypeRepository;
     use bsl_shared::TypeRepository;
     use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource};
     use bsl_shared::domain::types::{ParameterInfo, RawTypeData, RawDataSource};
-    use bsl_shared::engine::AnalysisEngine;
     use bsl_shared::TypeResolver;
     use tower_lsp::lsp_types::Url;
 
@@ -351,7 +330,6 @@ mod tests {
     }
 
     struct TestEnv {
-        service: Arc<TypeSystemService>,
         index: Arc<IntellisenseIndexStore>,
         deps: Arc<bsl_analysis_v2::SemanticDeps>,
     }
@@ -417,29 +395,14 @@ mod tests {
         let repository =
             repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
         let resolver = Arc::new(TypeResolver::new(repository.clone()));
-        let analysis_engine = Arc::new(AnalysisEngine::new(resolver.clone(), repository.clone()));
-        let cache = Arc::new(AnalysisCache::new(16));
-        let ir_cache = Arc::new(IrCache::new(16));
         let index = Arc::new(IntellisenseIndexStore::new("test", "test"));
-        let parser = Arc::new(ParserCoordinator::new_with_resolver(
-            repository.clone(),
-            resolver.clone(),
-        ));
         let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
             signature_index: repository.get_signature_index_clone(),
             resolver: Some(resolver),
             repository,
         });
 
-        let service = Arc::new(TypeSystemService::new(
-            analysis_engine,
-            cache,
-            parser,
-            ir_cache,
-            index.clone(),
-        ));
-
-        TestEnv { service, index, deps }
+        TestEnv { index, deps }
     }
 
     fn snapshot_path(name: &str) -> PathBuf {
@@ -536,24 +499,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn m5_completion_v2_matches_legacy() {
+    async fn m5_completion_v2_is_deterministic() {
         let content = read_fixture("m5_snippets_resolve.bsl");
         let position = find_position(&content, "Массив.");
         let uri = Url::parse("file:///m5_snippets_resolve.bsl").expect("url");
         let env = create_test_env();
-        let service = env.service.clone();
         let index = env.index.clone();
         let index_snapshot = index.snapshot();
         let deps = env.deps.clone();
-
-        let legacy = handle_completion(&content, position, &uri, Some(service), true)
-            .await
-            .expect("completion legacy");
-        let legacy_items = extract_items(legacy.response);
-        assert!(
-            legacy_items.iter().any(|item| item.label == "Добавить"),
-            "expected legacy completion to contain 'Добавить'"
-        );
 
         let (file_content, file_path, ir_program) =
             build_v2_ir(&content, &uri, deps.clone());
@@ -575,9 +528,7 @@ mod tests {
             "expected v2 completion to contain 'Добавить'"
         );
 
-        let legacy_snapshot = completion_items_snapshot(&legacy_items);
         let v2_snapshot = completion_items_snapshot(&v2_items);
-        assert_eq!(legacy_snapshot, v2_snapshot);
 
         // Determinism smoke: same input -> same output twice.
         let v2_second = handle_completion_v2(
@@ -603,13 +554,19 @@ mod tests {
         let position = find_position(&content, "Массив.");
         let uri = Url::parse("file:///m5_snippets_resolve.bsl").expect("url");
         let env = create_test_env();
-        let service = env.service;
+        let index_snapshot = env.index.snapshot();
+        let deps = env.deps;
 
-        let response = handle_completion(
-            &content,
+        let (file_content, file_path, ir_program) =
+            build_v2_ir(&content, &uri, deps.clone());
+        let response = handle_completion_v2(
+            file_content,
+            file_path,
+            ir_program,
+            deps.clone(),
             position,
             &uri,
-            Some(service.clone()),
+            &index_snapshot,
             true,
         )
         .await
@@ -625,8 +582,10 @@ mod tests {
             .find(|entry| entry.label == "Добавить")
             .expect("Добавить completion");
 
-        let resolved_true = handle_completion_resolve(item.clone(), Some(service.clone()), true).await;
-        let resolved_false = handle_completion_resolve(item.clone(), Some(service), false).await;
+        let resolved_true =
+            handle_completion_resolve(item.clone(), Some(deps.clone()), true).await;
+        let resolved_false =
+            handle_completion_resolve(item.clone(), Some(deps), false).await;
 
         let snapshot = serde_json::json!({
             "completion": {

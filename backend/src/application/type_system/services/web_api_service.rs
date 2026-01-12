@@ -16,7 +16,6 @@ use bsl_shared::domain::types::{Certainty, ResolutionResult, TypeResolution};
 use bsl_shared::domain::{CompletionItem, TypeMetadataLookup};
 
 use crate::application::TypeInferenceService;
-use crate::system::AnalysisCache;
 
 /// Searches types by query string
 ///
@@ -48,7 +47,6 @@ pub async fn search_types(
 pub async fn search_types_as_dto(
     inference_service: &TypeInferenceService,
     metadata_lookup: &TypeMetadataLookup,
-    cache: &AnalysisCache,
     query: &str,
 ) -> Result<AnalysisResultDto> {
     info!("🌐 Web search types with DTO: {}", query);
@@ -121,7 +119,7 @@ pub async fn search_types_as_dto(
             .count(),
         certainty_low: all_dtos.iter().filter(|t| t.certainty <= 40).count(),
         flow_sensitive: all_dtos.iter().filter(|t| t.flow_sensitive).count(),
-        cache_hit_rate: format!("{:.1}%", cache.get_hit_rate()),
+        cache_hit_rate: "n/a".to_string(),
         analysis_speed: "125ms".to_string(),
     };
 
@@ -210,7 +208,6 @@ pub async fn get_type_completions(
 pub fn get_all_types_as_dto(
     inference_service: &TypeInferenceService,
     metadata_lookup: &TypeMetadataLookup,
-    cache: &AnalysisCache,
     limit: usize,
     offset: usize,
     category_filter: Option<String>,
@@ -277,7 +274,7 @@ pub fn get_all_types_as_dto(
             .count(),
         certainty_low: type_dtos.iter().filter(|t| t.certainty <= 40).count(),
         flow_sensitive: type_dtos.iter().filter(|t| t.flow_sensitive).count(),
-        cache_hit_rate: format!("{:.1}%", cache.get_hit_rate()),
+        cache_hit_rate: "n/a".to_string(),
         analysis_speed: "125ms".to_string(), // TODO: real metric
     };
 

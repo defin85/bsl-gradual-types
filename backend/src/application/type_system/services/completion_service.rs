@@ -13,7 +13,6 @@ use bsl_shared::domain::metadata_constants::get_collection_kind;
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::ir::{ScopeId, SemanticProgram};
-use bsl_shared::utils::hash::hash_content;
 
 use super::super::extractors::symbol_extractor::{
     extract_word_at_position, is_identifier_char, utf16_to_byte_offset,
@@ -22,8 +21,7 @@ use super::completion_ranking::{rank_candidates_with_trace, RankingCandidate};
 use super::hover_service::find_variable_type_at_position;
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
 use crate::system::{
-    IndexItemKind, IndexSnapshot, IntellisenseIndexStore, IrCache, ParserCoordinator, SymbolScope,
-    TypeKind,
+    IndexItemKind, IndexSnapshot, IntellisenseIndexStore, SymbolScope, TypeKind,
 };
 
 pub trait IndexSnapshotSource: Sync {
@@ -85,8 +83,6 @@ pub struct CompletionResult {
 }
 
 pub(crate) struct CompletionAnalysisContext<'a> {
-    pub parser: Option<&'a ParserCoordinator>,
-    pub ir_cache: Option<&'a IrCache>,
     pub ir_program: Option<Arc<SemanticProgram>>,
     pub resolver: &'a TypeResolver,
     pub file_path: &'a str,
@@ -135,8 +131,6 @@ pub async fn get_completion_with_semantic_program(
     ir_program: Arc<SemanticProgram>,
 ) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
-        parser: None,
-        ir_cache: None,
         ir_program: Some(ir_program),
         resolver,
         file_path,
@@ -166,8 +160,6 @@ pub async fn get_completion_with_semantic_program_snapshot(
     ir_program: Arc<SemanticProgram>,
 ) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
-        parser: None,
-        ir_cache: None,
         ir_program: Some(ir_program),
         resolver,
         file_path,
@@ -746,34 +738,13 @@ fn add_properties_from_resolution(
 
 async fn resolve_member_owner_type(
     analysis: Option<&CompletionAnalysisContext<'_>>,
-    file_content: &str,
+    _file_content: &str,
     line: u32,
     column: u32,
     base_name: &str,
 ) -> Option<TypeResolution> {
     let ctx = analysis?;
-    let ir_program = if let Some(program) = &ctx.ir_program {
-        program.clone()
-    } else {
-        let cache_key = hash_content(&format!("{}\n{}", ctx.file_path, file_content));
-        let ir_cache = ctx.ir_cache?;
-        let parser = ctx.parser?;
-
-        if let Some(cached) = ir_cache.get(cache_key).await {
-            cached
-        } else {
-            let ir = match parser.parse_to_ir(file_content, ctx.file_path) {
-                Ok(program) => program,
-                Err(err) => {
-                    warn!("Completion IR parse failed: {}", err);
-                    return None;
-                }
-            };
-            let ir_arc = Arc::new(ir);
-            ir_cache.put(cache_key, ir_arc.clone()).await;
-            ir_arc
-        }
-    };
+    let ir_program = ctx.ir_program.clone()?;
 
     let scope_id = resolve_scope_for_member(&ir_program, line, column);
     if let Some(flow_type) =
@@ -1061,7 +1032,7 @@ pub fn resolve_method_completion(
     })
 }
 
-pub(crate) fn build_call_snippet(name: &str, params: &[(String, bool)]) -> Option<String> {
+pub fn build_call_snippet(name: &str, params: &[(String, bool)]) -> Option<String> {
     if params.is_empty() {
         return None;
     }
@@ -1122,12 +1093,12 @@ fn escape_snippet_text(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::system::IndexItem;
-    use crate::system::IrCache;
     use std::sync::Arc;
+    use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId};
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
     use bsl_shared::domain::resolver::TypeResolver;
     use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawPropertyData, RawTypeData};
-    use crate::system::ParserCoordinator;
+    use bsl_shared::formatting::DetailLevel;
 
     #[test]
     fn trim_to_window_keeps_tail() {
@@ -1310,8 +1281,6 @@ mod tests {
         let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> =
             repository.clone();
         let resolver = Arc::new(TypeResolver::new(repo.clone()));
-        let parser = ParserCoordinator::new_with_resolver(repo.clone(), resolver.clone());
-        let ir_cache = IrCache::new(4);
         let metadata_lookup = TypeMetadataLookup::new(repo.clone());
 
         let index = IntellisenseIndexStore::new("cfg", "platform");
@@ -1325,10 +1294,31 @@ mod tests {
         let line_text = "    ТаблЗнач.";
         let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
 
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            signature_index: repo.get_signature_index_clone(),
+            resolver: Some(resolver.clone()),
+            repository: repo.clone(),
+        });
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("test"),
+            deps,
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from("completion_test.bsl"),
+        });
+        let analysis = host.analysis();
+        let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+
         let ctx = CompletionAnalysisContext {
-            parser: Some(&parser),
-            ir_cache: Some(&ir_cache),
-            ir_program: None,
+            ir_program: Some(ir_program),
             resolver: resolver.as_ref(),
             file_path: "completion_test.bsl",
         };
@@ -1399,8 +1389,6 @@ mod tests {
 
         let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
         let resolver = Arc::new(TypeResolver::new(repo.clone()));
-        let parser = ParserCoordinator::new_with_resolver(repo.clone(), resolver.clone());
-        let ir_cache = IrCache::new(4);
         let metadata_lookup = TypeMetadataLookup::new(repo.clone());
 
         let index = IntellisenseIndexStore::new("cfg", "platform");
@@ -1414,10 +1402,31 @@ mod tests {
         let line_text = "    ТаблЗнач.Колонки.";
         let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
 
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            signature_index: repo.get_signature_index_clone(),
+            resolver: Some(resolver.clone()),
+            repository: repo.clone(),
+        });
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("test"),
+            deps,
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from("completion_nested_chain_test.bsl"),
+        });
+        let analysis = host.analysis();
+        let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+
         let ctx = CompletionAnalysisContext {
-            parser: Some(&parser),
-            ir_cache: Some(&ir_cache),
-            ir_program: None,
+            ir_program: Some(ir_program),
             resolver: resolver.as_ref(),
             file_path: "completion_nested_chain_test.bsl",
         };

@@ -17,19 +17,20 @@ mod signature_help_handler;
 
 use std::sync::Arc;
 
-use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::{AnalysisCache, IndexItem, IndexItemKind, IndexKind, IntellisenseIndexStore, IrCache, ParserCoordinator, TypeKind};
+use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId};
+use bsl_backend::system::{IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IntellisenseIndexStore, TypeKind};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource};
 use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::types::{ParameterInfo, RawDataSource, RawMethodData, RawParamData, RawTypeData};
-use bsl_shared::engine::AnalysisEngine;
+use bsl_shared::formatting::DetailLevel;
+use bsl_shared::ir::SemanticProgram;
 use bsl_shared::TypeResolver;
 use tower_lsp::lsp_types::{CompletionResponse, InsertTextFormat, Position, Url};
 
 struct TestEnv {
-    service: Arc<TypeSystemService>,
-    engine: Arc<AnalysisEngine>,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    index_snapshot: IndexSnapshot,
 }
 
 fn position_at_marker(content: &str, marker: &str) -> Position {
@@ -40,8 +41,8 @@ fn position_at_marker(content: &str, marker: &str) -> Position {
     }
 }
 
-fn build_index_with_keywords() -> Arc<IntellisenseIndexStore> {
-    let index = Arc::new(IntellisenseIndexStore::new("m8", "platform"));
+fn build_index_with_keywords() -> IndexSnapshot {
+    let index = IntellisenseIndexStore::new("m8", "platform");
     index.set_keywords(vec![IndexItem::new(
         "Процедура",
         IndexItemKind::Keyword,
@@ -52,7 +53,7 @@ fn build_index_with_keywords() -> Arc<IntellisenseIndexStore> {
         IndexItemKind::Type(TypeKind::Platform),
         IndexKind::Type,
     ));
-    index
+    index.snapshot()
 }
 
 fn build_repository_with_array() -> Arc<InMemoryTypeRepository> {
@@ -136,32 +137,58 @@ fn build_repository_with_array() -> Arc<InMemoryTypeRepository> {
     repository
 }
 
-fn build_engine_and_service(
-    repository: Arc<InMemoryTypeRepository>,
-    index: Arc<IntellisenseIndexStore>,
-) -> (Arc<AnalysisEngine>, Arc<TypeSystemService>) {
-    let repo = repository as Arc<dyn TypeRepository>;
-    let resolver = Arc::new(TypeResolver::new(repo.clone()));
-    let engine = Arc::new(AnalysisEngine::new(resolver.clone(), repo.clone()));
-    let cache = Arc::new(AnalysisCache::new(8));
-    let ir_cache = Arc::new(IrCache::new(8));
-    let parser = Arc::new(ParserCoordinator::new_with_resolver(repo, resolver));
-    let service = Arc::new(TypeSystemService::new(
-        engine.clone(),
-        cache,
-        parser,
-        ir_cache,
-        index,
-    ));
-    service.initialize().expect("initialize service");
-    (engine, service)
+fn build_deps(repository_impl: Arc<InMemoryTypeRepository>) -> Arc<bsl_analysis_v2::SemanticDeps> {
+    let repository = repository_impl as Arc<dyn TypeRepository>;
+    let resolver = Arc::new(TypeResolver::new(repository.clone()));
+
+    Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repository.get_signature_index_clone(),
+        resolver: Some(resolver),
+        repository,
+    })
 }
 
 fn build_env() -> TestEnv {
     let repository = build_repository_with_array();
-    let index = build_index_with_keywords();
-    let (engine, service) = build_engine_and_service(repository, index);
-    TestEnv { service, engine }
+    let deps = build_deps(repository);
+    let index_snapshot = build_index_with_keywords();
+    TestEnv { deps, index_snapshot }
+}
+
+fn build_v2_ir(
+    content: &str,
+    uri: &Url,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+) -> (Arc<str>, Arc<str>, Arc<SemanticProgram>) {
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("test"),
+        deps: deps.clone(),
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("test"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+
+    let path = uri
+        .to_file_path()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| uri.to_string());
+    let file_id = V2FileId(1);
+    host.apply_change(ChangeV2::SetFile {
+        file_id,
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from(path),
+    });
+
+    let analysis = host.analysis();
+    let file_content = analysis.file_text(file_id).ok().flatten().expect("file_text");
+    let file_path = analysis.file_path(file_id).ok().flatten().expect("file_path");
+    let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
+
+    (file_content, file_path, ir_program)
 }
 
 #[tokio::test]
@@ -171,11 +198,15 @@ async fn lsp_completion_returns_items_and_stats() {
     let position = position_at_marker(content, "Массив.");
     let uri = Url::parse("file:///m8_lsp_completion.bsl").expect("url");
 
-    let response = completion_handler::handle_completion(
-        content,
+    let (file_content, file_path, ir_program) = build_v2_ir(content, &uri, env.deps.clone());
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        file_path,
+        ir_program,
+        env.deps.clone(),
         position,
         &uri,
-        Some(env.service.clone()),
+        &env.index_snapshot,
         false,
     )
     .await
@@ -199,11 +230,15 @@ async fn lsp_completion_resolve_respects_snippet_support() {
     let position = position_at_marker(content, "Массив.");
     let uri = Url::parse("file:///m8_lsp_completion.bsl").expect("url");
 
-    let response = completion_handler::handle_completion(
-        content,
+    let (file_content, file_path, ir_program) = build_v2_ir(content, &uri, env.deps.clone());
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        file_path,
+        ir_program,
+        env.deps.clone(),
         position,
         &uri,
-        Some(env.service.clone()),
+        &env.index_snapshot,
         false,
     )
     .await
@@ -219,10 +254,10 @@ async fn lsp_completion_resolve_respects_snippet_support() {
         .expect("Добавить completion");
 
     let resolved_snippet =
-        completion_handler::handle_completion_resolve(item.clone(), Some(env.service.clone()), true)
+        completion_handler::handle_completion_resolve(item.clone(), Some(env.deps.clone()), true)
             .await;
     let resolved_plain =
-        completion_handler::handle_completion_resolve(item, Some(env.service), false).await;
+        completion_handler::handle_completion_resolve(item, Some(env.deps), false).await;
 
     assert_eq!(resolved_snippet.insert_text_format, Some(InsertTextFormat::SNIPPET));
     assert!(resolved_snippet
@@ -245,17 +280,20 @@ async fn lsp_signature_help_returns_method_and_constructor() {
     let constructor_pos = position_at_marker(content, "Новый Массив(1, ");
     let method_pos = position_at_marker(content, "Массив.Добавить(1, ");
 
-    let constructor = signature_help_handler::handle_signature_help(
-        content,
+    let constructor = signature_help_handler::handle_signature_help_v2(
+        Arc::from(content.to_string()),
         constructor_pos,
-        Some(env.engine.clone()),
+        env.deps.clone(),
     )
     .await
     .expect("constructor signature help");
-    let method =
-        signature_help_handler::handle_signature_help(content, method_pos, Some(env.engine))
-            .await
-            .expect("method signature help");
+    let method = signature_help_handler::handle_signature_help_v2(
+        Arc::from(content.to_string()),
+        method_pos,
+        env.deps,
+    )
+    .await
+    .expect("method signature help");
 
     let constructor_label = constructor
         .signatures
@@ -277,15 +315,20 @@ async fn lsp_signature_help_returns_method_and_constructor() {
 #[tokio::test]
 async fn lsp_completion_with_empty_index_returns_default_keywords() {
     let repository = Arc::new(InMemoryTypeRepository::new());
-    let index = Arc::new(IntellisenseIndexStore::new("m8", "platform"));
-    let (_engine, service) = build_engine_and_service(repository, index);
+    let deps = build_deps(repository);
+    let index = IntellisenseIndexStore::new("m8", "platform");
+    let index_snapshot = index.snapshot();
     let uri = Url::parse("file:///m8_lsp_empty.bsl").expect("url");
 
-    let response = completion_handler::handle_completion(
-        "",
+    let (file_content, file_path, ir_program) = build_v2_ir("", &uri, deps.clone());
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        file_path,
+        ir_program,
+        deps,
         Position::new(0, 0),
         &uri,
-        Some(service),
+        &index_snapshot,
         false,
     )
     .await

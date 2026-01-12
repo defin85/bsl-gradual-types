@@ -22,8 +22,6 @@ pub mod system;
 
 // Re-export main services
 #[cfg(not(target_arch = "wasm32"))]
-pub use application::TypeSystemService;
-#[cfg(not(target_arch = "wasm32"))]
 pub use system::SystemCoordinator;
 
 /// Version of the backend

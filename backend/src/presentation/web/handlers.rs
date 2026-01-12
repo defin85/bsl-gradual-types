@@ -7,17 +7,28 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
+use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use serde::Deserialize;
 use serde_json::json;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::application::TypeSystemService;
+use crate::application::TypeInferenceService;
+use crate::application::get_hover_info_with_semantic_program;
+use crate::application::type_system::web_api_service;
+use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
+use crate::system::DepsBundleV2;
 use crate::system::SystemCoordinator;
 use bsl_shared::api::{
     AstNodeDto, DebugAstResponseDto, DiagnosticsResponseDto, EnhancedHoverResponse,
     SemanticErrorDto, StartupProgressDto, SyntaxErrorDto,
 };
+use bsl_shared::api::ValidationErrorDto;
+use bsl_shared::domain::TypeMetadataLookup;
+use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::types::{DiagnosticSeverity, TypeDiagnostic};
+use bsl_shared::formatting::DetailLevel;
 
 // --- СТАРЫЕ DTO УДАЛЕНЫ ---
 
@@ -50,14 +61,68 @@ fn default_detail_level() -> String {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub type_service: Arc<TypeSystemService>,
-    pub system_coordinator: Arc<SystemCoordinator>, // ВРЕМЕННО для отладки
+    pub deps_bundle_v2: Arc<DepsBundleV2>,
+    pub system_coordinator: Arc<SystemCoordinator>,
+    pub syntax_helper_path: Option<PathBuf>,
+}
+
+fn compute_settings_id_v2(diagnostics_detail_level: DetailLevel) -> SettingsId {
+    let payload = format!(
+        "schema={};diagnostics.detail_level={:?}",
+        bsl_analysis_v2::SETTINGS_SCHEMA_VERSION,
+        diagnostics_detail_level
+    );
+    SettingsId::from_hash(blake3::hash(payload.as_bytes()).to_hex().to_string())
+}
+
+fn validation_error_type(message: &str) -> &'static str {
+    if message.contains("не существует") {
+        "NonExistentMethod"
+    } else if message.contains("параметр") {
+        "ParameterError"
+    } else {
+        "SemanticError"
+    }
+}
+
+fn type_diagnostics_to_validation_errors(diagnostics: &[TypeDiagnostic]) -> Vec<ValidationErrorDto> {
+    diagnostics
+        .iter()
+        .map(|d| ValidationErrorDto {
+            message: d.message.clone(),
+            severity: match d.severity {
+                DiagnosticSeverity::Error => "error".to_string(),
+                DiagnosticSeverity::Warning => "warning".to_string(),
+                DiagnosticSeverity::Info | DiagnosticSeverity::Hint => "info".to_string(),
+            },
+            line: d.line,
+            column: d.column,
+            end_line: d.end_line,
+            end_column: d.end_column,
+            error_type: validation_error_type(&d.message).to_string(),
+        })
+        .collect()
+}
+
+fn deps_resolver(deps: &Arc<bsl_analysis_v2::SemanticDeps>) -> Arc<TypeResolver> {
+    deps.resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())))
+}
+
+fn build_inference_v2(
+    deps: &Arc<bsl_analysis_v2::SemanticDeps>,
+) -> (TypeInferenceService, TypeMetadataLookup) {
+    let resolver = deps_resolver(deps);
+    let inference_service = TypeInferenceService::new(resolver, deps.repository.clone());
+    let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+    (inference_service, metadata_lookup)
 }
 
 /// Get system metrics
-/// Phase 5: Thin handler - делегирует всю логику в TypeSystemService
 pub async fn get_metrics(State(state): State<AppState>) -> impl IntoResponse {
-    let types = state.type_service.get_metrics_summary();
+    let (inference_service, _metadata_lookup) = build_inference_v2(&state.deps_bundle_v2.semantic_deps);
+    let types = web_api_service::get_metrics_summary(&inference_service);
     let observability = state.system_coordinator.observability_metrics();
     Json(json!({
         "types": types,
@@ -66,7 +131,6 @@ pub async fn get_metrics(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 /// Get all types with pagination support
-/// Phase 5: Thin handler - делегирует всю логику в TypeSystemService
 pub async fn get_types(
     State(state): State<AppState>,
     Query(params): Query<PaginationQuery>,
@@ -78,8 +142,10 @@ pub async fn get_types(
     // Конвертация page → offset для внутреннего использования
     let offset = (page - 1) * limit;
 
-    // Вся бизнес-логика и DTO конверсия теперь в Application Layer
-    let result = state.type_service.get_all_types_as_dto(
+    let (inference_service, metadata_lookup) = build_inference_v2(&state.deps_bundle_v2.semantic_deps);
+    let result = web_api_service::get_all_types_as_dto(
+        &inference_service,
+        &metadata_lookup,
         limit,
         offset,
         params.category,
@@ -90,12 +156,12 @@ pub async fn get_types(
 }
 
 /// Search types by query
-/// Phase 5: Thin handler - делегирует всю логику в TypeSystemService
 pub async fn search_types(
     State(state): State<AppState>,
     Query(query): Query<SearchQuery>,
 ) -> impl IntoResponse {
-    match state.type_service.search_types_as_dto(&query.q).await {
+    let (inference_service, metadata_lookup) = build_inference_v2(&state.deps_bundle_v2.semantic_deps);
+    match web_api_service::search_types_as_dto(&inference_service, &metadata_lookup, &query.q).await {
         Ok(result) => Json(result).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -139,12 +205,38 @@ pub async fn validate_code(
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    match state
-        .type_service
-        .validate_code_fragment(&payload.code)
-        .await
-    {
-        Ok(errors) => {
+    let deps_bundle = state.deps_bundle_v2.clone();
+    let code = payload.code.clone();
+    let validation_result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<ValidationErrorDto>> {
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: deps_bundle.deps_id.clone(),
+            deps: deps_bundle.semantic_deps.clone(),
+        });
+        let diagnostics_detail_level = DetailLevel::Full;
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: compute_settings_id_v2(diagnostics_detail_level),
+            diagnostics_detail_level,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(code),
+            version: 0,
+            path: Arc::from("<semantic_validation>"),
+        });
+
+        let analysis = host.analysis();
+        let diagnostics = analysis
+            .semantic_diagnostics(V2FileId(1))
+            .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+            .unwrap_or_else(|| Arc::new(Vec::new()));
+
+        Ok(type_diagnostics_to_validation_errors(diagnostics.as_ref()))
+    })
+    .await;
+
+    match validation_result {
+        Ok(Ok(errors)) => {
             let is_valid = errors.is_empty();
             let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -160,6 +252,7 @@ pub async fn validate_code(
 
             Json(response).into_response()
         }
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -172,12 +265,67 @@ pub async fn get_hover(
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    match state
-        .type_service
-        .get_hover_info(&req.code, req.line, req.column, None)
-        .await
-    {
-        Ok(hover_text) => {
+    let deps_bundle = state.deps_bundle_v2.clone();
+    let code = req.code.clone();
+    let line = req.line;
+    let column = req.column;
+    let syntax_helper_path = state.syntax_helper_path.clone();
+
+    let hover_result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: deps_bundle.deps_id.clone(),
+            deps: deps_bundle.semantic_deps.clone(),
+        });
+        let diagnostics_detail_level = DetailLevel::Full;
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: compute_settings_id_v2(diagnostics_detail_level),
+            diagnostics_detail_level,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(code),
+            version: 0,
+            path: Arc::from("hover_request.bsl"),
+        });
+
+        let analysis = host.analysis();
+        let file_content = analysis
+            .file_text(V2FileId(1))
+            .map_err(|_| anyhow::anyhow!("file_text cancelled"))?
+            .ok_or_else(|| anyhow::anyhow!("file_text unavailable"))?;
+        let ir_program = analysis
+            .ir(V2FileId(1))
+            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
+
+        let deps = deps_bundle.semantic_deps.clone();
+        let resolver = deps_resolver(&deps);
+        let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+        let hover_formatter = HoverFormatter::new(
+            HoverFormatConfig {
+                syntax_helper_path,
+                output_format: HoverOutputFormat::Markdown,
+                ..Default::default()
+            },
+            metadata_lookup.clone(),
+        );
+
+        Ok(get_hover_info_with_semantic_program(
+            file_content.as_ref(),
+            line,
+            column,
+            &metadata_lookup,
+            &hover_formatter,
+            None,
+            resolver.as_ref(),
+            ir_program,
+        ))
+    })
+    .await;
+
+    match hover_result {
+        Ok(Ok(hover_text)) => {
             let duration_ms = start.elapsed().as_millis() as u64;
 
             let response = serde_json::json!({
@@ -189,6 +337,7 @@ pub async fn get_hover(
 
             Json(response).into_response()
         }
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -202,61 +351,79 @@ pub async fn get_diagnostics(
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    // 1) Сначала синтаксис: если есть синтаксические ошибки — семантика бессмысленна
-    let syntax = match state.type_service.parse_and_validate(&payload.code) {
-        Ok(errors) => errors,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    };
+    let deps_bundle = state.deps_bundle_v2.clone();
+    let code = payload.code.clone();
 
-    let syntax_errors: Vec<SyntaxErrorDto> = syntax
-        .into_iter()
-        .map(|e| SyntaxErrorDto {
-            message: e.message,
-            line: e.span.start_line,
-            column: e.span.start_column,
-        })
-        .collect();
+    let diagnostics_result = tokio::task::spawn_blocking(move || -> anyhow::Result<(Vec<SyntaxErrorDto>, Vec<SemanticErrorDto>)> {
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: deps_bundle.deps_id.clone(),
+            deps: deps_bundle.semantic_deps.clone(),
+        });
+        let diagnostics_detail_level = DetailLevel::Full;
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: compute_settings_id_v2(diagnostics_detail_level),
+            diagnostics_detail_level,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(code),
+            version: 0,
+            path: Arc::from("<semantic_validation>"),
+        });
 
-    if !syntax_errors.is_empty() {
-        let duration_ms = start.elapsed().as_millis();
-        let response = DiagnosticsResponseDto {
-            total_errors: syntax_errors.len(),
-            syntax_errors,
-            semantic_errors: vec![],
-            duration_ms,
-        };
-        return Json(response).into_response();
-    }
+        let analysis = host.analysis();
+        let syntax = analysis
+            .syntax_diagnostics(V2FileId(1))
+            .map_err(|_| anyhow::anyhow!("syntax diagnostics cancelled"))?
+            .unwrap_or_else(|| Arc::new(Vec::new()));
 
-    // 2) Семантика (Phase 5: Unknown type, method/property existence)
-    match state
-        .type_service
-        .validate_semantics(&payload.code, None)
-        .await
-    {
-        Ok(diagnostics) => {
-            let semantic_errors: Vec<SemanticErrorDto> = diagnostics
-                .iter()
-                .map(|d| SemanticErrorDto {
-                    message: d.message.clone(),
-                    line: d.line,
-                    column: d.column,
-                    end_line: d.end_line,
-                    end_column: d.end_column,
-                    severity: format!("{:?}", d.severity).to_lowercase(),
-                })
-                .collect();
+        let syntax_errors: Vec<SyntaxErrorDto> = syntax
+            .iter()
+            .map(|e| SyntaxErrorDto {
+                message: e.message.clone(),
+                line: e.span.start_line,
+                column: e.span.start_column,
+            })
+            .collect();
 
+        if !syntax_errors.is_empty() {
+            return Ok((syntax_errors, Vec::new()));
+        }
+
+        let diagnostics = analysis
+            .semantic_diagnostics(V2FileId(1))
+            .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+            .unwrap_or_else(|| Arc::new(Vec::new()));
+
+        let semantic_errors: Vec<SemanticErrorDto> = diagnostics
+            .iter()
+            .map(|d| SemanticErrorDto {
+                message: d.message.clone(),
+                line: d.line,
+                column: d.column,
+                end_line: d.end_line,
+                end_column: d.end_column,
+                severity: format!("{:?}", d.severity).to_lowercase(),
+            })
+            .collect();
+
+        Ok((syntax_errors, semantic_errors))
+    })
+    .await;
+
+    match diagnostics_result {
+        Ok(Ok((syntax_errors, semantic_errors))) => {
             let duration_ms = start.elapsed().as_millis();
             let response = DiagnosticsResponseDto {
-                syntax_errors: vec![],
-                total_errors: semantic_errors.len(),
+                total_errors: syntax_errors.len() + semantic_errors.len(),
+                syntax_errors,
                 semantic_errors,
                 duration_ms,
             };
-
             Json(response).into_response()
         }
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -268,61 +435,131 @@ pub async fn get_diagnostics_debug(
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    let syntax = match state.type_service.parse_and_validate(&payload.code) {
-        Ok(errors) => errors,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    };
+    let deps_bundle = state.deps_bundle_v2.clone();
+    let code = payload.code.clone();
 
-    let syntax_errors: Vec<SyntaxErrorDto> = syntax
-        .into_iter()
-        .map(|e| SyntaxErrorDto {
-            message: e.message,
-            line: e.span.start_line,
-            column: e.span.start_column,
-        })
-        .collect();
+    let diagnostics_result = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
+        let mut debug_info = serde_json::json!({
+            "steps": [],
+            "resolver_available": false,
+            "property_accesses": []
+        });
 
-    if !syntax_errors.is_empty() {
-        let duration_ms = start.elapsed().as_millis();
-        return Json(serde_json::json!({
-            "syntaxErrors": syntax_errors,
-            "semanticErrors": [],
-            "totalErrors": syntax_errors.len(),
-            "durationMs": duration_ms,
-            "debug": { "note": "semantic validation skipped due to syntax errors" }
-        }))
-        .into_response();
-    }
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: deps_bundle.deps_id.clone(),
+            deps: deps_bundle.semantic_deps.clone(),
+        });
+        let diagnostics_detail_level = DetailLevel::Full;
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: compute_settings_id_v2(diagnostics_detail_level),
+            diagnostics_detail_level,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(code),
+            version: 0,
+            path: Arc::from("<debug_validation>"),
+        });
 
-    match state
-        .type_service
-        .validate_semantics_debug(&payload.code)
-        .await
-    {
-        Ok((diagnostics, debug_info)) => {
-            let semantic_errors: Vec<SemanticErrorDto> = diagnostics
-                .iter()
-                .map(|d| SemanticErrorDto {
-                    message: d.message.clone(),
-                    line: d.line,
-                    column: d.column,
-                    end_line: d.end_line,
-                    end_column: d.end_column,
-                    severity: format!("{:?}", d.severity).to_lowercase(),
-                })
-                .collect();
+        let analysis = host.analysis();
+        let syntax = analysis
+            .syntax_diagnostics(V2FileId(1))
+            .map_err(|_| anyhow::anyhow!("syntax diagnostics cancelled"))?
+            .unwrap_or_else(|| Arc::new(Vec::new()));
 
+        let steps = debug_info["steps"]
+            .as_array_mut()
+            .ok_or_else(|| anyhow::anyhow!("debug_info.steps is not array"))?;
+        steps.push(serde_json::json!({
+            "step": "parse",
+            "success": true,
+            "syntax_errors": syntax.len()
+        }));
+
+        let syntax_errors: Vec<SyntaxErrorDto> = syntax
+            .iter()
+            .map(|e| SyntaxErrorDto {
+                message: e.message.clone(),
+                line: e.span.start_line,
+                column: e.span.start_column,
+            })
+            .collect();
+
+        if !syntax_errors.is_empty() {
             let duration_ms = start.elapsed().as_millis();
-
-            Json(serde_json::json!({
-                "syntaxErrors": [],
-                "semanticErrors": semantic_errors,
-                "totalErrors": semantic_errors.len(),
+            return Ok(serde_json::json!({
+                "syntaxErrors": syntax_errors,
+                "semanticErrors": [],
+                "totalErrors": syntax_errors.len(),
                 "durationMs": duration_ms,
                 "debug": debug_info
-            }))
-            .into_response()
+            }));
         }
+
+        debug_info["resolver_available"] = serde_json::json!(true);
+
+        let ir = analysis
+            .ir(V2FileId(1))
+            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
+
+        let steps = debug_info["steps"]
+            .as_array_mut()
+            .ok_or_else(|| anyhow::anyhow!("debug_info.steps is not array"))?;
+        steps.push(serde_json::json!({
+            "step": "ast_to_ir",
+            "success": true,
+            "ir_nodes": ir.nodes.len()
+        }));
+
+        debug_info["ir_info"] = serde_json::json!({
+            "nodes_count": ir.nodes.len(),
+            "has_cfg": ir.cfg.is_some()
+        });
+
+        let diagnostics = analysis
+            .semantic_diagnostics(V2FileId(1))
+            .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+            .unwrap_or_else(|| Arc::new(Vec::new()));
+
+        let errors = diagnostics.as_ref();
+
+        let steps = debug_info["steps"]
+            .as_array_mut()
+            .ok_or_else(|| anyhow::anyhow!("debug_info.steps is not array"))?;
+        steps.push(serde_json::json!({
+            "step": "semantic_validation",
+            "success": true,
+            "errors_found": errors.len()
+        }));
+
+        let semantic_errors: Vec<SemanticErrorDto> = errors
+            .iter()
+            .map(|d| SemanticErrorDto {
+                message: d.message.clone(),
+                line: d.line,
+                column: d.column,
+                end_line: d.end_line,
+                end_column: d.end_column,
+                severity: format!("{:?}", d.severity).to_lowercase(),
+            })
+            .collect();
+
+        let duration_ms = start.elapsed().as_millis();
+        Ok(serde_json::json!({
+            "syntaxErrors": [],
+            "semanticErrors": semantic_errors,
+            "totalErrors": semantic_errors.len(),
+            "durationMs": duration_ms,
+            "debug": debug_info
+        }))
+    })
+    .await;
+
+    match diagnostics_result {
+        Ok(Ok(json)) => Json(json).into_response(),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -360,31 +597,84 @@ pub async fn get_enhanced_hover(
     State(state): State<AppState>,
     Json(req): Json<HoverRequest>,
 ) -> impl IntoResponse {
-    use crate::helpers::hover_formatter::HoverFormatConfig;
     use bsl_shared::formatting::DetailLevel;
 
     let start = Instant::now();
 
-    // Парсить detail_level из request
+    // Parse detail_level from request
     let detail_level = DetailLevel::parse(&req.detail_level);
 
-    // Создать конфиг с нужным detail_level
-    let hover_config = HoverFormatConfig {
-        detail_level,
-        ..Default::default()
-    };
+    let deps_bundle = state.deps_bundle_v2.clone();
+    let code = req.code.clone();
+    let line = req.line;
+    let column = req.column;
+    let syntax_helper_path = state.syntax_helper_path.clone();
 
-    match state
-        .type_service
-        .get_hover_info(&req.code, req.line, req.column, Some(hover_config))
-        .await
-    {
-        Ok(hover_text) => {
+    let hover_result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: deps_bundle.deps_id.clone(),
+            deps: deps_bundle.semantic_deps.clone(),
+        });
+        let diagnostics_detail_level = DetailLevel::Full;
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: compute_settings_id_v2(diagnostics_detail_level),
+            diagnostics_detail_level,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(code),
+            version: 0,
+            path: Arc::from("hover_request.bsl"),
+        });
+
+        let analysis = host.analysis();
+        let file_content = analysis
+            .file_text(V2FileId(1))
+            .map_err(|_| anyhow::anyhow!("file_text cancelled"))?
+            .ok_or_else(|| anyhow::anyhow!("file_text unavailable"))?;
+        let ir_program = analysis
+            .ir(V2FileId(1))
+            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
+
+        let deps = deps_bundle.semantic_deps.clone();
+        let resolver = deps_resolver(&deps);
+        let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+        let hover_formatter = HoverFormatter::new(
+            HoverFormatConfig {
+                syntax_helper_path: syntax_helper_path.clone(),
+                output_format: HoverOutputFormat::Markdown,
+                ..Default::default()
+            },
+            metadata_lookup.clone(),
+        );
+
+        let hover_config = HoverFormatConfig {
+            detail_level,
+            syntax_helper_path,
+            output_format: HoverOutputFormat::Markdown,
+            ..Default::default()
+        };
+
+        Ok(get_hover_info_with_semantic_program(
+            file_content.as_ref(),
+            line,
+            column,
+            &metadata_lookup,
+            &hover_formatter,
+            Some(hover_config),
+            resolver.as_ref(),
+            ir_program,
+        ))
+    })
+    .await;
+
+    match hover_result {
+        Ok(Ok(hover_text)) => {
             let duration_ms = start.elapsed().as_millis();
 
-            // Handle Option<String> from get_hover_info
-            let hover_text_str =
-                hover_text.unwrap_or_else(|| "No information available".to_string());
+            let hover_text_str = hover_text.unwrap_or_else(|| "No information available".to_string());
 
             let response = EnhancedHoverResponse {
                 hover_text: hover_text_str,
@@ -399,6 +689,7 @@ pub async fn get_enhanced_hover(
 
             Json(response).into_response()
         }
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -430,32 +721,57 @@ fn default_true() -> bool {
 
 /// Get semantic tree for code - показывает семантическое представление кода
 /// Milestone 5.3: Web API endpoint для семантического дерева
-///
-/// Возвращает:
-/// - root_nodes: дерево семантических узлов (функции, переменные, вызовы)
-/// - symbol_table: таблица символов с типами
-/// - metrics: метрики анализа (количество узлов, известных/выведенных типов)
 pub async fn get_semantic_tree(
     State(state): State<AppState>,
     Json(req): Json<SemanticTreeRequest>,
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    match state
-        .type_service
-        .get_semantic_tree(
-            &req.code,
-            &req.file_path,
-            req.compact,
-            req.include_call_graph,
-            req.include_flow_sensitive,
-        )
-        .await
-    {
-        Ok(tree) => {
+    let deps_bundle = state.deps_bundle_v2.clone();
+    let code = req.code.clone();
+    let file_path = req.file_path.clone();
+    let compact = req.compact;
+    let include_call_graph = req.include_call_graph;
+    let include_flow_sensitive = req.include_flow_sensitive;
+
+    let tree_result = tokio::task::spawn_blocking(move || -> anyhow::Result<bsl_shared::api::semantic_dtos::SemanticTreeDto> {
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: deps_bundle.deps_id.clone(),
+            deps: deps_bundle.semantic_deps.clone(),
+        });
+        let diagnostics_detail_level = DetailLevel::Full;
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: compute_settings_id_v2(diagnostics_detail_level),
+            diagnostics_detail_level,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(code),
+            version: 0,
+            path: Arc::from(file_path.clone()),
+        });
+
+        let analysis = host.analysis();
+        let ir_program = analysis
+            .ir(V2FileId(1))
+            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
+
+        let dto = if compact {
+            ir_program.to_compact_dto()
+        } else {
+            ir_program.to_dto(include_call_graph, include_flow_sensitive)
+        };
+
+        Ok(dto)
+    })
+    .await;
+
+    match tree_result {
+        Ok(Ok(tree)) => {
             let duration_ms = start.elapsed().as_millis();
 
-            // Добавляем время выполнения в метрики
             let response = serde_json::json!({
                 "file_path": tree.file_path,
                 "root_nodes": tree.root_nodes,
@@ -475,6 +791,7 @@ pub async fn get_semantic_tree(
 
             Json(response).into_response()
         }
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

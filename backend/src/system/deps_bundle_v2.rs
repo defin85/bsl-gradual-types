@@ -5,26 +5,29 @@ use anyhow::Context;
 use walkdir::WalkDir;
 
 use bsl_analysis_v2::{DepsSnapshotId, SemanticDeps};
-use bsl_backend::system::{IndexSnapshot, SystemCoordinator};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 
-pub(crate) struct DepsBundleV2 {
-    pub(crate) deps_id: DepsSnapshotId,
-    pub(crate) semantic_deps: Arc<SemanticDeps>,
-    pub(crate) index_snapshot: Arc<IndexSnapshot>,
-    pub(crate) meta: DepsBundleV2Meta,
+use super::{IndexSnapshot, SystemCoordinator};
+
+#[derive(Clone)]
+pub struct DepsBundleV2 {
+    pub deps_id: DepsSnapshotId,
+    pub semantic_deps: Arc<SemanticDeps>,
+    pub index_snapshot: Arc<IndexSnapshot>,
+    pub meta: DepsBundleV2Meta,
 }
 
-pub(crate) struct DepsBundleV2Meta {
-    pub(crate) platform_version: String,
-    pub(crate) platform_fingerprint: Option<String>,
-    pub(crate) config_fingerprint: Option<String>,
-    pub(crate) index_snapshot_id: String,
-    pub(crate) strict_fingerprint: bool,
+#[derive(Clone)]
+pub struct DepsBundleV2Meta {
+    pub platform_version: String,
+    pub platform_fingerprint: Option<String>,
+    pub config_fingerprint: Option<String>,
+    pub index_snapshot_id: String,
+    pub strict_fingerprint: bool,
 }
 
-pub(crate) fn build_deps_bundle_v2(
+pub fn build_deps_bundle_v2(
     coordinator: &SystemCoordinator,
     platform_docs_root: Option<&Path>,
     config_root: Option<&Path>,
@@ -48,8 +51,8 @@ pub(crate) fn build_deps_bundle_v2(
     let index_snapshot = coordinator.intellisense_index().snapshot();
     let index_snapshot_id = index_snapshot.id.as_str().to_string();
 
-    let (semantic_deps, repo_stats) = build_semantic_deps_snapshot(coordinator)
-        .context("build_semantic_deps_snapshot")?;
+    let (semantic_deps, repo_stats) =
+        build_semantic_deps_snapshot(coordinator).context("build_semantic_deps_snapshot")?;
 
     let deps_payload = format!(
         "schema={};platform_version={};platform_fp={};config_fp={};index_snapshot_id={};repo.total_types={};repo.platform_types={};repo.configuration_types={};repo.user_defined_types={};strict_fingerprint={}",
@@ -65,9 +68,8 @@ pub(crate) fn build_deps_bundle_v2(
         strict,
     );
 
-    let deps_id = DepsSnapshotId::from_hash(
-        blake3::hash(deps_payload.as_bytes()).to_hex().to_string(),
-    );
+    let deps_id =
+        DepsSnapshotId::from_hash(blake3::hash(deps_payload.as_bytes()).to_hex().to_string());
 
     Ok(DepsBundleV2 {
         deps_id,
@@ -213,3 +215,4 @@ fn fingerprint_paths(root: &Path, files: &[PathBuf], strict: bool) -> String {
 
     hasher.finalize().to_hex().to_string()
 }
+

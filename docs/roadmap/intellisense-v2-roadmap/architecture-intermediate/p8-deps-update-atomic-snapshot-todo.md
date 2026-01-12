@@ -13,7 +13,7 @@
 
 Текущее состояние (после P8):
 
-- `DepsBundleV2` (deps_id + semantic_deps + index_snapshot) строится целиком в `backend/src/bin/lsp_server/server/deps_v2.rs` (`build_deps_bundle_v2`).
+- `DepsBundleV2` (deps_id + semantic_deps + index_snapshot) строится целиком в `backend/src/system/deps_bundle_v2.rs` (`build_deps_bundle_v2`).
 - `deps_update_v2` строит bundle в blocking и атомарно применяет его через writer thread:
   `backend/src/bin/lsp_server/server/core.rs` (`deps_update_v2`).
 - v2 entrypoints получают согласованную пару `(AnalysisV2 snapshot, IndexSnapshot, deps_id)` через:
@@ -187,7 +187,7 @@
 
 ## Верификация (факты)
 
-- ✅ `backend/src/bin/lsp_server/server/deps_v2.rs`: `DepsBundleV2`, `DepsBundleV2Meta`, `build_deps_bundle_v2` (deps_id + semantic_deps + index_snapshot).
+- ✅ `backend/src/system/deps_bundle_v2.rs`: `DepsBundleV2`, `DepsBundleV2Meta`, `build_deps_bundle_v2` (deps_id + semantic_deps + index_snapshot).
 - ✅ `backend/src/bin/lsp_server/server/analysis_v2_runtime.rs`: `ApplyDepsBundle`, `snapshot_with_deps`, `apply_deps_bundle`; unit test `p8_snapshot_with_deps_is_atomic`.
 - ✅ `backend/src/bin/lsp_server/server/core.rs`: `deps_update_v2` (build+apply+metrics), diagnostics v2 использует `snapshot_with_deps`; integration test `p8_deps_update_is_atomic_and_completion_uses_runtime_index_snapshot`.
 - ✅ `backend/src/bin/lsp_server/server/language_server.rs`: v2 completion/hover/signatureHelp используют `snapshot_with_deps`; `bsl.parseConfiguration` вызывает `deps_update_v2` после успеха.

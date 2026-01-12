@@ -4,7 +4,7 @@
 
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::{MessageType, Url};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use std::path::{Path, PathBuf};
 
@@ -36,50 +36,70 @@ impl BslLanguageServer {
             tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e))
         })?;
 
-        let file_content = match self.documents.read().await.get(&uri) {
-            Some(content) => content.clone(),
-            None => match uri.to_file_path() {
-                Ok(path) => read_bsl_file(&path)
-                    .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                Err(_) => return Ok(CurrentContextResponse::empty()),
-            },
+        self.sync_v2_globals().await;
+        let file_id = self.get_or_create_file_id_v2(&uri).await;
+
+        let expected_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+
+        let ok = if let Some(expected_version) = expected_version {
+            self.analysis_v2
+                .wait_for_file_version(file_id, expected_version)
+                .await
+        } else {
+            let path = match uri.to_file_path() {
+                Ok(path) => path.to_string_lossy().to_string(),
+                Err(_) => uri.to_string(),
+            };
+
+            let file_content = match uri.to_file_path() {
+                Ok(path) => match read_bsl_file(&path) {
+                    Ok(content) => Some(content),
+                    Err(err) => {
+                        warn!("Failed to read file for getCurrentContext: {}", err);
+                        None
+                    }
+                },
+                Err(_) => None,
+            };
+
+            match file_content {
+                Some(file_content) => {
+                    self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                        file_id,
+                        text: std::sync::Arc::from(file_content),
+                        version: 0,
+                        path: std::sync::Arc::from(path),
+                    }]);
+                    self.analysis_v2.wait_for_file_version(file_id, 0).await
+                }
+                None => false,
+            }
         };
 
-        let file_path = uri
-            .to_file_path()
-            .unwrap_or_else(|_| std::path::PathBuf::from("untitled"))
-            .to_string_lossy()
-            .to_string();
+        if !ok {
+            return Ok(CurrentContextResponse::empty());
+        }
 
-        if let Some(service) = self.get_type_service() {
-            match service
-                .get_semantic_tree(&file_content, &file_path, false, true, true)
-                .await
-            {
-                Ok(semantic_tree_dto) => {
-                    match find_containing_function_in_dto(
-                        &semantic_tree_dto,
-                        params.line,
-                        params.character,
-                    ) {
-                        Some((name, kind, params_list, return_type)) => {
-                            Ok(CurrentContextResponse {
-                                function_name: Some(name),
-                                function_kind: kind,
-                                params: Some(params_list),
-                                return_type,
-                            })
-                        }
-                        None => Ok(CurrentContextResponse::empty()),
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to get semantic tree: {}", e);
-                    Err(tower_lsp::jsonrpc::Error::internal_error())
-                }
-            }
-        } else {
-            Ok(CurrentContextResponse::empty())
+        let analysis = self.analysis_v2.snapshot().await;
+        let ir_program = match analysis.ir(file_id).ok().flatten() {
+            Some(ir_program) => ir_program,
+            None => return Ok(CurrentContextResponse::empty()),
+        };
+
+        let semantic_tree_dto = ir_program.to_dto(true, true);
+        match find_containing_function_in_dto(&semantic_tree_dto, params.line, params.character) {
+            Some((name, kind, params_list, return_type)) => Ok(CurrentContextResponse {
+                function_name: Some(name),
+                function_kind: kind,
+                params: Some(params_list),
+                return_type,
+            }),
+            None => Ok(CurrentContextResponse::empty()),
         }
     }
 

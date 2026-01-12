@@ -1,4 +1,4 @@
-mod shared_test_fixtures;
+mod support;
 
 #[tokio::test]
 async fn test_examples_conf_test_completion_reports_unknown_type_for_typo() {
@@ -16,12 +16,10 @@ async fn test_examples_conf_test_completion_reports_unknown_type_for_typo() {
         "examples/conf/test_completion.bsl должен парситься без синтаксических ошибок"
     );
 
-    let service = shared_test_fixtures::get_test_service();
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
 
-    let diagnostics = service
-        .validate_semantics(&code, None)
-        .await
-        .expect("validate_semantics failed");
+    let diagnostics =
+        support::semantic_diagnostics_for_code(deps_bundle.as_ref(), "test_completion.bsl", &code);
 
     assert!(
         diagnostics
@@ -31,12 +29,8 @@ async fn test_examples_conf_test_completion_reports_unknown_type_for_typo() {
         diagnostics
     );
 
-    let hover = service
-        .get_hover_info(&code, 20, 6, None) // line 21 (0-based), column inside "МойМассив"
-        .await
-        .expect("get_hover_info failed");
-
-    let hover_text = hover.expect("Hover должен вернуть информацию");
+    let hover_text = support::hover_for_code(deps_bundle.as_ref(), "test_completion.bsl", &code, 20, 6)
+        .expect("Hover должен вернуть информацию");
 
     assert!(
         hover_text.contains("Масив1"),

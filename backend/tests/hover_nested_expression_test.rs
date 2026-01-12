@@ -1,7 +1,4 @@
-#[path = "shared_test_fixtures.rs"]
-mod shared_test_fixtures;
-
-use shared_test_fixtures::get_test_service;
+mod support;
 
 fn utf16_column(line: &str, needle: &str) -> u32 {
     let byte_idx = line.find(needle).expect("needle not found in line");
@@ -17,15 +14,12 @@ async fn test_hover_variable_inside_condition_expression() {
     КонецЕсли;\n\
 КонецПроцедуры";
 
-    let service = get_test_service();
     let line_idx = 2u32;
     let line_text = code.lines().nth(line_idx as usize).expect("line exists");
     let column = utf16_column(line_text, "Число");
 
-    let hover = service
-        .get_hover_info(code, line_idx, column, None)
-        .await
-        .unwrap()
+    let deps_bundle = support::deps_bundle_v2_fallback();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, line_idx, column)
         .unwrap_or_default();
 
     assert!(
@@ -52,15 +46,12 @@ async fn test_hover_variable_inside_call_argument() {
     СтрокаЗнач = \"x\" + Строка(Число);\n\
 КонецПроцедуры";
 
-    let service = get_test_service();
     let line_idx = 2u32;
     let line_text = code.lines().nth(line_idx as usize).expect("line exists");
     let column = utf16_column(line_text, "Число");
 
-    let hover = service
-        .get_hover_info(code, line_idx, column, None)
-        .await
-        .unwrap()
+    let deps_bundle = support::deps_bundle_v2_fallback();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, line_idx, column)
         .unwrap_or_default();
 
     assert!(
@@ -82,15 +73,12 @@ async fn test_hover_function_inside_binary_expression() {
     СтрокаЗнач = \"x\" + Строка(Число);\n\
 КонецПроцедуры";
 
-    let service = get_test_service();
     let line_idx = 2u32;
     let line_text = code.lines().nth(line_idx as usize).expect("line exists");
     let column = utf16_column(line_text, "Строка(");
 
-    let hover = service
-        .get_hover_info(code, line_idx, column, None)
-        .await
-        .unwrap()
+    let deps_bundle = support::deps_bundle_v2_fallback();
+    let hover = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, line_idx, column)
         .unwrap_or_default();
 
     assert!(

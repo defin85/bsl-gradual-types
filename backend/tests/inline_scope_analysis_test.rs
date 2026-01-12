@@ -5,39 +5,11 @@
 //! 2. Резолвит типы переменных через TypeRepository (Platform/Config)
 //! 3. Возвращает методы и свойства через TypeMetadataLookup
 
-use bsl_backend::application::TypeSystemService;
-use bsl_backend::system::{AnalysisCache, IntellisenseIndexStore, ParserCoordinator};
-use bsl_shared::domain::repository::InMemoryTypeRepository;
-use bsl_shared::domain::resolver::TypeResolver;
-use bsl_shared::engine::AnalysisEngine;
-use std::sync::Arc;
-
-/// Инициализация TypeSystemService для тестов
-fn setup_service() -> TypeSystemService {
-    use bsl_backend::system::IrCache;
-
-    // 1. Создаем InMemoryTypeRepository (конкретная реализация TypeRepository)
-    let repository = Arc::new(InMemoryTypeRepository::new());
-
-    // 2. Создаем TypeResolver
-    let resolver = Arc::new(TypeResolver::new(repository.clone()));
-
-    // 3. Создаем AnalysisEngine
-    let analysis_engine = Arc::new(AnalysisEngine::new(resolver, repository.clone()));
-
-    // 4. Создаем SystemLayer компоненты
-    let cache = Arc::new(AnalysisCache::new(1000)); // capacity = 1000
-    let parser = Arc::new(ParserCoordinator::with_fallback());
-    let ir_cache = Arc::new(IrCache::new(100)); // MILESTONE 2.13: IR Cache
-    let intellisense_index = Arc::new(IntellisenseIndexStore::new("test-config", "test-platform"));
-
-    // 5. Создаем TypeSystemService
-    TypeSystemService::new(analysis_engine, cache, parser, ir_cache, intellisense_index)
-}
+mod support;
 
 #[tokio::test]
 async fn test_inline_scope_simple_assignment() {
-    let service = setup_service();
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Процедура Тест()
@@ -46,10 +18,8 @@ async fn test_inline_scope_simple_assignment() {
     "#;
 
     // Hover на "МассивДанных" (строка 2, колонка 4)
-    let hover_result = service
-        .get_hover_info(code, 2, 4, None)
-        .await
-        .expect("Failed to get hover info");
+    let hover_result =
+        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 4);
 
     assert!(hover_result.is_some(), "Hover должен вернуть информацию");
     let hover_text = hover_result.unwrap();
@@ -64,7 +34,7 @@ async fn test_inline_scope_simple_assignment() {
 
 #[tokio::test]
 async fn test_inline_scope_with_methods() {
-    let service = setup_service();
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Процедура Тест()
@@ -74,10 +44,8 @@ async fn test_inline_scope_with_methods() {
     "#;
 
     // Hover на "МассивДанных" перед вызовом метода (строка 3, колонка 4)
-    let hover_result = service
-        .get_hover_info(code, 3, 4, None)
-        .await
-        .expect("Failed to get hover info");
+    let hover_result =
+        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 3, 4);
 
     assert!(hover_result.is_some(), "Hover должен вернуть информацию");
     let hover_text = hover_result.unwrap();
@@ -95,7 +63,7 @@ async fn test_inline_scope_with_methods() {
 
 #[tokio::test]
 async fn test_inline_scope_multiple_variables() {
-    let service = setup_service();
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Процедура Тест()
@@ -106,10 +74,8 @@ async fn test_inline_scope_multiple_variables() {
     "#;
 
     // Hover на "СтруктураДанных" (строка 3, колонка 4)
-    let hover_result = service
-        .get_hover_info(code, 3, 4, None)
-        .await
-        .expect("Failed to get hover info");
+    let hover_result =
+        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 3, 4);
 
     assert!(hover_result.is_some(), "Hover должен вернуть информацию");
     let hover_text = hover_result.unwrap();
@@ -127,7 +93,7 @@ async fn test_inline_scope_multiple_variables() {
 
 #[tokio::test]
 async fn test_inline_scope_nested_scope() {
-    let service = setup_service();
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Процедура Тест()
@@ -143,10 +109,8 @@ async fn test_inline_scope_nested_scope() {
     "#;
 
     // Hover на "Локальная" внутри вложенной функции (строка 5, колонка 8)
-    let hover_result = service
-        .get_hover_info(code, 5, 8, None)
-        .await
-        .expect("Failed to get hover info");
+    let hover_result =
+        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 5, 8);
 
     assert!(hover_result.is_some(), "Hover должен вернуть информацию");
     let hover_text = hover_result.unwrap();
@@ -163,7 +127,7 @@ async fn test_inline_scope_nested_scope() {
 
 #[tokio::test]
 async fn test_inline_scope_unknown_type() {
-    let service = setup_service();
+    let deps_bundle = support::deps_bundle_v2_fallback();
 
     let code = r#"
 Процедура Тест()
@@ -172,10 +136,8 @@ async fn test_inline_scope_unknown_type() {
     "#;
 
     // Hover на "НеизвестнаяПеременная" (строка 2, колонка 4)
-    let hover_result = service
-        .get_hover_info(code, 2, 4, None)
-        .await
-        .expect("Failed to get hover info");
+    let hover_result =
+        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 4);
 
     assert!(hover_result.is_some(), "Hover должен вернуть информацию");
     let hover_text = hover_result.unwrap();

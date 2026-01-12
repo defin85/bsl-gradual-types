@@ -5,12 +5,14 @@
 **Проверка:** `cargo test -p bsl-analysis-v2`, `cargo test --workspace`  
 **Область:** Фаза P0 из `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/salsa-migration-plan.md`
 
+**Примечание (P9):** runtime feature-flag `BSL_INTELLISENSE_V2_SALSA` удалён; LSP всегда использует v2 путь.
+
 ## Решение (зафиксировано)
 
 - [x] Используем upstream `salsa` (не `ra_ap_salsa`).
 - [x] Делаем отдельный workspace-crate для v2 анализа.
 - [x] `salsa` версия: `0.25.2` (workspace dependency).
-- [x] Feature-flag для P0: env `BSL_INTELLISENSE_V2_SALSA=1` (фиксируется при старте сервера).
+- [x] Feature-flag для P0: env `BSL_INTELLISENSE_V2_SALSA=1` (использовался на этапе миграции; удалён в P9).
 - [x] `Url -> FileId` маппинг живёт в LSP слое, `FileId` выдаётся монотонно.
 
 ## Цель P0 (что должно получиться)
@@ -79,8 +81,8 @@
   - [x] обновлять v2 inputs через `apply_change`
   - [x] не менять legacy путь (P0 только параллельная ветка)
 - [x] В `completion`:
-  - [x] если `BSL_INTELLISENSE_V2_SALSA=1` -> v2 completion (P0 заглушка)
-  - [x] иначе -> legacy `TypeSystemService` как сейчас
+  - [x] в P0 было ветвление: `BSL_INTELLISENSE_V2_SALSA=1` -> v2 completion (P0 заглушка), иначе -> legacy.
+  - [x] в P9 ветвление удалено, LSP всегда v2.
 
 **Выход:** v2 путь включается env-флагом и не ломает legacy.
 

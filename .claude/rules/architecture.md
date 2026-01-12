@@ -6,135 +6,160 @@
 graph TB
     subgraph "🎯 System Layer (в `backend/src/system`)"
         SystemCoordinator["🎯 SystemCoordinator"]
-        AnalysisCache["💾 AnalysisCache"]
-        ParserCoordinator["🎨 ParserCoordinator<br/>- TreeSitter + Regex<br/>✅ ПОСЛЕ 2.8: → IR через AstToIrConverter"]
+        DiskCache["💾 DiskCache"]
+        AstCache["🌳 AstCache"]
+        ParserCoordinator["🎨 ParserCoordinator<br/>- Tree-sitter + fallback<br/>- DiskCache-backed"]
+        IntellisenseIndex["📚 IntellisenseIndexStore"]
+        IndexSnapshot["🧷 IndexSnapshot"]
         BasicObservability["📊 BasicObservability"]
+        DepsBundleV2["📦 build_deps_bundle_v2()<br/>DepsBundleV2 { deps_id, semantic_deps, index_snapshot }"]
     end
 
-    subgraph "🌐 Presentation Layer (Адаптеры - разные процессы)"
-        subgraph "LSP Process"
-            LSPServer["🔌 LSP Server (backend)"]
-            VSCode["📦 VSCode Extension (TypeScript)"]
-        end
-
-        subgraph "Web Process"
-            WebServer["🌐 Web Server (backend)"]
-            Frontend["🖥️ Frontend UI (Leptos WASM)"]
-            SemanticRoutes["📊 Semantic Routes<br/>✅ MILESTONE 2.16<br/>- /api/semantic/:file_path<br/>- JSON/HTML visualization"]
-        end
-
-        CLITool["⚙️ CLI Tool (cli)<br/>✅ ПОСЛЕ 2.8: LightweightParser (~2-3 MB)"]
+    subgraph "🧩 v2 Analysis Layer (`analysis-v2`)"
+        AnalysisHostV2["🧠 AnalysisHostV2<br/>- salsa DB owner (mutable)"]
+        AnalysisV2["📸 AnalysisV2 snapshot (read-only)"]
+        V2Queries["queries:<br/>- line_index<br/>- parse_result<br/>- ir<br/>- syntax_diagnostics<br/>- semantic_diagnostics"]
+        DepsSnapshot["DepsSnapshot (SemanticDeps + deps_id)"]
+        SettingsSnapshot["SettingsSnapshot (DetailLevel + settings_id)"]
     end
 
-    subgraph "🎨 Helper Layer"
-        TypeViz["🎨 type-visualization"]
+    subgraph "🔧 Application Layer (в `backend/src/application/type_system/services`)"
+        CompletionSvc["completion_service"]
+        HoverSvc["hover_service"]
+        WebApiSvc["web_api_service"]
     end
 
-    subgraph "🔧 Application Layer"
-        subgraph "`backend/src/application`"
-            TypeSystemService["🎭 TypeSystemService<br/>✅ LSP hover через AST → IR"]
-            AstToIr["🔄 AstToIrConverter<br/>✅ ПОСЛЕ 2.8: AST → IR bridge<br/>- Конвертирует синтаксис в семантику<br/>- Строит SymbolTable"]
-        end
-        subgraph "`shared/src/engine`"
-            AnalysisEngine["🚀 AnalysisEngine<br/>✅ ПОСЛЕ 2.8: analyze_program(IR)<br/>- Работает с SemanticProgram<br/>- Не зависит от парсеров"]
-        end
-    end
-
-    subgraph "🌟 Semantic Layer (✅ НОВЫЙ! shared/src/ir/)"
-        IR["📄 Intermediate Representation<br/>✅ ПОСЛЕ 2.8: shared/src/ir/<br/>- SemanticProgram<br/>- SemanticNode (упрощённый набор)<br/>- SymbolTable<br/>- FlowSensitiveVisitor<br/>✨ Независим от парсера!"]
-
-        ParserTrait["🔌 Parser trait<br/>✅ ПОСЛЕ 2.8: shared/src/parsing/<br/>- parse() → SemanticProgram<br/>- DI для разных парсеров<br/>- LightweightParser для CLI"]
+    subgraph "🌟 Semantic Layer"
+        SyntaxAST["ParseResult AST (bsl-syntax)"]
+        AstToIr["AstToIrConverter (bsl-semantic)"]
+        IR["SemanticProgram (IR)"]
     end
 
     subgraph "🧠 Domain Layer (в `shared/src/domain`)"
         TypeResolver["🧠 TypeResolver"]
         TypeMetadataLookup["🔍 TypeMetadataLookup"]
-        TypeRepository["📚 TypeRepository (3927 типов)"]
+        TypeRepository["📚 TypeRepository"]
+        SignatureIndex["🧾 SignatureIndex"]
     end
 
     subgraph "💾 Data Layer"
-        PlatformTypes["📄 Platform Types<br/>(Syntax Helper: Строка, Число, etc.)"]
-        ConfigData["⚙️ Configuration"]
-        HbkRecovery["🔧 HBK Recovery<br/>✅ NEW: Восстановление .hbk файлов<br/>- Поиск ZIP signature<br/>- Извлечение валидного архива<br/>- Auto-recovery при старте"]
+        PlatformTypes["📄 Platform docs (Syntax Helper / HBK)"]
+        ConfigData["⚙️ Configuration types"]
+        HbkRecovery["🔧 HBK Recovery<br/>- Поиск ZIP signature<br/>- Извлечение валидного архива"]
+    end
+
+    subgraph "🌐 Presentation Layer (Адаптеры - разные процессы)"
+        subgraph "LSP Process"
+            LSPServer["🔌 LSP Server (backend/bin)"]
+            AnalysisRuntime["🧵 AnalysisV2Runtime<br/>writer thread"]
+            VSCode["📦 VSCode Extension (TypeScript)"]
+        end
+
+        subgraph "Web Process"
+            WebServer["🌐 Web Server (backend/bin)"]
+            Frontend["🖥️ Frontend UI (Leptos WASM)"]
+            SemanticRoutes["📊 Semantic Routes<br/>- /api/semantic/:file_path<br/>- /api/semantic-tree"]
+        end
+
+        CLITool["⚙️ CLI Tool (cli)"]
+    end
+
+    subgraph "🎨 Helper Layer"
+        SemanticHtml["🧾 semantic_html_generator"]
+        TypeViz["🎨 bsl-type-visualization"]
     end
 
     subgraph "📄 DTOs"
         DTOs["shared/api/dtos.rs"]
+        SemanticDTOs["shared/api/semantic_dtos.rs"]
     end
 
-    %% System coordination
-    SystemCoordinator --> AnalysisCache
+    %% System wiring
+    SystemCoordinator --> DiskCache
+    SystemCoordinator --> AstCache
     SystemCoordinator --> ParserCoordinator
+    SystemCoordinator --> IntellisenseIndex
     SystemCoordinator --> BasicObservability
-    SystemCoordinator --> TypeSystemService
+    SystemCoordinator --> DepsBundleV2
 
-    %% Presentation → Application
-    LSPServer --> TypeSystemService
-    WebServer --> TypeSystemService
-    WebServer --> SemanticRoutes
-    LSPServer -.->|"custom request<br/>bsl/getSemanticHtml"| SemanticRoutes
-    SemanticRoutes --> TypeSystemService
+    IntellisenseIndex --> IndexSnapshot
+    DepsBundleV2 --> IndexSnapshot
+
+    %% Presentation wiring
     VSCode --> LSPServer
+    LSPServer --> AnalysisRuntime
+    AnalysisRuntime --> AnalysisHostV2
+    WebServer --> AnalysisHostV2
+    CLITool --> AnalysisHostV2
+
+    WebServer --> SemanticRoutes
     Frontend --> WebServer
-    CLITool --> AnalysisEngine
 
-    %% Helper layer
+    %% v2 analysis (inputs -> queries)
+    AnalysisHostV2 --> AnalysisV2
+    AnalysisV2 --> V2Queries
+    DepsBundleV2 --> DepsSnapshot
+
+    V2Queries --> SyntaxAST
+    V2Queries --> AstToIr
+    AstToIr --> IR
+
+    %% LSP/Web call services with semantic inputs
+    LSPServer --> CompletionSvc
+    LSPServer --> HoverSvc
+
+    WebServer --> HoverSvc
+    WebServer --> WebApiSvc
+
+    CompletionSvc --> IR
+    CompletionSvc --> IndexSnapshot
+    CompletionSvc --> TypeMetadataLookup
+
+    HoverSvc --> IR
+    HoverSvc --> TypeMetadataLookup
+
+    WebApiSvc --> DTOs
+
+    SemanticRoutes --> SemanticHtml
+    SemanticHtml --> IR
+
     LSPServer --> TypeViz
-    TypeViz -.-> DTOs
+    TypeViz --> SemanticDTOs
 
-    %% Application → Semantic Layer (КЛЮЧЕВОЕ ИЗМЕНЕНИЕ 2.8)
-    TypeSystemService --> AnalysisEngine
-    TypeSystemService --> AstToIr
-    TypeSystemService --> ParserCoordinator
+    %% Domain/Data wiring
+    DepsSnapshot --> TypeRepository
+    DepsSnapshot --> TypeResolver
+    DepsSnapshot --> SignatureIndex
 
-    ParserCoordinator -.->|"✅ ПОСЛЕ 2.8: converts AST"| AstToIr
-    AstToIr -.->|"produces"| IR
-
-    %% CLI использует Parser trait (Dependency Injection)
-    CLITool -.->|"✅ uses ParserTrait"| ParserTrait
-    ParserTrait -.->|"returns"| IR
-
-    %% ParserCoordinator implements Parser trait
-    ParserCoordinator -.->|"✅ implements"| ParserTrait
-
-    %% AnalysisEngine работает с IR
-    AnalysisEngine -.->|"✅ analyzes"| IR
-    AnalysisEngine --> TypeResolver
-
-    %% Domain layer
     TypeResolver --> TypeRepository
     TypeMetadataLookup --> TypeRepository
-    TypeSystemService -.-> TypeMetadataLookup
-    AnalysisEngine -.-> TypeMetadataLookup
 
     TypeRepository --> PlatformTypes
     TypeRepository --> ConfigData
 
-    %% HBK Recovery (NEW)
     SystemCoordinator -.->|"🔧 auto-recovery<br/>при старте"| HbkRecovery
     HbkRecovery -.->|"восстанавливает<br/>.hbk → .zip"| PlatformTypes
-
-    TypeSystemService --> DTOs
-    TypeSystemService --> AnalysisCache
 
     %% Styling
     classDef systemStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
     classDef presentationStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
     classDef helperStyle fill:#fff9c4,stroke:#f57f17,stroke-width:2px
     classDef applicationStyle fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef v2Style fill:#e0f7fa,stroke:#006064,stroke-width:2px
     classDef semanticStyle fill:#ffe0b2,stroke:#e65100,stroke-width:4px,stroke-dasharray: 5 5
     classDef domainStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px
     classDef dataStyle fill:#fce4ec,stroke:#c2185b,stroke-width:2px
     classDef dtoStyle fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
 
-    class SystemCoordinator,AnalysisCache,ParserCoordinator,BasicObservability systemStyle
-    class LSPServer,WebServer,Frontend,VSCode,CLITool,SemanticRoutes presentationStyle
-    class TypeViz helperStyle
-    class TypeSystemService,AstToIr,AnalysisEngine applicationStyle
-    class IR,ParserTrait semanticStyle
-    class TypeResolver,TypeMetadataLookup,TypeRepository domainStyle
+    class SystemCoordinator,DiskCache,AstCache,ParserCoordinator,IntellisenseIndex,IndexSnapshot,BasicObservability,DepsBundleV2 systemStyle
+    class LSPServer,AnalysisRuntime,WebServer,Frontend,VSCode,CLITool,SemanticRoutes presentationStyle
+    class SemanticHtml,TypeViz helperStyle
+    class CompletionSvc,HoverSvc,WebApiSvc applicationStyle
+    class AnalysisHostV2,AnalysisV2,V2Queries,DepsSnapshot,SettingsSnapshot v2Style
+    class SyntaxAST,AstToIr,IR semanticStyle
+    class TypeResolver,TypeMetadataLookup,TypeRepository,SignatureIndex domainStyle
     class PlatformTypes,ConfigData,HbkRecovery dataStyle
-    class DTOs dtoStyle
+    class DTOs,SemanticDTOs dtoStyle
 ```
 
 ## Потоки данных

@@ -42,11 +42,11 @@
 ### 1) Механические проверки (ожидается пусто)
 
 ```bash
-rg -l "TypeSystem""Service" -S
-rg -l "Analysis""Cache" -S
-rg -l "Ir""Cache" -S
-rg -l "BSL_INTELLISENSE_V2_""SALSA" -S
-rg -l "use_""salsa_""v2" -S
+rg -l "TypeSystem""Service" -S --hidden --glob '!.git/**'
+rg -l "Analysis""Cache" -S --hidden --glob '!.git/**'
+rg -l "Ir""Cache" -S --hidden --glob '!.git/**'
+rg -l "BSL_INTELLISENSE_V2_""SALSA" -S --hidden --glob '!.git/**'
+rg -l "use_""salsa_""v2" -S --hidden --glob '!.git/**'
 ```
 
 ### 2) CLI `AnalyzeIr` (v2-only)

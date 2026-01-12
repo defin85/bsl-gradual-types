@@ -16,6 +16,9 @@ pub fn App() -> impl IntoView {
     let metrics = RwSignal::new(None::<MetricsDto>);
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
+    let snapshot_meta = RwSignal::new(None::<SnapshotMetaDto>);
+    let snapshot_reload = RwSignal::new(false);
+    let snapshot_error = RwSignal::new(None::<String>);
     let filters = RwSignal::new(TypeFilters::new());
     let search_query = RwSignal::new(String::new());
 
@@ -25,6 +28,12 @@ pub fn App() -> impl IntoView {
         error.set(None);
 
         spawn_local(async move {
+            // Load snapshot meta
+            match fetch_snapshot_meta().await {
+                Ok(meta) => snapshot_meta.set(Some(meta)),
+                Err(err) => snapshot_error.set(Some(format!("Ошибка snapshot/meta: {}", err))),
+            }
+
             // Load metrics
             match fetch_metrics().await {
                 Ok(metrics_data) => metrics.set(Some(metrics_data)),
@@ -41,6 +50,25 @@ pub fn App() -> impl IntoView {
                 Err(err) => {
                     error.set(Some(format!("Ошибка загрузки типов: {}", err)));
                     loading.set(false);
+                }
+            }
+        });
+    };
+
+    let reload_deps = move |_| {
+        snapshot_reload.set(true);
+        snapshot_error.set(None);
+
+        spawn_local(async move {
+            match reload_snapshot().await {
+                Ok(meta) => {
+                    snapshot_meta.set(Some(meta));
+                    snapshot_reload.set(false);
+                    load_data();
+                }
+                Err(err) => {
+                    snapshot_error.set(Some(format!("Ошибка snapshot/reload: {}", err)));
+                    snapshot_reload.set(false);
                 }
             }
         });
@@ -125,6 +153,70 @@ pub fn App() -> impl IntoView {
                                 }
                             />
                         </div>
+                    </div>
+
+                    <div class="py-2 border-t border-bsl-brown-600/15 dark:border-bsl-gray-400/20">
+                        {move || {
+                            if let Some(meta) = snapshot_meta.get() {
+                                view! {
+                                    <div class="flex flex-wrap items-center gap-2 text-xs">
+                                        <span class="font-semibold">"Snapshot"</span>
+                                        <span>"deps_id"</span>
+                                        <code class="px-2 py-1 rounded bg-bsl-cream-200/60 dark:bg-bsl-charcoal-700/40 font-mono text-[11px] break-all select-all">
+                                            {meta.deps_id}
+                                        </code>
+                                        <span>"index_snapshot_id"</span>
+                                        <code class="px-2 py-1 rounded bg-bsl-cream-200/60 dark:bg-bsl-charcoal-700/40 font-mono text-[11px] break-all select-all">
+                                            {meta.index_snapshot_id}
+                                        </code>
+                                        <span>"platform_version"</span>
+                                        <code class="px-2 py-1 rounded bg-bsl-cream-200/60 dark:bg-bsl-charcoal-700/40 font-mono text-[11px] break-all select-all">
+                                            {meta.platform_version}
+                                        </code>
+                                        <span>"platform_fp"</span>
+                                        <code class="px-2 py-1 rounded bg-bsl-cream-200/60 dark:bg-bsl-charcoal-700/40 font-mono text-[11px] break-all select-all">
+                                            {meta.platform_fingerprint.unwrap_or_else(|| "none".to_string())}
+                                        </code>
+                                        <span>"config_fp"</span>
+                                        <code class="px-2 py-1 rounded bg-bsl-cream-200/60 dark:bg-bsl-charcoal-700/40 font-mono text-[11px] break-all select-all">
+                                            {meta.config_fingerprint.unwrap_or_else(|| "none".to_string())}
+                                        </code>
+                                        <span>"config_path"</span>
+                                        <code class="px-2 py-1 rounded bg-bsl-cream-200/60 dark:bg-bsl-charcoal-700/40 font-mono text-[11px] break-all select-all">
+                                            {meta.inputs.configuration_path.unwrap_or_else(|| "none".to_string())}
+                                        </code>
+                                        <span>"strict"</span>
+                                        <code class="px-2 py-1 rounded bg-bsl-cream-200/60 dark:bg-bsl-charcoal-700/40 font-mono text-[11px] select-all">
+                                            {meta.strict_fingerprint.to_string()}
+                                        </code>
+                                        <button
+                                            class="btn btn--sm"
+                                            disabled=move || snapshot_reload.get()
+                                            on:click=reload_deps
+                                        >
+                                            {move || if snapshot_reload.get() { "Reloading..." } else { "Reload deps" }}
+                                        </button>
+                                    </div>
+                                }.into_any()
+                            } else {
+                                view! {
+                                    <div class="flex items-center gap-2 text-xs">
+                                        <span class="font-semibold">"Snapshot"</span>
+                                        <span class="opacity-70">"loading..."</span>
+                                    </div>
+                                }.into_any()
+                            }
+                        }}
+
+                        {move || {
+                            snapshot_error.get().map(|err| {
+                                view! {
+                                    <div class="text-xs text-red-600 dark:text-red-400 mt-1">
+                                        {err}
+                                    </div>
+                                }
+                            })
+                        }}
                     </div>
                 </div>
             </header>

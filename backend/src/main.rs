@@ -4,7 +4,7 @@
 use bsl_backend::{
     config::{load_config, CliConfig},
     presentation::web::{create_router, AppState},
-    system::{DepsBundleV2, DepsBundleV2Meta, SystemCoordinator, build_deps_bundle_v2},
+    system::{StartupInputs, SystemCoordinator, startup_v2},
 };
 #[cfg(feature = "web-ui")]
 use clap::Parser;
@@ -48,6 +48,14 @@ struct Args {
     #[arg(long, value_name = "LEVEL")]
     log_level: Option<String>,
 
+    /// Enable/disable disk cache (overrides env)
+    #[arg(long)]
+    cache_enabled: Option<bool>,
+
+    /// Use strict fingerprint mode for caches and deps ids
+    #[arg(long)]
+    strict_fingerprint: Option<bool>,
+
     /// Configuration file path
     #[arg(short, long, value_name = "FILE")]
     config: Option<PathBuf>,
@@ -69,6 +77,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         enable_cors: args.enable_cors,
         log_level: args.log_level,
         config_file: args.config,
+        cache_enabled: args.cache_enabled,
+        strict_fingerprint: args.strict_fingerprint,
     };
 
     let config = load_config(cli_config)?;
@@ -90,58 +100,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let system_coord = Arc::new(SystemCoordinator::new());
 
-    // 🚀 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: запускаем полную инициализацию с парсингом синтаксис-помощника
-    system_coord
-        .start_with_paths(
-            config.syntax_helper_path.as_deref(),
-            config.project_path.as_deref(),
-            config.platform_version.as_deref(),
-            None, // ✅ MILESTONE 2.20.2.3: progress_tx для web сервера не требуется
-        )
-        .await?;
+    let inputs = StartupInputs::from_web_flags(
+        config.syntax_helper_path.clone(),
+        config.project_path.clone(),
+        config.platform_version.clone(),
+        config.cache_enabled,
+        config.strict_fingerprint,
+    );
 
-    let deps_bundle_v2 = build_deps_bundle_v2(
-        system_coord.as_ref(),
-        config.syntax_helper_path.as_deref(),
-        config.project_path.as_deref(),
-    )
-    .unwrap_or_else(|err| {
-        tracing::warn!("Failed to build deps bundle v2 for web: {}", err);
-
-        let repository: Arc<dyn bsl_shared::domain::repository::TypeRepository> =
-            Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
-        let signature_index = repository.get_signature_index_clone();
-        let resolver = Some(Arc::new(bsl_shared::domain::resolver::TypeResolver::new(
-            repository.clone(),
-        )));
-
-        let semantic_deps = Arc::new(bsl_analysis_v2::SemanticDeps {
-            repository,
-            signature_index,
-            resolver,
-        });
-
-        let index_snapshot = Arc::new(system_coord.intellisense_index().snapshot());
-        let index_snapshot_id = index_snapshot.id.as_str().to_string();
-
-        DepsBundleV2 {
-            deps_id: bsl_analysis_v2::DepsSnapshotId::from_hash(""),
-            semantic_deps,
-            index_snapshot,
-            meta: DepsBundleV2Meta {
-                platform_version: env!("CARGO_PKG_VERSION").to_string(),
-                platform_fingerprint: None,
-                config_fingerprint: None,
-                index_snapshot_id,
-                strict_fingerprint: false,
-            },
-        }
-    });
+    let startup = startup_v2(system_coord.clone(), inputs, None).await?;
 
     let app_state = AppState {
-        deps_bundle_v2: Arc::new(deps_bundle_v2),
+        deps_bundle_v2: Arc::new(tokio::sync::RwLock::new(Arc::new(startup.deps_bundle_v2))),
         system_coordinator: system_coord.clone(),
-        syntax_helper_path: config.syntax_helper_path.clone(),
+        syntax_helper_path: startup.inputs.syntax_helper_path.clone(),
+        startup_inputs: Arc::new(tokio::sync::RwLock::new(startup.inputs)),
     };
 
     // Static SPA from configured path or default

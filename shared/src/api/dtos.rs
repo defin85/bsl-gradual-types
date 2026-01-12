@@ -6,6 +6,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::domain::repository::RepositoryStats;
+
 /// Прогресс запуска/инициализации системы (Web API polling).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +38,31 @@ impl Default for StartupProgressDto {
             done: false,
         }
     }
+}
+
+/// Normalized startup inputs that affect deps/config/index on startup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotInputsDto {
+    pub syntax_helper_path: Option<String>,
+    pub configuration_path: Option<String>,
+    pub platform_version: Option<String>,
+    pub cache_enabled: bool,
+    pub strict_fingerprint: bool,
+}
+
+/// Metadata about the currently loaded deps snapshot (Web UI parity diagnostics).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotMetaDto {
+    pub deps_id: String,
+    pub index_snapshot_id: String,
+    pub platform_version: String,
+    pub platform_fingerprint: Option<String>,
+    pub config_fingerprint: Option<String>,
+    pub strict_fingerprint: bool,
+    pub repository_stats: RepositoryStats,
+    pub inputs: SnapshotInputsDto,
 }
 
 /// The main structure representing the complete analysis result.

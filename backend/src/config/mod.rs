@@ -22,6 +22,10 @@ pub struct WebServerConfig {
     pub enable_cors: bool,
     /// Log level
     pub log_level: String,
+    /// Enable/disable disk cache (overrides env defaults)
+    pub cache_enabled: Option<bool>,
+    /// Use strict fingerprint mode for cache keys and deps snapshots
+    pub strict_fingerprint: Option<bool>,
 }
 
 impl Default for WebServerConfig {
@@ -35,6 +39,8 @@ impl Default for WebServerConfig {
             platform_version: None,
             enable_cors: true,
             log_level: "info".to_string(),
+            cache_enabled: None,
+            strict_fingerprint: None,
         }
     }
 }
@@ -119,6 +125,12 @@ impl WebServerConfig {
         if let Some(log_level) = cli_config.log_level {
             self.log_level = log_level;
         }
+        if let Some(cache_enabled) = cli_config.cache_enabled {
+            self.cache_enabled = Some(cache_enabled);
+        }
+        if let Some(strict_fingerprint) = cli_config.strict_fingerprint {
+            self.strict_fingerprint = Some(strict_fingerprint);
+        }
     }
 }
 
@@ -134,6 +146,8 @@ pub struct CliConfig {
     pub enable_cors: Option<bool>,
     pub log_level: Option<String>,
     pub config_file: Option<PathBuf>,
+    pub cache_enabled: Option<bool>,
+    pub strict_fingerprint: Option<bool>,
 }
 
 /// Load configuration with priority: CLI args > config file > env vars > defaults

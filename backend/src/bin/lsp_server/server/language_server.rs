@@ -19,6 +19,7 @@ use std::time::Instant;
 
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 use bsl_backend::system::fs_utils::read_bsl_file;
+use bsl_backend::system::{StartupInputs, startup_v2};
 use bsl_shared::api::semantic_dtos::{GetSemanticHtmlRequest, GetSemanticTreeRequest};
 
 use crate::commands::{
@@ -70,6 +71,10 @@ impl LanguageServer for BslLanguageServer {
                             "Cache enabled updated: requested={}, effective={}, env_disabled={}",
                             result.requested, result.effective, result.env_disabled
                         );
+                    }
+                    if let Some(strict_fingerprint) = config.strict_fingerprint {
+                        self.coordinator.set_strict_fingerprint(strict_fingerprint);
+                        info!("Strict fingerprint updated: {}", strict_fingerprint);
                     }
                     info!("Configuration saved, will reload types in initialized()");
                 }
@@ -338,38 +343,27 @@ impl LanguageServer for BslLanguageServer {
                 });
 
                 // Load types
-                let syntax_path = std::path::Path::new(platform_docs);
-                let config_path_ref = cfg
-                    .configuration_path
-                    .as_ref()
-                    .map(|s| std::path::Path::new(s.as_str()));
-                let platform_version_ref = cfg.platform_version.as_deref();
+                let inputs = StartupInputs::from_lsp_settings(
+                    Some(platform_docs),
+                    cfg.configuration_path.as_deref(),
+                    cfg.platform_version.as_deref(),
+                    cfg.cache_enabled,
+                    cfg.strict_fingerprint,
+                );
 
-                let result = self
-                    .coordinator
-                    .start_with_paths(
-                        Some(syntax_path),
-                        config_path_ref,
-                        platform_version_ref,
-                        Some(progress_tx),
-                    )
-                    .await;
+                let result = startup_v2(self.coordinator.clone(), inputs, Some(progress_tx)).await;
 
-                    match result {
-                        Ok(()) => {
-                            info!("Platform types loaded successfully");
-                            self.deps_update_v2(
-                                "start_with_paths",
-                                Some(syntax_path.to_path_buf()),
-                                config_path_ref.map(|path| path.to_path_buf()),
-                            )
+                match result {
+                    Ok(startup) => {
+                        info!("Platform types loaded successfully");
+                        self.apply_deps_bundle_v2("start_with_paths", startup.deps_bundle_v2)
                             .await;
-                            self.sync_v2_globals().await;
-                            let _ = result_tx.send(Ok(()));
-                            self.client
-                                .log_message(
-                                    MessageType::INFO,
-                                    format!("Platform documentation loaded from: {}", platform_docs),
+                        self.sync_v2_globals().await;
+                        let _ = result_tx.send(Ok(()));
+                        self.client
+                            .log_message(
+                                MessageType::INFO,
+                                format!("Platform documentation loaded from: {}", platform_docs),
                             )
                             .await;
                     }
@@ -413,6 +407,7 @@ impl LanguageServer for BslLanguageServer {
                             configuration_path: None,
                             platform_version: None,
                             cache_enabled: None,
+                            strict_fingerprint: None,
                         });
                         if new_config.platform_docs_archive.is_some() {
                             merged.platform_docs_archive = new_config.platform_docs_archive;
@@ -426,12 +421,22 @@ impl LanguageServer for BslLanguageServer {
                         if new_config.cache_enabled.is_some() {
                             merged.cache_enabled = new_config.cache_enabled;
                         }
+                        if new_config.strict_fingerprint.is_some() {
+                            merged.strict_fingerprint = new_config.strict_fingerprint;
+                        }
                         *guard = Some(merged.clone());
                         if let Some(cache_enabled) = merged.cache_enabled {
                             let result = self.coordinator.set_cache_enabled(cache_enabled).await;
                             info!(
                                 "Cache enabled updated via settings: requested={}, effective={}, env_disabled={}",
                                 result.requested, result.effective, result.env_disabled
+                            );
+                        }
+                        if let Some(strict_fingerprint) = merged.strict_fingerprint {
+                            self.coordinator.set_strict_fingerprint(strict_fingerprint);
+                            info!(
+                                "Strict fingerprint updated via settings: {}",
+                                strict_fingerprint
                             );
                         }
                     }

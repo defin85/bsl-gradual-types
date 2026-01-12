@@ -11,6 +11,8 @@ use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::engine::AnalysisEngine;
 
+use bsl_backend::application::type_system;
+
 use crate::converters::position::{char_to_utf16_index, utf16_to_char_index};
 
 /// Context of a function call
@@ -72,34 +74,32 @@ pub async fn handle_signature_help_v2(
         position.line, position.character
     );
 
-    // Find call context
-    let call_context = find_call_context(file_content.as_ref(), position)?;
-
-    debug!(
-        "Found call context (v2): function={}, receiver={:?}",
-        call_context.function_name, call_context.receiver_type
-    );
-
-    let resolver = deps
-        .resolver
-        .clone()
-        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
-
-    // Get signature from repository
-    let signature_info = get_signature_for_function_with_repository(
-        &call_context.function_name,
-        call_context.receiver_type.as_deref(),
-        call_context.is_constructor,
-        &deps.repository,
-        Some(resolver.as_ref()),
+    let data = type_system::get_signature_help_v2(
+        file_content.as_ref(),
+        position.line,
+        position.character,
+        deps,
     )?;
 
-    // Calculate active parameter
-    let active_param =
-        calculate_active_parameter(file_content.as_ref(), &call_context, position);
+    let parameters = data
+        .parameters
+        .into_iter()
+        .map(|label| ParameterInformation {
+            label: ParameterLabel::Simple(label),
+            documentation: None,
+        })
+        .collect();
 
-    // Build response
-    Some(build_signature_help_response(signature_info, active_param))
+    Some(SignatureHelp {
+        signatures: vec![SignatureInformation {
+            label: data.label,
+            documentation: None,
+            parameters: Some(parameters),
+            active_parameter: Some(data.active_parameter),
+        }],
+        active_signature: Some(0),
+        active_parameter: Some(data.active_parameter),
+    })
 }
 
 /// Find function call context

@@ -32,3 +32,5 @@ pub use services::completion_service::{
     build_call_snippet, CompletionResolveDetails, resolve_method_completion, resolve_type_details,
 };
 pub use services::hover_service::get_hover_info_with_semantic_program;
+pub use services::definition_service::{DefinitionTarget, goto_definition_v2};
+pub use services::signature_help_service::{SignatureHelpData, get_signature_help_v2};

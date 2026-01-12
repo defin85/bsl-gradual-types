@@ -23,6 +23,10 @@ pub struct LspConfig {
     /// Enable/disable cache (workspace setting)
     #[serde(default)]
     pub cache_enabled: Option<bool>,
+
+    /// Use strict fingerprint mode for cache keys and deps snapshots
+    #[serde(default)]
+    pub strict_fingerprint: Option<bool>,
 }
 
 /// MILESTONE 3.6 Phase 1+3: BSL Settings (from workspace/didChangeConfiguration)

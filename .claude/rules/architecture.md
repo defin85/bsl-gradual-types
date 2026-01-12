@@ -5,6 +5,8 @@
 ```mermaid
 graph TB
     subgraph "🎯 System Layer (в `backend/src/system`)"
+        StartupInputs["🧾 StartupInputs<br/>- syntax/config/version/cache/strict<br/>- normalize()"]
+        StartupV2["🚀 startup_v2()<br/>StartupInputs → { coordinator, deps_bundle_v2, inputs }"]
         SystemCoordinator["🎯 SystemCoordinator"]
         DiskCache["💾 DiskCache"]
         AstCache["🌳 AstCache"]
@@ -26,6 +28,8 @@ graph TB
     subgraph "🔧 Application Layer (в `backend/src/application/type_system/services`)"
         CompletionSvc["completion_service"]
         HoverSvc["hover_service"]
+        SignatureHelpSvc["signature_help_service (v2)"]
+        DefinitionSvc["definition_service (v2)"]
         WebApiSvc["web_api_service"]
     end
 
@@ -75,6 +79,10 @@ graph TB
     end
 
     %% System wiring
+    StartupInputs --> StartupV2
+    StartupV2 --> SystemCoordinator
+    StartupV2 --> DepsBundleV2
+
     SystemCoordinator --> DiskCache
     SystemCoordinator --> AstCache
     SystemCoordinator --> ParserCoordinator
@@ -107,6 +115,8 @@ graph TB
     %% LSP/Web call services with semantic inputs
     LSPServer --> CompletionSvc
     LSPServer --> HoverSvc
+    LSPServer --> SignatureHelpSvc
+    LSPServer --> DefinitionSvc
 
     WebServer --> HoverSvc
     WebServer --> WebApiSvc
@@ -117,6 +127,12 @@ graph TB
 
     HoverSvc --> IR
     HoverSvc --> TypeMetadataLookup
+
+    SignatureHelpSvc --> IR
+    SignatureHelpSvc --> TypeMetadataLookup
+
+    DefinitionSvc --> IR
+    DefinitionSvc --> TypeMetadataLookup
 
     WebApiSvc --> DTOs
 
@@ -151,10 +167,10 @@ graph TB
     classDef dataStyle fill:#fce4ec,stroke:#c2185b,stroke-width:2px
     classDef dtoStyle fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
 
-    class SystemCoordinator,DiskCache,AstCache,ParserCoordinator,IntellisenseIndex,IndexSnapshot,BasicObservability,DepsBundleV2 systemStyle
+    class StartupInputs,StartupV2,SystemCoordinator,DiskCache,AstCache,ParserCoordinator,IntellisenseIndex,IndexSnapshot,BasicObservability,DepsBundleV2 systemStyle
     class LSPServer,AnalysisRuntime,WebServer,Frontend,VSCode,CLITool,SemanticRoutes presentationStyle
     class SemanticHtml,TypeViz helperStyle
-    class CompletionSvc,HoverSvc,WebApiSvc applicationStyle
+    class CompletionSvc,HoverSvc,SignatureHelpSvc,DefinitionSvc,WebApiSvc applicationStyle
     class AnalysisHostV2,AnalysisV2,V2Queries,DepsSnapshot,SettingsSnapshot v2Style
     class SyntaxAST,AstToIr,IR semanticStyle
     class TypeResolver,TypeMetadataLookup,TypeRepository,SignatureIndex domainStyle

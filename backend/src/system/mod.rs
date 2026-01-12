@@ -12,8 +12,10 @@ pub mod intellisense_index_store; // M2: IntelliSense indexes storage
 pub mod keyword_index; // M2: Keyword index sources
 pub mod parallel_analyzer; // Milestone 2.4: Параллельный анализ
 pub mod parser_coordinator;
+mod platform_version;
 pub mod persistent_cache; // Milestone 2.4: Межсессионное кеширование
 pub mod positioning; // UTF-16 <-> byte offsets for LSP/tree-sitter
+pub mod startup_v2;
 pub mod system_coordinator;
 pub mod tree_cache;
 pub mod tree_sitter_adapter;
@@ -37,6 +39,7 @@ pub use parallel_analyzer::{ParallelAnalyzer, PerformanceStats, ProjectAnalysisR
 pub use parser_coordinator::ParserCoordinator;
 pub use positioning::{LineIndex, byte_offset_to_utf16, utf16_to_byte_offset};
 pub use persistent_cache::{CacheCleanupStats, CacheStats, CachedAnalysis, PersistentCache};
+pub use startup_v2::{EffectiveStartupInputs, StartupInputs, StartupResultV2, startup_v2};
 pub use system_coordinator::{
     CacheClearReport, CacheScope, CacheStatsReport, CacheToggleResult, ConfigIndexCache,
     DiskCacheStatsReport, LoadMetadataResult, ObjectKey, StartupError, SymbolInfo,

@@ -290,7 +290,7 @@ pub trait TypeRepository: Send + Sync {
 }
 
 /// Статистика репозитория
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryStats {
     pub total_types: usize,

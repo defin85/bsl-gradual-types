@@ -195,6 +195,10 @@ impl BslLanguageServer {
         self.coordinator
             .record_intellisense_v2_deps_update_build_latency(build_elapsed);
 
+        self.apply_deps_bundle_v2(reason, bundle).await;
+    }
+
+    pub(crate) async fn apply_deps_bundle_v2(&self, reason: &str, bundle: DepsBundleV2) {
         let apply_started = Instant::now();
         let ok = self
             .analysis_v2

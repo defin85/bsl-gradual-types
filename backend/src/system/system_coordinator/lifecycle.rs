@@ -22,6 +22,7 @@ use crate::data::loaders::{
 };
 use crate::system::keyword_index::keyword_items_from_syntax_or_default;
 use crate::system::parser_coordinator::ParserCoordinator;
+use crate::system::platform_version::{format_platform_version, parse_platform_version, PlatformVersion};
 use crate::system::{IndexItem, IndexItemKind, IndexKind, TypeKind};
 use crate::system::DiskCacheKey;
 use bsl_shared::api::StartupProgressDto;
@@ -54,38 +55,6 @@ struct SyntaxHelperCachePayload {
 struct CombinedCachePayload {
     config_raw_types: Vec<RawTypeData>,
     config_indexed: IndexedConfigSignatures,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
-struct PlatformVersion {
-    major: u32,
-    minor: u32,
-    patch: u32,
-}
-
-impl std::fmt::Display for PlatformVersion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
-    }
-}
-
-fn format_platform_version(version: PlatformVersion) -> String {
-    version.to_string()
-}
-
-fn parse_platform_version(raw: &str) -> Option<PlatformVersion> {
-    let trimmed = raw.trim();
-    let without_prefix = trimmed.strip_prefix("Version").unwrap_or(trimmed);
-    let normalized = without_prefix.replace('_', ".");
-    let mut parts = normalized.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    let patch = parts.next()?.parse().ok()?;
-    Some(PlatformVersion {
-        major,
-        minor,
-        patch,
-    })
 }
 
 impl SystemCoordinator {
@@ -635,13 +604,14 @@ impl SystemCoordinator {
     ) -> Result<DiskCacheKey, StartupError> {
         let canonical = fs::canonicalize(syntax_path).unwrap_or_else(|_| syntax_path.to_path_buf());
         let source_identity = canonical.to_string_lossy().to_string();
+        let strict = self.strict_fingerprint();
         let source_fingerprint =
-            syntax_helper_fingerprint(syntax_parser, syntax_path)
+            syntax_helper_fingerprint(syntax_parser, syntax_path, strict)
                 .map_err(StartupError::PlatformTypesError)?;
         let platform_version = platform_version.unwrap_or("unknown");
         let settings_fingerprint = format!(
             "{};platform_version={}",
-            syntax_helper_settings_fingerprint(syntax_parser),
+            syntax_helper_settings_fingerprint(syntax_parser, strict),
             platform_version
         );
         let key_hash = blake3::hash(
@@ -937,6 +907,7 @@ impl SystemCoordinator {
 fn syntax_helper_fingerprint(
     syntax_parser: &SyntaxHelperLoader,
     syntax_path: &Path,
+    strict: bool,
 ) -> anyhow::Result<String> {
     let mut roots = Vec::new();
     let context_help_path = syntax_path.join("rebuilt.shcntx_ru");
@@ -972,7 +943,7 @@ fn syntax_helper_fingerprint(
                 .unwrap_or(0);
             hasher.update(&modified.to_le_bytes());
         }
-        if std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok() {
+        if strict {
             if let Ok(contents) = fs::read(&path) {
                 let content_hash = blake3::hash(&contents);
                 hasher.update(content_hash.as_bytes());
@@ -983,9 +954,8 @@ fn syntax_helper_fingerprint(
     Ok(hasher.finalize().to_hex().to_string())
 }
 
-fn syntax_helper_settings_fingerprint(syntax_parser: &SyntaxHelperLoader) -> String {
+fn syntax_helper_settings_fingerprint(syntax_parser: &SyntaxHelperLoader, strict: bool) -> String {
     let settings = &syntax_parser.settings;
-    let strict = std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok();
     format!(
         "syntax_helper_parser_v1;threads={:?};batch={};show={};limit={:?};skip={:?};parallel={};keywords={};strict_fingerprint={}",
         settings.max_threads,

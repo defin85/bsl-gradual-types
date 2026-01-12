@@ -2,7 +2,7 @@
 
 use axum::http::Request;
 use bsl_backend::presentation::web::{create_router, AppState};
-use bsl_backend::system::{SystemCoordinator, build_deps_bundle_v2};
+use bsl_backend::system::{EffectiveStartupInputs, SystemCoordinator, build_deps_bundle_v2};
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -17,9 +17,16 @@ async fn metrics_endpoint_returns_observability_payload() {
         build_deps_bundle_v2(coordinator.as_ref(), None, None).expect("deps bundle v2");
 
     let state = AppState {
-        deps_bundle_v2: Arc::new(deps_bundle_v2),
+        deps_bundle_v2: Arc::new(tokio::sync::RwLock::new(Arc::new(deps_bundle_v2))),
         system_coordinator: coordinator,
         syntax_helper_path: None,
+        startup_inputs: Arc::new(tokio::sync::RwLock::new(EffectiveStartupInputs {
+            syntax_helper_path: None,
+            configuration_path: None,
+            platform_version: None,
+            cache_enabled: true,
+            strict_fingerprint: false,
+        })),
     };
 
     let app = create_router(state, "backend/static", true);

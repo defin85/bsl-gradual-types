@@ -32,7 +32,7 @@ pub fn build_deps_bundle_v2(
     platform_docs_root: Option<&Path>,
     config_root: Option<&Path>,
 ) -> anyhow::Result<DepsBundleV2> {
-    let strict = std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok();
+    let strict = coordinator.strict_fingerprint();
 
     let platform_fingerprint = platform_docs_root
         .map(|root| fingerprint_platform_docs(root, strict))
@@ -215,4 +215,3 @@ fn fingerprint_paths(root: &Path, files: &[PathBuf], strict: bool) -> String {
 
     hasher.finalize().to_hex().to_string()
 }
-

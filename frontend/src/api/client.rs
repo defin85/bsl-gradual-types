@@ -8,6 +8,24 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response};
 
+/// Получить мета-информацию текущего снапшота (deps/config/index parity diagnostics)
+pub async fn fetch_snapshot_meta() -> Result<SnapshotMetaDto, String> {
+    let config = get_config();
+    let url = config.api_url("snapshot/meta");
+    fetch_json::<SnapshotMetaDto>(&url)
+        .await
+        .map_err(|e| format!("API error: {:?}", e))
+}
+
+/// Пересобрать deps/index на backend и вернуть новую мету снапшота
+pub async fn reload_snapshot() -> Result<SnapshotMetaDto, String> {
+    let config = get_config();
+    let url = config.api_url("snapshot/reload");
+    fetch_json_with_method::<SnapshotMetaDto>(&url, "POST")
+        .await
+        .map_err(|e| format!("API error: {:?}", e))
+}
+
 /// Получить метрики системы типизации
 pub async fn fetch_metrics() -> Result<MetricsDto, String> {
     let config = get_config();
@@ -344,8 +362,15 @@ async fn fetch_json<T>(url: &str) -> Result<T, JsValue>
 where
     T: serde::de::DeserializeOwned,
 {
+    fetch_json_with_method(url, "GET").await
+}
+
+async fn fetch_json_with_method<T>(url: &str, method: &str) -> Result<T, JsValue>
+where
+    T: serde::de::DeserializeOwned,
+{
     let opts = RequestInit::new();
-    opts.set_method("GET");
+    opts.set_method(method);
     opts.set_mode(RequestMode::Cors);
 
     let request = Request::new_with_str_and_init(url, &opts)?;

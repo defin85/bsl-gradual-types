@@ -916,7 +916,7 @@ impl SystemCoordinator {
         raw_types: Vec<RawTypeData>,
         metadata: &[UniversalMetadataObject],
     ) {
-        let config_fingerprint = match config_fingerprint(config_path) {
+        let config_fingerprint = match config_fingerprint(config_path, self.strict_fingerprint()) {
             Ok(fingerprint) => fingerprint,
             Err(err) => {
                 warn!(
@@ -980,7 +980,7 @@ impl SystemCoordinator {
             self.observability.record_index_warmup_skip("disk_cache_disabled");
             return;
         }
-        let config_fingerprint = match config_fingerprint(config_path) {
+        let config_fingerprint = match config_fingerprint(config_path, self.strict_fingerprint()) {
             Ok(fingerprint) => fingerprint,
             Err(err) => {
                 warn!(
@@ -1209,11 +1209,14 @@ impl SystemCoordinator {
             config_info.uuid.clone().unwrap_or_default(),
             config_set_id
         );
-        let source_fingerprint =
-            config_layer_b_fingerprint(&config_info.path, metadata_for_indexing).map_err(
-                |e| anyhow::anyhow!("Ошибка вычисления fingerprint конфигурации: {}", e),
-            )?;
-        let settings_fingerprint = config_layer_b_settings_fingerprint();
+        let strict = self.strict_fingerprint();
+        let source_fingerprint = config_layer_b_fingerprint(
+            &config_info.path,
+            metadata_for_indexing,
+            strict,
+        )
+        .map_err(|e| anyhow::anyhow!("Ошибка вычисления fingerprint конфигурации: {}", e))?;
+        let settings_fingerprint = config_layer_b_settings_fingerprint(strict);
 
         let key_hash = blake3::hash(
             format!(
@@ -1250,9 +1253,9 @@ impl SystemCoordinator {
             module_path.to_string_lossy(),
             config_set_id
         );
-        let strict = cache_strict_fingerprint();
+        let strict = self.strict_fingerprint();
         let source_fingerprint = file_fingerprint(module_path, strict)?;
-        let settings_fingerprint = module_cache_settings_fingerprint();
+        let settings_fingerprint = module_cache_settings_fingerprint(strict);
 
         let key_hash = blake3::hash(
             format!(
@@ -1290,11 +1293,10 @@ impl SystemCoordinator {
             config_info.uuid.clone().unwrap_or_default(),
             config_set_id
         );
-        let source_fingerprint =
-            config_fingerprint(&config_info.path).map_err(|e| {
-                anyhow::anyhow!("Ошибка вычисления fingerprint конфигурации: {}", e)
-            })?;
-        let settings_fingerprint = config_settings_fingerprint();
+        let strict = self.strict_fingerprint();
+        let source_fingerprint = config_fingerprint(&config_info.path, strict)
+            .map_err(|e| anyhow::anyhow!("Ошибка вычисления fingerprint конфигурации: {}", e))?;
+        let settings_fingerprint = config_settings_fingerprint(strict);
 
         let key_hash = blake3::hash(
             format!(
@@ -1594,11 +1596,7 @@ fn extend_indexed_signatures(
         .extend(source.module_signatures.clone());
 }
 
-fn cache_strict_fingerprint() -> bool {
-    std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok()
-}
-
-fn config_fingerprint(config_path: &Path) -> Result<String> {
+fn config_fingerprint(config_path: &Path, strict: bool) -> Result<String> {
     use walkdir::WalkDir;
 
     let mut files: Vec<PathBuf> = WalkDir::new(config_path)
@@ -1621,12 +1619,10 @@ fn config_fingerprint(config_path: &Path) -> Result<String> {
         }
     }
 
-    let strict = cache_strict_fingerprint();
     Ok(merkle_fingerprint_paths(config_path, &files, strict))
 }
 
-fn config_settings_fingerprint() -> String {
-    let strict = cache_strict_fingerprint();
+fn config_settings_fingerprint(strict: bool) -> String {
     format!(
         "config_parser_v2;modules_indexing_v1;strict_fingerprint={}",
         strict
@@ -1636,6 +1632,7 @@ fn config_settings_fingerprint() -> String {
 fn config_layer_b_fingerprint(
     config_path: &Path,
     metadata_for_indexing: &[UniversalMetadataObject],
+    strict: bool,
 ) -> Result<String> {
     use walkdir::WalkDir;
 
@@ -1661,7 +1658,6 @@ fn config_layer_b_fingerprint(
         }
     }
 
-    let strict = cache_strict_fingerprint();
     Ok(merkle_fingerprint_paths_with_modules(
         config_path,
         &files,
@@ -1670,16 +1666,14 @@ fn config_layer_b_fingerprint(
     ))
 }
 
-fn config_layer_b_settings_fingerprint() -> String {
-    let strict = cache_strict_fingerprint();
+fn config_layer_b_settings_fingerprint(strict: bool) -> String {
     format!(
         "config_layer_b_v2;modules_indexing_v1;strict_fingerprint={}",
         strict
     )
 }
 
-fn module_cache_settings_fingerprint() -> String {
-    let strict = cache_strict_fingerprint();
+fn module_cache_settings_fingerprint(strict: bool) -> String {
     format!(
         "config_module_parse_v2;strict_fingerprint={}",
         strict

@@ -45,6 +45,10 @@ pub struct SystemCoordinator {
 
     // === PLATFORM VERSION (for platform docs matching) ===
     pub(crate) platform_version: Arc<RwLock<Option<String>>>,
+
+    // === FINGERPRINT MODE (fast vs strict) ===
+    // Used for cache keys and deps/config/index fingerprints.
+    pub(crate) strict_fingerprint: Arc<RwLock<bool>>,
 }
 
 impl Default for SystemCoordinator {
@@ -88,7 +92,28 @@ impl SystemCoordinator {
             startup_progress: Arc::new(RwLock::new(StartupProgressDto::default())),
             config_index_cache: Arc::new(RwLock::new(None)),
             platform_version: Arc::new(RwLock::new(None)),
+            strict_fingerprint: Arc::new(RwLock::new(
+                std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok(),
+            )),
         }
+    }
+
+    pub fn strict_fingerprint(&self) -> bool {
+        *self
+            .strict_fingerprint
+            .read()
+            .unwrap_or_else(|poisoned| {
+                warn!("Strict fingerprint RwLock poisoned (read), recovering data.");
+                poisoned.into_inner()
+            })
+    }
+
+    pub fn set_strict_fingerprint(&self, strict: bool) {
+        let mut guard = self.strict_fingerprint.write().unwrap_or_else(|poisoned| {
+            warn!("Strict fingerprint RwLock poisoned (write), recovering data.");
+            poisoned.into_inner()
+        });
+        *guard = strict;
     }
 
     pub fn platform_version(&self) -> Option<String> {

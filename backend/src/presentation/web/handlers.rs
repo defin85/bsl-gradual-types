@@ -13,16 +13,16 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::RwLock;
 
 use crate::application::TypeInferenceService;
 use crate::application::get_hover_info_with_semantic_program;
 use crate::application::type_system::web_api_service;
 use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
-use crate::system::DepsBundleV2;
-use crate::system::SystemCoordinator;
+use crate::system::{DepsBundleV2, EffectiveStartupInputs, StartupInputs, SystemCoordinator, startup_v2};
 use bsl_shared::api::{
     AstNodeDto, DebugAstResponseDto, DiagnosticsResponseDto, EnhancedHoverResponse,
-    SemanticErrorDto, StartupProgressDto, SyntaxErrorDto,
+    SemanticErrorDto, SnapshotInputsDto, SnapshotMetaDto, StartupProgressDto, SyntaxErrorDto,
 };
 use bsl_shared::api::ValidationErrorDto;
 use bsl_shared::domain::TypeMetadataLookup;
@@ -61,9 +61,10 @@ fn default_detail_level() -> String {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub deps_bundle_v2: Arc<DepsBundleV2>,
+    pub deps_bundle_v2: Arc<RwLock<Arc<DepsBundleV2>>>,
     pub system_coordinator: Arc<SystemCoordinator>,
     pub syntax_helper_path: Option<PathBuf>,
+    pub startup_inputs: Arc<RwLock<EffectiveStartupInputs>>,
 }
 
 fn compute_settings_id_v2(diagnostics_detail_level: DetailLevel) -> SettingsId {
@@ -121,7 +122,8 @@ fn build_inference_v2(
 
 /// Get system metrics
 pub async fn get_metrics(State(state): State<AppState>) -> impl IntoResponse {
-    let (inference_service, _metadata_lookup) = build_inference_v2(&state.deps_bundle_v2.semantic_deps);
+    let deps_bundle = state.deps_bundle_v2.read().await.clone();
+    let (inference_service, _metadata_lookup) = build_inference_v2(&deps_bundle.semantic_deps);
     let types = web_api_service::get_metrics_summary(&inference_service);
     let observability = state.system_coordinator.observability_metrics();
     Json(json!({
@@ -142,7 +144,8 @@ pub async fn get_types(
     // Конвертация page → offset для внутреннего использования
     let offset = (page - 1) * limit;
 
-    let (inference_service, metadata_lookup) = build_inference_v2(&state.deps_bundle_v2.semantic_deps);
+    let deps_bundle = state.deps_bundle_v2.read().await.clone();
+    let (inference_service, metadata_lookup) = build_inference_v2(&deps_bundle.semantic_deps);
     let result = web_api_service::get_all_types_as_dto(
         &inference_service,
         &metadata_lookup,
@@ -160,7 +163,8 @@ pub async fn search_types(
     State(state): State<AppState>,
     Query(query): Query<SearchQuery>,
 ) -> impl IntoResponse {
-    let (inference_service, metadata_lookup) = build_inference_v2(&state.deps_bundle_v2.semantic_deps);
+    let deps_bundle = state.deps_bundle_v2.read().await.clone();
+    let (inference_service, metadata_lookup) = build_inference_v2(&deps_bundle.semantic_deps);
     match web_api_service::search_types_as_dto(&inference_service, &metadata_lookup, &query.q).await {
         Ok(result) => Json(result).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -189,6 +193,69 @@ pub async fn get_version() -> impl IntoResponse {
     }))
 }
 
+pub async fn get_snapshot_meta(State(state): State<AppState>) -> impl IntoResponse {
+    let deps_bundle = state.deps_bundle_v2.read().await.clone();
+    let inputs = state.startup_inputs.read().await.clone();
+    Json(snapshot_meta_dto(deps_bundle.as_ref(), &inputs))
+}
+
+pub async fn reload_snapshot(State(state): State<AppState>) -> impl IntoResponse {
+    let current_inputs = state.startup_inputs.read().await.clone();
+    let coordinator = state.system_coordinator.clone();
+
+    let inputs = StartupInputs::from_web_flags(
+        current_inputs.syntax_helper_path.clone(),
+        current_inputs.configuration_path.clone(),
+        current_inputs.platform_version.clone(),
+        Some(current_inputs.cache_enabled),
+        Some(current_inputs.strict_fingerprint),
+    );
+
+    let result = startup_v2(coordinator, inputs, None).await;
+    match result {
+        Ok(startup) => {
+            let deps_bundle = Arc::new(startup.deps_bundle_v2);
+
+            {
+                let mut guard = state.deps_bundle_v2.write().await;
+                *guard = deps_bundle.clone();
+            }
+            {
+                let mut guard = state.startup_inputs.write().await;
+                *guard = startup.inputs.clone();
+            }
+
+            Json(snapshot_meta_dto(deps_bundle.as_ref(), &startup.inputs)).into_response()
+        }
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+fn snapshot_meta_dto(deps_bundle: &DepsBundleV2, inputs: &EffectiveStartupInputs) -> SnapshotMetaDto {
+    SnapshotMetaDto {
+        deps_id: deps_bundle.deps_id.as_str().to_string(),
+        index_snapshot_id: deps_bundle.meta.index_snapshot_id.clone(),
+        platform_version: deps_bundle.meta.platform_version.clone(),
+        platform_fingerprint: deps_bundle.meta.platform_fingerprint.clone(),
+        config_fingerprint: deps_bundle.meta.config_fingerprint.clone(),
+        strict_fingerprint: deps_bundle.meta.strict_fingerprint,
+        repository_stats: deps_bundle.semantic_deps.repository.get_stats(),
+        inputs: SnapshotInputsDto {
+            syntax_helper_path: inputs
+                .syntax_helper_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            configuration_path: inputs
+                .configuration_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            platform_version: inputs.platform_version.clone(),
+            cache_enabled: inputs.cache_enabled,
+            strict_fingerprint: inputs.strict_fingerprint,
+        },
+    }
+}
+
 /// Startup progress endpoint (polling).
 ///
 /// Возвращает прогресс инициализации системы, включая загрузку конфигурации и индексацию модулей.
@@ -205,7 +272,7 @@ pub async fn validate_code(
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    let deps_bundle = state.deps_bundle_v2.clone();
+    let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = payload.code.clone();
     let validation_result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<ValidationErrorDto>> {
         let mut host = AnalysisHostV2::default();
@@ -265,7 +332,7 @@ pub async fn get_hover(
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    let deps_bundle = state.deps_bundle_v2.clone();
+    let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = req.code.clone();
     let line = req.line;
     let column = req.column;
@@ -351,7 +418,7 @@ pub async fn get_diagnostics(
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    let deps_bundle = state.deps_bundle_v2.clone();
+    let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = payload.code.clone();
 
     let diagnostics_result = tokio::task::spawn_blocking(move || -> anyhow::Result<(Vec<SyntaxErrorDto>, Vec<SemanticErrorDto>)> {
@@ -435,7 +502,7 @@ pub async fn get_diagnostics_debug(
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    let deps_bundle = state.deps_bundle_v2.clone();
+    let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = payload.code.clone();
 
     let diagnostics_result = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
@@ -604,7 +671,7 @@ pub async fn get_enhanced_hover(
     // Parse detail_level from request
     let detail_level = DetailLevel::parse(&req.detail_level);
 
-    let deps_bundle = state.deps_bundle_v2.clone();
+    let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = req.code.clone();
     let line = req.line;
     let column = req.column;
@@ -727,7 +794,7 @@ pub async fn get_semantic_tree(
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    let deps_bundle = state.deps_bundle_v2.clone();
+    let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = req.code.clone();
     let file_path = req.file_path.clone();
     let compact = req.compact;

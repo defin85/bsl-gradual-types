@@ -7,7 +7,9 @@ use tower_lsp::lsp_types::*;
 use serde_json::json;
 use tracing::error;
 
-use bsl_backend::application::get_completion_with_semantic_program_snapshot;
+use bsl_backend::application::{
+    get_completion_with_semantic_program_snapshot, get_completion_with_semantic_program_snapshot_v2,
+};
 use bsl_backend::application::CompletionStats;
 use bsl_backend::application::type_system::{
     build_call_snippet, resolve_method_completion, resolve_type_details,
@@ -27,6 +29,7 @@ pub async fn handle_completion_v2(
     file_content: Arc<str>,
     file_path: Arc<str>,
     ir_program: Arc<SemanticProgram>,
+    parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     position: Position,
     file_uri: &Url,
@@ -39,19 +42,39 @@ pub async fn handle_completion_v2(
         .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
 
-    match get_completion_with_semantic_program_snapshot(
-        file_content.as_ref(),
-        position.line,
-        position.character,
-        Some(file_uri.as_str()),
-        index_snapshot,
-        &metadata_lookup,
-        file_path.as_ref(),
-        resolver.as_ref(),
-        ir_program,
-    )
-    .await
-    {
+    let completion = match parse_result {
+        Some(parse_result) => {
+            get_completion_with_semantic_program_snapshot_v2(
+                file_content.as_ref(),
+                position.line,
+                position.character,
+                Some(file_uri.as_str()),
+                index_snapshot,
+                &metadata_lookup,
+                file_path.as_ref(),
+                resolver.as_ref(),
+                ir_program,
+                parse_result,
+            )
+            .await
+        }
+        None => {
+            get_completion_with_semantic_program_snapshot(
+                file_content.as_ref(),
+                position.line,
+                position.character,
+                Some(file_uri.as_str()),
+                index_snapshot,
+                &metadata_lookup,
+                file_path.as_ref(),
+                resolver.as_ref(),
+                ir_program,
+            )
+            .await
+        }
+    };
+
+    match completion {
         Ok(result) => {
             let lsp_completions: Vec<CompletionItem> = result
                 .items
@@ -514,6 +537,7 @@ mod tests {
             file_content.clone(),
             file_path.clone(),
             ir_program.clone(),
+            None,
             deps.clone(),
             position,
             &uri,
@@ -535,6 +559,7 @@ mod tests {
             file_content,
             file_path,
             ir_program,
+            None,
             deps,
             position,
             &uri,
@@ -563,6 +588,7 @@ mod tests {
             file_content,
             file_path,
             ir_program,
+            None,
             deps.clone(),
             position,
             &uri,

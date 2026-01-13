@@ -682,7 +682,7 @@ impl LanguageServer for BslLanguageServer {
             if !ready {
                 empty()
             } else {
-                let (file_content, file_path, deps, ir_program, index_snapshot) = {
+                let (file_content, file_path, parse_result, deps, ir_program, index_snapshot) = {
                     let snapshot_started = Instant::now();
                     let (analysis, index_snapshot, deps_id) =
                         self.analysis_v2.snapshot_with_deps().await;
@@ -748,27 +748,9 @@ impl LanguageServer for BslLanguageServer {
                         observed_point,
                     );
 
-                    if std::env::var("BSL_INTELLISENSE_V2_P3_SMOKE").is_ok() {
-                        match analysis.parse_result(file_id) {
-                            Ok(Some(parsed)) => debug!(
-                                "Completion v2 parse_result: uri={}, file_id={}, syntax_errors={}",
-                                uri,
-                                file_id.0,
-                                parsed.syntax_errors.len()
-                            ),
-                            Ok(None) => debug!(
-                                "Completion v2 parse_result: uri={}, file_id={} (file not found)",
-                                uri, file_id.0
-                            ),
-                            Err(_) => debug!(
-                                "Completion v2 parse_result cancelled: uri={}, file_id={}",
-                                uri, file_id.0
-                            ),
-                        }
-                    }
-
                     let file_content = analysis.file_text(file_id).ok().flatten();
                     let file_path = analysis.file_path(file_id).ok().flatten();
+                    let parse_result = analysis.parse_result(file_id).ok().flatten();
                     let deps = analysis.deps_data().ok();
                     let ir_started = Instant::now();
                     let ir_program = analysis.ir(file_id).ok().flatten();
@@ -805,7 +787,22 @@ impl LanguageServer for BslLanguageServer {
                         }
                     }
 
-                    (file_content, file_path, deps, ir_program, index_snapshot)
+                    if std::env::var("BSL_INTELLISENSE_V2_P3_SMOKE").is_ok() {
+                        match parse_result.as_ref() {
+                            Some(parsed) => debug!(
+                                "Completion v2 parse_result: uri={}, file_id={}, syntax_errors={}",
+                                uri,
+                                file_id.0,
+                                parsed.syntax_errors.len()
+                            ),
+                            None => debug!(
+                                "Completion v2 parse_result: uri={}, file_id={} (unavailable)",
+                                uri, file_id.0
+                            ),
+                        }
+                    }
+
+                    (file_content, file_path, parse_result, deps, ir_program, index_snapshot)
                 };
 
                 match (file_content, file_path, deps, ir_program) {
@@ -814,6 +811,7 @@ impl LanguageServer for BslLanguageServer {
                             file_content,
                             file_path,
                             ir_program,
+                            parse_result,
                             deps,
                             position,
                             &uri,

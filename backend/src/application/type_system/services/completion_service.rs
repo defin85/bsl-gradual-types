@@ -10,10 +10,14 @@ use std::time::Instant;
 use tracing::{debug, info, Span};
 
 use bsl_shared::domain::metadata_constants::get_collection_kind;
+use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::types::{ConcreteType, ResolutionResult, SpecialType};
 use bsl_shared::ir::{ScopeId, SemanticProgram};
+use bsl_syntax::ast::Expression;
 
+use super::completion_target::extract_completion_target_for_member_access;
 use super::super::extractors::symbol_extractor::{
     extract_word_at_position, is_identifier_char, utf16_to_byte_offset,
 };
@@ -86,6 +90,7 @@ pub(crate) struct CompletionAnalysisContext<'a> {
     pub ir_program: Option<Arc<SemanticProgram>>,
     pub resolver: &'a TypeResolver,
     pub file_path: &'a str,
+    pub parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
 }
 
 /// LSP operations - get completion at position
@@ -134,6 +139,7 @@ pub async fn get_completion_with_semantic_program(
         ir_program: Some(ir_program),
         resolver,
         file_path,
+        parse_result: None,
     };
 
     get_completion_with_analysis(
@@ -163,6 +169,38 @@ pub async fn get_completion_with_semantic_program_snapshot(
         ir_program: Some(ir_program),
         resolver,
         file_path,
+        parse_result: None,
+    };
+
+    get_completion_with_analysis(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index_snapshot,
+        metadata_lookup,
+        Some(&analysis),
+    )
+    .await
+}
+
+pub async fn get_completion_with_semantic_program_snapshot_v2(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index_snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    file_path: &str,
+    resolver: &TypeResolver,
+    ir_program: Arc<SemanticProgram>,
+    parse_result: Arc<bsl_syntax::ast::ParseResult>,
+) -> Result<CompletionResult> {
+    let analysis = CompletionAnalysisContext {
+        ir_program: Some(ir_program),
+        resolver,
+        file_path,
+        parse_result: Some(parse_result),
     };
 
     get_completion_with_analysis(
@@ -245,28 +283,63 @@ pub(crate) async fn get_completion_with_analysis(
     };
 
     if context.member_access {
-        if let Some(receiver_chain) = extract_member_receiver_chain(file_content, line, column) {
+        let receiver_types_from_ast = analysis
+            .and_then(|analysis| analysis.parse_result.as_ref().map(|parse_result| (analysis, parse_result)))
+            .and_then(|(analysis, parse_result)| {
+                extract_completion_target_for_member_access(file_content, line, column, parse_result)
+                    .and_then(|target| {
+                        if let Some(expr) = target.receiver_expression.as_ref() {
+                            return Some(resolve_receiver_types_from_expression(
+                                Some(analysis),
+                                file_content,
+                                line,
+                                column,
+                                expr,
+                                &snapshot,
+                                metadata_lookup,
+                            ));
+                        }
+
+                        let mut out = Vec::new();
+                        if let Some(exprs) = target.receiver_union_expressions.as_ref() {
+                            for expr in exprs {
+                                out.extend(resolve_receiver_types_from_expression(
+                                    Some(analysis),
+                                    file_content,
+                                    line,
+                                    column,
+                                    expr,
+                                    &snapshot,
+                                    metadata_lookup,
+                                ));
+                            }
+                        }
+
+                        (!out.is_empty()).then(|| dedup_resolutions(out))
+                    })
+            })
+            .filter(|types| !types.is_empty());
+
+        if let Some(receiver_types) = receiver_types_from_ast {
+            for owner in receiver_types {
+                add_methods_from_resolution(metadata_lookup, &owner, &mut candidates, 0);
+                add_properties_from_resolution(metadata_lookup, &owner, &mut candidates, 1);
+            }
+        } else if let Some(receiver_chain) =
+            extract_member_receiver_chain(file_content, line, column)
+        {
             if receiver_chain.len() == 1 {
                 let base_name = receiver_chain[0].as_str();
                 if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup) {
-                    let resolution = TypeResolution::explicit(&type_name);
+                    let resolution =
+                        analysis.map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
+                            .unwrap_or_else(|| TypeResolution::explicit(&type_name));
                     add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                    add_properties_from_resolution(
-                        metadata_lookup,
-                        &resolution,
-                        &mut candidates,
-                        1,
-                    );
+                    add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
                 } else if let Some(kind) = get_collection_kind(base_name) {
                     add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
-                } else if let Some(resolution) = resolve_member_owner_type(
-                    analysis,
-                    file_content,
-                    line,
-                    column,
-                    base_name,
-                )
-                .await
+                } else if let Some(resolution) =
+                    resolve_member_owner_type(analysis, file_content, line, column, base_name).await
                 {
                     add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
                     add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
@@ -428,13 +501,14 @@ pub fn analyze_completion_context(content: &str, line: u32, column: u32) -> Comp
 
     let trigger_char = line_trimmed.chars().last().filter(|ch| *ch == '.' || *ch == '(');
     let member_base = extract_member_base(line_trimmed);
+    let member_access = is_member_access_context(line_trimmed);
 
     // Extract current word
     let current_word = extract_word_at_position(content, line, column).unwrap_or_default();
 
     CompletionContext {
         current_word,
-        member_access: member_base.is_some(),
+        member_access,
         member_base,
         trigger_char,
         can_add_statements: can_add_statements(line_trimmed),
@@ -559,6 +633,15 @@ fn extract_member_base(line_prefix: &str) -> Option<String> {
     Some(chars[start..end].iter().collect())
 }
 
+fn is_member_access_context(line_prefix: &str) -> bool {
+    let trimmed = line_prefix.trim_end();
+    let Some(dot_pos) = trimmed.rfind('.') else {
+        return false;
+    };
+    let after_dot = trimmed[dot_pos + 1..].trim_start();
+    after_dot.is_empty() || after_dot.chars().all(is_identifier_char)
+}
+
 fn extract_member_receiver_chain(
     content: &str,
     line: u32,
@@ -632,15 +715,37 @@ async fn resolve_member_chain_owner_type(
     snapshot: &IndexSnapshot,
     metadata_lookup: &TypeMetadataLookup,
 ) -> Option<TypeResolution> {
+    resolve_member_chain_owner_type_sync(
+        analysis,
+        file_content,
+        line,
+        column,
+        receiver_chain,
+        snapshot,
+        metadata_lookup,
+    )
+}
+
+fn resolve_member_chain_owner_type_sync(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    receiver_chain: &[String],
+    snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+) -> Option<TypeResolution> {
     if receiver_chain.is_empty() {
         return None;
     }
 
     let base_name = receiver_chain[0].as_str();
     let mut owner = if let Some(type_name) = resolve_type_name(snapshot, base_name, metadata_lookup) {
-        TypeResolution::explicit(&type_name)
+        analysis
+            .map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
+            .unwrap_or_else(|| TypeResolution::explicit(&type_name))
     } else {
-        resolve_member_owner_type(analysis, file_content, line, column, base_name).await?
+        resolve_member_owner_type_sync(analysis, file_content, line, column, base_name)?
     };
 
     let resolver = analysis.map(|ctx| ctx.resolver);
@@ -648,37 +753,18 @@ async fn resolve_member_chain_owner_type(
         if owner.is_unknown() {
             return None;
         }
-        let member_lower = member_name.to_lowercase();
 
-        if let Some(property) = metadata_lookup
-            .get_properties(&owner)
-            .into_iter()
-            .find(|item| item.name.to_lowercase() == member_lower)
+        if let Some(resolved) =
+            resolve_property_access_type(resolver, metadata_lookup, &owner, member_name)
         {
-            if property.prop_type.trim().is_empty() {
-                return None;
-            }
-            owner = if let Some(resolver) = resolver {
-                resolver.resolve_expression_sync(&property.prop_type)
-            } else {
-                TypeResolution::explicit(&property.prop_type)
-            };
+            owner = resolved;
             continue;
         }
 
-        if let Some(method) = metadata_lookup
-            .get_methods(&owner)
-            .into_iter()
-            .find(|item| item.name.to_lowercase() == member_lower)
+        if let Some(resolved) =
+            resolve_method_call_return_type(resolver, metadata_lookup, &owner, member_name)
         {
-            if method.return_type.trim().is_empty() {
-                return None;
-            }
-            owner = if let Some(resolver) = resolver {
-                resolver.resolve_expression_sync(&method.return_type)
-            } else {
-                TypeResolution::explicit(&method.return_type)
-            };
+            owner = resolved;
             continue;
         }
 
@@ -754,6 +840,16 @@ async fn resolve_member_owner_type(
     column: u32,
     base_name: &str,
 ) -> Option<TypeResolution> {
+    resolve_member_owner_type_sync(analysis, _file_content, line, column, base_name)
+}
+
+fn resolve_member_owner_type_sync(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    _file_content: &str,
+    line: u32,
+    column: u32,
+    base_name: &str,
+) -> Option<TypeResolution> {
     let ctx = analysis?;
     let ir_program = ctx.ir_program.clone()?;
 
@@ -775,6 +871,320 @@ async fn resolve_member_owner_type(
     }
 
     Some(resolved)
+}
+
+fn resolve_receiver_types_from_expression(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    expr: &Expression,
+    snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+) -> Vec<TypeResolution> {
+    match expr {
+        Expression::Identifier { name, .. } => resolve_identifier_receiver_types(
+            analysis,
+            file_content,
+            line,
+            column,
+            name,
+            snapshot,
+            metadata_lookup,
+        ),
+        Expression::New { type_name, .. } => vec![resolve_type_from_string(
+            analysis.map(|ctx| ctx.resolver),
+            type_name,
+        )],
+        Expression::Await { expression, .. } => resolve_receiver_types_from_expression(
+            analysis,
+            file_content,
+            line,
+            column,
+            expression,
+            snapshot,
+            metadata_lookup,
+        ),
+        Expression::PropertyAccess {
+            object, property, ..
+        } => {
+            let owners = resolve_receiver_types_from_expression(
+                analysis,
+                file_content,
+                line,
+                column,
+                object,
+                snapshot,
+                metadata_lookup,
+            );
+            let mut out = Vec::new();
+            for owner in owners {
+                if let Some(resolved) = resolve_property_access_type(
+                    analysis.map(|ctx| ctx.resolver),
+                    metadata_lookup,
+                    &owner,
+                    property,
+                ) {
+                    out.push(resolved);
+                }
+            }
+            dedup_resolutions(out)
+        }
+        Expression::Call { function, .. } => match function.as_ref() {
+            Expression::PropertyAccess {
+                object, property, ..
+            } => {
+                let owners = resolve_receiver_types_from_expression(
+                    analysis,
+                    file_content,
+                    line,
+                    column,
+                    object,
+                    snapshot,
+                    metadata_lookup,
+                );
+                let mut out = Vec::new();
+                for owner in owners {
+                    if let Some(resolved) = resolve_method_call_return_type(
+                        analysis.map(|ctx| ctx.resolver),
+                        metadata_lookup,
+                        &owner,
+                        property,
+                    ) {
+                        out.push(resolved);
+                    }
+                }
+                dedup_resolutions(out)
+            }
+            Expression::Identifier { name, .. } => resolve_global_function_return_types(
+                analysis.map(|ctx| ctx.resolver),
+                metadata_lookup,
+                name,
+            ),
+            _ => Vec::new(),
+        },
+        Expression::IndexAccess { object, .. } => {
+            let owners = resolve_receiver_types_from_expression(
+                analysis,
+                file_content,
+                line,
+                column,
+                object,
+                snapshot,
+                metadata_lookup,
+            );
+            let mut out = Vec::new();
+            for owner in owners {
+                if let Some(resolved) = resolve_index_access_element_type(
+                    analysis.map(|ctx| ctx.resolver),
+                    metadata_lookup,
+                    &owner,
+                ) {
+                    out.push(resolved);
+                }
+            }
+            dedup_resolutions(out)
+        }
+        Expression::Ternary {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            let mut out = resolve_receiver_types_from_expression(
+                analysis,
+                file_content,
+                line,
+                column,
+                then_expr,
+                snapshot,
+                metadata_lookup,
+            );
+            out.extend(resolve_receiver_types_from_expression(
+                analysis,
+                file_content,
+                line,
+                column,
+                else_expr,
+                snapshot,
+                metadata_lookup,
+            ));
+            dedup_resolutions(out)
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn resolve_identifier_receiver_types(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    name: &str,
+    snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+) -> Vec<TypeResolution> {
+    if let Some(type_name) = resolve_type_name(snapshot, name, metadata_lookup) {
+        return vec![resolve_type_from_string(analysis.map(|ctx| ctx.resolver), &type_name)];
+    }
+
+    resolve_member_owner_type_sync(analysis, file_content, line, column, name)
+        .filter(|resolution| !resolution.is_unknown())
+        .into_iter()
+        .collect()
+}
+
+fn resolve_property_access_type(
+    resolver: Option<&TypeResolver>,
+    metadata_lookup: &TypeMetadataLookup,
+    owner: &TypeResolution,
+    property_name: &str,
+) -> Option<TypeResolution> {
+    let owner_type_name = owner.type_name();
+    let lowered = property_name.to_lowercase();
+    let property = metadata_lookup
+        .get_properties(owner)
+        .into_iter()
+        .find(|item| item.name.to_lowercase() == lowered)?;
+    if property.prop_type.trim().is_empty() {
+        return None;
+    }
+
+    let resolved_type = substitute_type_name_if_needed(&property.prop_type, &owner_type_name);
+    Some(resolve_type_from_string(resolver, &resolved_type))
+}
+
+fn resolve_method_call_return_type(
+    resolver: Option<&TypeResolver>,
+    metadata_lookup: &TypeMetadataLookup,
+    owner: &TypeResolution,
+    method_name: &str,
+) -> Option<TypeResolution> {
+    let owner_type_name = owner.type_name();
+    let signature = metadata_lookup.find_method_signature_for_call(Some(owner), method_name);
+    if let Some(signature) = signature {
+        let return_type = signature.return_type.as_deref().unwrap_or("Неопределено");
+        let resolved_type = substitute_type_name_if_needed(return_type, &owner_type_name);
+        return Some(resolve_type_from_string(resolver, &resolved_type));
+    }
+
+    let lowered = method_name.to_lowercase();
+    let method = metadata_lookup
+        .get_methods(owner)
+        .into_iter()
+        .find(|item| item.name.to_lowercase() == lowered)?;
+    if method.return_type.trim().is_empty() {
+        return None;
+    }
+
+    let resolved_type = substitute_type_name_if_needed(&method.return_type, &owner_type_name);
+    Some(resolve_type_from_string(resolver, &resolved_type))
+}
+
+fn resolve_global_function_return_types(
+    resolver: Option<&TypeResolver>,
+    metadata_lookup: &TypeMetadataLookup,
+    function_name: &str,
+) -> Vec<TypeResolution> {
+    let signature = metadata_lookup.find_method_signature_for_call(None, function_name);
+    let Some(signature) = signature else {
+        return Vec::new();
+    };
+
+    let return_type = signature.return_type.as_deref().unwrap_or("Неопределено");
+    vec![resolve_type_from_string(resolver, return_type)]
+}
+
+fn resolve_index_access_element_type(
+    resolver: Option<&TypeResolver>,
+    metadata_lookup: &TypeMetadataLookup,
+    owner: &TypeResolution,
+) -> Option<TypeResolution> {
+    let resolver = resolver?;
+
+    match &owner.result {
+        ResolutionResult::Generic(generic) => {
+            let base = generic.base_type.to_lowercase();
+            let candidate = if base == "соответствие" || base == "map" {
+                generic.type_params.get(1).or_else(|| generic.type_params.first())
+            } else {
+                generic.type_params.first()
+            };
+
+            if let Some(candidate) = candidate {
+                if !matches!(candidate, ConcreteType::Special(SpecialType::Undefined)) {
+                    return Some(resolve_concrete_type(resolver, candidate));
+                }
+            }
+
+            let raw = metadata_lookup.get_raw_type(owner)?;
+            let item_type = raw.collection_item_type.as_deref()?;
+            if item_type.trim().is_empty() {
+                return None;
+            }
+            let substituted = substitute_type_name_if_needed(item_type, &owner.type_name());
+            Some(resolver.resolve_expression_sync(&substituted))
+        }
+        _ => {
+            let raw = metadata_lookup.get_raw_type(owner)?;
+            let item_type = raw.collection_item_type.as_deref()?;
+            if item_type.trim().is_empty() {
+                return None;
+            }
+            let substituted =
+                substitute_type_name_if_needed(item_type, &owner.type_name());
+            Some(resolver.resolve_expression_sync(&substituted))
+        }
+    }
+}
+
+fn resolve_concrete_type(resolver: &TypeResolver, concrete: &ConcreteType) -> TypeResolution {
+    let type_name = match concrete {
+        ConcreteType::Primitive(pt) => pt.display_name().to_string(),
+        ConcreteType::Platform(pt) => pt.name.clone(),
+        ConcreteType::Special(s) => s.display_name().to_string(),
+        ConcreteType::GlobalFunction(func) => func.name.clone(),
+        ConcreteType::TabularRow(row) => row.get_full_name(),
+        ConcreteType::Configuration(cfg) => {
+            if let Some(facet) = cfg.facet {
+                format!("{}.{}", cfg.kind.faceted_type_prefix(&facet), cfg.name)
+            } else {
+                format!("{}.{}", cfg.kind.to_prefix(), cfg.name)
+            }
+        }
+    };
+    resolver.resolve_expression_sync(&type_name)
+}
+
+fn substitute_type_name_if_needed(type_name: &str, owner_type: &str) -> String {
+    let Some(metadata_name) = SignatureIndex::extract_metadata_name(owner_type) else {
+        return type_name.to_string();
+    };
+    SignatureIndex::substitute_type_name(type_name, metadata_name)
+}
+
+fn resolve_type_from_string(resolver: Option<&TypeResolver>, type_name: &str) -> TypeResolution {
+    let type_name = type_name.trim();
+    if type_name.is_empty() {
+        return TypeResolution::unknown();
+    }
+    resolver
+        .map(|resolver| resolver.resolve_expression_sync(type_name))
+        .unwrap_or_else(|| TypeResolution::explicit(type_name))
+}
+
+fn dedup_resolutions(resolutions: Vec<TypeResolution>) -> Vec<TypeResolution> {
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut out = Vec::new();
+    for resolution in resolutions {
+        if resolution.is_unknown() {
+            continue;
+        }
+        let key = resolution.type_name();
+        if seen.insert(key) {
+            out.push(resolution);
+        }
+    }
+    out
 }
 
 fn resolve_scope_for_member(ir_program: &SemanticProgram, line: u32, column: u32) -> ScopeId {
@@ -1106,8 +1516,10 @@ mod tests {
     use crate::system::IndexItem;
     use std::sync::Arc;
     use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId};
+    use bsl_shared::domain::signature_index::{ContextRequirements, MethodSignature, SignatureIndex, SignatureSource};
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
     use bsl_shared::domain::resolver::TypeResolver;
+    use bsl_shared::domain::type_id::TypeId;
     use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawPropertyData, RawTypeData};
     use bsl_shared::formatting::DetailLevel;
 
@@ -1332,6 +1744,7 @@ mod tests {
             ir_program: Some(ir_program),
             resolver: resolver.as_ref(),
             file_path: "completion_test.bsl",
+            parse_result: None,
         };
 
         let resolved = resolve_member_owner_type(
@@ -1440,6 +1853,7 @@ mod tests {
             ir_program: Some(ir_program),
             resolver: resolver.as_ref(),
             file_path: "completion_nested_chain_test.bsl",
+            parse_result: None,
         };
 
         let result = get_completion_with_analysis(
@@ -1456,5 +1870,585 @@ mod tests {
 
         let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
         assert!(labels.contains(&"Добавить".to_string()), "labels: {:?}", labels);
+    }
+
+    #[tokio::test]
+    async fn completion_supports_member_access_after_method_call() {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository
+            .load_types(vec![
+                RawTypeData {
+                    name: "ТаблицаЗначений".to_string(),
+                    source: RawDataSource::Platform,
+                    properties: vec![RawPropertyData {
+                        name: "Колонки".to_string(),
+                        prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                        is_readonly: true,
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                    source: RawDataSource::Platform,
+                    methods: vec![RawMethodData {
+                        name: "Добавить".to_string(),
+                        return_type: "КолонкаТаблицыЗначений".to_string(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "КолонкаТаблицыЗначений".to_string(),
+                    source: RawDataSource::Platform,
+                    properties: vec![RawPropertyData {
+                        name: "Имя".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: true,
+                    }],
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+        let resolver = Arc::new(TypeResolver::new(repo.clone()));
+        let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+        let index = IntellisenseIndexStore::new("cfg", "platform");
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    ТаблЗнач = Новый ТаблицаЗначений;\n",
+            "    ТаблЗнач.Колонки.Добавить().\n",
+            "КонецПроцедуры\n"
+        );
+        let line = 2;
+        let line_text = "    ТаблЗнач.Колонки.Добавить().";
+        let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            signature_index: repo.get_signature_index_clone(),
+            resolver: Some(resolver.clone()),
+            repository: repo.clone(),
+        });
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("test"),
+            deps,
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from("completion_call_chain_test.bsl"),
+        });
+        let analysis = host.analysis();
+        let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+        let parse_result = analysis
+            .parse_result(V2FileId(1))
+            .ok()
+            .flatten()
+            .expect("parse_result");
+
+        let ctx = CompletionAnalysisContext {
+            ir_program: Some(ir_program),
+            resolver: resolver.as_ref(),
+            file_path: "completion_call_chain_test.bsl",
+            parse_result: Some(parse_result),
+        };
+
+        let result = get_completion_with_analysis(
+            content,
+            line,
+            column,
+            Some("completion_call_chain_test.bsl"),
+            &index,
+            &metadata_lookup,
+            Some(&ctx),
+        )
+        .await
+        .expect("completion ok");
+
+        let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+        assert!(labels.contains(&"Имя".to_string()), "labels: {:?}", labels);
+    }
+
+    #[tokio::test]
+    async fn completion_supports_member_access_after_index_access() {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository
+            .load_types(vec![
+                RawTypeData {
+                    name: "Массив".to_string(),
+                    source: RawDataSource::Platform,
+                    collection_item_type: Some("КолонкаТаблицыЗначений".to_string()),
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "КолонкаТаблицыЗначений".to_string(),
+                    source: RawDataSource::Platform,
+                    properties: vec![RawPropertyData {
+                        name: "Имя".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: true,
+                    }],
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+        let resolver = Arc::new(TypeResolver::new(repo.clone()));
+        let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+        let index = IntellisenseIndexStore::new("cfg", "platform");
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Перем arr;\n",
+            "    arr = Новый Массив;\n",
+            "    arr[0].\n",
+            "КонецПроцедуры\n"
+        );
+        let line = 3;
+        let line_text = "    arr[0].";
+        let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            signature_index: repo.get_signature_index_clone(),
+            resolver: Some(resolver.clone()),
+            repository: repo.clone(),
+        });
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("test"),
+            deps,
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from("completion_index_access_test.bsl"),
+        });
+        let analysis = host.analysis();
+        let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+        let parse_result = analysis
+            .parse_result(V2FileId(1))
+            .ok()
+            .flatten()
+            .expect("parse_result");
+
+        let ctx = CompletionAnalysisContext {
+            ir_program: Some(ir_program),
+            resolver: resolver.as_ref(),
+            file_path: "completion_index_access_test.bsl",
+            parse_result: Some(parse_result),
+        };
+
+        let result = get_completion_with_analysis(
+            content,
+            line,
+            column,
+            Some("completion_index_access_test.bsl"),
+            &index,
+            &metadata_lookup,
+            Some(&ctx),
+        )
+        .await
+        .expect("completion ok");
+
+        let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+        assert!(labels.contains(&"Имя".to_string()), "labels: {:?}", labels);
+    }
+
+    #[tokio::test]
+    async fn completion_supports_member_access_after_map_index_access() {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository
+            .load_types(vec![
+                RawTypeData {
+                    name: "Соответствие".to_string(),
+                    source: RawDataSource::Platform,
+                    collection_item_type: Some("КолонкаТаблицыЗначений".to_string()),
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "КолонкаТаблицыЗначений".to_string(),
+                    source: RawDataSource::Platform,
+                    properties: vec![RawPropertyData {
+                        name: "Имя".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: true,
+                    }],
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+        let resolver = Arc::new(TypeResolver::new(repo.clone()));
+        let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+        let index = IntellisenseIndexStore::new("cfg", "platform");
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Перем map;\n",
+            "    map = Новый Соответствие;\n",
+            "    map[\"k\"].\n",
+            "КонецПроцедуры\n"
+        );
+        let line = 3;
+        let line_text = "    map[\"k\"].";
+        let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            signature_index: repo.get_signature_index_clone(),
+            resolver: Some(resolver.clone()),
+            repository: repo.clone(),
+        });
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("test"),
+            deps,
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from("completion_map_index_access_test.bsl"),
+        });
+        let analysis = host.analysis();
+        let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+        let parse_result = analysis
+            .parse_result(V2FileId(1))
+            .ok()
+            .flatten()
+            .expect("parse_result");
+
+        let ctx = CompletionAnalysisContext {
+            ir_program: Some(ir_program),
+            resolver: resolver.as_ref(),
+            file_path: "completion_map_index_access_test.bsl",
+            parse_result: Some(parse_result),
+        };
+
+        let result = get_completion_with_analysis(
+            content,
+            line,
+            column,
+            Some("completion_map_index_access_test.bsl"),
+            &index,
+            &metadata_lookup,
+            Some(&ctx),
+        )
+        .await
+        .expect("completion ok");
+
+        let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+        assert!(labels.contains(&"Имя".to_string()), "labels: {:?}", labels);
+    }
+
+    #[tokio::test]
+    async fn completion_supports_member_access_after_ternary_expression() {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository
+            .load_types(vec![
+                RawTypeData {
+                    name: "TypeA".to_string(),
+                    source: RawDataSource::Platform,
+                    properties: vec![RawPropertyData {
+                        name: "PropA".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: true,
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "TypeB".to_string(),
+                    source: RawDataSource::Platform,
+                    properties: vec![RawPropertyData {
+                        name: "PropB".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: true,
+                    }],
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+        let resolver = Arc::new(TypeResolver::new(repo.clone()));
+        let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+        let index = IntellisenseIndexStore::new("cfg", "platform");
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    ?(Истина, Новый TypeA, Новый TypeB).\n",
+            "КонецПроцедуры\n"
+        );
+        let line = 1;
+        let line_text = "    ?(Истина, Новый TypeA, Новый TypeB).";
+        let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            signature_index: repo.get_signature_index_clone(),
+            resolver: Some(resolver.clone()),
+            repository: repo.clone(),
+        });
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("test"),
+            deps,
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from("completion_ternary_test.bsl"),
+        });
+        let analysis = host.analysis();
+        let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+        let parse_result = analysis
+            .parse_result(V2FileId(1))
+            .ok()
+            .flatten()
+            .expect("parse_result");
+
+        let ctx = CompletionAnalysisContext {
+            ir_program: Some(ir_program),
+            resolver: resolver.as_ref(),
+            file_path: "completion_ternary_test.bsl",
+            parse_result: Some(parse_result),
+        };
+
+        let result = get_completion_with_analysis(
+            content,
+            line,
+            column,
+            Some("completion_ternary_test.bsl"),
+            &index,
+            &metadata_lookup,
+            Some(&ctx),
+        )
+        .await
+        .expect("completion ok");
+
+        let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+        assert!(labels.contains(&"PropA".to_string()), "labels: {:?}", labels);
+        assert!(labels.contains(&"PropB".to_string()), "labels: {:?}", labels);
+    }
+
+    #[tokio::test]
+    async fn completion_supports_member_access_after_choice_expression() {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository
+            .load_types(vec![
+                RawTypeData {
+                    name: "TypeA".to_string(),
+                    source: RawDataSource::Platform,
+                    properties: vec![RawPropertyData {
+                        name: "PropA".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: true,
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "TypeB".to_string(),
+                    source: RawDataSource::Platform,
+                    properties: vec![RawPropertyData {
+                        name: "PropB".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: true,
+                    }],
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+        let resolver = Arc::new(TypeResolver::new(repo.clone()));
+        let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+        let index = IntellisenseIndexStore::new("cfg", "platform");
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Выбор\n",
+            "        Когда Истина Тогда Новый TypeA\n",
+            "        Иначе Новый TypeB\n",
+            "    Конец.\n",
+            "КонецПроцедуры\n"
+        );
+        let line = 4;
+        let line_text = "    Конец.";
+        let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            signature_index: repo.get_signature_index_clone(),
+            resolver: Some(resolver.clone()),
+            repository: repo.clone(),
+        });
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("test"),
+            deps,
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from("completion_choice_test.bsl"),
+        });
+        let analysis = host.analysis();
+        let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+        let parse_result = analysis
+            .parse_result(V2FileId(1))
+            .ok()
+            .flatten()
+            .expect("parse_result");
+
+        let ctx = CompletionAnalysisContext {
+            ir_program: Some(ir_program),
+            resolver: resolver.as_ref(),
+            file_path: "completion_choice_test.bsl",
+            parse_result: Some(parse_result),
+        };
+
+        let result = get_completion_with_analysis(
+            content,
+            line,
+            column,
+            Some("completion_choice_test.bsl"),
+            &index,
+            &metadata_lookup,
+            Some(&ctx),
+        )
+        .await
+        .expect("completion ok");
+
+        let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+        assert!(labels.contains(&"PropA".to_string()), "labels: {:?}", labels);
+        assert!(labels.contains(&"PropB".to_string()), "labels: {:?}", labels);
+    }
+
+    #[tokio::test]
+    async fn completion_substitutes_faceted_metadata_name_in_return_type() {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository
+            .load_types(vec![RawTypeData {
+                name: "Справочники.Контрагенты".to_string(),
+                source: RawDataSource::Configuration,
+                properties: vec![RawPropertyData {
+                    name: "Наименование".to_string(),
+                    prop_type: "Строка".to_string(),
+                    is_readonly: false,
+                }],
+                ..Default::default()
+            }])
+            .expect("load types");
+
+        let mut signatures = SignatureIndex::new();
+        signatures.add_platform_method(
+            TypeId::new("СправочникМенеджер"),
+            MethodSignature::new(
+                "СоздатьЭлемент".to_string(),
+                Some("СправочникМенеджер".to_string()),
+                vec![],
+                Some("СправочникОбъект".to_string()),
+                None,
+                None,
+                SignatureSource::Platform,
+                None,
+                ContextRequirements::default(),
+            ),
+        );
+        repository.set_signature_index(signatures);
+
+        let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+        let resolver = Arc::new(TypeResolver::new(repo.clone()));
+        let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+        let index = IntellisenseIndexStore::new("cfg", "platform");
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Manager = Справочники.Контрагенты;\n",
+            "    Manager.СоздатьЭлемент().\n",
+            "КонецПроцедуры\n"
+        );
+        let line = 2;
+        let line_text = "    Manager.СоздатьЭлемент().";
+        let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            signature_index: repo.get_signature_index_clone(),
+            resolver: Some(resolver.clone()),
+            repository: repo.clone(),
+        });
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("test"),
+            deps,
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from("completion_facet_substitution_test.bsl"),
+        });
+        let analysis = host.analysis();
+        let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+        let parse_result = analysis
+            .parse_result(V2FileId(1))
+            .ok()
+            .flatten()
+            .expect("parse_result");
+
+        let ctx = CompletionAnalysisContext {
+            ir_program: Some(ir_program),
+            resolver: resolver.as_ref(),
+            file_path: "completion_facet_substitution_test.bsl",
+            parse_result: Some(parse_result),
+        };
+
+        let result = get_completion_with_analysis(
+            content,
+            line,
+            column,
+            Some("completion_facet_substitution_test.bsl"),
+            &index,
+            &metadata_lookup,
+            Some(&ctx),
+        )
+        .await
+        .expect("completion ok");
+
+        let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+        assert!(
+            labels.contains(&"Наименование".to_string()),
+            "labels: {:?}",
+            labels
+        );
     }
 }

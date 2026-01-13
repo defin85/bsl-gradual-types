@@ -132,7 +132,9 @@ pub fn convert_expression(node: &Node, source: &str) -> Result<Option<Expression
 
         "access" => convert_access(node, source),
 
-        "index" => convert_index_access(node, source),
+        // `index` is the expression inside `access[index]` (see tree-sitter-bsl grammar).
+        // It is NOT the whole index access expression.
+        "index" => convert_index_expression(node, source),
 
         "unary_expression" => convert_unary_expression(node, source),
 
@@ -178,6 +180,7 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
     let mut object = None;
     let mut property_name = None;
     let mut method_call_node = None;
+    let mut index_expr = None;
 
     for child in node.children(&mut cursor) {
         match child.kind() {
@@ -202,6 +205,10 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
                 // Вызов метода после точки
                 method_call_node = Some(child);
             }
+            "index" => {
+                // Доступ по индексу: access { access { ... }, "[", index(expression), "]" }
+                index_expr = convert_expression(&child, source)?;
+            }
             "." => {} // Игнорируем точку
             _ => {
                 // MILESTONE 5.3 FIX (дополнение): объект цепочки может быть НЕ access/identifier,
@@ -218,6 +225,18 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
                 }
             }
         }
+    }
+
+    // Index access: `obj[expr]`
+    if let Some(idx) = index_expr {
+        return match object {
+            Some(obj) => Ok(Some(Expression::IndexAccess {
+                object: Box::new(obj),
+                index: Box::new(idx),
+                span,
+            })),
+            None => Ok(None),
+        };
     }
 
     // Строим результат в зависимости от структуры
@@ -497,6 +516,7 @@ fn convert_property_access(node: &Node, source: &str) -> Result<Option<Expressio
     let mut cursor = node.walk();
     let mut object = None;
     let mut property = String::new();
+    let mut index_expr = None;
 
     for child in node.children(&mut cursor) {
         match child.kind() {
@@ -531,8 +551,24 @@ fn convert_property_access(node: &Node, source: &str) -> Result<Option<Expressio
             "property" => {
                 property = node_text(&child, source);
             }
+            "index" => {
+                // index access: property_access { access, "[", index(expression), "]" }
+                index_expr = convert_expression(&child, source)?;
+            }
             _ => {}
         }
+    }
+
+    // Index access: `obj[expr]`
+    if let Some(idx) = index_expr {
+        return match object {
+            Some(obj) => Ok(Some(Expression::IndexAccess {
+                object: Box::new(obj),
+                index: Box::new(idx),
+                span,
+            })),
+            None => Ok(None),
+        };
     }
 
     match object {
@@ -551,31 +587,19 @@ fn convert_property_access(node: &Node, source: &str) -> Result<Option<Expressio
     }
 }
 
-/// Конвертировать index_access (доступ по индексу: arr[0])
-fn convert_index_access(node: &Node, source: &str) -> Result<Option<Expression>, String> {
-    let span = node_to_span(node, source);
+/// Конвертировать индекс-выражение в `access[index]`.
+///
+/// В tree-sitter-bsl `index` — это alias для `expression` внутри квадратных скобок,
+/// а не отдельный узел "index access". Сам "index access" — это `access`/`property_access`
+/// c дочерними узлами `access` + `index`.
+fn convert_index_expression(node: &Node, source: &str) -> Result<Option<Expression>, String> {
     let mut cursor = node.walk();
-    let mut object = None;
-    let mut index = None;
-
     for child in node.children(&mut cursor) {
         if let Some(expr) = convert_expression(&child, source)? {
-            if object.is_none() {
-                object = Some(expr);
-            } else {
-                index = Some(expr);
-            }
+            return Ok(Some(expr));
         }
     }
-
-    match (object, index) {
-        (Some(obj), Some(idx)) => Ok(Some(Expression::IndexAccess {
-            object: Box::new(obj),
-            index: Box::new(idx),
-            span,
-        })),
-        _ => Ok(None),
-    }
+    Ok(None)
 }
 
 /// Конвертировать ternary_expression

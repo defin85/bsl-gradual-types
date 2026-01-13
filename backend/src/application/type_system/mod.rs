@@ -28,6 +28,7 @@ pub use services::web_api_service;
 pub use services::completion_service::{CompletionContext, CompletionStats, get_completion};
 pub use services::completion_service::get_completion_with_semantic_program;
 pub use services::completion_service::get_completion_with_semantic_program_snapshot;
+pub use services::completion_service::get_completion_with_semantic_program_snapshot_v2;
 pub use services::completion_service::{
     build_call_snippet, CompletionResolveDetails, resolve_method_completion, resolve_type_details,
 };

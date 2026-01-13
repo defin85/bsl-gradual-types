@@ -211,6 +211,7 @@ fn to_lsp_completion(
     origin_sources: Vec<u8>,
     snippet_support: bool,
 ) -> CompletionItem {
+    let kind_tag = completion_kind_tag(&item);
     let kind = map_completion_kind(item.kind);
     let mut insert_text = item.insert_text;
     let contains_snippet = insert_text
@@ -227,7 +228,7 @@ fn to_lsp_completion(
     };
 
     let data = Some(json!({
-        "kind": completion_kind_tag(item.kind),
+        "kind": kind_tag,
         "owner_type": owner_type,
         "origin_sources": origin_sources,
     }));
@@ -246,15 +247,75 @@ fn to_lsp_completion(
     }
 }
 
-fn completion_kind_tag(kind: bsl_shared::domain::CompletionKind) -> &'static str {
+fn completion_kind_tag(item: &bsl_shared::domain::CompletionItem) -> &'static str {
     use bsl_shared::domain::CompletionKind::*;
-    match kind {
+
+    match item.kind {
         Method => "method",
         Function => "function",
-        Type | Class | Struct | Catalog | Document | Enum => "type",
         Keyword => "keyword",
-        _ => "other",
+        Type | Class | Struct => "type",
+        _ => metadata_completion_kind_tag(item).unwrap_or("other"),
     }
+}
+
+fn metadata_completion_kind_tag(item: &bsl_shared::domain::CompletionItem) -> Option<&'static str> {
+    use bsl_shared::domain::CompletionKind::*;
+
+    let is_metadata_item = match item.kind {
+        Catalog
+        | Document
+        | MetadataUnknown
+        | Report
+        | DataProcessor
+        | Register
+        | InformationRegister
+        | AccumulationRegister
+        | AccountingRegister
+        | CalculationRegister
+        | ChartOfAccounts
+        | ChartOfCharacteristicTypes
+        | ChartOfCalculationTypes
+        | BusinessProcess
+        | Task
+        | ExchangePlan
+        | CommonModule
+        | Role
+        | Subsystem
+        | Language => true,
+        Enum | Constant => item.detail.is_some(),
+        _ => false,
+    };
+
+    if !is_metadata_item {
+        return None;
+    }
+
+    Some(match item.kind {
+        Catalog => "metadata.catalog",
+        Document => "metadata.document",
+        MetadataUnknown => "metadata.unknown",
+        Report => "metadata.report",
+        DataProcessor => "metadata.data_processor",
+        Register => "metadata.register",
+        InformationRegister => "metadata.information_register",
+        AccumulationRegister => "metadata.accumulation_register",
+        AccountingRegister => "metadata.accounting_register",
+        CalculationRegister => "metadata.calculation_register",
+        ChartOfAccounts => "metadata.chart_of_accounts",
+        ChartOfCharacteristicTypes => "metadata.chart_of_characteristic_types",
+        ChartOfCalculationTypes => "metadata.chart_of_calculation_types",
+        BusinessProcess => "metadata.business_process",
+        Task => "metadata.task",
+        ExchangePlan => "metadata.exchange_plan",
+        Constant => "metadata.constant",
+        CommonModule => "metadata.common_module",
+        Role => "metadata.role",
+        Subsystem => "metadata.subsystem",
+        Language => "metadata.language",
+        Enum => "metadata.enum",
+        _ => return None,
+    })
 }
 
 fn map_completion_kind(kind: bsl_shared::domain::CompletionKind) -> Option<CompletionItemKind> {
@@ -285,7 +346,26 @@ fn map_completion_kind(kind: bsl_shared::domain::CompletionKind) -> Option<Compl
         Operator => CompletionItemKind::OPERATOR,
         TypeParameter => CompletionItemKind::TYPE_PARAMETER,
         Text => CompletionItemKind::TEXT,
-        Catalog | Document => CompletionItemKind::CLASS,
+        Catalog => CompletionItemKind::CLASS,
+        Document => CompletionItemKind::FILE,
+        MetadataUnknown => CompletionItemKind::TEXT,
+        Report => CompletionItemKind::SNIPPET,
+        DataProcessor => CompletionItemKind::CONSTRUCTOR,
+        Register => CompletionItemKind::STRUCT,
+        InformationRegister => CompletionItemKind::EVENT,
+        AccumulationRegister => CompletionItemKind::UNIT,
+        AccountingRegister => CompletionItemKind::VALUE,
+        CalculationRegister => CompletionItemKind::OPERATOR,
+        ChartOfAccounts => CompletionItemKind::ENUM_MEMBER,
+        ChartOfCharacteristicTypes => CompletionItemKind::TYPE_PARAMETER,
+        ChartOfCalculationTypes => CompletionItemKind::INTERFACE,
+        BusinessProcess => CompletionItemKind::FIELD,
+        Task => CompletionItemKind::PROPERTY,
+        ExchangePlan => CompletionItemKind::REFERENCE,
+        CommonModule => CompletionItemKind::MODULE,
+        Role => CompletionItemKind::COLOR,
+        Subsystem => CompletionItemKind::FOLDER,
+        Language => CompletionItemKind::KEYWORD,
     })
 }
 
@@ -487,6 +567,82 @@ mod tests {
             CompletionResponse::List(list) => list.items,
             CompletionResponse::Array(list) => list,
         }
+    }
+
+    #[test]
+    fn metadata_completion_kinds_have_unique_lsp_kinds() {
+        use bsl_shared::domain::CompletionKind::*;
+
+        let metadata_kinds = [
+            MetadataUnknown,
+            Catalog,
+            Document,
+            Register,
+            Report,
+            DataProcessor,
+            Enum,
+            ChartOfAccounts,
+            ChartOfCharacteristicTypes,
+            ChartOfCalculationTypes,
+            InformationRegister,
+            AccumulationRegister,
+            AccountingRegister,
+            CalculationRegister,
+            BusinessProcess,
+            Task,
+            ExchangePlan,
+            Constant,
+            CommonModule,
+            Role,
+            Subsystem,
+            Language,
+        ];
+
+        let mut seen: Vec<CompletionItemKind> = Vec::new();
+        for kind in metadata_kinds {
+            let mapped = map_completion_kind(kind).expect("metadata kind should map");
+            assert!(
+                !seen.iter().any(|existing| *existing == mapped),
+                "Duplicate LSP kind mapping for metadata completion kind: {:?} -> {:?}",
+                kind,
+                mapped
+            );
+            seen.push(mapped);
+        }
+    }
+
+    #[test]
+    fn metadata_completion_items_have_granular_kind_in_data() {
+        let item = bsl_shared::domain::CompletionItem::with_details(
+            "Регистр".to_string(),
+            bsl_shared::domain::CompletionKind::InformationRegister,
+            Some("Регистр сведений".to_string()),
+            None,
+        );
+        let lsp_item = to_lsp_completion(item, None, vec![], false);
+        let kind = lsp_item
+            .data
+            .as_ref()
+            .and_then(|value| value.get("kind"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        assert_eq!(kind, "metadata.information_register");
+    }
+
+    #[test]
+    fn method_completion_items_keep_method_kind_in_data() {
+        let item = bsl_shared::domain::CompletionItem::new(
+            "Добавить".to_string(),
+            bsl_shared::domain::CompletionKind::Method,
+        );
+        let lsp_item = to_lsp_completion(item, None, vec![], false);
+        let kind = lsp_item
+            .data
+            .as_ref()
+            .and_then(|value| value.get("kind"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        assert_eq!(kind, "method");
     }
 
     fn build_v2_ir(

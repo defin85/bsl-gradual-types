@@ -171,16 +171,11 @@ impl TypeInferenceService {
 
     /// Определить тип автодополнения на основе TypeResolution
     fn determine_completion_kind(&self, resolution: &TypeResolution) -> CompletionKind {
-        use bsl_shared::domain::types::MetadataKind;
-
         match &resolution.result {
             ResolutionResult::Concrete(ConcreteType::Platform(_)) => CompletionKind::Global,
-            ResolutionResult::Concrete(ConcreteType::Configuration(config)) => match config.kind {
-                MetadataKind::Catalog => CompletionKind::Catalog,
-                MetadataKind::Document => CompletionKind::Document,
-                MetadataKind::Enum => CompletionKind::Enum,
-                _ => CompletionKind::Global,
-            },
+            ResolutionResult::Concrete(ConcreteType::Configuration(config)) => {
+                CompletionKind::from_metadata_kind(config.kind)
+            }
             _ => CompletionKind::Global,
         }
     }

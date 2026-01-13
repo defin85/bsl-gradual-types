@@ -1446,12 +1446,7 @@ fn completion_kind_from_index_item(item: &crate::system::IndexItem) -> Completio
     match &item.kind {
         IndexItemKind::Keyword => CompletionKind::Keyword,
         IndexItemKind::Type(_) => CompletionKind::Type,
-        IndexItemKind::Metadata(kind) => match kind {
-            bsl_shared::domain::types::MetadataKind::Catalog => CompletionKind::Catalog,
-            bsl_shared::domain::types::MetadataKind::Document => CompletionKind::Document,
-            bsl_shared::domain::types::MetadataKind::Enum => CompletionKind::Enum,
-            _ => CompletionKind::Type,
-        },
+        IndexItemKind::Metadata(kind) => CompletionKind::from_metadata_kind(*kind),
         IndexItemKind::Symbol(symbol) => match symbol {
             crate::system::SymbolKind::Function => CompletionKind::Function,
             crate::system::SymbolKind::Procedure => CompletionKind::Function,

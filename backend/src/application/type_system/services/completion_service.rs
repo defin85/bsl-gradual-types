@@ -13,7 +13,7 @@ use bsl_shared::domain::metadata_constants::get_collection_kind;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
 use bsl_shared::domain::resolver::TypeResolver;
-use bsl_shared::domain::types::{ConcreteType, ResolutionResult, SpecialType};
+use bsl_shared::domain::types::{ConcreteType, FacetKind, MetadataKind, ResolutionResult, SpecialType};
 use bsl_shared::ir::{ScopeId, SemanticProgram};
 use bsl_syntax::ast::Expression;
 
@@ -330,14 +330,14 @@ pub(crate) async fn get_completion_with_analysis(
         {
             if receiver_chain.len() == 1 {
                 let base_name = receiver_chain[0].as_str();
-                if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup) {
+                if let Some(kind) = get_collection_kind(base_name) {
+                    add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
+                } else if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup) {
                     let resolution =
                         analysis.map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
                             .unwrap_or_else(|| TypeResolution::explicit(&type_name));
                     add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
                     add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
-                } else if let Some(kind) = get_collection_kind(base_name) {
-                    add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
                 } else if let Some(resolution) =
                     resolve_member_owner_type(analysis, file_content, line, column, base_name).await
                 {
@@ -359,7 +359,9 @@ pub(crate) async fn get_completion_with_analysis(
                 add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
             }
         } else if let Some(base_name) = context.member_base.as_deref() {
-            if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup) {
+            if let Some(kind) = get_collection_kind(base_name) {
+                add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
+            } else if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup) {
                 let resolution = TypeResolution::explicit(&type_name);
                 add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
                 add_properties_from_resolution(
@@ -368,8 +370,6 @@ pub(crate) async fn get_completion_with_analysis(
                     &mut candidates,
                     1,
                 );
-            } else if let Some(kind) = get_collection_kind(base_name) {
-                add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
             } else if let Some(resolution) = resolve_member_owner_type(
                 analysis,
                 file_content,
@@ -740,7 +740,15 @@ fn resolve_member_chain_owner_type_sync(
     }
 
     let base_name = receiver_chain[0].as_str();
-    let mut owner = if let Some(type_name) = resolve_type_name(snapshot, base_name, metadata_lookup) {
+    let mut start_index = 1usize;
+    let mut owner = if let Some(kind) = get_collection_kind(base_name) {
+        let object_name = receiver_chain.get(1)?;
+        start_index = 2;
+        let expr = format!("{}.{}", base_name, object_name);
+        analysis
+            .map(|ctx| ctx.resolver.resolve_expression_sync(&expr))
+            .unwrap_or_else(|| TypeResolution::metadata_type(kind, object_name, Some(FacetKind::Manager)))
+    } else if let Some(type_name) = resolve_type_name(snapshot, base_name, metadata_lookup) {
         analysis
             .map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
             .unwrap_or_else(|| TypeResolution::explicit(&type_name))
@@ -749,7 +757,7 @@ fn resolve_member_chain_owner_type_sync(
     };
 
     let resolver = analysis.map(|ctx| ctx.resolver);
-    for member_name in receiver_chain.iter().skip(1) {
+    for member_name in receiver_chain.iter().skip(start_index) {
         if owner.is_unknown() {
             return None;
         }
@@ -908,6 +916,16 @@ fn resolve_receiver_types_from_expression(
         Expression::PropertyAccess {
             object, property, ..
         } => {
+            if let Expression::Identifier { name, .. } = object.as_ref() {
+                if let Some(kind) = get_collection_kind(name) {
+                    let expr = format!("{}.{}", name, property);
+                    let resolution = analysis
+                        .map(|ctx| ctx.resolver.resolve_expression_sync(&expr))
+                        .unwrap_or_else(|| TypeResolution::metadata_type(kind, property, Some(FacetKind::Manager)));
+                    return (!resolution.is_unknown()).then(|| vec![resolution]).unwrap_or_default();
+                }
+            }
+
             let owners = resolve_receiver_types_from_expression(
                 analysis,
                 file_content,
@@ -1023,6 +1041,10 @@ fn resolve_identifier_receiver_types(
     snapshot: &IndexSnapshot,
     metadata_lookup: &TypeMetadataLookup,
 ) -> Vec<TypeResolution> {
+    if get_collection_kind(name).is_some() {
+        return Vec::new();
+    }
+
     if let Some(type_name) = resolve_type_name(snapshot, name, metadata_lookup) {
         return vec![resolve_type_from_string(analysis.map(|ctx| ctx.resolver), &type_name)];
     }
@@ -1049,6 +1071,30 @@ fn resolve_property_access_type(
         return None;
     }
 
+    if let Some(resolver) = resolver {
+        if property.prop_type.trim_start().starts_with("ТабличнаяЧасть<") {
+            if let ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) = &owner.result {
+                let tabular_sections = metadata_lookup.get_tabular_sections(owner);
+                let lowered = property_name.to_lowercase();
+                if let Some(ts) = tabular_sections
+                    .iter()
+                    .find(|ts| ts.name.to_lowercase() == lowered)
+                {
+                    let parent_type = if cfg.name.contains('.') {
+                        cfg.name.clone()
+                    } else {
+                        format!("{}.{}", cfg.kind.to_prefix(), cfg.name)
+                    };
+                    let expr = format!("{}.{}", parent_type, ts.name);
+                    let resolved = resolver.resolve_expression_sync(&expr);
+                    if !resolved.is_unknown() {
+                        return Some(resolved);
+                    }
+                }
+            }
+        }
+    }
+
     let resolved_type = substitute_type_name_if_needed(&property.prop_type, &owner_type_name);
     Some(resolve_type_from_string(resolver, &resolved_type))
 }
@@ -1060,9 +1106,52 @@ fn resolve_method_call_return_type(
     method_name: &str,
 ) -> Option<TypeResolution> {
     let owner_type_name = owner.type_name();
+
+    if matches!(owner.result, ResolutionResult::Generic(_)) {
+        if let ResolutionResult::Generic(generic) = &owner.result {
+            let base = generic.base_type.to_lowercase();
+            let method = method_name.to_lowercase();
+            if base == "табличнаячасть"
+                && matches!(method.as_str(), "добавить" | "вставить" | "получить" | "найти")
+            {
+                if let Some(concrete) = generic.type_params.first() {
+                    if !matches!(concrete, ConcreteType::Special(SpecialType::Undefined)) {
+                        if let Some(resolver) = resolver {
+                            return Some(resolve_concrete_type(resolver, concrete));
+                        }
+                    }
+                }
+            }
+        }
+
+        let lowered = method_name.to_lowercase();
+        let method = metadata_lookup
+            .get_methods(owner)
+            .into_iter()
+            .find(|item| item.name.to_lowercase() == lowered)?;
+        if method.return_type.trim().is_empty() {
+            return None;
+        }
+        let resolved_type = substitute_type_name_if_needed(&method.return_type, &owner_type_name);
+        return Some(resolve_type_from_string(resolver, &resolved_type));
+    }
+
     let signature = metadata_lookup.find_method_signature_for_call(Some(owner), method_name);
     if let Some(signature) = signature {
         let return_type = signature.return_type.as_deref().unwrap_or("Неопределено");
+
+        if return_type == "T" {
+            if let ResolutionResult::Generic(generic) = &owner.result {
+                if let Some(concrete) = generic.type_params.first() {
+                    if !matches!(concrete, ConcreteType::Special(SpecialType::Undefined)) {
+                        if let Some(resolver) = resolver {
+                            return Some(resolve_concrete_type(resolver, concrete));
+                        }
+                    }
+                }
+            }
+        }
+
         let resolved_type = substitute_type_name_if_needed(return_type, &owner_type_name);
         return Some(resolve_type_from_string(resolver, &resolved_type));
     }
@@ -1299,16 +1388,33 @@ fn add_module_symbols(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>, pri
 
 fn add_metadata_items(
     snapshot: &IndexSnapshot,
-    kind: Option<bsl_shared::domain::types::MetadataKind>,
+    kind: Option<MetadataKind>,
     target: &mut Vec<Candidate>,
     priority: u8,
 ) {
+    fn format_metadata_detail(kind: MetadataKind, facets: &[FacetKind]) -> String {
+        if facets.is_empty() {
+            return kind.to_russian_name().to_string();
+        }
+        let facets = facets
+            .iter()
+            .map(|facet| facet.display_name())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{} ({})", kind.to_russian_name(), facets)
+    }
+
     match kind {
         Some(kind) => {
             if let Some(items) = snapshot.metadata_index.get(&kind) {
                 for item in items {
+                    let item_kind = completion_kind_from_index_item(item);
+                    let detail = match item.kind {
+                        IndexItemKind::Metadata(kind) => Some(format_metadata_detail(kind, &item.facets)),
+                        _ => None,
+                    };
                     target.push(Candidate::new(
-                        CompletionItem::new(item.name.clone(), CompletionKind::Type),
+                        CompletionItem::with_details(item.name.clone(), item_kind, detail, None),
                         priority,
                         None,
                         None,
@@ -1319,8 +1425,13 @@ fn add_metadata_items(
         None => {
             for items in snapshot.metadata_index.values() {
                 for item in items {
+                    let item_kind = completion_kind_from_index_item(item);
+                    let detail = match item.kind {
+                        IndexItemKind::Metadata(kind) => Some(format_metadata_detail(kind, &item.facets)),
+                        _ => None,
+                    };
                     target.push(Candidate::new(
-                        CompletionItem::new(item.name.clone(), CompletionKind::Type),
+                        CompletionItem::with_details(item.name.clone(), item_kind, detail, None),
                         priority,
                         None,
                         None,

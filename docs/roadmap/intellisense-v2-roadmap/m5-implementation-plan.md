@@ -1,6 +1,6 @@
 # План реализации M5: Metadata‑first completion (имена/фасеты/табличные части)
 
-**Статус:** 🔴 ПЛАН  
+**Статус:** ✅ РЕАЛИЗОВАНО  
 **Цель:** обеспечить полноту completion по метаданным конфигурации как основному сценарию 1С: имена объектов, фасеты (Manager/Object/Reference/Selection), табличные части, реквизиты и методы.
 
 ---
@@ -63,23 +63,45 @@
 
 ## Задачи (тикеты) по M5
 
-### T1: Контракт metadata completion ⏳
+### T1: Контракт metadata completion ✅
 **DoD:**
 - определены сущности и связи;
 - определены правила отображения.
 
-### T2: Индексация + инвалидация metadata ⏳
+### T2: Индексация + инвалидация metadata ✅
 **DoD:**
 - пересборка по изменению конфигурации;
 - нет mixed state со snapshot id.
 
-### T3: Facet‑aware lookup ⏳
+### T3: Facet‑aware lookup ✅
 **DoD:**
 - корректные переходы facet‑ов;
 - тесты на `.Ссылка/.Объект` и табличные части.
 
-### T4: Golden/LSP тесты на fixture конфигурации ⏳
+### T4: Golden/LSP тесты на fixture конфигурации ✅
 **DoD:**
 - добавлены кейсы по `examples/conf/...`;
 - стабильные результаты.
 
+---
+
+## Прогресс (факты по коду)
+
+- Контракт metadata completion (kind/detail): `backend/src/application/type_system/services/completion_service.rs` (`add_metadata_items`).
+- Facet-aware резолвинг цепочек метаданных (`Документы.<Имя>.` и далее): `backend/src/application/type_system/services/completion_service.rs` (`resolve_receiver_types_from_expression`, `resolve_member_chain_owner_type_sync`).
+- Табличные части: `.Работы` резолвится как `ТабличнаяЧасть<Строка...>` на основе конфигурации; `Добавить/Вставить/Получить/Найти` возвращают тип строки табличной части: `backend/src/application/type_system/services/completion_service.rs` (`resolve_property_access_type`, `resolve_method_call_return_type`).
+- Доступные фасеты берутся из loaded config (или из fallback mapping по MetadataKind): `shared/src/domain/resolver/member_resolution.rs` (`default_facets_for_kind`).
+- Snapshot-consistency при загрузке/перезагрузке конфигурации:
+  - атомарный reset snapshot id + очистка metadata/type: `backend/src/system/intellisense_index.rs` (`reset_metadata_snapshot`),
+  - использование в loader: `backend/src/system/system_coordinator/config_loader.rs`,
+  - фиксация combined-cache path (metadata/type индекс не остаётся пустым): `backend/src/system/system_coordinator/lifecycle.rs` (`update_intellisense_index_from_config_raw_types`).
+- Интеграционный тест на fixture конфигурации: `backend/tests/metadata_completion_fixture_test.rs`.
+
+## Проверка
+
+- `cargo test -p bsl-backend --test metadata_completion_fixture_test`
+- `cargo test -p bsl-backend reset_metadata_snapshot_updates_id_and_clears_indexes`
+
+**Факт (2026-01-13):**
+- `cargo test -p bsl-backend --test metadata_completion_fixture_test` — ok (1/1)
+- `cargo test -p bsl-backend reset_metadata_snapshot_updates_id_and_clears_indexes` — ok (1/1)

@@ -311,6 +311,14 @@ impl SystemCoordinator {
                             Ok(Some(payload)) => {
                                 info!("Используем combined cache конфигурации");
                                 Self::apply_combined_config_payload(&repository, &payload)?;
+                                let platform_version = self
+                                    .platform_version()
+                                    .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+                                self.update_intellisense_index_from_config_raw_types(
+                                    &config_meta.source_fingerprint,
+                                    &platform_version,
+                                    &payload.config_raw_types,
+                                );
                                 combined_cache_hit = true;
                                 let prev = self.startup_progress();
                                 self.set_startup_progress(StartupProgressDto {
@@ -793,6 +801,57 @@ impl SystemCoordinator {
             .map_err(StartupError::PlatformTypesError)?;
 
         Ok(())
+    }
+
+    fn update_intellisense_index_from_config_raw_types(
+        &self,
+        config_fingerprint: &str,
+        platform_version: &str,
+        raw_types: &[RawTypeData],
+    ) {
+        use std::collections::HashMap;
+
+        self.intellisense_index
+            .reset_metadata_snapshot(config_fingerprint, platform_version);
+
+        for raw_type in raw_types.iter() {
+            if raw_type.source != RawDataSource::Configuration {
+                continue;
+            }
+
+            let mut item = IndexItem::new(
+                raw_type.name.clone(),
+                IndexItemKind::Type(TypeKind::from_raw_source(&raw_type.source)),
+                IndexKind::Type,
+            );
+            item.facets = raw_type.facets.clone();
+            self.intellisense_index.upsert_type(item);
+        }
+
+        let mut by_kind: HashMap<bsl_shared::domain::types::MetadataKind, Vec<IndexItem>> =
+            HashMap::new();
+        for raw_type in raw_types.iter() {
+            if raw_type.source != RawDataSource::Configuration {
+                continue;
+            }
+            let Some(kind) = raw_type.kind else {
+                continue;
+            };
+            let Some((_, object_name)) = raw_type.name.split_once('.') else {
+                continue;
+            };
+
+            let mut item = IndexItem::new(
+                object_name.to_string(),
+                IndexItemKind::Metadata(kind),
+                IndexKind::Metadata,
+            );
+            item.facets = raw_type.facets.clone();
+            by_kind.entry(kind).or_default().push(item);
+        }
+        for (kind, items) in by_kind {
+            self.intellisense_index.replace_metadata_for_kind(kind, items);
+        }
     }
 
     /// Загрузка базовых типов как fallback

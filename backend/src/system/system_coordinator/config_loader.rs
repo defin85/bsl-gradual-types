@@ -930,8 +930,7 @@ impl SystemCoordinator {
             .platform_version()
             .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
         self.intellisense_index
-            .update_snapshot_id(&config_fingerprint, &platform_version);
-        self.intellisense_index.invalidate_metadata();
+            .reset_metadata_snapshot(&config_fingerprint, &platform_version);
 
         for raw_type in raw_types.iter() {
             if raw_type.source != bsl_shared::domain::types::RawDataSource::Configuration {

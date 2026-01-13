@@ -186,6 +186,13 @@ impl IntellisenseIndexStore {
         snapshot.id = IndexSnapshotId::new(config_fingerprint, platform_version);
     }
 
+    pub fn reset_metadata_snapshot(&self, config_fingerprint: &str, platform_version: &str) {
+        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
+        snapshot.id = IndexSnapshotId::new(config_fingerprint, platform_version);
+        snapshot.metadata_index.clear();
+        snapshot.type_index.clear();
+    }
+
     pub fn upsert_type(&self, item: IndexItem) {
         let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
         snapshot.type_index.insert(item.name.clone(), item);
@@ -318,5 +325,28 @@ mod tests {
         assert!(snapshot
             .type_index
             .contains_key("Справочник.Контрагенты"));
+    }
+
+    #[test]
+    fn reset_metadata_snapshot_updates_id_and_clears_indexes() {
+        let store = IntellisenseIndexStore::new("cfg", "platform");
+        store.upsert_type(IndexItem::new(
+            "Catalog",
+            IndexItemKind::Type(TypeKind::Configuration),
+            IndexKind::Type,
+        ));
+        store.replace_metadata_for_kind(MetadataKind::Catalog, vec![IndexItem::new(
+            "Контрагенты",
+            IndexItemKind::Metadata(MetadataKind::Catalog),
+            IndexKind::Metadata,
+        )]);
+        let before_id = store.snapshot_id();
+
+        store.reset_metadata_snapshot("cfg-next", "platform-next");
+
+        let snapshot = store.snapshot();
+        assert_ne!(snapshot.id, before_id);
+        assert!(snapshot.type_index.is_empty());
+        assert!(snapshot.metadata_index.is_empty());
     }
 }

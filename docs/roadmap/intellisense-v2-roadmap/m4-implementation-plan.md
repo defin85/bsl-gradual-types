@@ -112,3 +112,7 @@
 - `cargo test -p bsl-backend completion_supports_member_access_after_ternary_expression`
 - `cargo test -p bsl-backend completion_supports_member_access_after_choice_expression`
 - `cargo test -p bsl-backend completion_substitutes_faceted_metadata_name_in_return_type`
+
+**Факт (2026-01-13):**
+- `cargo test -p bsl-backend completion_supports_member_access_after` — ok (5/5)
+- `cargo test -p bsl-backend completion_substitutes_faceted_metadata_name_in_return_type` — ok (1/1)

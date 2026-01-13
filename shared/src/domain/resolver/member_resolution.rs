@@ -99,8 +99,13 @@ impl<'a> MemberResolver<'a> {
         // MILESTONE 3.16: Three-level resolution logic
         // Формируем имя типа для поиска в repository
         let type_name = format!("{}.{}", collection_prefix, member);
-        let has_metadata = self.repository.find_type(&type_name).is_some();
+        let raw_type = self.repository.find_type(&type_name);
+        let has_metadata = raw_type.is_some();
         let config_loaded = self.is_configuration_loaded();
+        let available_facets = raw_type
+            .as_ref()
+            .map(|raw| raw.facets.clone())
+            .unwrap_or_else(|| Self::default_facets_for_kind(kind));
 
         // Three-level certainty determination:
         // 1. Known (100%) - type found in loaded configuration metadata
@@ -165,7 +170,50 @@ impl<'a> MemberResolver<'a> {
                 uncertainty_reason,
             },
             active_facet: Some(facet),
-            available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            available_facets,
+        }
+    }
+
+    fn default_facets_for_kind(kind: MetadataKind) -> Vec<FacetKind> {
+        match kind {
+            MetadataKind::Catalog | MetadataKind::Document => vec![
+                FacetKind::Manager,
+                FacetKind::Object,
+                FacetKind::Reference,
+                FacetKind::Selection,
+                FacetKind::List,
+            ],
+            MetadataKind::Enum => vec![FacetKind::Manager, FacetKind::Reference],
+            MetadataKind::InformationRegister
+            | MetadataKind::AccumulationRegister
+            | MetadataKind::AccountingRegister
+            | MetadataKind::CalculationRegister => {
+                vec![FacetKind::Manager, FacetKind::Object, FacetKind::Selection]
+            }
+            MetadataKind::ChartOfAccounts
+            | MetadataKind::ChartOfCharacteristicTypes
+            | MetadataKind::ChartOfCalculationTypes => vec![
+                FacetKind::Manager,
+                FacetKind::Object,
+                FacetKind::Reference,
+                FacetKind::Selection,
+            ],
+            MetadataKind::Report | MetadataKind::DataProcessor => {
+                vec![FacetKind::Manager, FacetKind::Object]
+            }
+            MetadataKind::BusinessProcess | MetadataKind::Task => vec![
+                FacetKind::Manager,
+                FacetKind::Object,
+                FacetKind::Reference,
+            ],
+            MetadataKind::Constant => vec![FacetKind::Manager],
+            MetadataKind::CommonModule => vec![FacetKind::Singleton],
+            MetadataKind::Role
+            | MetadataKind::Subsystem
+            | MetadataKind::Language
+            | MetadataKind::ExchangePlan => vec![FacetKind::Metadata],
+            MetadataKind::Register => vec![FacetKind::Manager, FacetKind::Object],
+            MetadataKind::Unknown => vec![],
         }
     }
 

@@ -37,7 +37,14 @@ pub fn deps_bundle_v2_fallback() -> Arc<DepsBundleV2> {
 
 pub fn deps_bundle_v2_with_syntax_helper() -> Arc<DepsBundleV2> {
     static BUNDLE: LazyLock<Arc<DepsBundleV2>> = LazyLock::new(|| {
-        deps_bundle_v2_for_paths(Some(Path::new("examples/syntax_helper")), None, None)
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let syntax_helper_path = manifest_dir.join("..").join("examples").join("syntax_helper");
+        assert!(
+            syntax_helper_path.exists(),
+            "syntax helper path does not exist: {}",
+            syntax_helper_path.display()
+        );
+        deps_bundle_v2_for_paths(Some(syntax_helper_path.as_path()), None, None)
     });
     BUNDLE.clone()
 }

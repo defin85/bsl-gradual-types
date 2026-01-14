@@ -1,6 +1,6 @@
 # План реализации M6: Candidate identity + корректный completionItem/resolve
 
-**Статус:** 🔴 ПЛАН  
+**Статус:** ✅ РЕАЛИЗОВАНО  
 **Цель:** сделать `completionItem/resolve` однозначным и корректным при дублях/перегрузках/нескольких источниках, используя стабильный `candidate_id` вместо угадывания по `label`.
 
 ---
@@ -53,23 +53,45 @@
 
 ## Задачи (тикеты) по M6
 
-### T1: Спецификация candidate_id ⏳
+### T1: Спецификация candidate_id ✅
 **DoD:**
 - определён формат `data`;
 - добавлена версия/схема миграции.
 
-### T2: Проброс candidate_id в completion ⏳
+### T2: Проброс candidate_id в completion ✅
 **DoD:**
 - `data` содержит candidate_id для всех item‑ов;
 - тесты на сериализацию/совместимость.
 
-### T3: Resolve по candidate_id ⏳
+### T3: Resolve по candidate_id ✅
 **DoD:**
 - resolve корректен при дублях;
 - fallback‑ветка не ломает legacy.
 
-### T4: Тесты на корректность resolve ⏳
+### T4: Тесты на корректность resolve ✅
 **DoD:**
 - unit + integration тесты;
 - фиксация регрессий.
 
+---
+
+## Прогресс (факты по коду)
+
+- `candidate_id` добавлен в `CompletionItem.data`:
+  - schema: `{"v": 1, "t": "...", ...}` (версионирование через `v`)
+  - базовые типы: `method`, `property`, `function`, `type`, `metadata`, `keyword`, `other`
+  - для `function` добавлено поле `resolve` (не все функции должны резолвиться через SignatureIndex, чтобы не подменять локальные символы)
+    - `resolve` учитывает дедуп источников: берётся лучший источник как `min(origin_sources)`, чтобы `origin_sources=[0,1]` не приводил к ошибочному resolve глобальной сигнатуры
+  - для `method`/`function` добавляется `sig_hash` (hash сигнатуры `MethodSignature`, включая `SignatureSource`)
+- `completionItem/resolve` теперь использует `candidate_id` как первичный источник истины; если `candidate_id` отсутствует — fallback на legacy логику (`kind/owner_type`).
+
+**Код:**
+- `backend/src/bin/lsp_server/handlers/completion.rs`
+
+**Тесты:**
+- `cargo test -p bsl-backend --test lsp_intellisense_tests`
+  - `completion_handler::tests::m6_completion_resolve_uses_candidate_id_for_function_origin`
+  - `completion_handler::tests::m6_completion_resolve_uses_candidate_id_for_property`
+  - `completion_handler::tests::m6_completion_resolve_uses_candidate_id_for_metadata`
+  - `completion_handler::tests::m6_completion_resolve_dedup_sources_prefers_local_function`
+  - `completion_handler::tests::m6_completion_resolve_legacy_fallback_works_without_candidate_id`

@@ -1,11 +1,24 @@
 # План миграции: IntelliSense v2 → rust-analyzer/salsa-подход
 
-**Статус:** 🔴 ПЛАН  
+**Статус:** 🟢 DONE  
 **Зачем:** получить "как у rust-analyzer" свойства (консистентные снапшоты, инкрементальные queries, дешёвый hot path) без mixed state и mixed deps.
 
 Этот план предполагает, что мы мигрируем **архитектурно** на salsa-подход (DB + queries + snapshots), но **не обязаны** повторять стек rust-analyzer 1:1 (у нас tree-sitter, свой IR и типизация).
 
 См. также: `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/README.md` и `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/direct-salsa-checklist.md`.
+
+**Факт:** план реализован; детальные чеклисты и верификация по фазам лежат в отдельных документах:
+
+- P0: `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/p0-project-decision.md`
+- P1: `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/p1-identifiers-inputs-todo.md`
+- P2: `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/p2-line-index-positioning-todo.md`
+- P3: `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/p3-parse-result-tree-sitter-todo.md`
+- P4: `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/p4-ir-semantic-program-todo.md`
+- P5: `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/p5-completion-hover-signature-help-v2-todo.md`
+- P6: `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/p6-diagnostics-pipeline-background-tasks-todo.md`
+- P7: `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/p7-analysis-host-writer-thread-todo.md`
+- P8: `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/p8-deps-update-atomic-snapshot-todo.md`
+- P9: `docs/roadmap/intellisense-v2-roadmap/architecture-intermediate/p9-remove-legacy-paths-and-caches-todo.md`
 
 ---
 

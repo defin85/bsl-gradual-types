@@ -3,6 +3,7 @@
 //! Handles textDocument/completion requests.
 
 use std::sync::Arc;
+use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::*;
 use serde_json::json;
 use tracing::error;
@@ -17,7 +18,51 @@ use bsl_backend::application::type_system::{
 use bsl_backend::system::IndexSnapshot;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
+use bsl_shared::domain::types::{MetadataKind, TypeResolution};
 use bsl_shared::ir::SemanticProgram;
+
+const COMPLETION_CANDIDATE_ID_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CompletionCandidateId {
+    v: u32,
+    #[serde(flatten)]
+    payload: CompletionCandidateIdPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "t", rename_all = "snake_case")]
+enum CompletionCandidateIdPayload {
+    Method {
+        owner_type: String,
+        name: String,
+        sig_hash: Option<String>,
+    },
+    Property {
+        owner_type: String,
+        name: String,
+    },
+    Function {
+        name: String,
+        sig_hash: Option<String>,
+        resolve: bool,
+    },
+    Type {
+        name: String,
+    },
+    Metadata {
+        kind: MetadataKind,
+        name: String,
+    },
+    Keyword {
+        name: String,
+    },
+    Other {
+        kind: String,
+        name: String,
+    },
+}
 
 pub struct CompletionResponseWithStats {
     pub response: CompletionResponse,
@@ -85,6 +130,7 @@ pub async fn handle_completion_v2(
                         candidate.owner_type,
                         candidate.origin_sources,
                         snippet_support,
+                        Some(deps.as_ref()),
                     )
                 })
                 .collect();
@@ -127,66 +173,18 @@ pub async fn handle_completion_resolve(
 
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
 
-    let (kind, owner_type) = parse_completion_data(&item);
-    let resolved = match (kind.as_deref(), owner_type.as_deref()) {
-        (Some("method"), Some(owner)) => {
-            if let Some(signature) =
-                deps.repository.find_method_signature(Some(owner), &item.label)
-            {
-                let detail = signature
-                    .return_type
-                    .clone()
-                    .filter(|value| !value.is_empty());
-                let documentation = signature.description.clone();
-                let params: Vec<(String, bool)> = signature
-                    .params
-                    .iter()
-                    .map(|param| (param.name.clone(), param.is_optional))
-                    .collect();
-                let insert_text = if snippet_support {
-                    build_call_snippet(&signature.name, &params)
-                } else {
-                    None
-                };
-
-                Some((detail, documentation, insert_text))
-            } else {
-                resolve_method_completion(
-                    owner,
-                    &item.label,
-                    &metadata_lookup,
-                    snippet_support,
-                )
-                .map(|details| (details.detail, details.documentation, details.insert_text))
-            }
-        }
-        (Some("function"), _) => {
-            deps.repository
-                .find_method_signature(None, &item.label)
-                .map(|signature| {
-                    let detail = signature
-                        .return_type
-                        .clone()
-                        .filter(|value| !value.is_empty());
-                    let documentation = signature.description.clone();
-                    let params: Vec<(String, bool)> = signature
-                        .params
-                        .iter()
-                        .map(|param| (param.name.clone(), param.is_optional))
-                        .collect();
-                    let insert_text = if snippet_support {
-                        build_call_snippet(&signature.name, &params)
-                    } else {
-                        None
-                    };
-
-                    (detail, documentation, insert_text)
-                })
-        }
-        (Some("type"), _) => resolve_type_details(&item.label, &metadata_lookup)
-            .map(|(detail, documentation)| (detail, documentation, None)),
-        _ => resolve_type_details(&item.label, &metadata_lookup)
-            .map(|(detail, documentation)| (detail, documentation, None)),
+    let resolved = if let Some(candidate_id) = parse_candidate_id(&item) {
+        resolve_by_candidate_id(&candidate_id, deps.as_ref(), &metadata_lookup, snippet_support)
+    } else {
+        let (kind, owner_type) = parse_completion_data(&item);
+        resolve_legacy(
+            &item,
+            deps.as_ref(),
+            &metadata_lookup,
+            snippet_support,
+            kind.as_deref(),
+            owner_type.as_deref(),
+        )
     };
 
     if let Some((detail, documentation, insert_text)) = resolved {
@@ -210,8 +208,11 @@ fn to_lsp_completion(
     owner_type: Option<String>,
     origin_sources: Vec<u8>,
     snippet_support: bool,
+    deps: Option<&bsl_analysis_v2::SemanticDeps>,
 ) -> CompletionItem {
     let kind_tag = completion_kind_tag(&item);
+    let candidate_id =
+        build_candidate_id(kind_tag, &item, owner_type.as_deref(), &origin_sources, deps);
     let kind = map_completion_kind(item.kind);
     let mut insert_text = item.insert_text;
     let contains_snippet = insert_text
@@ -231,6 +232,7 @@ fn to_lsp_completion(
         "kind": kind_tag,
         "owner_type": owner_type,
         "origin_sources": origin_sources,
+        "candidate_id": candidate_id,
     }));
 
     CompletionItem {
@@ -247,11 +249,336 @@ fn to_lsp_completion(
     }
 }
 
+fn build_candidate_id(
+    kind_tag: &str,
+    item: &bsl_shared::domain::CompletionItem,
+    owner_type: Option<&str>,
+    origin_sources: &[u8],
+    deps: Option<&bsl_analysis_v2::SemanticDeps>,
+) -> CompletionCandidateId {
+    let payload = if kind_tag.starts_with("metadata.") {
+        CompletionCandidateIdPayload::Metadata {
+            kind: item.kind.metadata_kind().unwrap_or(MetadataKind::Unknown),
+            name: item.label.clone(),
+        }
+    } else {
+        match kind_tag {
+            "method" => match owner_type {
+                Some(owner) => {
+                    let sig_hash = deps
+                        .and_then(|deps| deps.signature_index.find_method(owner, &item.label))
+                        .map(method_signature_hash);
+
+                    CompletionCandidateIdPayload::Method {
+                        owner_type: owner.to_string(),
+                        name: item.label.clone(),
+                        sig_hash,
+                    }
+                }
+                None => CompletionCandidateIdPayload::Other {
+                    kind: kind_tag.to_string(),
+                    name: item.label.clone(),
+                },
+            },
+            "property" => match owner_type {
+                Some(owner) => CompletionCandidateIdPayload::Property {
+                    owner_type: owner.to_string(),
+                    name: item.label.clone(),
+                },
+                None => CompletionCandidateIdPayload::Other {
+                    kind: kind_tag.to_string(),
+                    name: item.label.clone(),
+                },
+            },
+            "function" => {
+                // Для `CompletionKind::Function` считаем, что:
+                // - `source_priority=0` → локальные/файловые символы (не resolve'им по SignatureIndex)
+                // - иначе → модульные/глобальные функции (resolve'им, если есть сигнатура)
+                //
+                // Важно: `origin_sources` может быть merge'нут ранжированием/дедупом,
+                // поэтому берём "лучший" источник как `min(origin_sources)`.
+                let best_source = origin_sources.iter().copied().min();
+                let resolve = best_source.map(|source| source != 0).unwrap_or(false);
+                let sig_hash = if resolve {
+                    deps.and_then(|deps| deps.signature_index.find_global_function(&item.label))
+                        .map(method_signature_hash)
+                } else {
+                    None
+                };
+
+                CompletionCandidateIdPayload::Function {
+                    name: item.label.clone(),
+                    sig_hash,
+                    resolve,
+                }
+            }
+            "type" => CompletionCandidateIdPayload::Type {
+                name: item.label.clone(),
+            },
+            "keyword" => CompletionCandidateIdPayload::Keyword {
+                name: item.label.clone(),
+            },
+            _ => CompletionCandidateIdPayload::Other {
+                kind: kind_tag.to_string(),
+                name: item.label.clone(),
+            },
+        }
+    };
+
+    CompletionCandidateId {
+        v: COMPLETION_CANDIDATE_ID_VERSION,
+        payload,
+    }
+}
+
+fn method_signature_hash(signature: &MethodSignature) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"completion-sig-v1|");
+
+    let source_code = match signature.source {
+        SignatureSource::Platform => b"p",
+        SignatureSource::Configuration => b"c",
+        SignatureSource::UserCode => b"u",
+    };
+    hasher.update(source_code);
+    hasher.update(b"|");
+
+    if let Some(owner_type) = signature.owner_type.as_deref() {
+        hasher.update(owner_type.to_lowercase().as_bytes());
+    }
+    hasher.update(b"|");
+    hasher.update(signature.name.to_lowercase().as_bytes());
+    hasher.update(b"|");
+    if let Some(return_type) = signature.return_type.as_deref() {
+        hasher.update(return_type.to_lowercase().as_bytes());
+    }
+    hasher.update(b"|");
+
+    for param in &signature.params {
+        hasher.update(param.name.to_lowercase().as_bytes());
+        hasher.update(b":");
+        if let Some(type_name) = param.type_name.as_deref() {
+            hasher.update(type_name.to_lowercase().as_bytes());
+        }
+        hasher.update(b":");
+        hasher.update(if param.is_optional { b"1" } else { b"0" });
+        hasher.update(b"|");
+    }
+
+    hasher.finalize().to_hex().to_string()
+}
+
+fn parse_candidate_id(item: &CompletionItem) -> Option<CompletionCandidateId> {
+    let data = item.data.as_ref()?;
+    let value = data.get("candidate_id")?.clone();
+    serde_json::from_value(value).ok()
+}
+
+fn resolve_by_candidate_id(
+    candidate_id: &CompletionCandidateId,
+    deps: &bsl_analysis_v2::SemanticDeps,
+    metadata_lookup: &TypeMetadataLookup,
+    snippet_support: bool,
+) -> Option<(Option<String>, Option<String>, Option<String>)> {
+    if candidate_id.v != COMPLETION_CANDIDATE_ID_VERSION {
+        return None;
+    }
+
+    match &candidate_id.payload {
+        CompletionCandidateIdPayload::Method {
+            owner_type,
+            name,
+            sig_hash,
+        } => resolve_method_by_candidate_id(
+            owner_type,
+            name,
+            sig_hash.as_deref(),
+            deps,
+            metadata_lookup,
+            snippet_support,
+        ),
+        CompletionCandidateIdPayload::Property { owner_type, name } => {
+            resolve_property_by_candidate_id(owner_type, name, metadata_lookup)
+        }
+        CompletionCandidateIdPayload::Function {
+            name,
+            sig_hash,
+            resolve,
+        } => {
+            if !resolve {
+                return None;
+            }
+            resolve_function_by_candidate_id(name, sig_hash.as_deref(), deps, snippet_support)
+        }
+        CompletionCandidateIdPayload::Type { name } => resolve_type_details(name, metadata_lookup)
+            .map(|(detail, documentation)| (detail, documentation, None)),
+        CompletionCandidateIdPayload::Metadata { kind, name } => {
+            resolve_metadata_by_candidate_id(*kind, name, metadata_lookup)
+        }
+        CompletionCandidateIdPayload::Keyword { .. } => None,
+        CompletionCandidateIdPayload::Other { .. } => None,
+    }
+}
+
+fn resolve_method_by_candidate_id(
+    owner_type: &str,
+    name: &str,
+    sig_hash: Option<&str>,
+    deps: &bsl_analysis_v2::SemanticDeps,
+    metadata_lookup: &TypeMetadataLookup,
+    snippet_support: bool,
+) -> Option<(Option<String>, Option<String>, Option<String>)> {
+    let signature = sig_hash
+        .and_then(|expected| {
+            deps.signature_index
+                .find_methods(owner_type, name)
+                .into_iter()
+                .find(|signature| method_signature_hash(signature) == expected)
+                .cloned()
+        })
+        .or_else(|| deps.signature_index.find_method(owner_type, name).cloned());
+
+    if let Some(signature) = signature {
+        let detail = signature.return_type.clone().filter(|value| !value.is_empty());
+        let documentation = signature.description.clone();
+        let params: Vec<(String, bool)> = signature
+            .params
+            .iter()
+            .map(|param| (param.name.clone(), param.is_optional))
+            .collect();
+        let insert_text = if snippet_support {
+            build_call_snippet(&signature.name, &params)
+        } else {
+            None
+        };
+
+        return Some((detail, documentation, insert_text));
+    }
+
+    resolve_method_completion(owner_type, name, metadata_lookup, snippet_support)
+        .map(|details| (details.detail, details.documentation, details.insert_text))
+}
+
+fn resolve_function_by_candidate_id(
+    name: &str,
+    _sig_hash: Option<&str>,
+    deps: &bsl_analysis_v2::SemanticDeps,
+    snippet_support: bool,
+) -> Option<(Option<String>, Option<String>, Option<String>)> {
+    let signature = deps.signature_index.find_global_function(name).cloned()?;
+
+    let detail = signature.return_type.clone().filter(|value| !value.is_empty());
+    let documentation = signature.description.clone();
+    let params: Vec<(String, bool)> = signature
+        .params
+        .iter()
+        .map(|param| (param.name.clone(), param.is_optional))
+        .collect();
+    let insert_text = if snippet_support {
+        build_call_snippet(&signature.name, &params)
+    } else {
+        None
+    };
+
+    Some((detail, documentation, insert_text))
+}
+
+fn resolve_property_by_candidate_id(
+    owner_type: &str,
+    name: &str,
+    metadata_lookup: &TypeMetadataLookup,
+) -> Option<(Option<String>, Option<String>, Option<String>)> {
+    let resolution = TypeResolution::explicit(owner_type);
+    let lowered = name.to_lowercase();
+    let property = metadata_lookup
+        .get_properties(&resolution)
+        .into_iter()
+        .find(|prop| prop.name.to_lowercase() == lowered)?;
+
+    let detail = if property.prop_type.is_empty() {
+        None
+    } else {
+        Some(property.prop_type)
+    };
+    Some((detail, None, None))
+}
+
+fn resolve_metadata_by_candidate_id(
+    kind: MetadataKind,
+    name: &str,
+    metadata_lookup: &TypeMetadataLookup,
+) -> Option<(Option<String>, Option<String>, Option<String>)> {
+    let type_name = format!("{}.{}", kind.to_prefix(), name);
+    let documentation = resolve_type_details(&type_name, metadata_lookup).and_then(|(_, doc)| doc);
+    Some((Some(kind.to_russian_name().to_string()), documentation, None))
+}
+
+fn resolve_legacy(
+    item: &CompletionItem,
+    deps: &bsl_analysis_v2::SemanticDeps,
+    metadata_lookup: &TypeMetadataLookup,
+    snippet_support: bool,
+    kind: Option<&str>,
+    owner_type: Option<&str>,
+) -> Option<(Option<String>, Option<String>, Option<String>)> {
+    match (kind, owner_type) {
+        (Some("method"), Some(owner)) => {
+            if let Some(signature) = deps.repository.find_method_signature(Some(owner), &item.label)
+            {
+                let detail = signature.return_type.clone().filter(|value| !value.is_empty());
+                let documentation = signature.description.clone();
+                let params: Vec<(String, bool)> = signature
+                    .params
+                    .iter()
+                    .map(|param| (param.name.clone(), param.is_optional))
+                    .collect();
+                let insert_text = if snippet_support {
+                    build_call_snippet(&signature.name, &params)
+                } else {
+                    None
+                };
+
+                Some((detail, documentation, insert_text))
+            } else {
+                resolve_method_completion(owner, &item.label, metadata_lookup, snippet_support)
+                    .map(|details| (details.detail, details.documentation, details.insert_text))
+            }
+        }
+        (Some("property"), Some(owner)) => {
+            resolve_property_by_candidate_id(owner, &item.label, metadata_lookup)
+        }
+        (Some("function"), _) => deps
+            .repository
+            .find_method_signature(None, &item.label)
+            .map(|signature| {
+                let detail = signature.return_type.clone().filter(|value| !value.is_empty());
+                let documentation = signature.description.clone();
+                let params: Vec<(String, bool)> = signature
+                    .params
+                    .iter()
+                    .map(|param| (param.name.clone(), param.is_optional))
+                    .collect();
+                let insert_text = if snippet_support {
+                    build_call_snippet(&signature.name, &params)
+                } else {
+                    None
+                };
+
+                (detail, documentation, insert_text)
+            }),
+        (Some("type"), _) => resolve_type_details(&item.label, metadata_lookup)
+            .map(|(detail, documentation)| (detail, documentation, None)),
+        _ => resolve_type_details(&item.label, metadata_lookup)
+            .map(|(detail, documentation)| (detail, documentation, None)),
+    }
+}
+
 fn completion_kind_tag(item: &bsl_shared::domain::CompletionItem) -> &'static str {
     use bsl_shared::domain::CompletionKind::*;
 
     match item.kind {
         Method => "method",
+        Property => "property",
         Function => "function",
         Keyword => "keyword",
         Type | Class | Struct => "type",
@@ -397,8 +724,10 @@ mod tests {
     use bsl_backend::system::IntellisenseIndexStore;
     use bsl_shared::domain::repository::InMemoryTypeRepository;
     use bsl_shared::TypeRepository;
-    use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource};
-    use bsl_shared::domain::types::{ParameterInfo, RawTypeData, RawDataSource};
+    use bsl_shared::domain::signature_index::{
+        ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource,
+    };
+    use bsl_shared::domain::types::{ParameterInfo, RawDataSource, RawPropertyData, RawTypeData};
     use bsl_shared::TypeResolver;
     use tower_lsp::lsp_types::Url;
 
@@ -442,10 +771,21 @@ mod tests {
         let raw_type = RawTypeData {
             name: "Массив".to_string(),
             source: RawDataSource::Platform,
+            properties: vec![RawPropertyData {
+                name: "Длина".to_string(),
+                prop_type: "Число".to_string(),
+                is_readonly: true,
+            }],
+            ..Default::default()
+        };
+        let metadata_type = RawTypeData {
+            name: "Документы.ТестДок".to_string(),
+            description: "Описание тестового документа".to_string(),
+            source: RawDataSource::Configuration,
             ..Default::default()
         };
         repository_impl
-            .load_types(vec![raw_type])
+            .load_types(vec![raw_type, metadata_type])
             .expect("load types");
 
         let mut index = SignatureIndex::new();
@@ -492,6 +832,28 @@ mod tests {
                 is_collection: true,
                 generic_params_count: 1,
             },
+        );
+
+        let global_function = MethodSignature::new(
+            "Дубль".to_string(),
+            None,
+            vec![ParameterInfo {
+                name: "Значение".to_string(),
+                type_name: Some("Число".to_string()),
+                is_optional: false,
+                default_value: None,
+                description: None,
+            }],
+            Some("Число".to_string()),
+            None,
+            None,
+            SignatureSource::Platform,
+            None,
+            Default::default(),
+        );
+        index.add_global_function(
+            bsl_shared::domain::type_id::TypeId::new("Дубль"),
+            global_function,
         );
         repository_impl.set_signature_index(index);
 
@@ -619,7 +981,7 @@ mod tests {
             Some("Регистр сведений".to_string()),
             None,
         );
-        let lsp_item = to_lsp_completion(item, None, vec![], false);
+        let lsp_item = to_lsp_completion(item, None, vec![], false, None);
         let kind = lsp_item
             .data
             .as_ref()
@@ -635,7 +997,7 @@ mod tests {
             "Добавить".to_string(),
             bsl_shared::domain::CompletionKind::Method,
         );
-        let lsp_item = to_lsp_completion(item, None, vec![], false);
+        let lsp_item = to_lsp_completion(item, None, vec![], false, None);
         let kind = lsp_item
             .data
             .as_ref()
@@ -643,6 +1005,31 @@ mod tests {
             .and_then(|value| value.as_str())
             .unwrap_or_default();
         assert_eq!(kind, "method");
+    }
+
+    #[test]
+    fn property_completion_items_keep_property_kind_in_data() {
+        let item = bsl_shared::domain::CompletionItem::new(
+            "Длина".to_string(),
+            bsl_shared::domain::CompletionKind::Property,
+        );
+        let lsp_item = to_lsp_completion(item, Some("Массив".to_string()), vec![0], false, None);
+        let kind = lsp_item
+            .data
+            .as_ref()
+            .and_then(|value| value.get("kind"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        assert_eq!(kind, "property");
+
+        let candidate_id = parse_candidate_id(&lsp_item).expect("candidate_id");
+        match candidate_id.payload {
+            CompletionCandidateIdPayload::Property { owner_type, name } => {
+                assert_eq!(owner_type, "Массив");
+                assert_eq!(name, "Длина");
+            }
+            other => panic!("expected property candidate_id, got {:?}", other),
+        }
     }
 
     fn build_v2_ir(
@@ -793,5 +1180,140 @@ mod tests {
         });
 
         assert_snapshot("m5_completion_resolve_snippets.json", &snapshot);
+    }
+
+    #[tokio::test]
+    async fn m6_completion_resolve_uses_candidate_id_for_function_origin() {
+        let env = create_test_env();
+        let deps = env.deps.clone();
+
+        let file_symbol = to_lsp_completion(
+            bsl_shared::domain::CompletionItem::new(
+                "Дубль".to_string(),
+                bsl_shared::domain::CompletionKind::Function,
+            ),
+            None,
+            vec![0],
+            false,
+            Some(deps.as_ref()),
+        );
+        let module_symbol = to_lsp_completion(
+            bsl_shared::domain::CompletionItem::new(
+                "Дубль".to_string(),
+                bsl_shared::domain::CompletionKind::Function,
+            ),
+            None,
+            vec![1],
+            false,
+            Some(deps.as_ref()),
+        );
+
+        let file_resolved =
+            handle_completion_resolve(file_symbol, Some(deps.clone()), false).await;
+        let module_resolved =
+            handle_completion_resolve(module_symbol, Some(deps), false).await;
+
+        assert_eq!(
+            file_resolved.detail, None,
+            "file-level symbol should not resolve to global signature"
+        );
+        assert_eq!(
+            module_resolved.detail.as_deref(),
+            Some("Число"),
+            "module/global function should resolve via SignatureIndex"
+        );
+    }
+
+    #[tokio::test]
+    async fn m6_completion_resolve_uses_candidate_id_for_property() {
+        let env = create_test_env();
+        let deps = env.deps.clone();
+
+        let item = to_lsp_completion(
+            bsl_shared::domain::CompletionItem::new(
+                "Длина".to_string(),
+                bsl_shared::domain::CompletionKind::Property,
+            ),
+            Some("Массив".to_string()),
+            vec![0],
+            false,
+            Some(deps.as_ref()),
+        );
+
+        let resolved = handle_completion_resolve(item, Some(deps), false).await;
+        assert_eq!(resolved.detail.as_deref(), Some("Число"));
+    }
+
+    #[tokio::test]
+    async fn m6_completion_resolve_uses_candidate_id_for_metadata() {
+        let env = create_test_env();
+        let deps = env.deps.clone();
+
+        let item = to_lsp_completion(
+            bsl_shared::domain::CompletionItem::new(
+                "ТестДок".to_string(),
+                bsl_shared::domain::CompletionKind::Document,
+            ),
+            None,
+            vec![2],
+            false,
+            Some(deps.as_ref()),
+        );
+
+        let resolved = handle_completion_resolve(item, Some(deps), false).await;
+        assert_eq!(resolved.detail.as_deref(), Some("Документ"));
+        assert!(resolved.documentation.is_some());
+    }
+
+    #[tokio::test]
+    async fn m6_completion_resolve_dedup_sources_prefers_local_function() {
+        let env = create_test_env();
+        let deps = env.deps.clone();
+
+        let deduped = to_lsp_completion(
+            bsl_shared::domain::CompletionItem::new(
+                "Дубль".to_string(),
+                bsl_shared::domain::CompletionKind::Function,
+            ),
+            None,
+            vec![0, 1],
+            false,
+            Some(deps.as_ref()),
+        );
+
+        let resolved = handle_completion_resolve(deduped, Some(deps), false).await;
+        assert_eq!(
+            resolved.detail, None,
+            "deduped local+module function should not resolve to global signature"
+        );
+    }
+
+    #[tokio::test]
+    async fn m6_completion_resolve_legacy_fallback_works_without_candidate_id() {
+        let env = create_test_env();
+        let deps = env.deps.clone();
+
+        let mut legacy = to_lsp_completion(
+            bsl_shared::domain::CompletionItem::new(
+                "Добавить".to_string(),
+                bsl_shared::domain::CompletionKind::Method,
+            ),
+            Some("Массив".to_string()),
+            vec![0],
+            false,
+            Some(deps.as_ref()),
+        );
+        if let Some(value) = legacy.data.as_mut() {
+            if let Some(obj) = value.as_object_mut() {
+                obj.remove("candidate_id");
+            }
+        }
+
+        let resolved = handle_completion_resolve(legacy, Some(deps), false).await;
+        assert_eq!(
+            resolved.detail.as_deref(),
+            Some("Булево"),
+            "legacy resolve should still work via kind/owner_type"
+        );
     }
 }

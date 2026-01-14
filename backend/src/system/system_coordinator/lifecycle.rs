@@ -227,6 +227,7 @@ impl SystemCoordinator {
         };
 
         if !platform_raw_data.is_empty() {
+            let mut type_items: Vec<IndexItem> = Vec::new();
             for raw_type in &platform_raw_data {
                 if raw_type.source != RawDataSource::Platform {
                     continue;
@@ -237,7 +238,10 @@ impl SystemCoordinator {
                     IndexKind::Type,
                 );
                 item.facets = raw_type.facets.clone();
-                self.intellisense_index.upsert_type(item);
+                type_items.push(item);
+            }
+            if !type_items.is_empty() {
+                self.intellisense_index.upsert_types(type_items);
             }
         }
 
@@ -814,6 +818,7 @@ impl SystemCoordinator {
         self.intellisense_index
             .reset_metadata_snapshot(config_fingerprint, platform_version);
 
+        let mut type_items: Vec<IndexItem> = Vec::new();
         for raw_type in raw_types.iter() {
             if raw_type.source != RawDataSource::Configuration {
                 continue;
@@ -825,7 +830,10 @@ impl SystemCoordinator {
                 IndexKind::Type,
             );
             item.facets = raw_type.facets.clone();
-            self.intellisense_index.upsert_type(item);
+            type_items.push(item);
+        }
+        if !type_items.is_empty() {
+            self.intellisense_index.upsert_types(type_items);
         }
 
         let mut by_kind: HashMap<bsl_shared::domain::types::MetadataKind, Vec<IndexItem>> =

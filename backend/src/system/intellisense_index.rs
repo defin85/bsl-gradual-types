@@ -2,9 +2,10 @@
 
 use bsl_shared::domain::types::{FacetKind, MetadataKind, RawDataSource};
 use bsl_shared::ir::Span;
+use arc_swap::ArcSwap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::Arc;
 
 pub const INDEX_SCHEMA_VERSION: &str = "intellisense-index-v1";
 
@@ -126,29 +127,29 @@ impl IndexItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexSnapshot {
     pub id: IndexSnapshotId,
-    pub type_index: HashMap<String, IndexItem>,
-    pub symbol_index: HashMap<String, Vec<IndexItem>>,
-    pub module_index: HashMap<String, Vec<IndexItem>>,
-    pub metadata_index: HashMap<MetadataKind, Vec<IndexItem>>,
-    pub keyword_index: Vec<IndexItem>,
+    pub type_index: Arc<HashMap<String, Arc<IndexItem>>>,
+    pub symbol_index: Arc<HashMap<String, Arc<Vec<IndexItem>>>>,
+    pub module_index: Arc<HashMap<String, Arc<Vec<IndexItem>>>>,
+    pub metadata_index: Arc<HashMap<MetadataKind, Arc<Vec<IndexItem>>>>,
+    pub keyword_index: Arc<Vec<IndexItem>>,
 }
 
 impl IndexSnapshot {
     pub fn empty(id: IndexSnapshotId) -> Self {
         Self {
             id,
-            type_index: HashMap::new(),
-            symbol_index: HashMap::new(),
-            module_index: HashMap::new(),
-            metadata_index: HashMap::new(),
-            keyword_index: Vec::new(),
+            type_index: Arc::new(HashMap::new()),
+            symbol_index: Arc::new(HashMap::new()),
+            module_index: Arc::new(HashMap::new()),
+            metadata_index: Arc::new(HashMap::new()),
+            keyword_index: Arc::new(Vec::new()),
         }
     }
 }
 
 pub struct IntellisenseIndexStore {
     schema_version: &'static str,
-    inner: RwLock<IndexSnapshot>,
+    inner: ArcSwap<IndexSnapshot>,
 }
 
 impl IntellisenseIndexStore {
@@ -156,7 +157,7 @@ impl IntellisenseIndexStore {
         let id = IndexSnapshotId::new(config_fingerprint, platform_version);
         Self {
             schema_version: INDEX_SCHEMA_VERSION,
-            inner: RwLock::new(IndexSnapshot::empty(id)),
+            inner: ArcSwap::from_pointee(IndexSnapshot::empty(id)),
         }
     }
 
@@ -165,89 +166,139 @@ impl IntellisenseIndexStore {
     }
 
     pub fn snapshot_id(&self) -> IndexSnapshotId {
-        self.inner
-            .read()
-            .expect("index snapshot lock poisoned")
-            .id
-            .clone()
+        self.inner.load().id.clone()
     }
 
     pub fn snapshot(&self) -> IndexSnapshot {
-        self.inner.read().expect("index snapshot lock poisoned").clone()
+        self.inner.load_full().as_ref().clone()
     }
 
     pub fn replace_snapshot(&self, snapshot: IndexSnapshot) {
-        let mut guard = self.inner.write().expect("index snapshot lock poisoned");
-        *guard = snapshot;
+        self.inner.store(Arc::new(snapshot));
     }
 
     pub fn update_snapshot_id(&self, config_fingerprint: &str, platform_version: &str) {
-        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
-        snapshot.id = IndexSnapshotId::new(config_fingerprint, platform_version);
+        let new_id = IndexSnapshotId::new(config_fingerprint, platform_version);
+        self.inner.rcu(|current| {
+            let mut snapshot = current.as_ref().clone();
+            snapshot.id = new_id.clone();
+            Arc::new(snapshot)
+        });
     }
 
     pub fn reset_metadata_snapshot(&self, config_fingerprint: &str, platform_version: &str) {
-        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
-        snapshot.id = IndexSnapshotId::new(config_fingerprint, platform_version);
-        snapshot.metadata_index.clear();
-        snapshot.type_index.clear();
+        let new_id = IndexSnapshotId::new(config_fingerprint, platform_version);
+        self.inner.rcu(|current| {
+            let mut snapshot = current.as_ref().clone();
+            snapshot.id = new_id.clone();
+            snapshot.metadata_index = Arc::new(HashMap::new());
+            snapshot.type_index = Arc::new(HashMap::new());
+            Arc::new(snapshot)
+        });
     }
 
     pub fn upsert_type(&self, item: IndexItem) {
-        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
-        snapshot.type_index.insert(item.name.clone(), item);
+        let item = Arc::new(item);
+        let name = item.name.clone();
+        self.inner.rcu(|current| {
+            let mut snapshot = current.as_ref().clone();
+            Arc::make_mut(&mut snapshot.type_index).insert(name.clone(), item.clone());
+            Arc::new(snapshot)
+        });
+    }
+
+    pub fn upsert_types(&self, items: Vec<IndexItem>) {
+        if items.is_empty() {
+            return;
+        }
+
+        let items: Vec<Arc<IndexItem>> = items.into_iter().map(Arc::new).collect();
+        self.inner.rcu(|current| {
+            let mut snapshot = current.as_ref().clone();
+            let map = Arc::make_mut(&mut snapshot.type_index);
+            for item in &items {
+                map.insert(item.name.clone(), item.clone());
+            }
+            Arc::new(snapshot)
+        });
     }
 
     pub fn replace_symbols_for_uri(&self, uri: &str, items: Vec<IndexItem>) {
-        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
-        snapshot.symbol_index.insert(uri.to_string(), items);
+        let uri = uri.to_string();
+        let items = Arc::new(items);
+        self.inner.rcu(|current| {
+            let mut snapshot = current.as_ref().clone();
+            Arc::make_mut(&mut snapshot.symbol_index).insert(uri.clone(), items.clone());
+            Arc::new(snapshot)
+        });
     }
 
     pub fn replace_modules_for_key(&self, module_key: &str, items: Vec<IndexItem>) {
-        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
-        snapshot
-            .module_index
-            .insert(module_key.to_string(), items);
+        let module_key = module_key.to_string();
+        let items = Arc::new(items);
+        self.inner.rcu(|current| {
+            let mut snapshot = current.as_ref().clone();
+            Arc::make_mut(&mut snapshot.module_index)
+                .insert(module_key.clone(), items.clone());
+            Arc::new(snapshot)
+        });
     }
 
     pub fn replace_metadata_for_kind(&self, kind: MetadataKind, items: Vec<IndexItem>) {
-        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
-        snapshot.metadata_index.insert(kind, items);
+        let items = Arc::new(items);
+        self.inner.rcu(|current| {
+            let mut snapshot = current.as_ref().clone();
+            Arc::make_mut(&mut snapshot.metadata_index).insert(kind, items.clone());
+            Arc::new(snapshot)
+        });
     }
 
     pub fn set_keywords(&self, items: Vec<IndexItem>) {
-        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
-        snapshot.keyword_index = items;
+        let items = Arc::new(items);
+        self.inner.rcu(|current| {
+            let mut snapshot = current.as_ref().clone();
+            snapshot.keyword_index = items.clone();
+            Arc::new(snapshot)
+        });
     }
 
     pub fn invalidate_file(&self, uri: &str, module_key: Option<&str>) {
-        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
-        snapshot.symbol_index.remove(uri);
-        if let Some(key) = module_key {
-            snapshot.module_index.remove(key);
-        }
+        let uri = uri.to_string();
+        let module_key = module_key.map(str::to_string);
+        self.inner.rcu(|current| {
+            let mut snapshot = current.as_ref().clone();
+            Arc::make_mut(&mut snapshot.symbol_index).remove(&uri);
+            if let Some(key) = module_key.as_ref() {
+                Arc::make_mut(&mut snapshot.module_index).remove(key);
+            }
+            Arc::new(snapshot)
+        });
     }
 
     pub fn invalidate_metadata(&self) {
-        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
-        snapshot.metadata_index.clear();
-        snapshot.type_index.clear();
+        self.inner.rcu(|current| {
+            let mut snapshot = current.as_ref().clone();
+            snapshot.metadata_index = Arc::new(HashMap::new());
+            snapshot.type_index = Arc::new(HashMap::new());
+            Arc::new(snapshot)
+        });
     }
 
     pub fn invalidate_platform_types(&self) {
-        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
-        snapshot.type_index.retain(|_, item| {
-            !matches!(item.kind, IndexItemKind::Type(TypeKind::Platform | TypeKind::Primitive))
+        self.inner.rcu(|current| {
+            let mut snapshot = current.as_ref().clone();
+            Arc::make_mut(&mut snapshot.type_index).retain(|_, item| {
+                let item = item.as_ref();
+                !matches!(item.kind, IndexItemKind::Type(TypeKind::Platform | TypeKind::Primitive))
+            });
+            Arc::new(snapshot)
         });
     }
 
     pub fn invalidate_all(&self) {
-        let mut snapshot = self.inner.write().expect("index snapshot lock poisoned");
-        snapshot.type_index.clear();
-        snapshot.symbol_index.clear();
-        snapshot.module_index.clear();
-        snapshot.metadata_index.clear();
-        snapshot.keyword_index.clear();
+        self.inner.rcu(|current| {
+            Arc::new(IndexSnapshot::empty(current.id.clone()))
+        });
     }
 }
 
@@ -260,6 +311,30 @@ mod tests {
         let a = IndexSnapshotId::new("config-a", "platform-1");
         let b = IndexSnapshotId::new("config-a", "platform-1");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn snapshot_is_copy_on_write() {
+        let store = IntellisenseIndexStore::new("cfg", "platform");
+        store.upsert_type(IndexItem::new(
+            "A",
+            IndexItemKind::Type(TypeKind::Platform),
+            IndexKind::Type,
+        ));
+        let before = store.snapshot();
+
+        store.upsert_type(IndexItem::new(
+            "B",
+            IndexItemKind::Type(TypeKind::Platform),
+            IndexKind::Type,
+        ));
+        let after = store.snapshot();
+
+        assert!(before.type_index.contains_key("A"));
+        assert!(!before.type_index.contains_key("B"));
+        assert!(after.type_index.contains_key("A"));
+        assert!(after.type_index.contains_key("B"));
+        assert!(!Arc::ptr_eq(&before.type_index, &after.type_index));
     }
 
     #[test]

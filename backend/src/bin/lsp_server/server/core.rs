@@ -914,13 +914,13 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
     async fn p8_deps_update_is_atomic_and_completion_uses_runtime_index_snapshot() {
         fn make_index_snapshot(id: &str, type_name: &str) -> IndexSnapshot {
             let mut snapshot = IndexSnapshot::empty(IndexSnapshotId::from_hash(id.to_string()));
-            snapshot.type_index.insert(
+            Arc::make_mut(&mut snapshot.type_index).insert(
                 type_name.to_string(),
-                IndexItem::new(
+                Arc::new(IndexItem::new(
                     type_name.to_string(),
                     IndexItemKind::Type(TypeKind::Generic),
                     IndexKind::Type,
-                ),
+                )),
             );
             snapshot
         }

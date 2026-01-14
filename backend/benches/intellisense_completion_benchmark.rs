@@ -25,6 +25,8 @@ struct Scenario {
     syntax_helper_path: Option<PathBuf>,
     #[serde(default)]
     config_path: Option<PathBuf>,
+    #[serde(default)]
+    platform_version: Option<String>,
     cases: Vec<ScenarioCase>,
 }
 
@@ -66,6 +68,12 @@ fn completion_benchmark(c: &mut Criterion) {
         .config_path
         .as_ref()
         .map(|path| resolve_relative(&workspace_root, path));
+    let platform_version = scenario.platform_version.as_deref();
+
+    if config_path.is_some() && platform_version.is_none() {
+        eprintln!("WARN: Scenario requires platform_version when config_path is set");
+        return;
+    }
 
     let prepared = match prepare_cases(&scenario.cases, &workspace_root) {
         Ok(value) => value,
@@ -79,7 +87,7 @@ fn completion_benchmark(c: &mut Criterion) {
     if let Err(err) = coordinator.start_with_paths_blocking(
         syntax_helper_path.as_deref(),
         config_path.as_deref(),
-        None,
+        platform_version,
         None,
     ) {
         eprintln!("WARN: Startup failed: {}", err);

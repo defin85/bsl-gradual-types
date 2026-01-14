@@ -1114,7 +1114,11 @@ mod symbol_index_tests {
 
         let uri = path_to_uri(Path::new(file_path));
         let snapshot = index.snapshot();
-        let items = snapshot.symbol_index.get(&uri).expect("symbols missing");
+        let items = snapshot
+            .symbol_index
+            .get(&uri)
+            .expect("symbols missing")
+            .as_ref();
 
         assert!(has_symbol(items, "x", SymbolKind::Variable, SymbolScope::Module));
         assert!(has_symbol(items, "Test", SymbolKind::Procedure, SymbolScope::Module));

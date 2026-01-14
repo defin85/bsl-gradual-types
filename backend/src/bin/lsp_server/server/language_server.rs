@@ -837,6 +837,19 @@ impl LanguageServer for BslLanguageServer {
                 }
             }
 
+            if let Some(stats) = &result.stats {
+                self.coordinator.record_completion_stage_latency(
+                    "snapshot_read",
+                    stats.stage_snapshot_read,
+                );
+                self.coordinator
+                    .record_completion_stage_latency("collect", stats.stage_collect);
+                self.coordinator
+                    .record_completion_stage_latency("rank", stats.stage_rank);
+                self.coordinator
+                    .record_completion_stage_latency("format", stats.stage_format);
+            }
+
             if std::env::var("BSL_COMPLETION_QUALITY").is_ok() {
                 if let Some(stats) = &result.stats {
                     self.coordinator.record_completion_quality(

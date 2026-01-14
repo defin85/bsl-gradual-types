@@ -145,6 +145,10 @@ impl SystemCoordinator {
         self.observability.record_completion_latency(duration);
     }
 
+    pub fn record_completion_stage_latency(&self, stage: &str, duration: std::time::Duration) {
+        self.observability.record_completion_stage_latency(stage, duration);
+    }
+
     pub fn record_completion_error(&self) {
         self.observability.record_completion_error();
     }

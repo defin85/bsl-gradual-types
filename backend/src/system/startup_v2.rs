@@ -353,4 +353,130 @@ mod tests {
         assert_eq!(left.deps_id.as_str(), right.deps_id.as_str());
         assert_eq!(left.meta.index_snapshot_id, right.meta.index_snapshot_id);
     }
+
+    #[test]
+    fn changing_platform_version_changes_deps_and_index_ids() {
+        let temp = TempDir::new().expect("TempDir");
+        let platform_root = temp.path().join("platform");
+        let config_root = temp.path().join("config");
+
+        fs::create_dir_all(&platform_root).expect("create platform root");
+        fs::create_dir_all(&config_root).expect("create config root");
+
+        fs::write(platform_root.join("a.html"), "<html/>").expect("write platform file");
+        fs::write(config_root.join("Configuration.xml"), "<MetaDataObject/>")
+            .expect("write config file");
+
+        let coordinator = SystemCoordinator::new();
+        coordinator.set_strict_fingerprint(false);
+
+        coordinator.set_platform_version(Some("8.3.25".to_string()));
+        let seed = build_deps_bundle_v2(
+            &coordinator,
+            Some(platform_root.as_path()),
+            Some(config_root.as_path()),
+        )
+        .expect("seed bundle");
+        let config_fp = seed
+            .meta
+            .config_fingerprint
+            .clone()
+            .expect("config_fingerprint");
+        coordinator
+            .intellisense_index()
+            .update_snapshot_id(&config_fp, &seed.meta.platform_version);
+
+        let left = build_deps_bundle_v2(
+            &coordinator,
+            Some(platform_root.as_path()),
+            Some(config_root.as_path()),
+        )
+        .expect("left bundle");
+
+        coordinator.set_platform_version(Some("8.3.26".to_string()));
+        coordinator
+            .intellisense_index()
+            .update_snapshot_id(&config_fp, "8.3.26");
+
+        let right = build_deps_bundle_v2(
+            &coordinator,
+            Some(platform_root.as_path()),
+            Some(config_root.as_path()),
+        )
+        .expect("right bundle");
+
+        assert_ne!(left.meta.index_snapshot_id, right.meta.index_snapshot_id);
+        assert_ne!(left.deps_id.as_str(), right.deps_id.as_str());
+    }
+
+    #[test]
+    fn changing_configuration_fingerprint_changes_deps_and_index_ids() {
+        let temp = TempDir::new().expect("TempDir");
+        let platform_root = temp.path().join("platform");
+        let config_root = temp.path().join("config");
+
+        fs::create_dir_all(&platform_root).expect("create platform root");
+        fs::create_dir_all(&config_root).expect("create config root");
+
+        fs::write(platform_root.join("a.html"), "<html/>").expect("write platform file");
+        let config_file = config_root.join("Configuration.xml");
+        fs::write(&config_file, "<MetaDataObject/>").expect("write config file");
+
+        let coordinator = SystemCoordinator::new();
+        coordinator.set_platform_version(Some("8.3.25".to_string()));
+        coordinator.set_strict_fingerprint(false);
+
+        let seed = build_deps_bundle_v2(
+            &coordinator,
+            Some(platform_root.as_path()),
+            Some(config_root.as_path()),
+        )
+        .expect("seed bundle");
+        let config_fp = seed
+            .meta
+            .config_fingerprint
+            .clone()
+            .expect("config_fingerprint");
+        coordinator
+            .intellisense_index()
+            .update_snapshot_id(&config_fp, &seed.meta.platform_version);
+
+        let left = build_deps_bundle_v2(
+            &coordinator,
+            Some(platform_root.as_path()),
+            Some(config_root.as_path()),
+        )
+        .expect("left bundle");
+
+        fs::write(&config_file, "<MetaDataObject><X/></MetaDataObject>")
+            .expect("update config file");
+
+        let changed = build_deps_bundle_v2(
+            &coordinator,
+            Some(platform_root.as_path()),
+            Some(config_root.as_path()),
+        )
+        .expect("changed bundle");
+        let changed_fp = changed
+            .meta
+            .config_fingerprint
+            .clone()
+            .expect("config_fingerprint");
+
+        assert_ne!(config_fp, changed_fp);
+
+        coordinator
+            .intellisense_index()
+            .update_snapshot_id(&changed_fp, &changed.meta.platform_version);
+
+        let right = build_deps_bundle_v2(
+            &coordinator,
+            Some(platform_root.as_path()),
+            Some(config_root.as_path()),
+        )
+        .expect("right bundle");
+
+        assert_ne!(left.meta.index_snapshot_id, right.meta.index_snapshot_id);
+        assert_ne!(left.deps_id.as_str(), right.deps_id.as_str());
+    }
 }

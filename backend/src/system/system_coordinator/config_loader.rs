@@ -932,6 +932,7 @@ impl SystemCoordinator {
         self.intellisense_index
             .reset_metadata_snapshot(&config_fingerprint, &platform_version);
 
+        let mut type_items: Vec<IndexItem> = Vec::new();
         for raw_type in raw_types.iter() {
             if raw_type.source != bsl_shared::domain::types::RawDataSource::Configuration {
                 continue;
@@ -942,7 +943,10 @@ impl SystemCoordinator {
                 IndexKind::Type,
             );
             item.facets = raw_type.facets.clone();
-            self.intellisense_index.upsert_type(item);
+            type_items.push(item);
+        }
+        if !type_items.is_empty() {
+            self.intellisense_index.upsert_types(type_items);
         }
 
         let mut by_kind: std::collections::HashMap<MetadataKind, Vec<IndexItem>> =
@@ -2157,6 +2161,7 @@ fn index_warmup_disabled() -> bool {
 mod warmup_tests {
     use super::*;
     use crate::system::IndexSnapshot;
+    use std::sync::Arc;
 
     #[test]
     fn warmup_skips_when_snapshot_id_changed() {
@@ -2168,9 +2173,13 @@ mod warmup_tests {
     #[test]
     fn warmup_skips_when_current_has_data() {
         let mut current = IndexSnapshot::empty(IndexSnapshotId::from_hash("a"));
-        current.type_index.insert(
+        Arc::make_mut(&mut current.type_index).insert(
             "Type".to_string(),
-            IndexItem::new("Type", IndexItemKind::Type(TypeKind::Platform), IndexKind::Type),
+            Arc::new(IndexItem::new(
+                "Type",
+                IndexItemKind::Type(TypeKind::Platform),
+                IndexKind::Type,
+            )),
         );
         let candidate = IndexSnapshot::empty(IndexSnapshotId::from_hash("a"));
         assert!(!should_apply_warmup(&current, &candidate));

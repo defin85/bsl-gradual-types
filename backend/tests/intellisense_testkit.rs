@@ -103,6 +103,31 @@ pub fn completion_snapshot_domain(items: &[DomainCompletionItem], is_incomplete:
     })
 }
 
+pub fn completion_snapshot_domain_top_n(
+    items: &[DomainCompletionItem],
+    is_incomplete: bool,
+    top_n: usize,
+) -> Value {
+    let items_json: Vec<Value> = items
+        .iter()
+        .take(top_n)
+        .map(|item| {
+            serde_json::json!({
+                "label": item.label.as_str(),
+                "kind": domain_completion_kind(item.kind),
+                "insertText": item.insert_text.as_deref(),
+                "insertTextFormat": Option::<&'static str>::None,
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "isIncomplete": is_incomplete,
+        "topN": top_n,
+        "items": items_json,
+    })
+}
+
 pub fn find_marker_position(content: &str, marker: &str) -> (u32, u32) {
     let byte_index = content
         .find(marker)

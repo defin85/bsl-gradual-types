@@ -1,0 +1,1212 @@
+{
+  "cases": [
+    {
+      "case": "m8_metadata_documents",
+      "completion": {
+        "isIncomplete": false,
+        "items": [
+          {
+            "insertText": "ЗаказНаряды",
+            "insertTextFormat": null,
+            "kind": "DOCUMENT",
+            "label": "ЗаказНаряды"
+          }
+        ],
+        "topN": 25
+      },
+      "expectedTopN": [
+        "ЗаказНаряды"
+      ],
+      "expressionForm": "id.",
+      "receiverExpr": "Документы",
+      "receiverType": "Dynamic",
+      "source": "metadata"
+    },
+    {
+      "case": "m8_metadata_catalogs",
+      "completion": {
+        "isIncomplete": false,
+        "items": [
+          {
+            "insertText": "Контрагенты",
+            "insertTextFormat": null,
+            "kind": "CATALOG",
+            "label": "Контрагенты"
+          },
+          {
+            "insertText": "Организации",
+            "insertTextFormat": null,
+            "kind": "CATALOG",
+            "label": "Организации"
+          }
+        ],
+        "topN": 25
+      },
+      "expectedTopN": [
+        "Контрагенты"
+      ],
+      "expressionForm": "id.",
+      "receiverExpr": "Справочники",
+      "receiverType": "Dynamic",
+      "source": "metadata"
+    },
+    {
+      "case": "m8_metadata_doc_manager",
+      "completion": {
+        "isIncomplete": false,
+        "items": [
+          {
+            "insertText": "Выбрать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Выбрать"
+          },
+          {
+            "insertText": "ВыбратьПоСсылкам",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ВыбратьПоСсылкам"
+          },
+          {
+            "insertText": "НайтиПоНомеру",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "НайтиПоНомеру"
+          },
+          {
+            "insertText": "НайтиПоРеквизиту",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "НайтиПоРеквизиту"
+          },
+          {
+            "insertText": "ПолучитьДанныеВыбора",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПолучитьДанныеВыбора"
+          },
+          {
+            "insertText": "ПолучитьМакет",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПолучитьМакет"
+          },
+          {
+            "insertText": "ПолучитьСсылку",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПолучитьСсылку"
+          },
+          {
+            "insertText": "ПолучитьФорму",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПолучитьФорму"
+          },
+          {
+            "insertText": "ПолучитьФормуВыбора",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПолучитьФормуВыбора"
+          },
+          {
+            "insertText": "ПолучитьФормуНовогоДокумента",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПолучитьФормуНовогоДокумента"
+          },
+          {
+            "insertText": "ПолучитьФормуСписка",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПолучитьФормуСписка"
+          },
+          {
+            "insertText": "ПустаяСсылка",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПустаяСсылка"
+          },
+          {
+            "insertText": "СоздатьДокумент",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "СоздатьДокумент"
+          }
+        ],
+        "topN": 25
+      },
+      "expectedTopN": [
+        "СоздатьДокумент"
+      ],
+      "expressionForm": "id.",
+      "receiverExpr": "Документы.ЗаказНаряды",
+      "receiverType": "ДокументМенеджер.ЗаказНаряды",
+      "source": "metadata"
+    },
+    {
+      "case": "m8_metadata_doc_object_call",
+      "completion": {
+        "isIncomplete": false,
+        "items": [
+          {
+            "insertText": "Заблокирован",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Заблокирован"
+          },
+          {
+            "insertText": "Заблокировать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Заблокировать"
+          },
+          {
+            "insertText": "Записать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Записать"
+          },
+          {
+            "insertText": "Заполнить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Заполнить"
+          },
+          {
+            "insertText": "Метаданные",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Метаданные"
+          },
+          {
+            "insertText": "Модифицированность",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Модифицированность"
+          },
+          {
+            "insertText": "МоментВремени",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "МоментВремени"
+          },
+          {
+            "insertText": "ПолучитьМакет",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПолучитьМакет"
+          },
+          {
+            "insertText": "ПолучитьСсылкуНового",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПолучитьСсылкуНового"
+          },
+          {
+            "insertText": "ПолучитьФорму",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПолучитьФорму"
+          },
+          {
+            "insertText": "ПроверитьЗаполнение",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПроверитьЗаполнение"
+          },
+          {
+            "insertText": "Прочитать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Прочитать"
+          },
+          {
+            "insertText": "Разблокировать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Разблокировать"
+          },
+          {
+            "insertText": "Скопировать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Скопировать"
+          },
+          {
+            "insertText": "Удалить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Удалить"
+          },
+          {
+            "insertText": "УстановитьВремя",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "УстановитьВремя"
+          },
+          {
+            "insertText": "УстановитьКомментарийВерсииИсторииДанных",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "УстановитьКомментарийВерсииИсторииДанных"
+          },
+          {
+            "insertText": "УстановитьНовыйНомер",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "УстановитьНовыйНомер"
+          },
+          {
+            "insertText": "УстановитьПометкуУдаления",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "УстановитьПометкуУдаления"
+          },
+          {
+            "insertText": "УстановитьСсылкуНового",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "УстановитьСсылкуНового"
+          },
+          {
+            "insertText": "ЭтоНовый",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ЭтоНовый"
+          },
+          {
+            "insertText": "НомерЗаказ",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "НомерЗаказ"
+          },
+          {
+            "insertText": "Работы",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Работы"
+          },
+          {
+            "insertText": "РеквизитВремя",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "РеквизитВремя"
+          },
+          {
+            "insertText": "РеквизитДата",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "РеквизитДата"
+          },
+          {
+            "insertText": "РеквизитДатаВремя",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "РеквизитДатаВремя"
+          },
+          {
+            "insertText": "РеквизитИндексируемый",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "РеквизитИндексируемый"
+          },
+          {
+            "insertText": "РеквизитИндексируемыйДопУпорядочивание",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "РеквизитИндексируемыйДопУпорядочивание"
+          },
+          {
+            "insertText": "Стороны",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Стороны"
+          },
+          {
+            "insertText": "СтроковыйТип1",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "СтроковыйТип1"
+          },
+          {
+            "insertText": "СтроковыйТип2",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "СтроковыйТип2"
+          },
+          {
+            "insertText": "СтроковыйТип3",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "СтроковыйТип3"
+          },
+          {
+            "insertText": "СтроковыйТип4",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "СтроковыйТип4"
+          },
+          {
+            "insertText": "ЧисловойТип1",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "ЧисловойТип1"
+          },
+          {
+            "insertText": "ЧисловойТип2",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "ЧисловойТип2"
+          }
+        ],
+        "topN": 35
+      },
+      "expectedTopN": [
+        "ПолучитьСсылкуНового",
+        "Работы"
+      ],
+      "expressionForm": "call().",
+      "receiverExpr": "Документы.ЗаказНаряды.СоздатьДокумент()",
+      "receiverType": "Dynamic",
+      "source": "metadata"
+    },
+    {
+      "case": "m8_metadata_tabular_section_chain",
+      "completion": {
+        "isIncomplete": false,
+        "items": [
+          {
+            "insertText": "Итог",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Итог"
+          },
+          {
+            "insertText": "Вставить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Вставить"
+          },
+          {
+            "insertText": "Выгрузить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Выгрузить"
+          },
+          {
+            "insertText": "ВыгрузитьКолонки",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ВыгрузитьКолонки"
+          },
+          {
+            "insertText": "ВыгрузитьКолонку",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ВыгрузитьКолонку"
+          },
+          {
+            "insertText": "Добавить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Добавить"
+          },
+          {
+            "insertText": "Загрузить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Загрузить"
+          },
+          {
+            "insertText": "ЗагрузитьКолонку",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ЗагрузитьКолонку"
+          },
+          {
+            "insertText": "Индекс",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Индекс"
+          },
+          {
+            "insertText": "Количество",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Количество"
+          },
+          {
+            "insertText": "Найти",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Найти"
+          },
+          {
+            "insertText": "НайтиСтроки",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "НайтиСтроки"
+          },
+          {
+            "insertText": "Очистить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Очистить"
+          },
+          {
+            "insertText": "Получить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Получить"
+          },
+          {
+            "insertText": "Свернуть",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Свернуть"
+          },
+          {
+            "insertText": "Сдвинуть",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Сдвинуть"
+          },
+          {
+            "insertText": "Сортировать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Сортировать"
+          },
+          {
+            "insertText": "Удалить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Удалить"
+          }
+        ],
+        "topN": 35
+      },
+      "expectedTopN": [
+        "Добавить"
+      ],
+      "expressionForm": "цепочка",
+      "receiverExpr": "Документы.ЗаказНаряды.СоздатьДокумент().Работы",
+      "receiverType": "Dynamic",
+      "source": "metadata"
+    },
+    {
+      "case": "m8_metadata_doc_ref_chain",
+      "completion": {
+        "isIncomplete": false,
+        "items": [
+          {
+            "insertText": "Метаданные",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Метаданные"
+          },
+          {
+            "insertText": "МоментВремени",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "МоментВремени"
+          },
+          {
+            "insertText": "ПолучитьОбъект",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПолучитьОбъект"
+          },
+          {
+            "insertText": "ПолучитьФорму",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ПолучитьФорму"
+          },
+          {
+            "insertText": "Пустая",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Пустая"
+          },
+          {
+            "insertText": "Скопировать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Скопировать"
+          },
+          {
+            "insertText": "УникальныйИдентификатор",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "УникальныйИдентификатор"
+          },
+          {
+            "insertText": "НомерЗаказ",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "НомерЗаказ"
+          },
+          {
+            "insertText": "Работы",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Работы"
+          },
+          {
+            "insertText": "РеквизитВремя",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "РеквизитВремя"
+          },
+          {
+            "insertText": "РеквизитДата",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "РеквизитДата"
+          },
+          {
+            "insertText": "РеквизитДатаВремя",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "РеквизитДатаВремя"
+          },
+          {
+            "insertText": "РеквизитИндексируемый",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "РеквизитИндексируемый"
+          },
+          {
+            "insertText": "РеквизитИндексируемыйДопУпорядочивание",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "РеквизитИндексируемыйДопУпорядочивание"
+          },
+          {
+            "insertText": "Стороны",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Стороны"
+          },
+          {
+            "insertText": "СтроковыйТип1",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "СтроковыйТип1"
+          },
+          {
+            "insertText": "СтроковыйТип2",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "СтроковыйТип2"
+          },
+          {
+            "insertText": "СтроковыйТип3",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "СтроковыйТип3"
+          },
+          {
+            "insertText": "СтроковыйТип4",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "СтроковыйТип4"
+          },
+          {
+            "insertText": "ЧисловойТип1",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "ЧисловойТип1"
+          },
+          {
+            "insertText": "ЧисловойТип2",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "ЧисловойТип2"
+          },
+          {
+            "insertText": "ЧисловойТип3",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "ЧисловойТип3"
+          }
+        ],
+        "topN": 35
+      },
+      "expectedTopN": [
+        "ПолучитьОбъект"
+      ],
+      "expressionForm": "цепочка",
+      "receiverExpr": "Документы.ЗаказНаряды.СоздатьДокумент().ПолучитьСсылкуНового()",
+      "receiverType": "Dynamic",
+      "source": "metadata"
+    },
+    {
+      "case": "m8_stdlib_new_value_table",
+      "completion": {
+        "isIncomplete": false,
+        "items": [
+          {
+            "insertText": "Итог",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Итог"
+          },
+          {
+            "insertText": "Вставить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Вставить"
+          },
+          {
+            "insertText": "ВыбратьСтроку",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ВыбратьСтроку"
+          },
+          {
+            "insertText": "ВыгрузитьКолонку",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ВыгрузитьКолонку"
+          },
+          {
+            "insertText": "Добавить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Добавить"
+          },
+          {
+            "insertText": "ЗагрузитьКолонку",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ЗагрузитьКолонку"
+          },
+          {
+            "insertText": "ЗаполнитьЗначения",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ЗаполнитьЗначения"
+          },
+          {
+            "insertText": "Индекс",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Индекс"
+          },
+          {
+            "insertText": "Количество",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Количество"
+          },
+          {
+            "insertText": "Найти",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Найти"
+          },
+          {
+            "insertText": "НайтиСтроки",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "НайтиСтроки"
+          },
+          {
+            "insertText": "Очистить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Очистить"
+          },
+          {
+            "insertText": "Получить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Получить"
+          },
+          {
+            "insertText": "Свернуть",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Свернуть"
+          },
+          {
+            "insertText": "Сдвинуть",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Сдвинуть"
+          },
+          {
+            "insertText": "Скопировать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Скопировать"
+          },
+          {
+            "insertText": "СкопироватьКолонки",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "СкопироватьКолонки"
+          },
+          {
+            "insertText": "Сортировать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Сортировать"
+          },
+          {
+            "insertText": "Удалить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Удалить"
+          },
+          {
+            "insertText": "Индексы",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Индексы"
+          },
+          {
+            "insertText": "Колонки",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Колонки"
+          }
+        ],
+        "topN": 35
+      },
+      "expectedTopN": [
+        "Колонки"
+      ],
+      "expressionForm": "call().",
+      "receiverExpr": "Новый ТаблицаЗначений()",
+      "receiverType": "Dynamic",
+      "source": "stdlib"
+    },
+    {
+      "case": "m8_stdlib_value_table_columns",
+      "completion": {
+        "isIncomplete": false,
+        "items": [
+          {
+            "insertText": "Итог",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Итог"
+          },
+          {
+            "insertText": "Вставить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Вставить"
+          },
+          {
+            "insertText": "ВыбратьСтроку",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ВыбратьСтроку"
+          },
+          {
+            "insertText": "ВыгрузитьКолонку",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ВыгрузитьКолонку"
+          },
+          {
+            "insertText": "Добавить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Добавить"
+          },
+          {
+            "insertText": "ЗагрузитьКолонку",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ЗагрузитьКолонку"
+          },
+          {
+            "insertText": "ЗаполнитьЗначения",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ЗаполнитьЗначения"
+          },
+          {
+            "insertText": "Индекс",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Индекс"
+          },
+          {
+            "insertText": "Количество",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Количество"
+          },
+          {
+            "insertText": "Найти",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Найти"
+          },
+          {
+            "insertText": "НайтиСтроки",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "НайтиСтроки"
+          },
+          {
+            "insertText": "Очистить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Очистить"
+          },
+          {
+            "insertText": "Получить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Получить"
+          },
+          {
+            "insertText": "Свернуть",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Свернуть"
+          },
+          {
+            "insertText": "Сдвинуть",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Сдвинуть"
+          },
+          {
+            "insertText": "Скопировать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Скопировать"
+          },
+          {
+            "insertText": "СкопироватьКолонки",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "СкопироватьКолонки"
+          },
+          {
+            "insertText": "Сортировать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Сортировать"
+          },
+          {
+            "insertText": "Удалить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Удалить"
+          },
+          {
+            "insertText": "Индексы",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Индексы"
+          },
+          {
+            "insertText": "Колонки",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Колонки"
+          }
+        ],
+        "topN": 35
+      },
+      "expectedTopN": [
+        "Добавить"
+      ],
+      "expressionForm": "цепочка",
+      "receiverExpr": "Новый ТаблицаЗначений().Колонки",
+      "receiverType": "Dynamic",
+      "source": "stdlib"
+    },
+    {
+      "case": "m8_stdlib_index_after_call",
+      "completion": {
+        "isIncomplete": false,
+        "items": [
+          {
+            "insertText": "ВГраница",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ВГраница"
+          },
+          {
+            "insertText": "Вставить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Вставить"
+          },
+          {
+            "insertText": "Добавить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Добавить"
+          },
+          {
+            "insertText": "Количество",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Количество"
+          },
+          {
+            "insertText": "Найти",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Найти"
+          },
+          {
+            "insertText": "Очистить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Очистить"
+          },
+          {
+            "insertText": "Получить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Получить"
+          },
+          {
+            "insertText": "Удалить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Удалить"
+          },
+          {
+            "insertText": "Установить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Установить"
+          }
+        ],
+        "topN": 25
+      },
+      "expectedTopN": [
+        "Добавить"
+      ],
+      "expressionForm": "[]",
+      "receiverExpr": "Новый Массив()[0]",
+      "receiverType": "Dynamic",
+      "source": "stdlib"
+    },
+    {
+      "case": "m8_stdlib_parens_receiver",
+      "completion": {
+        "isIncomplete": false,
+        "items": [
+          {
+            "insertText": "ВГраница",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ВГраница"
+          },
+          {
+            "insertText": "Вставить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Вставить"
+          },
+          {
+            "insertText": "Добавить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Добавить"
+          },
+          {
+            "insertText": "Количество",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Количество"
+          },
+          {
+            "insertText": "Найти",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Найти"
+          },
+          {
+            "insertText": "Очистить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Очистить"
+          },
+          {
+            "insertText": "Получить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Получить"
+          },
+          {
+            "insertText": "Удалить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Удалить"
+          },
+          {
+            "insertText": "Установить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Установить"
+          }
+        ],
+        "topN": 25
+      },
+      "expectedTopN": [
+        "Добавить"
+      ],
+      "expressionForm": "()",
+      "receiverExpr": "(Новый Массив())",
+      "receiverType": "Dynamic",
+      "source": "stdlib"
+    },
+    {
+      "case": "m8_stdlib_conditional_receiver",
+      "completion": {
+        "isIncomplete": false,
+        "items": [
+          {
+            "insertText": "ВГраница",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ВГраница"
+          },
+          {
+            "insertText": "Вставить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Вставить"
+          },
+          {
+            "insertText": "Добавить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Добавить"
+          },
+          {
+            "insertText": "Количество",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Количество"
+          },
+          {
+            "insertText": "Найти",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Найти"
+          },
+          {
+            "insertText": "Очистить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Очистить"
+          },
+          {
+            "insertText": "Получить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Получить"
+          },
+          {
+            "insertText": "Удалить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Удалить"
+          },
+          {
+            "insertText": "Установить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Установить"
+          }
+        ],
+        "topN": 25
+      },
+      "expectedTopN": [
+        "Добавить"
+      ],
+      "expressionForm": "?()",
+      "receiverExpr": "?(Истина, Новый Массив(), Новый Массив())",
+      "receiverType": "Dynamic",
+      "source": "stdlib"
+    },
+    {
+      "case": "m8_stdlib_choice_receiver",
+      "completion": {
+        "isIncomplete": false,
+        "items": [
+          {
+            "insertText": "ВГраница",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "ВГраница"
+          },
+          {
+            "insertText": "Вставить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Вставить"
+          },
+          {
+            "insertText": "Добавить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Добавить"
+          },
+          {
+            "insertText": "Количество",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Количество"
+          },
+          {
+            "insertText": "Найти",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Найти"
+          },
+          {
+            "insertText": "Очистить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Очистить"
+          },
+          {
+            "insertText": "Получить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Получить"
+          },
+          {
+            "insertText": "Удалить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Удалить"
+          },
+          {
+            "insertText": "Установить",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Установить"
+          }
+        ],
+        "topN": 25
+      },
+      "expectedTopN": [
+        "Добавить"
+      ],
+      "expressionForm": "Выбор",
+      "receiverExpr": "(Выбор Когда Истина Тогда Новый Массив() Иначе Новый Массив() КонецВыбора)",
+      "receiverType": "Dynamic",
+      "source": "stdlib"
+    }
+  ],
+  "schema": "m8_completion_matrix_v2"
+}

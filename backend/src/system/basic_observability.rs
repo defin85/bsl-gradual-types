@@ -105,6 +105,19 @@ impl BasicObservability {
             .observe_histogram("completion_duration_ms", duration.as_millis() as f64);
     }
 
+    pub fn record_completion_stage_latency(&self, stage: &str, duration: Duration) {
+        let metric = match stage {
+            "snapshot_read" => "completion_stage_snapshot_read_ms",
+            "collect" => "completion_stage_collect_ms",
+            "rank" => "completion_stage_rank_ms",
+            "format" => "completion_stage_format_ms",
+            _ => "completion_stage_other_ms",
+        };
+
+        self.metrics
+            .observe_histogram(metric, duration.as_millis() as f64);
+    }
+
     pub fn record_completion_error(&self) {
         self.metrics.increment("completion_error_total");
     }

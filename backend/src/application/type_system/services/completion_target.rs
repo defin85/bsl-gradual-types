@@ -562,7 +562,11 @@ fn collect_choice_keywords(
                 continue;
             }
 
-            if let Some(end) = keyword_at(lower, i, "конец").or_else(|| keyword_at(lower, i, "end")) {
+            if let Some(end) = keyword_at(lower, i, "конецвыбора")
+                .or_else(|| keyword_at(lower, i, "endcase"))
+                .or_else(|| keyword_at(lower, i, "конец"))
+                .or_else(|| keyword_at(lower, i, "end"))
+            {
                 keywords.push(ChoiceKeyword {
                     kind: ChoiceKeywordKind::End,
                     start: i,

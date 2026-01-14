@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
@@ -55,7 +56,7 @@ struct IndexStorePayload<T> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SymbolIndexPayload {
     uri: String,
-    items: Vec<IndexItem>,
+    items: Arc<Vec<IndexItem>>,
 }
 
 pub struct IntellisenseIndexDiskStore {
@@ -108,7 +109,7 @@ impl IntellisenseIndexDiskStore {
         let symbols_root = self.symbols_root(&snapshot.id);
         fs::create_dir_all(&symbols_root)
             .context("Failed to create symbol index directory")?;
-        for (uri, items) in &snapshot.symbol_index {
+        for (uri, items) in snapshot.symbol_index.iter() {
             let symbol_payload = IndexStorePayload {
                 header: header.clone(),
                 payload: SymbolIndexPayload {
@@ -132,7 +133,7 @@ impl IntellisenseIndexDiskStore {
             loaded_any = true;
             payload
         } else {
-            HashMap::new()
+            Arc::new(HashMap::new())
         };
 
         let modules_path = self.modules_path(snapshot_id);
@@ -143,7 +144,7 @@ impl IntellisenseIndexDiskStore {
             loaded_any = true;
             payload
         } else {
-            HashMap::new()
+            Arc::new(HashMap::new())
         };
 
         let metadata_path = self.metadata_path(snapshot_id);
@@ -154,7 +155,7 @@ impl IntellisenseIndexDiskStore {
             loaded_any = true;
             payload
         } else {
-            HashMap::new()
+            Arc::new(HashMap::new())
         };
 
         let keywords_path = self.keywords_path(snapshot_id);
@@ -165,10 +166,10 @@ impl IntellisenseIndexDiskStore {
             loaded_any = true;
             payload
         } else {
-            Vec::new()
+            Arc::new(Vec::new())
         };
 
-        let mut symbols = HashMap::new();
+        let mut symbols: HashMap<String, Arc<Vec<IndexItem>>> = HashMap::new();
         let symbols_root = self.symbols_root(snapshot_id);
         if symbols_root.exists() {
             let entries = fs::read_dir(&symbols_root)
@@ -208,7 +209,7 @@ impl IntellisenseIndexDiskStore {
         Ok(Some(IndexSnapshot {
             id: snapshot_id.clone(),
             type_index: types,
-            symbol_index: symbols,
+            symbol_index: Arc::new(symbols),
             module_index: modules,
             metadata_index: metadata,
             keyword_index: keywords,
@@ -403,6 +404,7 @@ mod tests {
     use super::*;
     use crate::system::intellisense_index::{IndexItemKind, IndexKind, SymbolKind};
     use crate::system::TypeKind;
+    use std::sync::Arc;
 
     #[test]
     fn store_and_load_snapshot_roundtrip() {
@@ -411,30 +413,34 @@ mod tests {
         let snapshot_id = IndexSnapshotId::from_hash("snapshot-1");
 
         let mut snapshot = IndexSnapshot::empty(snapshot_id.clone());
-        snapshot.type_index.insert(
+        Arc::make_mut(&mut snapshot.type_index).insert(
             "TestType".to_string(),
-            IndexItem::new("TestType", IndexItemKind::Type(TypeKind::Platform), IndexKind::Type),
+            Arc::new(IndexItem::new(
+                "TestType",
+                IndexItemKind::Type(TypeKind::Platform),
+                IndexKind::Type,
+            )),
         );
-        snapshot.module_index.insert(
+        Arc::make_mut(&mut snapshot.module_index).insert(
             "module".to_string(),
-            vec![IndexItem::new(
+            Arc::new(vec![IndexItem::new(
                 "Proc",
                 IndexItemKind::Symbol(SymbolKind::Procedure),
                 IndexKind::Module,
-            )],
+            )]),
         );
-        snapshot.keyword_index.push(IndexItem::new(
+        Arc::make_mut(&mut snapshot.keyword_index).push(IndexItem::new(
             "If",
             IndexItemKind::Keyword,
             IndexKind::Keyword,
         ));
-        snapshot.symbol_index.insert(
+        Arc::make_mut(&mut snapshot.symbol_index).insert(
             "file:///a.bsl".to_string(),
-            vec![IndexItem::new(
+            Arc::new(vec![IndexItem::new(
                 "Var",
                 IndexItemKind::Symbol(SymbolKind::Variable),
                 IndexKind::Symbol,
-            )],
+            )]),
         );
 
         store.store_snapshot(&snapshot).unwrap();
@@ -454,9 +460,13 @@ mod tests {
         let snapshot_id = IndexSnapshotId::from_hash("snapshot-2");
 
         let mut snapshot = IndexSnapshot::empty(snapshot_id.clone());
-        snapshot.type_index.insert(
+        Arc::make_mut(&mut snapshot.type_index).insert(
             "TestType".to_string(),
-            IndexItem::new("TestType", IndexItemKind::Type(TypeKind::Platform), IndexKind::Type),
+            Arc::new(IndexItem::new(
+                "TestType",
+                IndexItemKind::Type(TypeKind::Platform),
+                IndexKind::Type,
+            )),
         );
 
         store.store_snapshot(&snapshot).unwrap();
@@ -464,7 +474,7 @@ mod tests {
         let types_path = store.types_path(&snapshot_id);
         let bytes = fs::read(&types_path).unwrap();
         let decoded = zstd::stream::decode_all(&bytes[..]).unwrap_or(bytes);
-        let mut payload: IndexStorePayload<HashMap<String, IndexItem>> =
+        let mut payload: IndexStorePayload<Arc<HashMap<String, Arc<IndexItem>>>> =
             bincode::deserialize(&decoded).unwrap();
         payload.header.store_version = IndexStoreVersion("invalid-version".to_string());
         let altered = bincode::serialize(&payload).unwrap();

@@ -6,7 +6,7 @@ use anyhow::Result;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, Span};
 
 use bsl_shared::domain::metadata_constants::get_collection_kind;
@@ -77,6 +77,10 @@ pub struct CompletionStats {
     pub prefix_none: usize,
     pub member_access: usize,
     pub has_owner: usize,
+    pub stage_snapshot_read: Duration,
+    pub stage_collect: Duration,
+    pub stage_rank: Duration,
+    pub stage_format: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -231,7 +235,9 @@ pub(crate) async fn get_completion_with_analysis(
     };
     let analysis_file_path = analysis.map(|analysis| analysis.file_path);
     let context = analyze_completion_context(file_content, line, column);
+    let snapshot_started = Instant::now();
     let snapshot = index.snapshot();
+    let snapshot_elapsed = snapshot_started.elapsed();
 
     if let Some(request_id) = trace_request_id {
         info!(
@@ -276,11 +282,7 @@ pub(crate) async fn get_completion_with_analysis(
         Span::none()
     };
     let _collect_guard = collect_span.enter();
-    let collect_started = if trace_request_id.is_some() {
-        Some(Instant::now())
-    } else {
-        None
-    };
+    let collect_started = Instant::now();
 
     if context.member_access {
         let receiver_types_from_ast = analysis
@@ -394,11 +396,12 @@ pub(crate) async fn get_completion_with_analysis(
         add_types(&snapshot, &mut candidates, 3);
         add_keywords(&snapshot, &mut candidates, 4);
     }
-    if let (Some(request_id), Some(started)) = (trace_request_id, collect_started) {
+    let collect_elapsed = collect_started.elapsed();
+    if let Some(request_id) = trace_request_id {
         debug!(
             request_id = request_id,
             stage = "collect",
-            elapsed_ms = started.elapsed().as_millis(),
+            elapsed_ms = collect_elapsed.as_millis(),
             candidates = candidates.len()
         );
     }
@@ -415,7 +418,9 @@ pub(crate) async fn get_completion_with_analysis(
         })
         .collect();
 
+    let rank_started = Instant::now();
     let ranked = rank_candidates_with_trace(ranking_input, &context, trace_request_id);
+    let rank_elapsed = rank_started.elapsed();
     let is_incomplete = ranked.candidates.len() > COMPLETION_MAX_ITEMS;
     let limited = ranked.candidates.into_iter().take(COMPLETION_MAX_ITEMS);
 
@@ -425,11 +430,7 @@ pub(crate) async fn get_completion_with_analysis(
         Span::none()
     };
     let _format_guard = format_span.enter();
-    let format_started = if trace_request_id.is_some() {
-        Some(Instant::now())
-    } else {
-        None
-    };
+    let format_started = Instant::now();
 
     let items: Vec<CompletionCandidate> = limited
         .map(|candidate| CompletionCandidate {
@@ -445,11 +446,12 @@ pub(crate) async fn get_completion_with_analysis(
         })
         .collect();
 
-    if let (Some(request_id), Some(started)) = (trace_request_id, format_started) {
+    let format_elapsed = format_started.elapsed();
+    if let Some(request_id) = trace_request_id {
         debug!(
             request_id = request_id,
             stage = "format",
-            elapsed_ms = started.elapsed().as_millis(),
+            elapsed_ms = format_elapsed.as_millis(),
             returned = items.len(),
             is_incomplete = is_incomplete
         );
@@ -469,6 +471,10 @@ pub(crate) async fn get_completion_with_analysis(
             prefix_none: ranked.summary.prefix_none,
             member_access: ranked.summary.member_access,
             has_owner: ranked.summary.has_owner,
+            stage_snapshot_read: snapshot_elapsed,
+            stage_collect: collect_elapsed,
+            stage_rank: rank_elapsed,
+            stage_format: format_elapsed,
         },
     })
 }
@@ -487,7 +493,7 @@ pub fn analyze_completion_context(content: &str, line: u32, column: u32) -> Comp
     let line_index = line as usize;
 
     // Get current line and prefix
-    let (_current_line, line_prefix) = if line_index < lines.len() {
+    let (_current_line, line_prefix_raw) = if line_index < lines.len() {
         let line_content = lines[line_index];
         // Convert UTF-16 offset -> UTF-8 byte offset
         let column_index = utf16_to_byte_offset(line_content, column);
@@ -496,12 +502,16 @@ pub fn analyze_completion_context(content: &str, line: u32, column: u32) -> Comp
         ("", "")
     };
 
-    let line_prefix = trim_to_window(line_prefix, CONTEXT_WINDOW_CHARS);
+    let in_string_or_comment = is_in_string_or_comment(line_prefix_raw);
+
+    let line_prefix = trim_to_window(line_prefix_raw, CONTEXT_WINDOW_CHARS);
     let line_trimmed = line_prefix.trim_end();
 
-    let trigger_char = line_trimmed.chars().last().filter(|ch| *ch == '.' || *ch == '(');
-    let member_base = extract_member_base(line_trimmed);
-    let member_access = is_member_access_context(line_trimmed);
+    let trigger_char = (!in_string_or_comment)
+        .then(|| line_trimmed.chars().last().filter(|ch| *ch == '.' || *ch == '('))
+        .flatten();
+    let member_base = (!in_string_or_comment).then(|| extract_member_base(line_trimmed)).flatten();
+    let member_access = !in_string_or_comment && is_member_access_context(line_trimmed);
 
     // Extract current word
     let current_word = extract_word_at_position(content, line, column).unwrap_or_default();
@@ -515,6 +525,33 @@ pub fn analyze_completion_context(content: &str, line: u32, column: u32) -> Comp
         expects_type: expects_type_context(line_trimmed),
         can_add_functions: can_add_functions(line_trimmed),
     }
+}
+
+fn is_in_string_or_comment(line_prefix: &str) -> bool {
+    let mut in_string = false;
+    let mut chars = line_prefix.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if in_string {
+            if ch == '"' {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                } else {
+                    in_string = false;
+                }
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            continue;
+        }
+
+        if ch == '/' && chars.peek() == Some(&'/') {
+            return true;
+        }
+    }
+    in_string
 }
 
 /// Checks if statements can be added at this position
@@ -554,7 +591,7 @@ fn add_keywords(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>, priority:
         return;
     }
 
-    for item in &snapshot.keyword_index {
+    for item in snapshot.keyword_index.iter() {
         target.push(Candidate::new(
             CompletionItem::new(item.name.clone(), CompletionKind::Keyword),
             priority,
@@ -1361,7 +1398,7 @@ fn add_symbols(
         return;
     };
 
-    for item in items {
+    for item in items.iter() {
         let kind = completion_kind_from_index_item(item);
         target.push(Candidate::new(
             CompletionItem::new(item.name.clone(), kind),
@@ -1374,7 +1411,7 @@ fn add_symbols(
 
 fn add_module_symbols(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>, priority: u8) {
     for items in snapshot.module_index.values() {
-        for item in items {
+        for item in items.iter() {
             let kind = completion_kind_from_index_item(item);
             target.push(Candidate::new(
                 CompletionItem::new(item.name.clone(), kind),
@@ -1407,7 +1444,7 @@ fn add_metadata_items(
     match kind {
         Some(kind) => {
             if let Some(items) = snapshot.metadata_index.get(&kind) {
-                for item in items {
+                for item in items.iter() {
                     let item_kind = completion_kind_from_index_item(item);
                     let detail = match item.kind {
                         IndexItemKind::Metadata(kind) => Some(format_metadata_detail(kind, &item.facets)),
@@ -1424,7 +1461,7 @@ fn add_metadata_items(
         }
         None => {
             for items in snapshot.metadata_index.values() {
-                for item in items {
+                for item in items.iter() {
                     let item_kind = completion_kind_from_index_item(item);
                     let detail = match item.kind {
                         IndexItemKind::Metadata(kind) => Some(format_metadata_detail(kind, &item.facets)),

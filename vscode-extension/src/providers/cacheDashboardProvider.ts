@@ -109,7 +109,7 @@ export class CacheDashboardProvider implements vscode.TreeDataProvider<BslOvervi
         const total = runtime.hit_count + runtime.miss_count;
         const hitRate = total > 0 ? Math.round((runtime.hit_count / total) * 100) : 0;
 
-        return [
+        const items: BslOverviewItem[] = [
             new BslOverviewItem(
                 `Disk: hits ${runtime.hit_count} / misses ${runtime.miss_count} (${hitRate}%)`,
                 vscode.TreeItemCollapsibleState.None
@@ -122,11 +122,26 @@ export class CacheDashboardProvider implements vscode.TreeDataProvider<BslOvervi
                 `AST: hits ${stats.ast.hits} / misses ${stats.ast.misses}`,
                 vscode.TreeItemCollapsibleState.None
             ),
-            new BslOverviewItem(
-                `IR: hits ${stats.ir.hits} / misses ${stats.ir.misses}`,
-                vscode.TreeItemCollapsibleState.None
-            )
         ];
+
+        // NOTE: IR stats are optional (some LSP server versions don't report them yet).
+        if (stats.ir) {
+            items.push(
+                new BslOverviewItem(
+                    `IR: hits ${stats.ir.hits} / misses ${stats.ir.misses}`,
+                    vscode.TreeItemCollapsibleState.None
+                )
+            );
+        } else {
+            const irMissing = new BslOverviewItem(
+                'IR: n/a (not reported by LSP server)',
+                vscode.TreeItemCollapsibleState.None
+            );
+            irMissing.tooltip = 'Update the LSP server binary to see IR cache stats (if supported).';
+            items.push(irMissing);
+        }
+
+        return items;
     }
 
     private async getTimingItems(): Promise<BslOverviewItem[]> {

@@ -174,7 +174,8 @@ export interface CacheStatsResponse {
     scope: CacheScopeDto;
     disk: DiskCacheStatsReport;
     ast: AstCacheStats;
-    ir: IrStats;
+    // Backward/forward compatibility: some LSP versions don't report IR cache stats yet.
+    ir?: IrStats;
 }
 
 // ============================================================================

@@ -19432,7 +19432,7 @@ var CacheDashboardProvider = class {
     const runtime = stats.disk.runtime;
     const total = runtime.hit_count + runtime.miss_count;
     const hitRate = total > 0 ? Math.round(runtime.hit_count / total * 100) : 0;
-    return [
+    const items = [
       new BslOverviewItem(
         `Disk: hits ${runtime.hit_count} / misses ${runtime.miss_count} (${hitRate}%)`,
         vscode12.TreeItemCollapsibleState.None
@@ -19444,12 +19444,24 @@ var CacheDashboardProvider = class {
       new BslOverviewItem(
         `AST: hits ${stats.ast.hits} / misses ${stats.ast.misses}`,
         vscode12.TreeItemCollapsibleState.None
-      ),
-      new BslOverviewItem(
-        `IR: hits ${stats.ir.hits} / misses ${stats.ir.misses}`,
-        vscode12.TreeItemCollapsibleState.None
       )
     ];
+    if (stats.ir) {
+      items.push(
+        new BslOverviewItem(
+          `IR: hits ${stats.ir.hits} / misses ${stats.ir.misses}`,
+          vscode12.TreeItemCollapsibleState.None
+        )
+      );
+    } else {
+      const irMissing = new BslOverviewItem(
+        "IR: n/a (not reported by LSP server)",
+        vscode12.TreeItemCollapsibleState.None
+      );
+      irMissing.tooltip = "Update the LSP server binary to see IR cache stats (if supported).";
+      items.push(irMissing);
+    }
+    return items;
   }
   async getTimingItems() {
     const stats = await this.loadStats();

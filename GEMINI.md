@@ -1,148 +1,39 @@
-# Контекст проекта: bsl-gradual-types
+# Инструкции для AI-ассистента (BSL Gradual Types)
 
-## Обзор проекта
+Этот `GEMINI.md` — короткий индекс. Полные правила и рабочие процессы лежат в `.claude/rules/` и `.claude/skills/`.
 
-Этот репозиторий содержит проект **bsl-gradual-types**, который представляет собой систему градуальной типизации и набор инструментов для языка BSL (1С:Предприятие). Проект состоит из двух основных частей:
-1.  **Ядро на Rust**: Основная логика, включающая LSP-сервер, парсеры, анализатор типов и инструменты командной строки.
-2.  **Расширение для VS Code**: Клиентская часть, которая интегрирует ядро в редактор Visual Studio Code, предоставляя пользователям такие возможности, как подсветка синтаксиса, автодополнение, диагностика и многое другое.
+## TL;DR (частые команды)
 
-Цель проекта — повысить надежность и качество кода, написанного на BSL, путем внедрения статического анализа и современной системы типов.
-
-## Архитектура
-
-Проект использует упрощенную, "правильно подобранную" (right-sized) архитектуру, основные принципы которой изложены в `docs/simplified_architecture.md`. Этот подход фокусируется на необходимых компонентах, избегая излишней сложности.
-
-### Основные компоненты:
-- **SystemCoordinator**: Единая точка координации, управляющая жизненным циклом и зависимостями.
-- **Cache layer**: Дисковый кэш + AST кэш для ускорения повторных запросов.
-- **ParserCoordinator**: Координатор парсинга, использующий `TreeSitter` как основной парсер и `Regex` в качестве запасного варианта.
-- **BasicObservability**: Обеспечивает базовые возможности для логирования и сбора метрик.
-- **v2 analysis host (salsa)**: Единый путь анализа через inputs/queries и консистентные снапшоты.
-- **TypeResolver**: Ядро системы, отвечающее за анализ и разрешение типов.
-- **TypeRepository**: Абстракция для хранения и получения данных о типах.
-
-### Диаграмма упрощенной архитектуры:
-```mermaid
-graph TB
-    subgraph "🎯 System Layer (Simplified)"
-        SystemCoordinator["🎯 SystemCoordinator<br/>- Single coordination point<br/>- DI management<br/>- Lifecycle control"]
-        
-        CacheLayer["💾 Cache layer<br/>- Disk cache<br/>- AST cache<br/>- Scope-aware"]
-        
-        ParserCoordinator["🎨 ParserCoordinator<br/>- TreeSitter (primary)<br/>- Regex fallback<br/>- Simple selection logic"]
-        
-        BasicObservability["📊 BasicObservability<br/>- Structured logging<br/>- Basic metrics<br/>- Health endpoint"]
-    end
-
-    subgraph "🌐 Presentation Layer"
-        LSPServer["🔌 LSP Server<br/>- Language Server Protocol<br/>- VS Code integration"]
-        
-        WebInterface["🌐 Web Interface<br/>- Simple HTML dashboard<br/>- Type visualization"]
-        
-        CLITool["⚙️ CLI Tool<br/>- Command line interface<br/>- Batch analysis"]
-    end
-
-    subgraph "🔧 Application Layer" 
-        AnalysisHostV2["🎭 v2 analysis host (salsa)<br/>- inputs / queries<br/>- snapshots<br/>- single source of truth"]
-    end
-
-    subgraph "🧠 Domain Layer"
-        TypeResolver["🧠 TypeResolver<br/>- Core type analysis<br/>- Resolution algorithms<br/>- Business logic"]
-        
-        TypeRepository["📚 TypeRepository<br/>- Type storage<br/>- Query interface<br/>- Data abstraction"]
-    end
-
-    subgraph "💾 Data Layer"
-        PlatformTypes["📄 Platform Types<br/>- 1C platform metadata<br/>- HTML parsing<br/>- Type definitions"]
-        
-        ConfigData["⚙️ Configuration<br/>- XML metadata<br/>- Settings<br/>- User preferences"]
-    end
-
-    %% Simple flow
-    SystemCoordinator --> CacheLayer
-    SystemCoordinator --> ParserCoordinator  
-    SystemCoordinator --> BasicObservability
-    SystemCoordinator --> AnalysisHostV2
-    
-    LSPServer --> AnalysisHostV2
-    WebInterface --> AnalysisHostV2
-    CLITool --> AnalysisHostV2
-    
-    AnalysisHostV2 --> CacheLayer
-    AnalysisHostV2 --> TypeResolver
-    
-    TypeResolver --> TypeRepository
-    TypeRepository --> PlatformTypes
-    TypeRepository --> ConfigData
-    
-    ParserCoordinator --> TypeResolver
-```
-
-
-## Ключевые технологии
-
-- **Основной язык (ядро)**: Rust
-- **Расширение VS Code**: TypeScript
-- **Парсинг**: `tree-sitter` для BSL, `quick-xml` и `roxmltree` для XML.
-- **Асинхронность**: `tokio`
-- **Веб-сервер (опционально)**: `axum` с `leptos` для UI.
-- **Сборка и зависимости (Rust)**: `cargo`
-- **Сборка и зависимости (VS Code)**: `npm`
-
-## Сборка и запуск
-
-### Ядро на Rust
-
-- **Сборка проекта**:
-  ```bash
-  cargo build
-  ```
-- **Запуск тестов**:
-  ```bash
-  cargo test
-  ```
-- **Форматирование кода**:
-  ```bash
-  cargo fmt
-  ```
-- **Линтинг (проверка кода)**:
-  ```bash
-  cargo clippy
-  ```
-- **Запуск бинарных файлов** (например, LSP-сервера):
-  ```bash
-  cargo run --bin lsp-server
-  ```
-
-### Расширение для VS Code
-
-Необходимо перейти в каталог `vscode-extension`:
 ```bash
-cd vscode-extension
+# Сборка / тесты
+./scripts/build-all.sh --release
+# или быстрее без тестов:
+./scripts/build-all.sh --release --skip-tests
+# точечно (только Rust тесты):
+cargo test --workspace
+
+# Web API для отладки резолвинга типов: сервер запускаешь ты, я тестирую через curl
+# (я сам сервер не запускаю и не останавливаю)
+# Тебе: ./scripts/start-web-api.sh --build
+curl -s http://localhost:3002/api/health
 ```
 
-- **Установка зависимостей**:
-  ```bash
-  npm install
-  ```
-- **Компиляция TypeScript в JavaScript**:
-  ```bash
-  npm run compile
-  ```
-- **Запуск тестов расширения**:
-  ```bash
-  npm test
-  ```
-- **Сборка пакета расширения (`.vsix`)**:
-  ```bash
-  vsce package
-  ```
+## Обязательные правила
 
-## Соглашения по разработке
+- Отвечай на русском: `.claude/rules/project-specifics.md`
+- Следуй принципам проекта (Right-Sized Architecture, Semantic IR, честная проверка): `.claude/rules/general.md`
+- Перед отчётом о выполнении Milestone/задачи — подтверждай фактами (grep/read/tests): `docs/guides/roadmap-verification.md`
 
-Файл `CONTRIBUTING.md` содержит подробные правила и рекомендации для контрибьюторов.
+## Тестирование LSP через Web API
 
-- **Стиль кода**: Для Rust используется `cargo fmt`.
-- **Коммиты**: Используется строгий формат сообщений коммитов, например: `feat(parser): add support for new syntax`.
-- **Тестирование**: Ожидается, что новый функционал будет покрыт тестами. В проекте используются юнит-тесты, интеграционные и бенчмарки.
-- **Документация**: Публичные API должны быть документированы с использованием `///` в коде Rust.
+- Не запускай/не останавливай LSP/Web серверы сам (и не делай `pkill`); тестируй через `curl`, когда сервер поднят пользователем: `.claude/rules/web-api-testing.md`
+- Полная справка по endpoints: `docs/api/web-api-reference.md`
+
+## Навигация и архитектура
+
+- Быстрые ссылки на документацию/roadmap: `.claude/rules/navigation.md`
+- Архитектурная диаграмма и термины: `.claude/rules/architecture.md`
+
+## Отладка
+
+- Глубокая отладка Rust через MCP Debug: `.claude/rules/mcp-debug.md`

@@ -1,8 +1,8 @@
 //! Модуль для извлечения и распаковки ZIP архивов
 
 use anyhow::{Context, Result};
-use std::fs::{self, File};
 use flate2::read::DeflateDecoder;
+use std::fs::{self, File};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use tracing::{debug, info, warn};
@@ -202,8 +202,7 @@ where
     const CD_SIGNATURE: u32 = 0x02014b50;
     const LFH_SIGNATURE: u32 = 0x04034b50;
 
-    let eocd_pos =
-        find_eocd(data).ok_or_else(|| anyhow::anyhow!("Не удалось найти EOCD в ZIP"))?;
+    let eocd_pos = find_eocd(data).ok_or_else(|| anyhow::anyhow!("Не удалось найти EOCD в ZIP"))?;
     let total_files = read_u16_le(data, eocd_pos + 10) as usize;
     let cd_size = read_u32_le(data, eocd_pos + 12) as usize;
     let cd_offset = read_u32_le(data, eocd_pos + 16) as usize;
@@ -316,8 +315,7 @@ where
 fn reconstruct_zip_from_central_directory(data: &[u8]) -> Result<RebuiltZip> {
     const CD_SIGNATURE: u32 = 0x02014b50;
 
-    let eocd_pos =
-        find_eocd(data).ok_or_else(|| anyhow::anyhow!("Не удалось найти EOCD в ZIP"))?;
+    let eocd_pos = find_eocd(data).ok_or_else(|| anyhow::anyhow!("Не удалось найти EOCD в ZIP"))?;
     let total_files = read_u16_le(data, eocd_pos + 10) as usize;
     let cd_size = read_u32_le(data, eocd_pos + 12) as usize;
     let cd_offset = read_u32_le(data, eocd_pos + 16) as usize;
@@ -325,9 +323,7 @@ fn reconstruct_zip_from_central_directory(data: &[u8]) -> Result<RebuiltZip> {
     let comment_end = eocd_pos.saturating_add(22 + comment_len);
 
     if cd_offset + cd_size > data.len() {
-        return Err(anyhow::anyhow!(
-            "Невалидный размер центрального каталога"
-        ));
+        return Err(anyhow::anyhow!("Невалидный размер центрального каталога"));
     }
     if comment_end > data.len() {
         return Err(anyhow::anyhow!("Невалидная длина комментария EOCD"));
@@ -468,12 +464,10 @@ fn repair_zip_offsets_if_needed(zip_path: &Path) -> Result<Vec<u8>> {
     const CD_SIGNATURE: u32 = 0x02014b50;
     const LFH_SIGNATURE: u32 = 0x04034b50;
 
-    let data = fs::read(zip_path)
-        .context(format!("Не удалось прочитать ZIP: {:?}", zip_path))?;
+    let data = fs::read(zip_path).context(format!("Не удалось прочитать ZIP: {:?}", zip_path))?;
 
-    let eocd_pos = find_eocd(&data).ok_or_else(|| {
-        anyhow::anyhow!("Не удалось найти EOCD в ZIP: {:?}", zip_path)
-    })?;
+    let eocd_pos = find_eocd(&data)
+        .ok_or_else(|| anyhow::anyhow!("Не удалось найти EOCD в ZIP: {:?}", zip_path))?;
 
     let mut patched = data;
     let mut patched_changed = false;
@@ -487,9 +481,7 @@ fn repair_zip_offsets_if_needed(zip_path: &Path) -> Result<Vec<u8>> {
         patched_changed = true;
     }
 
-    if cd_offset + 4 > patched.len()
-        || read_u32_le(&patched, cd_offset) != CD_SIGNATURE
-    {
+    if cd_offset + 4 > patched.len() || read_u32_le(&patched, cd_offset) != CD_SIGNATURE {
         let cd_start_by_size = eocd_pos.saturating_sub(cd_size);
         if cd_start_by_size + 4 <= patched.len()
             && read_u32_le(&patched, cd_start_by_size) == CD_SIGNATURE
@@ -568,8 +560,7 @@ fn repair_zip_offsets_if_needed(zip_path: &Path) -> Result<Vec<u8>> {
             patched_changed = true;
         }
 
-        pos = pos
-            .saturating_add(46 + name_len + extra_len + comment_len);
+        pos = pos.saturating_add(46 + name_len + extra_len + comment_len);
     }
 
     if patched_changed {
@@ -593,9 +584,7 @@ fn find_eocd(data: &[u8]) -> Option<usize> {
             let cd_size = read_u32_le(data, i + 12) as usize;
             let cd_offset = read_u32_le(data, i + 16) as usize;
 
-            if cd_offset + 4 <= data.len()
-                && read_u32_le(data, cd_offset) == CD_SIGNATURE
-            {
+            if cd_offset + 4 <= data.len() && read_u32_le(data, cd_offset) == CD_SIGNATURE {
                 return Some(i);
             }
 
@@ -615,8 +604,7 @@ fn find_eocd(data: &[u8]) -> Option<usize> {
 }
 
 fn find_signature(data: &[u8], signature: u32) -> Option<usize> {
-    data.windows(4)
-        .position(|w| read_u32_le(w, 0) == signature)
+    data.windows(4).position(|w| read_u32_le(w, 0) == signature)
 }
 
 fn find_signature_before(data: &[u8], signature: u32, end: usize) -> Option<usize> {

@@ -3,8 +3,8 @@
 //! Tree-sitter использует byte offsets (UTF-8), а LSP требует UTF-16 code units.
 //! Этот модуль предоставляет функции для корректной конвертации.
 
+pub use bsl_line_index::{byte_offset_to_utf16, LineIndex};
 use bsl_shared::ir::Span;
-pub use bsl_line_index::{LineIndex, byte_offset_to_utf16};
 use tracing::debug;
 use tree_sitter::Node;
 
@@ -61,8 +61,7 @@ pub fn node_to_span_cached(node: &Node, source: &str, line_index: &LineIndex) ->
     // MILESTONE 2.18: Конвертируем byte offsets -> UTF-16 code units
     let start_column_utf16 =
         line_index.byte_column_to_utf16(source, start_pos.row, start_pos.column);
-    let end_column_utf16 =
-        line_index.byte_column_to_utf16(source, end_pos.row, end_pos.column);
+    let end_column_utf16 = line_index.byte_column_to_utf16(source, end_pos.row, end_pos.column);
 
     let span = Span::from_positions(
         (start_pos.row as u32, start_column_utf16),

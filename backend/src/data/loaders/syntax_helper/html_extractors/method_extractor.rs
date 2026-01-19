@@ -148,9 +148,7 @@ impl MethodExtractor {
                                         if let Some((ru, en)) = items.last() {
                                             debug!(
                                                 "Extracted from '{}': {} ({})",
-                                                section_name,
-                                                ru,
-                                                en
+                                                section_name, ru, en
                                             );
                                         }
                                     }

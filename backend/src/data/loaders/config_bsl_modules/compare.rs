@@ -144,7 +144,12 @@ fn decl_keys(decls: &[ParsedDecl]) -> (HashMap<String, usize>, usize) {
         if d.is_export {
             export_count += 1;
         }
-        let key = format!("{}|{}|{}", d.name.to_lowercase(), d.params.len(), d.is_export);
+        let key = format!(
+            "{}|{}|{}",
+            d.name.to_lowercase(),
+            d.params.len(),
+            d.is_export
+        );
         *out.entry(key).or_insert(0) += 1;
     }
     (out, export_count)

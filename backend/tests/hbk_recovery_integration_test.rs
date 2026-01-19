@@ -23,9 +23,7 @@ fn create_minimal_empty_zip() -> Vec<u8> {
     writer
         .start_file("empty.txt", options)
         .expect("Failed to create ZIP entry");
-    writer
-        .write_all(b"")
-        .expect("Failed to write ZIP entry");
+    writer.write_all(b"").expect("Failed to write ZIP entry");
     writer.finish().expect("Failed to finalize ZIP");
 
     cursor.into_inner()

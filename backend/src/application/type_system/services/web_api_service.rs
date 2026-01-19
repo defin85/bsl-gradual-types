@@ -71,8 +71,7 @@ pub async fn search_types_as_dto(
         })
         .collect();
 
-    let mut global_function_dtos =
-        search_global_functions_as_dto(inference_service, query);
+    let mut global_function_dtos = search_global_functions_as_dto(inference_service, query);
 
     let mut all_dtos = Vec::with_capacity(type_dtos.len() + global_function_dtos.len());
     all_dtos.append(&mut type_dtos);
@@ -130,10 +129,7 @@ pub async fn search_types_as_dto(
         CategoryDto {
             color: "#3498db".to_string(),
             icon: "🔧".to_string(),
-            count: all_dtos
-                .iter()
-                .filter(|t| t.category == "Platform")
-                .count(),
+            count: all_dtos.iter().filter(|t| t.category == "Platform").count(),
         },
     );
     categories.insert(
@@ -220,7 +216,9 @@ pub fn get_all_types_as_dto(
     // 2. First transform to DTO (to know category), then filter, then paginate
     let all_type_dtos: Vec<TypeDto> = all_types
         .iter()
-        .map(|(name, res)| type_resolution_to_dto(name, res, metadata_lookup, generate_type_description))
+        .map(|(name, res)| {
+            type_resolution_to_dto(name, res, metadata_lookup, generate_type_description)
+        })
         .collect();
 
     // 3. Apply filters
@@ -436,9 +434,7 @@ fn normalize_signature_type(value: &Option<String>) -> Option<String> {
 
 fn global_function_signature_to_dto(name: &str, signature: &MethodSignature) -> TypeDto {
     let (category, source) = match signature.source {
-        SignatureSource::Platform => {
-            ("Platform".to_string(), "Platform".to_string())
-        }
+        SignatureSource::Platform => ("Platform".to_string(), "Platform".to_string()),
         SignatureSource::Configuration | SignatureSource::UserCode => {
             ("Configuration".to_string(), "Configuration".to_string())
         }

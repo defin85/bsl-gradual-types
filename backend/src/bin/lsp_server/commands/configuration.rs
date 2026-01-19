@@ -12,8 +12,9 @@ use bsl_backend::data::loaders::config_metadata_parser::{
     ConfigurationDiscovery, UniversalMetadataObject, UniversalMetadataParser,
 };
 use bsl_backend::data::loaders::{
-    index_configuration_bsl_modules_by_paths, index_configuration_bsl_modules_with_progress_parallel,
-    ModuleIndexProgress, ModuleIndexResult, ModuleSignatureSnapshot,
+    index_configuration_bsl_modules_by_paths,
+    index_configuration_bsl_modules_with_progress_parallel, ModuleIndexProgress, ModuleIndexResult,
+    ModuleSignatureSnapshot,
 };
 use bsl_backend::system::{ConfigIndexCache, ObjectKey, SystemCoordinator};
 use bsl_shared::domain::repository::TypeRepository;
@@ -130,10 +131,7 @@ pub async fn handle_parse_configuration(
     reporter
         .lock()
         .await
-        .report(
-            plan.validation.end,
-            Some("Validation OK".to_string()),
-        )
+        .report(plan.validation.end, Some("Validation OK".to_string()))
         .await;
 
     // Get AnalysisEngine
@@ -290,7 +288,8 @@ pub async fn handle_parse_configuration(
 
     let mut module_signatures: Vec<ModuleSignatureSnapshot> = Vec::new();
 
-    let (modules_tx, mut modules_rx) = tokio::sync::mpsc::unbounded_channel::<ModuleIndexProgress>();
+    let (modules_tx, mut modules_rx) =
+        tokio::sync::mpsc::unbounded_channel::<ModuleIndexProgress>();
     let reporter_for_modules = reporter.clone();
     let modules_task = tokio::spawn(async move {
         while let Some(p) = modules_rx.recv().await {
@@ -439,11 +438,8 @@ pub async fn handle_incremental_update(
         }
     };
 
-    let changed_paths = normalize_changed_paths(
-        &params.changed_paths,
-        &config_path,
-        &canonical_path,
-    );
+    let changed_paths =
+        normalize_changed_paths(&params.changed_paths, &config_path, &canonical_path);
 
     if changed_paths.is_empty() {
         let resp = handle_parse_configuration(
@@ -515,10 +511,7 @@ pub async fn handle_incremental_update(
     reporter
         .lock()
         .await
-        .report(
-            plan.validation.end,
-            Some("Validation OK".to_string()),
-        )
+        .report(plan.validation.end, Some("Validation OK".to_string()))
         .await;
 
     let engine = match coordinator.get_analysis_engine() {
@@ -627,9 +620,7 @@ pub async fn handle_incremental_update(
                             &added.object_type_raw,
                             &added.name,
                         ) {
-                            if let Ok(metadata) =
-                                parse_metadata_object(&discovery, &xml_path)
-                            {
+                            if let Ok(metadata) = parse_metadata_object(&discovery, &xml_path) {
                                 apply_metadata_update(
                                     &mut cache,
                                     repository.as_ref(),
@@ -656,8 +647,7 @@ pub async fn handle_incremental_update(
         if xml_path.file_name().and_then(|n| n.to_str()) == Some("Form.xml") {
             if let Some(object_key) = resolve_object_key_for_form(&cache, xml_path) {
                 let updated = cache.metadata_by_key.get(&object_key).and_then(|metadata| {
-                    let folder_name =
-                        discovery.xml_tag_to_folder_name(&metadata.object_type_raw);
+                    let folder_name = discovery.xml_tag_to_folder_name(&metadata.object_type_raw);
                     discovery
                         .discover_forms_for_object(
                             &folder_name,
@@ -673,7 +663,9 @@ pub async fn handle_incremental_update(
                 });
 
                 if let Some(metadata) = updated {
-                    cache.metadata_by_key.insert(object_key.clone(), metadata.clone());
+                    cache
+                        .metadata_by_key
+                        .insert(object_key.clone(), metadata.clone());
                     refresh_form_mappings(
                         &mut cache,
                         &canonical_path,
@@ -766,10 +758,7 @@ pub async fn handle_incremental_update(
                         .lock()
                         .await
                         .report(
-                            index_modules_range.map_current_total(
-                                module_processed,
-                                results_total,
-                            ),
+                            index_modules_range.map_current_total(module_processed, results_total),
                             Some(format!(
                                 "Indexed {}/{}: {}",
                                 module_processed,
@@ -830,12 +819,9 @@ fn build_config_index_cache(
         let key = ObjectKey::new(&obj.object_type_raw, &obj.name);
         cache.metadata_by_key.insert(key.clone(), obj.clone());
 
-        if let Some(xml_path) = resolve_object_xml_path(
-            &discovery,
-            config_root,
-            &obj.object_type_raw,
-            &obj.name,
-        ) {
+        if let Some(xml_path) =
+            resolve_object_xml_path(&discovery, config_root, &obj.object_type_raw, &obj.name)
+        {
             cache.object_xml_map.insert(xml_path, key.clone());
         }
 
@@ -931,11 +917,9 @@ fn parse_metadata_object(
         UniversalMetadataParser::parse_any_object(xml_path).map_err(|e| e.to_string())?;
     let folder_name = discovery.xml_tag_to_folder_name(&metadata.object_type_raw);
 
-    if let Ok(forms) = discovery.discover_forms_for_object(
-        &folder_name,
-        &metadata.object_type_raw,
-        &metadata.name,
-    ) {
+    if let Ok(forms) =
+        discovery.discover_forms_for_object(&folder_name, &metadata.object_type_raw, &metadata.name)
+    {
         metadata.forms = forms;
     }
 
@@ -1037,8 +1021,7 @@ fn apply_module_index_result(
         repository.add_global_function_definition_location(&function_name, location);
     }
 
-    if !result.snapshot.method_names.is_empty()
-        || !result.snapshot.global_function_names.is_empty()
+    if !result.snapshot.method_names.is_empty() || !result.snapshot.global_function_names.is_empty()
     {
         cache
             .module_signatures
@@ -1061,13 +1044,7 @@ fn apply_metadata_update(
     let new_key = ObjectKey::new(&metadata.object_type_raw, &metadata.name);
     if let Some(old_key) = cache.object_xml_map.get(xml_path).cloned() {
         if old_key != new_key {
-            remove_object(
-                cache,
-                repository,
-                config_root,
-                &old_key,
-                removed_types,
-            );
+            remove_object(cache, repository, config_root, &old_key, removed_types);
         }
     }
 
@@ -1077,8 +1054,12 @@ fn apply_metadata_update(
         .map(|m| collect_module_paths_for_metadata(config_root, m))
         .unwrap_or_default();
 
-    cache.metadata_by_key.insert(new_key.clone(), metadata.clone());
-    cache.object_xml_map.insert(xml_path.to_path_buf(), new_key.clone());
+    cache
+        .metadata_by_key
+        .insert(new_key.clone(), metadata.clone());
+    cache
+        .object_xml_map
+        .insert(xml_path.to_path_buf(), new_key.clone());
     refresh_form_mappings(cache, config_root, discovery, &new_key, &metadata);
 
     let raw_type = metadata.to_raw_type_data(None);
@@ -1087,7 +1068,10 @@ fn apply_metadata_update(
     }
 
     let new_module_paths = collect_module_paths_for_metadata(config_root, &metadata);
-    for path in old_module_paths.into_iter().chain(new_module_paths.into_iter()) {
+    for path in old_module_paths
+        .into_iter()
+        .chain(new_module_paths.into_iter())
+    {
         modules_to_reindex.insert(path);
     }
 }
@@ -1133,8 +1117,7 @@ fn resolve_object_key_for_form(cache: &ConfigIndexCache, form_xml: &Path) -> Opt
 
     let object_name = parts.get(forms_idx - 1)?;
     let folder_name = parts.get(forms_idx - 2)?;
-    let object_type_raw =
-        ConfigurationDiscovery::folder_name_to_xml_tag(folder_name)?.to_string();
+    let object_type_raw = ConfigurationDiscovery::folder_name_to_xml_tag(folder_name)?.to_string();
     let key = ObjectKey::new(object_type_raw, object_name);
 
     cache.metadata_by_key.get(&key).map(|_| key)

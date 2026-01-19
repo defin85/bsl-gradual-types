@@ -13,9 +13,9 @@ use serde::Deserialize;
 
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_backend::application::get_completion_with_semantic_program_snapshot;
-use bsl_backend::system::{SystemCoordinator, build_deps_bundle_v2};
-use bsl_shared::domain::TypeMetadataLookup;
+use bsl_backend::system::{build_deps_bundle_v2, SystemCoordinator};
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
 
 #[derive(Debug, Deserialize)]
@@ -170,9 +170,8 @@ fn default_scenario_path() -> PathBuf {
 }
 
 fn read_scenario(path: &Path) -> Result<Scenario> {
-    let data = fs::read_to_string(path).with_context(|| {
-        format!("Failed to read scenario file: {}", path.to_string_lossy())
-    })?;
+    let data = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read scenario file: {}", path.to_string_lossy()))?;
     let scenario: Scenario = serde_json::from_str(&data).context("Invalid scenario JSON")?;
     Ok(scenario)
 }
@@ -181,9 +180,8 @@ fn prepare_cases(cases: &[ScenarioCase], base_dir: &Path) -> Result<Vec<Prepared
     let mut prepared = Vec::with_capacity(cases.len());
     for case in cases {
         let file = resolve_relative(base_dir, &case.file);
-        let content = fs::read_to_string(&file).with_context(|| {
-            format!("Failed to read case file: {}", file.to_string_lossy())
-        })?;
+        let content = fs::read_to_string(&file)
+            .with_context(|| format!("Failed to read case file: {}", file.to_string_lossy()))?;
         let (line, column) = find_position(&content, &case.marker).with_context(|| {
             format!(
                 "Marker '{}' not found in {}",
@@ -207,10 +205,7 @@ fn find_position(content: &str, marker: &str) -> Option<(u32, u32)> {
     let before = &content[..byte_index + marker.len()];
     let line = before.lines().count().saturating_sub(1) as u32;
     let last_line = before.lines().last().unwrap_or("");
-    let character = last_line
-        .chars()
-        .map(|ch| ch.len_utf16())
-        .sum::<usize>() as u32;
+    let character = last_line.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
     Some((line, character))
 }
 

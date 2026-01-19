@@ -235,7 +235,10 @@ impl TypeMetadataLookup {
         // 1. Проверяем, показывает ли фасет свойства
         if !facet.shows_properties() {
             if matches!(facet, FacetKind::Manager)
-                && matches!(self.extract_metadata_kind(resolution), Some(MetadataKind::Enum))
+                && matches!(
+                    self.extract_metadata_kind(resolution),
+                    Some(MetadataKind::Enum)
+                )
             {
                 if let Some(config_type) = self.get_raw_type(resolution) {
                     let enum_name = config_type

@@ -6,10 +6,10 @@ use std::sync::{Arc, LazyLock};
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_backend::application::get_hover_info_with_semantic_program;
 use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter};
-use bsl_backend::system::{DepsBundleV2, SystemCoordinator, build_deps_bundle_v2};
-use bsl_shared::domain::TypeMetadataLookup;
+use bsl_backend::system::{build_deps_bundle_v2, DepsBundleV2, SystemCoordinator};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{ParseError, TypeDiagnostic};
+use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticProgram;
 
@@ -23,8 +23,8 @@ pub fn deps_bundle_v2_for_paths(
         .start_with_paths_blocking(syntax_helper_path, config_path, platform_version, None)
         .expect("startup");
 
-    let deps_bundle =
-        build_deps_bundle_v2(&coordinator, syntax_helper_path, config_path).expect("deps bundle v2");
+    let deps_bundle = build_deps_bundle_v2(&coordinator, syntax_helper_path, config_path)
+        .expect("deps bundle v2");
 
     Arc::new(deps_bundle)
 }
@@ -38,7 +38,10 @@ pub fn deps_bundle_v2_fallback() -> Arc<DepsBundleV2> {
 pub fn deps_bundle_v2_with_syntax_helper() -> Arc<DepsBundleV2> {
     static BUNDLE: LazyLock<Arc<DepsBundleV2>> = LazyLock::new(|| {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let syntax_helper_path = manifest_dir.join("..").join("examples").join("syntax_helper");
+        let syntax_helper_path = manifest_dir
+            .join("..")
+            .join("examples")
+            .join("syntax_helper");
         assert!(
             syntax_helper_path.exists(),
             "syntax helper path does not exist: {}",
@@ -49,7 +52,11 @@ pub fn deps_bundle_v2_with_syntax_helper() -> Arc<DepsBundleV2> {
     BUNDLE.clone()
 }
 
-pub fn ir_program_for_code(deps_bundle: &DepsBundleV2, file_path: &str, code: &str) -> Arc<SemanticProgram> {
+pub fn ir_program_for_code(
+    deps_bundle: &DepsBundleV2,
+    file_path: &str,
+    code: &str,
+) -> Arc<SemanticProgram> {
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
         deps_id: deps_bundle.deps_id.clone(),
@@ -162,7 +169,8 @@ pub fn hover_for_code_with_config(
         .clone()
         .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
-    let hover_formatter = HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup.clone());
+    let hover_formatter =
+        HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup.clone());
 
     get_hover_info_with_semantic_program(
         code,

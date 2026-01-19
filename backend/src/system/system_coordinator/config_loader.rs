@@ -133,21 +133,20 @@ impl SystemCoordinator {
             let cache = self.disk_cache();
             let discovery_root = config_path.to_path_buf();
             let config_info = config_info.clone();
-            let entry = cache
-                .get_or_build_with_swr(
-                    &cache_key,
-                    move || {
-                        let discovery = ConfigurationDiscovery::new(discovery_root, false);
-                        // Без progress_callback в публичном методе (для обратной совместимости)
-                        discovery
-                            .discover_metadata_in_configuration(
-                                &config_info,
-                                None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
-                            )
-                            .map_err(|e| anyhow::anyhow!("Не удалось обнаружить метаданные: {}", e))
-                    },
-                    |metadata| !metadata.is_empty(),
-                )?;
+            let entry = cache.get_or_build_with_swr(
+                &cache_key,
+                move || {
+                    let discovery = ConfigurationDiscovery::new(discovery_root, false);
+                    // Без progress_callback в публичном методе (для обратной совместимости)
+                    discovery
+                        .discover_metadata_in_configuration(
+                            &config_info,
+                            None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
+                        )
+                        .map_err(|e| anyhow::anyhow!("Не удалось обнаружить метаданные: {}", e))
+                },
+                |metadata| !metadata.is_empty(),
+            )?;
             entry.value
         } else {
             // Без progress_callback в публичном методе (для обратной совместимости)
@@ -329,14 +328,10 @@ impl SystemCoordinator {
     where
         F: Fn(ProgressUpdate) + Send + Sync + Clone + 'static,
     {
-        let (result, payload) = self.load_all_configurations_with_progress_inner(
-            config_path,
-            progress_callback,
-            true,
-        )?;
-        let payload = payload.ok_or_else(|| {
-            anyhow::anyhow!("Combined config payload not collected")
-        })?;
+        let (result, payload) =
+            self.load_all_configurations_with_progress_inner(config_path, progress_callback, true)?;
+        let payload =
+            payload.ok_or_else(|| anyhow::anyhow!("Combined config payload not collected"))?;
         Ok((result, payload))
     }
 
@@ -412,21 +407,20 @@ impl SystemCoordinator {
             let discovery_root = config_path.to_path_buf();
             let config_info_clone = config_info.clone();
             let progress_callback_clone = progress_callback.clone();
-            let entry = cache
-                .get_or_build_with_swr(
-                    &cache_key,
-                    move || {
-                        let discovery = ConfigurationDiscovery::new(discovery_root, true);
-                        // НОВОЕ: Используем новый метод с прогрессом через 4 фазы парсинга
-                        discovery
-                            .discover_metadata_in_configuration_with_progress(
-                                &config_info_clone,
-                                progress_callback_clone.clone(),
-                            )
-                            .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))
-                    },
-                    |metadata| !metadata.is_empty(),
-                )?;
+            let entry = cache.get_or_build_with_swr(
+                &cache_key,
+                move || {
+                    let discovery = ConfigurationDiscovery::new(discovery_root, true);
+                    // НОВОЕ: Используем новый метод с прогрессом через 4 фазы парсинга
+                    discovery
+                        .discover_metadata_in_configuration_with_progress(
+                            &config_info_clone,
+                            progress_callback_clone.clone(),
+                        )
+                        .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))
+                },
+                |metadata| !metadata.is_empty(),
+            )?;
 
             if entry.from_cache {
                 emit_cached_config_progress(&config_info, &progress_callback);
@@ -576,7 +570,11 @@ impl SystemCoordinator {
                 repository.add_global_function_signature(&name, sig);
             }
             for (owner_type, method_name, location) in payload.indexed.definition_locations {
-                repository.add_config_method_definition_location(&owner_type, &method_name, location);
+                repository.add_config_method_definition_location(
+                    &owner_type,
+                    &method_name,
+                    location,
+                );
             }
             for (function_name, location) in payload.indexed.global_definition_locations {
                 repository.add_global_function_definition_location(&function_name, location);
@@ -718,21 +716,20 @@ impl SystemCoordinator {
             let cache = self.disk_cache();
             let discovery_root = config_path.to_path_buf();
             let config_info_clone = config_info.clone();
-            let entry = cache
-                .get_or_build_with_swr(
-                    &cache_key,
-                    move || {
-                        let discovery = ConfigurationDiscovery::new(discovery_root, true);
-                        // Без progress_callback в публичном методе (для обратной совместимости)
-                        discovery
-                            .discover_metadata_in_configuration(
-                                &config_info_clone,
-                                None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
-                            )
-                            .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))
-                    },
-                    |metadata| !metadata.is_empty(),
-                )?;
+            let entry = cache.get_or_build_with_swr(
+                &cache_key,
+                move || {
+                    let discovery = ConfigurationDiscovery::new(discovery_root, true);
+                    // Без progress_callback в публичном методе (для обратной совместимости)
+                    discovery
+                        .discover_metadata_in_configuration(
+                            &config_info_clone,
+                            None::<fn(crate::data::loaders::progress::ProgressUpdate)>,
+                        )
+                        .map_err(|e| anyhow::anyhow!("Ошибка загрузки метаданных: {}", e))
+                },
+                |metadata| !metadata.is_empty(),
+            )?;
 
             let metadata = entry.value;
 
@@ -854,7 +851,11 @@ impl SystemCoordinator {
                 repository.add_global_function_signature(&name, sig);
             }
             for (owner_type, method_name, location) in payload.indexed.definition_locations {
-                repository.add_config_method_definition_location(&owner_type, &method_name, location);
+                repository.add_config_method_definition_location(
+                    &owner_type,
+                    &method_name,
+                    location,
+                );
             }
             for (function_name, location) in payload.indexed.global_definition_locations {
                 repository.add_global_function_definition_location(&function_name, location);
@@ -980,7 +981,8 @@ impl SystemCoordinator {
             return;
         }
         if self.disk_cache.is_disabled() {
-            self.observability.record_index_warmup_skip("disk_cache_disabled");
+            self.observability
+                .record_index_warmup_skip("disk_cache_disabled");
             return;
         }
         let config_fingerprint = match config_fingerprint(config_path, self.strict_fingerprint()) {
@@ -990,7 +992,8 @@ impl SystemCoordinator {
                     "Не удалось вычислить fingerprint конфигурации для warmup индекса: {}",
                     err
                 );
-                self.observability.record_index_warmup_skip("fingerprint_error");
+                self.observability
+                    .record_index_warmup_skip("fingerprint_error");
                 return;
             }
         };
@@ -999,7 +1002,8 @@ impl SystemCoordinator {
             Ok(store) => store,
             Err(err) => {
                 warn!("Не удалось инициализировать store индекса: {}", err);
-                self.observability.record_index_warmup_skip("store_init_error");
+                self.observability
+                    .record_index_warmup_skip("store_init_error");
                 return;
             }
         };
@@ -1053,6 +1057,10 @@ impl SystemCoordinator {
     }
 
     fn persist_intellisense_index_snapshot(&self, project_id: &str, config_set_id: &str) {
+        if self.disk_cache.is_disabled() {
+            return;
+        }
+
         let store = match self.intellisense_index_store_for_ids(project_id, config_set_id) {
             Ok(store) => store,
             Err(err) => {
@@ -1213,12 +1221,10 @@ impl SystemCoordinator {
             config_set_id
         );
         let strict = self.strict_fingerprint();
-        let source_fingerprint = config_layer_b_fingerprint(
-            &config_info.path,
-            metadata_for_indexing,
-            strict,
-        )
-        .map_err(|e| anyhow::anyhow!("Ошибка вычисления fingerprint конфигурации: {}", e))?;
+        let source_fingerprint =
+            config_layer_b_fingerprint(&config_info.path, metadata_for_indexing, strict).map_err(
+                |e| anyhow::anyhow!("Ошибка вычисления fingerprint конфигурации: {}", e),
+            )?;
         let settings_fingerprint = config_layer_b_settings_fingerprint(strict);
 
         let key_hash = blake3::hash(
@@ -1251,11 +1257,7 @@ impl SystemCoordinator {
     ) -> Result<DiskCacheKey> {
         let identity = config_cache_identity(root_path, config_info);
         let config_set_id = config_set_id.unwrap_or_default();
-        let source_identity = format!(
-            "{}|{}",
-            module_path.to_string_lossy(),
-            config_set_id
-        );
+        let source_identity = format!("{}|{}", module_path.to_string_lossy(), config_set_id);
         let strict = self.strict_fingerprint();
         let source_fingerprint = file_fingerprint(module_path, strict)?;
         let settings_fingerprint = module_cache_settings_fingerprint(strict);
@@ -1519,7 +1521,10 @@ fn emit_cached_module_index_progress<F>(
         IndexingPhase::ConfigurationIndexingModules,
         1,
         1,
-        Some(format!("Индексация BSL-модулей: {} (кэш)", config_info.name)),
+        Some(format!(
+            "Индексация BSL-модулей: {} (кэш)",
+            config_info.name
+        )),
     ));
 }
 
@@ -1565,15 +1570,8 @@ fn config_id_for_info(
 }
 
 fn normalize_config_root(config_path: &Path) -> PathBuf {
-    if config_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        == Some("Configuration.xml")
-    {
-        return config_path
-            .parent()
-            .unwrap_or(config_path)
-            .to_path_buf();
+    if config_path.file_name().and_then(|name| name.to_str()) == Some("Configuration.xml") {
+        return config_path.parent().unwrap_or(config_path).to_path_buf();
     }
     config_path.to_path_buf()
 }
@@ -1582,9 +1580,7 @@ fn extend_indexed_signatures(
     target: &mut IndexedConfigSignatures,
     source: &IndexedConfigSignatures,
 ) {
-    target
-        .config_methods
-        .extend(source.config_methods.clone());
+    target.config_methods.extend(source.config_methods.clone());
     target
         .global_functions
         .extend(source.global_functions.clone());
@@ -1677,10 +1673,7 @@ fn config_layer_b_settings_fingerprint(strict: bool) -> String {
 }
 
 fn module_cache_settings_fingerprint(strict: bool) -> String {
-    format!(
-        "config_module_parse_v2;strict_fingerprint={}",
-        strict
-    )
+    format!("config_module_parse_v2;strict_fingerprint={}", strict)
 }
 
 fn file_fingerprint(path: &Path, strict: bool) -> Result<String> {
@@ -1810,7 +1803,11 @@ fn merkle_leaf_hash_fast(kind: &str, path_norm: &str, size: u64, mtime_ns: u64) 
     hasher.finalize()
 }
 
-fn merkle_leaf_hash_strict(kind: &str, path_norm: &str, content_hash: &blake3::Hash) -> blake3::Hash {
+fn merkle_leaf_hash_strict(
+    kind: &str,
+    path_norm: &str,
+    content_hash: &blake3::Hash,
+) -> blake3::Hash {
     let mut hasher = blake3::Hasher::new();
     hasher.update(&[0x00]);
     hasher.update(kind.as_bytes());
@@ -2000,8 +1997,7 @@ mod merkle_tests {
 
         let empty_modules: Vec<PathBuf> = Vec::new();
         let fp_xml = merkle_fingerprint_paths(root, &xml_paths, true);
-        let fp_with =
-            merkle_fingerprint_paths_with_modules(root, &xml_paths, &empty_modules, true);
+        let fp_with = merkle_fingerprint_paths_with_modules(root, &xml_paths, &empty_modules, true);
 
         assert_eq!(fp_xml, fp_with);
     }
@@ -2018,18 +2014,14 @@ mod merkle_tests {
             .join("Ext")
             .join("Module.bsl");
         write_file(&xml, "<Configuration/>");
-        write_file(
-            &bsl,
-            "Процедура X() Экспорт\nКонецПроцедуры\n",
-        );
+        write_file(&bsl, "Процедура X() Экспорт\nКонецПроцедуры\n");
 
         let xml_paths = [xml];
 
         let empty_modules: Vec<PathBuf> = Vec::new();
         let no_modules =
             merkle_fingerprint_paths_with_modules(root, &xml_paths, &empty_modules, true);
-        let with_modules =
-            merkle_fingerprint_paths_with_modules(root, &xml_paths, &[bsl], true);
+        let with_modules = merkle_fingerprint_paths_with_modules(root, &xml_paths, &[bsl], true);
 
         assert_ne!(no_modules, with_modules);
     }
@@ -2194,7 +2186,9 @@ mod warmup_tests {
 }
 
 fn normalize_path(path: &Path, root: Option<&Path>) -> String {
-    let relative = root.and_then(|base| path.strip_prefix(base).ok()).unwrap_or(path);
+    let relative = root
+        .and_then(|base| path.strip_prefix(base).ok())
+        .unwrap_or(path);
     let mut parts = Vec::new();
     for component in relative.components() {
         if let std::path::Component::Normal(value) = component {
@@ -2234,7 +2228,9 @@ fn config_set_id_from_configs(
         return String::new();
     }
 
-    blake3::hash(parts.join("|").as_bytes()).to_hex().to_string()
+    blake3::hash(parts.join("|").as_bytes())
+        .to_hex()
+        .to_string()
 }
 
 fn config_set_id_from_single(
@@ -2252,15 +2248,12 @@ fn discover_single_config(
     discovery: &crate::data::loaders::config_metadata_parser::ConfigurationDiscovery,
     config_path: &Path,
 ) -> Option<crate::data::loaders::config_metadata_parser::ConfigurationInfo> {
-    let config_xml = if config_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        == Some("Configuration.xml")
-    {
-        config_path.to_path_buf()
-    } else {
-        config_path.join("Configuration.xml")
-    };
+    let config_xml =
+        if config_path.file_name().and_then(|name| name.to_str()) == Some("Configuration.xml") {
+            config_path.to_path_buf()
+        } else {
+            config_path.join("Configuration.xml")
+        };
 
     if !config_xml.exists() {
         return None;

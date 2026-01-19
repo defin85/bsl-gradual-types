@@ -12,11 +12,11 @@ mod support;
 #[cfg(test)]
 mod metadata_existence_validation_tests {
     use super::support;
+    use bsl_shared::domain::repository::TypeRepository;
     use bsl_shared::domain::types::{
         Certainty, ConcreteType, ConfigurationType, MetadataKind, ResolutionMetadata,
         ResolutionResult, ResolutionSource, TypeResolution,
     };
-    use bsl_shared::domain::repository::TypeRepository;
     use bsl_shared::domain::TypeMetadataLookup;
     use bsl_shared::utils::string_utils::{levenshtein_distance, similarity};
     use std::sync::Arc;

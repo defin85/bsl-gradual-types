@@ -95,32 +95,41 @@ async fn get_semantic_tree(
     let source_for_ir = source.clone();
     let file_path_for_ir = file_path.clone();
 
-    let program = match tokio::task::spawn_blocking(move || -> anyhow::Result<Arc<bsl_shared::ir::SemanticProgram>> {
-        let mut host = AnalysisHostV2::default();
-        host.apply_change(ChangeV2::SetDepsSnapshot {
-            deps_id: deps_bundle.deps_id.clone(),
-            deps: deps_bundle.semantic_deps.clone(),
-        });
-        host.apply_change(ChangeV2::SetSettingsSnapshot {
-            settings_id: bsl_analysis_v2::SettingsId::from_hash(""),
-            diagnostics_detail_level: bsl_shared::formatting::DetailLevel::Full,
-        });
-        host.apply_change(ChangeV2::SetFile {
-            file_id: V2FileId(1),
-            text: Arc::from(source_for_ir),
-            version: 0,
-            path: Arc::from(file_path_for_ir),
-        });
+    let program = match tokio::task::spawn_blocking(
+        move || -> anyhow::Result<Arc<bsl_shared::ir::SemanticProgram>> {
+            let mut host = AnalysisHostV2::default();
+            host.apply_change(ChangeV2::SetDepsSnapshot {
+                deps_id: deps_bundle.deps_id.clone(),
+                deps: deps_bundle.semantic_deps.clone(),
+            });
+            host.apply_change(ChangeV2::SetSettingsSnapshot {
+                settings_id: bsl_analysis_v2::SettingsId::from_hash(""),
+                diagnostics_detail_level: bsl_shared::formatting::DetailLevel::Full,
+            });
+            host.apply_change(ChangeV2::SetFile {
+                file_id: V2FileId(1),
+                text: Arc::from(source_for_ir),
+                version: 0,
+                path: Arc::from(file_path_for_ir),
+            });
 
-        let analysis = host.analysis();
-        analysis
-            .ir(V2FileId(1))
-            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
-            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))
-    })
-    .await {
+            let analysis = host.analysis();
+            analysis
+                .ir(V2FileId(1))
+                .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+                .ok_or_else(|| anyhow::anyhow!("ir unavailable"))
+        },
+    )
+    .await
+    {
         Ok(Ok(program)) => program,
-        Ok(Err(e)) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Parse error: {}", e)).into_response(),
+        Ok(Err(e)) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Parse error: {}", e),
+            )
+                .into_response()
+        }
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
 

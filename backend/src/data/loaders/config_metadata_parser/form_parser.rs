@@ -7,9 +7,9 @@ use std::fs;
 use std::path::Path;
 use tracing::trace;
 
-use crate::system::fs_utils::read_bsl_file;
 use super::form_types::*;
 use super::types::ExecutionContext;
+use crate::system::fs_utils::read_bsl_file;
 
 /// Парсер форм конфигурации 1С
 pub struct FormParser;

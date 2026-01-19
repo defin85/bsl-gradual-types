@@ -107,8 +107,7 @@ impl IntellisenseIndexDiskStore {
         write_payload(self.keywords_path(&snapshot.id), &keywords_payload)?;
 
         let symbols_root = self.symbols_root(&snapshot.id);
-        fs::create_dir_all(&symbols_root)
-            .context("Failed to create symbol index directory")?;
+        fs::create_dir_all(&symbols_root).context("Failed to create symbol index directory")?;
         for (uri, items) in snapshot.symbol_index.iter() {
             let symbol_payload = IndexStorePayload {
                 header: header.clone(),
@@ -267,8 +266,7 @@ impl IntellisenseIndexDiskStore {
 
 fn write_payload<T: Serialize>(path: PathBuf, payload: &IndexStorePayload<T>) -> Result<()> {
     let bytes = bincode::serialize(payload).context("Failed to serialize index payload")?;
-    let compressed = zstd::stream::encode_all(std::io::Cursor::new(&bytes), 0)
-        .unwrap_or(bytes);
+    let compressed = zstd::stream::encode_all(std::io::Cursor::new(&bytes), 0).unwrap_or(bytes);
     write_atomic(&path, &compressed)
 }
 
@@ -478,8 +476,8 @@ mod tests {
             bincode::deserialize(&decoded).unwrap();
         payload.header.store_version = IndexStoreVersion("invalid-version".to_string());
         let altered = bincode::serialize(&payload).unwrap();
-        let compressed = zstd::stream::encode_all(std::io::Cursor::new(&altered), 0)
-            .unwrap_or(altered);
+        let compressed =
+            zstd::stream::encode_all(std::io::Cursor::new(&altered), 0).unwrap_or(altered);
         write_atomic(&types_path, &compressed).unwrap();
 
         let loaded = store.load_snapshot(&snapshot_id).unwrap();

@@ -1,5 +1,5 @@
 pub use bsl_syntax::tree_sitter_adapter::{
-    TreeSitterAdapter, collect_syntax_errors, collect_syntax_errors_cached,
+    collect_syntax_errors, collect_syntax_errors_cached, TreeSitterAdapter,
 };
 
 pub mod directives {
@@ -13,4 +13,3 @@ pub mod span {
 pub mod utils {
     pub use bsl_syntax::tree_sitter_adapter::utils::*;
 }
-

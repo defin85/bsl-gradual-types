@@ -407,7 +407,8 @@ impl TypeMetadataLookup {
             return true;
         }
 
-        if let Some(enum_name) = resolution.type_name().strip_prefix("ПеречислениеМенеджер.") {
+        if let Some(enum_name) = resolution.type_name().strip_prefix("ПеречислениеМенеджер.")
+        {
             if let Some(raw_enum) = self
                 .repository
                 .find_type(&format!("Перечисления.{}", enum_name))

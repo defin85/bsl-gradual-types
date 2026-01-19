@@ -45,9 +45,14 @@ pub fn get_signature_help_v2(
 
     let active_param = calculate_active_parameter(file_content, &call_context, line, character);
     let (label, parameters) = match signature_info {
-        SignatureTarget::Method(signature) => build_signature_labels(&signature.name, &signature.params),
+        SignatureTarget::Method(signature) => {
+            build_signature_labels(&signature.name, &signature.params)
+        }
         SignatureTarget::Constructor(signature) => {
-            let name = format!("\u{041D}\u{043E}\u{0432}\u{044B}\u{0439} {}", signature.type_name);
+            let name = format!(
+                "\u{041D}\u{043E}\u{0432}\u{044B}\u{0439} {}",
+                signature.type_name
+            );
             build_signature_labels(&name, &signature.params)
         }
     };
@@ -285,7 +290,8 @@ fn extract_function_name(text: &str) -> Option<(String, Option<String>, bool)> {
 
         if !method_name.is_empty() {
             let receiver = trimmed[..dot_byte_pos].trim_end();
-            let receiver_compact: String = receiver.chars().filter(|c| !c.is_whitespace()).collect();
+            let receiver_compact: String =
+                receiver.chars().filter(|c| !c.is_whitespace()).collect();
             let receiver_type = if is_simple_receiver(&receiver_compact) {
                 Some(receiver_compact)
             } else {

@@ -171,8 +171,7 @@ where
             if module.is_global_common_module {
                 let mut global_sig = signature;
                 global_sig.owner_type = None;
-                out.global_functions
-                    .push((method_name.clone(), global_sig));
+                out.global_functions.push((method_name.clone(), global_sig));
                 snapshot.global_function_names.push(method_name.clone());
                 out.global_definition_locations.push((
                     method_name.clone(),
@@ -349,11 +348,7 @@ where
                         Ok(Some(data)) => Some(data),
                         Ok(None) => None,
                         Err(e) => {
-                            tracing::warn!(
-                                "Не удалось загрузить кеш для {:?}: {}",
-                                module_path,
-                                e
-                            );
+                            tracing::warn!("Не удалось загрузить кеш для {:?}: {}", module_path, e);
                             None
                         }
                     };
@@ -369,16 +364,17 @@ where
                             }
                         };
 
-                        let parsed = source.and_then(|source| match parse_bsl_module(&source, module_path)
-                        {
-                            Ok(p) => Some(p),
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Не удалось распарсить модуль {:?}: {}",
-                                    module_path,
-                                    e
-                                );
-                                None
+                        let parsed = source.and_then(|source| {
+                            match parse_bsl_module(&source, module_path) {
+                                Ok(p) => Some(p),
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Не удалось распарсить модуль {:?}: {}",
+                                        module_path,
+                                        e
+                                    );
+                                    None
+                                }
                             }
                         });
 
@@ -397,8 +393,7 @@ where
 
                     if let Some(parsed) = parsed {
                         let module_type = location.module_type;
-                        let is_global =
-                            is_global_common_module(&module_type, &common_module_props);
+                        let is_global = is_global_common_module(&module_type, &common_module_props);
 
                         parsed_module = Some(ParsedModule {
                             owner_type_name,
@@ -634,7 +629,10 @@ fn collect_common_module_props(
         .collect()
 }
 
-pub fn collect_module_paths(config_root: &Path, metadata: &[UniversalMetadataObject]) -> Vec<PathBuf> {
+pub fn collect_module_paths(
+    config_root: &Path,
+    metadata: &[UniversalMetadataObject],
+) -> Vec<PathBuf> {
     let mut all_module_paths: Vec<PathBuf> = Vec::new();
 
     // Common modules: используем фактический путь, обнаруженный в discovery
@@ -734,8 +732,7 @@ fn build_index_from_parsed_modules(
             if module.is_global_common_module {
                 let mut global_sig = signature;
                 global_sig.owner_type = None;
-                out.global_functions
-                    .push((method_name.clone(), global_sig));
+                out.global_functions.push((method_name.clone(), global_sig));
                 snapshot.global_function_names.push(method_name.clone());
                 out.global_definition_locations.push((
                     method_name.clone(),
@@ -872,11 +869,21 @@ fn resolve_owner_type_for_signature(
     match module_type {
         ModuleType::CommonModule { name, .. } => {
             let _ = common_props.get(name)?;
-            Some(format!("{}.{}", MetadataKind::CommonModule.to_prefix(), name))
+            Some(format!(
+                "{}.{}",
+                MetadataKind::CommonModule.to_prefix(),
+                name
+            ))
         }
-        ModuleType::ObjectModule { owner_type } => owner_type_to_faceted_type(owner_type, FacetKind::Object),
-        ModuleType::ManagerModule { owner_type } => owner_type_to_faceted_type(owner_type, FacetKind::Manager),
-        ModuleType::RecordSetModule { owner_type } => owner_type_to_faceted_type(owner_type, FacetKind::Object),
+        ModuleType::ObjectModule { owner_type } => {
+            owner_type_to_faceted_type(owner_type, FacetKind::Object)
+        }
+        ModuleType::ManagerModule { owner_type } => {
+            owner_type_to_faceted_type(owner_type, FacetKind::Manager)
+        }
+        ModuleType::RecordSetModule { owner_type } => {
+            owner_type_to_faceted_type(owner_type, FacetKind::Object)
+        }
         ModuleType::FormModule { .. } | ModuleType::Unknown => None,
     }
 }

@@ -10,23 +10,23 @@ use std::time::{Duration, Instant};
 use tracing::{debug, info, Span};
 
 use bsl_shared::domain::metadata_constants::get_collection_kind;
-use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
 use bsl_shared::domain::resolver::TypeResolver;
-use bsl_shared::domain::types::{ConcreteType, FacetKind, MetadataKind, ResolutionResult, SpecialType};
+use bsl_shared::domain::signature_index::SignatureIndex;
+use bsl_shared::domain::types::{
+    ConcreteType, FacetKind, MetadataKind, ResolutionResult, SpecialType,
+};
+use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
 use bsl_shared::ir::{ScopeId, SemanticProgram};
 use bsl_syntax::ast::Expression;
 
-use super::completion_target::extract_completion_target_for_member_access;
 use super::super::extractors::symbol_extractor::{
     extract_word_at_position, is_identifier_char, utf16_to_byte_offset,
 };
 use super::completion_ranking::{rank_candidates_with_trace, RankingCandidate};
+use super::completion_target::extract_completion_target_for_member_access;
 use super::hover_service::find_variable_type_at_position;
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
-use crate::system::{
-    IndexItemKind, IndexSnapshot, IntellisenseIndexStore, SymbolScope, TypeKind,
-};
+use crate::system::{IndexItemKind, IndexSnapshot, IntellisenseIndexStore, SymbolScope, TypeKind};
 
 pub trait IndexSnapshotSource: Sync {
     fn snapshot(&self) -> IndexSnapshot;
@@ -50,8 +50,7 @@ static COMPLETION_TRACE_ENABLED: OnceLock<bool> = OnceLock::new();
 static COMPLETION_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 fn completion_trace_enabled() -> bool {
-    *COMPLETION_TRACE_ENABLED
-        .get_or_init(|| std::env::var("BSL_COMPLETION_TRACE").is_ok())
+    *COMPLETION_TRACE_ENABLED.get_or_init(|| std::env::var("BSL_COMPLETION_TRACE").is_ok())
 }
 
 fn next_completion_request_id() -> u64 {
@@ -286,12 +285,36 @@ pub(crate) async fn get_completion_with_analysis(
 
     if context.member_access {
         let receiver_types_from_ast = analysis
-            .and_then(|analysis| analysis.parse_result.as_ref().map(|parse_result| (analysis, parse_result)))
+            .and_then(|analysis| {
+                analysis
+                    .parse_result
+                    .as_ref()
+                    .map(|parse_result| (analysis, parse_result))
+            })
             .and_then(|(analysis, parse_result)| {
-                extract_completion_target_for_member_access(file_content, line, column, parse_result)
-                    .and_then(|target| {
-                        if let Some(expr) = target.receiver_expression.as_ref() {
-                            return Some(resolve_receiver_types_from_expression(
+                extract_completion_target_for_member_access(
+                    file_content,
+                    line,
+                    column,
+                    parse_result,
+                )
+                .and_then(|target| {
+                    if let Some(expr) = target.receiver_expression.as_ref() {
+                        return Some(resolve_receiver_types_from_expression(
+                            Some(analysis),
+                            file_content,
+                            line,
+                            column,
+                            expr,
+                            &snapshot,
+                            metadata_lookup,
+                        ));
+                    }
+
+                    let mut out = Vec::new();
+                    if let Some(exprs) = target.receiver_union_expressions.as_ref() {
+                        for expr in exprs {
+                            out.extend(resolve_receiver_types_from_expression(
                                 Some(analysis),
                                 file_content,
                                 line,
@@ -301,24 +324,10 @@ pub(crate) async fn get_completion_with_analysis(
                                 metadata_lookup,
                             ));
                         }
+                    }
 
-                        let mut out = Vec::new();
-                        if let Some(exprs) = target.receiver_union_expressions.as_ref() {
-                            for expr in exprs {
-                                out.extend(resolve_receiver_types_from_expression(
-                                    Some(analysis),
-                                    file_content,
-                                    line,
-                                    column,
-                                    expr,
-                                    &snapshot,
-                                    metadata_lookup,
-                                ));
-                            }
-                        }
-
-                        (!out.is_empty()).then(|| dedup_resolutions(out))
-                    })
+                    (!out.is_empty()).then(|| dedup_resolutions(out))
+                })
             })
             .filter(|types| !types.is_empty());
 
@@ -334,17 +343,29 @@ pub(crate) async fn get_completion_with_analysis(
                 let base_name = receiver_chain[0].as_str();
                 if let Some(kind) = get_collection_kind(base_name) {
                     add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
-                } else if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup) {
-                    let resolution =
-                        analysis.map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
-                            .unwrap_or_else(|| TypeResolution::explicit(&type_name));
+                } else if let Some(type_name) =
+                    resolve_type_name(&snapshot, base_name, metadata_lookup)
+                {
+                    let resolution = analysis
+                        .map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
+                        .unwrap_or_else(|| TypeResolution::explicit(&type_name));
                     add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                    add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
+                    add_properties_from_resolution(
+                        metadata_lookup,
+                        &resolution,
+                        &mut candidates,
+                        1,
+                    );
                 } else if let Some(resolution) =
                     resolve_member_owner_type(analysis, file_content, line, column, base_name).await
                 {
                     add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                    add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
+                    add_properties_from_resolution(
+                        metadata_lookup,
+                        &resolution,
+                        &mut candidates,
+                        1,
+                    );
                 }
             } else if let Some(resolution) = resolve_member_chain_owner_type(
                 analysis,
@@ -363,23 +384,13 @@ pub(crate) async fn get_completion_with_analysis(
         } else if let Some(base_name) = context.member_base.as_deref() {
             if let Some(kind) = get_collection_kind(base_name) {
                 add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
-            } else if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup) {
+            } else if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup)
+            {
                 let resolution = TypeResolution::explicit(&type_name);
                 add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                add_properties_from_resolution(
-                    metadata_lookup,
-                    &resolution,
-                    &mut candidates,
-                    1,
-                );
-            } else if let Some(resolution) = resolve_member_owner_type(
-                analysis,
-                file_content,
-                line,
-                column,
-                base_name,
-            )
-            .await
+                add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
+            } else if let Some(resolution) =
+                resolve_member_owner_type(analysis, file_content, line, column, base_name).await
             {
                 add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
                 add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
@@ -508,9 +519,16 @@ pub fn analyze_completion_context(content: &str, line: u32, column: u32) -> Comp
     let line_trimmed = line_prefix.trim_end();
 
     let trigger_char = (!in_string_or_comment)
-        .then(|| line_trimmed.chars().last().filter(|ch| *ch == '.' || *ch == '('))
+        .then(|| {
+            line_trimmed
+                .chars()
+                .last()
+                .filter(|ch| *ch == '.' || *ch == '(')
+        })
         .flatten();
-    let member_base = (!in_string_or_comment).then(|| extract_member_base(line_trimmed)).flatten();
+    let member_base = (!in_string_or_comment)
+        .then(|| extract_member_base(line_trimmed))
+        .flatten();
     let member_access = !in_string_or_comment && is_member_access_context(line_trimmed);
 
     // Extract current word
@@ -679,11 +697,7 @@ fn is_member_access_context(line_prefix: &str) -> bool {
     after_dot.is_empty() || after_dot.chars().all(is_identifier_char)
 }
 
-fn extract_member_receiver_chain(
-    content: &str,
-    line: u32,
-    column: u32,
-) -> Option<Vec<String>> {
+fn extract_member_receiver_chain(content: &str, line: u32, column: u32) -> Option<Vec<String>> {
     let lines: Vec<&str> = content.lines().collect();
     let line_content = *lines.get(line as usize)?;
     let column_index = utf16_to_byte_offset(line_content, column);
@@ -784,7 +798,9 @@ fn resolve_member_chain_owner_type_sync(
         let expr = format!("{}.{}", base_name, object_name);
         analysis
             .map(|ctx| ctx.resolver.resolve_expression_sync(&expr))
-            .unwrap_or_else(|| TypeResolution::metadata_type(kind, object_name, Some(FacetKind::Manager)))
+            .unwrap_or_else(|| {
+                TypeResolution::metadata_type(kind, object_name, Some(FacetKind::Manager))
+            })
     } else if let Some(type_name) = resolve_type_name(snapshot, base_name, metadata_lookup) {
         analysis
             .map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
@@ -838,7 +854,10 @@ fn with_sort_text(
     label_lower: &str,
 ) -> CompletionItem {
     let score_rank = ((1.0 - score).clamp(0.0, 1.0) * 1000.0) as u32;
-    item.sort_text = Some(format!("{:04}-{:02}-{}", score_rank, source_priority, label_lower));
+    item.sort_text = Some(format!(
+        "{:04}-{:02}-{}",
+        score_rank, source_priority, label_lower
+    ));
     item
 }
 
@@ -899,14 +918,14 @@ fn resolve_member_owner_type_sync(
     let ir_program = ctx.ir_program.clone()?;
 
     let scope_id = resolve_scope_for_member(&ir_program, line, column);
-    if let Some(flow_type) =
-        find_variable_type_at_position(&ir_program, base_name, scope_id, line)
+    if let Some(flow_type) = find_variable_type_at_position(&ir_program, base_name, scope_id, line)
     {
         return Some(flow_type);
     }
 
     let mut resolved =
-        ctx.resolver.resolve_variable_with_context(base_name, &ir_program.symbols, scope_id);
+        ctx.resolver
+            .resolve_variable_with_context(base_name, &ir_program.symbols, scope_id);
     if resolved.is_unknown() {
         if let Some(best_effort) =
             find_variable_resolution_best_effort(&ir_program.symbols, base_name, line)
@@ -958,8 +977,12 @@ fn resolve_receiver_types_from_expression(
                     let expr = format!("{}.{}", name, property);
                     let resolution = analysis
                         .map(|ctx| ctx.resolver.resolve_expression_sync(&expr))
-                        .unwrap_or_else(|| TypeResolution::metadata_type(kind, property, Some(FacetKind::Manager)));
-                    return (!resolution.is_unknown()).then(|| vec![resolution]).unwrap_or_default();
+                        .unwrap_or_else(|| {
+                            TypeResolution::metadata_type(kind, property, Some(FacetKind::Manager))
+                        });
+                    return (!resolution.is_unknown())
+                        .then(|| vec![resolution])
+                        .unwrap_or_default();
                 }
             }
 
@@ -1083,7 +1106,10 @@ fn resolve_identifier_receiver_types(
     }
 
     if let Some(type_name) = resolve_type_name(snapshot, name, metadata_lookup) {
-        return vec![resolve_type_from_string(analysis.map(|ctx| ctx.resolver), &type_name)];
+        return vec![resolve_type_from_string(
+            analysis.map(|ctx| ctx.resolver),
+            &type_name,
+        )];
     }
 
     resolve_member_owner_type_sync(analysis, file_content, line, column, name)
@@ -1109,7 +1135,11 @@ fn resolve_property_access_type(
     }
 
     if let Some(resolver) = resolver {
-        if property.prop_type.trim_start().starts_with("ТабличнаяЧасть<") {
+        if property
+            .prop_type
+            .trim_start()
+            .starts_with("ТабличнаяЧасть<")
+        {
             if let ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) = &owner.result {
                 let tabular_sections = metadata_lookup.get_tabular_sections(owner);
                 let lowered = property_name.to_lowercase();
@@ -1149,7 +1179,10 @@ fn resolve_method_call_return_type(
             let base = generic.base_type.to_lowercase();
             let method = method_name.to_lowercase();
             if base == "табличнаячасть"
-                && matches!(method.as_str(), "добавить" | "вставить" | "получить" | "найти")
+                && matches!(
+                    method.as_str(),
+                    "добавить" | "вставить" | "получить" | "найти"
+                )
             {
                 if let Some(concrete) = generic.type_params.first() {
                     if !matches!(concrete, ConcreteType::Special(SpecialType::Undefined)) {
@@ -1231,7 +1264,10 @@ fn resolve_index_access_element_type(
         ResolutionResult::Generic(generic) => {
             let base = generic.base_type.to_lowercase();
             let candidate = if base == "соответствие" || base == "map" {
-                generic.type_params.get(1).or_else(|| generic.type_params.first())
+                generic
+                    .type_params
+                    .get(1)
+                    .or_else(|| generic.type_params.first())
             } else {
                 generic.type_params.first()
             };
@@ -1256,8 +1292,7 @@ fn resolve_index_access_element_type(
             if item_type.trim().is_empty() {
                 return None;
             }
-            let substituted =
-                substitute_type_name_if_needed(item_type, &owner.type_name());
+            let substituted = substitute_type_name_if_needed(item_type, &owner.type_name());
             Some(resolver.resolve_expression_sync(&substituted))
         }
     }
@@ -1318,9 +1353,11 @@ fn resolve_scope_for_member(ir_program: &SemanticProgram, line: u32, column: u32
         .find_node_at_position(line, column)
         .map(|node| node.scope_id)
         .or_else(|| {
-            column
-                .checked_sub(1)
-                .and_then(|col| ir_program.find_node_at_position(line, col).map(|node| node.scope_id))
+            column.checked_sub(1).and_then(|col| {
+                ir_program
+                    .find_node_at_position(line, col)
+                    .map(|node| node.scope_id)
+            })
         })
         .or_else(|| find_scope_by_line(ir_program, line))
         .or_else(|| find_scope_before_position(ir_program, line, column))
@@ -1447,7 +1484,9 @@ fn add_metadata_items(
                 for item in items.iter() {
                     let item_kind = completion_kind_from_index_item(item);
                     let detail = match item.kind {
-                        IndexItemKind::Metadata(kind) => Some(format_metadata_detail(kind, &item.facets)),
+                        IndexItemKind::Metadata(kind) => {
+                            Some(format_metadata_detail(kind, &item.facets))
+                        }
                         _ => None,
                     };
                     target.push(Candidate::new(
@@ -1464,7 +1503,9 @@ fn add_metadata_items(
                 for item in items.iter() {
                     let item_kind = completion_kind_from_index_item(item);
                     let detail = match item.kind {
-                        IndexItemKind::Metadata(kind) => Some(format_metadata_detail(kind, &item.facets)),
+                        IndexItemKind::Metadata(kind) => {
+                            Some(format_metadata_detail(kind, &item.facets))
+                        }
                         _ => None,
                     };
                     target.push(Candidate::new(
@@ -1657,14 +1698,18 @@ fn escape_snippet_text(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::system::IndexItem;
-    use std::sync::Arc;
-    use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId};
-    use bsl_shared::domain::signature_index::{ContextRequirements, MethodSignature, SignatureIndex, SignatureSource};
+    use bsl_analysis_v2::{
+        AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId,
+    };
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
     use bsl_shared::domain::resolver::TypeResolver;
+    use bsl_shared::domain::signature_index::{
+        ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
+    };
     use bsl_shared::domain::type_id::TypeId;
     use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawPropertyData, RawTypeData};
     use bsl_shared::formatting::DetailLevel;
+    use std::sync::Arc;
 
     #[test]
     fn trim_to_window_keeps_tail() {
@@ -1761,8 +1806,16 @@ mod tests {
     async fn completion_filters_by_prefix() {
         let index = IntellisenseIndexStore::new("cfg", "platform");
         index.set_keywords(vec![
-            IndexItem::new("Процедура", IndexItemKind::Keyword, crate::system::IndexKind::Keyword),
-            IndexItem::new("Функция", IndexItemKind::Keyword, crate::system::IndexKind::Keyword),
+            IndexItem::new(
+                "Процедура",
+                IndexItemKind::Keyword,
+                crate::system::IndexKind::Keyword,
+            ),
+            IndexItem::new(
+                "Функция",
+                IndexItemKind::Keyword,
+                crate::system::IndexKind::Keyword,
+            ),
         ]);
         index.upsert_type(IndexItem::new(
             "Массив",
@@ -1783,10 +1836,7 @@ mod tests {
 
     #[test]
     fn build_call_snippet_includes_optional_placeholders() {
-        let params = vec![
-            ("Путь".to_string(), false),
-            ("Режим".to_string(), true),
-        ];
+        let params = vec![("Путь".to_string(), false), ("Режим".to_string(), true)];
         let snippet = build_call_snippet("Открыть", &params).expect("snippet");
         assert_eq!(snippet, "Открыть(${1:Путь}, ${2:})$0");
     }
@@ -1844,8 +1894,7 @@ mod tests {
             }])
             .expect("load types");
 
-        let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> =
-            repository.clone();
+        let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
         let resolver = Arc::new(TypeResolver::new(repo.clone()));
         let metadata_lookup = TypeMetadataLookup::new(repo.clone());
 
@@ -1890,15 +1939,9 @@ mod tests {
             parse_result: None,
         };
 
-        let resolved = resolve_member_owner_type(
-            Some(&ctx),
-            content,
-            line,
-            column,
-            "ТаблЗнач",
-        )
-        .await
-        .expect("member type");
+        let resolved = resolve_member_owner_type(Some(&ctx), content, line, column, "ТаблЗнач")
+            .await
+            .expect("member type");
         assert_eq!(resolved.type_name(), "ТаблицаЗначений");
 
         let result = get_completion_with_analysis(
@@ -2012,7 +2055,11 @@ mod tests {
         .expect("completion ok");
 
         let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
-        assert!(labels.contains(&"Добавить".to_string()), "labels: {:?}", labels);
+        assert!(
+            labels.contains(&"Добавить".to_string()),
+            "labels: {:?}",
+            labels
+        );
     }
 
     #[tokio::test]
@@ -2391,8 +2438,16 @@ mod tests {
         .expect("completion ok");
 
         let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
-        assert!(labels.contains(&"PropA".to_string()), "labels: {:?}", labels);
-        assert!(labels.contains(&"PropB".to_string()), "labels: {:?}", labels);
+        assert!(
+            labels.contains(&"PropA".to_string()),
+            "labels: {:?}",
+            labels
+        );
+        assert!(
+            labels.contains(&"PropB".to_string()),
+            "labels: {:?}",
+            labels
+        );
     }
 
     #[tokio::test]
@@ -2488,8 +2543,16 @@ mod tests {
         .expect("completion ok");
 
         let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
-        assert!(labels.contains(&"PropA".to_string()), "labels: {:?}", labels);
-        assert!(labels.contains(&"PropB".to_string()), "labels: {:?}", labels);
+        assert!(
+            labels.contains(&"PropA".to_string()),
+            "labels: {:?}",
+            labels
+        );
+        assert!(
+            labels.contains(&"PropB".to_string()),
+            "labels: {:?}",
+            labels
+        );
     }
 
     #[tokio::test]

@@ -2,8 +2,8 @@
 //!
 //! Infrastructure компоненты для загрузки данных из внешних источников
 
-pub mod config_metadata_parser;
 pub mod config_bsl_modules;
+pub mod config_metadata_parser;
 pub mod hbk_recovery;
 pub mod platform_types;
 pub mod progress;
@@ -16,20 +16,18 @@ pub use config_metadata_parser::{
 };
 
 pub use config_bsl_modules::{
-    collect_module_paths,
-    index_configuration_bsl_modules, index_configuration_bsl_modules_by_paths,
-    index_configuration_bsl_modules_with_progress,
+    collect_module_paths, compare_module_parsing_from_file,
+    compare_module_parsing_from_file_with_progress,
+    compare_module_parsing_from_file_with_progress_mode, index_configuration_bsl_modules,
+    index_configuration_bsl_modules_by_paths, index_configuration_bsl_modules_with_progress,
     index_configuration_bsl_modules_with_progress_parallel,
-    IndexedConfigSignatures,
+    single_pass_module_stats_from_file_with_progress_mode, IndexedConfigSignatures,
     ModuleIndexProgress, ModuleIndexResult, ModuleParseComparison, ModuleParseStats,
     ModuleSignatureSnapshot, SinglePassMode,
-    compare_module_parsing_from_file, compare_module_parsing_from_file_with_progress,
-    compare_module_parsing_from_file_with_progress_mode,
-    single_pass_module_stats_from_file_with_progress_mode,
 };
 
-pub(crate) use config_bsl_modules::ParsedModuleData;
 pub(crate) use config_bsl_modules::index_configuration_bsl_modules_with_progress_parallel_cached;
+pub(crate) use config_bsl_modules::ParsedModuleData;
 
 // Новые реэкспорты из syntax_helper
 pub use syntax_helper::{ParsingStats, SyntaxHelperLoader};

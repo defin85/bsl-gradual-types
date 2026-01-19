@@ -1,8 +1,8 @@
 //! IntelliSense индексы и snapshot-консистентность (M2)
 
+use arc_swap::ArcSwap;
 use bsl_shared::domain::types::{FacetKind, MetadataKind, RawDataSource};
 use bsl_shared::ir::Span;
-use arc_swap::ArcSwap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -238,8 +238,7 @@ impl IntellisenseIndexStore {
         let items = Arc::new(items);
         self.inner.rcu(|current| {
             let mut snapshot = current.as_ref().clone();
-            Arc::make_mut(&mut snapshot.module_index)
-                .insert(module_key.clone(), items.clone());
+            Arc::make_mut(&mut snapshot.module_index).insert(module_key.clone(), items.clone());
             Arc::new(snapshot)
         });
     }
@@ -289,16 +288,18 @@ impl IntellisenseIndexStore {
             let mut snapshot = current.as_ref().clone();
             Arc::make_mut(&mut snapshot.type_index).retain(|_, item| {
                 let item = item.as_ref();
-                !matches!(item.kind, IndexItemKind::Type(TypeKind::Platform | TypeKind::Primitive))
+                !matches!(
+                    item.kind,
+                    IndexItemKind::Type(TypeKind::Platform | TypeKind::Primitive)
+                )
             });
             Arc::new(snapshot)
         });
     }
 
     pub fn invalidate_all(&self) {
-        self.inner.rcu(|current| {
-            Arc::new(IndexSnapshot::empty(current.id.clone()))
-        });
+        self.inner
+            .rcu(|current| Arc::new(IndexSnapshot::empty(current.id.clone())));
     }
 }
 
@@ -340,16 +341,22 @@ mod tests {
     #[test]
     fn invalidate_file_removes_symbol_and_module() {
         let store = IntellisenseIndexStore::new("cfg", "platform");
-        store.replace_symbols_for_uri("file:///a.bsl", vec![IndexItem::new(
-            "Var",
-            IndexItemKind::Symbol(SymbolKind::Variable),
-            IndexKind::Symbol,
-        )]);
-        store.replace_modules_for_key("module-a", vec![IndexItem::new(
-            "Proc",
-            IndexItemKind::Symbol(SymbolKind::Procedure),
-            IndexKind::Module,
-        )]);
+        store.replace_symbols_for_uri(
+            "file:///a.bsl",
+            vec![IndexItem::new(
+                "Var",
+                IndexItemKind::Symbol(SymbolKind::Variable),
+                IndexKind::Symbol,
+            )],
+        );
+        store.replace_modules_for_key(
+            "module-a",
+            vec![IndexItem::new(
+                "Proc",
+                IndexItemKind::Symbol(SymbolKind::Procedure),
+                IndexKind::Module,
+            )],
+        );
 
         store.invalidate_file("file:///a.bsl", Some("module-a"));
 
@@ -366,11 +373,14 @@ mod tests {
             IndexItemKind::Type(TypeKind::Configuration),
             IndexKind::Type,
         ));
-        store.replace_metadata_for_kind(MetadataKind::Catalog, vec![IndexItem::new(
-            "Контрагенты",
-            IndexItemKind::Metadata(MetadataKind::Catalog),
-            IndexKind::Metadata,
-        )]);
+        store.replace_metadata_for_kind(
+            MetadataKind::Catalog,
+            vec![IndexItem::new(
+                "Контрагенты",
+                IndexItemKind::Metadata(MetadataKind::Catalog),
+                IndexKind::Metadata,
+            )],
+        );
 
         store.invalidate_metadata();
 
@@ -397,9 +407,7 @@ mod tests {
 
         let snapshot = store.snapshot();
         assert_eq!(snapshot.type_index.len(), 1);
-        assert!(snapshot
-            .type_index
-            .contains_key("Справочник.Контрагенты"));
+        assert!(snapshot.type_index.contains_key("Справочник.Контрагенты"));
     }
 
     #[test]
@@ -410,11 +418,14 @@ mod tests {
             IndexItemKind::Type(TypeKind::Configuration),
             IndexKind::Type,
         ));
-        store.replace_metadata_for_kind(MetadataKind::Catalog, vec![IndexItem::new(
-            "Контрагенты",
-            IndexItemKind::Metadata(MetadataKind::Catalog),
-            IndexKind::Metadata,
-        )]);
+        store.replace_metadata_for_kind(
+            MetadataKind::Catalog,
+            vec![IndexItem::new(
+                "Контрагенты",
+                IndexItemKind::Metadata(MetadataKind::Catalog),
+                IndexKind::Metadata,
+            )],
+        );
         let before_id = store.snapshot_id();
 
         store.reset_metadata_snapshot("cfg-next", "platform-next");

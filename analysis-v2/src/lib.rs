@@ -3,20 +3,20 @@ use std::sync::Arc;
 
 use salsa::Setter;
 
-pub use bsl_line_index::{LineIndex, byte_offset_to_utf16, utf16_to_byte_offset};
+pub use bsl_line_index::{byte_offset_to_utf16, utf16_to_byte_offset, LineIndex};
 use bsl_semantic::AstToIrConverter;
 use bsl_semantic_diagnostics::SemanticValidationVisitor;
-use bsl_syntax::ParseOptions;
-use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::{DiagnosticSeverity, ParseError, TypeDiagnostic};
 use bsl_shared::domain::validators::TypeValidator;
+use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
-use bsl_shared::ir::SemanticProgram;
 use bsl_shared::ir::walk_program;
+use bsl_shared::ir::SemanticProgram;
 use bsl_shared::utils::hash::hash_content;
+use bsl_syntax::ParseOptions;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FileId(pub u32);
@@ -402,8 +402,7 @@ pub struct AnalysisHostV2 {
 impl Default for AnalysisHostV2 {
     fn default() -> Self {
         let db = AnalysisDatabase::default();
-        let repository =
-            Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
         let deps_data = Arc::new(SemanticDeps {
             signature_index: repository.get_signature_index_clone(),
             resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
@@ -551,10 +550,7 @@ impl AnalysisV2 {
         cancellable(|| ir(&self.db, file, self.deps, self.settings).0).map(Some)
     }
 
-    pub fn syntax_diagnostics(
-        &self,
-        file_id: FileId,
-    ) -> Cancellable<Option<Arc<Vec<ParseError>>>> {
+    pub fn syntax_diagnostics(&self, file_id: FileId) -> Cancellable<Option<Arc<Vec<ParseError>>>> {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
@@ -625,12 +621,7 @@ impl AnalysisV2 {
         Ok(())
     }
 
-    pub fn signature_help(
-        &self,
-        _file_id: FileId,
-        _line: u32,
-        _character: u32,
-    ) -> Cancellable<()> {
+    pub fn signature_help(&self, _file_id: FileId, _line: u32, _character: u32) -> Cancellable<()> {
         Ok(())
     }
 }
@@ -690,7 +681,10 @@ mod tests {
 
         {
             let analysis = host.analysis();
-            assert_eq!(analysis.file_text(file_id).unwrap().as_deref(), Some("abcd"));
+            assert_eq!(
+                analysis.file_text(file_id).unwrap().as_deref(),
+                Some("abcd")
+            );
             assert_eq!(analysis.file_version(file_id).unwrap(), Some(2));
             assert_eq!(analysis.file_text_len(file_id).unwrap(), Some(4));
         }
@@ -721,20 +715,20 @@ mod tests {
         use std::time::Duration;
 
         let host = Arc::new(Mutex::new(AnalysisHostV2::default()));
+        host.lock().unwrap().apply_change(Change::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("deps-a"),
+            deps: Arc::new(SemanticDeps {
+                repository: Arc::new(InMemoryTypeRepository::new()),
+                signature_index: SignatureIndex::new(),
+                resolver: None,
+            }),
+        });
         host.lock()
             .unwrap()
-            .apply_change(Change::SetDepsSnapshot {
-                deps_id: DepsSnapshotId::from_hash("deps-a"),
-                deps: Arc::new(SemanticDeps {
-                    repository: Arc::new(InMemoryTypeRepository::new()),
-                    signature_index: SignatureIndex::new(),
-                    resolver: None,
-                }),
+            .apply_change(Change::SetSettingsSnapshot {
+                settings_id: SettingsId::from_hash("settings-a"),
+                diagnostics_detail_level: DetailLevel::Full,
             });
-        host.lock().unwrap().apply_change(Change::SetSettingsSnapshot {
-            settings_id: SettingsId::from_hash("settings-a"),
-            diagnostics_detail_level: DetailLevel::Full,
-        });
 
         let analysis_a = host.lock().unwrap().snapshot();
         assert_eq!(analysis_a.deps_id().unwrap().as_str(), "deps-a");
@@ -1111,13 +1105,21 @@ mod tests {
             deps_id: DepsSnapshotId::from_hash("deps-a"),
             deps: deps.clone(),
         });
-        let diagnostics_a = host.analysis().semantic_diagnostics(file_id).unwrap().unwrap();
+        let diagnostics_a = host
+            .analysis()
+            .semantic_diagnostics(file_id)
+            .unwrap()
+            .unwrap();
 
         host.apply_change(Change::SetDepsSnapshot {
             deps_id: DepsSnapshotId::from_hash("deps-b"),
             deps,
         });
-        let diagnostics_b = host.analysis().semantic_diagnostics(file_id).unwrap().unwrap();
+        let diagnostics_b = host
+            .analysis()
+            .semantic_diagnostics(file_id)
+            .unwrap()
+            .unwrap();
 
         assert!(
             !Arc::ptr_eq(&diagnostics_a, &diagnostics_b),
@@ -1146,14 +1148,22 @@ mod tests {
             settings_id: SettingsId::from_hash("settings-compact"),
             diagnostics_detail_level: DetailLevel::Compact,
         });
-        let compact = host.analysis().semantic_diagnostics(file_id).unwrap().unwrap();
+        let compact = host
+            .analysis()
+            .semantic_diagnostics(file_id)
+            .unwrap()
+            .unwrap();
         assert!(!compact.is_empty());
 
         host.apply_change(Change::SetSettingsSnapshot {
             settings_id: SettingsId::from_hash("settings-detailed"),
             diagnostics_detail_level: DetailLevel::Detailed,
         });
-        let detailed = host.analysis().semantic_diagnostics(file_id).unwrap().unwrap();
+        let detailed = host
+            .analysis()
+            .semantic_diagnostics(file_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(compact.len(), detailed.len());
         assert_ne!(compact[0].message, detailed[0].message);
     }

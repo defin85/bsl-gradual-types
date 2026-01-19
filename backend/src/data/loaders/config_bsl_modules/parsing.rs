@@ -50,7 +50,8 @@ pub(crate) fn parse_bsl_module(source: &str, module_path: &Path) -> Result<Parse
 
             let parse_result = TreeSitterAdapter::convert_tree_fast(&tree, source)
                 .map_err(|e| anyhow!("tree-sitter convert_tree_fast failed: {}", e))?;
-            let (decls, call_sites) = collect_decls_and_call_sites(&parse_result.program.statements);
+            let (decls, call_sites) =
+                collect_decls_and_call_sites(&parse_result.program.statements);
             Ok(ParsedModuleData { decls, call_sites })
         }
     }

@@ -201,11 +201,9 @@ impl<'a> MemberResolver<'a> {
             MetadataKind::Report | MetadataKind::DataProcessor => {
                 vec![FacetKind::Manager, FacetKind::Object]
             }
-            MetadataKind::BusinessProcess | MetadataKind::Task => vec![
-                FacetKind::Manager,
-                FacetKind::Object,
-                FacetKind::Reference,
-            ],
+            MetadataKind::BusinessProcess | MetadataKind::Task => {
+                vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference]
+            }
             MetadataKind::Constant => vec![FacetKind::Manager],
             MetadataKind::CommonModule => vec![FacetKind::Singleton],
             MetadataKind::Role

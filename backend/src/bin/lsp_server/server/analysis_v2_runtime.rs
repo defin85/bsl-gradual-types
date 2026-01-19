@@ -46,7 +46,10 @@ enum Command {
 }
 
 impl AnalysisV2Runtime {
-    pub(crate) fn new(initial_host: AnalysisHostV2, initial_index_snapshot: Arc<IndexSnapshot>) -> Self {
+    pub(crate) fn new(
+        initial_host: AnalysisHostV2,
+        initial_index_snapshot: Arc<IndexSnapshot>,
+    ) -> Self {
         let (tx, rx) = std::sync::mpsc::channel::<Command>();
 
         let join_handle = std::thread::Builder::new()
@@ -179,7 +182,12 @@ impl AnalysisV2Runtime {
         if changes.is_empty() {
             return;
         }
-        if self.inner.tx.send(Command::ApplyChanges { changes }).is_err() {
+        if self
+            .inner
+            .tx
+            .send(Command::ApplyChanges { changes })
+            .is_err()
+        {
             warn!("analysis_v2_runtime: failed to send ApplyChanges (writer thread is gone)");
         }
     }
@@ -256,11 +264,7 @@ impl AnalysisV2Runtime {
         }
     }
 
-    pub(crate) async fn wait_for_file_version(
-        &self,
-        file_id: FileId,
-        min_version: i32,
-    ) -> bool {
+    pub(crate) async fn wait_for_file_version(&self, file_id: FileId, min_version: i32) -> bool {
         let (reply, rx) = oneshot::channel::<bool>();
         if self
             .inner
@@ -272,9 +276,7 @@ impl AnalysisV2Runtime {
             })
             .is_err()
         {
-            warn!(
-                "analysis_v2_runtime: failed to send WaitForFileVersion (writer thread is gone)"
-            );
+            warn!("analysis_v2_runtime: failed to send WaitForFileVersion (writer thread is gone)");
             return false;
         }
         rx.await.unwrap_or(false)
@@ -297,7 +299,7 @@ impl AnalysisV2Runtime {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use tokio::time::{Duration, timeout};
+    use tokio::time::{timeout, Duration};
 
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
     use bsl_shared::domain::resolver::TypeResolver;
@@ -379,8 +381,7 @@ mod tests {
             deps: deps_old,
         });
 
-        let runtime =
-            AnalysisV2Runtime::new(host, make_index_snapshot("index_old"));
+        let runtime = AnalysisV2Runtime::new(host, make_index_snapshot("index_old"));
 
         {
             let (analysis, index_snapshot, deps_id) = runtime.snapshot_with_deps().await;
@@ -411,8 +412,7 @@ mod tests {
             let runtime = runtime.clone();
             async move {
                 for _ in 0..200 {
-                    let (_analysis, index_snapshot, deps_id) =
-                        runtime.snapshot_with_deps().await;
+                    let (_analysis, index_snapshot, deps_id) = runtime.snapshot_with_deps().await;
                     match deps_id.as_str() {
                         "deps_old" => assert_eq!(index_snapshot.id.as_str(), "index_old"),
                         "deps_new" => assert_eq!(index_snapshot.id.as_str(), "index_new"),

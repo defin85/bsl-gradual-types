@@ -176,10 +176,7 @@ fn check_function_body_semicolons(
 ///
 /// Для IDE это плохо: hover/completion начинают работать по сломанной структуре.
 /// Поэтому добавляем явную проверку по тексту.
-pub fn check_incomplete_new_expressions(
-    source: &str,
-    line_index: &LineIndex,
-) -> Vec<ParseError> {
+pub fn check_incomplete_new_expressions(source: &str, line_index: &LineIndex) -> Vec<ParseError> {
     let mut errors = Vec::new();
 
     for row in 0..line_index.line_count() {

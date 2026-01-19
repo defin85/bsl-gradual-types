@@ -199,7 +199,7 @@ fn convert_type_info_to_raw(
                                 is_constructor: method_info.name.starts_with("Новый")
                                     || method_info.name.starts_with("New"),
                                 context_requirements,
-                                return_facet: None,         // TODO: Извлечь из Syntax Helper
+                                return_facet: None, // TODO: Извлечь из Syntax Helper
                             }
                         })
                         .collect::<Vec<_>>();
@@ -227,7 +227,7 @@ fn convert_type_info_to_raw(
                     is_constructor: method_info.name.starts_with("Новый")
                         || method_info.name.starts_with("New"),
                     context_requirements,
-                    return_facet: None,         // TODO: Извлечь из Syntax Helper
+                    return_facet: None, // TODO: Извлечь из Syntax Helper
                 }]
             } else {
                 warn!(
@@ -305,9 +305,7 @@ pub fn convert_resolutions_to_raw(_resolutions: &[TypeResolution]) -> Vec<RawTyp
     vec![]
 }
 
-pub fn convert_syntax_helper_global_functions(
-    db: &SyntaxHelperDatabase,
-) -> Vec<MethodSignature> {
+pub fn convert_syntax_helper_global_functions(db: &SyntaxHelperDatabase) -> Vec<MethodSignature> {
     let mut signatures = Vec::new();
 
     for func in db.global_functions.values() {
@@ -338,8 +336,7 @@ pub fn convert_syntax_helper_global_functions(
             .as_ref()
             .map(|d| d.trim().to_string())
             .filter(|d| !d.is_empty());
-        let context_requirements =
-            contexts_to_requirements(&func.contexts).unwrap_or_default();
+        let context_requirements = contexts_to_requirements(&func.contexts).unwrap_or_default();
 
         let signature = MethodSignature::new(
             func.name.clone(),
@@ -532,8 +529,7 @@ mod tests {
             "examples/syntax_helper/rebuilt.shcntx_ru/objects/Global context/methods/catalog20/NStr871.html",
         );
 
-        let content = std::fs::read_to_string(&html_path)
-            .expect("failed to read NStr871.html");
+        let content = std::fs::read_to_string(&html_path).expect("failed to read NStr871.html");
         let document = Html::parse_document(&content);
         let parser = DocumentParser::new();
         let func_info = parser
@@ -550,7 +546,10 @@ mod tests {
             .expect("НСтр signature should exist");
 
         assert_eq!(nstr_sig.return_type.as_deref(), Some("Строка"));
-        assert_eq!(nstr_sig.context_requirements, ContextRequirements::Universal);
+        assert_eq!(
+            nstr_sig.context_requirements,
+            ContextRequirements::Universal
+        );
         assert!(
             signatures.iter().any(|sig| sig.name == "NStr"),
             "English alias should be exported"

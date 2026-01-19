@@ -267,11 +267,7 @@ mod tests {
         let size = extractor::extract_valid_zip(&mut source_file, junk_size, &output_path).unwrap();
 
         assert!(output_path.exists(), "Output ZIP должен существовать");
-        assert_eq!(
-            size,
-            empty_zip.len(),
-            "Размер должен быть размер ZIP"
-        );
+        assert_eq!(size, empty_zip.len(), "Размер должен быть размер ZIP");
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 use axum::http::Request;
 use bsl_backend::presentation::web::{create_router, AppState};
-use bsl_backend::system::{EffectiveStartupInputs, SystemCoordinator, build_deps_bundle_v2};
+use bsl_backend::system::{build_deps_bundle_v2, EffectiveStartupInputs, SystemCoordinator};
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -31,7 +31,11 @@ async fn metrics_endpoint_returns_observability_payload() {
 
     let app = create_router(state, "backend/static", true);
     let resp = app
-        .oneshot(Request::get("/api/metrics").body(axum::body::Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/api/metrics")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -47,7 +51,10 @@ async fn metrics_endpoint_returns_observability_payload() {
         .expect("expected field `observability`");
 
     assert!(
-        types.get("total_types").and_then(|value| value.as_u64()).is_some(),
+        types
+            .get("total_types")
+            .and_then(|value| value.as_u64())
+            .is_some(),
         "expected numeric `types.total_types`"
     );
     assert!(

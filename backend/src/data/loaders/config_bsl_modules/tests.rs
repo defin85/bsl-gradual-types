@@ -7,7 +7,9 @@ use std::sync::{
 
 use tempfile::TempDir;
 
-use super::{index_configuration_bsl_modules, index_configuration_bsl_modules_with_progress_parallel_cached};
+use super::{
+    index_configuration_bsl_modules, index_configuration_bsl_modules_with_progress_parallel_cached,
+};
 use crate::data::loaders::config_metadata_parser::types::{
     CommonModuleProperties, ReturnValuesReuse,
 };

@@ -29,8 +29,9 @@ async fn test_examples_conf_test_completion_reports_unknown_type_for_typo() {
         diagnostics
     );
 
-    let hover_text = support::hover_for_code(deps_bundle.as_ref(), "test_completion.bsl", &code, 20, 6)
-        .expect("Hover должен вернуть информацию");
+    let hover_text =
+        support::hover_for_code(deps_bundle.as_ref(), "test_completion.bsl", &code, 20, 6)
+            .expect("Hover должен вернуть информацию");
 
     assert!(
         hover_text.contains("Масив1"),

@@ -7,9 +7,19 @@ pub struct KeywordExtractor;
 impl KeywordExtractor {
     pub fn extract_keywords(document: &Html) -> Vec<String> {
         let mut keywords = Vec::new();
-        Self::extract_with_selector(document, "strong.ControlElement", TagKind::Keyword, &mut keywords);
+        Self::extract_with_selector(
+            document,
+            "strong.ControlElement",
+            TagKind::Keyword,
+            &mut keywords,
+        );
         Self::extract_with_selector(document, "u", TagKind::Keyword, &mut keywords);
-        Self::extract_with_selector(document, "span.SourceCode", TagKind::Directive, &mut keywords);
+        Self::extract_with_selector(
+            document,
+            "span.SourceCode",
+            TagKind::Directive,
+            &mut keywords,
+        );
 
         keywords
     }
@@ -55,8 +65,20 @@ impl KeywordExtractor {
         let trimmed = token.trim_matches(|c: char| {
             matches!(
                 c,
-                ';' | ',' | '.' | ':' | '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\''
-                    | '—' | '-' | '/'
+                ';' | ','
+                    | '.'
+                    | ':'
+                    | '('
+                    | ')'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '"'
+                    | '\''
+                    | '—'
+                    | '-'
+                    | '/'
             )
         });
         let trimmed = trimmed.trim();

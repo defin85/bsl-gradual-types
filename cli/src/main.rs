@@ -19,9 +19,9 @@ use bsl_shared::engine::AnalysisEngine;
 use bsl_shared::formatting::DetailLevel;
 use formatters::CliFormatter;
 
-use bsl_backend::application::TypeInferenceService;
 use bsl_backend::application::type_system::web_api_service;
-use bsl_backend::system::{SystemCoordinator, build_deps_bundle_v2};
+use bsl_backend::application::TypeInferenceService;
+use bsl_backend::system::{build_deps_bundle_v2, SystemCoordinator};
 use bsl_shared::TypeResolver;
 
 #[tokio::main]
@@ -280,10 +280,7 @@ async fn analyze_ir_command(
 
     // 4. Вывод результатов
     println!("\n{}", "✅ Результаты анализа:".green().bold());
-    println!(
-        "   • Узлов IR: {}",
-        ir.nodes.len().to_string().cyan()
-    );
+    println!("   • Узлов IR: {}", ir.nodes.len().to_string().cyan());
     println!(
         "   • Типов разрешено: {}",
         type_resolutions.len().to_string().cyan()
@@ -301,14 +298,8 @@ async fn analyze_ir_command(
     if show_symbols || verbose {
         println!("\n{}", "📋 Symbol Table:".blue().bold());
         println!("   • Scopes: {}", ir.symbols.scopes.len());
-        println!(
-            "   • Функции: {}",
-            ir.symbols.global_functions.len()
-        );
-        println!(
-            "   • Процедуры: {}",
-            ir.symbols.global_procedures.len()
-        );
+        println!("   • Функции: {}", ir.symbols.global_functions.len());
+        println!("   • Процедуры: {}", ir.symbols.global_procedures.len());
 
         if verbose {
             for (name, sig) in &ir.symbols.global_functions {

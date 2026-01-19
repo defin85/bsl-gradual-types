@@ -67,7 +67,11 @@ fn apply_file(
         .flatten()
         .expect("file_path");
     let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
-    let parse_result = analysis.parse_result(file_id).ok().flatten().expect("parse_result");
+    let parse_result = analysis
+        .parse_result(file_id)
+        .ok()
+        .flatten()
+        .expect("parse_result");
 
     (file_content, file_path, ir_program, parse_result)
 }
@@ -242,7 +246,10 @@ async fn m8_lsp_edits_around_dot_do_not_break_completion() {
     .await;
     assert!(!response.had_error);
     let labels = completion_labels(response.response);
-    assert!(!labels.is_empty(), "completion should not be empty on broken code");
+    assert!(
+        !labels.is_empty(),
+        "completion should not be empty on broken code"
+    );
 
     version = version.saturating_add(1);
     let response = apply_and_complete_at_member_dot(

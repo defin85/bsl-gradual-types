@@ -2,8 +2,8 @@
 //!
 //! This module contains all execute_command handlers.
 
-pub mod configuration;
 pub mod cache;
+pub mod configuration;
 pub mod get_all_types;
 pub mod query_type;
 pub mod search_types;

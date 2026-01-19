@@ -43,19 +43,19 @@ impl TypeResolver {
 
         if arg_types.len() < required_count {
             // Найти первый отсутствующий обязательный параметр
-        if let Some(missing_param) = signature
-            .params
-            .iter()
-            .enumerate()
-            .find(|(i, p)| !p.is_optional && *i >= arg_types.len())
-        {
-            return ValidationResult::MissingRequiredParam {
-                param_name: missing_param.1.name.clone(),
-                param_index: missing_param.0,
-            };
-        }
+            if let Some(missing_param) = signature
+                .params
+                .iter()
+                .enumerate()
+                .find(|(i, p)| !p.is_optional && *i >= arg_types.len())
+            {
+                return ValidationResult::MissingRequiredParam {
+                    param_name: missing_param.1.name.clone(),
+                    param_index: missing_param.0,
+                };
+            }
 
-        return ValidationResult::NotFound;
+            return ValidationResult::NotFound;
         }
 
         if arg_types.len() > signature.params.len() {

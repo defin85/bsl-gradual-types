@@ -30,10 +30,18 @@ fn collection_name_to_metadata_kind(name: &str) -> Option<MetadataKind> {
         "Справочники" | "Catalogs" => Some(MetadataKind::Catalog),
         "Документы" | "Documents" => Some(MetadataKind::Document),
         "Перечисления" | "Enums" => Some(MetadataKind::Enum),
-        "РегистрыСведений" | "InformationRegisters" => Some(MetadataKind::InformationRegister),
-        "РегистрыНакопления" | "AccumulationRegisters" => Some(MetadataKind::AccumulationRegister),
-        "РегистрыБухгалтерии" | "AccountingRegisters" => Some(MetadataKind::AccountingRegister),
-        "РегистрыРасчета" | "CalculationRegisters" => Some(MetadataKind::CalculationRegister),
+        "РегистрыСведений" | "InformationRegisters" => {
+            Some(MetadataKind::InformationRegister)
+        }
+        "РегистрыНакопления" | "AccumulationRegisters" => {
+            Some(MetadataKind::AccumulationRegister)
+        }
+        "РегистрыБухгалтерии" | "AccountingRegisters" => {
+            Some(MetadataKind::AccountingRegister)
+        }
+        "РегистрыРасчета" | "CalculationRegisters" => {
+            Some(MetadataKind::CalculationRegister)
+        }
         "Отчеты" | "Reports" => Some(MetadataKind::Report),
         "Обработки" | "DataProcessors" => Some(MetadataKind::DataProcessor),
         "ПланыСчетов" | "ChartsOfAccounts" => Some(MetadataKind::ChartOfAccounts),

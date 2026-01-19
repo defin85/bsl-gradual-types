@@ -18,9 +18,7 @@ fn utf16_position_at_byte(source: &str, byte_index: usize) -> (u32, u32) {
         }
     }
 
-    let col_utf16 = source[last_line_start..byte_index]
-        .encode_utf16()
-        .count() as u32;
+    let col_utf16 = source[last_line_start..byte_index].encode_utf16().count() as u32;
     (line, col_utf16)
 }
 
@@ -45,7 +43,10 @@ fn assert_incremental_matches_full(
 
     let incr_json = serde_json::to_value(&incremental).expect("serialize incremental");
     let full_json = serde_json::to_value(&full).expect("serialize full");
-    assert_eq!(incr_json, full_json, "incremental parse must match full parse");
+    assert_eq!(
+        incr_json, full_json,
+        "incremental parse must match full parse"
+    );
 }
 
 #[test]
@@ -237,13 +238,10 @@ fn test_incremental_unicode_emoji_insertion_after_emoji_utf16() {
 #[test]
 fn test_incremental_unicode_multiline_insert_with_cyrillic_tail() {
     let original_code = "Процедура Тест()\n    Возврат;\nКонецПроцедуры\n";
-    let modified_code =
-        "Процедура Тест()\n    Перем Я;\n    Возврат;\nКонецПроцедуры\n";
+    let modified_code = "Процедура Тест()\n    Перем Я;\n    Возврат;\nКонецПроцедуры\n";
     let file_path = PathBuf::from("unicode_multiline_insert.bsl");
 
-    let insert_at = original_code
-        .find("    Возврат;")
-        .expect("anchor exists");
+    let insert_at = original_code.find("    Возврат;").expect("anchor exists");
     let (line, col_utf16) = utf16_position_at_byte(original_code, insert_at);
 
     let edits = vec![TextEdit {
@@ -259,7 +257,8 @@ fn test_incremental_unicode_multiline_insert_with_cyrillic_tail() {
 
 #[test]
 fn test_incremental_two_edits_with_line_shift() {
-    let original_code = "Процедура Тест()\n    Сообщить(\"a😀b\");\n    Сообщить(\"ok\");\nКонецПроцедуры\n";
+    let original_code =
+        "Процедура Тест()\n    Сообщить(\"a😀b\");\n    Сообщить(\"ok\");\nКонецПроцедуры\n";
     let modified_code = "Процедура Тест()\n    Перем Значение;\n    Сообщить(\"a😀Xb\");\n    Сообщить(\"ok\");\nКонецПроцедуры\n";
     let file_path = PathBuf::from("unicode_two_edits.bsl");
 

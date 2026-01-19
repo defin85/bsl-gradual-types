@@ -25,9 +25,8 @@ pub use compare::{
     single_pass_module_stats_from_file_with_progress_mode,
 };
 pub use indexing::{
-    collect_module_paths,
-    index_configuration_bsl_modules, index_configuration_bsl_modules_by_paths,
-    index_configuration_bsl_modules_with_progress,
+    collect_module_paths, index_configuration_bsl_modules,
+    index_configuration_bsl_modules_by_paths, index_configuration_bsl_modules_with_progress,
     index_configuration_bsl_modules_with_progress_parallel,
 };
 pub use types::{
@@ -35,5 +34,5 @@ pub use types::{
     ModuleParseStats, ModuleSignatureSnapshot, SinglePassMode,
 };
 
-pub(crate) use types::ParsedModuleData;
 pub(crate) use indexing::index_configuration_bsl_modules_with_progress_parallel_cached;
+pub(crate) use types::ParsedModuleData;

@@ -8,9 +8,11 @@ use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, Se
 use bsl_backend::application::get_completion_with_semantic_program_snapshot;
 use bsl_backend::application::get_hover_info_with_semantic_program;
 use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter};
-use bsl_backend::system::{DepsBundleV2, ParserCoordinator, SystemCoordinator, build_deps_bundle_v2};
-use bsl_shared::domain::TypeMetadataLookup;
+use bsl_backend::system::{
+    build_deps_bundle_v2, DepsBundleV2, ParserCoordinator, SystemCoordinator,
+};
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticProgram;
 
@@ -22,8 +24,12 @@ fn deps_bundle_v2_with_syntax_helper() -> Arc<DepsBundleV2> {
             .expect("startup");
 
         Arc::new(
-            build_deps_bundle_v2(&coordinator, Some(Path::new("examples/syntax_helper")), None)
-                .expect("deps bundle v2"),
+            build_deps_bundle_v2(
+                &coordinator,
+                Some(Path::new("examples/syntax_helper")),
+                None,
+            )
+            .expect("deps bundle v2"),
         )
     });
 
@@ -85,7 +91,10 @@ fn test_parser_coordinator() {
 
     let content = "Функция Тест() Возврат 42; КонецФункции";
     let result = parser.parse(content);
-    assert!(result.is_ok(), "Парсер должен успешно разбирать базовый код");
+    assert!(
+        result.is_ok(),
+        "Парсер должен успешно разбирать базовый код"
+    );
 }
 
 #[test]
@@ -128,7 +137,8 @@ async fn test_v2_completion_and_hover_smoke() {
         .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
 
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
-    let hover_formatter = HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup.clone());
+    let hover_formatter =
+        HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup.clone());
 
     let hover = get_hover_info_with_semantic_program(
         code,
@@ -156,5 +166,8 @@ async fn test_v2_completion_and_hover_smoke() {
     .await
     .expect("completion");
 
-    assert!(!completion.items.is_empty(), "Completion не должен быть пустым");
+    assert!(
+        !completion.items.is_empty(),
+        "Completion не должен быть пустым"
+    );
 }

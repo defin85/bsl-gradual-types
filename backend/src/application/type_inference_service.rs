@@ -4,8 +4,8 @@
 //! Использует чистый Domain TypeResolver для основной логики типизации.
 
 use bsl_shared::domain::repository::{CompletionItem, CompletionKind, TypeRepository};
-use bsl_shared::domain::signature_index::MethodSignature;
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::signature_index::MethodSignature;
 use bsl_shared::domain::types::{
     Attribute, ConcreteType, ConfigurationType, MetadataKind, RawAttributeData, RawDataSource,
     RawTabularSectionData, ResolutionResult, TabularSection, TypeResolution,

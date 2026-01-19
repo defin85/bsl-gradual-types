@@ -40,10 +40,7 @@ pub fn handle_get_all_types(
             let repository = engine.get_repository();
             let all_types: Vec<RawTypeData> = repository.get_all_types();
 
-            let mut dtos: Vec<TypeDto> = all_types
-                .iter()
-                .map(raw_type_to_dto)
-                .collect();
+            let mut dtos: Vec<TypeDto> = all_types.iter().map(raw_type_to_dto).collect();
 
             if let Some(ref category) = params.category {
                 dtos.retain(|dto| dto.category == *category);
@@ -53,12 +50,7 @@ pub fn handle_get_all_types(
             let limit = params.limit.max(1);
             let offset = params.offset.min(total_items);
 
-            let paged: Vec<TypeDto> = dtos
-                .iter()
-                .skip(offset)
-                .take(limit)
-                .cloned()
-                .collect();
+            let paged: Vec<TypeDto> = dtos.iter().skip(offset).take(limit).cloned().collect();
 
             let metrics = MetricsDto {
                 total_types: total_items,
@@ -80,14 +72,8 @@ pub fn handle_get_all_types(
             });
 
             let mut categories = std::collections::HashMap::new();
-            let platform_count = paged
-                .iter()
-                .filter(|t| t.source == "Platform")
-                .count();
-            let config_count = paged
-                .iter()
-                .filter(|t| t.source == "Configuration")
-                .count();
+            let platform_count = paged.iter().filter(|t| t.source == "Platform").count();
+            let config_count = paged.iter().filter(|t| t.source == "Configuration").count();
 
             if platform_count > 0 {
                 categories.insert(
@@ -176,7 +162,11 @@ fn raw_type_to_dto(raw: &RawTypeData) -> TypeDto {
         })
         .collect();
 
-    let properties: Vec<String> = raw.properties.iter().map(|prop| prop.name.clone()).collect();
+    let properties: Vec<String> = raw
+        .properties
+        .iter()
+        .map(|prop| prop.name.clone())
+        .collect();
 
     let tabular_sections = raw
         .tabular_sections
@@ -217,7 +207,11 @@ fn raw_type_to_dto(raw: &RawTypeData) -> TypeDto {
         raw.category.clone()
     };
 
-    let methods_count = if methods.is_empty() { None } else { Some(methods.len()) };
+    let methods_count = if methods.is_empty() {
+        None
+    } else {
+        Some(methods.len())
+    };
     let attributes_count = if raw.attributes.is_empty() {
         None
     } else {

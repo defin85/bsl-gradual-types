@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use fs2::FileExt;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -266,10 +266,32 @@ impl DiskCache {
         let mut removed_entries = 0u64;
         let mut freed_bytes = 0u64;
         for scope_root in self.collect_scope_roots_for_ids(project_id, config_ids)? {
-            let scope_stats = self.collect_scope_stats(&scope_root);
-            removed_entries = removed_entries.saturating_add(scope_stats.entries);
-            freed_bytes = freed_bytes.saturating_add(scope_stats.size_bytes);
-            let _ = fs::remove_dir_all(&scope_root);
+            for manifest_path in collect_manifest_paths(&scope_root) {
+                let cache_dir = match manifest_path.parent() {
+                    Some(dir) => dir.to_path_buf(),
+                    None => continue,
+                };
+
+                let manifest_bytes = match fs::read(&manifest_path) {
+                    Ok(bytes) => bytes,
+                    Err(_) => {
+                        let _ = self.try_purge_entry_dir(&cache_dir, None);
+                        continue;
+                    }
+                };
+                let manifest: CacheManifest = match serde_json::from_slice(&manifest_bytes) {
+                    Ok(parsed) => parsed,
+                    Err(_) => {
+                        let _ = self.try_purge_entry_dir(&cache_dir, None);
+                        continue;
+                    }
+                };
+
+                if self.try_purge_entry_dir(&cache_dir, Some(&manifest))? {
+                    removed_entries = removed_entries.saturating_add(1);
+                    freed_bytes = freed_bytes.saturating_add(manifest.size_bytes);
+                }
+            }
         }
 
         Ok(CacheCleanupReport {
@@ -451,10 +473,7 @@ impl DiskCache {
         }
 
         let started = Instant::now();
-        let value = build
-            .take()
-            .expect("build closure must be available")
-            ()?;
+        let value = build.take().expect("build closure must be available")()?;
         let build_time_ms = started.elapsed().as_millis() as u64;
         self.stats
             .build_time_ms_total
@@ -475,11 +494,7 @@ impl DiskCache {
     }
 
     fn cache_dir(&self, key: &DiskCacheKey) -> PathBuf {
-        let project_id = key
-            .project_id
-            .as_deref()
-            .unwrap_or("global")
-            .to_string();
+        let project_id = key.project_id.as_deref().unwrap_or("global").to_string();
         let config_id = key.config_id.as_deref().unwrap_or("none").to_string();
         self.root
             .join(format!("v{}", self.schema_version))
@@ -500,6 +515,73 @@ impl DiskCache {
         file.lock_exclusive()
             .context("Failed to acquire cache lock")?;
         Ok(DiskCacheLock { _file: file })
+    }
+
+    fn try_lock_key(&self, cache_dir: &Path) -> Result<Option<DiskCacheLock>> {
+        let lock_path = cache_dir.join(".lock");
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&lock_path)
+            .with_context(|| format!("Failed to open lock file {}", lock_path.display()))?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Some(DiskCacheLock { _file: file })),
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
+            Err(err) => Err(err).context("Failed to acquire cache lock")?,
+        }
+    }
+
+    fn purge_entry_files(cache_dir: &Path) {
+        let entries = match fs::read_dir(cache_dir) {
+            Ok(entries) => entries,
+            Err(_) => return,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if file_name == ".lock" {
+                continue;
+            }
+            if path.is_dir() {
+                let _ = fs::remove_dir_all(&path);
+            } else {
+                let _ = fs::remove_file(&path);
+            }
+        }
+    }
+
+    fn try_purge_entry_dir(
+        &self,
+        cache_dir: &Path,
+        manifest: Option<&CacheManifest>,
+    ) -> Result<bool> {
+        if !cache_dir.exists() {
+            return Ok(false);
+        }
+        let Some(_lock) = self.try_lock_key(cache_dir)? else {
+            debug!(
+                "Skip cache purge for {}: entry is locked",
+                cache_dir.display()
+            );
+            return Ok(false);
+        };
+
+        Self::purge_entry_files(cache_dir);
+        if let Some(manifest) = manifest {
+            debug!(
+                "Purged cache entry {} ({} bytes)",
+                cache_dir.display(),
+                manifest.size_bytes
+            );
+        } else {
+            debug!("Purged cache entry {}", cache_dir.display());
+        }
+        Ok(true)
     }
 
     fn spawn_rebuild<T, F, P>(
@@ -588,14 +670,14 @@ impl DiskCache {
             let manifest_bytes = match fs::read(&manifest_path) {
                 Ok(bytes) => bytes,
                 Err(_) => {
-                    let _ = fs::remove_dir_all(&cache_dir);
+                    let _ = self.try_purge_entry_dir(&cache_dir, None);
                     continue;
                 }
             };
             let manifest: CacheManifest = match serde_json::from_slice(&manifest_bytes) {
                 Ok(parsed) => parsed,
                 Err(_) => {
-                    let _ = fs::remove_dir_all(&cache_dir);
+                    let _ = self.try_purge_entry_dir(&cache_dir, None);
                     continue;
                 }
             };
@@ -617,10 +699,18 @@ impl DiskCache {
                 .unwrap_or(false);
 
             if expired {
-                let _ = fs::remove_dir_all(&cache_dir);
-                removed += 1;
-                freed += manifest.size_bytes;
-                self.stats.expired_entries.fetch_add(1, Ordering::Relaxed);
+                if self.try_purge_entry_dir(&cache_dir, Some(&manifest))? {
+                    removed += 1;
+                    freed += manifest.size_bytes;
+                    self.stats.expired_entries.fetch_add(1, Ordering::Relaxed);
+                    continue;
+                }
+                total_size = total_size.saturating_add(manifest.size_bytes);
+                entries.push(CacheEntryInfo {
+                    path: cache_dir,
+                    size_bytes: manifest.size_bytes,
+                    last_used_at: 0,
+                });
                 continue;
             }
 
@@ -639,11 +729,12 @@ impl DiskCache {
                     if total_size <= limit {
                         break;
                     }
-                    let _ = fs::remove_dir_all(&entry.path);
-                    total_size = total_size.saturating_sub(entry.size_bytes);
-                    removed += 1;
-                    freed += entry.size_bytes;
-                    self.stats.evicted_entries.fetch_add(1, Ordering::Relaxed);
+                    if self.try_purge_entry_dir(&entry.path, None)? {
+                        total_size = total_size.saturating_sub(entry.size_bytes);
+                        removed += 1;
+                        freed += entry.size_bytes;
+                        self.stats.evicted_entries.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
             }
         }
@@ -768,8 +859,7 @@ impl DiskCache {
             return Ok(CacheLoadResult::empty());
         }
 
-        let manifest_bytes =
-            fs::read(&manifest_path).context("Failed to read cache manifest")?;
+        let manifest_bytes = fs::read(&manifest_path).context("Failed to read cache manifest")?;
         let manifest: CacheManifest = match serde_json::from_slice(&manifest_bytes) {
             Ok(parsed) => parsed,
             Err(err) => {
@@ -806,15 +896,14 @@ impl DiskCache {
                 is_expired = true;
                 if !allow_stale {
                     self.stats.expired_entries.fetch_add(1, Ordering::Relaxed);
-                    let _ = fs::remove_dir_all(cache_dir);
+                    Self::purge_entry_files(cache_dir);
                     return Ok(CacheLoadResult::empty());
                 }
             }
         }
 
         let load_started = Instant::now();
-        let artifact_bytes =
-            fs::read(&artifact_path).context("Failed to read cache artifact")?;
+        let artifact_bytes = fs::read(&artifact_path).context("Failed to read cache artifact")?;
         let payload = match zstd::stream::decode_all(&artifact_bytes[..]) {
             Ok(bytes) => bytes,
             Err(_) => artifact_bytes,
@@ -1104,8 +1193,7 @@ mod tests {
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK
-            .get_or_init(|| Mutex::new(()))
+        LOCK.get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
@@ -1227,7 +1315,11 @@ mod tests {
         let key = test_key();
 
         let entry = cache
-            .get_or_build(&key, || Ok(TestValue { value: "old".into() }))
+            .get_or_build(&key, || {
+                Ok(TestValue {
+                    value: "old".into(),
+                })
+            })
             .unwrap();
         assert!(!entry.from_cache);
 
@@ -1240,7 +1332,11 @@ mod tests {
         write_atomic(&manifest_path, &manifest_bytes).unwrap();
 
         let entry = cache
-            .get_or_build(&key, || Ok(TestValue { value: "new".into() }))
+            .get_or_build(&key, || {
+                Ok(TestValue {
+                    value: "new".into(),
+                })
+            })
             .unwrap();
         assert!(!entry.from_cache);
         assert_eq!(entry.value.value, "new");
@@ -1257,7 +1353,11 @@ mod tests {
         let key = test_key();
 
         let entry = cache
-            .get_or_build(&key, || Ok(TestValue { value: "old".into() }))
+            .get_or_build(&key, || {
+                Ok(TestValue {
+                    value: "old".into(),
+                })
+            })
             .unwrap();
         assert!(!entry.from_cache);
 
@@ -1272,7 +1372,11 @@ mod tests {
         let entry = cache
             .get_or_build_with_swr(
                 &key,
-                || Ok(TestValue { value: "new".into() }),
+                || {
+                    Ok(TestValue {
+                        value: "new".into(),
+                    })
+                },
                 |_| true,
             )
             .unwrap();
@@ -1329,6 +1433,63 @@ mod tests {
         let second = cache.try_get::<TestValue>(&key2).unwrap();
         assert!(first.is_none(), "Ожидали вытеснение первого entry");
         assert!(second.is_some(), "Ожидали сохранение второго entry");
+    }
+
+    #[test]
+    fn test_disk_cache_cleanup_skips_locked_entries() {
+        let _guard = env_lock();
+        let temp = TempDir::new().unwrap();
+        let _ttl = EnvGuard::set("BSL_CACHE_TTL_SECS", "1");
+        let _disable = EnvGuard::remove("BSL_CACHE_DISABLE");
+        let cache = DiskCache::with_root(temp.path().to_path_buf(), 1).unwrap();
+        let key = test_key();
+
+        let entry = cache
+            .get_or_build(&key, || {
+                Ok(TestValue {
+                    value: "old".into(),
+                })
+            })
+            .unwrap();
+        assert!(!entry.from_cache);
+
+        let cache_dir = cache.cache_dir(&key);
+        let manifest_path = cache_dir.join("manifest.json");
+        let artifact_path = cache_dir.join("artifact.json");
+
+        let manifest_bytes = fs::read(&manifest_path).unwrap();
+        let mut manifest: CacheManifest = serde_json::from_slice(&manifest_bytes).unwrap();
+        manifest.created_at = 0;
+        manifest.last_used_at = 0;
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+        write_atomic(&manifest_path, &manifest_bytes).unwrap();
+
+        let lock_path = cache_dir.join(".lock");
+        let lock_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&lock_path)
+            .unwrap();
+        lock_file.lock_exclusive().unwrap();
+
+        let report = cache.cleanup().unwrap();
+        assert_eq!(report.removed_entries, 0);
+        assert!(
+            manifest_path.exists(),
+            "manifest should remain while locked"
+        );
+        assert!(
+            artifact_path.exists(),
+            "artifact should remain while locked"
+        );
+
+        drop(lock_file);
+
+        let report = cache.cleanup().unwrap();
+        assert_eq!(report.removed_entries, 1);
+        assert!(!manifest_path.exists(), "manifest should be purged");
+        assert!(!artifact_path.exists(), "artifact should be purged");
     }
 
     fn read_cached_value<T>(cache: &DiskCache, key: &DiskCacheKey) -> Option<T>

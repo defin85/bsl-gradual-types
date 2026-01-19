@@ -28,7 +28,8 @@ impl StageRange {
     pub fn map_percent_0_100(&self, p: u32) -> u32 {
         let p = p.min(100);
         let span = self.end.saturating_sub(self.start);
-        self.start.saturating_add(((p as f32 / 100.0) * (span as f32)).round() as u32)
+        self.start
+            .saturating_add(((p as f32 / 100.0) * (span as f32)).round() as u32)
     }
 
     pub fn map_current_total(&self, current: usize, total: usize) -> u32 {
@@ -168,12 +169,14 @@ impl ProgressReporter for LspWorkDoneReporter {
             .client
             .send_notification::<ProgressNotification>(ProgressParams {
                 token: self.token.clone(),
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(WorkDoneProgressBegin {
-                    title,
-                    message,
-                    percentage: Some(0),
-                    cancellable: Some(false),
-                })),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
+                    WorkDoneProgressBegin {
+                        title,
+                        message,
+                        percentage: Some(0),
+                        cancellable: Some(false),
+                    },
+                )),
             })
             .await;
     }
@@ -191,7 +194,10 @@ impl ProgressReporter for LspWorkDoneReporter {
             .is_some_and(|last| now.duration_since(last) < self.throttle_interval);
 
         if should_throttle {
-            self.pending = Some(PendingReport { percentage, message });
+            self.pending = Some(PendingReport {
+                percentage,
+                message,
+            });
             return;
         }
 

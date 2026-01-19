@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use bsl_backend::data::loaders::{
-    compare_module_parsing_from_file_with_progress_mode, single_pass_module_stats_from_file_with_progress_mode,
-    SinglePassMode,
+    compare_module_parsing_from_file_with_progress_mode,
+    single_pass_module_stats_from_file_with_progress_mode, SinglePassMode,
 };
 
 fn main() -> Result<()> {
@@ -137,9 +137,7 @@ fn main() -> Result<()> {
     );
     println!(
         "AST:         decls={}, exports={}, call_sites={}",
-        comparison.ast.decls,
-        comparison.ast.export_decls,
-        comparison.ast.call_sites
+        comparison.ast.decls, comparison.ast.export_decls, comparison.ast.call_sites
     );
 
     if comparison.missing_decls.is_empty()

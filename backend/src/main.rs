@@ -4,7 +4,7 @@
 use bsl_backend::{
     config::{load_config, CliConfig},
     presentation::web::{create_router, AppState},
-    system::{StartupInputs, SystemCoordinator, startup_v2},
+    system::{startup_v2, StartupInputs, SystemCoordinator},
 };
 #[cfg(feature = "web-ui")]
 use clap::Parser;

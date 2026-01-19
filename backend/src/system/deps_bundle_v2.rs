@@ -87,7 +87,10 @@ pub fn build_deps_bundle_v2(
 
 fn build_semantic_deps_snapshot(
     coordinator: &SystemCoordinator,
-) -> anyhow::Result<(Arc<SemanticDeps>, bsl_shared::domain::repository::RepositoryStats)> {
+) -> anyhow::Result<(
+    Arc<SemanticDeps>,
+    bsl_shared::domain::repository::RepositoryStats,
+)> {
     let Some(engine) = coordinator.analysis_engine() else {
         let repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
         let resolver = Arc::new(TypeResolver::new(repository.clone()));

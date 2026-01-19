@@ -469,13 +469,10 @@ impl TypeRepository for InMemoryTypeRepository {
     }
 
     fn platform_docs_loaded(&self) -> bool {
-        *self
-            .platform_docs_loaded
-            .read()
-            .unwrap_or_else(|poisoned| {
-                tracing::warn!("platform_docs_loaded RwLock poisoned, recovering");
-                poisoned.into_inner()
-            })
+        *self.platform_docs_loaded.read().unwrap_or_else(|poisoned| {
+            tracing::warn!("platform_docs_loaded RwLock poisoned, recovering");
+            poisoned.into_inner()
+        })
     }
 
     fn load_types(&self, new_types: Vec<RawTypeData>) -> Result<()> {
@@ -597,8 +594,7 @@ impl TypeRepository for InMemoryTypeRepository {
             poisoned.into_inner()
         });
 
-        let targets: HashSet<TypeId> =
-            type_names.iter().map(|n| TypeId::new(n)).collect();
+        let targets: HashSet<TypeId> = type_names.iter().map(|n| TypeId::new(n)).collect();
         let before = types.len();
         types.retain(|t| !targets.contains(&TypeId::new(&t.name)));
         let removed = before.saturating_sub(types.len());
@@ -623,10 +619,13 @@ impl TypeRepository for InMemoryTypeRepository {
     }
 
     fn get_all_types(&self) -> Vec<RawTypeData> {
-        self.types.read().unwrap_or_else(|poisoned| {
-            tracing::warn!("types RwLock poisoned in get_all_types, recovering");
-            poisoned.into_inner()
-        }).clone()
+        self.types
+            .read()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("types RwLock poisoned in get_all_types, recovering");
+                poisoned.into_inner()
+            })
+            .clone()
     }
 
     fn find_type(&self, name: &str) -> Option<RawTypeData> {
@@ -726,7 +725,9 @@ impl TypeRepository for InMemoryTypeRepository {
         use crate::domain::signature_index::{MethodSignature, SignatureSource};
 
         let index = self.signature_index.read().unwrap_or_else(|poisoned| {
-            tracing::warn!("SignatureIndex RwLock poisoned in validate_method_signature, recovering");
+            tracing::warn!(
+                "SignatureIndex RwLock poisoned in validate_method_signature, recovering"
+            );
             poisoned.into_inner()
         });
 
@@ -788,10 +789,15 @@ impl TypeRepository for InMemoryTypeRepository {
     }
 
     fn get_signature_index_clone(&self) -> SignatureIndex {
-        self.signature_index.read().unwrap_or_else(|poisoned| {
-            tracing::warn!("SignatureIndex RwLock poisoned in get_signature_index_clone, recovering");
-            poisoned.into_inner()
-        }).clone()
+        self.signature_index
+            .read()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!(
+                    "SignatureIndex RwLock poisoned in get_signature_index_clone, recovering"
+                );
+                poisoned.into_inner()
+            })
+            .clone()
     }
 
     fn add_config_method_signature(
@@ -800,7 +806,9 @@ impl TypeRepository for InMemoryTypeRepository {
         method: crate::domain::signature_index::MethodSignature,
     ) {
         let mut index = self.signature_index.write().unwrap_or_else(|poisoned| {
-            tracing::warn!("SignatureIndex RwLock poisoned in add_config_method_signature, recovering");
+            tracing::warn!(
+                "SignatureIndex RwLock poisoned in add_config_method_signature, recovering"
+            );
             poisoned.into_inner()
         });
         index.add_config_method(TypeId::new(owner_type), method);
@@ -855,7 +863,10 @@ impl TypeRepository for InMemoryTypeRepository {
                 );
                 poisoned.into_inner()
             });
-        map.insert((TypeId::new(owner_type), TypeId::new(method_name)), location);
+        map.insert(
+            (TypeId::new(owner_type), TypeId::new(method_name)),
+            location,
+        );
     }
 
     fn add_global_function_definition_location(

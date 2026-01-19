@@ -36,7 +36,10 @@ pub fn syntax_errors_to_diagnostics(errors: &[ParseError], uri: &Url) -> Vec<Dia
                             location: Location {
                                 uri: uri.clone(),
                                 range: Range::new(
-                                    Position::new(related.span.start_line, related.span.start_column),
+                                    Position::new(
+                                        related.span.start_line,
+                                        related.span.start_column,
+                                    ),
                                     Position::new(related.span.end_line, related.span.end_column),
                                 ),
                             },

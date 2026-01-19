@@ -34,7 +34,10 @@ mod tests {
 
         let content = read_bsl_file(file.path()).unwrap();
         assert!(!content.starts_with('\u{FEFF}'), "BOM should be stripped");
-        assert!(content.starts_with("&НаСервере"), "expected content after BOM");
+        assert!(
+            content.starts_with("&НаСервере"),
+            "expected content after BOM"
+        );
     }
 
     #[test]
@@ -43,6 +46,9 @@ mod tests {
         writeln!(file, "Процедура П() Экспорт").unwrap();
 
         let content = read_bsl_file(file.path()).unwrap();
-        assert!(content.starts_with("Процедура"), "expected original content");
+        assert!(
+            content.starts_with("Процедура"),
+            "expected original content"
+        );
     }
 }

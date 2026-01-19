@@ -74,9 +74,7 @@ pub enum SemanticNodeKind {
     },
 
     /// Доступ к переменной в выражении: `x`
-    VariableAccess {
-        name: String,
-    },
+    VariableAccess { name: String },
 
     /// Присваивание: `x = 42;`
     ///

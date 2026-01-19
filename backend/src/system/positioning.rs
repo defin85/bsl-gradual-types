@@ -57,7 +57,9 @@ impl LineIndex {
 
     /// Convert an UTF-16 position (LSP) into a tree-sitter point (row + byte column).
     pub fn utf16_position_to_point(&self, source: &str, line: u32, utf16_column: u32) -> Point {
-        let (row, column) = self.inner.utf16_position_to_point(source, line, utf16_column);
+        let (row, column) = self
+            .inner
+            .utf16_position_to_point(source, line, utf16_column);
         Point::new(row, column)
     }
 

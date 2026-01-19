@@ -129,7 +129,10 @@ fn test_discover_common_module_path() {
         .find(|obj| obj.object_type_raw == "CommonModule")
         .expect("CommonModule должен быть найден");
 
-    assert_eq!(common_module.common_module_path.as_ref(), Some(&module_path));
+    assert_eq!(
+        common_module.common_module_path.as_ref(),
+        Some(&module_path)
+    );
 }
 
 #[test]

@@ -12,9 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_backend::application::get_completion_with_semantic_program_snapshot;
-use bsl_backend::system::{SystemCoordinator, build_deps_bundle_v2};
-use bsl_shared::domain::TypeMetadataLookup;
+use bsl_backend::system::{build_deps_bundle_v2, SystemCoordinator};
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
 
 #[derive(Debug, Parser)]
@@ -156,12 +156,10 @@ struct PerfThresholds {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let scenario_path = args.scenario.canonicalize().with_context(|| {
-        format!(
-            "Scenario not found: {}",
-            args.scenario.to_string_lossy()
-        )
-    })?;
+    let scenario_path = args
+        .scenario
+        .canonicalize()
+        .with_context(|| format!("Scenario not found: {}", args.scenario.to_string_lossy()))?;
     let workspace_root = workspace_root();
     let scenario = read_scenario(&scenario_path)?;
 
@@ -343,9 +341,8 @@ async fn main() -> Result<()> {
 }
 
 fn read_scenario(path: &Path) -> Result<Scenario> {
-    let data = fs::read_to_string(path).with_context(|| {
-        format!("Failed to read scenario file: {}", path.to_string_lossy())
-    })?;
+    let data = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read scenario file: {}", path.to_string_lossy()))?;
     let scenario: Scenario = serde_json::from_str(&data).context("Invalid scenario JSON")?;
     if scenario.cases.is_empty() {
         bail!("Scenario must contain at least one case");
@@ -387,9 +384,8 @@ fn prepare_cases(cases: &[ScenarioCase], base_dir: &Path) -> Result<Vec<Prepared
         let content = if let Some(existing) = cache.get(&file) {
             existing.clone()
         } else {
-            let text = fs::read_to_string(&file).with_context(|| {
-                format!("Failed to read case file: {}", file.to_string_lossy())
-            })?;
+            let text = fs::read_to_string(&file)
+                .with_context(|| format!("Failed to read case file: {}", file.to_string_lossy()))?;
             cache.insert(file.clone(), text.clone());
             text
         };
@@ -421,10 +417,7 @@ fn find_position(content: &str, marker: &str) -> Option<(u32, u32)> {
     let before = &content[..byte_index + marker.len()];
     let line = before.lines().count().saturating_sub(1) as u32;
     let last_line = before.lines().last().unwrap_or("");
-    let character = last_line
-        .chars()
-        .map(|ch| ch.len_utf16())
-        .sum::<usize>() as u32;
+    let character = last_line.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
     Some((line, character))
 }
 
@@ -484,7 +477,12 @@ struct OutputTargets<'a> {
     incomplete: &'a mut usize,
 }
 
-fn build_metrics(total_requests: usize, durations: &[f64], errors: usize, incomplete: usize) -> PerfMetrics {
+fn build_metrics(
+    total_requests: usize,
+    durations: &[f64],
+    errors: usize,
+    incomplete: usize,
+) -> PerfMetrics {
     let count = durations.len();
     let (p50, p95, p99) = if count == 0 {
         (0.0, 0.0, 0.0)
@@ -589,10 +587,7 @@ fn write_summary(path: &Path, report: &PerfReport) -> Result<()> {
         "- p50/p95/p99 (ms): {:.3} / {:.3} / {:.3}",
         report.metrics.p50_ms, report.metrics.p95_ms, report.metrics.p99_ms
     ));
-    lines.push(format!(
-        "- error_rate: {:.3}",
-        report.metrics.error_rate
-    ));
+    lines.push(format!("- error_rate: {:.3}", report.metrics.error_rate));
     lines.push(format!(
         "- incomplete_rate: {:.3}",
         report.metrics.incomplete_rate

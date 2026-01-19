@@ -3,7 +3,9 @@ use tree_sitter::Parser;
 pub mod ast;
 pub mod tree_sitter_adapter;
 
-pub use tree_sitter_adapter::{TreeSitterAdapter, collect_syntax_errors, collect_syntax_errors_cached};
+pub use tree_sitter_adapter::{
+    collect_syntax_errors, collect_syntax_errors_cached, TreeSitterAdapter,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct ParseOptions {}
@@ -33,7 +35,9 @@ fn parse_tree(source: &str) -> Result<tree_sitter::Tree, ParseFatalError> {
     parser
         .set_language(&tree_sitter_bsl::LANGUAGE.into())
         .map_err(|e| ParseFatalError::Language(format!("{:?}", e)))?;
-    parser.parse(source, None).ok_or(ParseFatalError::ParseFailed)
+    parser
+        .parse(source, None)
+        .ok_or(ParseFatalError::ParseFailed)
 }
 
 #[cfg(test)]
@@ -81,9 +85,8 @@ mod tests {
         let a = parse(source, &ParseOptions::default()).unwrap();
         let b = parse(source, &ParseOptions::default()).unwrap();
 
-        let project = |e: &bsl_shared::domain::types::ParseError| {
-            (e.error_type, e.message.clone(), e.span)
-        };
+        let project =
+            |e: &bsl_shared::domain::types::ParseError| (e.error_type, e.message.clone(), e.span);
 
         let a_projected: Vec<_> = a.syntax_errors.iter().map(project).collect();
         let b_projected: Vec<_> = b.syntax_errors.iter().map(project).collect();

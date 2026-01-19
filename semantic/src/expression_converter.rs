@@ -42,8 +42,7 @@ impl AstToIrConverter {
                 property,
                 span,
             } => {
-                let node_idx =
-                    self.convert_property_access_expression(object, property, *span)?;
+                let node_idx = self.convert_property_access_expression(object, property, *span)?;
 
                 if !matches!(
                     **object,

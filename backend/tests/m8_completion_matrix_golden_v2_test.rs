@@ -9,8 +9,8 @@ use std::sync::{Arc, LazyLock};
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_backend::application::get_completion_with_semantic_program_snapshot_v2;
 use bsl_backend::system::DepsBundleV2;
-use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
 
 fn workspace_root() -> PathBuf {
@@ -145,8 +145,10 @@ fn matrix_cases() -> Vec<MatrixCase> {
             id: "m8_stdlib_choice_receiver",
             expression_form: "Выбор",
             source: "stdlib",
-            receiver_expr: "(Выбор Когда Истина Тогда Новый Массив() Иначе Новый Массив() КонецВыбора)",
-            typed_prefix: "(Выбор Когда Истина Тогда Новый Массив() Иначе Новый Массив() КонецВыбора).",
+            receiver_expr:
+                "(Выбор Когда Истина Тогда Новый Массив() Иначе Новый Массив() КонецВыбора)",
+            typed_prefix:
+                "(Выбор Когда Истина Тогда Новый Массив() Иначе Новый Массив() КонецВыбора).",
             expected_top_n: &["Добавить"],
             top_n: 25,
         },
@@ -157,7 +159,10 @@ fn build_ir_and_parse(
     deps_bundle: &DepsBundleV2,
     file_path: &str,
     code: &str,
-) -> (Arc<bsl_shared::ir::SemanticProgram>, Arc<bsl_syntax::ast::ParseResult>) {
+) -> (
+    Arc<bsl_shared::ir::SemanticProgram>,
+    Arc<bsl_syntax::ast::ParseResult>,
+) {
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
         deps_id: deps_bundle.deps_id.clone(),
@@ -175,11 +180,7 @@ fn build_ir_and_parse(
     });
 
     let analysis = host.analysis();
-    let ir_program = analysis
-        .ir(V2FileId(1))
-        .ok()
-        .flatten()
-        .expect("ir");
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
     let parse_result = analysis
         .parse_result(V2FileId(1))
         .ok()
@@ -192,11 +193,16 @@ fn build_ir_and_parse(
 #[tokio::test]
 async fn m8_completion_matrix_golden_v2() {
     let deps_bundle = FIXTURE_DEPS.clone();
-    let resolver: Arc<TypeResolver> = deps_bundle
-        .semantic_deps
-        .resolver
-        .clone()
-        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_bundle.semantic_deps.repository.clone())));
+    let resolver: Arc<TypeResolver> =
+        deps_bundle
+            .semantic_deps
+            .resolver
+            .clone()
+            .unwrap_or_else(|| {
+                Arc::new(TypeResolver::new(
+                    deps_bundle.semantic_deps.repository.clone(),
+                ))
+            });
     let metadata_lookup = TypeMetadataLookup::new(deps_bundle.semantic_deps.repository.clone());
     let index_snapshot = deps_bundle.index_snapshot.as_ref();
 
@@ -209,8 +215,10 @@ async fn m8_completion_matrix_golden_v2() {
             "Процедура M8()\n    __tmp = {} X;\nКонецПроцедуры\n",
             case.typed_prefix
         );
-        let (line, column) = intellisense_testkit::find_marker_position(&content, case.typed_prefix);
-        let (ir_program, parse_result) = build_ir_and_parse(deps_bundle.as_ref(), file_path, &content);
+        let (line, column) =
+            intellisense_testkit::find_marker_position(&content, case.typed_prefix);
+        let (ir_program, parse_result) =
+            build_ir_and_parse(deps_bundle.as_ref(), file_path, &content);
 
         let result = get_completion_with_semantic_program_snapshot_v2(
             &content,
@@ -251,7 +259,9 @@ async fn m8_completion_matrix_golden_v2() {
             );
         }
 
-        let receiver_type = resolver.resolve_expression_sync(case.receiver_expr).type_name();
+        let receiver_type = resolver
+            .resolve_expression_sync(case.receiver_expr)
+            .type_name();
         snapshots.push(serde_json::json!({
             "case": case.id,
             "expressionForm": case.expression_form,

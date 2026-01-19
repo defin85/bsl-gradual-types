@@ -44,10 +44,16 @@ impl AstCache {
     }
 
     pub fn get(&self, key: [u8; 32]) -> Option<Arc<ParseResult>> {
-        let mut storage = self.storage.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut storage = self
+            .storage
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let result = storage.get(&key).cloned();
 
-        let mut stats = self.stats.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut stats = self
+            .stats
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if result.is_some() {
             stats.hits += 1;
         } else {
@@ -58,11 +64,17 @@ impl AstCache {
     }
 
     pub fn put(&self, key: [u8; 32], value: Arc<ParseResult>) {
-        let mut storage = self.storage.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut storage = self
+            .storage
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let will_evict = storage.len() >= storage.cap().get() && !storage.contains(&key);
 
         if will_evict {
-            let mut stats = self.stats.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut stats = self
+                .stats
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             stats.evictions += 1;
         }
 
@@ -70,12 +82,18 @@ impl AstCache {
     }
 
     pub fn clear(&self) {
-        let mut storage = self.storage.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut storage = self
+            .storage
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         storage.clear();
     }
 
     pub fn stats(&self) -> AstCacheStats {
-        let stats = self.stats.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let stats = self
+            .stats
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let storage = self
             .storage
             .read()

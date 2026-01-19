@@ -4,9 +4,9 @@
 
 use tracing::{debug, info, warn};
 
+use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::TypeMetadataLookup;
-use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::ir::{ScopeId, SemanticNodeKind, SemanticProgram};
 
 use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter};
@@ -187,11 +187,19 @@ fn compute_hover_info_from_ir(
                 } else {
                     hover_formatter.clone()
                 };
-                let label = if object_type.is_some() { "Метод" } else { "Функция" };
+                let label = if object_type.is_some() {
+                    "Метод"
+                } else {
+                    "Функция"
+                };
                 return Some(formatter.format_function_signature(label, &signature));
             }
         }
-        return Some(format_semantic_node_info(node, file_content, metadata_lookup));
+        return Some(format_semantic_node_info(
+            node,
+            file_content,
+            metadata_lookup,
+        ));
     }
 
     // Milestone 2.11 Task B1: Warning when node not found
@@ -368,10 +376,7 @@ fn extract_enhanced_symbol_info(
 }
 
 /// Try to resolve type for identifier via TypeResolver
-fn resolve_type_for_identifier(
-    resolver: &TypeResolver,
-    identifier: &str,
-) -> Option<String> {
+fn resolve_type_for_identifier(resolver: &TypeResolver, identifier: &str) -> Option<String> {
     use bsl_shared::domain::types::Certainty;
 
     // Domain Layer: Resolve via TypeResolver

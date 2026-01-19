@@ -281,7 +281,12 @@ async fn test_graceful_error_handling() {
     println!("\n📊 TEST 4: GRACEFUL ERROR HANDLING");
 
     let result = coordinator
-        .start_with_paths(Some(nonexistent_path), None, None, Some(progress_tx.clone()))
+        .start_with_paths(
+            Some(nonexistent_path),
+            None,
+            None,
+            Some(progress_tx.clone()),
+        )
         .await;
 
     match result {

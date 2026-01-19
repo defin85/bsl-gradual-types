@@ -1,0 +1,32 @@
+[package]
+name = "bsl-agent"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "MCP server (stdio) providing semantic context for BSL projects"
+
+[[bin]]
+name = "bsl-agent"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+blake3 = { workspace = true }
+bsl-analysis-v2 = { workspace = true }
+bsl-backend = { workspace = true }
+bsl-shared = { workspace = true }
+rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main", features = ["client", "server", "macros", "transport-io", "transport-child-process"] }
+schemars = "1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true, features = ["json"] }
+tempfile = { workspace = true }

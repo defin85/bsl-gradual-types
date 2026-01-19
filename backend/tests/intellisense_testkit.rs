@@ -5,9 +5,11 @@
 use std::fs;
 use std::path::PathBuf;
 
+use bsl_shared::domain::{
+    CompletionItem as DomainCompletionItem, CompletionKind as DomainCompletionKind,
+};
 use serde_json::Value;
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat};
-use bsl_shared::domain::{CompletionItem as DomainCompletionItem, CompletionKind as DomainCompletionKind};
 
 pub const UPDATE_GOLDEN_ENV: &str = "UPDATE_GOLDEN";
 

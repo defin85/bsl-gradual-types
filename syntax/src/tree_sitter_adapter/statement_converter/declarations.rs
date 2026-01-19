@@ -47,9 +47,7 @@ pub(crate) fn convert_function_definition_cached(
             }
             _ => {
                 // Собираем тело функции через dispatcher
-                if let Some(stmt) =
-                    super::dispatch_statement_cached(&child, source, line_index)?
-                {
+                if let Some(stmt) = super::dispatch_statement_cached(&child, source, line_index)? {
                     body.push(stmt);
                 }
             }

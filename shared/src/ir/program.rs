@@ -129,8 +129,8 @@ impl SemanticProgram {
                     SemanticNodeKind::MemberAccess { .. } => 1, // Высокий приоритет
                     SemanticNodeKind::VariableAccess { .. } => 2, // Высокий приоритет
                     SemanticNodeKind::VariableDeclaration { .. } => 3, // Средний приоритет
-                    SemanticNodeKind::Assignment { .. } => 10, // Низкий приоритет
-                    _ => 5, // Остальные - средний приоритет
+                    SemanticNodeKind::Assignment { .. } => 10,  // Низкий приоритет
+                    _ => 5,                                     // Остальные - средний приоритет
                 };
 
                 // Сортировка: сначала по размеру span, затем по приоритету типа

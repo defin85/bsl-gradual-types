@@ -113,8 +113,8 @@ impl SyntaxHelperLoader {
                             const PROGRESS_MIN_INTERVAL_MS: u64 = 75;
                             let last_ms = self.last_progress_at.load(Ordering::Relaxed);
                             let last_count = self.last_reported_count.load(Ordering::Relaxed);
-                            let enough_time = now_ms.saturating_sub(last_ms)
-                                >= PROGRESS_MIN_INTERVAL_MS;
+                            let enough_time =
+                                now_ms.saturating_sub(last_ms) >= PROGRESS_MIN_INTERVAL_MS;
                             let advanced = count > last_count;
                             if enough_time && advanced {
                                 self.last_progress_at
@@ -179,7 +179,10 @@ impl SyntaxHelperLoader {
             .with_context(|| format!("Не удалось прочитать файл {:?}", path))?;
         let document = Html::parse_document(&content);
         if self.settings.collect_keywords && is_language_help_path(path) {
-            let keywords = self.document_parser.html_extractor().extract_keywords(&document);
+            let keywords = self
+                .document_parser
+                .html_extractor()
+                .extract_keywords(&document);
             for keyword in keywords {
                 self.keywords.insert(keyword);
             }

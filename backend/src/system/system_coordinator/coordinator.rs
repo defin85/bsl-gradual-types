@@ -8,18 +8,18 @@ use anyhow::Result;
 use serde_json::Value;
 use tracing::warn;
 
+use super::types::{
+    CacheClearReport, CacheScope, CacheStatsReport, CacheToggleResult, ConfigIndexCache,
+    DiskCacheStatsReport,
+};
 use crate::system::basic_observability::BasicObservability;
 use crate::system::disk_cache::DiskCache;
 use crate::system::intellisense_index::IntellisenseIndexStore;
 use crate::system::intellisense_index_store::IntellisenseIndexDiskStore;
 use crate::system::parser_coordinator::ParserCoordinator;
+use bsl_shared::api::StartupProgressDto;
 use bsl_shared::domain::repository::RepositoryStats;
 use bsl_shared::engine::AnalysisEngine;
-use bsl_shared::api::StartupProgressDto;
-use super::types::{
-    CacheClearReport, CacheScope, CacheStatsReport, CacheToggleResult, ConfigIndexCache,
-    DiskCacheStatsReport,
-};
 
 /// Упрощенный системный координатор
 ///
@@ -71,8 +71,10 @@ impl SystemCoordinator {
             }
         };
 
-        let intellisense_index =
-            Arc::new(IntellisenseIndexStore::new("unknown-config", env!("CARGO_PKG_VERSION")));
+        let intellisense_index = Arc::new(IntellisenseIndexStore::new(
+            "unknown-config",
+            env!("CARGO_PKG_VERSION"),
+        ));
 
         // 2. Simple parsing (будет обновлён с TypeResolver в start_with_paths_blocking)
         // Milestone 3.17: Используем RwLock для возможности обновления
@@ -99,13 +101,10 @@ impl SystemCoordinator {
     }
 
     pub fn strict_fingerprint(&self) -> bool {
-        *self
-            .strict_fingerprint
-            .read()
-            .unwrap_or_else(|poisoned| {
-                warn!("Strict fingerprint RwLock poisoned (read), recovering data.");
-                poisoned.into_inner()
-            })
+        *self.strict_fingerprint.read().unwrap_or_else(|poisoned| {
+            warn!("Strict fingerprint RwLock poisoned (read), recovering data.");
+            poisoned.into_inner()
+        })
     }
 
     pub fn set_strict_fingerprint(&self, strict: bool) {
@@ -146,7 +145,8 @@ impl SystemCoordinator {
     }
 
     pub fn record_completion_stage_latency(&self, stage: &str, duration: std::time::Duration) {
-        self.observability.record_completion_stage_latency(stage, duration);
+        self.observability
+            .record_completion_stage_latency(stage, duration);
     }
 
     pub fn record_completion_error(&self) {
@@ -154,7 +154,8 @@ impl SystemCoordinator {
     }
 
     pub fn record_completion_resolve_latency(&self, duration: std::time::Duration) {
-        self.observability.record_completion_resolve_latency(duration);
+        self.observability
+            .record_completion_resolve_latency(duration);
     }
 
     pub fn record_completion_incomplete(&self) {
@@ -182,12 +183,20 @@ impl SystemCoordinator {
             .record_intellisense_v2_wait_for_file_version(kind, duration);
     }
 
-    pub fn record_intellisense_v2_snapshot_latency(&self, kind: &str, duration: std::time::Duration) {
+    pub fn record_intellisense_v2_snapshot_latency(
+        &self,
+        kind: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
             .record_intellisense_v2_snapshot_latency(kind, duration);
     }
 
-    pub fn record_intellisense_v2_ir_query_latency(&self, kind: &str, duration: std::time::Duration) {
+    pub fn record_intellisense_v2_ir_query_latency(
+        &self,
+        kind: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
             .record_intellisense_v2_ir_query_latency(kind, duration);
     }
@@ -224,7 +233,8 @@ impl SystemCoordinator {
     }
 
     pub fn record_intellisense_v2_deps_update_error(&self) {
-        self.observability.record_intellisense_v2_deps_update_error();
+        self.observability
+            .record_intellisense_v2_deps_update_error();
     }
 
     pub fn record_completion_quality(

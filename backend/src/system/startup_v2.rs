@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 
 use crate::data::loaders::progress::ProgressUpdate;
 use crate::system::platform_version::normalize_platform_version;
-use crate::system::{DepsBundleV2, SystemCoordinator, StartupError, build_deps_bundle_v2};
+use crate::system::{build_deps_bundle_v2, DepsBundleV2, StartupError, SystemCoordinator};
 
 #[derive(Debug, Clone, Default)]
 pub struct StartupInputs {
@@ -46,7 +46,9 @@ impl StartupInputs {
                 .and_then(|value| non_empty_string(value).map(PathBuf::from)),
             configuration_path: configuration_path
                 .and_then(|value| non_empty_string(value).map(PathBuf::from)),
-            platform_version: platform_version.and_then(non_empty_string).map(str::to_string),
+            platform_version: platform_version
+                .and_then(non_empty_string)
+                .map(str::to_string),
             cache_enabled,
             strict_fingerprint,
         }
@@ -69,9 +71,7 @@ impl StartupInputs {
     }
 
     pub fn normalize(self) -> Result<Self, StartupError> {
-        let syntax_helper_path = self
-            .syntax_helper_path
-            .map(normalize_path_best_effort);
+        let syntax_helper_path = self.syntax_helper_path.map(normalize_path_best_effort);
 
         let configuration_path = self
             .configuration_path
@@ -84,14 +84,12 @@ impl StartupInputs {
                 if trimmed.is_empty() {
                     None
                 } else {
-                    Some(
-                        normalize_platform_version(trimmed).ok_or_else(|| {
-                            StartupError::PlatformTypesError(anyhow::anyhow!(
-                                "Invalid platform_version: {}",
-                                trimmed
-                            ))
-                        })?,
-                    )
+                    Some(normalize_platform_version(trimmed).ok_or_else(|| {
+                        StartupError::PlatformTypesError(anyhow::anyhow!(
+                            "Invalid platform_version: {}",
+                            trimmed
+                        ))
+                    })?)
                 }
             }
             None => None,
@@ -252,7 +250,10 @@ mod tests {
 
         let normalized = inputs.normalize().expect("normalize");
         let expected = fs::canonicalize(&config_root).expect("canonicalize config root");
-        assert_eq!(normalized.configuration_path.as_deref(), Some(expected.as_path()));
+        assert_eq!(
+            normalized.configuration_path.as_deref(),
+            Some(expected.as_path())
+        );
     }
 
     #[test]
@@ -315,7 +316,8 @@ mod tests {
         fs::create_dir_all(&config_root).expect("create config root");
 
         fs::write(platform_root.join("a.html"), "<html/>").expect("write platform file");
-        fs::write(config_root.join("Configuration.xml"), "<MetaDataObject/>").expect("write config file");
+        fs::write(config_root.join("Configuration.xml"), "<MetaDataObject/>")
+            .expect("write config file");
 
         let coordinator = SystemCoordinator::new();
         coordinator.set_platform_version(Some("8.3.25".to_string()));

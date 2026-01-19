@@ -212,8 +212,7 @@ impl SignatureIndex {
             return 0;
         }
 
-        let target: HashSet<String> =
-            method_names.iter().map(|n| n.to_lowercase()).collect();
+        let target: HashSet<String> = method_names.iter().map(|n| n.to_lowercase()).collect();
         let before = methods.len();
         methods.retain(|m| !target.contains(&m.name.to_lowercase()));
         let removed = before.saturating_sub(methods.len());

@@ -81,16 +81,16 @@ async fn test_hover_shows_different_info_for_different_variables() {
     let deps_bundle = support::deps_bundle_v2_fallback();
 
     // Hover на "МойМассив" в строке 2
-    let hover1 = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 5)
-        .unwrap_or_default();
+    let hover1 =
+        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 5).unwrap_or_default();
 
     // Hover на "МояСтрока" в строке 3
-    let hover2 = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 3, 5)
-        .unwrap_or_default();
+    let hover2 =
+        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 3, 5).unwrap_or_default();
 
     // Hover на "МоеЧисло" в строке 4
-    let hover3 = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 4, 5)
-        .unwrap_or_default();
+    let hover3 =
+        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 4, 5).unwrap_or_default();
 
     // КЛЮЧЕВАЯ ПРОВЕРКА: hover НЕ должен быть одинаковым для всех переменных
     // (проблема из Milestone 2.11 - без реальных Span все переменные показывали одинаковую информацию)

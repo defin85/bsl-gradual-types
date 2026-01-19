@@ -45,9 +45,7 @@ fn test_missing_endif_detected() {
             error.span.end_line,
             error.span.end_column
         );
-        if error.error_type == ErrorType::MissingToken
-            && error.message.contains("ENDIF_KEYWORD")
-        {
+        if error.error_type == ErrorType::MissingToken && error.message.contains("ENDIF_KEYWORD") {
             assert!(
                 !error.related.is_empty(),
                 "Для MissingToken ENDIF ожидается related информация"
@@ -72,10 +70,7 @@ fn test_missing_endif_detected() {
         );
     }
 
-    assert!(
-        related_checked,
-        "MissingToken для ENDIF_KEYWORD не найден"
-    );
+    assert!(related_checked, "MissingToken для ENDIF_KEYWORD не найден");
 
     println!("===================================\n");
 }

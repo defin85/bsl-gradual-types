@@ -34,12 +34,16 @@ pub fn goto_definition_v2(
         {
             let owner_type = object_type.as_ref().map(|value| value.type_name());
 
-            if let Some(loc) = repo.find_method_definition_location(owner_type.as_deref(), function_name) {
+            if let Some(loc) =
+                repo.find_method_definition_location(owner_type.as_deref(), function_name)
+            {
                 return definition_target_from_location(loc);
             }
 
             if owner_type.is_none() {
-                if let Some(span) = find_local_method_declaration_span(ir_program.as_ref(), function_name) {
+                if let Some(span) =
+                    find_local_method_declaration_span(ir_program.as_ref(), function_name)
+                {
                     return Some(DefinitionTarget {
                         file_path: PathBuf::from(current_file_path),
                         span: Some(span),
@@ -56,7 +60,9 @@ pub fn goto_definition_v2(
         character,
     )?;
 
-    let module_paths = if let ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) = &type_resolution.result {
+    let module_paths = if let ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) =
+        &type_resolution.result
+    {
         let type_key = format!("{}.{}", cfg.kind.to_prefix(), cfg.name);
         repo.find_type(&type_key)
             .and_then(|raw| raw.module_paths.clone())
@@ -95,7 +101,9 @@ fn get_type_at_position_with_semantic_program(
     line: u32,
     column: u32,
 ) -> Option<TypeResolution> {
-    if let Some((var_name, _type_hint, scope_id)) = ir_program.find_variable_with_scope(line, column) {
+    if let Some((var_name, _type_hint, scope_id)) =
+        ir_program.find_variable_with_scope(line, column)
+    {
         return Some(resolver.resolve_variable_with_context(
             &var_name,
             &ir_program.symbols,
@@ -126,7 +134,9 @@ fn get_type_at_position_with_semantic_program(
     }
 }
 
-fn definition_target_from_location(definition_location: TypeDefinitionLocation) -> Option<DefinitionTarget> {
+fn definition_target_from_location(
+    definition_location: TypeDefinitionLocation,
+) -> Option<DefinitionTarget> {
     match definition_location {
         TypeDefinitionLocation::Configuration {
             metadata_path,

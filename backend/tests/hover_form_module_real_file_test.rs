@@ -33,7 +33,8 @@ fn target_file_path() -> PathBuf {
 
 #[tokio::test]
 async fn hover_for_object_tabular_section_in_form_module_has_type() {
-    let deps_bundle = support::deps_bundle_v2_for_paths(None, Some(&test_config_path()), Some("8.3.25"));
+    let deps_bundle =
+        support::deps_bundle_v2_for_paths(None, Some(&test_config_path()), Some("8.3.25"));
 
     let file_path = target_file_path();
     let content = std::fs::read_to_string(&file_path).expect("read Module.bsl");

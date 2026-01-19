@@ -17,12 +17,20 @@ mod signature_help_handler;
 
 use std::sync::Arc;
 
-use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId};
-use bsl_backend::system::{IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IntellisenseIndexStore, TypeKind};
+use bsl_analysis_v2::{
+    AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId,
+};
+use bsl_backend::system::{
+    IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IntellisenseIndexStore, TypeKind,
+};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
-use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource};
+use bsl_shared::domain::signature_index::{
+    ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource,
+};
 use bsl_shared::domain::type_id::TypeId;
-use bsl_shared::domain::types::{ParameterInfo, RawDataSource, RawMethodData, RawParamData, RawTypeData};
+use bsl_shared::domain::types::{
+    ParameterInfo, RawDataSource, RawMethodData, RawParamData, RawTypeData,
+};
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticProgram;
 use bsl_shared::TypeResolver;
@@ -152,7 +160,10 @@ fn build_env() -> TestEnv {
     let repository = build_repository_with_array();
     let deps = build_deps(repository);
     let index_snapshot = build_index_with_keywords();
-    TestEnv { deps, index_snapshot }
+    TestEnv {
+        deps,
+        index_snapshot,
+    }
 }
 
 fn build_v2_ir(
@@ -184,8 +195,16 @@ fn build_v2_ir(
     });
 
     let analysis = host.analysis();
-    let file_content = analysis.file_text(file_id).ok().flatten().expect("file_text");
-    let file_path = analysis.file_path(file_id).ok().flatten().expect("file_path");
+    let file_content = analysis
+        .file_text(file_id)
+        .ok()
+        .flatten()
+        .expect("file_text");
+    let file_path = analysis
+        .file_path(file_id)
+        .ok()
+        .flatten()
+        .expect("file_path");
     let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
 
     (file_content, file_path, ir_program)
@@ -261,7 +280,10 @@ async fn lsp_completion_resolve_respects_snippet_support() {
     let resolved_plain =
         completion_handler::handle_completion_resolve(item, Some(env.deps), false).await;
 
-    assert_eq!(resolved_snippet.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(
+        resolved_snippet.insert_text_format,
+        Some(InsertTextFormat::SNIPPET)
+    );
     assert!(resolved_snippet
         .insert_text
         .as_deref()

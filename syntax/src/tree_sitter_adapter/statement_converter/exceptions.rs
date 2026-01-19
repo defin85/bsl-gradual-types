@@ -29,9 +29,7 @@ pub(crate) fn convert_try_statement_cached(
                 in_except = true;
             }
             _ => {
-                if let Some(stmt) =
-                    super::dispatch_statement_cached(&child, source, line_index)?
-                {
+                if let Some(stmt) = super::dispatch_statement_cached(&child, source, line_index)? {
                     if in_except {
                         except_body.push(stmt);
                     } else {

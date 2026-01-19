@@ -4,9 +4,7 @@
 
 use tracing::info;
 
-use bsl_shared::api::semantic_dtos::{
-    RenderedHtmlDto, SemanticNodeDto, SemanticTreeDto,
-};
+use bsl_shared::api::semantic_dtos::{RenderedHtmlDto, SemanticNodeDto, SemanticTreeDto};
 use bsl_type_visualization::{HtmlRenderer, RenderOptions, ThemeMode};
 
 pub fn semantic_tree_from_ir(

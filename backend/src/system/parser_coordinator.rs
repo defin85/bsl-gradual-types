@@ -6,14 +6,14 @@
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use tracing::{debug, error, warn};
 use tree_sitter::{InputEdit, Parser, Point};
 use url::Url;
 
-use crate::parsing::ParseResult;
 use crate::parsing::bsl::ast::{Program, Statement};
+use crate::parsing::ParseResult;
 use crate::system::ast_cache::AstCache;
 use crate::system::disk_cache::{DiskCache, DiskCacheKey};
 use crate::system::intellisense_index::{
@@ -273,9 +273,18 @@ impl ParserCoordinator {
             ) {
                 Ok((new_tree, program)) => {
                     // Кешируем новое дерево
-                    self.tree_cache
-                        .update(&file_path, new_tree, new_content.clone(), new_tree_hash);
-                    self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
+                    self.tree_cache.update(
+                        &file_path,
+                        new_tree,
+                        new_content.clone(),
+                        new_tree_hash,
+                    );
+                    self.store_ast_cache(
+                        new_hash,
+                        &program,
+                        Some(file_path.as_path()),
+                        &new_content,
+                    );
                     return Ok(program);
                 }
                 Err(e) => {
@@ -373,17 +382,12 @@ impl ParserCoordinator {
 
     fn store_ast_memory(&self, content_hash: [u8; 32], result: &ParseResult) {
         if self.cache_enabled() {
-            self.ast_cache
-                .put(content_hash, Arc::new(result.clone()));
+            self.ast_cache.put(content_hash, Arc::new(result.clone()));
         }
     }
 
     fn update_symbol_index(&self, file_path: &Path, result: &ParseResult) {
-        let index = self
-            .symbol_index
-            .read()
-            .ok()
-            .and_then(|slot| slot.clone());
+        let index = self.symbol_index.read().ok().and_then(|slot| slot.clone());
         let Some(index) = index else {
             return;
         };
@@ -676,7 +680,12 @@ fn collect_symbol_items_from_statements(
                 }
                 collect_symbol_items_from_statements(body, uri, false, items);
             }
-            Statement::For { variable, body, span, .. } => {
+            Statement::For {
+                variable,
+                body,
+                span,
+                ..
+            } => {
                 items.push(symbol_item(
                     variable,
                     SymbolKind::Variable,
@@ -686,7 +695,12 @@ fn collect_symbol_items_from_statements(
                 ));
                 collect_symbol_items_from_statements(body, uri, false, items);
             }
-            Statement::ForEach { variable, body, span, .. } => {
+            Statement::ForEach {
+                variable,
+                body,
+                span,
+                ..
+            } => {
                 items.push(symbol_item(
                     variable,
                     SymbolKind::Variable,
@@ -817,7 +831,8 @@ impl TreeSitterParser {
                 tree.edit(&input_edit);
                 debug!("Applied edit: {:?}", input_edit);
 
-                current_source = apply_edit_to_source(&current_source, start_byte, old_end_byte, &edit.new_text);
+                current_source =
+                    apply_edit_to_source(&current_source, start_byte, old_end_byte, &edit.new_text);
             }
 
             if current_source != new_content {
@@ -864,7 +879,8 @@ impl TreeSitterParser {
             edit.old_end_utf16_column,
         );
 
-        let start_position = index.utf16_position_to_point(source, edit.start_line, edit.start_utf16_column);
+        let start_position =
+            index.utf16_position_to_point(source, edit.start_line, edit.start_utf16_column);
         let old_end_position =
             index.utf16_position_to_point(source, edit.old_end_line, edit.old_end_utf16_column);
 
@@ -907,7 +923,12 @@ fn apply_text_to_point(start: Point, text: &str) -> Point {
     Point::new(row, column)
 }
 
-fn apply_edit_to_source(source: &str, start_byte: usize, old_end_byte: usize, new_text: &str) -> String {
+fn apply_edit_to_source(
+    source: &str,
+    start_byte: usize,
+    old_end_byte: usize,
+    new_text: &str,
+) -> String {
     let start = start_byte.min(source.len());
     let end = old_end_byte.min(source.len());
 
@@ -1020,10 +1041,7 @@ mod symbol_index_tests {
     #[test]
     fn collect_symbol_items_from_program() {
         let span = Span::new(1, 1, 1, 2);
-        let expr = Expression::Number {
-            value: 1.0,
-            span,
-        };
+        let expr = Expression::Number { value: 1.0, span };
         let program = Program {
             statements: vec![
                 Statement::VarDeclaration {
@@ -1084,17 +1102,72 @@ mod symbol_index_tests {
 
         let items = collect_symbol_items(&program, "file:///test.bsl");
 
-        assert!(has_symbol(&items, "x", SymbolKind::Variable, SymbolScope::Module));
-        assert!(has_symbol(&items, "Func", SymbolKind::Function, SymbolScope::Module));
-        assert!(has_symbol(&items, "a", SymbolKind::Parameter, SymbolScope::Local));
-        assert!(has_symbol(&items, "b", SymbolKind::Parameter, SymbolScope::Local));
-        assert!(has_symbol(&items, "y", SymbolKind::Variable, SymbolScope::Local));
-        assert!(has_symbol(&items, "i", SymbolKind::Variable, SymbolScope::Local));
-        assert!(has_symbol(&items, "Proc", SymbolKind::Procedure, SymbolScope::Module));
-        assert!(has_symbol(&items, "p", SymbolKind::Parameter, SymbolScope::Local));
-        assert!(has_symbol(&items, "item", SymbolKind::Variable, SymbolScope::Local));
-        assert!(has_symbol(&items, "z", SymbolKind::Variable, SymbolScope::Local));
-        assert!(has_symbol(&items, "w", SymbolKind::Variable, SymbolScope::Local));
+        assert!(has_symbol(
+            &items,
+            "x",
+            SymbolKind::Variable,
+            SymbolScope::Module
+        ));
+        assert!(has_symbol(
+            &items,
+            "Func",
+            SymbolKind::Function,
+            SymbolScope::Module
+        ));
+        assert!(has_symbol(
+            &items,
+            "a",
+            SymbolKind::Parameter,
+            SymbolScope::Local
+        ));
+        assert!(has_symbol(
+            &items,
+            "b",
+            SymbolKind::Parameter,
+            SymbolScope::Local
+        ));
+        assert!(has_symbol(
+            &items,
+            "y",
+            SymbolKind::Variable,
+            SymbolScope::Local
+        ));
+        assert!(has_symbol(
+            &items,
+            "i",
+            SymbolKind::Variable,
+            SymbolScope::Local
+        ));
+        assert!(has_symbol(
+            &items,
+            "Proc",
+            SymbolKind::Procedure,
+            SymbolScope::Module
+        ));
+        assert!(has_symbol(
+            &items,
+            "p",
+            SymbolKind::Parameter,
+            SymbolScope::Local
+        ));
+        assert!(has_symbol(
+            &items,
+            "item",
+            SymbolKind::Variable,
+            SymbolScope::Local
+        ));
+        assert!(has_symbol(
+            &items,
+            "z",
+            SymbolKind::Variable,
+            SymbolScope::Local
+        ));
+        assert!(has_symbol(
+            &items,
+            "w",
+            SymbolKind::Variable,
+            SymbolScope::Local
+        ));
     }
 
     #[test]
@@ -1120,9 +1193,29 @@ mod symbol_index_tests {
             .expect("symbols missing")
             .as_ref();
 
-        assert!(has_symbol(items, "x", SymbolKind::Variable, SymbolScope::Module));
-        assert!(has_symbol(items, "Test", SymbolKind::Procedure, SymbolScope::Module));
-        assert!(has_symbol(items, "p", SymbolKind::Parameter, SymbolScope::Local));
-        assert!(has_symbol(items, "y", SymbolKind::Variable, SymbolScope::Local));
+        assert!(has_symbol(
+            items,
+            "x",
+            SymbolKind::Variable,
+            SymbolScope::Module
+        ));
+        assert!(has_symbol(
+            items,
+            "Test",
+            SymbolKind::Procedure,
+            SymbolScope::Module
+        ));
+        assert!(has_symbol(
+            items,
+            "p",
+            SymbolKind::Parameter,
+            SymbolScope::Local
+        ));
+        assert!(has_symbol(
+            items,
+            "y",
+            SymbolKind::Variable,
+            SymbolScope::Local
+        ));
     }
 }

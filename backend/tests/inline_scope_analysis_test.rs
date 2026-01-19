@@ -18,8 +18,7 @@ async fn test_inline_scope_simple_assignment() {
     "#;
 
     // Hover на "МассивДанных" (строка 2, колонка 4)
-    let hover_result =
-        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 4);
+    let hover_result = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 4);
 
     assert!(hover_result.is_some(), "Hover должен вернуть информацию");
     let hover_text = hover_result.unwrap();
@@ -44,8 +43,7 @@ async fn test_inline_scope_with_methods() {
     "#;
 
     // Hover на "МассивДанных" перед вызовом метода (строка 3, колонка 4)
-    let hover_result =
-        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 3, 4);
+    let hover_result = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 3, 4);
 
     assert!(hover_result.is_some(), "Hover должен вернуть информацию");
     let hover_text = hover_result.unwrap();
@@ -74,8 +72,7 @@ async fn test_inline_scope_multiple_variables() {
     "#;
 
     // Hover на "СтруктураДанных" (строка 3, колонка 4)
-    let hover_result =
-        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 3, 4);
+    let hover_result = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 3, 4);
 
     assert!(hover_result.is_some(), "Hover должен вернуть информацию");
     let hover_text = hover_result.unwrap();
@@ -109,8 +106,7 @@ async fn test_inline_scope_nested_scope() {
     "#;
 
     // Hover на "Локальная" внутри вложенной функции (строка 5, колонка 8)
-    let hover_result =
-        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 5, 8);
+    let hover_result = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 5, 8);
 
     assert!(hover_result.is_some(), "Hover должен вернуть информацию");
     let hover_text = hover_result.unwrap();
@@ -136,8 +132,7 @@ async fn test_inline_scope_unknown_type() {
     "#;
 
     // Hover на "НеизвестнаяПеременная" (строка 2, колонка 4)
-    let hover_result =
-        support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 4);
+    let hover_result = support::hover_for_code(deps_bundle.as_ref(), "inline.bsl", code, 2, 4);
 
     assert!(hover_result.is_some(), "Hover должен вернуть информацию");
     let hover_text = hover_result.unwrap();

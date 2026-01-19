@@ -7,16 +7,16 @@
 //! - `language_server`: Full LanguageServer trait implementation
 //! - `command_handlers`: Command-specific handlers
 
+mod analysis_v2_runtime;
 mod command_handlers;
 mod core;
 mod language_server;
-mod analysis_v2_runtime;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::sync::atomic::AtomicU32;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;

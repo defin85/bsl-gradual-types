@@ -124,8 +124,10 @@ impl BasicObservability {
 
     pub fn record_completion_resolve_latency(&self, duration: Duration) {
         self.metrics.increment("completion_resolve_total");
-        self.metrics
-            .observe_histogram("completion_resolve_duration_ms", duration.as_millis() as f64);
+        self.metrics.observe_histogram(
+            "completion_resolve_duration_ms",
+            duration.as_millis() as f64,
+        );
     }
 
     pub fn record_signature_help_latency(&self, duration: Duration) {
@@ -167,10 +169,8 @@ impl BasicObservability {
         };
 
         self.metrics.increment(total_metric);
-        self.metrics.observe_histogram(
-            histogram_metric,
-            duration.as_millis() as f64,
-        );
+        self.metrics
+            .observe_histogram(histogram_metric, duration.as_millis() as f64);
     }
 
     pub fn record_intellisense_v2_snapshot_latency(&self, kind: &str, duration: Duration) {
@@ -198,10 +198,8 @@ impl BasicObservability {
         };
 
         self.metrics.increment(total_metric);
-        self.metrics.observe_histogram(
-            histogram_metric,
-            duration.as_millis() as f64,
-        );
+        self.metrics
+            .observe_histogram(histogram_metric, duration.as_millis() as f64);
     }
 
     pub fn record_intellisense_v2_ir_query_latency(&self, kind: &str, duration: Duration) {
@@ -221,10 +219,8 @@ impl BasicObservability {
         };
 
         self.metrics.increment(total_metric);
-        self.metrics.observe_histogram(
-            histogram_metric,
-            duration.as_millis() as f64,
-        );
+        self.metrics
+            .observe_histogram(histogram_metric, duration.as_millis() as f64);
     }
 
     pub fn record_intellisense_v2_syntax_diagnostics_query_latency(&self, duration: Duration) {
@@ -287,20 +283,16 @@ impl BasicObservability {
     ) {
         self.metrics
             .add_counter("completion_candidates_total", total_candidates as u64);
-        self.metrics.add_counter(
-            "completion_dedup_removed_total",
-            dedup_removed as u64,
-        );
-        self.metrics.add_counter("completion_prefix_exact_total", prefix_exact as u64);
-        self.metrics.add_counter(
-            "completion_prefix_starts_total",
-            prefix_starts as u64,
-        );
-        self.metrics.add_counter(
-            "completion_prefix_contains_total",
-            prefix_contains as u64,
-        );
-        self.metrics.add_counter("completion_prefix_none_total", prefix_none as u64);
+        self.metrics
+            .add_counter("completion_dedup_removed_total", dedup_removed as u64);
+        self.metrics
+            .add_counter("completion_prefix_exact_total", prefix_exact as u64);
+        self.metrics
+            .add_counter("completion_prefix_starts_total", prefix_starts as u64);
+        self.metrics
+            .add_counter("completion_prefix_contains_total", prefix_contains as u64);
+        self.metrics
+            .add_counter("completion_prefix_none_total", prefix_none as u64);
         self.metrics
             .add_counter("completion_member_access_total", member_access as u64);
         self.metrics
@@ -466,16 +458,19 @@ impl SimpleMetrics {
         }
 
         let mut rates = HashMap::new();
-        if let Some(rate) = compute_rate(&counters, "completion_incomplete_total", "completion_total")
+        if let Some(rate) =
+            compute_rate(&counters, "completion_incomplete_total", "completion_total")
         {
             rates.insert("completion_incomplete_rate".to_string(), rate);
         }
         if let Some(rate) = compute_rate(&counters, "completion_error_total", "completion_total") {
             rates.insert("completion_error_rate".to_string(), rate);
         }
-        if let Some(rate) =
-            compute_rate(&counters, "signature_help_empty_total", "signature_help_total")
-        {
+        if let Some(rate) = compute_rate(
+            &counters,
+            "signature_help_empty_total",
+            "signature_help_total",
+        ) {
             rates.insert("signature_help_empty_rate".to_string(), rate);
         }
 
@@ -489,7 +484,11 @@ impl SimpleMetrics {
     }
 }
 
-fn compute_rate(counters: &HashMap<String, u64>, numerator: &str, denominator: &str) -> Option<f64> {
+fn compute_rate(
+    counters: &HashMap<String, u64>,
+    numerator: &str,
+    denominator: &str,
+) -> Option<f64> {
     let numerator = *counters.get(numerator)? as f64;
     let denominator = *counters.get(denominator)? as f64;
     if denominator == 0.0 {

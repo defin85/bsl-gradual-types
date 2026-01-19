@@ -304,10 +304,7 @@ impl AstToIrConverter {
         // Milestone 2.11 Task B1: DEBUG логи для AST -> IR конвертации
         debug!(
             "AST -> IR Span conversion: {}:{} - {}:{}",
-            ast_span.start_line,
-            ast_span.start_column,
-            ast_span.end_line,
-            ast_span.end_column
+            ast_span.start_line, ast_span.start_column, ast_span.end_line, ast_span.end_column
         );
 
         ast_span

@@ -92,7 +92,9 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
     let file_uri = Some("file:///m5_metadata_completion_fixture.bsl");
     let index_snapshot = deps_bundle.index_snapshot.as_ref();
     assert!(
-        index_snapshot.metadata_index.contains_key(&MetadataKind::Document),
+        index_snapshot
+            .metadata_index
+            .contains_key(&MetadataKind::Document),
         "index snapshot should contain document metadata, kinds: {:?}",
         index_snapshot.metadata_index.keys().collect::<Vec<_>>()
     );
@@ -121,7 +123,12 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         .iter()
         .find(|c| c.item.label == "ЗаказНаряды")
         .map(|c| &c.item)
-        .unwrap_or_else(|| panic!("Документы. should include ЗаказНаряды, labels: {:?}", labels));
+        .unwrap_or_else(|| {
+            panic!(
+                "Документы. should include ЗаказНаряды, labels: {:?}",
+                labels
+            )
+        });
     assert!(
         matches!(item.kind, bsl_shared::domain::CompletionKind::Document),
         "Документы. items should be DOCUMENT kind"
@@ -189,8 +196,7 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
 
     // 4) ...СоздатьДокумент().ПолучитьСсылкуНового(). -> методы ссылки
     let line = 4u32;
-    let line_text =
-        "    Документы.ЗаказНаряды.СоздатьДокумент().ПолучитьСсылкуНового().";
+    let line_text = "    Документы.ЗаказНаряды.СоздатьДокумент().ПолучитьСсылкуНового().";
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,

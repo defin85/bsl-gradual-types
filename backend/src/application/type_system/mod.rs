@@ -24,14 +24,14 @@ pub mod extractors;
 mod formatters;
 mod services;
 
-pub use services::web_api_service;
-pub use services::completion_service::{CompletionContext, CompletionStats, get_completion};
 pub use services::completion_service::get_completion_with_semantic_program;
 pub use services::completion_service::get_completion_with_semantic_program_snapshot;
 pub use services::completion_service::get_completion_with_semantic_program_snapshot_v2;
 pub use services::completion_service::{
-    build_call_snippet, CompletionResolveDetails, resolve_method_completion, resolve_type_details,
+    build_call_snippet, resolve_method_completion, resolve_type_details, CompletionResolveDetails,
 };
+pub use services::completion_service::{get_completion, CompletionContext, CompletionStats};
+pub use services::definition_service::{goto_definition_v2, DefinitionTarget};
 pub use services::hover_service::get_hover_info_with_semantic_program;
-pub use services::definition_service::{DefinitionTarget, goto_definition_v2};
-pub use services::signature_help_service::{SignatureHelpData, get_signature_help_v2};
+pub use services::signature_help_service::{get_signature_help_v2, SignatureHelpData};
+pub use services::web_api_service;

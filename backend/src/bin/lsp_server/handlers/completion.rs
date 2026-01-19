@@ -2,24 +2,24 @@
 //!
 //! Handles textDocument/completion requests.
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
-use tower_lsp::lsp_types::*;
 use serde_json::json;
+use std::sync::Arc;
+use tower_lsp::lsp_types::*;
 use tracing::error;
 
-use bsl_backend::application::{
-    get_completion_with_semantic_program_snapshot, get_completion_with_semantic_program_snapshot_v2,
-};
-use bsl_backend::application::CompletionStats;
 use bsl_backend::application::type_system::{
     build_call_snippet, resolve_method_completion, resolve_type_details,
 };
+use bsl_backend::application::CompletionStats;
+use bsl_backend::application::{
+    get_completion_with_semantic_program_snapshot, get_completion_with_semantic_program_snapshot_v2,
+};
 use bsl_backend::system::IndexSnapshot;
-use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
 use bsl_shared::domain::types::{MetadataKind, TypeResolution};
+use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::ir::SemanticProgram;
 
 const COMPLETION_CANDIDATE_ID_VERSION: u32 = 1;
@@ -174,7 +174,12 @@ pub async fn handle_completion_resolve(
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
 
     let resolved = if let Some(candidate_id) = parse_candidate_id(&item) {
-        resolve_by_candidate_id(&candidate_id, deps.as_ref(), &metadata_lookup, snippet_support)
+        resolve_by_candidate_id(
+            &candidate_id,
+            deps.as_ref(),
+            &metadata_lookup,
+            snippet_support,
+        )
     } else {
         let (kind, owner_type) = parse_completion_data(&item);
         resolve_legacy(
@@ -211,8 +216,13 @@ fn to_lsp_completion(
     deps: Option<&bsl_analysis_v2::SemanticDeps>,
 ) -> CompletionItem {
     let kind_tag = completion_kind_tag(&item);
-    let candidate_id =
-        build_candidate_id(kind_tag, &item, owner_type.as_deref(), &origin_sources, deps);
+    let candidate_id = build_candidate_id(
+        kind_tag,
+        &item,
+        owner_type.as_deref(),
+        &origin_sources,
+        deps,
+    );
     let kind = map_completion_kind(item.kind);
     let mut insert_text = item.insert_text;
     let contains_snippet = insert_text
@@ -439,7 +449,10 @@ fn resolve_method_by_candidate_id(
         .or_else(|| deps.signature_index.find_method(owner_type, name).cloned());
 
     if let Some(signature) = signature {
-        let detail = signature.return_type.clone().filter(|value| !value.is_empty());
+        let detail = signature
+            .return_type
+            .clone()
+            .filter(|value| !value.is_empty());
         let documentation = signature.description.clone();
         let params: Vec<(String, bool)> = signature
             .params
@@ -467,7 +480,10 @@ fn resolve_function_by_candidate_id(
 ) -> Option<(Option<String>, Option<String>, Option<String>)> {
     let signature = deps.signature_index.find_global_function(name).cloned()?;
 
-    let detail = signature.return_type.clone().filter(|value| !value.is_empty());
+    let detail = signature
+        .return_type
+        .clone()
+        .filter(|value| !value.is_empty());
     let documentation = signature.description.clone();
     let params: Vec<(String, bool)> = signature
         .params
@@ -510,7 +526,11 @@ fn resolve_metadata_by_candidate_id(
 ) -> Option<(Option<String>, Option<String>, Option<String>)> {
     let type_name = format!("{}.{}", kind.to_prefix(), name);
     let documentation = resolve_type_details(&type_name, metadata_lookup).and_then(|(_, doc)| doc);
-    Some((Some(kind.to_russian_name().to_string()), documentation, None))
+    Some((
+        Some(kind.to_russian_name().to_string()),
+        documentation,
+        None,
+    ))
 }
 
 fn resolve_legacy(
@@ -523,9 +543,14 @@ fn resolve_legacy(
 ) -> Option<(Option<String>, Option<String>, Option<String>)> {
     match (kind, owner_type) {
         (Some("method"), Some(owner)) => {
-            if let Some(signature) = deps.repository.find_method_signature(Some(owner), &item.label)
+            if let Some(signature) = deps
+                .repository
+                .find_method_signature(Some(owner), &item.label)
             {
-                let detail = signature.return_type.clone().filter(|value| !value.is_empty());
+                let detail = signature
+                    .return_type
+                    .clone()
+                    .filter(|value| !value.is_empty());
                 let documentation = signature.description.clone();
                 let params: Vec<(String, bool)> = signature
                     .params
@@ -551,7 +576,10 @@ fn resolve_legacy(
             .repository
             .find_method_signature(None, &item.label)
             .map(|signature| {
-                let detail = signature.return_type.clone().filter(|value| !value.is_empty());
+                let detail = signature
+                    .return_type
+                    .clone()
+                    .filter(|value| !value.is_empty());
                 let documentation = signature.description.clone();
                 let params: Vec<(String, bool)> = signature
                     .params
@@ -723,11 +751,11 @@ mod tests {
 
     use bsl_backend::system::IntellisenseIndexStore;
     use bsl_shared::domain::repository::InMemoryTypeRepository;
-    use bsl_shared::TypeRepository;
     use bsl_shared::domain::signature_index::{
         ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource,
     };
     use bsl_shared::domain::types::{ParameterInfo, RawDataSource, RawPropertyData, RawTypeData};
+    use bsl_shared::TypeRepository;
     use bsl_shared::TypeResolver;
     use tower_lsp::lsp_types::Url;
 
@@ -1057,8 +1085,16 @@ mod tests {
         });
 
         let analysis = host.analysis();
-        let file_content = analysis.file_text(file_id).ok().flatten().expect("file_text");
-        let file_path = analysis.file_path(file_id).ok().flatten().expect("file_path");
+        let file_content = analysis
+            .file_text(file_id)
+            .ok()
+            .flatten()
+            .expect("file_text");
+        let file_path = analysis
+            .file_path(file_id)
+            .ok()
+            .flatten()
+            .expect("file_path");
         let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
 
         (file_content, file_path, ir_program)
@@ -1074,8 +1110,7 @@ mod tests {
         let index_snapshot = index.snapshot();
         let deps = env.deps.clone();
 
-        let (file_content, file_path, ir_program) =
-            build_v2_ir(&content, &uri, deps.clone());
+        let (file_content, file_path, ir_program) = build_v2_ir(&content, &uri, deps.clone());
         let v2 = handle_completion_v2(
             file_content.clone(),
             file_path.clone(),
@@ -1125,8 +1160,7 @@ mod tests {
         let index_snapshot = env.index.snapshot();
         let deps = env.deps;
 
-        let (file_content, file_path, ir_program) =
-            build_v2_ir(&content, &uri, deps.clone());
+        let (file_content, file_path, ir_program) = build_v2_ir(&content, &uri, deps.clone());
         let response = handle_completion_v2(
             file_content,
             file_path,
@@ -1151,10 +1185,8 @@ mod tests {
             .find(|entry| entry.label == "Добавить")
             .expect("Добавить completion");
 
-        let resolved_true =
-            handle_completion_resolve(item.clone(), Some(deps.clone()), true).await;
-        let resolved_false =
-            handle_completion_resolve(item.clone(), Some(deps), false).await;
+        let resolved_true = handle_completion_resolve(item.clone(), Some(deps.clone()), true).await;
+        let resolved_false = handle_completion_resolve(item.clone(), Some(deps), false).await;
 
         let snapshot = serde_json::json!({
             "completion": {
@@ -1208,10 +1240,8 @@ mod tests {
             Some(deps.as_ref()),
         );
 
-        let file_resolved =
-            handle_completion_resolve(file_symbol, Some(deps.clone()), false).await;
-        let module_resolved =
-            handle_completion_resolve(module_symbol, Some(deps), false).await;
+        let file_resolved = handle_completion_resolve(file_symbol, Some(deps.clone()), false).await;
+        let module_resolved = handle_completion_resolve(module_symbol, Some(deps), false).await;
 
         assert_eq!(
             file_resolved.detail, None,

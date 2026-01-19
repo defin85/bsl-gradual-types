@@ -2,7 +2,7 @@
 
 use axum::http::Request;
 use bsl_backend::presentation::web::{create_router, AppState};
-use bsl_backend::system::{EffectiveStartupInputs, SystemCoordinator, build_deps_bundle_v2};
+use bsl_backend::system::{build_deps_bundle_v2, EffectiveStartupInputs, SystemCoordinator};
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -31,7 +31,11 @@ async fn startup_progress_endpoint_returns_json() {
 
     let app = create_router(state, "backend/static", true);
     let resp = app
-        .oneshot(Request::get("/api/startup/progress").body(axum::body::Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/api/startup/progress")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -42,6 +46,9 @@ async fn startup_progress_endpoint_returns_json() {
 
     let json: serde_json::Value = serde_json::from_slice(&body).expect("valid json");
     assert!(json.get("phase").is_some(), "expected field `phase`");
-    assert!(json.get("percentage").is_some(), "expected field `percentage`");
+    assert!(
+        json.get("percentage").is_some(),
+        "expected field `percentage`"
+    );
     assert!(json.get("done").is_some(), "expected field `done`");
 }

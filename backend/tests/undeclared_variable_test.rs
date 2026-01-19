@@ -21,7 +21,10 @@ fn undeclared_variable_in_method_argument_is_reported() {
 "#;
 
     let messages = undeclared_messages(code);
-    assert!(!messages.is_empty(), "expected undeclared variable diagnostic");
+    assert!(
+        !messages.is_empty(),
+        "expected undeclared variable diagnostic"
+    );
     assert!(
         messages.iter().any(|msg| msg.contains("необъявленная")),
         "expected variable name in message: {:?}",
@@ -40,7 +43,11 @@ fn declared_variable_is_not_reported() {
 "#;
 
     let messages = undeclared_messages(code);
-    assert!(messages.is_empty(), "unexpected diagnostics: {:?}", messages);
+    assert!(
+        messages.is_empty(),
+        "unexpected diagnostics: {:?}",
+        messages
+    );
 }
 
 #[test]
@@ -53,6 +60,9 @@ fn function_parameter_is_treated_as_declared() {
 "#;
 
     let messages = undeclared_messages(code);
-    assert!(messages.is_empty(), "unexpected diagnostics: {:?}", messages);
+    assert!(
+        messages.is_empty(),
+        "unexpected diagnostics: {:?}",
+        messages
+    );
 }
-

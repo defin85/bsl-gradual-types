@@ -184,9 +184,9 @@ fn walk_stmt_ts(
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "expression" || child.kind() == "method_call" {
-                walk_expr_ts(&child, source, calls, env);
+                    walk_expr_ts(&child, source, calls, env);
+                }
             }
-        }
         }
         _ => {}
     }
@@ -654,11 +654,7 @@ fn infer_expr_type_ts(
         "new_expression" | "new_expression_method" => extract_new_type_ts(node, source),
         _ => {
             let text = node_text(node, source).to_lowercase();
-            if text == "истина"
-                || text == "true"
-                || text == "ложь"
-                || text == "false"
-            {
+            if text == "истина" || text == "true" || text == "ложь" || text == "false" {
                 Some("Булево".to_string())
             } else {
                 None

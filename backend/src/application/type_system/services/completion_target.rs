@@ -119,11 +119,7 @@ pub fn extract_member_access_receiver_expression(
     parse_expression_snippet(receiver_text)
 }
 
-fn extract_member_access_receiver_text(
-    file_content: &str,
-    line: u32,
-    column: u32,
-) -> Option<&str> {
+fn extract_member_access_receiver_text(file_content: &str, line: u32, column: u32) -> Option<&str> {
     let line_content = file_content.lines().nth(line as usize)?;
     let cursor_byte_in_line = utf16_to_byte_offset(line_content, column);
     let line_prefix = line_content.get(..cursor_byte_in_line)?;
@@ -424,7 +420,12 @@ fn extract_choice_result_expression_slices(receiver_expr_text: &str) -> Option<V
         let expr_end = keywords
             .iter()
             .filter(|next| next.start >= expr_start)
-            .filter(|next| matches!(next.kind, ChoiceKeywordKind::When | ChoiceKeywordKind::Else | ChoiceKeywordKind::End))
+            .filter(|next| {
+                matches!(
+                    next.kind,
+                    ChoiceKeywordKind::When | ChoiceKeywordKind::Else | ChoiceKeywordKind::End
+                )
+            })
             .map(|next| next.start)
             .min()
             .unwrap_or(receiver_expr_text.len());
@@ -522,7 +523,9 @@ fn collect_choice_keywords(
         }
 
         if paren_depth == 0 && bracket_depth == 0 {
-            if let Some(end) = keyword_at(lower, i, "выбор").or_else(|| keyword_at(lower, i, "case")) {
+            if let Some(end) =
+                keyword_at(lower, i, "выбор").or_else(|| keyword_at(lower, i, "case"))
+            {
                 keywords.push(ChoiceKeyword {
                     kind: ChoiceKeywordKind::Case,
                     start: i,
@@ -532,7 +535,9 @@ fn collect_choice_keywords(
                 continue;
             }
 
-            if let Some(end) = keyword_at(lower, i, "когда").or_else(|| keyword_at(lower, i, "when")) {
+            if let Some(end) =
+                keyword_at(lower, i, "когда").or_else(|| keyword_at(lower, i, "when"))
+            {
                 keywords.push(ChoiceKeyword {
                     kind: ChoiceKeywordKind::When,
                     start: i,
@@ -542,7 +547,9 @@ fn collect_choice_keywords(
                 continue;
             }
 
-            if let Some(end) = keyword_at(lower, i, "тогда").or_else(|| keyword_at(lower, i, "then")) {
+            if let Some(end) =
+                keyword_at(lower, i, "тогда").or_else(|| keyword_at(lower, i, "then"))
+            {
                 keywords.push(ChoiceKeyword {
                     kind: ChoiceKeywordKind::Then,
                     start: i,
@@ -552,7 +559,9 @@ fn collect_choice_keywords(
                 continue;
             }
 
-            if let Some(end) = keyword_at(lower, i, "иначе").or_else(|| keyword_at(lower, i, "else")) {
+            if let Some(end) =
+                keyword_at(lower, i, "иначе").or_else(|| keyword_at(lower, i, "else"))
+            {
                 keywords.push(ChoiceKeyword {
                     kind: ChoiceKeywordKind::Else,
                     start: i,
@@ -693,12 +702,16 @@ mod tests {
         let parse_result = bsl_syntax::parse_fast(content).expect("parse");
         let (line, dot_col) = utf16_position(content, "Add().");
         let column = dot_col + "Add().".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
-        let chain =
-            extract_member_access_receiver_chain(content, line, column, &parse_result).expect("chain");
+        let chain = extract_member_access_receiver_chain(content, line, column, &parse_result)
+            .expect("chain");
         let name_chain = chain.to_name_chain().expect("name chain");
         assert_eq!(
             name_chain,
-            vec!["Table".to_string(), "Columns".to_string(), "Add".to_string()]
+            vec![
+                "Table".to_string(),
+                "Columns".to_string(),
+                "Add".to_string()
+            ]
         );
     }
 
@@ -712,8 +725,8 @@ mod tests {
         let parse_result = bsl_syntax::parse_fast(content).expect("parse");
         let (line, dot_col) = utf16_position(content, "e.");
         let column = dot_col + "e.".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
-        let chain =
-            extract_member_access_receiver_chain(content, line, column, &parse_result).expect("chain");
+        let chain = extract_member_access_receiver_chain(content, line, column, &parse_result)
+            .expect("chain");
 
         assert_eq!(chain.head, ReceiverChainHead::Identifier("a".to_string()));
         assert_eq!(
@@ -750,8 +763,9 @@ mod tests {
         let (line, dot_col) = utf16_position(content, "Add().");
         let column = dot_col + "Add().".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
 
-        let target = extract_completion_target_for_member_access(content, line, column, &parse_result)
-            .expect("target");
+        let target =
+            extract_completion_target_for_member_access(content, line, column, &parse_result)
+                .expect("target");
 
         assert_eq!(target.kind, CompletionTargetKind::MemberAccess);
         assert!(target.receiver_expression.is_some());
@@ -761,23 +775,23 @@ mod tests {
                 .expect("receiver")
                 .to_name_chain()
                 .expect("name chain"),
-            vec!["Table".to_string(), "Columns".to_string(), "Add".to_string()]
+            vec![
+                "Table".to_string(),
+                "Columns".to_string(),
+                "Add".to_string()
+            ]
         );
     }
 
     #[test]
     fn member_access_receiver_chain_supports_global_call_receiver() {
-        let content = concat!(
-            "Procedure Test()\n",
-            "    Make().\n",
-            "EndProcedure\n",
-        );
+        let content = concat!("Procedure Test()\n", "    Make().\n", "EndProcedure\n",);
         let parse_result = bsl_syntax::parse_fast(content).expect("parse");
         let (line, dot_col) = utf16_position(content, "Make().");
         let column = dot_col + "Make().".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
 
-        let chain =
-            extract_member_access_receiver_chain(content, line, column, &parse_result).expect("chain");
+        let chain = extract_member_access_receiver_chain(content, line, column, &parse_result)
+            .expect("chain");
 
         assert_eq!(chain.head, ReceiverChainHead::Call("Make".to_string()));
         assert!(chain.segments.is_empty());
@@ -786,17 +800,13 @@ mod tests {
 
     #[test]
     fn member_access_receiver_chain_supports_parenthesized_receiver() {
-        let content = concat!(
-            "Procedure Test()\n",
-            "    (a).\n",
-            "EndProcedure\n",
-        );
+        let content = concat!("Procedure Test()\n", "    (a).\n", "EndProcedure\n",);
         let parse_result = bsl_syntax::parse_fast(content).expect("parse");
         let (line, dot_col) = utf16_position(content, "(a).");
         let column = dot_col + "(a).".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
 
-        let chain =
-            extract_member_access_receiver_chain(content, line, column, &parse_result).expect("chain");
+        let chain = extract_member_access_receiver_chain(content, line, column, &parse_result)
+            .expect("chain");
 
         assert_eq!(chain.head, ReceiverChainHead::Identifier("a".to_string()));
         assert!(chain.segments.is_empty());
@@ -804,19 +814,18 @@ mod tests {
 
     #[test]
     fn member_access_receiver_chain_supports_new_expression_receiver() {
-        let content = concat!(
-            "Procedure Test()\n",
-            "    New Table().\n",
-            "EndProcedure\n",
-        );
+        let content = concat!("Procedure Test()\n", "    New Table().\n", "EndProcedure\n",);
         let parse_result = bsl_syntax::parse_fast(content).expect("parse");
         let (line, dot_col) = utf16_position(content, "Table().");
         let column = dot_col + "Table().".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
 
-        let chain =
-            extract_member_access_receiver_chain(content, line, column, &parse_result).expect("chain");
+        let chain = extract_member_access_receiver_chain(content, line, column, &parse_result)
+            .expect("chain");
 
-        assert_eq!(chain.head, ReceiverChainHead::ExplicitType("Table".to_string()));
+        assert_eq!(
+            chain.head,
+            ReceiverChainHead::ExplicitType("Table".to_string())
+        );
         assert!(chain.segments.is_empty());
         assert_eq!(
             chain.to_name_chain().expect("name chain"),

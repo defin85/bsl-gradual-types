@@ -34,10 +34,7 @@ pub fn byte_offset_to_utf16(text: &str, byte_offset: usize) -> u32 {
     while capped > 0 && !text.is_char_boundary(capped) {
         capped -= 1;
     }
-    text[..capped]
-        .chars()
-        .map(|c| c.len_utf16() as u32)
-        .sum()
+    text[..capped].chars().map(|c| c.len_utf16() as u32).sum()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,10 +169,7 @@ mod tests {
         let text = "\u{041F}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}";
         assert_eq!(utf16_to_byte_offset(text, 0), 0);
         assert_eq!(utf16_to_byte_offset(text, 1), "\u{041F}".len());
-        assert_eq!(
-            utf16_to_byte_offset(text, 2),
-            "\u{041F}\u{0440}".len()
-        );
+        assert_eq!(utf16_to_byte_offset(text, 2), "\u{041F}\u{0440}".len());
     }
 
     #[test]
@@ -254,4 +248,3 @@ mod tests {
         assert_eq!(index.line_text(source, 2), "c");
     }
 }
-

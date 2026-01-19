@@ -54,4 +54,3 @@ fn test_conf_big_common_module_indexes_proverit_obekt_obrabotan() {
         "expected to index method ПроверитьОбъектОбработан for {owner}"
     );
 }
-

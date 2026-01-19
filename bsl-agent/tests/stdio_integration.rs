@@ -1,0 +1,371 @@
+use std::path::{Path, PathBuf};
+
+use bsl_agent::types::{
+    ContextExpandResponse, ContextPackResponse, WorkspaceDocumentsSetResponse,
+    WorkspaceOpenResponse,
+};
+use rmcp::model::CallToolRequestParam;
+use rmcp::service::RunningService;
+use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
+use rmcp::{RoleClient, ServiceError, ServiceExt};
+use serde::de::DeserializeOwned;
+use serde_json::json;
+use tokio::process::Command;
+
+fn bsl_agent_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_bsl-agent")
+}
+
+async fn spawn_agent(extra_env: &[(&str, &str)]) -> RunningService<RoleClient, ()> {
+    let mut cmd = Command::new(bsl_agent_bin()).configure(|cmd| {
+        cmd.env("RUST_LOG", "error");
+    });
+    for (key, value) in extra_env {
+        cmd.env(key, value);
+    }
+
+    let transport = TokioChildProcess::new(cmd).expect("spawn bsl-agent");
+    ().serve(transport).await.expect("connect client")
+}
+
+fn json_object(value: serde_json::Value) -> rmcp::model::JsonObject {
+    value.as_object().expect("json object").clone()
+}
+
+fn extract_json_text(result: rmcp::model::CallToolResult) -> serde_json::Value {
+    let content = result.content.into_iter().next().expect("tool content");
+    let text = content.as_text().expect("text content").text.clone();
+    serde_json::from_str(&text).expect("json decode")
+}
+
+async fn call_tool<T: DeserializeOwned>(
+    service: &RunningService<RoleClient, ()>,
+    name: &'static str,
+    args: serde_json::Value,
+) -> T {
+    let result = service
+        .call_tool(CallToolRequestParam {
+            name: name.into(),
+            arguments: Some(json_object(args)),
+        })
+        .await
+        .expect("call_tool");
+
+    let value = extract_json_text(result);
+    serde_json::from_value(value).expect("decode result")
+}
+
+async fn call_tool_expect_invalid_params(
+    service: &RunningService<RoleClient, ()>,
+    name: &'static str,
+    args: serde_json::Value,
+    message_contains: &str,
+) {
+    let err = service
+        .call_tool(CallToolRequestParam {
+            name: name.into(),
+            arguments: Some(json_object(args)),
+        })
+        .await
+        .expect_err("expected error");
+
+    let ServiceError::McpError(err) = err else {
+        panic!("unexpected error: {err:?}");
+    };
+    assert_eq!(err.code.0, rmcp::model::ErrorCode::INVALID_PARAMS.0);
+    assert!(
+        err.message.contains(message_contains),
+        "message={:?} does not contain {:?}",
+        err.message,
+        message_contains
+    );
+}
+
+fn ensure_dir_empty(path: &Path) {
+    let mut entries = std::fs::read_dir(path).expect("read_dir");
+    assert!(
+        entries.next().is_none(),
+        "expected empty dir: {}",
+        path.display()
+    );
+}
+
+fn ensure_dir_non_empty(path: &Path) {
+    let mut entries = std::fs::read_dir(path).expect("read_dir");
+    assert!(
+        entries.next().is_some(),
+        "expected non-empty dir: {}",
+        path.display()
+    );
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("repo root")
+        .to_path_buf()
+}
+
+#[tokio::test]
+async fn stdio_tools_list_and_lifecycle_smoke() {
+    let service = spawn_agent(&[]).await;
+
+    let tools = service.list_all_tools().await.expect("list_all_tools");
+    let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
+
+    for required in [
+        "workspace_open",
+        "workspace_status",
+        "workspace_close",
+        "workspace_documents_set",
+        "workspace_documents_clear",
+        "bsl_diagnostics",
+        "bsl_symbol_search",
+        "bsl_type_at_position",
+        "bsl_members",
+        "bsl_definition",
+        "bsl_references",
+        "context_pack",
+        "context_expand",
+    ] {
+        assert!(
+            names.contains(&required),
+            "missing tool {required}; got {names:?}"
+        );
+    }
+
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+
+    let _status: serde_json::Value = call_tool(
+        &service,
+        "workspace_status",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_context_pack_stale_ids_are_rejected() {
+    let service = spawn_agent(&[]).await;
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let root_id = open.roots[0].root_id.clone();
+
+    let set: WorkspaceDocumentsSetResponse = call_tool(
+        &service,
+        "workspace_documents_set",
+        json!({
+            "session_id": &session_id,
+            "files": [
+                {
+                    "doc": { "root_id": &root_id, "path": "src/CommonModules/Foo/Module.bsl" },
+                    "text": "Procedure Test()\\n    A = 1;\\nEndProcedure\\n",
+                    "version": 1
+                }
+            ],
+            "mark_hot": true
+        }),
+    )
+    .await;
+    assert!(set.analysis_revision > 0);
+
+    let pack: ContextPackResponse = call_tool(
+        &service,
+        "context_pack",
+        json!({
+            "session_id": &session_id,
+            "goal": "Test pack",
+            "focus": {
+                "kind": "position",
+                "file": { "doc": { "root_id": &root_id, "path": "src/CommonModules/Foo/Module.bsl" } },
+                "position": { "line": 1, "character": 4 }
+            },
+            "budget_chars": 800
+        }),
+    )
+    .await;
+    let pack_id = pack.pack_id.clone();
+    let item_id = pack.items[0].item_id.clone();
+
+    let expand: ContextExpandResponse = call_tool(
+        &service,
+        "context_expand",
+        json!({
+            "session_id": &session_id,
+            "pack_id": &pack_id,
+            "item_id": &item_id,
+            "budget_chars": 300
+        }),
+    )
+    .await;
+    assert!(expand.text.contains("```bsl"));
+
+    let _bump: WorkspaceDocumentsSetResponse = call_tool(
+        &service,
+        "workspace_documents_set",
+        json!({
+            "session_id": &session_id,
+            "files": [
+                {
+                    "doc": { "root_id": &root_id, "path": "src/CommonModules/Foo/Module.bsl" },
+                    "text": "Procedure Test()\\n    A = 2;\\nEndProcedure\\n",
+                    "version": 2
+                }
+            ],
+            "mark_hot": true
+        }),
+    )
+    .await;
+
+    call_tool_expect_invalid_params(
+        &service,
+        "context_expand",
+        json!({
+            "session_id": &session_id,
+            "pack_id": &pack_id,
+            "item_id": &item_id,
+            "budget_chars": 200
+        }),
+        "stale or unknown pack_id/item_id",
+    )
+    .await;
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_disk_cache_can_be_disabled() {
+    let cache_dir = tempfile::TempDir::new().expect("cache");
+
+    let config_path = repo_root()
+        .join("examples")
+        .join("conf")
+        .join("conf_test")
+        .canonicalize()
+        .expect("config fixture");
+
+    ensure_dir_empty(cache_dir.path());
+
+    // Cache enabled: expect at least some cache artifacts after startup with configuration.
+    {
+        let cache_dir_value = cache_dir.path().to_string_lossy().to_string();
+        let service = spawn_agent(&[("BSL_CACHE_DIR", cache_dir_value.as_str())]).await;
+        let temp_root = tempfile::TempDir::new().expect("root");
+
+        let _open: WorkspaceOpenResponse = call_tool(
+            &service,
+            "workspace_open",
+            json!({
+                "roots": [temp_root.path().to_string_lossy()],
+                "configuration_path": config_path.to_string_lossy(),
+                "platform_version": "8.3.25"
+            }),
+        )
+        .await;
+
+        let _ = service.cancel().await;
+    }
+
+    ensure_dir_non_empty(cache_dir.path());
+
+    // Cache disabled: should not create new artifacts in a fresh cache dir.
+    let cache_dir_disabled = tempfile::TempDir::new().expect("cache2");
+    ensure_dir_empty(cache_dir_disabled.path());
+
+    {
+        let cache_dir_value = cache_dir_disabled.path().to_string_lossy().to_string();
+        let service = spawn_agent(&[
+            ("BSL_CACHE_DIR", cache_dir_value.as_str()),
+            ("BSL_CACHE_DISABLE", "1"),
+        ])
+        .await;
+        let temp_root = tempfile::TempDir::new().expect("root");
+
+        let _open: WorkspaceOpenResponse = call_tool(
+            &service,
+            "workspace_open",
+            json!({
+                "roots": [temp_root.path().to_string_lossy()],
+                "configuration_path": config_path.to_string_lossy(),
+                "platform_version": "8.3.25"
+            }),
+        )
+        .await;
+
+        let _ = service.cancel().await;
+    }
+
+    ensure_dir_empty(cache_dir_disabled.path());
+}
+
+#[tokio::test]
+async fn stdio_disk_cache_concurrent_startup_same_dir() {
+    let cache_dir = tempfile::TempDir::new().expect("cache");
+    let cache_dir_str = cache_dir.path().to_string_lossy().to_string();
+
+    let config_path = repo_root()
+        .join("examples")
+        .join("conf")
+        .join("conf_test")
+        .canonicalize()
+        .expect("config fixture");
+
+    let service_a = spawn_agent(&[("BSL_CACHE_DIR", cache_dir_str.as_str())]).await;
+    let service_b = spawn_agent(&[("BSL_CACHE_DIR", cache_dir_str.as_str())]).await;
+
+    let temp_root_a = tempfile::TempDir::new().expect("rootA");
+    let temp_root_b = tempfile::TempDir::new().expect("rootB");
+
+    let open_a = call_tool::<WorkspaceOpenResponse>(
+        &service_a,
+        "workspace_open",
+        json!({
+            "roots": [temp_root_a.path().to_string_lossy()],
+            "configuration_path": config_path.to_string_lossy(),
+            "platform_version": "8.3.25"
+        }),
+    );
+    let open_b = call_tool::<WorkspaceOpenResponse>(
+        &service_b,
+        "workspace_open",
+        json!({
+            "roots": [temp_root_b.path().to_string_lossy()],
+            "configuration_path": config_path.to_string_lossy(),
+            "platform_version": "8.3.25"
+        }),
+    );
+
+    let (_a, _b) = tokio::join!(open_a, open_b);
+
+    ensure_dir_non_empty(cache_dir.path());
+
+    let _ = service_a.cancel().await;
+    let _ = service_b.cancel().await;
+}

@@ -166,9 +166,7 @@ pub(crate) fn convert_while_statement_cached(
                 }
             }
             _ => {
-                if let Some(stmt) =
-                    super::dispatch_statement_cached(&child, source, line_index)?
-                {
+                if let Some(stmt) = super::dispatch_statement_cached(&child, source, line_index)? {
                     body.push(stmt);
                 }
             }

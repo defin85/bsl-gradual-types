@@ -10,7 +10,9 @@ mod tests {
     use crate::helpers::hover_formatter::formatter::HoverFormatter;
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
-    use bsl_shared::domain::signature_index::{ContextRequirements, MethodSignature, SignatureSource};
+    use bsl_shared::domain::signature_index::{
+        ContextRequirements, MethodSignature, SignatureSource,
+    };
     use bsl_shared::domain::types::{
         Certainty, ConcreteType, ParameterInfo, PlatformType, RawMethodData, RawPropertyData,
         ResolutionMetadata, ResolutionResult, ResolutionSource, TypeResolution,

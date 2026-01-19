@@ -72,10 +72,7 @@ fn startup_indexes_common_module_methods() {
     let engine = coordinator.analysis_engine().expect("analysis_engine");
     let repo = engine.get_repository();
 
-    let sig = repo.find_method_signature(
-        Some("ОбщиеМодули.МойМодуль"),
-        "ПроверитьОбъектОбработан",
-    );
+    let sig = repo.find_method_signature(Some("ОбщиеМодули.МойМодуль"), "ПроверитьОбъектОбработан");
     assert!(
         sig.is_some(),
         "expected method signature to be indexed at startup"

@@ -2,9 +2,7 @@
 //!
 //! Требует наличия `examples/conf_big` в репозитории (выгрузка конфигурации 1С).
 
-use bsl_backend::data::loaders::{
-    index_configuration_bsl_modules, UniversalMetadataObject,
-};
+use bsl_backend::data::loaders::{index_configuration_bsl_modules, UniversalMetadataObject};
 use bsl_shared::domain::code_location::CodeLocation;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -16,7 +14,9 @@ fn test_conf_big_indexes_exported_module_methods() {
         std::path::PathBuf::from("../examples/conf_big"),
     ];
 
-    let Some(config_path) = candidates.into_iter().find(|p| p.join("Configuration.xml").exists())
+    let Some(config_path) = candidates
+        .into_iter()
+        .find(|p| p.join("Configuration.xml").exists())
     else {
         // Конфигурация может отсутствовать в некоторых окружениях (например, минимальные CI).
         // В таком случае не считаем это падением функциональности парсера.

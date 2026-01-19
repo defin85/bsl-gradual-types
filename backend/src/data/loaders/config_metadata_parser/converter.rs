@@ -98,7 +98,7 @@ impl UniversalMetadataObject {
             attributes: self.convert_attributes(),
             tabular_sections: self.convert_tabular_sections(),
             enum_values: self.enum_values.clone(),
-            generic_info: None,      // Конфигурационные типы не имеют Generic метаданных (пока)
+            generic_info: None, // Конфигурационные типы не имеют Generic метаданных (пока)
             collection_item_type: None,
             module_paths, // Milestone 3.14: пути к модулям для Go To Definition
         }

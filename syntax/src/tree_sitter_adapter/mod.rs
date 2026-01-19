@@ -86,8 +86,7 @@ impl TreeSitterAdapter {
             syntax_errors::collect_syntax_errors_cached(&root, source, &line_index);
 
         // Проверяем отсутствующие точки с запятой (BSL linter)
-        let semicolon_errors =
-            syntax_errors::check_missing_semicolons(&root, source, &line_index);
+        let semicolon_errors = syntax_errors::check_missing_semicolons(&root, source, &line_index);
         syntax_errors.extend(semicolon_errors);
 
         // Проверяем незавершённые `Новый` без типа/аргументов (IDE-friendly)

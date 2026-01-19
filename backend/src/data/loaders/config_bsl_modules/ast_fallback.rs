@@ -43,7 +43,9 @@ pub(crate) fn collect_decls_and_call_sites(
     fn expr_to_dotted_path(expr: &Expression) -> Option<Vec<String>> {
         match expr {
             Expression::Identifier { name, .. } => Some(vec![name.clone()]),
-            Expression::PropertyAccess { object, property, .. } => {
+            Expression::PropertyAccess {
+                object, property, ..
+            } => {
                 let mut base = expr_to_dotted_path(object)?;
                 base.push(property.clone());
                 Some(base)
@@ -74,9 +76,7 @@ pub(crate) fn collect_decls_and_call_sites(
                             .collect(),
                     }),
                     Expression::PropertyAccess {
-                        object,
-                        property,
-                        ..
+                        object, property, ..
                     } => {
                         if let Some(receiver) = expr_to_dotted_path(object) {
                             acc.push(CallSite {
@@ -169,7 +169,9 @@ pub(crate) fn collect_decls_and_call_sites(
                     }
                 }
             }
-            Statement::VarDeclaration { name, type_hint, .. } => {
+            Statement::VarDeclaration {
+                name, type_hint, ..
+            } => {
                 if let Some(hint) = type_hint.as_ref().filter(|s| !s.trim().is_empty()) {
                     env_add_type(env, name, hint.trim().to_string());
                 }
@@ -258,14 +260,18 @@ pub(crate) fn collect_decls_and_call_sites(
                 walk_block(decls, calls, body, &mut body_env);
                 merge_envs(env, body_env);
             }
-            Statement::ForEach { collection, body, .. } => {
+            Statement::ForEach {
+                collection, body, ..
+            } => {
                 walk_expr(calls, collection, env);
 
                 let mut body_env = env.clone();
                 walk_block(decls, calls, body, &mut body_env);
                 merge_envs(env, body_env);
             }
-            Statement::While { condition, body, .. } => {
+            Statement::While {
+                condition, body, ..
+            } => {
                 walk_expr(calls, condition, env);
 
                 let mut body_env = env.clone();
@@ -303,12 +309,8 @@ pub(crate) fn collect_decls_and_call_sites(
                     walk_expr(calls, m, env);
                 }
             }
-            Statement::AddHandler {
-                event, handler, ..
-            }
-            | Statement::RemoveHandler {
-                event, handler, ..
-            } => {
+            Statement::AddHandler { event, handler, .. }
+            | Statement::RemoveHandler { event, handler, .. } => {
                 walk_expr(calls, event, env);
                 walk_expr(calls, handler, env);
             }
@@ -378,9 +380,7 @@ pub(crate) fn infer_return_type_from_body(
     Some(normalize_union_parts(collected).join(" | "))
 }
 
-pub(crate) fn infer_expr_type(
-    expr: &crate::parsing::bsl::ast::Expression,
-) -> Option<String> {
+pub(crate) fn infer_expr_type(expr: &crate::parsing::bsl::ast::Expression) -> Option<String> {
     use crate::parsing::bsl::ast::Expression;
     match expr {
         Expression::String { .. } => Some("Строка".to_string()),

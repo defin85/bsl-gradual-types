@@ -183,17 +183,29 @@ impl ParallelAnalyzer {
 
         // 7. Собрать результаты
         let file_results_map = match Arc::try_unwrap(file_results) {
-            Ok(mutex) => mutex.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()),
-            Err(arc) => arc.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone(),
+            Ok(mutex) => mutex
+                .into_inner()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            Err(arc) => arc
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
         };
 
         let errors_vec = match Arc::try_unwrap(errors) {
-            Ok(mutex) => mutex.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()),
-            Err(arc) => arc.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone(),
+            Ok(mutex) => mutex
+                .into_inner()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            Err(arc) => arc
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
         };
 
         let files_from_cache = match Arc::try_unwrap(cache_hits) {
-            Ok(mutex) => mutex.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()),
+            Ok(mutex) => mutex
+                .into_inner()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
             Err(arc) => *arc.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
         };
 

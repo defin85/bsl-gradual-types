@@ -144,8 +144,8 @@ async fn golden_completion_dedup_sources() {
         &index,
         &lookup,
     )
-        .await
-        .expect("completion ok");
+    .await
+    .expect("completion ok");
     let items = result.items.into_iter().map(|c| c.item).collect::<Vec<_>>();
     let snapshot = intellisense_testkit::completion_snapshot_domain(&items, result.is_incomplete);
 
@@ -172,8 +172,8 @@ async fn golden_completion_ordering_stable() {
         &index,
         &lookup,
     )
-        .await
-        .expect("completion ok");
+    .await
+    .expect("completion ok");
     let items = result.items.into_iter().map(|c| c.item).collect::<Vec<_>>();
     let snapshot = intellisense_testkit::completion_snapshot_domain(&items, result.is_incomplete);
 
@@ -188,7 +188,8 @@ async fn golden_completion_types_and_keywords() {
 
 #[tokio::test]
 async fn golden_completion_symbols_in_scope() {
-    let snapshot = snapshot_completion("Лок", 0, 3, Some("file:///m8_minimal_completion.bsl")).await;
+    let snapshot =
+        snapshot_completion("Лок", 0, 3, Some("file:///m8_minimal_completion.bsl")).await;
     intellisense_testkit::assert_snapshot("m8_completion_symbols.json", &snapshot);
 }
 
@@ -225,8 +226,5 @@ async fn golden_completion_incomplete_flag() {
 #[tokio::test]
 async fn golden_completion_member_access_falls_back_to_keywords() {
     let snapshot = snapshot_completion("Строка.", 0, 7, None).await;
-    intellisense_testkit::assert_snapshot(
-        "m8_completion_member_fallback_keywords.json",
-        &snapshot,
-    );
+    intellisense_testkit::assert_snapshot("m8_completion_member_fallback_keywords.json", &snapshot);
 }

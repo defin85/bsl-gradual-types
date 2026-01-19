@@ -7,10 +7,10 @@ use tower_lsp::lsp_types::*;
 use tracing::debug;
 
 use bsl_backend::application::get_hover_info_with_semantic_program;
-use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverOutputFormat};
 use bsl_backend::helpers::hover_formatter::HoverFormatter;
-use bsl_shared::domain::TypeMetadataLookup;
+use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverOutputFormat};
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticProgram;
 
@@ -213,8 +213,16 @@ mod tests {
         });
 
         let analysis = host.analysis();
-        let file_content = analysis.file_text(file_id).ok().flatten().expect("file_text");
-        let file_path = analysis.file_path(file_id).ok().flatten().expect("file_path");
+        let file_content = analysis
+            .file_text(file_id)
+            .ok()
+            .flatten()
+            .expect("file_text");
+        let file_path = analysis
+            .file_path(file_id)
+            .ok()
+            .flatten()
+            .expect("file_path");
         let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
 
         (file_content, file_path, ir_program)
@@ -251,8 +259,7 @@ mod tests {
             show_certainty: false,
         };
 
-        let (file_content, file_path, ir_program) =
-            build_v2_ir(&content, &uri, env.deps.clone());
+        let (file_content, file_path, ir_program) = build_v2_ir(&content, &uri, env.deps.clone());
         let v2 = handle_hover_v2(
             file_content.clone(),
             file_path.clone(),
@@ -269,7 +276,10 @@ mod tests {
             v2_text.contains("Переменная"),
             "expected hover to contain variable header"
         );
-        assert!(v2_text.contains("Массив"), "expected hover to contain type name");
+        assert!(
+            v2_text.contains("Массив"),
+            "expected hover to contain type name"
+        );
 
         // Determinism smoke: same input -> same output twice.
         let v2_second = handle_hover_v2(

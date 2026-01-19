@@ -55,4 +55,3 @@ mod tests {
         assert!(parse_platform_version("invalid").is_none());
     }
 }
-

@@ -77,7 +77,9 @@ pub fn validate_global_function_call_context(
     None
 }
 
-fn infer_context_requirements(method_name: &str) -> Option<bsl_shared::domain::ContextRequirements> {
+fn infer_context_requirements(
+    method_name: &str,
+) -> Option<bsl_shared::domain::ContextRequirements> {
     use bsl_shared::domain::ContextRequirements;
 
     let lower = method_name.to_lowercase();
@@ -106,10 +108,7 @@ fn infer_context_requirements(method_name: &str) -> Option<bsl_shared::domain::C
         return Some(ContextRequirements::ServerOnly);
     }
 
-    if lower == "пустая"
-        || lower == "isempty"
-        || lower == "пустаяссылка"
-        || lower == "emptyref"
+    if lower == "пустая" || lower == "isempty" || lower == "пустаяссылка" || lower == "emptyref"
     {
         return Some(ContextRequirements::Universal);
     }
@@ -120,7 +119,10 @@ fn infer_context_requirements(method_name: &str) -> Option<bsl_shared::domain::C
 /// Converts ValidationResult to TypeDiagnostic (Milestone 3.10)
 /// TODO: Use in future for detailed parameter diagnostics
 #[allow(dead_code)]
-pub fn validation_result_to_diagnostic(result: &ValidationResult, span: Span) -> Option<TypeDiagnostic> {
+pub fn validation_result_to_diagnostic(
+    result: &ValidationResult,
+    span: Span,
+) -> Option<TypeDiagnostic> {
     match result {
         ValidationResult::Ok(_) => None,
         ValidationResult::NotFound => None, // Already handled in validate_method_exists
@@ -167,4 +169,3 @@ pub fn validation_result_to_diagnostic(result: &ValidationResult, span: Span) ->
         }),
     }
 }
-

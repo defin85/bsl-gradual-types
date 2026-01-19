@@ -21,7 +21,8 @@ members = [
     "frontend",
     "cli",
     "type-visualization",  # Milestone 2.5: Унификация визуализации
-    "mcp-debug-server"     # Milestone 4.4: MCP Debug Server
+    "mcp-debug-server",    # Milestone 4.4: MCP Debug Server
+    "bsl-agent"            # MCP server for IDE/LLM agents
 ]
 resolver = "2"
 

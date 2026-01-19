@@ -1,0 +1,9 @@
+---
+source: bsl-agent/src/session/mod.rs
+expression: "serde_json::to_value(expand1).expect(\"json\")"
+---
+{
+  "analysis_revision": 1,
+  "text": "snippet src/CommonModules/Foo/Module.bsl:2 (+/-80 lines)\n```bsl\n     1 | Procedure Test()\n>    2 |     A = 1;\n     3 | EndProcedure\n```\n",
+  "truncated": false
+}

@@ -410,9 +410,9 @@ impl ConfigurationDiscovery {
         // Создаём терминальный прогресс-бар если show_progress == true
         let terminal_progress = if self.show_progress {
             let pb = ProgressBar::new(total_objects as u64);
-            let style = match ProgressStyle::default_bar().template(
-                "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]",
-            ) {
+            let style = match ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg} [{per_sec}]")
+            {
                 Ok(style) => style.progress_chars("##-"),
                 Err(_) => ProgressStyle::default_bar(),
             };
@@ -924,7 +924,11 @@ impl ConfigurationDiscovery {
         object_type: &str,
         object_name: &str,
     ) -> Result<Vec<FormMetadata>> {
-        let forms_dir = self.base_path.join(folder_name).join(object_name).join("Forms");
+        let forms_dir = self
+            .base_path
+            .join(folder_name)
+            .join(object_name)
+            .join("Forms");
 
         if !forms_dir.exists() {
             tracing::trace!("  ℹ️ Forms directory not found: {:?}", forms_dir);

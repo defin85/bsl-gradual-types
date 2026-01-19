@@ -16,20 +16,22 @@ use bsl_shared::engine::AnalysisEngine;
 use serde::{Deserialize, Serialize};
 
 use crate::data::adapters::{convert_syntax_helper_global_functions, convert_syntax_helper_to_raw};
+use crate::data::loaders::config_metadata_parser::ConfigurationDiscovery;
 use crate::data::loaders::{
-    hbk_recovery, progress::ProgressUpdate, IndexedConfigSignatures, SyntaxHelperDatabase,
-    SyntaxHelperLoader, OptimizationSettings,
+    hbk_recovery, progress::ProgressUpdate, IndexedConfigSignatures, OptimizationSettings,
+    SyntaxHelperDatabase, SyntaxHelperLoader,
 };
 use crate::system::keyword_index::keyword_items_from_syntax_or_default;
 use crate::system::parser_coordinator::ParserCoordinator;
-use crate::system::platform_version::{format_platform_version, parse_platform_version, PlatformVersion};
-use crate::system::{IndexItem, IndexItemKind, IndexKind, TypeKind};
+use crate::system::platform_version::{
+    format_platform_version, parse_platform_version, PlatformVersion,
+};
 use crate::system::DiskCacheKey;
+use crate::system::{IndexItem, IndexItemKind, IndexKind, TypeKind};
 use bsl_shared::api::StartupProgressDto;
-use crate::data::loaders::config_metadata_parser::ConfigurationDiscovery;
 
-use super::coordinator::SystemCoordinator;
 use super::config_loader::ConfigCombinedCacheMeta;
+use super::coordinator::SystemCoordinator;
 use super::types::StartupError;
 
 #[derive(Debug, Clone)]
@@ -376,11 +378,8 @@ impl SystemCoordinator {
                     )
                     .map(|(result, payload)| (result, Some(payload)))
                 } else {
-                    self.load_all_configurations_with_progress(
-                        config_path,
-                        progress_callback,
-                    )
-                    .map(|result| (result, None))
+                    self.load_all_configurations_with_progress(config_path, progress_callback)
+                        .map(|result| (result, None))
                 };
 
                 match result {
@@ -509,10 +508,11 @@ impl SystemCoordinator {
                 &cache_key,
                 move || {
                     let mut parse_ok = true;
-                    let mut syntax_parser = SyntaxHelperLoader::with_settings(OptimizationSettings {
-                        collect_keywords: true,
-                        ..Default::default()
-                    });
+                    let mut syntax_parser =
+                        SyntaxHelperLoader::with_settings(OptimizationSettings {
+                            collect_keywords: true,
+                            ..Default::default()
+                        });
                     // MILESTONE 2.20.2.3: Парсим с прогрессом если передан callback
                     if let Some(ref tx) = progress_tx {
                         let tx_clone = tx.clone();
@@ -570,16 +570,14 @@ impl SystemCoordinator {
         })
     }
 
-    fn required_platform_version(&self, config_path: &Path) -> Result<PlatformVersion, StartupError> {
+    fn required_platform_version(
+        &self,
+        config_path: &Path,
+    ) -> Result<PlatformVersion, StartupError> {
         let discovery = ConfigurationDiscovery::new(config_path.to_path_buf(), false);
-        let configurations = discovery
-            .discover_all_configurations()
-            .map_err(|e| {
-                StartupError::PlatformTypesError(anyhow!(
-                    "Не удалось обнаружить конфигурации: {}",
-                    e
-                ))
-            })?;
+        let configurations = discovery.discover_all_configurations().map_err(|e| {
+            StartupError::PlatformTypesError(anyhow!("Не удалось обнаружить конфигурации: {}", e))
+        })?;
 
         if configurations.is_empty() {
             return Err(StartupError::PlatformTypesError(anyhow!(
@@ -617,9 +615,8 @@ impl SystemCoordinator {
         let canonical = fs::canonicalize(syntax_path).unwrap_or_else(|_| syntax_path.to_path_buf());
         let source_identity = canonical.to_string_lossy().to_string();
         let strict = self.strict_fingerprint();
-        let source_fingerprint =
-            syntax_helper_fingerprint(syntax_parser, syntax_path, strict)
-                .map_err(StartupError::PlatformTypesError)?;
+        let source_fingerprint = syntax_helper_fingerprint(syntax_parser, syntax_path, strict)
+            .map_err(StartupError::PlatformTypesError)?;
         let platform_version = platform_version.unwrap_or("unknown");
         let settings_fingerprint = format!(
             "{};platform_version={}",
@@ -748,18 +745,14 @@ impl SystemCoordinator {
             .build();
         repository.set_signature_index(index);
 
-        let global_function_signatures =
-            convert_syntax_helper_global_functions(&database);
+        let global_function_signatures = convert_syntax_helper_global_functions(&database);
         if !global_function_signatures.is_empty() {
             let count = global_function_signatures.len();
             for signature in global_function_signatures {
                 let name = signature.name.clone();
                 repository.add_global_function_signature(&name, signature);
             }
-            info!(
-                "SignatureIndex заполнен {} глобальными функциями",
-                count
-            );
+            info!("SignatureIndex заполнен {} глобальными функциями", count);
         }
 
         // Milestone 3.x: Применяем GenericInfo для типов-коллекций (inference rules)
@@ -794,10 +787,7 @@ impl SystemCoordinator {
             );
         }
         for (function_name, location) in &payload.config_indexed.global_definition_locations {
-            repository.add_global_function_definition_location(
-                function_name,
-                location.clone(),
-            );
+            repository.add_global_function_definition_location(function_name, location.clone());
         }
 
         repository
@@ -858,7 +848,8 @@ impl SystemCoordinator {
             by_kind.entry(kind).or_default().push(item);
         }
         for (kind, items) in by_kind {
-            self.intellisense_index.replace_metadata_for_kind(kind, items);
+            self.intellisense_index
+                .replace_metadata_for_kind(kind, items);
         }
     }
 
@@ -1039,9 +1030,9 @@ fn syntax_helper_settings_fingerprint(syntax_parser: &SyntaxHelperLoader, strict
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
-    use std::fs;
 
     fn write_configuration_xml(dir: &TempDir, body: &str) -> PathBuf {
         let path = dir.path().join("Configuration.xml");
@@ -1235,7 +1226,10 @@ mod tests {
 
         let coordinator = SystemCoordinator::new();
         let result = coordinator.required_platform_version(temp.path());
-        assert!(result.is_err(), "expected error for missing CompatibilityMode");
+        assert!(
+            result.is_err(),
+            "expected error for missing CompatibilityMode"
+        );
     }
 
     #[test]
@@ -1257,7 +1251,10 @@ mod tests {
 
         let coordinator = SystemCoordinator::new();
         let result = coordinator.required_platform_version(temp.path());
-        assert!(result.is_err(), "expected error for invalid CompatibilityMode");
+        assert!(
+            result.is_err(),
+            "expected error for invalid CompatibilityMode"
+        );
     }
 
     #[test]

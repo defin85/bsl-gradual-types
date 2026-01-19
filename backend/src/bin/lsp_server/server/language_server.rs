@@ -8,24 +8,24 @@
 //! - Features: completion, hover, goto_definition, signature_help
 //! - Commands: execute_command
 
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
 use tracing::{debug, error, info, warn};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Instant;
 
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 use bsl_backend::system::fs_utils::read_bsl_file;
-use bsl_backend::system::{StartupInputs, startup_v2};
+use bsl_backend::system::{startup_v2, StartupInputs};
 use bsl_shared::api::semantic_dtos::{GetSemanticHtmlRequest, GetSemanticTreeRequest};
 
 use crate::commands::{
     handle_cache_clear, handle_cache_set_enabled, handle_cache_stats, handle_get_all_types,
-    handle_get_type_repository_stats, semantic_html_from_tree, semantic_tree_from_ir,
-    handle_parse_configuration, handle_query_type, handle_search_types, CacheCommandParams,
+    handle_get_type_repository_stats, handle_parse_configuration, handle_query_type,
+    handle_search_types, semantic_html_from_tree, semantic_tree_from_ir, CacheCommandParams,
     CacheToggleParams, GetAllTypesRequest, ParseConfigurationParams, QueryTypeParams,
     SearchTypesRequest,
 };
@@ -255,16 +255,14 @@ impl LanguageServer for BslLanguageServer {
                                     )
                                 })
                             }
-                            _ => {
-                                update.message.clone().unwrap_or_else(|| {
-                                    format!(
-                                        "{} | {}/{}",
-                                        update.phase.display_name(),
-                                        update.current,
-                                        update.total
-                                    )
-                                })
-                            }
+                            _ => update.message.clone().unwrap_or_else(|| {
+                                format!(
+                                    "{} | {}/{}",
+                                    update.phase.display_name(),
+                                    update.current,
+                                    update.total
+                                )
+                            }),
                         };
 
                         let message_with_eta = if let Some(eta_secs) = eta {
@@ -283,9 +281,7 @@ impl LanguageServer for BslLanguageServer {
                         Ok(Ok(())) => {
                             // SUCCESS: Send WorkDoneProgressEnd
                             reporter
-                                .end(Some(
-                                    "Platform types loaded successfully".to_string(),
-                                ))
+                                .end(Some("Platform types loaded successfully".to_string()))
                                 .await;
 
                             let _ = client_clone
@@ -328,9 +324,7 @@ impl LanguageServer for BslLanguageServer {
                         }
                         Ok(Err(error_msg)) => {
                             // ERROR: Send WorkDoneProgressEnd with error
-                            reporter
-                                .end(Some(format!("Error: {}", error_msg)))
-                                .await;
+                            reporter.end(Some(format!("Error: {}", error_msg))).await;
 
                             let _ = client_clone
                                 .send_notification::<ServerStatus>(ServerStatusParams::ready())
@@ -487,14 +481,16 @@ impl LanguageServer for BslLanguageServer {
             .await
             .insert(file_id, version);
 
-        self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-            file_id,
-            text: Arc::from(text.clone()),
-            version,
-            path: Arc::from(path),
-        }]);
+        self.analysis_v2
+            .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                file_id,
+                text: Arc::from(text.clone()),
+                version,
+                path: Arc::from(path),
+            }]);
 
-        self.schedule_diagnostics_v2(uri.clone(), file_id, version).await;
+        self.schedule_diagnostics_v2(uri.clone(), file_id, version)
+            .await;
 
         self.client
             .log_message(
@@ -525,7 +521,10 @@ impl LanguageServer for BslLanguageServer {
             .get(&file_id)
             .copied();
         if let Some(prev_version) = prev_version {
-            let _ = self.analysis_v2.wait_for_file_version(file_id, prev_version).await;
+            let _ = self
+                .analysis_v2
+                .wait_for_file_version(file_id, prev_version)
+                .await;
         }
 
         // Apply changes
@@ -556,14 +555,16 @@ impl LanguageServer for BslLanguageServer {
             .await
             .insert(file_id, version);
 
-        self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-            file_id,
-            text: Arc::from(updated_text.clone()),
-            version,
-            path: Arc::from(path),
-        }]);
+        self.analysis_v2
+            .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                file_id,
+                text: Arc::from(updated_text.clone()),
+                version,
+                path: Arc::from(path),
+            }]);
 
-        self.schedule_diagnostics_v2(uri.clone(), file_id, version).await;
+        self.schedule_diagnostics_v2(uri.clone(), file_id, version)
+            .await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -649,12 +650,13 @@ impl LanguageServer for BslLanguageServer {
                 };
                 match file_content {
                     Some(file_content) => {
-                        self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                            file_id,
-                            text: Arc::from(file_content),
-                            version: 0,
-                            path: Arc::from(path),
-                        }]);
+                        self.analysis_v2
+                            .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                                file_id,
+                                text: Arc::from(file_content),
+                                version: 0,
+                                path: Arc::from(path),
+                            }]);
 
                         self.analysis_v2.wait_for_file_version(file_id, 0).await
                     }
@@ -662,10 +664,8 @@ impl LanguageServer for BslLanguageServer {
                 }
             };
             let wait_elapsed = wait_started.elapsed();
-            self.coordinator.record_intellisense_v2_wait_for_file_version(
-                "completion",
-                wait_elapsed,
-            );
+            self.coordinator
+                .record_intellisense_v2_wait_for_file_version("completion", wait_elapsed);
             if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
                 if wait_elapsed >= threshold {
                     warn!(
@@ -687,10 +687,8 @@ impl LanguageServer for BslLanguageServer {
                     let (analysis, index_snapshot, deps_id) =
                         self.analysis_v2.snapshot_with_deps().await;
                     let snapshot_elapsed = snapshot_started.elapsed();
-                    self.coordinator.record_intellisense_v2_snapshot_latency(
-                        "completion",
-                        snapshot_elapsed,
-                    );
+                    self.coordinator
+                        .record_intellisense_v2_snapshot_latency("completion", snapshot_elapsed);
                     if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
                         if snapshot_elapsed >= threshold {
                             warn!(
@@ -755,10 +753,8 @@ impl LanguageServer for BslLanguageServer {
                     let ir_started = Instant::now();
                     let ir_program = analysis.ir(file_id).ok().flatten();
                     let ir_elapsed = ir_started.elapsed();
-                    self.coordinator.record_intellisense_v2_ir_query_latency(
-                        "completion",
-                        ir_elapsed,
-                    );
+                    self.coordinator
+                        .record_intellisense_v2_ir_query_latency("completion", ir_elapsed);
                     if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
                         if ir_elapsed >= threshold {
                             warn!(
@@ -802,7 +798,14 @@ impl LanguageServer for BslLanguageServer {
                         }
                     }
 
-                    (file_content, file_path, parse_result, deps, ir_program, index_snapshot)
+                    (
+                        file_content,
+                        file_path,
+                        parse_result,
+                        deps,
+                        ir_program,
+                        index_snapshot,
+                    )
                 };
 
                 match (file_content, file_path, deps, ir_program) {
@@ -838,10 +841,8 @@ impl LanguageServer for BslLanguageServer {
             }
 
             if let Some(stats) = &result.stats {
-                self.coordinator.record_completion_stage_latency(
-                    "snapshot_read",
-                    stats.stage_snapshot_read,
-                );
+                self.coordinator
+                    .record_completion_stage_latency("snapshot_read", stats.stage_snapshot_read);
                 self.coordinator
                     .record_completion_stage_latency("collect", stats.stage_collect);
                 self.coordinator
@@ -870,10 +871,7 @@ impl LanguageServer for BslLanguageServer {
         Ok(completion.map(|result| result.response))
     }
 
-    async fn completion_resolve(
-        &self,
-        item: CompletionItem,
-    ) -> JsonRpcResult<CompletionItem> {
+    async fn completion_resolve(&self, item: CompletionItem) -> JsonRpcResult<CompletionItem> {
         let snippet_support = *self.completion_snippet_support.read().await;
         let started = Instant::now();
         let deps = self.analysis_v2.snapshot().await.deps_data().ok();
@@ -925,12 +923,13 @@ impl LanguageServer for BslLanguageServer {
                 };
                 match file_content {
                     Some(file_content) => {
-                        self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                            file_id,
-                            text: Arc::from(file_content),
-                            version: 0,
-                            path: Arc::from(path),
-                        }]);
+                        self.analysis_v2
+                            .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                                file_id,
+                                text: Arc::from(file_content),
+                                version: 0,
+                                path: Arc::from(path),
+                            }]);
 
                         self.analysis_v2.wait_for_file_version(file_id, 0).await
                     }
@@ -958,7 +957,8 @@ impl LanguageServer for BslLanguageServer {
 
             let (file_content, file_path, deps, ir_program) = {
                 let snapshot_started = Instant::now();
-                let (analysis, index_snapshot, deps_id) = self.analysis_v2.snapshot_with_deps().await;
+                let (analysis, index_snapshot, deps_id) =
+                    self.analysis_v2.snapshot_with_deps().await;
                 let snapshot_elapsed = snapshot_started.elapsed();
                 self.coordinator
                     .record_intellisense_v2_snapshot_latency("hover", snapshot_elapsed);
@@ -1088,12 +1088,13 @@ impl LanguageServer for BslLanguageServer {
                 };
                 match file_content {
                     Some(file_content) => {
-                        self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                            file_id,
-                            text: Arc::from(file_content),
-                            version: 0,
-                            path: Arc::from(path),
-                        }]);
+                        self.analysis_v2
+                            .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                                file_id,
+                                text: Arc::from(file_content),
+                                version: 0,
+                                path: Arc::from(path),
+                            }]);
 
                         self.analysis_v2.wait_for_file_version(file_id, 0).await
                     }
@@ -1101,10 +1102,8 @@ impl LanguageServer for BslLanguageServer {
                 }
             };
             let wait_elapsed = wait_started.elapsed();
-            self.coordinator.record_intellisense_v2_wait_for_file_version(
-                "definition",
-                wait_elapsed,
-            );
+            self.coordinator
+                .record_intellisense_v2_wait_for_file_version("definition", wait_elapsed);
             if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
                 if wait_elapsed >= threshold {
                     warn!(
@@ -1126,10 +1125,8 @@ impl LanguageServer for BslLanguageServer {
                 let (analysis, index_snapshot, deps_id) =
                     self.analysis_v2.snapshot_with_deps().await;
                 let snapshot_elapsed = snapshot_started.elapsed();
-                self.coordinator.record_intellisense_v2_snapshot_latency(
-                    "definition",
-                    snapshot_elapsed,
-                );
+                self.coordinator
+                    .record_intellisense_v2_snapshot_latency("definition", snapshot_elapsed);
                 if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
                     if snapshot_elapsed >= threshold {
                         warn!(
@@ -1229,12 +1226,13 @@ impl LanguageServer for BslLanguageServer {
 
                 match file_content {
                     Some(file_content) => {
-                        self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                            file_id,
-                            text: Arc::from(file_content),
-                            version: 0,
-                            path: Arc::from(path),
-                        }]);
+                        self.analysis_v2
+                            .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                                file_id,
+                                text: Arc::from(file_content),
+                                version: 0,
+                                path: Arc::from(path),
+                            }]);
 
                         self.analysis_v2.wait_for_file_version(file_id, 0).await
                     }
@@ -1242,10 +1240,8 @@ impl LanguageServer for BslLanguageServer {
                 }
             };
             let wait_elapsed = wait_started.elapsed();
-            self.coordinator.record_intellisense_v2_wait_for_file_version(
-                "signature_help",
-                wait_elapsed,
-            );
+            self.coordinator
+                .record_intellisense_v2_wait_for_file_version("signature_help", wait_elapsed);
             if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
                 if wait_elapsed >= threshold {
                     warn!(
@@ -1264,12 +1260,11 @@ impl LanguageServer for BslLanguageServer {
 
             let (file_content, deps) = {
                 let snapshot_started = Instant::now();
-                let (analysis, index_snapshot, deps_id) = self.analysis_v2.snapshot_with_deps().await;
+                let (analysis, index_snapshot, deps_id) =
+                    self.analysis_v2.snapshot_with_deps().await;
                 let snapshot_elapsed = snapshot_started.elapsed();
-                self.coordinator.record_intellisense_v2_snapshot_latency(
-                    "signature_help",
-                    snapshot_elapsed,
-                );
+                self.coordinator
+                    .record_intellisense_v2_snapshot_latency("signature_help", snapshot_elapsed);
                 if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
                     if snapshot_elapsed >= threshold {
                         warn!(
@@ -1400,12 +1395,14 @@ impl LanguageServer for BslLanguageServer {
 
                     match file_content {
                         Some(file_content) => {
-                            self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                                file_id,
-                                text: Arc::from(file_content),
-                                version: 0,
-                                path: Arc::from(path),
-                            }]);
+                            self.analysis_v2.apply_changes(vec![
+                                bsl_analysis_v2::Change::SetFile {
+                                    file_id,
+                                    text: Arc::from(file_content),
+                                    version: 0,
+                                    path: Arc::from(path),
+                                },
+                            ]);
                             self.analysis_v2.wait_for_file_version(file_id, 0).await
                         }
                         None => false,
@@ -1430,10 +1427,9 @@ impl LanguageServer for BslLanguageServer {
                     request.compact,
                 );
 
-                Ok(Some(
-                    serde_json::to_value(result)
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                ))
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
             }
             "bsl.getSemanticTree" => {
                 if params.arguments.is_empty() {
@@ -1486,12 +1482,14 @@ impl LanguageServer for BslLanguageServer {
 
                     match file_content {
                         Some(file_content) => {
-                            self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                                file_id,
-                                text: Arc::from(file_content),
-                                version: 0,
-                                path: Arc::from(path),
-                            }]);
+                            self.analysis_v2.apply_changes(vec![
+                                bsl_analysis_v2::Change::SetFile {
+                                    file_id,
+                                    text: Arc::from(file_content),
+                                    version: 0,
+                                    path: Arc::from(path),
+                                },
+                            ]);
                             self.analysis_v2.wait_for_file_version(file_id, 0).await
                         }
                         None => false,
@@ -1515,10 +1513,9 @@ impl LanguageServer for BslLanguageServer {
                     request.include_flow_sensitive,
                 );
 
-                Ok(Some(
-                    serde_json::to_value(result)
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                ))
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
             }
             "bsl.searchTypes" => {
                 if params.arguments.is_empty() {
@@ -1536,10 +1533,9 @@ impl LanguageServer for BslLanguageServer {
                     })?;
 
                 let result = handle_search_types(request, self.coordinator.get_analysis_engine());
-                Ok(Some(
-                    serde_json::to_value(result)
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                ))
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
             }
             "bsl.getAllTypes" => {
                 // Parameters are optional - use defaults if not provided
@@ -1559,10 +1555,9 @@ impl LanguageServer for BslLanguageServer {
                 };
 
                 let result = handle_get_all_types(request, self.coordinator.get_analysis_engine());
-                Ok(Some(
-                    serde_json::to_value(result)
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                ))
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
             }
             "bsl.getCurrentContext" => {
                 if params.arguments.is_empty() {
@@ -1580,10 +1575,9 @@ impl LanguageServer for BslLanguageServer {
                     })?;
 
                 let result = self.handle_get_current_context(request).await?;
-                Ok(Some(
-                    serde_json::to_value(result)
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                ))
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
             }
             "bsl.queryType" => {
                 if params.arguments.is_empty() {
@@ -1601,24 +1595,21 @@ impl LanguageServer for BslLanguageServer {
                     })?;
 
                 let result = handle_query_type(request, self.coordinator.get_analysis_engine());
-                Ok(Some(
-                    serde_json::to_value(result)
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                ))
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
             }
             "bsl.getTypeRepositoryStats" => {
                 let result = handle_get_type_repository_stats(self.coordinator.clone());
-                Ok(Some(
-                    serde_json::to_value(result)
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                ))
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
             }
             "bsl.getWorkspaceStats" => {
                 let result = self.handle_get_workspace_stats().await?;
-                Ok(Some(
-                    serde_json::to_value(result)
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                ))
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
             }
             "bsl.parseConfiguration" => {
                 if params.arguments.is_empty() {
@@ -1664,10 +1655,9 @@ impl LanguageServer for BslLanguageServer {
                     self.sync_v2_globals().await;
                 }
 
-                Ok(Some(
-                    serde_json::to_value(result)
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                ))
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
             }
             "bsl.cache.getStats" => {
                 let config_path = resolve_cache_config_path(&params, &self.config).await?;
@@ -1678,10 +1668,9 @@ impl LanguageServer for BslLanguageServer {
                 let result = handle_cache_stats(self.coordinator.clone(), scope)
                     .await
                     .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-                Ok(Some(
-                    serde_json::to_value(result)
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                ))
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
             }
             "bsl.cache.clear" => {
                 let config_path = resolve_cache_config_path(&params, &self.config).await?;
@@ -1692,10 +1681,9 @@ impl LanguageServer for BslLanguageServer {
                 let result = handle_cache_clear(self.coordinator.clone(), scope)
                     .await
                     .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-                Ok(Some(
-                    serde_json::to_value(result)
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                ))
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
             }
             "bsl.cache.setEnabled" => {
                 if params.arguments.is_empty() {
@@ -1711,14 +1699,12 @@ impl LanguageServer for BslLanguageServer {
                             e
                         ))
                     })?;
-                let result =
-                    handle_cache_set_enabled(self.coordinator.clone(), request.enabled)
-                        .await
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-                Ok(Some(
-                    serde_json::to_value(result)
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
-                ))
+                let result = handle_cache_set_enabled(self.coordinator.clone(), request.enabled)
+                    .await
+                    .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
             }
             _ => {
                 warn!("Unknown command: {}", params.command);
@@ -1733,8 +1719,8 @@ async fn resolve_cache_config_path(
     config: &tokio::sync::RwLock<Option<LspConfig>>,
 ) -> JsonRpcResult<String> {
     if !params.arguments.is_empty() {
-        let request: CacheCommandParams =
-            serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+        let request: CacheCommandParams = serde_json::from_value(params.arguments[0].clone())
+            .map_err(|e| {
                 tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid parameters: {}", e))
             })?;
         if let Some(path) = request.configuration_path {

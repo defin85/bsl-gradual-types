@@ -2,23 +2,25 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
 use tower_lsp::Client;
 use tracing::{debug, info, warn};
 
 use bsl_analysis_v2::{AnalysisHostV2, DepsSnapshotId, FileId as V2FileId, SettingsId};
-use bsl_backend::system::{DepsBundleV2, DepsBundleV2Meta, SystemCoordinator, build_deps_bundle_v2};
+use bsl_backend::system::{
+    build_deps_bundle_v2, DepsBundleV2, DepsBundleV2Meta, SystemCoordinator,
+};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 
 use crate::config::BslSettings;
 use crate::converters::{semantic_error_to_diagnostic, syntax_errors_to_diagnostics};
 
-use super::{BslLanguageServer, Url, V2FileKey};
 use super::analysis_v2_runtime::AnalysisV2Runtime;
+use super::{BslLanguageServer, Url, V2FileKey};
 
 impl BslLanguageServer {
     pub fn new(client: Client, coordinator: Arc<SystemCoordinator>) -> Self {
@@ -31,8 +33,7 @@ impl BslLanguageServer {
             build_deps_bundle_v2(&coordinator, None, None).unwrap_or_else(|err| {
                 warn!("Failed to build initial deps bundle v2: {}", err);
 
-                let repository: Arc<dyn TypeRepository> =
-                    Arc::new(InMemoryTypeRepository::new());
+                let repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
                 let signature_index = repository.get_signature_index_clone();
                 let resolver = Some(Arc::new(TypeResolver::new(repository.clone())));
 
@@ -175,7 +176,10 @@ impl BslLanguageServer {
                 self.coordinator
                     .record_intellisense_v2_deps_update_build_latency(elapsed);
                 self.coordinator.record_intellisense_v2_deps_update_error();
-                warn!("deps_update_v2 build failed: reason={}, error={}", reason, err);
+                warn!(
+                    "deps_update_v2 build failed: reason={}, error={}",
+                    reason, err
+                );
                 return;
             }
             Err(err) => {
@@ -228,7 +232,8 @@ impl BslLanguageServer {
             *last_deps_id = Some(bundle.deps_id.clone());
         }
 
-        self.coordinator.record_intellisense_v2_deps_update_success();
+        self.coordinator
+            .record_intellisense_v2_deps_update_success();
         info!(
             "deps_update_v2 applied: reason={}, deps_id={}, index_snapshot_id={}, platform_version={}, platform_fp={}, config_fp={}, strict_fingerprint={}",
             reason,
@@ -275,10 +280,9 @@ impl BslLanguageServer {
                 .wait_for_file_version(file_id, expected_version)
                 .await;
             let wait_elapsed = wait_started.elapsed();
-            server.coordinator.record_intellisense_v2_wait_for_file_version(
-                "diagnostics",
-                wait_elapsed,
-            );
+            server
+                .coordinator
+                .record_intellisense_v2_wait_for_file_version("diagnostics", wait_elapsed);
             if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
                 if wait_elapsed >= threshold {
                     warn!(
@@ -377,10 +381,8 @@ impl BslLanguageServer {
 
                 match syntax_result {
                     Ok(Some(syntax_errors)) => {
-                        diagnostics.extend(syntax_errors_to_diagnostics(
-                            &syntax_errors,
-                            &uri_for_task,
-                        ));
+                        diagnostics
+                            .extend(syntax_errors_to_diagnostics(&syntax_errors, &uri_for_task));
                     }
                     Ok(None) => {}
                     Err(cancelled) => {
@@ -582,27 +584,26 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
 }
 
 #[cfg(test)]
-    mod tests {
-        use super::*;
-        use bsl_backend::system::{
-            IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IndexSnapshotId, TypeKind,
-        };
-        use futures::StreamExt;
-        use tower::Service;
-        use tower::ServiceExt;
-        use tower_lsp::LspService;
-        use tower_lsp::jsonrpc::Request;
-        use tower_lsp::LanguageServer;
-        use tower_lsp::lsp_types::{
-            ClientCapabilities, CompletionParams, DidChangeTextDocumentParams,
-            DidOpenTextDocumentParams, InitializeParams, InitializedParams,
-            PartialResultParams, Position, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-            TextDocumentItem, TextDocumentPositionParams, VersionedTextDocumentIdentifier,
-            WorkDoneProgressParams,
-        };
+mod tests {
+    use super::*;
+    use bsl_backend::system::{
+        IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IndexSnapshotId, TypeKind,
+    };
+    use futures::StreamExt;
+    use tower::Service;
+    use tower::ServiceExt;
+    use tower_lsp::jsonrpc::Request;
+    use tower_lsp::lsp_types::{
+        ClientCapabilities, CompletionParams, DidChangeTextDocumentParams,
+        DidOpenTextDocumentParams, InitializeParams, InitializedParams, PartialResultParams,
+        Position, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+        TextDocumentPositionParams, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    };
+    use tower_lsp::LanguageServer;
+    use tower_lsp::LspService;
 
     #[tokio::test]
-        async fn p6_fast_did_change_series_publish_diagnostics_is_monotonic() {
+    async fn p6_fast_did_change_series_publish_diagnostics_is_monotonic() {
         let coordinator = Arc::new(SystemCoordinator::new());
 
         let (mut service, mut socket) = LspService::build({
@@ -611,8 +612,9 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
         })
         .finish();
 
-        let (published_tx, mut published_rx) =
-            tokio::sync::mpsc::unbounded_channel::<tower_lsp::lsp_types::PublishDiagnosticsParams>();
+        let (published_tx, mut published_rx) = tokio::sync::mpsc::unbounded_channel::<
+            tower_lsp::lsp_types::PublishDiagnosticsParams,
+        >();
 
         let drain_task = tokio::spawn(async move {
             while let Some(req) = socket.next().await {
@@ -622,9 +624,9 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
                 let Some(params) = req.params().cloned() else {
                     continue;
                 };
-                let Ok(parsed) =
-                    serde_json::from_value::<tower_lsp::lsp_types::PublishDiagnosticsParams>(params)
-                else {
+                let Ok(parsed) = serde_json::from_value::<
+                    tower_lsp::lsp_types::PublishDiagnosticsParams,
+                >(params) else {
                     continue;
                 };
                 let _ = published_tx.send(parsed);
@@ -659,7 +661,10 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
             .call(initialized)
             .await
             .expect("initialized notification");
-        assert!(initialized_response.is_none(), "initialized is a notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
 
         let uri = Url::parse("file:///test.bsl").expect("test uri");
 
@@ -706,7 +711,10 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
             .call(did_change_req_v2)
             .await
             .expect("didChange v2 notification");
-        assert!(did_change_response_v2.is_none(), "didChange is a notification");
+        assert!(
+            did_change_response_v2.is_none(),
+            "didChange is a notification"
+        );
 
         let did_change_v3 = DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
@@ -729,7 +737,10 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
             .call(did_change_req_v3)
             .await
             .expect("didChange v3 notification");
-        assert!(did_change_response_v3.is_none(), "didChange is a notification");
+        assert!(
+            did_change_response_v3.is_none(),
+            "didChange is a notification"
+        );
 
         let mut versions = Vec::new();
         let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(2);
@@ -772,8 +783,7 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
         // After observing version 3, ensure we don't later publish version 1/2 (no jump-back).
         let after_deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(300);
         while tokio::time::Instant::now() < after_deadline {
-            let remaining =
-                after_deadline.saturating_duration_since(tokio::time::Instant::now());
+            let remaining = after_deadline.saturating_duration_since(tokio::time::Instant::now());
             let Ok(next) = tokio::time::timeout(remaining, published_rx.recv()).await else {
                 break;
             };
@@ -786,7 +796,11 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
             let Some(version) = params.version else {
                 continue;
             };
-            assert!(version >= 3, "unexpected jump-back diagnostics: v{}", version);
+            assert!(
+                version >= 3,
+                "unexpected jump-back diagnostics: v{}",
+                version
+            );
         }
 
         drain_task.abort();
@@ -802,9 +816,7 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
         })
         .finish();
 
-        let drain_task = tokio::spawn(async move {
-            while let Some(_req) = socket.next().await {}
-        });
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
         let initialize_params = InitializeParams {
             capabilities: ClientCapabilities::default(),
@@ -833,7 +845,10 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
             .call(initialized)
             .await
             .expect("initialized notification");
-        assert!(initialized_response.is_none(), "initialized is a notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
 
         let uri = Url::parse("file:///test_p7.bsl").expect("test uri");
 
@@ -905,7 +920,10 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
         .expect("completion request timeout")
         .expect("completion request");
 
-        assert!(completion_response.is_some(), "completion should return a response");
+        assert!(
+            completion_response.is_some(),
+            "completion should return a response"
+        );
 
         drain_task.abort();
     }
@@ -925,7 +943,9 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
             snapshot
         }
 
-        fn extract_completion_labels(response: tower_lsp::lsp_types::CompletionResponse) -> Vec<String> {
+        fn extract_completion_labels(
+            response: tower_lsp::lsp_types::CompletionResponse,
+        ) -> Vec<String> {
             match response {
                 tower_lsp::lsp_types::CompletionResponse::Array(items) => {
                     items.into_iter().map(|item| item.label).collect()
@@ -951,9 +971,7 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
         })
         .finish();
 
-        let drain_task = tokio::spawn(async move {
-            while let Some(_req) = socket.next().await {}
-        });
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
         let initialize_params = InitializeParams {
             capabilities: ClientCapabilities::default(),
@@ -982,7 +1000,10 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
             .call(initialized)
             .await
             .expect("initialized notification");
-        assert!(initialized_response.is_none(), "initialized is a notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
 
         let server = server_holder
             .lock()
@@ -996,18 +1017,16 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
         coordinator
             .intellisense_index()
             .replace_snapshot(snapshot_a.clone());
-        let expected_deps_id_a =
-            build_deps_bundle_v2(coordinator.as_ref(), None, None)
-                .expect("bundle A")
-                .deps_id;
+        let expected_deps_id_a = build_deps_bundle_v2(coordinator.as_ref(), None, None)
+            .expect("bundle A")
+            .deps_id;
 
         coordinator
             .intellisense_index()
             .replace_snapshot(snapshot_b.clone());
-        let expected_deps_id_b =
-            build_deps_bundle_v2(coordinator.as_ref(), None, None)
-                .expect("bundle B")
-                .deps_id;
+        let expected_deps_id_b = build_deps_bundle_v2(coordinator.as_ref(), None, None)
+            .expect("bundle B")
+            .deps_id;
 
         coordinator
             .intellisense_index()
@@ -1038,7 +1057,10 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
         let completion_params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line: 1, character: 6 },
+                position: Position {
+                    line: 1,
+                    character: 6,
+                },
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
@@ -1068,7 +1090,9 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
             let snapshot_b = snapshot_b.clone();
             async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-                coordinator.intellisense_index().replace_snapshot(snapshot_b);
+                coordinator
+                    .intellisense_index()
+                    .replace_snapshot(snapshot_b);
                 server.deps_update_v2("p8_test_update", None, None).await;
             }
         });

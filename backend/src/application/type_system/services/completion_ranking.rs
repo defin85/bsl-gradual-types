@@ -93,7 +93,11 @@ pub fn rank_candidates_with_trace(
         Span::none()
     };
     let _filter_guard = filter_span.enter();
-    let filter_started = if trace_enabled { Some(Instant::now()) } else { None };
+    let filter_started = if trace_enabled {
+        Some(Instant::now())
+    } else {
+        None
+    };
 
     let mut filtered = Vec::with_capacity(candidates.len());
     for candidate in candidates.drain(..) {
@@ -125,7 +129,11 @@ pub fn rank_candidates_with_trace(
         Span::none()
     };
     let _rank_guard = rank_span.enter();
-    let rank_started = if trace_enabled { Some(Instant::now()) } else { None };
+    let rank_started = if trace_enabled {
+        Some(Instant::now())
+    } else {
+        None
+    };
 
     let mut ranked = Vec::with_capacity(filtered.len());
     for candidate in filtered {
@@ -188,11 +196,7 @@ pub fn rank_candidates_with_trace(
     unique.sort_by(|a, b| stable_order(a, b));
 
     let mut summary = RankingSummary::default();
-    let score_samples = unique
-        .iter()
-        .take(200)
-        .map(|item| item.score)
-        .collect();
+    let score_samples = unique.iter().take(200).map(|item| item.score).collect();
 
     for candidate in &unique {
         match candidate.signals.prefix_match {
@@ -293,7 +297,10 @@ fn dedup_key(candidate: &RankedCandidate) -> String {
         .scope
         .map(|scope| format!("{:?}", scope))
         .unwrap_or_else(|| "none".to_string());
-    format!("{}|{:?}|{}", candidate.label_lower, candidate.item.kind, scope)
+    format!(
+        "{}|{:?}|{}",
+        candidate.label_lower, candidate.item.kind, scope
+    )
 }
 
 fn merge_candidates(mut best: RankedCandidate, other: RankedCandidate) -> RankedCandidate {

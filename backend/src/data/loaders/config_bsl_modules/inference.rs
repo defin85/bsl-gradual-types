@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use bsl_shared::domain::code_location::ModuleType;
 
 use super::types::{CallTarget, ParsedModule};
-use super::utils::{normalize_union_parts, resolve_manager_owner_type_from_receiver, split_union_string};
+use super::utils::{
+    normalize_union_parts, resolve_manager_owner_type_from_receiver, split_union_string,
+};
 
 pub(crate) fn infer_export_param_types_across_modules(
     modules: &[ParsedModule],

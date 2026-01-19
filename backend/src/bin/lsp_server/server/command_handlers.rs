@@ -8,7 +8,6 @@ use tracing::{info, warn};
 
 use std::path::{Path, PathBuf};
 
-use bsl_backend::system::fs_utils::read_bsl_file;
 use crate::commands::{
     handle_incremental_update, handle_parse_configuration, ParseConfigurationParams,
 };
@@ -18,6 +17,7 @@ use crate::types::{
     GetCurrentContextParams, IncrementalUpdateParams, IncrementalUpdateResponse,
     WorkspaceStatsResponse,
 };
+use bsl_backend::system::fs_utils::read_bsl_file;
 
 use super::BslLanguageServer;
 
@@ -69,12 +69,13 @@ impl BslLanguageServer {
 
             match file_content {
                 Some(file_content) => {
-                    self.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                        file_id,
-                        text: std::sync::Arc::from(file_content),
-                        version: 0,
-                        path: std::sync::Arc::from(path),
-                    }]);
+                    self.analysis_v2
+                        .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                            file_id,
+                            text: std::sync::Arc::from(file_content),
+                            version: 0,
+                            path: std::sync::Arc::from(path),
+                        }]);
                     self.analysis_v2.wait_for_file_version(file_id, 0).await
                 }
                 None => false,
@@ -115,14 +116,12 @@ impl BslLanguageServer {
             return Ok(BuildIndexResponse {
                 success: false,
                 types_count: 0,
-                message: "LSP config not available (initializationOptions not received)".to_string(),
+                message: "LSP config not available (initializationOptions not received)"
+                    .to_string(),
             });
         };
 
-        let platform_docs_root = cfg
-            .platform_docs_archive
-            .as_deref()
-            .map(PathBuf::from);
+        let platform_docs_root = cfg.platform_docs_archive.as_deref().map(PathBuf::from);
 
         let Some(config_path) = cfg.configuration_path else {
             return Ok(BuildIndexResponse {
@@ -256,15 +255,10 @@ impl BslLanguageServer {
     }
 
     /// Custom request: bsl/getWorkspaceStats
-    pub(crate) async fn handle_get_workspace_stats(
-        &self,
-    ) -> JsonRpcResult<WorkspaceStatsResponse> {
+    pub(crate) async fn handle_get_workspace_stats(&self) -> JsonRpcResult<WorkspaceStatsResponse> {
         let config = self.config.read().await.clone();
         let root = resolve_workspace_root(config);
-        let bsl_files = root
-            .as_deref()
-            .map(count_bsl_files)
-            .unwrap_or(0);
+        let bsl_files = root.as_deref().map(count_bsl_files).unwrap_or(0);
 
         let diagnostics = {
             let counts = self.diagnostics_counts.read().await;

@@ -9,15 +9,15 @@ use tracing::debug;
 use bsl_backend::application::type_system;
 
 #[cfg(test)]
-use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature};
+use crate::converters::position::{char_to_utf16_index, utf16_to_char_index};
 #[cfg(test)]
 use bsl_shared::domain::repository::TypeRepository;
 #[cfg(test)]
 use bsl_shared::domain::resolver::TypeResolver;
 #[cfg(test)]
-use bsl_shared::engine::AnalysisEngine;
+use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature};
 #[cfg(test)]
-use crate::converters::position::{char_to_utf16_index, utf16_to_char_index};
+use bsl_shared::engine::AnalysisEngine;
 
 /// Context of a function call
 #[derive(Debug)]
@@ -462,9 +462,7 @@ enum SignatureTarget {
 #[cfg(test)]
 fn build_signature_help_response(signature: SignatureTarget, active_param: u32) -> SignatureHelp {
     match signature {
-        SignatureTarget::Method(signature) => {
-            build_method_signature_help(signature, active_param)
-        }
+        SignatureTarget::Method(signature) => build_method_signature_help(signature, active_param),
         SignatureTarget::Constructor(signature) => {
             build_constructor_signature_help(signature, active_param)
         }
@@ -547,10 +545,12 @@ mod tests {
     use std::sync::Arc;
 
     use bsl_shared::domain::repository::InMemoryTypeRepository;
-    use bsl_shared::TypeRepository;
-    use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource};
+    use bsl_shared::domain::signature_index::{
+        ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource,
+    };
     use bsl_shared::domain::types::{ParameterInfo, RawDataSource, RawTypeData};
     use bsl_shared::engine::AnalysisEngine;
+    use bsl_shared::TypeRepository;
     use bsl_shared::TypeResolver;
 
     fn fixture_path(name: &str) -> PathBuf {
@@ -689,23 +689,33 @@ mod tests {
         .expect("constructor signature help (v2)");
 
         let method_pos = find_position(&content, "Массив.Добавить(1, ");
-        let method_legacy =
-            handle_signature_help(&content, method_pos, Some(test_deps.engine))
-                .await
-                .expect("method signature help (legacy)");
-        let method_v2 =
-            handle_signature_help_v2(Arc::from(content), method_pos, test_deps.deps)
-                .await
-                .expect("method signature help (v2)");
+        let method_legacy = handle_signature_help(&content, method_pos, Some(test_deps.engine))
+            .await
+            .expect("method signature help (legacy)");
+        let method_v2 = handle_signature_help_v2(Arc::from(content), method_pos, test_deps.deps)
+            .await
+            .expect("method signature help (v2)");
 
-        assert_eq!(constructor_legacy.active_parameter, constructor_v2.active_parameter);
         assert_eq!(
-            constructor_legacy.signatures.first().map(|sig| sig.label.clone()),
-            constructor_v2.signatures.first().map(|sig| sig.label.clone())
+            constructor_legacy.active_parameter,
+            constructor_v2.active_parameter
+        );
+        assert_eq!(
+            constructor_legacy
+                .signatures
+                .first()
+                .map(|sig| sig.label.clone()),
+            constructor_v2
+                .signatures
+                .first()
+                .map(|sig| sig.label.clone())
         );
         assert_eq!(method_legacy.active_parameter, method_v2.active_parameter);
         assert_eq!(
-            method_legacy.signatures.first().map(|sig| sig.label.clone()),
+            method_legacy
+                .signatures
+                .first()
+                .map(|sig| sig.label.clone()),
             method_v2.signatures.first().map(|sig| sig.label.clone())
         );
 

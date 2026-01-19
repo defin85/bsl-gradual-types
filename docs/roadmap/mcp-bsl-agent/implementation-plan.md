@@ -1,7 +1,7 @@
 # План реализации: `bsl-agent` (MCP, локальная семантика)
 
 **Статус:** 🔴 ПЛАН  
-**Цель:** за 5–10 дней получить working MCP (stdio) с project-level семантикой и `context.pack`.
+**Цель:** за 5–10 дней получить working MCP (stdio) с project-level семантикой и `context_pack`.
 
 ---
 
@@ -41,16 +41,18 @@
   - `bsl_references`
   - `bsl_symbol_search` (минимальный индекс)
 - Политики безопасности: roots sandbox + лимит чтения файлов.
-- Поддержка `FileRef.text` (unsaved buffer).
+- Поддержка unsaved буферов:
+  - ad-hoc: `FileRef.text` (snapshot на один вызов);
+  - session overlay: `workspace_documents_set` / `workspace_documents_clear` (для `scope=hot` и `context_pack`).
 
 **DoD:** “точечные” tools работают на реальном workspace и возвращают DTO без паник.
 
 ---
 
-## M3: `context.pack` (2–3 дня)
+## M3: `context_pack` (2–3 дня)
 
 - `ContextPackBuilder`:
-  - бюджетирование (`budget_tokens`/`budget_chars`)
+  - бюджетирование (`budget_chars` как hard limit; `budget_tokens` как подсказка/alias)
   - ранжирование items по фокусу
   - `context_expand`
 - Добавить `missing_inputs[]`/`completeness` (например: нет platform docs/config path).
@@ -62,7 +64,7 @@
 ## M4: Integration tests (1–2 дня)
 
 - Интеграционные тесты MCP по stdio (поднять процесс, сделать `initialize`, `tools/list`, `tools/call`).
-- Golden tests для `context.pack` (стабильность текста/структуры).
+- Golden tests для `context_pack` (стабильность текста/структуры).
+- Тесты на корректность `analysis_revision` и поведение при stale IDs.
 
 **DoD:** 10+ integration тестов, воспроизводимые результаты.
-

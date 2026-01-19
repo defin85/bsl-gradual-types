@@ -20,13 +20,13 @@
 
 ### 1.2. “Проектный” контекст для LLM
 
-**Решение:** основной интерфейс для LLM — агрегирующий tool `context.pack`, который:
+**Решение:** основной интерфейс для LLM — агрегирующий tool `context_pack`, который:
 
 - принимает “цель” (goal) и “фокус” (diagnostic/symbol/file+pos/query);
 - возвращает компактный текстовый пакет + структурированный список items;
 - работает **в рамках бюджета** (chars/tokens) и умеет честно отвечать `completeness=partial` + `missing_inputs[]` при нехватке данных.
 
-Точечные tools (`diagnostics`, `typeAtPosition`, `definition`, `references`, `members`, `symbol.search`) нужны только для дозапросов.
+Точечные tools (`bsl_diagnostics`, `bsl_type_at_position`, `bsl_definition`, `bsl_references`, `bsl_members`, `bsl_symbol_search`) нужны только для дозапросов.
 
 ### 1.3. Local-first (на данном этапе)
 
@@ -39,12 +39,12 @@
 
 ### 1.4. Unsaved buffer из IDE
 
-**Решение:** поддержать **опционально**:
+**Решение:** поддержать двумя уровнями (оба read-only, без записи на диск):
 
-- если клиент передаёт `text`, анализируем его как snapshot файла;
-- если `text` не передан, читаем с диска.
+- **ad-hoc snapshot:** `FileRef.text` в конкретном tool-call (анализируем текст только в рамках одного вызова);
+- **session overlay:** инструменты `workspace_documents_set` / `workspace_documents_clear` сохраняют unsaved тексты в памяти сессии, чтобы `scope=hot` и `context_pack` работали по реальному состоянию редактора.
 
-Это критично для IDE-host’ов (VS Code/Cursor), но не мешает CLI-host’ам.
+Каждое изменение effective-состояния документов (overlay и/или изменения на диске, обнаруженные сервером) увеличивает `analysis_revision` (монотонный `u64`). Все семантические ответы возвращают `analysis_revision`; ID (`symbol_id`, `diagnostic_id`, `pack_id`, `item_id`) валидны только в рамках конкретного `analysis_revision`.
 
 ---
 
@@ -52,19 +52,19 @@
 
 ### 2.1. Functional
 
-- `diagnostics` по файлу и по проекту (с группировками).
+- `bsl_diagnostics` по файлу и по проекту (с группировками).
 - “семантическая навигация”:
-  - `typeAtPosition`
-  - `members` (member list / completion-like для receiver выражений)
-  - `definition`
-  - `references`
-  - `symbol.search`
-- `context.pack`: собрать контекст “готовый для LLM” под задачу исправления/рефакторинга.
+  - `bsl_type_at_position`
+  - `bsl_members` (member list / completion-like для receiver выражений)
+  - `bsl_definition`
+  - `bsl_references`
+  - `bsl_symbol_search`
+- `context_pack`: собрать контекст “готовый для LLM” под задачу исправления/рефакторинга.
 
 ### 2.2. Non-functional
 
 - **Determinism:** одинаковый snapshot → одинаковый результат (порядок, ID).
-- **Budgeted output:** ограничение размера выдачи (`budget_tokens`/`budget_chars`) с аккуратным `truncated=true`.
+- **Budgeted output:** ограничение размера выдачи (`budget_chars` как hard limit; `budget_tokens` как подсказка/alias) с аккуратным `truncated=true`.
 - **Incremental correctness:** per-file snapshots (hash/version) без смешивания состояний.
 - **No write:** MCP не пишет файлы и не применяет патчи (read-only).
 - **Security:** sandbox roots + защита от path traversal + лимиты на чтение.
@@ -80,6 +80,7 @@ Host (LLM)  ──tools/call──>  bsl-agent (MCP, stdio)
                                ├─ WorkspaceSessionManager (sessions)
                                │     ├─ Policy (roots/include/exclude/limits)
                                │     ├─ WorkspaceProvider (FS read/list/search)
+                               │     ├─ DocumentStore (disk + overlays + hot set)
                                │     └─ SemanticProvider (in-proc)
                                │            └─ SemanticFacade (shared API)
                                │                  ├─ TypeRepository (platform + metadata)
@@ -95,14 +96,17 @@ Host (LLM)  ──tools/call──>  bsl-agent (MCP, stdio)
 
 - управление lifecycle сессии (open/status/close);
 - кэширование тяжёлых данных (platform types, metadata, индексы);
-- выдача “snapshot” контента для анализа.
+- выдача “snapshot” контента для анализа (disk + overlays).
+- управление `analysis_revision` и “hot” набором документов (IDE‑friendly).
 
 Данные сессии (минимум):
 
-- `roots[]` (sandbox);
+- `roots[]` (sandbox) + стабильные `root_id`;
 - `platform_docs_archive` + `platform_version` (если задано);
 - `configuration_path` (опционально, для metadata);
+- `analysis_revision` (монотонный счётчик изменений overlay);
 - runtime кэши и индексы (AST/IR caches, symbol index, diag index).
+  - включая кэши, привязанные к `analysis_revision`/hash’ам документов.
 
 ### 3.2. Policy
 
@@ -119,8 +123,20 @@ Host (LLM)  ──tools/call──>  bsl-agent (MCP, stdio)
 
 Фасад работает по схеме:
 
-- вход: `WorkspaceSnapshot` + `DocumentSnapshot` (path + text + version/hash)
-- выход: чистые DTO (diagnostics, symbols, types, members) + минимальные “explain” поля для LLM.
+- вход: `WorkspaceSnapshot` + `DocumentSnapshot` (DocumentRef + text + version/hash + source)
+- выход: чистые DTO (diagnostics, symbols, types, members, impact/coverage) + минимальные “explain” поля для LLM.
+
+### 3.4. DocumentStore и WorkspaceSnapshot
+
+DocumentStore — ключевой компонент для LLM‑воркфлоу: он отделяет “что лежит на диске” от “что сейчас в редакторе”.
+
+- хранит overlay-тексты (unsaved buffers) и метаданные (`version`, `hash`, `source`);
+- умеет отдавать `DocumentSnapshot` по `DocumentRef`:
+  - если есть overlay → берём overlay;
+  - иначе читаем с диска (в пределах `roots[]`, с лимитами `Policy`).
+- поддерживает `hot_set` (активные документы) для `scope=hot` и быстрых pack’ов.
+
+`WorkspaceSnapshot` фиксирует “какие документы и в каких версиях” использовались для конкретного анализа. Все результаты семантики должны ссылаться на `analysis_revision`/hash’и, чтобы LLM мог понимать, что результаты соответствуют конкретному snapshot’у.
 
 ---
 
@@ -131,12 +147,17 @@ Host (LLM)  ──tools/call──>  bsl-agent (MCP, stdio)
 Нужны для дозапросов и итеративной работы LLM.
 
 - `session_id`: UUID v4.
-- `document_id`: нормализованный относительный путь от root (posix).
-- `symbol_id`: hash(`document_id|kind|range`).
-- `diagnostic_id`: hash(`document_id|range|code|message`).
+- `root_id`: hash(canonical_abs_root_path) → hex (для multi-root без коллизий).
+- `document_id`: `root_id:path` (path нормализован как posix relative path внутри root).
+- `analysis_revision`: монотонный `u64` внутри сессии (увеличивается на любые изменения overlay).
+- `symbol_id`: hash(`analysis_revision|document_id|kind|range|name?`).
+- `diagnostic_id`: hash(`analysis_revision|document_id|range|code|message`).
+- `pack_id`: hash(`analysis_revision|goal|focus|include|budget_chars`).
 - `pack_item_id`: hash(`pack_id|kind|primary_key`).
 
 Хеш: `blake3` → hex (короткий, детерминированный).
+
+Важно: ID считаются стабильными **внутри одного `analysis_revision`**. Если `analysis_revision` изменился (например, после `workspace_documents_set`), старые `symbol_id/diagnostic_id/pack_id` могут стать stale — сервер должен отвечать явно (ошибка `stale_id`/`stale_revision` или `completeness=partial` + reason).
 
 ### 4.2. Sorting
 
@@ -145,9 +166,15 @@ Host (LLM)  ──tools/call──>  bsl-agent (MCP, stdio)
 - сначала по `document_id`, затем по `range.start`, затем по `kind/name`.
 - при equal — по `id`.
 
+### 4.3. Budget policy (детерминизм выдачи)
+
+- `budget_chars` — **жёсткий лимит** на текстовые поля (`text`, `snippet.text`) и суммарный `context_pack.text`.
+- `budget_tokens` — **не гарантия**, а только подсказка/alias для выставления `budget_chars` по детерминированной формуле (например, фиксированный коэффициент chars-per-token).
+- Любая обрезка обязана быть явной: `truncated=true`, плюс причины/счётчики (сколько элементов/строк выкинули).
+
 ---
 
-## 5) `context.pack`: как “LLM-friendly” агрегатор
+## 5) `context_pack`: как “LLM-friendly” агрегатор
 
 ### 5.1. Вход (идея)
 
@@ -157,13 +184,15 @@ Host (LLM)  ──tools/call──>  bsl-agent (MCP, stdio)
   - `symbol_id`
   - `file + position_utf16 (+ text?)`
   - `query` (строка поиска)
-- `budget`: `budget_tokens` (default 1800) и/или `budget_chars` (default ~7000).
+- `scope`: `hot|file|project` (по умолчанию `hot` для IDE-host’ов, `project` для CLI-host’ов).
+- `budget`: `budget_chars` (hard limit, default ~7000) и/или `budget_tokens` (alias).
 - `include`: флаги (snippets/diagnostics/types/references/metadata/coverage/impact).
 
 ### 5.2. Выход (идея)
 
 - `text`: готовый для LLM “пакет” (строго в бюджете).
-- `items[]`: структурированные элементы (каждый можно расширить через `context.expand`).
+- `items[]`: структурированные элементы (каждый можно расширить через `context_expand`).
+- `analysis_revision`: ревизия snapshot’а, для которой сформирован pack.
 - `completeness`: `full|partial`.
 - `missing_inputs[]`: что нужно догрузить/разрешить (например “нет platform docs”, “не настроен configuration_path”).
 
@@ -173,7 +202,7 @@ Host (LLM)  ──tools/call──>  bsl-agent (MCP, stdio)
 
 1) проектный контекст (platform version, config path, режимы) — 5-10 строк;
 2) фокус (snippet 60-120 строк с маркерами диапазонов);
-3) связанные diagnostics (тот же файл + “соседи”);
+3) связанные diagnostics + impact/coverage summary (“радиус поражения”, непроверенные операции);
 4) типы/члены для выражения под курсором (если focus=position);
 5) определение ключевого символа (если находится) + 3-10 наиболее релевантных references.
 
@@ -187,7 +216,7 @@ Scopes:
 
 - `scope=project`: все `**/*.bsl` в roots (с ограничениями/кэшем).
 - `scope=file`: один файл.
-- `scope=hot`: набор “активных” файлов (передаётся явно) — быстрый default для IDE-host’ов.
+- `scope=hot`: набор “активных” файлов из `DocumentStore.hot_set` (заполняется через `workspace_documents_set(mark_hot=true)`).
 
 ---
 
@@ -198,6 +227,6 @@ Scopes:
 - нет `platform_docs_archive` → доступны только fallback типы/heuristics;
 - нет `configuration_path` → нет metadata типов (`Документы.`, `Справочники.` и т.д.);
 - файл слишком большой или бинарный → возвращаем “preview + truncated”.
+- `symbol_id/diagnostic_id` от старого `analysis_revision` → явный ответ “stale id” + просьба обновить pack/повторить запрос.
 
 Важно: деградации должны быть явными и объясняемыми в DTO (`reasons[]`).
-

@@ -1,4 +1,0 @@
-# Cargo warnings (workspace, all-targets)
-# Unique warnings: 0
-# Total warning occurrences (incl. duplicates across targets): 0
-

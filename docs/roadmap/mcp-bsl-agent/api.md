@@ -31,17 +31,33 @@
 }
 ```
 
-### 2.2. FileRef
+### 2.2. RootRef / DocumentRef
+
+`root_id` нужен для корректной работы multi-root workspace и стабильных ID.
+
+```json
+{ "root_id": "hex", "path": "/abs/path/to/workspace" }
+```
+
+```json
+{ "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }
+```
+
+### 2.3. FileRef
 
 ```json
 {
-  "path": "src/CommonModules/Foo/Module.bsl",
+  "doc": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" },
   "text": "optional full text (unsaved buffer)",
   "version": 12
 }
 ```
 
-Если `text` отсутствует — читаем файл с диска (в пределах roots).
+Если `text` отсутствует — читаем файл с диска (в пределах roots). Если `text` присутствует — он используется как snapshot **только для этого вызова**. Для IDE‑сценариев, где unsaved тексты должны влиять на `context_pack`/`scope=hot`, используется `workspace_documents_set`.
+
+### 2.4. `analysis_revision` и валидность ID
+
+`analysis_revision` — монотонный счётчик изменений effective-состояния документов внутри сессии (overlay и/или изменения на диске, обнаруженные сервером). Все семантические ответы возвращают `analysis_revision`; ID (`symbol_id`, `diagnostic_id`, `pack_id`, `item_id`) считаются валидными только в рамках этого revision.
 
 ---
 
@@ -70,6 +86,8 @@ Output:
 ```json
 {
   "session_id": "uuid",
+  "roots": [{ "root_id": "hex", "path": "/abs/path/to/workspace" }],
+  "analysis_revision": 0,
   "ready": false,
   "warnings": [],
   "missing_inputs": []
@@ -91,6 +109,7 @@ Output:
 ```json
 {
   "ready": true,
+  "analysis_revision": 0,
   "phase": "idle|loading_platform|loading_config|indexing",
   "progress": { "percent": 100 },
   "warnings": [],
@@ -112,7 +131,47 @@ Output:
 { "ok": true }
 ```
 
-### 3.4. `bsl_diagnostics`
+### 3.4. `workspace_documents_set`
+
+Сохранить unsaved тексты в памяти сессии (overlay). Эти тексты будут использоваться для `scope=hot` и `context_pack`.
+
+Если у `FileRef` не задан `text`, документ просто помечается как “hot” и будет читаться с диска (без overlay).
+
+Input:
+```json
+{
+  "session_id": "uuid",
+  "files": [
+    { "doc": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }, "text": "...", "version": 12 }
+  ],
+  "mark_hot": true
+}
+```
+
+Output:
+```json
+{ "ok": true, "analysis_revision": 1 }
+```
+
+### 3.5. `workspace_documents_clear`
+
+Удалить overlay для документов (вернуться к чтению с диска).
+
+Input:
+```json
+{
+  "session_id": "uuid",
+  "documents": [{ "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }],
+  "clear_hot": true
+}
+```
+
+Output:
+```json
+{ "ok": true, "analysis_revision": 2 }
+```
+
+### 3.6. `bsl_diagnostics`
 
 Диагностики по проекту/файлу.
 
@@ -130,10 +189,11 @@ Input:
 Output (идея):
 ```json
 {
+  "analysis_revision": 2,
   "diagnostics": [
     {
       "diagnostic_id": "hex",
-      "file": "path",
+      "file": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" },
       "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 10 } },
       "severity": "error|warning|info",
       "code": "optional",
@@ -146,7 +206,7 @@ Output (идея):
 }
 ```
 
-### 3.5. `bsl_symbol_search`
+### 3.7. `bsl_symbol_search`
 
 Поиск символов по имени (для навигации LLM).
 
@@ -158,13 +218,14 @@ Input:
 Output:
 ```json
 {
+  "analysis_revision": 2,
   "symbols": [
-    { "symbol_id": "hex", "name": "Документы", "kind": "namespace", "file": "path", "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } } }
+    { "symbol_id": "hex", "name": "Документы", "kind": "namespace", "file": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }, "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } } }
   ]
 }
 ```
 
-### 3.6. `bsl_type_at_position`
+### 3.8. `bsl_type_at_position`
 
 Тип/разрешение выражения в позиции.
 
@@ -172,7 +233,7 @@ Input:
 ```json
 {
   "session_id": "uuid",
-  "file": { "path": "path", "text": "optional" },
+  "file": { "doc": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }, "text": "optional" },
   "position": { "line": 10, "character": 5 }
 }
 ```
@@ -180,13 +241,14 @@ Input:
 Output:
 ```json
 {
+  "analysis_revision": 2,
   "type": { "name": "Строка", "certainty": 1.0, "facet": "Object" },
   "node": { "kind": "MemberAccess", "range": { "start": { "line": 10, "character": 0 }, "end": { "line": 10, "character": 20 } } },
   "explain": { "reasons": [] }
 }
 ```
 
-### 3.7. `bsl_members`
+### 3.9. `bsl_members`
 
 Member list (completion-like) для receiver в позиции (например для `expr.`).
 
@@ -194,7 +256,7 @@ Input:
 ```json
 {
   "session_id": "uuid",
-  "file": { "path": "path", "text": "optional" },
+  "file": { "doc": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }, "text": "optional" },
   "position": { "line": 10, "character": 12 },
   "limit": 200
 }
@@ -203,6 +265,7 @@ Input:
 Output:
 ```json
 {
+  "analysis_revision": 2,
   "receiver": { "type": { "name": "ДокументОбъект.ЗаказПокупателя", "facet": "Object" } },
   "members": [
     { "name": "Записать", "kind": "method", "signature": "Записать()", "return_type": "Булево", "deprecated": false }
@@ -211,7 +274,7 @@ Output:
 }
 ```
 
-### 3.8. `bsl_definition`
+### 3.10. `bsl_definition`
 
 Definition по `symbol_id` или по позиции.
 
@@ -222,18 +285,19 @@ Input (вариант A):
 
 Input (вариант B):
 ```json
-{ "session_id": "uuid", "file": { "path": "path", "text": "optional" }, "position": { "line": 10, "character": 5 } }
+{ "session_id": "uuid", "file": { "doc": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }, "text": "optional" }, "position": { "line": 10, "character": 5 } }
 ```
 
 Output:
 ```json
 {
-  "location": { "file": "path", "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 1 } } },
+  "analysis_revision": 2,
+  "location": { "file": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }, "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 1 } } },
   "snippet": { "text": "bounded snippet", "truncated": false }
 }
 ```
 
-### 3.9. `bsl_references`
+### 3.11. `bsl_references`
 
 References по `symbol_id`.
 
@@ -245,15 +309,16 @@ Input:
 Output:
 ```json
 {
+  "analysis_revision": 2,
   "count": 12,
   "references": [
-    { "file": "path", "range": { "start": { "line": 1, "character": 1 }, "end": { "line": 1, "character": 5 } } }
+    { "file": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }, "range": { "start": { "line": 1, "character": 1 }, "end": { "line": 1, "character": 5 } } }
   ],
   "truncated": false
 }
 ```
 
-### 3.10. `context_pack` (главный)
+### 3.12. `context_pack` (главный)
 
 Input:
 ```json
@@ -269,10 +334,11 @@ Input:
 Output (идея):
 ```json
 {
+  "analysis_revision": 2,
   "pack_id": "hex",
   "text": "LLM-ready pack (bounded)",
   "items": [
-    { "item_id": "hex", "kind": "snippet", "file": "path", "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } }, "summary": "..." }
+    { "item_id": "hex", "kind": "snippet", "file": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }, "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } }, "summary": "..." }
   ],
   "truncated": false,
   "completeness": "full",
@@ -280,7 +346,7 @@ Output (идея):
 }
 ```
 
-### 3.11. `context_expand`
+### 3.13. `context_expand`
 
 Расширить конкретный item из `context_pack`.
 
@@ -291,7 +357,7 @@ Input:
 
 Output:
 ```json
-{ "text": "expanded content", "truncated": false }
+{ "analysis_revision": 2, "text": "expanded content", "truncated": false }
 ```
 
 ---
@@ -309,6 +375,5 @@ Resources полезны для интерактивных клиентов, н�
 
 Prompts — “шаблоны” для UI-хостов:
 
-- `analyze-bsl` — анализ проблемы по `context.pack`
+- `analyze-bsl` — анализ проблемы по `context_pack`
 - `fix-type-errors` — пошаговое исправление с учётом gradual typing и impact
-

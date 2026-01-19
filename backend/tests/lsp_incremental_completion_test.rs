@@ -5,10 +5,6 @@ mod support;
 #[path = "../src/bin/lsp_server/converters/position.rs"]
 pub mod position;
 
-mod converters {
-    pub use crate::position;
-}
-
 #[path = "../src/bin/lsp_server/handlers/completion.rs"]
 mod completion_handler;
 
@@ -92,6 +88,7 @@ fn format_expr_with_cursor_guard(typed: &str) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn apply_and_complete_at_member_dot(
     host: &mut AnalysisHostV2,
     deps_bundle: &Arc<DepsBundleV2>,

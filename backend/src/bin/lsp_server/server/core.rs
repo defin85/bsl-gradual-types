@@ -767,7 +767,7 @@ mod tests {
         }
 
         assert!(
-            versions.iter().any(|v| *v == 3),
+            versions.contains(&3),
             "expected diagnostics for version 3 to be published, got {:?}",
             versions
         );

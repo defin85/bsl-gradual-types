@@ -326,7 +326,6 @@ impl SystemCoordinator {
                                     &payload.config_raw_types,
                                 );
                                 combined_cache_hit = true;
-                                let prev = self.startup_progress();
                                 self.set_startup_progress(StartupProgressDto {
                                     phase: "Загрузка конфигурации".to_string(),
                                     current: 1,
@@ -334,7 +333,6 @@ impl SystemCoordinator {
                                     percentage: 100.0,
                                     message: Some("Конфигурация: из combined cache".to_string()),
                                     done: false,
-                                    ..prev
                                 });
                                 info!(
                                     "Загружено {} типов из combined cache",

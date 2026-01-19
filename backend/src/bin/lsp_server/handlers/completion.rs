@@ -66,10 +66,12 @@ enum CompletionCandidateIdPayload {
 
 pub struct CompletionResponseWithStats {
     pub response: CompletionResponse,
+    #[allow(dead_code)]
     pub stats: Option<CompletionStats>,
     pub had_error: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_completion_v2(
     file_content: Arc<str>,
     file_path: Arc<str>,
@@ -992,7 +994,7 @@ mod tests {
         for kind in metadata_kinds {
             let mapped = map_completion_kind(kind).expect("metadata kind should map");
             assert!(
-                !seen.iter().any(|existing| *existing == mapped),
+                !seen.contains(&mapped),
                 "Duplicate LSP kind mapping for metadata completion kind: {:?} -> {:?}",
                 kind,
                 mapped

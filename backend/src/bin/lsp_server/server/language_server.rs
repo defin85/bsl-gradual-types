@@ -396,7 +396,7 @@ impl LanguageServer for BslLanguageServer {
                     Ok(mut new_config) => {
                         normalize_lsp_config(&mut new_config);
                         let mut guard = self.config.write().await;
-                        let mut merged = guard.clone().unwrap_or_else(|| LspConfig {
+                        let mut merged = guard.clone().unwrap_or(LspConfig {
                             platform_docs_archive: None,
                             configuration_path: None,
                             platform_version: None,

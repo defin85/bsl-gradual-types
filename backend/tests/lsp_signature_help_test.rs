@@ -272,7 +272,7 @@ mod lsp_signature_help_tests {
     fn is_identifier_char(c: char) -> bool {
         c.is_alphanumeric()
             || c == '_'
-            || (c >= '\u{0410}' && c <= '\u{044F}')
+            || ('\u{0410}'..='\u{044F}').contains(&c)
             || c == '\u{0401}'
             || c == '\u{0451}'
     }

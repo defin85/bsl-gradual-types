@@ -68,7 +68,7 @@ impl SystemCoordinator {
         let project_id = project_id_from_root(&config_root);
         let mut config_ids: Vec<String> = configurations
             .iter()
-            .map(|info| config_id_for_info(info))
+            .map(config_id_for_info)
             .collect();
         config_ids.sort();
         config_ids.dedup();
@@ -127,9 +127,9 @@ impl SystemCoordinator {
         }
 
         let metadata_objects = if let Some(ref config_info) = config_info {
-            let config_set_id = config_set_id_from_single(&config_info);
+            let config_set_id = config_set_id_from_single(config_info);
             let cache_key =
-                self.build_config_cache_key(config_path, &config_info, Some(&config_set_id))?;
+                self.build_config_cache_key(config_path, config_info, Some(&config_set_id))?;
             let cache = self.disk_cache();
             let discovery_root = config_path.to_path_buf();
             let config_info = config_info.clone();
@@ -168,13 +168,13 @@ impl SystemCoordinator {
         let mut payload = None;
         let mut metadata_for_indexing = metadata_objects.clone();
         if let Some(ref config_info) = config_info {
-            let config_set_id = config_set_id_from_single(&config_info);
+            let config_set_id = config_set_id_from_single(config_info);
             let prefix = config_info.prefix.as_deref();
             metadata_for_indexing = Self::apply_prefix_for_indexing(&metadata_objects, prefix);
 
             let cache_key = self.build_config_layer_b_cache_key(
                 config_path,
-                &config_info,
+                config_info,
                 Some(&config_set_id),
                 &metadata_for_indexing,
             )?;
@@ -278,7 +278,7 @@ impl SystemCoordinator {
         );
         if let Some(ref config_info) = config_info {
             let project_id = project_id_from_root(config_path);
-            let config_set_id = config_set_id_from_single(&config_info);
+            let config_set_id = config_set_id_from_single(config_info);
             self.persist_intellisense_index_snapshot(&project_id, &config_set_id);
         }
         Ok(count)
@@ -1117,6 +1117,7 @@ impl SystemCoordinator {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_config_layer_b_payload<F>(
         &self,
         root_path: &Path,
@@ -1826,7 +1827,7 @@ fn merkle_root_raw(leaves: &[blake3::Hash]) -> blake3::Hash {
 
     let mut level: Vec<[u8; 32]> = leaves.iter().map(|hash| *hash.as_bytes()).collect();
     while level.len() > 1 {
-        let mut next_level: Vec<[u8; 32]> = Vec::with_capacity((level.len() + 1) / 2);
+        let mut next_level: Vec<[u8; 32]> = Vec::with_capacity(level.len().div_ceil(2));
         let mut idx = 0;
         while idx < level.len() {
             let left = level[idx];
@@ -1980,7 +1981,7 @@ mod merkle_tests {
         let a = root.join("A.xml");
         write_file(&a, "<a/>");
 
-        let fp_unique = merkle_fingerprint_paths(root, &[a.clone()], true);
+        let fp_unique = merkle_fingerprint_paths(root, std::slice::from_ref(&a), true);
         let fp_dup = merkle_fingerprint_paths(root, &[a.clone(), a], true);
 
         assert_eq!(fp_unique, fp_dup);
@@ -2092,7 +2093,7 @@ mod merkle_tests {
         let xml_paths = [xml];
 
         let fp_unique =
-            merkle_fingerprint_paths_with_modules(root, &xml_paths, &[bsl.clone()], true);
+            merkle_fingerprint_paths_with_modules(root, &xml_paths, std::slice::from_ref(&bsl), true);
         let fp_dup =
             merkle_fingerprint_paths_with_modules(root, &xml_paths, &[bsl.clone(), bsl], true);
 
@@ -2135,7 +2136,6 @@ fn log_warmup_skip_reason(
             project_id, config_set_id
         );
         observability.record_index_warmup_skip("already_populated");
-        return;
     }
 }
 

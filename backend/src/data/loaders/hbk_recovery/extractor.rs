@@ -291,7 +291,7 @@ where
         }
 
         extracted += 1;
-        if extracted % 100 == 0 || extracted == total_files {
+        if extracted.is_multiple_of(100) || extracted == total_files {
             if let Some(ref callback) = progress_callback {
                 callback(ProgressUpdateType::hbk_extraction(
                     file_name.clone(),

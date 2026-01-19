@@ -237,6 +237,7 @@ impl SystemCoordinator {
             .record_intellisense_v2_deps_update_error();
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_completion_quality(
         &self,
         total_candidates: usize,

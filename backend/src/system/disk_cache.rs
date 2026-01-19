@@ -510,6 +510,7 @@ impl DiskCache {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&lock_path)
             .with_context(|| format!("Failed to open lock file {}", lock_path.display()))?;
         file.lock_exclusive()
@@ -523,6 +524,7 @@ impl DiskCache {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&lock_path)
             .with_context(|| format!("Failed to open lock file {}", lock_path.display()))?;
         match file.try_lock_exclusive() {
@@ -1469,6 +1471,7 @@ mod tests {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&lock_path)
             .unwrap();
         lock_file.lock_exclusive().unwrap();

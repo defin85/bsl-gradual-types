@@ -17,6 +17,7 @@ use super::super::formatters::hover_formatters::format_semantic_node_info;
 /// Hover по уже готовому `SemanticProgram` (без legacy парсинга/IR build).
 ///
 /// Используется в IntelliSense v2 (salsa) hot path.
+#[allow(clippy::too_many_arguments)]
 pub fn get_hover_info_with_semantic_program(
     file_content: &str,
     line: u32,

@@ -127,6 +127,7 @@ pub async fn get_completion(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn get_completion_with_semantic_program(
     file_content: &str,
     line: u32,
@@ -157,6 +158,7 @@ pub async fn get_completion_with_semantic_program(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn get_completion_with_semantic_program_snapshot(
     file_content: &str,
     line: u32,
@@ -187,6 +189,7 @@ pub async fn get_completion_with_semantic_program_snapshot(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn get_completion_with_semantic_program_snapshot_v2(
     file_content: &str,
     line: u32,
@@ -980,9 +983,11 @@ fn resolve_receiver_types_from_expression(
                         .unwrap_or_else(|| {
                             TypeResolution::metadata_type(kind, property, Some(FacetKind::Manager))
                         });
-                    return (!resolution.is_unknown())
-                        .then(|| vec![resolution])
-                        .unwrap_or_default();
+                    return if !resolution.is_unknown() {
+                        vec![resolution]
+                    } else {
+                        Vec::new()
+                    };
                 }
             }
 

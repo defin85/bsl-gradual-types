@@ -193,7 +193,7 @@ pub fn rank_candidates_with_trace(
     }
 
     let mut unique: Vec<RankedCandidate> = dedup_map.into_values().collect();
-    unique.sort_by(|a, b| stable_order(a, b));
+    unique.sort_by(stable_order);
 
     let mut summary = RankingSummary::default();
     let score_samples = unique.iter().take(200).map(|item| item.score).collect();
@@ -409,9 +409,10 @@ mod tests {
 
     impl Write for SharedWriterGuard {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            let mut guard = self.0.lock().map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::Other, "log buffer poisoned")
-            })?;
+            let mut guard = self
+                .0
+                .lock()
+                .map_err(|_| std::io::Error::other("log buffer poisoned"))?;
             guard.extend_from_slice(buf);
             Ok(buf.len())
         }

@@ -59,11 +59,13 @@ pub struct BslLanguageServer {
     /// lifetime of the server process (even if the document is closed and re-opened).
     pub(crate) file_key_to_file_id_v2: Arc<RwLock<HashMap<V2FileKey, V2FileId>>>,
     pub(crate) next_file_id_v2: Arc<AtomicU32>,
-    pub(crate) diagnostics_tasks_v2: Arc<Mutex<HashMap<V2FileId, (i32, JoinHandle<()>)>>>,
+    pub(crate) diagnostics_tasks_v2: Arc<Mutex<DiagnosticsTasksV2>>,
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
     pub(crate) last_deps_id_v2: Arc<RwLock<Option<DepsSnapshotId>>>,
     pub(crate) last_settings_id_v2: Arc<RwLock<Option<SettingsId>>>,
 }
+
+type DiagnosticsTasksV2 = HashMap<V2FileId, (i32, JoinHandle<()>)>;
 
 fn parse_env_duration_ms(var: &str) -> Option<Duration> {
     let raw = std::env::var(var).ok()?;

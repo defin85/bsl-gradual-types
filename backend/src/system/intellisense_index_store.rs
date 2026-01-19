@@ -285,7 +285,7 @@ fn read_payload<T: for<'de> Deserialize<'de>>(
             invalid: false,
         });
     }
-    let metadata = fs::metadata(&path)
+    let metadata = fs::metadata(path)
         .with_context(|| format!("Failed to read metadata {}", path.display()))?;
     if metadata.len() > MAX_COMPRESSED_BYTES {
         warn!(
@@ -298,7 +298,7 @@ fn read_payload<T: for<'de> Deserialize<'de>>(
             invalid: false,
         });
     }
-    let bytes = match fs::read(&path) {
+    let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(err) => {
             warn!("Failed to read {}: {}", path.display(), err);

@@ -884,7 +884,7 @@ impl TreeSitterParser {
         let old_end_position =
             index.utf16_position_to_point(source, edit.old_end_line, edit.old_end_utf16_column);
 
-        let inserted_bytes = edit.new_text.as_bytes().len();
+        let inserted_bytes = edit.new_text.len();
         let new_end_byte = start_byte + inserted_bytes;
         let new_end_position = apply_text_to_point(start_position, &edit.new_text);
 
@@ -914,11 +914,11 @@ fn apply_text_to_point(start: Point, text: &str) -> Point {
         }
     }
 
-    if row == start.row {
-        column += text.as_bytes().len();
-    } else {
-        column = text.as_bytes().len().saturating_sub(last_line_start);
-    }
+        if row == start.row {
+            column += text.len();
+        } else {
+            column = text.len().saturating_sub(last_line_start);
+        }
 
     Point::new(row, column)
 }

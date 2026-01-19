@@ -8,6 +8,7 @@ use bsl_syntax::ast::{Expression, ParseResult, Program, Statement};
 use crate::application::type_system::extractors::symbol_extractor::utf16_to_byte_offset;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum CompletionTargetKind {
     MemberAccess,
     Call,
@@ -24,6 +25,7 @@ pub struct CompletionTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ReceiverChainHead {
     Identifier(String),
     ExplicitType(String),
@@ -51,6 +53,7 @@ pub struct ReceiverChain {
 }
 
 impl ReceiverChain {
+    #[allow(dead_code)]
     pub fn to_name_chain(&self) -> Option<Vec<String>> {
         let mut out = Vec::new();
         match &self.head {
@@ -84,7 +87,7 @@ pub fn extract_completion_target_for_member_access(
 
     let receiver = receiver_expression
         .as_ref()
-        .and_then(|expr| receiver_chain_from_expression(expr));
+        .and_then(receiver_chain_from_expression);
 
     if receiver_expression.is_none() && receiver_union_expressions.is_none() {
         return None;
@@ -98,6 +101,7 @@ pub fn extract_completion_target_for_member_access(
     })
 }
 
+#[allow(dead_code)]
 pub fn extract_member_access_receiver_chain(
     file_content: &str,
     line: u32,
@@ -109,6 +113,7 @@ pub fn extract_member_access_receiver_chain(
     receiver_chain_from_expression(&receiver_expr)
 }
 
+#[allow(dead_code)]
 pub fn extract_member_access_receiver_expression(
     file_content: &str,
     line: u32,
@@ -222,7 +227,7 @@ fn try_strip_one_pair_of_parens(text: &str) -> Option<&str> {
         return None;
     }
 
-    Some(text.get(1..text.len().saturating_sub(1))?)
+    text.get(1..text.len().saturating_sub(1))
 }
 
 fn extract_expression_suffix(prefix: &str) -> Option<&str> {
@@ -393,8 +398,8 @@ fn extract_choice_result_expression_slices(receiver_expr_text: &str) -> Option<V
         return None;
     }
 
-    if !keyword_at(&lower, start_offset, "выбор").is_some()
-        && !keyword_at(&lower, start_offset, "case").is_some()
+    if keyword_at(&lower, start_offset, "выбор").is_none()
+        && keyword_at(&lower, start_offset, "case").is_none()
     {
         return None;
     }

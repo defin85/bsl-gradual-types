@@ -269,6 +269,7 @@ impl BasicObservability {
             .increment("intellisense_v2_deps_update_error_total");
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_completion_quality(
         &self,
         total_candidates: usize,

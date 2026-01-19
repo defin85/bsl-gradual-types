@@ -21,6 +21,8 @@
 ### Requirement: Локальный кэш для платформы/конфигурации/AST (DiskCache)
 Система SHALL поддерживать локальный дисковый кэш для тяжёлых артефактов (platform docs/config metadata/AST) и SHALL управляться переменными окружения, совместимыми с существующим кэшем проекта (`BSL_CACHE_DIR`, `BSL_CACHE_DISABLE`, `BSL_CACHE_STRICT_FINGERPRINT` и др.).
 
+`platform_docs_archive` SHALL принимать как путь к файлу документации (например, `.hbk`/архив синтаксис‑помощника), так и путь к директории с распакованной документацией.
+
 #### Scenario: Включённый кэш создаёт артефакты в `BSL_CACHE_DIR`
 - **GIVEN** `BSL_CACHE_DIR` указывает на пустую временную директорию и `BSL_CACHE_DISABLE` не задан
 - **WHEN** клиент открывает сессию с `platform_docs_archive` и/или `configuration_path` и дожидается готовности через `workspace_status`

@@ -163,6 +163,48 @@ async fn stdio_tools_list_and_lifecycle_smoke() {
 }
 
 #[tokio::test]
+async fn stdio_workspace_open_rejects_empty_roots() {
+    let service = spawn_agent(&[]).await;
+
+    call_tool_expect_invalid_params(
+        &service,
+        "workspace_open",
+        json!({ "roots": [] }),
+        "roots must be non-empty",
+    )
+    .await;
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_workspace_open_deduplicates_roots() {
+    let service = spawn_agent(&[]).await;
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let root_str = temp_root.path().to_string_lossy().to_string();
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [root_str, temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+
+    assert_eq!(open.roots.len(), 1);
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &open.session_id }),
+    )
+    .await;
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
 async fn stdio_context_pack_stale_ids_are_rejected() {
     let service = spawn_agent(&[]).await;
     let temp_root = tempfile::TempDir::new().expect("tempdir");
@@ -261,6 +303,115 @@ async fn stdio_context_pack_stale_ids_are_rejected() {
 }
 
 #[tokio::test]
+async fn stdio_workspace_documents_set_requires_version_with_text() {
+    let service = spawn_agent(&[]).await;
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+
+    call_tool_expect_invalid_params(
+        &service,
+        "workspace_documents_set",
+        json!({
+            "session_id": &open.session_id,
+            "files": [
+                {
+                    "doc": { "root_id": &open.roots[0].root_id, "path": "src/CommonModules/Foo/Module.bsl" },
+                    "text": "Procedure Test() EndProcedure"
+                }
+            ],
+            "mark_hot": true
+        }),
+        "version is required when text is provided",
+    )
+    .await;
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_workspace_documents_set_rejects_large_overlay() {
+    let service = spawn_agent(&[]).await;
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+
+    let big_text = "x".repeat(2 * 1024 * 1024 + 1);
+    call_tool_expect_invalid_params(
+        &service,
+        "workspace_documents_set",
+        json!({
+            "session_id": &open.session_id,
+            "files": [
+                {
+                    "doc": { "root_id": &open.roots[0].root_id, "path": "src/CommonModules/Foo/Module.bsl" },
+                    "text": big_text,
+                    "version": 1
+                }
+            ],
+            "mark_hot": true
+        }),
+        "MAX_OVERLAY_BYTES",
+    )
+    .await;
+
+    let _ = service.cancel().await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn stdio_symlink_escape_is_rejected() {
+    use std::os::unix::fs::symlink;
+
+    let service = spawn_agent(&[]).await;
+    let root = tempfile::TempDir::new().expect("root");
+    let outside = tempfile::TempDir::new().expect("outside");
+
+    let outside_file = outside.path().join("outside.bsl");
+    std::fs::write(&outside_file, "Procedure Test() EndProcedure\n").expect("write outside");
+
+    let link_path = root.path().join("outside.bsl");
+    symlink(&outside_file, &link_path).expect("symlink");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+
+    call_tool_expect_invalid_params(
+        &service,
+        "bsl_type_at_position",
+        json!({
+            "session_id": &open.session_id,
+            "file": { "doc": { "root_id": &open.roots[0].root_id, "path": "outside.bsl" } },
+            "position": { "line": 0, "character": 0 }
+        }),
+        "path escapes roots",
+    )
+    .await;
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
 async fn stdio_disk_cache_can_be_disabled() {
     let cache_dir = tempfile::TempDir::new().expect("cache");
 
@@ -323,6 +474,39 @@ async fn stdio_disk_cache_can_be_disabled() {
     }
 
     ensure_dir_empty(cache_dir_disabled.path());
+}
+
+#[tokio::test]
+async fn stdio_workspace_open_accepts_platform_docs_file() {
+    let service = spawn_agent(&[]).await;
+    let temp_root = tempfile::TempDir::new().expect("root");
+
+    let platform_docs = repo_root()
+        .join("examples")
+        .join("syntax_helper")
+        .join("shcntx_ru.hbk")
+        .canonicalize()
+        .expect("platform docs fixture");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+            "platform_docs_archive": platform_docs.to_string_lossy(),
+            "platform_version": "8.3.25"
+        }),
+    )
+    .await;
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &open.session_id }),
+    )
+    .await;
+
+    let _ = service.cancel().await;
 }
 
 #[tokio::test]

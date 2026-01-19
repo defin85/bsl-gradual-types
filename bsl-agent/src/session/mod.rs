@@ -177,7 +177,7 @@ impl SessionManager {
         let missing_inputs = workspace_missing_inputs(&settings);
         let warnings = workspace_warnings(&settings);
 
-        validate_optional_dir(
+        validate_optional_path(
             settings.platform_docs_archive.as_deref(),
             "platform_docs_archive",
         )?;
@@ -482,7 +482,7 @@ impl SessionManager {
         let mut total_read_bytes = 0u64;
 
         for file in files {
-            let text = match load_disk_text_with_limits(&file.abs_path)? {
+            let text = match load_disk_text_with_limits(&file.root_path, &file.abs_path)? {
                 Some(text) => text,
                 None => continue,
             };
@@ -625,8 +625,9 @@ impl SessionManager {
         };
 
         let file_key = document_key_from_ref(&roots, &params.file.doc)?;
-        let (abs_path, _file_ref) = resolve_doc_path(&roots, &file_key)?;
-        let text = select_effective_text(&params.file, &file_key, &overlays, &abs_path)?;
+        let (root_path, abs_path, _file_ref) = resolve_doc_path(&roots, &file_key)?;
+        let text =
+            select_effective_text(&params.file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&params.file, &file_key, &overlays);
 
         let mut host = AnalysisHostV2::default();
@@ -715,8 +716,9 @@ impl SessionManager {
         };
 
         let file_key = document_key_from_ref(&roots, &params.file.doc)?;
-        let (abs_path, _file_ref) = resolve_doc_path(&roots, &file_key)?;
-        let text = select_effective_text(&params.file, &file_key, &overlays, &abs_path)?;
+        let (root_path, abs_path, _file_ref) = resolve_doc_path(&roots, &file_key)?;
+        let text =
+            select_effective_text(&params.file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&params.file, &file_key, &overlays);
 
         let mut host = AnalysisHostV2::default();
@@ -864,8 +866,8 @@ impl SessionManager {
         };
 
         let file_key = document_key_from_ref(&roots, &file.doc)?;
-        let (abs_path, _file_ref) = resolve_doc_path(&roots, &file_key)?;
-        let text = select_effective_text(&file, &file_key, &overlays, &abs_path)?;
+        let (root_path, abs_path, _file_ref) = resolve_doc_path(&roots, &file_key)?;
+        let text = select_effective_text(&file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&file, &file_key, &overlays);
 
         let mut host = AnalysisHostV2::default();
@@ -966,7 +968,7 @@ impl SessionManager {
         let mut total_read_bytes = 0u64;
 
         for file in files {
-            let text = match load_disk_text_with_limits(&file.abs_path)? {
+            let text = match load_disk_text_with_limits(&file.root_path, &file.abs_path)? {
                 Some(text) => text,
                 None => continue,
             };
@@ -1121,8 +1123,9 @@ impl SessionManager {
         match params.focus {
             Some(ContextFocus::Position { file, position }) => {
                 let file_key = document_key_from_ref(&roots, &file.doc)?;
-                let (abs_path, file_ref) = resolve_doc_path(&roots, &file_key)?;
-                let source_text = select_effective_text(&file, &file_key, &overlays, &abs_path)?;
+                let (root_path, abs_path, file_ref) = resolve_doc_path(&roots, &file_key)?;
+                let source_text =
+                    select_effective_text(&file, &file_key, &overlays, &root_path, &abs_path)?;
 
                 text.push_line(&format!(
                     "focus: position {}:{}:{}",
@@ -1225,14 +1228,14 @@ impl SessionManager {
                         path: diagnostic.file.path.clone(),
                     };
                     let file_key = document_key_from_ref(&roots, &doc)?;
-                    let (abs_path, file_ref) = resolve_doc_path(&roots, &file_key)?;
+                    let (root_path, abs_path, file_ref) = resolve_doc_path(&roots, &file_key)?;
                     let file = FileRef {
                         doc,
                         text: None,
                         version: None,
                     };
                     let source_text =
-                        select_effective_text(&file, &file_key, &overlays, &abs_path)?;
+                        select_effective_text(&file, &file_key, &overlays, &root_path, &abs_path)?;
 
                     let center_line = diagnostic.range.start.line;
                     let snippet =
@@ -1303,14 +1306,14 @@ impl SessionManager {
                         path: symbol.file.path.clone(),
                     };
                     let file_key = document_key_from_ref(&roots, &doc)?;
-                    let (abs_path, file_ref) = resolve_doc_path(&roots, &file_key)?;
+                    let (root_path, abs_path, file_ref) = resolve_doc_path(&roots, &file_key)?;
                     let file = FileRef {
                         doc,
                         text: None,
                         version: None,
                     };
                     let source_text =
-                        select_effective_text(&file, &file_key, &overlays, &abs_path)?;
+                        select_effective_text(&file, &file_key, &overlays, &root_path, &abs_path)?;
                     let center_line = symbol.range.start.line;
                     let snippet =
                         render_snippet(&source_text, center_line, PACK_SNIPPET_CONTEXT_LINES);
@@ -1460,13 +1463,14 @@ impl SessionManager {
                     path: file.path.clone(),
                 };
                 let file_key = document_key_from_ref(&roots, &doc)?;
-                let (abs_path, file_ref) = resolve_doc_path(&roots, &file_key)?;
+                let (root_path, abs_path, file_ref) = resolve_doc_path(&roots, &file_key)?;
                 let file = FileRef {
                     doc,
                     text: None,
                     version: None,
                 };
-                let source_text = select_effective_text(&file, &file_key, &overlays, &abs_path)?;
+                let source_text =
+                    select_effective_text(&file, &file_key, &overlays, &root_path, &abs_path)?;
                 let snippet =
                     render_snippet(&source_text, center_line, EXPAND_SNIPPET_CONTEXT_LINES);
                 text.push_line(&format!(
@@ -1661,25 +1665,6 @@ fn workspace_settings_for_startup(settings: &WorkspaceSettings) -> WorkspaceSett
     settings.clone()
 }
 
-fn validate_optional_dir(path: Option<&Path>, field: &str) -> Result<(), rmcp::ErrorData> {
-    let Some(path) = path else {
-        return Ok(());
-    };
-    if !path.exists() {
-        return Err(rmcp::ErrorData::invalid_params(
-            format!("{field} does not exist: {}", path.display()),
-            None,
-        ));
-    }
-    if !path.is_dir() {
-        return Err(rmcp::ErrorData::invalid_params(
-            format!("{field} must be a directory: {}", path.display()),
-            None,
-        ));
-    }
-    Ok(())
-}
-
 fn validate_optional_path(path: Option<&Path>, field: &str) -> Result<(), rmcp::ErrorData> {
     let Some(path) = path else {
         return Ok(());
@@ -1713,6 +1698,7 @@ async fn start_semantic_runtime(
 #[derive(Debug, Clone)]
 struct WorkspaceFile {
     root_id: String,
+    root_path: PathBuf,
     rel_path: String,
     abs_path: PathBuf,
 }
@@ -1735,9 +1721,10 @@ fn collect_scope_files(
         WorkspaceScope::Hot => collect_hot_files(roots, hot_set),
         WorkspaceScope::File { document } => {
             let key = document_key_from_ref(roots, &document)?;
-            let (abs_path, file_ref) = resolve_doc_path(roots, &key)?;
+            let (root_path, abs_path, file_ref) = resolve_doc_path(roots, &key)?;
             Ok(vec![WorkspaceFile {
                 root_id: file_ref.root_id,
+                root_path,
                 rel_path: file_ref.path,
                 abs_path,
             }])
@@ -1751,9 +1738,10 @@ fn collect_hot_files(
 ) -> Result<Vec<WorkspaceFile>, rmcp::ErrorData> {
     let mut files = Vec::new();
     for key in hot_set {
-        let (abs_path, file_ref) = resolve_doc_path(roots, key)?;
+        let (root_path, abs_path, file_ref) = resolve_doc_path(roots, key)?;
         files.push(WorkspaceFile {
             root_id: file_ref.root_id,
+            root_path,
             rel_path: file_ref.path,
             abs_path,
         });
@@ -1781,6 +1769,9 @@ fn collect_project_files(roots: &[RootEntry]) -> Result<Vec<WorkspaceFile>, rmcp
             .filter_map(Result::ok)
         {
             let path = entry.path();
+            if entry.file_type().is_symlink() {
+                continue;
+            }
             if !path.is_file() {
                 continue;
             }
@@ -1794,6 +1785,7 @@ fn collect_project_files(roots: &[RootEntry]) -> Result<Vec<WorkspaceFile>, rmcp
             let rel_path = normalize_path_components(rel_path);
             files.push(WorkspaceFile {
                 root_id: root.root_id.clone(),
+                root_path: root.path.clone(),
                 rel_path,
                 abs_path: path.to_path_buf(),
             });
@@ -1838,7 +1830,7 @@ fn load_document_snapshot(
         }));
     }
 
-    let text = load_disk_text_with_limits(&file.abs_path)?;
+    let text = load_disk_text_with_limits(&file.root_path, &file.abs_path)?;
     Ok(text.map(|text| DocumentSnapshot {
         file: DocumentRefDto {
             root_id: key.root_id,
@@ -1850,8 +1842,22 @@ fn load_document_snapshot(
     }))
 }
 
-fn load_disk_text_with_limits(path: &Path) -> Result<Option<String>, rmcp::ErrorData> {
-    let metadata = match std::fs::metadata(path) {
+fn load_disk_text_with_limits(
+    root_path: &Path,
+    path: &Path,
+) -> Result<Option<String>, rmcp::ErrorData> {
+    let canonical = match std::fs::canonicalize(path) {
+        Ok(path) => path,
+        Err(_) => return Ok(None),
+    };
+    if !canonical.starts_with(root_path) {
+        return Err(rmcp::ErrorData::invalid_params(
+            "path escapes roots",
+            None,
+        ));
+    }
+
+    let metadata = match std::fs::metadata(&canonical) {
         Ok(metadata) => metadata,
         Err(_) => return Ok(None),
     };
@@ -1859,13 +1865,13 @@ fn load_disk_text_with_limits(path: &Path) -> Result<Option<String>, rmcp::Error
         return Err(rmcp::ErrorData::invalid_params(
             format!(
                 "file too large: {} ({} bytes)",
-                path.display(),
+                canonical.display(),
                 metadata.len()
             ),
             None,
         ));
     }
-    bsl_backend::system::fs_utils::read_bsl_file(path)
+    bsl_backend::system::fs_utils::read_bsl_file(&canonical)
         .map(Some)
         .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))
 }
@@ -1894,13 +1900,14 @@ fn document_key_from_ref(
 fn resolve_doc_path(
     roots: &[RootEntry],
     key: &DocumentKey,
-) -> Result<(PathBuf, DocumentRefDto), rmcp::ErrorData> {
+) -> Result<(PathBuf, PathBuf, DocumentRefDto), rmcp::ErrorData> {
     let root = roots
         .iter()
         .find(|root| root.root_id == key.root_id)
         .ok_or_else(|| rmcp::ErrorData::invalid_params("unknown root_id", None))?;
     let abs = root.path.join(PathBuf::from(&key.path));
     Ok((
+        root.path.clone(),
         abs,
         DocumentRefDto {
             root_id: key.root_id.clone(),
@@ -1913,6 +1920,7 @@ fn select_effective_text(
     file: &FileRef,
     key: &DocumentKey,
     overlays: &HashMap<DocumentKey, DocumentOverlay>,
+    root_path: &Path,
     abs_path: &Path,
 ) -> Result<String, rmcp::ErrorData> {
     if let Some(text) = &file.text {
@@ -1935,7 +1943,7 @@ fn select_effective_text(
         return Ok(overlay.text.clone());
     }
 
-    load_disk_text_with_limits(abs_path)?
+    load_disk_text_with_limits(root_path, abs_path)?
         .ok_or_else(|| rmcp::ErrorData::invalid_params("file not found", None))
 }
 

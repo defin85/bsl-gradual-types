@@ -1,12 +1,12 @@
 # Change: Добавить `bsl-agent` (MCP) — MVP локального семантического агента
 
-## Почему
+## Why
 
 Сейчас LLM‑агенты (IDE/CLI) не имеют стабильного, “IDE‑grade” семантического контекста по BSL‑проекту: типы, диагностики, переходы по символам и компактный контекст под конкретную задачу приходится собирать вручную и несогласованно.
 
 Цель этого change — получить локальный MCP‑сервер (stdio), который читает workspace и отдаёт семантику проекта детерминированно и в рамках бюджета, не модифицируя файлы (read‑only).
 
-## Что меняется
+## What Changes
 
 - Добавляется новый бинарник `bsl-agent` (workspace crate) — MCP server (stdio).
 - Семантика предоставляется **in-proc** (через общий `SemanticFacade`/`SemanticProvider`), без проксирования через LSP.
@@ -17,13 +17,13 @@
 - Вводятся стабильные ID + `analysis_revision` и фиксированная сортировка для детерминизма выдачи.
 - Добавляются интеграционные тесты MCP по stdio и golden/snapshot‑тесты для `context_pack`.
 
-## Что НЕ входит (явно)
+## Out of Scope
 
 - Remote режим / “тонкий агент” к серверу семантики (только local-first).
 - MCP transport кроме stdio (нет HTTP/SSE).
 - Любые write/patch операции над workspace (строго read‑only).
 
-## Влияние
+## Impact
 
 - Новые артефакты: `bsl-agent` crate + тесты.
 - Ожидаемые затронутые области кода:
@@ -31,10 +31,9 @@
   - возможные небольшие изменения в `backend/` для выделения общего API.
 - Публичные интерфейсы существующих компонентов (LSP/CLI/Web) не должны ломаться.
 
-## Референсы
+## References
 
 - Roadmap: `docs/roadmap/mcp-bsl-agent/README.md`
 - Архитектура: `docs/roadmap/mcp-bsl-agent/architecture.md`
 - MCP API: `docs/roadmap/mcp-bsl-agent/api.md`
 - Паттерн реализации MCP: `mcp-debug-server/`
-

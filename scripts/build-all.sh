@@ -373,6 +373,15 @@ build_rust_binaries() {
 
     measure_time cargo build $cargo_flags --workspace
 
+    # Для MCP-конфига удобно иметь стабильный путь: target/release/bsl-agent
+    # (даже если общий билд был в debug).
+    log_info "\n🤖 Сборка bsl-agent для MCP (release)..."
+    if [ ! -f "target/release/bsl-agent${BINARY_EXT}" ]; then
+        measure_time cargo build --release -p bsl-agent
+    else
+        log_success "  ✅ bsl-agent уже собран: target/release/bsl-agent${BINARY_EXT}"
+    fi
+
     log_success "\n✅ Rust бинарники собраны"
 
     # Проверка результатов
@@ -382,6 +391,7 @@ build_rust_binaries() {
     local all_ok=true
 
     check_file "$target_dir/bsl-lsp-server${BINARY_EXT}" "LSP Server (bsl-lsp-server${BINARY_EXT})" || all_ok=false
+    check_file "target/release/bsl-agent${BINARY_EXT}" "MCP Server (bsl-agent${BINARY_EXT})" || all_ok=false
 
     # Web Server и CLI - опциональные
     if [ -f "$target_dir/bsl-web-server${BINARY_EXT}" ]; then

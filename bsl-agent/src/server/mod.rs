@@ -5,21 +5,24 @@ use rmcp::{
 };
 use std::sync::Arc;
 
+use crate::jobs::JobManager;
 use crate::session::SessionManager;
-use crate::types::BslAgentError;
+use crate::types::{BslAgentError, JobStartResponse};
 
 pub mod types;
 
 use types::{
     BslDefinitionParams, BslDiagnosticsParams, BslMembersParams, BslReferencesParams,
     BslSymbolSearchParams, BslTypeAtPositionParams, ContextExpandParams, ContextPackParams,
-    WorkspaceCloseParams, WorkspaceOpenParams, WorkspaceStatusParams,
+    JobCancelParams, JobResultParams, JobStatusParams, JobWaitParams, WorkspaceCloseParams,
+    WorkspaceListParams, WorkspaceOpenParams, WorkspaceResumeParams, WorkspaceStatusParams,
 };
 use types::{WorkspaceDocumentsClearParams, WorkspaceDocumentsSetParams};
 
 #[derive(Clone)]
 pub struct BslAgentHandler {
     session_manager: Arc<SessionManager>,
+    job_manager: Arc<JobManager>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -28,6 +31,7 @@ impl BslAgentHandler {
     pub fn new() -> Self {
         Self {
             session_manager: Arc::new(SessionManager::new()),
+            job_manager: Arc::new(JobManager::new()),
             tool_router: Self::tool_router(),
         }
     }
@@ -37,7 +41,10 @@ impl BslAgentHandler {
         &self,
         Parameters(params): Parameters<WorkspaceOpenParams>,
     ) -> Result<Content, rmcp::ErrorData> {
-        let response = self.session_manager.open(params).await?;
+        let response = self
+            .session_manager
+            .open(params, Arc::clone(&self.job_manager))
+            .await?;
         Ok(Content::json(response)?)
     }
 
@@ -57,6 +64,27 @@ impl BslAgentHandler {
     ) -> Result<Content, rmcp::ErrorData> {
         self.session_manager.close(&params.session_id).await?;
         Ok(Content::json(serde_json::json!({ "ok": true }))?)
+    }
+
+    #[tool(description = "Resume a persisted workspace session by session_id")]
+    async fn workspace_resume(
+        &self,
+        Parameters(params): Parameters<WorkspaceResumeParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let response = self
+            .session_manager
+            .resume(&params.session_id, Arc::clone(&self.job_manager))
+            .await?;
+        Ok(Content::json(response)?)
+    }
+
+    #[tool(description = "List persisted workspace sessions available for resume")]
+    async fn workspace_list(
+        &self,
+        Parameters(_params): Parameters<WorkspaceListParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let response = self.session_manager.list().await?;
+        Ok(Content::json(response)?)
     }
 
     #[tool(description = "Set unsaved documents (overlay) and/or mark documents as hot")]
@@ -83,75 +111,226 @@ impl BslAgentHandler {
         Ok(Content::json(response)?)
     }
 
-    #[tool(description = "Get semantic diagnostics for project/file/hot scope")]
-    async fn bsl_diagnostics(
+    #[tool(description = "Start semantic diagnostics job for project/file/hot scope")]
+    async fn bsl_diagnostics_start(
         &self,
         Parameters(params): Parameters<BslDiagnosticsParams>,
     ) -> Result<Content, rmcp::ErrorData> {
-        let response = self.session_manager.bsl_diagnostics(params).await?;
-        Ok(Content::json(response)?)
+        let session_manager = Arc::clone(&self.session_manager);
+        let job_id = self
+            .job_manager
+            .spawn("bsl_diagnostics", move |ctx| async move {
+                ctx.set_progress("bsl_diagnostics/running", 0).await;
+                let response = session_manager
+                    .bsl_diagnostics(params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
+            })
+            .await;
+        Ok(Content::json(JobStartResponse {
+            job_id,
+            recommended_poll_ms: Some(200),
+        })?)
     }
 
-    #[tool(description = "Search symbols by name (deterministic)")]
-    async fn bsl_symbol_search(
+    #[tool(description = "Start symbol search job by name (deterministic)")]
+    async fn bsl_symbol_search_start(
         &self,
         Parameters(params): Parameters<BslSymbolSearchParams>,
     ) -> Result<Content, rmcp::ErrorData> {
-        let response = self.session_manager.bsl_symbol_search(params).await?;
-        Ok(Content::json(response)?)
+        let session_manager = Arc::clone(&self.session_manager);
+        let job_id = self
+            .job_manager
+            .spawn("bsl_symbol_search", move |ctx| async move {
+                ctx.set_progress("bsl_symbol_search/running", 0).await;
+                let response = session_manager
+                    .bsl_symbol_search(params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
+            })
+            .await;
+        Ok(Content::json(JobStartResponse {
+            job_id,
+            recommended_poll_ms: Some(200),
+        })?)
     }
 
-    #[tool(description = "Get type information at given position")]
-    async fn bsl_type_at_position(
+    #[tool(description = "Start type-at-position job")]
+    async fn bsl_type_at_position_start(
         &self,
         Parameters(params): Parameters<BslTypeAtPositionParams>,
     ) -> Result<Content, rmcp::ErrorData> {
-        let response = self.session_manager.bsl_type_at_position(params).await?;
-        Ok(Content::json(response)?)
+        let session_manager = Arc::clone(&self.session_manager);
+        let job_id = self
+            .job_manager
+            .spawn("bsl_type_at_position", move |ctx| async move {
+                ctx.set_progress("bsl_type_at_position/running", 0).await;
+                let response = session_manager
+                    .bsl_type_at_position(params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
+            })
+            .await;
+        Ok(Content::json(JobStartResponse {
+            job_id,
+            recommended_poll_ms: Some(200),
+        })?)
     }
 
-    #[tool(description = "List members (completion-like) at given position")]
-    async fn bsl_members(
+    #[tool(description = "Start members (completion-like) job at given position")]
+    async fn bsl_members_start(
         &self,
         Parameters(params): Parameters<BslMembersParams>,
     ) -> Result<Content, rmcp::ErrorData> {
-        let response = self.session_manager.bsl_members(params).await?;
-        Ok(Content::json(response)?)
+        let session_manager = Arc::clone(&self.session_manager);
+        let job_id = self
+            .job_manager
+            .spawn("bsl_members", move |ctx| async move {
+                ctx.set_progress("bsl_members/running", 0).await;
+                let response = session_manager
+                    .bsl_members(params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
+            })
+            .await;
+        Ok(Content::json(JobStartResponse {
+            job_id,
+            recommended_poll_ms: Some(200),
+        })?)
     }
 
-    #[tool(description = "Resolve definition for symbol_id or position")]
-    async fn bsl_definition(
+    #[tool(description = "Start definition resolution job for symbol_id or position")]
+    async fn bsl_definition_start(
         &self,
         Parameters(params): Parameters<BslDefinitionParams>,
     ) -> Result<Content, rmcp::ErrorData> {
-        let response = self.session_manager.bsl_definition(params).await?;
-        Ok(Content::json(response)?)
+        let session_manager = Arc::clone(&self.session_manager);
+        let job_id = self
+            .job_manager
+            .spawn("bsl_definition", move |ctx| async move {
+                ctx.set_progress("bsl_definition/running", 0).await;
+                let response = session_manager
+                    .bsl_definition(params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
+            })
+            .await;
+        Ok(Content::json(JobStartResponse {
+            job_id,
+            recommended_poll_ms: Some(200),
+        })?)
     }
 
-    #[tool(description = "Find references for symbol_id")]
-    async fn bsl_references(
+    #[tool(description = "Start references search job for symbol_id")]
+    async fn bsl_references_start(
         &self,
         Parameters(params): Parameters<BslReferencesParams>,
     ) -> Result<Content, rmcp::ErrorData> {
-        let response = self.session_manager.bsl_references(params).await?;
-        Ok(Content::json(response)?)
+        let session_manager = Arc::clone(&self.session_manager);
+        let job_id = self
+            .job_manager
+            .spawn("bsl_references", move |ctx| async move {
+                ctx.set_progress("bsl_references/running", 0).await;
+                let response = session_manager
+                    .bsl_references(params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
+            })
+            .await;
+        Ok(Content::json(JobStartResponse {
+            job_id,
+            recommended_poll_ms: Some(200),
+        })?)
     }
 
-    #[tool(description = "Build an LLM-ready context pack within a hard char budget")]
-    async fn context_pack(
+    #[tool(description = "Start building an LLM-ready context pack within a hard char budget")]
+    async fn context_pack_start(
         &self,
         Parameters(params): Parameters<ContextPackParams>,
     ) -> Result<Content, rmcp::ErrorData> {
-        let response = self.session_manager.context_pack(params).await?;
-        Ok(Content::json(response)?)
+        let session_manager = Arc::clone(&self.session_manager);
+        let job_id = self
+            .job_manager
+            .spawn("context_pack", move |ctx| async move {
+                ctx.set_progress("context_pack/running", 0).await;
+                let response = session_manager
+                    .context_pack(params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
+            })
+            .await;
+        Ok(Content::json(JobStartResponse {
+            job_id,
+            recommended_poll_ms: Some(200),
+        })?)
     }
 
-    #[tool(description = "Expand a specific item from a previous context_pack")]
-    async fn context_expand(
+    #[tool(description = "Start expanding a specific item from a previous context_pack")]
+    async fn context_expand_start(
         &self,
         Parameters(params): Parameters<ContextExpandParams>,
     ) -> Result<Content, rmcp::ErrorData> {
-        let response = self.session_manager.context_expand(params).await?;
+        let session_manager = Arc::clone(&self.session_manager);
+        let job_id = self
+            .job_manager
+            .spawn("context_expand", move |ctx| async move {
+                ctx.set_progress("context_expand/running", 0).await;
+                let response = session_manager
+                    .context_expand(params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
+            })
+            .await;
+        Ok(Content::json(JobStartResponse {
+            job_id,
+            recommended_poll_ms: Some(200),
+        })?)
+    }
+
+    #[tool(description = "Get job status / progress")]
+    async fn job_status(
+        &self,
+        Parameters(params): Parameters<JobStatusParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let response = self.job_manager.status(&params.job_id).await?;
+        Ok(Content::json(response)?)
+    }
+
+    #[tool(description = "Wait for job status change or completion (long-poll)")]
+    async fn job_wait(
+        &self,
+        Parameters(params): Parameters<JobWaitParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let response = self
+            .job_manager
+            .wait(&params.job_id, params.timeout_ms)
+            .await?;
+        Ok(Content::json(response)?)
+    }
+
+    #[tool(description = "Get final job result (only for succeeded jobs)")]
+    async fn job_result(
+        &self,
+        Parameters(params): Parameters<JobResultParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let value = self.job_manager.result(&params.job_id).await?;
+        Ok(Content::json(value)?)
+    }
+
+    #[tool(description = "Cancel a job (best-effort)")]
+    async fn job_cancel(
+        &self,
+        Parameters(params): Parameters<JobCancelParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let response = self.job_manager.cancel(&params.job_id).await?;
         Ok(Content::json(response)?)
     }
 }

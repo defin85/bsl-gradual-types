@@ -31,11 +31,13 @@ pub struct WorkspaceOpenResponse {
     pub roots: Vec<RootDto>,
     pub analysis_revision: u64,
     pub ready: bool,
+    #[serde(default)]
+    pub startup_job_id: Option<String>,
     pub warnings: Vec<String>,
     pub missing_inputs: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ProgressDto {
     pub percent: u8,
 }
@@ -48,6 +50,71 @@ pub struct WorkspaceStatusResponse {
     pub progress: ProgressDto,
     pub warnings: Vec<String>,
     pub missing_inputs: Vec<String>,
+    #[serde(default)]
+    pub startup_job_id: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceListItemDto {
+    pub session_id: String,
+    pub roots: Vec<String>,
+    pub analysis_revision: u64,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceListResponse {
+    pub sessions: Vec<WorkspaceListItemDto>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum JobStateDto {
+    Queued,
+    Running,
+    Succeeded,
+    Failed,
+    Canceled,
+    AbortedByRestart,
+}
+
+impl JobStateDto {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            JobStateDto::Queued => "queued",
+            JobStateDto::Running => "running",
+            JobStateDto::Succeeded => "succeeded",
+            JobStateDto::Failed => "failed",
+            JobStateDto::Canceled => "canceled",
+            JobStateDto::AbortedByRestart => "aborted_by_restart",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobStatusResponse {
+    pub job_id: String,
+    pub state: JobStateDto,
+    pub phase: String,
+    pub progress: ProgressDto,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobCancelResponse {
+    pub ok: bool,
+    pub job_id: String,
+    pub state: JobStateDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobStartResponse {
+    pub job_id: String,
+    #[serde(default)]
+    pub recommended_poll_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

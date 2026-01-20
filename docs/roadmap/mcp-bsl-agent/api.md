@@ -86,6 +86,7 @@ Output:
 ```json
 {
   "session_id": "uuid",
+  "startup_job_id": "uuid",
   "roots": [{ "root_id": "hex", "path": "/abs/path/to/workspace" }],
   "analysis_revision": 0,
   "ready": false,
@@ -94,7 +95,7 @@ Output:
 }
 ```
 
-Примечание: тяжёлая инициализация может быть async; статус получать через `workspace_status`.
+Примечание: тяжёлая инициализация выполняется асинхронно как job; прогресс и готовность получать через `workspace_status` или `job_status/job_wait` по `startup_job_id`.
 
 ### 3.2. `workspace_status`
 
@@ -110,10 +111,12 @@ Output:
 {
   "ready": true,
   "analysis_revision": 0,
-  "phase": "idle|loading_platform|loading_config|indexing",
+  "phase": "idle|startup/...|...",
   "progress": { "percent": 100 },
   "warnings": [],
-  "missing_inputs": []
+  "missing_inputs": [],
+  "startup_job_id": "uuid",
+  "error": null
 }
 ```
 
@@ -131,7 +134,36 @@ Output:
 { "ok": true }
 ```
 
-### 3.4. `workspace_documents_set`
+### 3.4. `workspace_resume`
+
+Восстановить сохранённую сессию по `session_id` (persist/resume).
+
+Input:
+```json
+{ "session_id": "uuid" }
+```
+
+Output: как у `workspace_open`.
+
+### 3.5. `workspace_list`
+
+Список доступных сессий для `workspace_resume`.
+
+Input:
+```json
+{}
+```
+
+Output:
+```json
+{
+  "sessions": [
+    { "session_id": "uuid", "roots": ["/abs/path/to/workspace"], "analysis_revision": 0, "updated_at": 0 }
+  ]
+}
+```
+
+### 3.6. `workspace_documents_set`
 
 Сохранить unsaved тексты в памяти сессии (overlay). Эти тексты будут использоваться для `scope=hot` и `context_pack`.
 
@@ -153,7 +185,7 @@ Output:
 { "ok": true, "analysis_revision": 1 }
 ```
 
-### 3.5. `workspace_documents_clear`
+### 3.7. `workspace_documents_clear`
 
 Удалить overlay для документов (вернуться к чтению с диска).
 
@@ -171,7 +203,16 @@ Output:
 { "ok": true, "analysis_revision": 2 }
 ```
 
-### 3.6. `bsl_diagnostics`
+### 3.8. Job tools: `job_status` / `job_wait` / `job_result` / `job_cancel`
+
+Общий паттерн для асинхронных tools:
+1) вызвать `*_start` → получить `job_id`
+2) опрашивать `job_status` или делать long-poll через `job_wait(timeout_ms)`
+3) получить результат через `job_result(job_id)`
+
+`job_result` возвращает **финальный результат исходного tool** (например `BslDiagnosticsResponse`), без дополнительной обёртки.
+
+### 3.9. `bsl_diagnostics_start`
 
 Диагностики по проекту/файлу.
 
@@ -186,7 +227,12 @@ Input:
 }
 ```
 
-Output (идея):
+Output (start):
+```json
+{ "job_id": "uuid", "recommended_poll_ms": 200 }
+```
+
+Output (job_result, идея):
 ```json
 {
   "analysis_revision": 2,
@@ -206,16 +252,21 @@ Output (идея):
 }
 ```
 
-### 3.7. `bsl_symbol_search`
+### 3.10. `bsl_symbol_search_start`
 
 Поиск символов по имени (для навигации LLM).
 
-Input:
+Input (start):
 ```json
 { "session_id": "uuid", "query": "Документы", "limit": 20 }
 ```
 
-Output:
+Output (start):
+```json
+{ "job_id": "uuid", "recommended_poll_ms": 200 }
+```
+
+Output (job_result):
 ```json
 {
   "analysis_revision": 2,
@@ -225,7 +276,7 @@ Output:
 }
 ```
 
-### 3.8. `bsl_type_at_position`
+### 3.11. `bsl_type_at_position_start`
 
 Тип/разрешение выражения в позиции.
 
@@ -238,7 +289,12 @@ Input:
 }
 ```
 
-Output:
+Output (start):
+```json
+{ "job_id": "uuid", "recommended_poll_ms": 200 }
+```
+
+Output (job_result):
 ```json
 {
   "analysis_revision": 2,
@@ -248,7 +304,7 @@ Output:
 }
 ```
 
-### 3.9. `bsl_members`
+### 3.12. `bsl_members_start`
 
 Member list (completion-like) для receiver в позиции (например для `expr.`).
 
@@ -262,7 +318,12 @@ Input:
 }
 ```
 
-Output:
+Output (start):
+```json
+{ "job_id": "uuid", "recommended_poll_ms": 200 }
+```
+
+Output (job_result):
 ```json
 {
   "analysis_revision": 2,
@@ -274,7 +335,7 @@ Output:
 }
 ```
 
-### 3.10. `bsl_definition`
+### 3.13. `bsl_definition_start`
 
 Definition по `symbol_id` или по позиции.
 
@@ -288,7 +349,12 @@ Input (вариант B):
 { "session_id": "uuid", "file": { "doc": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }, "text": "optional" }, "position": { "line": 10, "character": 5 } }
 ```
 
-Output:
+Output (start):
+```json
+{ "job_id": "uuid", "recommended_poll_ms": 200 }
+```
+
+Output (job_result):
 ```json
 {
   "analysis_revision": 2,
@@ -297,7 +363,7 @@ Output:
 }
 ```
 
-### 3.11. `bsl_references`
+### 3.14. `bsl_references_start`
 
 References по `symbol_id`.
 
@@ -306,7 +372,12 @@ Input:
 { "session_id": "uuid", "symbol_id": "hex", "limit": 200, "include_snippets": false }
 ```
 
-Output:
+Output (start):
+```json
+{ "job_id": "uuid", "recommended_poll_ms": 200 }
+```
+
+Output (job_result):
 ```json
 {
   "analysis_revision": 2,
@@ -318,7 +389,7 @@ Output:
 }
 ```
 
-### 3.12. `context_pack` (главный)
+### 3.15. `context_pack_start` (главный)
 
 Input:
 ```json
@@ -331,7 +402,12 @@ Input:
 }
 ```
 
-Output (идея):
+Output (start):
+```json
+{ "job_id": "uuid", "recommended_poll_ms": 200 }
+```
+
+Output (job_result, идея):
 ```json
 {
   "analysis_revision": 2,
@@ -346,7 +422,7 @@ Output (идея):
 }
 ```
 
-### 3.13. `context_expand`
+### 3.16. `context_expand_start`
 
 Расширить конкретный item из `context_pack`.
 
@@ -355,7 +431,12 @@ Input:
 { "session_id": "uuid", "pack_id": "hex", "item_id": "hex", "budget_tokens": 1200 }
 ```
 
-Output:
+Output (start):
+```json
+{ "job_id": "uuid", "recommended_poll_ms": 200 }
+```
+
+Output (job_result):
 ```json
 { "analysis_revision": 2, "text": "expanded content", "truncated": false }
 ```

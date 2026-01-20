@@ -3,12 +3,15 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use bsl_analysis_v2::{AnalysisHostV2, Change, FileId};
+use bsl_backend::data::loaders::progress::ProgressUpdate;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::TypeResolver;
+use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
+use crate::jobs::{JobContext, JobManager};
 use crate::semantic::dto::{DocumentRefDto, PositionDto, RangeDto};
 use crate::semantic::facade::SemanticFacade;
 use crate::semantic::ids;
@@ -23,7 +26,8 @@ use crate::types::{
     BslSymbolSearchResponse, BslTypeAtPositionResponse, CompletenessDto, ContextExpandResponse,
     ContextPackItemDto, ContextPackResponse, LocationDto, MemberDto, NodeInfoDto, ProgressDto,
     ReferenceDto, RootDto, SymbolDto, TypeInfoDto, WorkspaceDocumentsClearResponse,
-    WorkspaceDocumentsSetResponse, WorkspaceOpenResponse, WorkspaceStatusResponse,
+    WorkspaceDocumentsSetResponse, WorkspaceListItemDto, WorkspaceListResponse,
+    WorkspaceOpenResponse, WorkspaceStatusResponse,
 };
 
 const MAX_OVERLAY_BYTES: usize = 2 * 1024 * 1024;
@@ -34,8 +38,12 @@ const CHARS_PER_TOKEN: usize = 4;
 const PACK_SNIPPET_CONTEXT_LINES: u32 = 20;
 const EXPAND_SNIPPET_CONTEXT_LINES: u32 = 80;
 
+mod store;
+use store::{PersistedSession, SessionStore};
+
 pub struct SessionManager {
     sessions: RwLock<HashMap<Uuid, WorkspaceSession>>,
+    store: Option<SessionStore>,
 }
 
 struct WorkspaceSession {
@@ -43,7 +51,12 @@ struct WorkspaceSession {
     documents: DocumentStore,
     analysis_revision: u64,
     settings: WorkspaceSettings,
-    startup: bsl_backend::system::StartupResultV2,
+    startup: Option<bsl_backend::system::StartupResultV2>,
+    startup_job_id: Option<String>,
+    startup_phase: String,
+    startup_progress: u8,
+    startup_error: Option<String>,
+    created_at: u64,
     id_map: IdMap,
     pack_store: PackStore,
 }
@@ -117,12 +130,14 @@ impl SessionManager {
     pub fn new() -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
+            store: SessionStore::new(),
         }
     }
 
     pub async fn open(
-        &self,
+        self: &Arc<Self>,
         params: WorkspaceOpenParams,
+        job_manager: Arc<JobManager>,
     ) -> Result<WorkspaceOpenResponse, rmcp::ErrorData> {
         if params.roots.is_empty() {
             return Err(rmcp::ErrorData::invalid_params(
@@ -183,26 +198,49 @@ impl SessionManager {
         )?;
         validate_optional_path(settings.configuration_path.as_deref(), "configuration_path")?;
 
-        let startup_settings = workspace_settings_for_startup(&settings);
-        let startup = start_semantic_runtime(&startup_settings).await?;
-
         let session_id = Uuid::new_v4();
+        let created_at = crate::state::now_unix_secs();
         let session = WorkspaceSession {
             roots,
             documents: DocumentStore::default(),
             analysis_revision: 0,
             settings,
-            startup,
+            startup: None,
+            startup_job_id: None,
+            startup_phase: "startup/queued".to_string(),
+            startup_progress: 0,
+            startup_error: None,
+            created_at,
             id_map: IdMap::default(),
             pack_store: PackStore::default(),
         };
         self.sessions.write().await.insert(session_id, session);
+        self.persist_session(session_id).await;
+
+        let startup_settings = {
+            let sessions = self.sessions.read().await;
+            let session = sessions
+                .get(&session_id)
+                .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+            workspace_settings_for_startup(&session.settings)
+        };
+
+        let session_manager = Arc::clone(self);
+        let startup_job_id = job_manager
+            .spawn("startup", move |ctx| async move {
+                run_startup_job(session_manager, session_id, startup_settings, ctx).await
+            })
+            .await;
+
+        self.set_startup_job_id(session_id, startup_job_id.clone())
+            .await?;
 
         Ok(WorkspaceOpenResponse {
             session_id: session_id.to_string(),
             roots: root_dtos,
             analysis_revision: 0,
-            ready: true,
+            ready: false,
+            startup_job_id: Some(startup_job_id),
             warnings,
             missing_inputs,
         })
@@ -220,13 +258,30 @@ impl SessionManager {
             .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
         let _ = session.roots.len();
 
+        if session.startup.is_some() {
+            return Ok(WorkspaceStatusResponse {
+                ready: true,
+                analysis_revision: session.analysis_revision,
+                phase: "idle".to_string(),
+                progress: ProgressDto { percent: 100 },
+                warnings: workspace_warnings(&session.settings),
+                missing_inputs: workspace_missing_inputs(&session.settings),
+                startup_job_id: session.startup_job_id.clone(),
+                error: None,
+            });
+        }
+
         Ok(WorkspaceStatusResponse {
-            ready: true,
+            ready: false,
             analysis_revision: session.analysis_revision,
-            phase: "idle".to_string(),
-            progress: ProgressDto { percent: 100 },
+            phase: session.startup_phase.clone(),
+            progress: ProgressDto {
+                percent: session.startup_progress,
+            },
             warnings: workspace_warnings(&session.settings),
             missing_inputs: workspace_missing_inputs(&session.settings),
+            startup_job_id: session.startup_job_id.clone(),
+            error: session.startup_error.clone(),
         })
     }
 
@@ -239,6 +294,215 @@ impl SessionManager {
         Ok(())
     }
 
+    pub async fn resume(
+        self: &Arc<Self>,
+        session_id: &str,
+        job_manager: Arc<JobManager>,
+    ) -> Result<WorkspaceOpenResponse, rmcp::ErrorData> {
+        let uuid = parse_session_id(session_id)?;
+
+        if let Some(existing) = self.sessions.read().await.get(&uuid) {
+            return Ok(WorkspaceOpenResponse {
+                session_id: uuid.to_string(),
+                roots: existing
+                    .roots
+                    .iter()
+                    .map(|root| RootDto {
+                        root_id: root.root_id.clone(),
+                        path: root.path.to_string_lossy().to_string(),
+                    })
+                    .collect(),
+                analysis_revision: existing.analysis_revision,
+                ready: existing.startup.is_some(),
+                startup_job_id: existing.startup_job_id.clone(),
+                warnings: workspace_warnings(&existing.settings),
+                missing_inputs: workspace_missing_inputs(&existing.settings),
+            });
+        }
+
+        let store = self
+            .store
+            .as_ref()
+            .ok_or_else(|| rmcp::ErrorData::internal_error("persist store is not available", None))?;
+        let persisted = store
+            .load(session_id)
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+
+        let (roots, root_dtos) = restore_roots(&persisted.roots)?;
+        let settings = WorkspaceSettings {
+            platform_docs_archive: persisted.platform_docs_archive.map(PathBuf::from),
+            platform_version: persisted.platform_version,
+            configuration_path: persisted.configuration_path.map(PathBuf::from),
+            mode: persisted.mode,
+        };
+
+        let missing_inputs = workspace_missing_inputs(&settings);
+        let warnings = workspace_warnings(&settings);
+
+        validate_optional_path(
+            settings.platform_docs_archive.as_deref(),
+            "platform_docs_archive",
+        )?;
+        validate_optional_path(settings.configuration_path.as_deref(), "configuration_path")?;
+
+        let session = WorkspaceSession {
+            roots,
+            documents: DocumentStore::default(),
+            analysis_revision: persisted.analysis_revision,
+            settings,
+            startup: None,
+            startup_job_id: None,
+            startup_phase: "startup/queued".to_string(),
+            startup_progress: 0,
+            startup_error: None,
+            created_at: persisted.created_at,
+            id_map: IdMap::default(),
+            pack_store: PackStore::default(),
+        };
+        self.sessions.write().await.insert(uuid, session);
+        self.persist_session(uuid).await;
+
+        let startup_settings = {
+            let sessions = self.sessions.read().await;
+            let session = sessions
+                .get(&uuid)
+                .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+            workspace_settings_for_startup(&session.settings)
+        };
+
+        let session_manager = Arc::clone(self);
+        let startup_job_id = job_manager
+            .spawn("startup", move |ctx| async move {
+                run_startup_job(session_manager, uuid, startup_settings, ctx).await
+            })
+            .await;
+
+        self.set_startup_job_id(uuid, startup_job_id.clone()).await?;
+
+        Ok(WorkspaceOpenResponse {
+            session_id: uuid.to_string(),
+            roots: root_dtos,
+            analysis_revision: persisted.analysis_revision,
+            ready: false,
+            startup_job_id: Some(startup_job_id),
+            warnings,
+            missing_inputs,
+        })
+    }
+
+    pub async fn list(&self) -> Result<WorkspaceListResponse, rmcp::ErrorData> {
+        let Some(store) = self.store.as_ref() else {
+            return Ok(WorkspaceListResponse { sessions: Vec::new() });
+        };
+        let sessions = store
+            .list()
+            .into_iter()
+            .map(|session| WorkspaceListItemDto {
+                session_id: session.session_id,
+                roots: session.roots,
+                analysis_revision: session.analysis_revision,
+                updated_at: session.updated_at,
+            })
+            .collect();
+        Ok(WorkspaceListResponse { sessions })
+    }
+
+    async fn set_startup_job_id(
+        &self,
+        session_id: Uuid,
+        startup_job_id: String,
+    ) -> Result<(), rmcp::ErrorData> {
+        let mut sessions = self.sessions.write().await;
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+        session.startup_job_id = Some(startup_job_id);
+        drop(sessions);
+
+        self.persist_session(session_id).await;
+        Ok(())
+    }
+
+    async fn set_startup_progress(&self, session_id: Uuid, phase: String, percent: u8) {
+        let mut sessions = self.sessions.write().await;
+        let Some(session) = sessions.get_mut(&session_id) else {
+            return;
+        };
+        if session.startup.is_some() {
+            return;
+        }
+        session.startup_phase = phase;
+        session.startup_progress = session.startup_progress.max(percent.min(100));
+    }
+
+    async fn set_startup_result(
+        &self,
+        session_id: Uuid,
+        startup: bsl_backend::system::StartupResultV2,
+    ) -> Result<(), rmcp::ErrorData> {
+        let mut sessions = self.sessions.write().await;
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+        session.startup = Some(startup);
+        session.startup_phase = "idle".to_string();
+        session.startup_progress = 100;
+        session.startup_error = None;
+        drop(sessions);
+
+        self.persist_session(session_id).await;
+        Ok(())
+    }
+
+    async fn set_startup_error(&self, session_id: Uuid, error: String) {
+        let mut sessions = self.sessions.write().await;
+        let Some(session) = sessions.get_mut(&session_id) else {
+            return;
+        };
+        if session.startup.is_some() {
+            return;
+        }
+        session.startup_phase = "startup/failed".to_string();
+        session.startup_progress = 100;
+        session.startup_error = Some(error);
+    }
+
+    async fn persist_session(&self, session_id: Uuid) {
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        let sessions = self.sessions.read().await;
+        let Some(session) = sessions.get(&session_id) else {
+            return;
+        };
+
+        let mut persisted = PersistedSession {
+            session_id: session_id.to_string(),
+            roots: session
+                .roots
+                .iter()
+                .map(|root| root.path.to_string_lossy().to_string())
+                .collect(),
+            platform_docs_archive: session
+                .settings
+                .platform_docs_archive
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            platform_version: session.settings.platform_version.clone(),
+            configuration_path: session
+                .settings
+                .configuration_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            mode: session.settings.mode.clone(),
+            analysis_revision: session.analysis_revision,
+            created_at: session.created_at,
+            updated_at: crate::state::now_unix_secs(),
+            startup_job_id: session.startup_job_id.clone(),
+        };
+        store.upsert(&mut persisted);
+    }
+
     pub async fn documents_set(
         &self,
         session_id: &str,
@@ -246,6 +510,7 @@ impl SessionManager {
         mark_hot: bool,
     ) -> Result<WorkspaceDocumentsSetResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(session_id)?;
+        let mut did_change_revision = false;
         let mut sessions = self.sessions.write().await;
         let session = sessions
             .get_mut(&uuid)
@@ -283,11 +548,18 @@ impl SessionManager {
             session.analysis_revision = session.analysis_revision.saturating_add(1);
             session.id_map.reset(session.analysis_revision);
             session.pack_store.reset(session.analysis_revision);
+            did_change_revision = true;
+        }
+
+        let analysis_revision = session.analysis_revision;
+        drop(sessions);
+        if did_change_revision {
+            self.persist_session(uuid).await;
         }
 
         Ok(WorkspaceDocumentsSetResponse {
             ok: true,
-            analysis_revision: session.analysis_revision,
+            analysis_revision,
         })
     }
 
@@ -298,6 +570,7 @@ impl SessionManager {
         clear_hot: bool,
     ) -> Result<WorkspaceDocumentsClearResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(session_id)?;
+        let mut did_change_revision = false;
         let mut sessions = self.sessions.write().await;
         let session = sessions
             .get_mut(&uuid)
@@ -316,11 +589,18 @@ impl SessionManager {
             session.analysis_revision = session.analysis_revision.saturating_add(1);
             session.id_map.reset(session.analysis_revision);
             session.pack_store.reset(session.analysis_revision);
+            did_change_revision = true;
+        }
+
+        let analysis_revision = session.analysis_revision;
+        drop(sessions);
+        if did_change_revision {
+            self.persist_session(uuid).await;
         }
 
         Ok(WorkspaceDocumentsClearResponse {
             ok: true,
-            analysis_revision: session.analysis_revision,
+            analysis_revision,
         })
     }
 
@@ -334,13 +614,16 @@ impl SessionManager {
             let session = sessions
                 .get(&uuid)
                 .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+            let startup = session.startup.as_ref().ok_or_else(|| {
+                rmcp::ErrorData::invalid_params("workspace not ready (startup in progress)", None)
+            })?;
             (
                 session.roots.clone(),
                 session.documents.hot_set.clone(),
                 session.documents.overlays.clone(),
                 session.analysis_revision,
-                session.startup.deps_bundle_v2.deps_id.clone(),
-                session.startup.deps_bundle_v2.semantic_deps.clone(),
+                startup.deps_bundle_v2.deps_id.clone(),
+                startup.deps_bundle_v2.semantic_deps.clone(),
             )
         };
 
@@ -467,11 +750,14 @@ impl SessionManager {
             let session = sessions
                 .get(&uuid)
                 .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+            let startup = session.startup.as_ref().ok_or_else(|| {
+                rmcp::ErrorData::invalid_params("workspace not ready (startup in progress)", None)
+            })?;
             (
                 session.roots.clone(),
                 session.analysis_revision,
-                session.startup.deps_bundle_v2.deps_id.clone(),
-                session.startup.deps_bundle_v2.semantic_deps.clone(),
+                startup.deps_bundle_v2.deps_id.clone(),
+                startup.deps_bundle_v2.semantic_deps.clone(),
             )
         };
 
@@ -614,13 +900,16 @@ impl SessionManager {
             let session = sessions
                 .get(&uuid)
                 .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+            let startup = session.startup.as_ref().ok_or_else(|| {
+                rmcp::ErrorData::invalid_params("workspace not ready (startup in progress)", None)
+            })?;
             (
                 session.analysis_revision,
                 session.roots.clone(),
                 session.documents.overlays.clone(),
-                session.startup.deps_bundle_v2.deps_id.clone(),
-                session.startup.deps_bundle_v2.semantic_deps.clone(),
-                session.startup.deps_bundle_v2.index_snapshot.clone(),
+                startup.deps_bundle_v2.deps_id.clone(),
+                startup.deps_bundle_v2.semantic_deps.clone(),
+                startup.deps_bundle_v2.index_snapshot.clone(),
             )
         };
 
@@ -705,13 +994,16 @@ impl SessionManager {
             let session = sessions
                 .get(&uuid)
                 .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+            let startup = session.startup.as_ref().ok_or_else(|| {
+                rmcp::ErrorData::invalid_params("workspace not ready (startup in progress)", None)
+            })?;
             (
                 session.analysis_revision,
                 session.roots.clone(),
                 session.documents.overlays.clone(),
-                session.startup.deps_bundle_v2.deps_id.clone(),
-                session.startup.deps_bundle_v2.semantic_deps.clone(),
-                session.startup.deps_bundle_v2.index_snapshot.clone(),
+                startup.deps_bundle_v2.deps_id.clone(),
+                startup.deps_bundle_v2.semantic_deps.clone(),
+                startup.deps_bundle_v2.index_snapshot.clone(),
             )
         };
 
@@ -856,12 +1148,15 @@ impl SessionManager {
             let session = sessions
                 .get(&uuid)
                 .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+            let startup = session.startup.as_ref().ok_or_else(|| {
+                rmcp::ErrorData::invalid_params("workspace not ready (startup in progress)", None)
+            })?;
             (
                 session.analysis_revision,
                 session.roots.clone(),
                 session.documents.overlays.clone(),
-                session.startup.deps_bundle_v2.deps_id.clone(),
-                session.startup.deps_bundle_v2.semantic_deps.clone(),
+                startup.deps_bundle_v2.deps_id.clone(),
+                startup.deps_bundle_v2.semantic_deps.clone(),
             )
         };
 
@@ -939,6 +1234,9 @@ impl SessionManager {
             let session = sessions
                 .get(&uuid)
                 .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+            let startup = session.startup.as_ref().ok_or_else(|| {
+                rmcp::ErrorData::invalid_params("workspace not ready (startup in progress)", None)
+            })?;
             let symbol = session
                 .id_map
                 .get_symbol(session.analysis_revision, &params.symbol_id)
@@ -947,8 +1245,8 @@ impl SessionManager {
             (
                 session.roots.clone(),
                 session.analysis_revision,
-                session.startup.deps_bundle_v2.deps_id.clone(),
-                session.startup.deps_bundle_v2.semantic_deps.clone(),
+                startup.deps_bundle_v2.deps_id.clone(),
+                startup.deps_bundle_v2.semantic_deps.clone(),
                 symbol,
             )
         };
@@ -1054,15 +1352,18 @@ impl SessionManager {
             let session = sessions
                 .get(&uuid)
                 .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+            let startup = session.startup.as_ref().ok_or_else(|| {
+                rmcp::ErrorData::invalid_params("workspace not ready (startup in progress)", None)
+            })?;
             (
                 session.analysis_revision,
                 session.roots.clone(),
                 session.documents.overlays.clone(),
                 session.documents.hot_set.clone(),
                 session.settings.clone(),
-                session.startup.deps_bundle_v2.deps_id.clone(),
-                session.startup.deps_bundle_v2.semantic_deps.clone(),
-                session.startup.deps_bundle_v2.index_snapshot.clone(),
+                startup.deps_bundle_v2.deps_id.clone(),
+                startup.deps_bundle_v2.semantic_deps.clone(),
+                startup.deps_bundle_v2.index_snapshot.clone(),
             )
         };
 
@@ -1680,6 +1981,7 @@ fn validate_optional_path(path: Option<&Path>, field: &str) -> Result<(), rmcp::
 
 async fn start_semantic_runtime(
     settings: &WorkspaceSettings,
+    progress_tx: Option<mpsc::UnboundedSender<ProgressUpdate>>,
 ) -> Result<bsl_backend::system::StartupResultV2, rmcp::ErrorData> {
     let coordinator = Arc::new(bsl_backend::system::SystemCoordinator::new());
     let inputs = bsl_backend::system::StartupInputs::from_web_flags(
@@ -1690,9 +1992,107 @@ async fn start_semantic_runtime(
         None,
     );
 
-    bsl_backend::system::startup_v2(coordinator, inputs, None)
+    bsl_backend::system::startup_v2(coordinator, inputs, progress_tx)
         .await
         .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))
+}
+
+async fn run_startup_job(
+    session_manager: Arc<SessionManager>,
+    session_id: Uuid,
+    settings: WorkspaceSettings,
+    ctx: JobContext,
+) -> Result<serde_json::Value, anyhow::Error> {
+    ctx.set_progress("startup/starting".to_string(), 0).await;
+    session_manager
+        .set_startup_progress(session_id, "startup/starting".to_string(), 0)
+        .await;
+
+    let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressUpdate>();
+    let ctx_for_progress = ctx.clone();
+    let session_for_progress = Arc::clone(&session_manager);
+    let progress_task = tokio::spawn(async move {
+        while let Some(update) = progress_rx.recv().await {
+            let phase = format!("startup/{:?}", update.phase);
+            let percent = update.percentage.round().clamp(0.0, 100.0) as u8;
+            ctx_for_progress.set_progress(phase.clone(), percent).await;
+            session_for_progress
+                .set_startup_progress(session_id, phase, percent)
+                .await;
+        }
+    });
+
+    let startup = match start_semantic_runtime(&settings, Some(progress_tx)).await {
+        Ok(value) => value,
+        Err(err) => {
+            session_manager
+                .set_startup_error(session_id, err.to_string())
+                .await;
+            let _ = progress_task.await;
+            return Err(anyhow::anyhow!(err.to_string()));
+        }
+    };
+
+    if let Err(err) = session_manager.set_startup_result(session_id, startup).await {
+        session_manager
+            .set_startup_error(session_id, err.to_string())
+            .await;
+        let _ = progress_task.await;
+        return Err(anyhow::anyhow!(err.to_string()));
+    }
+
+    let _ = progress_task.await;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+fn restore_roots(
+    roots_raw: &[String],
+) -> Result<(Vec<RootEntry>, Vec<RootDto>), rmcp::ErrorData> {
+    if roots_raw.is_empty() {
+        return Err(rmcp::ErrorData::invalid_params(
+            "roots must be non-empty",
+            None,
+        ));
+    }
+
+    let mut roots = Vec::new();
+    let mut root_dtos = Vec::new();
+    let mut seen = HashSet::new();
+
+    for root_raw in roots_raw {
+        let root_path = PathBuf::from(root_raw);
+        let canonical = std::fs::canonicalize(&root_path).map_err(|_| {
+            rmcp::ErrorData::invalid_params(format!("root does not exist: {root_raw}"), None)
+        })?;
+
+        let metadata = std::fs::metadata(&canonical).map_err(|_| {
+            rmcp::ErrorData::invalid_params(
+                format!("root is not accessible: {}", canonical.display()),
+                None,
+            )
+        })?;
+        if !metadata.is_dir() {
+            return Err(rmcp::ErrorData::invalid_params(
+                format!("root is not a directory: {}", canonical.display()),
+                None,
+            ));
+        }
+
+        let root_id = root_id(&canonical);
+        if !seen.insert(root_id.clone()) {
+            continue;
+        }
+        root_dtos.push(RootDto {
+            root_id: root_id.clone(),
+            path: canonical.to_string_lossy().to_string(),
+        });
+        roots.push(RootEntry {
+            root_id,
+            path: canonical,
+        });
+    }
+
+    Ok((roots, root_dtos))
 }
 
 #[derive(Debug, Clone)]
@@ -2246,16 +2646,35 @@ fn focus_key_for_pack(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::jobs::JobManager;
     use crate::server::types::{
         ContextExpandParams, ContextFocus, ContextInclude, ContextPackParams, DocumentRef, FileRef,
         Position, WorkspaceOpenParams, WorkspaceScope,
     };
+    use crate::types::JobStateDto;
+    use std::sync::Arc;
+
+    async fn wait_startup(job_manager: &JobManager, open: &WorkspaceOpenResponse) {
+        let job_id = open
+            .startup_job_id
+            .as_deref()
+            .expect("startup_job_id missing");
+        loop {
+            let status = job_manager.wait(job_id, 60_000).await.expect("job_wait");
+            match status.state {
+                JobStateDto::Succeeded => break,
+                JobStateDto::Queued | JobStateDto::Running => continue,
+                other => panic!("startup job ended unexpectedly: {}", other.as_str()),
+            }
+        }
+    }
 
     #[tokio::test]
     async fn documents_set_and_clear_bump_revision_only_on_change() {
         let temp = tempfile::TempDir::new().expect("tempdir");
 
-        let manager = SessionManager::new();
+        let job_manager = Arc::new(JobManager::new());
+        let manager = Arc::new(SessionManager::new());
         let open = manager
             .open(WorkspaceOpenParams {
                 roots: vec![temp.path().to_string_lossy().to_string()],
@@ -2263,7 +2682,7 @@ mod tests {
                 platform_version: None,
                 configuration_path: None,
                 mode: None,
-            })
+            }, Arc::clone(&job_manager))
             .await
             .expect("open");
         assert_eq!(open.analysis_revision, 0);
@@ -2308,7 +2727,8 @@ mod tests {
     async fn context_pack_and_expand_are_deterministic_and_budgeted() {
         let temp = tempfile::TempDir::new().expect("tempdir");
 
-        let manager = SessionManager::new();
+        let job_manager = Arc::new(JobManager::new());
+        let manager = Arc::new(SessionManager::new());
         let open = manager
             .open(WorkspaceOpenParams {
                 roots: vec![temp.path().to_string_lossy().to_string()],
@@ -2316,9 +2736,10 @@ mod tests {
                 platform_version: None,
                 configuration_path: None,
                 mode: None,
-            })
+            }, Arc::clone(&job_manager))
             .await
             .expect("open");
+        wait_startup(job_manager.as_ref(), &open).await;
 
         let session_id = open.session_id.clone();
         let root_id = open.roots[0].root_id.clone();

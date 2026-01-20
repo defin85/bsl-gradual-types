@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use bsl_agent::types::{
-    ContextExpandResponse, ContextPackResponse, WorkspaceDocumentsSetResponse,
-    WorkspaceOpenResponse,
+    BslSymbolSearchResponse, ContextExpandResponse, ContextPackResponse, JobStartResponse,
+    JobStateDto, JobStatusResponse, WorkspaceDocumentsSetResponse, WorkspaceListResponse,
+    WorkspaceOpenResponse, WorkspaceStatusResponse,
 };
 use rmcp::model::CallToolRequestParam;
 use rmcp::service::RunningService;
@@ -90,11 +91,32 @@ fn ensure_dir_empty(path: &Path) {
     );
 }
 
-fn ensure_dir_non_empty(path: &Path) {
-    let mut entries = std::fs::read_dir(path).expect("read_dir");
+fn ensure_dir_empty_except_bsl_agent_state(path: &Path) {
+    let entries = std::fs::read_dir(path).expect("read_dir");
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name != "bsl-agent-state" {
+            panic!(
+                "expected cache dir to contain only bsl-agent-state, found: {}",
+                entry.path().display()
+            );
+        }
+    }
+}
+
+fn ensure_dir_has_non_state_entries(path: &Path) {
+    let entries = std::fs::read_dir(path).expect("read_dir");
+    let mut has_non_state = false;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name != "bsl-agent-state" {
+            has_non_state = true;
+            break;
+        }
+    }
     assert!(
-        entries.next().is_some(),
-        "expected non-empty dir: {}",
+        has_non_state,
+        "expected disk cache artifacts outside bsl-agent-state in {}",
         path.display()
     );
 }
@@ -104,6 +126,61 @@ fn repo_root() -> PathBuf {
         .parent()
         .expect("repo root")
         .to_path_buf()
+}
+
+async fn wait_job_terminal(
+    service: &RunningService<RoleClient, ()>,
+    job_id: &str,
+) -> JobStatusResponse {
+    loop {
+        let status: JobStatusResponse = call_tool(
+            service,
+            "job_wait",
+            json!({ "job_id": job_id, "timeout_ms": 60_000 }),
+        )
+        .await;
+
+        match status.state {
+            JobStateDto::Queued | JobStateDto::Running => continue,
+            _ => return status,
+        }
+    }
+}
+
+async fn wait_job_succeeded(service: &RunningService<RoleClient, ()>, job_id: &str) {
+    let status = wait_job_terminal(service, job_id).await;
+    assert_eq!(
+        status.state,
+        JobStateDto::Succeeded,
+        "job did not succeed: state={:?} error={:?}",
+        status.state,
+        status.error
+    );
+}
+
+async fn wait_workspace_ready(
+    service: &RunningService<RoleClient, ()>,
+    open: &WorkspaceOpenResponse,
+) -> WorkspaceStatusResponse {
+    let startup_job_id = open
+        .startup_job_id
+        .as_deref()
+        .expect("startup_job_id missing");
+
+    wait_job_succeeded(service, startup_job_id).await;
+
+    loop {
+        let status: WorkspaceStatusResponse = call_tool(
+            service,
+            "workspace_status",
+            json!({ "session_id": &open.session_id }),
+        )
+        .await;
+        if status.ready {
+            return status;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 }
 
 #[tokio::test]
@@ -117,16 +194,22 @@ async fn stdio_tools_list_and_lifecycle_smoke() {
         "workspace_open",
         "workspace_status",
         "workspace_close",
+        "workspace_resume",
+        "workspace_list",
         "workspace_documents_set",
         "workspace_documents_clear",
-        "bsl_diagnostics",
-        "bsl_symbol_search",
-        "bsl_type_at_position",
-        "bsl_members",
-        "bsl_definition",
-        "bsl_references",
-        "context_pack",
-        "context_expand",
+        "job_status",
+        "job_wait",
+        "job_result",
+        "job_cancel",
+        "bsl_diagnostics_start",
+        "bsl_symbol_search_start",
+        "bsl_type_at_position_start",
+        "bsl_members_start",
+        "bsl_definition_start",
+        "bsl_references_start",
+        "context_pack_start",
+        "context_expand_start",
     ] {
         assert!(
             names.contains(&required),
@@ -145,12 +228,9 @@ async fn stdio_tools_list_and_lifecycle_smoke() {
     .await;
     let session_id = open.session_id.clone();
 
-    let _status: serde_json::Value = call_tool(
-        &service,
-        "workspace_status",
-        json!({ "session_id": &session_id }),
-    )
-    .await;
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let _list: WorkspaceListResponse = call_tool(&service, "workspace_list", json!({})).await;
 
     let _close: serde_json::Value = call_tool(
         &service,
@@ -194,6 +274,8 @@ async fn stdio_workspace_open_deduplicates_roots() {
 
     assert_eq!(open.roots.len(), 1);
 
+    let _ = wait_workspace_ready(&service, &open).await;
+
     let _close: serde_json::Value = call_tool(
         &service,
         "workspace_close",
@@ -220,6 +302,8 @@ async fn stdio_context_pack_stale_ids_are_rejected() {
     let session_id = open.session_id.clone();
     let root_id = open.roots[0].root_id.clone();
 
+    let _ = wait_workspace_ready(&service, &open).await;
+
     let set: WorkspaceDocumentsSetResponse = call_tool(
         &service,
         "workspace_documents_set",
@@ -238,9 +322,9 @@ async fn stdio_context_pack_stale_ids_are_rejected() {
     .await;
     assert!(set.analysis_revision > 0);
 
-    let pack: ContextPackResponse = call_tool(
+    let pack_job: JobStartResponse = call_tool(
         &service,
-        "context_pack",
+        "context_pack_start",
         json!({
             "session_id": &session_id,
             "goal": "Test pack",
@@ -253,12 +337,15 @@ async fn stdio_context_pack_stale_ids_are_rejected() {
         }),
     )
     .await;
+    wait_job_succeeded(&service, &pack_job.job_id).await;
+    let pack: ContextPackResponse =
+        call_tool(&service, "job_result", json!({ "job_id": &pack_job.job_id })).await;
     let pack_id = pack.pack_id.clone();
     let item_id = pack.items[0].item_id.clone();
 
-    let expand: ContextExpandResponse = call_tool(
+    let expand_job: JobStartResponse = call_tool(
         &service,
-        "context_expand",
+        "context_expand_start",
         json!({
             "session_id": &session_id,
             "pack_id": &pack_id,
@@ -267,6 +354,9 @@ async fn stdio_context_pack_stale_ids_are_rejected() {
         }),
     )
     .await;
+    wait_job_succeeded(&service, &expand_job.job_id).await;
+    let expand: ContextExpandResponse =
+        call_tool(&service, "job_result", json!({ "job_id": &expand_job.job_id })).await;
     assert!(expand.text.contains("```bsl"));
 
     let _bump: WorkspaceDocumentsSetResponse = call_tool(
@@ -286,15 +376,24 @@ async fn stdio_context_pack_stale_ids_are_rejected() {
     )
     .await;
 
-    call_tool_expect_invalid_params(
+    let stale_expand_job: JobStartResponse = call_tool(
         &service,
-        "context_expand",
+        "context_expand_start",
         json!({
             "session_id": &session_id,
             "pack_id": &pack_id,
             "item_id": &item_id,
             "budget_chars": 200
         }),
+    )
+    .await;
+    let stale_status = wait_job_terminal(&service, &stale_expand_job.job_id).await;
+    assert_eq!(stale_status.state, JobStateDto::Failed);
+
+    call_tool_expect_invalid_params(
+        &service,
+        "job_result",
+        json!({ "job_id": &stale_expand_job.job_id }),
         "stale or unknown pack_id/item_id",
     )
     .await;
@@ -396,14 +495,25 @@ async fn stdio_symlink_escape_is_rejected() {
     )
     .await;
 
-    call_tool_expect_invalid_params(
+    let _ = wait_workspace_ready(&service, &open).await;
+
+    let start: JobStartResponse = call_tool(
         &service,
-        "bsl_type_at_position",
+        "bsl_type_at_position_start",
         json!({
             "session_id": &open.session_id,
             "file": { "doc": { "root_id": &open.roots[0].root_id, "path": "outside.bsl" } },
             "position": { "line": 0, "character": 0 }
         }),
+    )
+    .await;
+    let status = wait_job_terminal(&service, &start.job_id).await;
+    assert_eq!(status.state, JobStateDto::Failed);
+
+    call_tool_expect_invalid_params(
+        &service,
+        "job_result",
+        json!({ "job_id": &start.job_id }),
         "path escapes roots",
     )
     .await;
@@ -430,7 +540,7 @@ async fn stdio_disk_cache_can_be_disabled() {
         let service = spawn_agent(&[("BSL_CACHE_DIR", cache_dir_value.as_str())]).await;
         let temp_root = tempfile::TempDir::new().expect("root");
 
-        let _open: WorkspaceOpenResponse = call_tool(
+        let open: WorkspaceOpenResponse = call_tool(
             &service,
             "workspace_open",
             json!({
@@ -440,11 +550,12 @@ async fn stdio_disk_cache_can_be_disabled() {
             }),
         )
         .await;
+        let _ = wait_workspace_ready(&service, &open).await;
 
         let _ = service.cancel().await;
     }
 
-    ensure_dir_non_empty(cache_dir.path());
+    ensure_dir_has_non_state_entries(cache_dir.path());
 
     // Cache disabled: should not create new artifacts in a fresh cache dir.
     let cache_dir_disabled = tempfile::TempDir::new().expect("cache2");
@@ -459,7 +570,7 @@ async fn stdio_disk_cache_can_be_disabled() {
         .await;
         let temp_root = tempfile::TempDir::new().expect("root");
 
-        let _open: WorkspaceOpenResponse = call_tool(
+        let open: WorkspaceOpenResponse = call_tool(
             &service,
             "workspace_open",
             json!({
@@ -469,11 +580,12 @@ async fn stdio_disk_cache_can_be_disabled() {
             }),
         )
         .await;
+        let _ = wait_workspace_ready(&service, &open).await;
 
         let _ = service.cancel().await;
     }
 
-    ensure_dir_empty(cache_dir_disabled.path());
+    ensure_dir_empty_except_bsl_agent_state(cache_dir_disabled.path());
 }
 
 #[tokio::test]
@@ -498,6 +610,8 @@ async fn stdio_workspace_open_accepts_platform_docs_file() {
         }),
     )
     .await;
+
+    let _ = wait_workspace_ready(&service, &open).await;
 
     let _close: serde_json::Value = call_tool(
         &service,
@@ -546,10 +660,75 @@ async fn stdio_disk_cache_concurrent_startup_same_dir() {
         }),
     );
 
-    let (_a, _b) = tokio::join!(open_a, open_b);
+    let (open_a, open_b) = tokio::join!(open_a, open_b);
+    let _ = wait_workspace_ready(&service_a, &open_a).await;
+    let _ = wait_workspace_ready(&service_b, &open_b).await;
 
-    ensure_dir_non_empty(cache_dir.path());
+    ensure_dir_has_non_state_entries(cache_dir.path());
 
     let _ = service_a.cancel().await;
     let _ = service_b.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_workspace_resume_persists_jobs_and_results() {
+    let cache_dir = tempfile::TempDir::new().expect("cache");
+    let cache_dir_str = cache_dir.path().to_string_lossy().to_string();
+
+    let root = tempfile::TempDir::new().expect("root");
+    let module_path = root.path().join("src/CommonModules/Foo/Module.bsl");
+    std::fs::create_dir_all(module_path.parent().expect("parent")).expect("mkdir");
+    std::fs::write(
+        &module_path,
+        "Procedure TestProc()\n    A = 1;\nEndProcedure\n",
+    )
+    .expect("write module");
+
+    let service = spawn_agent(&[("BSL_CACHE_DIR", cache_dir_str.as_str())]).await;
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({ "roots": [root.path().to_string_lossy()] }),
+    )
+    .await;
+    let _ = wait_workspace_ready(&service, &open).await;
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_symbol_search_start",
+        json!({
+            "session_id": &open.session_id,
+            "query": "TestProc",
+            "limit": 50
+        }),
+    )
+    .await;
+    wait_job_succeeded(&service, &start.job_id).await;
+    let result: BslSymbolSearchResponse =
+        call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+    assert!(!result.symbols.is_empty(), "expected at least one symbol");
+
+    let session_id = open.session_id.clone();
+    let job_id = start.job_id.clone();
+
+    let _ = service.cancel().await;
+
+    let service = spawn_agent(&[("BSL_CACHE_DIR", cache_dir_str.as_str())]).await;
+    let resumed: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_resume",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = wait_workspace_ready(&service, &resumed).await;
+
+    let result_after_restart: BslSymbolSearchResponse =
+        call_tool(&service, "job_result", json!({ "job_id": &job_id })).await;
+    assert_eq!(
+        result_after_restart.symbols.len(),
+        result.symbols.len(),
+        "expected persisted job_result across restart"
+    );
+
+    let _ = service.cancel().await;
 }

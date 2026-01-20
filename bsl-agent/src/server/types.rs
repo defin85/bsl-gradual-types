@@ -33,6 +33,14 @@ pub struct WorkspaceCloseParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceResumeParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceListParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DocumentRef {
     pub root_id: String,
     pub path: String,
@@ -198,4 +206,30 @@ pub struct ContextExpandParams {
     pub budget_chars: Option<u32>,
     #[serde(default)]
     pub budget_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct JobStatusParams {
+    pub job_id: String,
+}
+
+fn default_timeout_ms() -> u64 {
+    5_000
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct JobWaitParams {
+    pub job_id: String,
+    #[serde(default = "default_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct JobResultParams {
+    pub job_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct JobCancelParams {
+    pub job_id: String,
 }

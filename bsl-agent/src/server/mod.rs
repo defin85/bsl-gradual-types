@@ -29,11 +29,23 @@ pub struct BslAgentHandler {
 #[tool_router]
 impl BslAgentHandler {
     pub fn new() -> Self {
+        Self::with_state(Arc::new(SessionManager::new()), Arc::new(JobManager::new()))
+    }
+
+    pub fn with_state(session_manager: Arc<SessionManager>, job_manager: Arc<JobManager>) -> Self {
         Self {
-            session_manager: Arc::new(SessionManager::new()),
-            job_manager: Arc::new(JobManager::new()),
+            session_manager,
+            job_manager,
             tool_router: Self::tool_router(),
         }
+    }
+
+    pub fn session_manager(&self) -> Arc<SessionManager> {
+        Arc::clone(&self.session_manager)
+    }
+
+    pub fn job_manager(&self) -> Arc<JobManager> {
+        Arc::clone(&self.job_manager)
     }
 
     #[tool(description = "Open a workspace session for semantic queries")]

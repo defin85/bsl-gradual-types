@@ -338,8 +338,12 @@ async fn stdio_context_pack_stale_ids_are_rejected() {
     )
     .await;
     wait_job_succeeded(&service, &pack_job.job_id).await;
-    let pack: ContextPackResponse =
-        call_tool(&service, "job_result", json!({ "job_id": &pack_job.job_id })).await;
+    let pack: ContextPackResponse = call_tool(
+        &service,
+        "job_result",
+        json!({ "job_id": &pack_job.job_id }),
+    )
+    .await;
     let pack_id = pack.pack_id.clone();
     let item_id = pack.items[0].item_id.clone();
 
@@ -355,8 +359,12 @@ async fn stdio_context_pack_stale_ids_are_rejected() {
     )
     .await;
     wait_job_succeeded(&service, &expand_job.job_id).await;
-    let expand: ContextExpandResponse =
-        call_tool(&service, "job_result", json!({ "job_id": &expand_job.job_id })).await;
+    let expand: ContextExpandResponse = call_tool(
+        &service,
+        "job_result",
+        json!({ "job_id": &expand_job.job_id }),
+    )
+    .await;
     assert!(expand.text.contains("```bsl"));
 
     let _bump: WorkspaceDocumentsSetResponse = call_tool(

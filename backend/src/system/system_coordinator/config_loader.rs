@@ -66,10 +66,7 @@ impl SystemCoordinator {
 
         let config_set_id = config_set_id_from_configs(&configurations);
         let project_id = project_id_from_root(&config_root);
-        let mut config_ids: Vec<String> = configurations
-            .iter()
-            .map(config_id_for_info)
-            .collect();
+        let mut config_ids: Vec<String> = configurations.iter().map(config_id_for_info).collect();
         config_ids.sort();
         config_ids.dedup();
 
@@ -2092,8 +2089,12 @@ mod merkle_tests {
 
         let xml_paths = [xml];
 
-        let fp_unique =
-            merkle_fingerprint_paths_with_modules(root, &xml_paths, std::slice::from_ref(&bsl), true);
+        let fp_unique = merkle_fingerprint_paths_with_modules(
+            root,
+            &xml_paths,
+            std::slice::from_ref(&bsl),
+            true,
+        );
         let fp_dup =
             merkle_fingerprint_paths_with_modules(root, &xml_paths, &[bsl.clone(), bsl], true);
 

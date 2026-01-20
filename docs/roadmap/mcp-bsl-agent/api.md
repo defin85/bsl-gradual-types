@@ -458,3 +458,38 @@ Prompts — “шаблоны” для UI-хостов:
 
 - `analyze-bsl` — анализ проблемы по `context_pack`
 - `fix-type-errors` — пошаговое исправление с учётом gradual typing и impact
+
+---
+
+## 6) Unified UI (Web Server + MCP Agent)
+
+Цель: один и тот же SPA (`frontend → target/site`) должен уметь работать:
+- с `bsl-web-server` (web API);
+- с `bsl-agent` (MCP stdio) в режиме read-only “MCP Dashboard”.
+
+### 6.1. Capability detection
+
+UI делает `GET /api/mcp/status`.
+
+- Для `bsl-web-server` сервер возвращает `supported=false` (MCP дашборд недоступен).
+- Для `bsl-agent` сервер возвращает `supported=true` и `mode=mcp_agent`.
+
+### 6.2. Запуск UI для `bsl-agent` (опционально)
+
+`bsl-agent` поднимает HTTP UI только при наличии `BSL_AGENT_HTTP_ADDR`.
+
+Env:
+- `BSL_AGENT_HTTP_ADDR=127.0.0.1:0` — включить UI и выбрать свободный порт автоматически (рекомендуется).
+- `BSL_AGENT_HTTP_STATIC_DIR=target/site` — где лежит собранный SPA (по умолчанию `target/site`).
+
+Сервер bind’ится только на loopback (localhost-only) и не предоставляет write‑эндпоинтов.
+
+### 6.3. Read-only HTTP API (`bsl-agent`)
+
+Все эндпоинты ниже — только `GET`:
+
+- `GET /api/mcp/status` → `McpStatusDto`
+- `GET /api/mcp/sessions` → `McpSessionsResponseDto`
+- `GET /api/mcp/jobs` → `McpJobsResponseDto`
+- `GET /api/mcp/jobs/:job_id` → `McpJobDto`
+- `GET /api/mcp/deps/meta?sessionId=...` → `SnapshotMetaDto`

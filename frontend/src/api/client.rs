@@ -17,6 +17,47 @@ pub async fn fetch_snapshot_meta() -> Result<SnapshotMetaDto, String> {
         .map_err(|e| format!("API error: {:?}", e))
 }
 
+/// Получить статус MCP UI (capability detection).
+pub async fn fetch_mcp_status() -> Result<McpStatusDto, String> {
+    let config = get_config();
+    let url = config.api_url("mcp/status");
+    fetch_json::<McpStatusDto>(&url)
+        .await
+        .map_err(|e| format!("API error: {:?}", e))
+}
+
+/// Получить список активных MCP сессий (read-only).
+pub async fn fetch_mcp_sessions() -> Result<McpSessionsResponseDto, String> {
+    let config = get_config();
+    let url = config.api_url("mcp/sessions");
+    fetch_json::<McpSessionsResponseDto>(&url)
+        .await
+        .map_err(|e| format!("API error: {:?}", e))
+}
+
+/// Получить список MCP job'ов (read-only).
+pub async fn fetch_mcp_jobs() -> Result<McpJobsResponseDto, String> {
+    let config = get_config();
+    let url = config.api_url("mcp/jobs");
+    fetch_json::<McpJobsResponseDto>(&url)
+        .await
+        .map_err(|e| format!("API error: {:?}", e))
+}
+
+/// Получить deps/meta из MCP (обычно привязано к одной сессии).
+pub async fn fetch_mcp_deps_meta(session_id: Option<&str>) -> Result<SnapshotMetaDto, String> {
+    let config = get_config();
+    let base_url = config.api_url("mcp/deps/meta");
+    let url = if let Some(session_id) = session_id {
+        format!("{base_url}?sessionId={session_id}")
+    } else {
+        base_url
+    };
+    fetch_json::<SnapshotMetaDto>(&url)
+        .await
+        .map_err(|e| format!("API error: {:?}", e))
+}
+
 /// Пересобрать deps/index на backend и вернуть новую мету снапшота
 pub async fn reload_snapshot() -> Result<SnapshotMetaDto, String> {
     let config = get_config();

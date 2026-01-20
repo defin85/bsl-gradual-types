@@ -25,7 +25,8 @@ use crate::system::{
 use bsl_shared::api::ValidationErrorDto;
 use bsl_shared::api::{
     AstNodeDto, DebugAstResponseDto, DiagnosticsResponseDto, EnhancedHoverResponse,
-    SemanticErrorDto, SnapshotInputsDto, SnapshotMetaDto, StartupProgressDto, SyntaxErrorDto,
+    McpBackendModeDto, McpStatusDto, SemanticErrorDto, SnapshotInputsDto, SnapshotMetaDto,
+    StartupProgressDto, SyntaxErrorDto,
 };
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{DiagnosticSeverity, TypeDiagnostic};
@@ -196,6 +197,20 @@ pub async fn get_version() -> impl IntoResponse {
         "rust_version": env!("CARGO_PKG_RUST_VERSION", "unknown"),
         "name": "BSL Gradual Types"
     }))
+}
+
+/// Capability detection endpoint for unified SPA.
+///
+/// In `bsl-web-server` mode, MCP dashboard endpoints are not supported.
+pub async fn get_mcp_status() -> impl IntoResponse {
+    Json(McpStatusDto {
+        mode: McpBackendModeDto::WebServer,
+        supported: false,
+        read_only: false,
+        instance_id: None,
+        ui_url: None,
+        cache_dir: None,
+    })
 }
 
 pub async fn get_snapshot_meta(State(state): State<AppState>) -> impl IntoResponse {

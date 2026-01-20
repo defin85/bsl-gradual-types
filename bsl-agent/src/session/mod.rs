@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use bsl_analysis_v2::{AnalysisHostV2, Change, FileId};
 use bsl_backend::data::loaders::progress::ProgressUpdate;
+use bsl_shared::api::dtos::{McpRootDto, McpSessionDto, SnapshotInputsDto, SnapshotMetaDto};
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::TypeResolver;
 use tokio::sync::mpsc;
@@ -285,6 +286,104 @@ impl SessionManager {
         })
     }
 
+    pub async fn http_list_sessions(&self) -> Vec<McpSessionDto> {
+        let sessions = self.sessions.read().await;
+        let mut result = Vec::with_capacity(sessions.len());
+        for (session_id, session) in sessions.iter() {
+            let roots = session
+                .roots
+                .iter()
+                .map(|root| McpRootDto {
+                    root_id: root.root_id.clone(),
+                    path: root.path.to_string_lossy().to_string(),
+                })
+                .collect();
+
+            if session.startup.is_some() {
+                result.push(McpSessionDto {
+                    session_id: session_id.to_string(),
+                    roots,
+                    ready: true,
+                    analysis_revision: session.analysis_revision,
+                    phase: "idle".to_string(),
+                    progress_percent: 100,
+                    warnings: workspace_warnings(&session.settings),
+                    missing_inputs: workspace_missing_inputs(&session.settings),
+                    startup_job_id: session.startup_job_id.clone(),
+                    error: None,
+                });
+            } else {
+                result.push(McpSessionDto {
+                    session_id: session_id.to_string(),
+                    roots,
+                    ready: false,
+                    analysis_revision: session.analysis_revision,
+                    phase: session.startup_phase.clone(),
+                    progress_percent: session.startup_progress,
+                    warnings: workspace_warnings(&session.settings),
+                    missing_inputs: workspace_missing_inputs(&session.settings),
+                    startup_job_id: session.startup_job_id.clone(),
+                    error: session.startup_error.clone(),
+                });
+            }
+        }
+
+        result.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+        result
+    }
+
+    pub async fn http_deps_meta(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<SnapshotMetaDto, rmcp::ErrorData> {
+        let sessions = self.sessions.read().await;
+        let uuid = if let Some(session_id) = session_id {
+            parse_session_id(session_id)?
+        } else if sessions.len() == 1 {
+            *sessions
+                .keys()
+                .next()
+                .ok_or_else(|| rmcp::ErrorData::invalid_params("no sessions", None))?
+        } else {
+            return Err(rmcp::ErrorData::invalid_params(
+                "session_id is required when multiple sessions exist",
+                None,
+            ));
+        };
+
+        let session = sessions
+            .get(&uuid)
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+        let startup = session.startup.as_ref().ok_or_else(|| {
+            rmcp::ErrorData::invalid_params("workspace not ready (startup in progress)", None)
+        })?;
+
+        let deps_bundle = &startup.deps_bundle_v2;
+        let inputs = &startup.inputs;
+        Ok(SnapshotMetaDto {
+            deps_id: deps_bundle.deps_id.as_str().to_string(),
+            index_snapshot_id: deps_bundle.meta.index_snapshot_id.clone(),
+            platform_version: deps_bundle.meta.platform_version.clone(),
+            platform_fingerprint: deps_bundle.meta.platform_fingerprint.clone(),
+            config_fingerprint: deps_bundle.meta.config_fingerprint.clone(),
+            strict_fingerprint: deps_bundle.meta.strict_fingerprint,
+            repository_stats: deps_bundle.semantic_deps.repository.get_stats(),
+            inputs: SnapshotInputsDto {
+                syntax_helper_path: inputs
+                    .syntax_helper_path
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().to_string()),
+                configuration_path: inputs
+                    .configuration_path
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().to_string()),
+                platform_version: inputs.platform_version.clone(),
+                cache_enabled: inputs.cache_enabled,
+                strict_fingerprint: inputs.strict_fingerprint,
+            },
+        })
+    }
+
     pub async fn close(&self, session_id: &str) -> Result<(), rmcp::ErrorData> {
         let uuid = parse_session_id(session_id)?;
         let mut sessions = self.sessions.write().await;
@@ -320,10 +419,9 @@ impl SessionManager {
             });
         }
 
-        let store = self
-            .store
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("persist store is not available", None))?;
+        let store = self.store.as_ref().ok_or_else(|| {
+            rmcp::ErrorData::internal_error("persist store is not available", None)
+        })?;
         let persisted = store
             .load(session_id)
             .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
@@ -377,7 +475,8 @@ impl SessionManager {
             })
             .await;
 
-        self.set_startup_job_id(uuid, startup_job_id.clone()).await?;
+        self.set_startup_job_id(uuid, startup_job_id.clone())
+            .await?;
 
         Ok(WorkspaceOpenResponse {
             session_id: uuid.to_string(),
@@ -392,7 +491,9 @@ impl SessionManager {
 
     pub async fn list(&self) -> Result<WorkspaceListResponse, rmcp::ErrorData> {
         let Some(store) = self.store.as_ref() else {
-            return Ok(WorkspaceListResponse { sessions: Vec::new() });
+            return Ok(WorkspaceListResponse {
+                sessions: Vec::new(),
+            });
         };
         let sessions = store
             .list()
@@ -2039,7 +2140,10 @@ async fn run_startup_job(
         }
     };
 
-    if let Err(err) = session_manager.set_startup_result(session_id, startup).await {
+    if let Err(err) = session_manager
+        .set_startup_result(session_id, startup)
+        .await
+    {
         session_manager
             .set_startup_error(session_id, err.to_string())
             .await;
@@ -2051,9 +2155,7 @@ async fn run_startup_job(
     Ok(serde_json::json!({ "ok": true }))
 }
 
-fn restore_roots(
-    roots_raw: &[String],
-) -> Result<(Vec<RootEntry>, Vec<RootDto>), rmcp::ErrorData> {
+fn restore_roots(roots_raw: &[String]) -> Result<(Vec<RootEntry>, Vec<RootDto>), rmcp::ErrorData> {
     if roots_raw.is_empty() {
         return Err(rmcp::ErrorData::invalid_params(
             "roots must be non-empty",
@@ -2256,10 +2358,7 @@ fn load_disk_text_with_limits(
         Err(_) => return Ok(None),
     };
     if !canonical.starts_with(root_path) {
-        return Err(rmcp::ErrorData::invalid_params(
-            "path escapes roots",
-            None,
-        ));
+        return Err(rmcp::ErrorData::invalid_params("path escapes roots", None));
     }
 
     let metadata = match std::fs::metadata(&canonical) {
@@ -2681,13 +2780,16 @@ mod tests {
         let job_manager = Arc::new(JobManager::new());
         let manager = Arc::new(SessionManager::new());
         let open = manager
-            .open(WorkspaceOpenParams {
-                roots: vec![temp.path().to_string_lossy().to_string()],
-                platform_docs_archive: None,
-                platform_version: None,
-                configuration_path: None,
-                mode: None,
-            }, Arc::clone(&job_manager))
+            .open(
+                WorkspaceOpenParams {
+                    roots: vec![temp.path().to_string_lossy().to_string()],
+                    platform_docs_archive: None,
+                    platform_version: None,
+                    configuration_path: None,
+                    mode: None,
+                },
+                Arc::clone(&job_manager),
+            )
             .await
             .expect("open");
         assert_eq!(open.analysis_revision, 0);
@@ -2735,13 +2837,16 @@ mod tests {
         let job_manager = Arc::new(JobManager::new());
         let manager = Arc::new(SessionManager::new());
         let open = manager
-            .open(WorkspaceOpenParams {
-                roots: vec![temp.path().to_string_lossy().to_string()],
-                platform_docs_archive: None,
-                platform_version: None,
-                configuration_path: None,
-                mode: None,
-            }, Arc::clone(&job_manager))
+            .open(
+                WorkspaceOpenParams {
+                    roots: vec![temp.path().to_string_lossy().to_string()],
+                    platform_docs_archive: None,
+                    platform_version: None,
+                    configuration_path: None,
+                    mode: None,
+                },
+                Arc::clone(&job_manager),
+            )
             .await
             .expect("open");
         wait_startup(job_manager.as_ref(), &open).await;

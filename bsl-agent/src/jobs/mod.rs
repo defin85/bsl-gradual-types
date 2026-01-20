@@ -2,16 +2,16 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Notify, RwLock};
 use uuid::Uuid;
 
-use crate::types::{JobCancelResponse, JobStateDto, JobStatusResponse, ProgressDto};
 use crate::state::{now_unix_secs, state_root, write_atomic};
+use crate::types::{JobCancelResponse, JobStateDto, JobStatusResponse, ProgressDto};
 
 const JOBS_DIR: &str = "jobs";
 const DEFAULT_TTL_SECS: u64 = 7 * 24 * 60 * 60;
@@ -258,12 +258,18 @@ impl JobManager {
         }
     }
 
+    pub fn new_in_memory() -> Self {
+        Self {
+            store: None,
+            jobs: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
     pub async fn spawn<F, Fut>(&self, phase: impl Into<String>, job_fn: F) -> String
     where
         F: FnOnce(JobContext) -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = Result<serde_json::Value, anyhow::Error>>
-            + Send
-            + 'static,
+        Fut:
+            std::future::Future<Output = Result<serde_json::Value, anyhow::Error>> + Send + 'static,
     {
         let job_id = Uuid::new_v4();
         let now = now_unix_secs();
@@ -394,6 +400,22 @@ impl JobManager {
         Ok(job.as_status())
     }
 
+    pub async fn list_statuses(&self) -> Vec<JobStatusResponse> {
+        let entries: Vec<Arc<JobEntry>> = {
+            let jobs = self.jobs.read().await;
+            jobs.values().cloned().collect()
+        };
+
+        let mut statuses = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let job = entry.job.read().await;
+            statuses.push(job.as_status());
+        }
+
+        statuses.sort_by(|a, b| a.job_id.cmp(&b.job_id));
+        statuses
+    }
+
     pub async fn wait(
         &self,
         job_id: &str,
@@ -521,6 +543,5 @@ impl Default for JobManager {
 }
 
 fn parse_job_id(job_id: &str) -> Result<Uuid, rmcp::ErrorData> {
-    Uuid::parse_str(job_id)
-        .map_err(|_| rmcp::ErrorData::invalid_params("invalid job_id", None))
+    Uuid::parse_str(job_id).map_err(|_| rmcp::ErrorData::invalid_params("invalid job_id", None))
 }

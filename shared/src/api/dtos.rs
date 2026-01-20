@@ -8,6 +8,87 @@ use std::collections::HashMap;
 
 use crate::domain::repository::RepositoryStats;
 
+/// Backend mode for unified UI (Web Server vs MCP Agent).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpBackendModeDto {
+    McpAgent,
+    WebServer,
+}
+
+/// Capability detection for the unified SPA (target/site).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpStatusDto {
+    /// Backend mode the SPA is connected to.
+    pub mode: McpBackendModeDto,
+    /// Whether MCP dashboard endpoints are supported.
+    pub supported: bool,
+    /// Whether the MCP dashboard is strictly read-only.
+    pub read_only: bool,
+    /// Optional instance identifier (useful for per-agent mode).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    /// Optional UI URL (useful when server binds to :0).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ui_url: Option<String>,
+    /// Optional cache directory used by this instance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_dir: Option<String>,
+}
+
+/// MCP session summary for read-only dashboard.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSessionDto {
+    pub session_id: String,
+    pub roots: Vec<McpRootDto>,
+    pub ready: bool,
+    pub analysis_revision: u64,
+    pub phase: String,
+    pub progress_percent: u8,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    #[serde(default)]
+    pub missing_inputs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub startup_job_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Root for MCP session summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpRootDto {
+    pub root_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSessionsResponseDto {
+    pub sessions: Vec<McpSessionDto>,
+}
+
+/// MCP job summary for read-only dashboard.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpJobDto {
+    pub job_id: String,
+    pub state: String,
+    pub phase: String,
+    pub progress_percent: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpJobsResponseDto {
+    pub jobs: Vec<McpJobDto>,
+}
+
 /// Прогресс запуска/инициализации системы (Web API polling).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

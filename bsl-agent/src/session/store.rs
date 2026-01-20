@@ -93,4 +93,3 @@ impl SessionStore {
         self.sessions_dir.join(format!("{session_id}.json"))
     }
 }
-

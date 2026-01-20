@@ -914,11 +914,11 @@ fn apply_text_to_point(start: Point, text: &str) -> Point {
         }
     }
 
-        if row == start.row {
-            column += text.len();
-        } else {
-            column = text.len().saturating_sub(last_line_start);
-        }
+    if row == start.row {
+        column += text.len();
+    } else {
+        column = text.len().saturating_sub(last_line_start);
+    }
 
     Point::new(row, column)
 }

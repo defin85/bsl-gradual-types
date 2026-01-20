@@ -39,4 +39,3 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     fs::rename(temp_path, path)?;
     Ok(())
 }
-

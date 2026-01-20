@@ -628,7 +628,7 @@ impl SessionManager {
         };
 
         let files = collect_scope_files(&roots, &hot_set, params.scope)?;
-        let facade = SemanticFacade::default();
+        let facade = SemanticFacade;
         let mut diagnostics = Vec::new();
         let mut truncated = false;
         let mut total_read_bytes = 0u64;
@@ -1796,6 +1796,12 @@ impl SessionManager {
     }
 }
 
+impl Default for SessionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorkspaceSession {
     fn document_key(&self, doc: &DocumentRef) -> Result<DocumentKey, rmcp::ErrorData> {
         let root = self
@@ -2201,9 +2207,8 @@ fn collect_project_files(roots: &[RootEntry]) -> Result<Vec<WorkspaceFile>, rmcp
 fn normalize_path_components(path: &Path) -> String {
     let mut parts = Vec::new();
     for component in path.components() {
-        match component {
-            Component::Normal(value) => parts.push(value.to_string_lossy().to_string()),
-            _ => {}
+        if let Component::Normal(value) = component {
+            parts.push(value.to_string_lossy().to_string());
         }
     }
     parts.join("/")
@@ -2698,13 +2703,13 @@ mod tests {
         };
 
         let set = manager
-            .documents_set(&open.session_id, &[file.clone()], true)
+            .documents_set(&open.session_id, std::slice::from_ref(&file), true)
             .await
             .expect("set");
         assert_eq!(set.analysis_revision, 1);
 
         let set_again = manager
-            .documents_set(&open.session_id, &[file], true)
+            .documents_set(&open.session_id, std::slice::from_ref(&file), true)
             .await
             .expect("set again");
         assert_eq!(set_again.analysis_revision, 1);
@@ -2753,7 +2758,7 @@ mod tests {
             version: Some(1),
         };
         manager
-            .documents_set(&session_id, &[overlay_file.clone()], true)
+            .documents_set(&session_id, std::slice::from_ref(&overlay_file), true)
             .await
             .expect("documents_set");
 

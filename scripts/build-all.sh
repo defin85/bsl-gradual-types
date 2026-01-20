@@ -376,11 +376,7 @@ build_rust_binaries() {
     # Для MCP-конфига удобно иметь стабильный путь: target/release/bsl-agent
     # (даже если общий билд был в debug).
     log_info "\n🤖 Сборка bsl-agent для MCP (release)..."
-    if [ ! -f "target/release/bsl-agent${BINARY_EXT}" ]; then
-        measure_time cargo build --release -p bsl-agent
-    else
-        log_success "  ✅ bsl-agent уже собран: target/release/bsl-agent${BINARY_EXT}"
-    fi
+    measure_time cargo build --release -p bsl-agent
 
     log_success "\n✅ Rust бинарники собраны"
 

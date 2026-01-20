@@ -329,6 +329,10 @@ impl JobManager {
             entry.notify.notify_waiters();
 
             let result = job_fn(ctx.clone()).await;
+            if entry.canceled.load(Ordering::Relaxed) {
+                entry.notify.notify_waiters();
+                return;
+            }
             match result {
                 Ok(value) => {
                     {
@@ -458,22 +462,37 @@ impl JobManager {
                 .ok_or_else(|| rmcp::ErrorData::invalid_params("job not found", None))?
         };
 
-        entry.canceled.store(true, Ordering::Relaxed);
-
+        let mut current_state = JobStateDto::Canceled;
+        let mut should_cancel = false;
         {
             let mut job = entry.job.write().await;
             if job.is_terminal() {
-                return Ok(JobCancelResponse {
-                    ok: true,
-                    job_id: job.job_id.clone(),
-                    state: job.state,
-                });
+                current_state = job.state;
+            } else {
+                should_cancel = true;
+                entry.canceled.store(true, Ordering::Relaxed);
+                job.state = JobStateDto::Canceled;
+                job.phase = "canceled".to_string();
+                job.error = Some("job canceled".to_string());
+                job.updated_at = now_unix_secs();
+                job.finished_at = Some(job.updated_at);
             }
-            job.state = JobStateDto::Canceled;
-            job.phase = "canceled".to_string();
-            job.error = Some("job canceled".to_string());
-            job.updated_at = now_unix_secs();
-            job.finished_at = Some(job.updated_at);
+        }
+
+        if !should_cancel {
+            return Ok(JobCancelResponse {
+                ok: true,
+                job_id: job_id.to_string(),
+                state: current_state,
+            });
+        }
+
+        {
+            let mut result_slot = entry.result.write().await;
+            *result_slot = None;
+        }
+        if let Some(store) = self.store.as_ref() {
+            store.remove_result_file(job_id);
         }
 
         self.persist_job(&entry).await;
@@ -492,6 +511,12 @@ impl JobManager {
         };
         let job = entry.job.read().await.clone();
         store.write_job(&job);
+    }
+}
+
+impl Default for JobManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

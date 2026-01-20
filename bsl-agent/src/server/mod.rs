@@ -45,7 +45,7 @@ impl BslAgentHandler {
             .session_manager
             .open(params, Arc::clone(&self.job_manager))
             .await?;
-        Ok(Content::json(response)?)
+        Content::json(response)
     }
 
     #[tool(description = "Get workspace session status / progress")]
@@ -54,7 +54,7 @@ impl BslAgentHandler {
         Parameters(params): Parameters<WorkspaceStatusParams>,
     ) -> Result<Content, rmcp::ErrorData> {
         let response = self.session_manager.status(&params.session_id).await?;
-        Ok(Content::json(response)?)
+        Content::json(response)
     }
 
     #[tool(description = "Close a workspace session and release resources")]
@@ -63,7 +63,7 @@ impl BslAgentHandler {
         Parameters(params): Parameters<WorkspaceCloseParams>,
     ) -> Result<Content, rmcp::ErrorData> {
         self.session_manager.close(&params.session_id).await?;
-        Ok(Content::json(serde_json::json!({ "ok": true }))?)
+        Content::json(serde_json::json!({ "ok": true }))
     }
 
     #[tool(description = "Resume a persisted workspace session by session_id")]
@@ -75,7 +75,7 @@ impl BslAgentHandler {
             .session_manager
             .resume(&params.session_id, Arc::clone(&self.job_manager))
             .await?;
-        Ok(Content::json(response)?)
+        Content::json(response)
     }
 
     #[tool(description = "List persisted workspace sessions available for resume")]
@@ -84,7 +84,7 @@ impl BslAgentHandler {
         Parameters(_params): Parameters<WorkspaceListParams>,
     ) -> Result<Content, rmcp::ErrorData> {
         let response = self.session_manager.list().await?;
-        Ok(Content::json(response)?)
+        Content::json(response)
     }
 
     #[tool(description = "Set unsaved documents (overlay) and/or mark documents as hot")]
@@ -96,7 +96,7 @@ impl BslAgentHandler {
             .session_manager
             .documents_set(&params.session_id, &params.files, params.mark_hot)
             .await?;
-        Ok(Content::json(response)?)
+        Content::json(response)
     }
 
     #[tool(description = "Clear document overlays and/or remove documents from hot set")]
@@ -108,7 +108,7 @@ impl BslAgentHandler {
             .session_manager
             .documents_clear(&params.session_id, &params.documents, params.clear_hot)
             .await?;
-        Ok(Content::json(response)?)
+        Content::json(response)
     }
 
     #[tool(description = "Start semantic diagnostics job for project/file/hot scope")]
@@ -128,10 +128,10 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
-        Ok(Content::json(JobStartResponse {
+        Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
-        })?)
+        })
     }
 
     #[tool(description = "Start symbol search job by name (deterministic)")]
@@ -151,10 +151,10 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
-        Ok(Content::json(JobStartResponse {
+        Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
-        })?)
+        })
     }
 
     #[tool(description = "Start type-at-position job")]
@@ -174,10 +174,10 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
-        Ok(Content::json(JobStartResponse {
+        Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
-        })?)
+        })
     }
 
     #[tool(description = "Start members (completion-like) job at given position")]
@@ -197,10 +197,10 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
-        Ok(Content::json(JobStartResponse {
+        Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
-        })?)
+        })
     }
 
     #[tool(description = "Start definition resolution job for symbol_id or position")]
@@ -220,10 +220,10 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
-        Ok(Content::json(JobStartResponse {
+        Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
-        })?)
+        })
     }
 
     #[tool(description = "Start references search job for symbol_id")]
@@ -243,10 +243,10 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
-        Ok(Content::json(JobStartResponse {
+        Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
-        })?)
+        })
     }
 
     #[tool(description = "Start building an LLM-ready context pack within a hard char budget")]
@@ -266,10 +266,10 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
-        Ok(Content::json(JobStartResponse {
+        Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
-        })?)
+        })
     }
 
     #[tool(description = "Start expanding a specific item from a previous context_pack")]
@@ -289,10 +289,10 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
-        Ok(Content::json(JobStartResponse {
+        Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
-        })?)
+        })
     }
 
     #[tool(description = "Get job status / progress")]
@@ -301,7 +301,7 @@ impl BslAgentHandler {
         Parameters(params): Parameters<JobStatusParams>,
     ) -> Result<Content, rmcp::ErrorData> {
         let response = self.job_manager.status(&params.job_id).await?;
-        Ok(Content::json(response)?)
+        Content::json(response)
     }
 
     #[tool(description = "Wait for job status change or completion (long-poll)")]
@@ -313,7 +313,7 @@ impl BslAgentHandler {
             .job_manager
             .wait(&params.job_id, params.timeout_ms)
             .await?;
-        Ok(Content::json(response)?)
+        Content::json(response)
     }
 
     #[tool(description = "Get final job result (only for succeeded jobs)")]
@@ -322,7 +322,7 @@ impl BslAgentHandler {
         Parameters(params): Parameters<JobResultParams>,
     ) -> Result<Content, rmcp::ErrorData> {
         let value = self.job_manager.result(&params.job_id).await?;
-        Ok(Content::json(value)?)
+        Content::json(value)
     }
 
     #[tool(description = "Cancel a job (best-effort)")]
@@ -331,7 +331,7 @@ impl BslAgentHandler {
         Parameters(params): Parameters<JobCancelParams>,
     ) -> Result<Content, rmcp::ErrorData> {
         let response = self.job_manager.cancel(&params.job_id).await?;
-        Ok(Content::json(response)?)
+        Content::json(response)
     }
 }
 

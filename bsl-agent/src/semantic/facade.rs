@@ -37,7 +37,7 @@ impl SemanticFacade {
         }
     }
 
-    pub fn sort_diagnostics(&self, diagnostics: &mut Vec<DiagnosticDto>) {
+    pub fn sort_diagnostics(&self, diagnostics: &mut [DiagnosticDto]) {
         sort::sort_diagnostics(diagnostics);
     }
 }

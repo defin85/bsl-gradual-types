@@ -2,16 +2,56 @@
 
 Local MCP server (stdio) that provides semantic context for BSL projects.
 
+## MCP inputs (workspace_open)
+
+Most behavior is configured via MCP tool inputs (not env):
+- `roots[]` - workspace roots (sandbox)
+- `platform_docs_archive` - path to 1C Syntax Helper (file or directory)
+- `platform_version` - e.g. `8.3.27`
+- `configuration_path` - path to config dump (optional)
+- `mode` - optional mode switch
+
 ## Environment variables
 
-Disk cache:
+Logging:
+- `RUST_LOG` - e.g. `bsl_agent=info` or `bsl_agent=debug,info`
+
+Disk cache (shared with backend startup):
 - `BSL_CACHE_DIR` - cache root directory (overrides XDG/HOME defaults)
 - `BSL_CACHE_DISABLE=1|true|yes` - disable disk cache reads/writes
 - `BSL_CACHE_STRICT_FINGERPRINT=1` - stricter fingerprinting for cache keys
+- `BSL_CACHE_TTL_SECS` - TTL in seconds for cache entries (optional)
+- `BSL_CACHE_TTL_MODE=created|idle` - TTL base timestamp (default: `created`)
+- `BSL_CACHE_MAX_BYTES` - max cache size, triggers cleanup (optional)
+- `BSL_CACHE_CLEANUP_INTERVAL_SECS` - cleanup loop period (default: `300`)
+- `BSL_CACHE_TOUCH_INTERVAL_SECS` - keep-alive touch interval (default: `60`)
+- `BSL_CACHE_SWR=1|true|yes|0|false|no` - stale-while-revalidate mode (default: enabled)
 
 In-memory AST cache:
 - `BSL_AST_CACHE_CAPACITY` - LRU capacity (default: 64)
 
-Logging:
-- `RUST_LOG` - e.g. `bsl_agent=debug,info`
+Persisted state (sessions/jobs, for resume):
+- Stored under `<cache_root>/bsl-agent-state/v1/` (derived from `BSL_CACHE_DIR` or XDG/HOME fallbacks).
+- `BSL_AGENT_STATE_TTL_SECS` - TTL for persisted jobs (default: 7 days)
 
+Optional HTTP UI (read-only, unified SPA from `target/site`):
+- `BSL_AGENT_HTTP_ADDR=127.0.0.1:0` - enable UI and bind to loopback (use `:0` to auto-pick a port)
+- `BSL_AGENT_HTTP_STATIC_DIR=target/site` - path to SPA directory (default: `target/site`)
+
+Notes:
+- HTTP UI is localhost-only and rejects non-loopback bind addresses.
+- UI is read-only: `bsl-agent` does not expose write HTTP endpoints under `/api/mcp/*`.
+
+## Example Codex MCP config (stdio)
+
+```toml
+[mcp_servers.bsl_agent]
+command = "/home/egor/code/bsl-gradual-types/target/release/bsl-agent"
+cwd = "/home/egor/code/bsl-gradual-types"
+env = {
+  RUST_LOG = "bsl_agent=info",
+  BSL_CACHE_DIR = "/tmp/bsl-cache",
+  BSL_AGENT_HTTP_ADDR = "127.0.0.1:0",
+  BSL_AGENT_HTTP_STATIC_DIR = "target/site",
+}
+```

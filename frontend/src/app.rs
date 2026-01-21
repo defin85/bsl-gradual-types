@@ -95,17 +95,26 @@ pub fn App() -> impl IntoView {
         spawn_local(async move {
             match fetch_mcp_sessions().await {
                 Ok(sessions) => {
-                    let session_id = sessions
+                    let ready_session_id = sessions
                         .sessions
-                        .first()
+                        .iter()
+                        .find(|session| session.ready)
                         .map(|session| session.session_id.clone());
+                    let has_sessions = !sessions.sessions.is_empty();
                     mcp_sessions.set(Some(sessions));
 
-                    match fetch_mcp_deps_meta(session_id.as_deref()).await {
-                        Ok(meta) => snapshot_meta.set(Some(meta)),
-                        Err(err) => {
-                            snapshot_error.set(Some(format!("Ошибка mcp/deps/meta: {}", err)))
+                    if has_sessions {
+                        if let Some(session_id) = ready_session_id {
+                            match fetch_mcp_deps_meta(Some(&session_id)).await {
+                                Ok(meta) => snapshot_meta.set(Some(meta)),
+                                Err(err) => snapshot_error
+                                    .set(Some(format!("Ошибка mcp/deps/meta: {}", err))),
+                            }
+                        } else {
+                            snapshot_meta.set(None);
                         }
+                    } else {
+                        snapshot_meta.set(None);
                     }
                 }
                 Err(err) => {

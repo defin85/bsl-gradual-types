@@ -4,6 +4,7 @@ use bsl_agent::session::SessionManager;
 use bsl_shared::api::{
     McpBackendModeDto, McpJobsResponseDto, McpSessionsResponseDto, McpStatusDto,
 };
+use reqwest::Method;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -87,6 +88,31 @@ async fn http_ui_serves_spa_and_readonly_api() {
         "expected 405/404, got {}",
         post_status.status()
     );
+
+    let endpoints = [
+        "/api/mcp/status",
+        "/api/mcp/sessions",
+        "/api/mcp/jobs",
+        "/api/mcp/jobs/00000000-0000-0000-0000-000000000000",
+        "/api/mcp/deps/meta",
+        "/api/mcp/deps/meta?sessionId=00000000-0000-0000-0000-000000000000",
+    ];
+    let methods = [Method::POST, Method::PUT, Method::PATCH, Method::DELETE];
+
+    for endpoint in endpoints {
+        for method in methods.iter().cloned() {
+            let resp = client
+                .request(method.clone(), format!("{}{}", handle.ui_url, endpoint))
+                .send()
+                .await
+                .unwrap_or_else(|_| panic!("{method} {endpoint}"));
+            assert!(
+                resp.status().as_u16() == 405 || resp.status().as_u16() == 404,
+                "expected 405/404, got {} for {method} {endpoint}",
+                resp.status()
+            );
+        }
+    }
 
     handle.task.abort();
 }

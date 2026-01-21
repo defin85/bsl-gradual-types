@@ -339,6 +339,8 @@ impl SessionManager {
         let sessions = self.sessions.read().await;
         let uuid = if let Some(session_id) = session_id {
             parse_session_id(session_id)?
+        } else if sessions.is_empty() {
+            return Err(rmcp::ErrorData::invalid_params("no sessions", None));
         } else if sessions.len() == 1 {
             *sessions
                 .keys()

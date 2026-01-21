@@ -472,7 +472,7 @@ Prompts — “шаблоны” для UI-хостов:
 UI делает `GET /api/mcp/status`.
 
 - Для `bsl-web-server` сервер возвращает `supported=false` (MCP дашборд недоступен).
-- Для `bsl-agent` сервер возвращает `supported=true` и `mode=mcp_agent`.
+- Для `bsl-agent` сервер возвращает `supported=true` и `mode=mcp-agent`.
 
 ### 6.2. Запуск UI для `bsl-agent` (опционально)
 

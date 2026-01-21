@@ -10,7 +10,7 @@ use crate::domain::repository::RepositoryStats;
 
 /// Backend mode for unified UI (Web Server vs MCP Agent).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 pub enum McpBackendModeDto {
     McpAgent,
     WebServer,

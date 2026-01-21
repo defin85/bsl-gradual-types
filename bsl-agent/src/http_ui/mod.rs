@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderName, HeaderValue, StatusCode},
     response::IntoResponse,
     routing::get,
     Json, Router,
@@ -9,10 +9,15 @@ use bsl_shared::api::dtos::{
     McpBackendModeDto, McpJobDto, McpJobsResponseDto, McpSessionsResponseDto, McpStatusDto,
 };
 use serde::Deserialize;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    path::PathBuf,
+    sync::Arc,
+};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::jobs::JobManager;
 use crate::session::SessionManager;
@@ -126,6 +131,8 @@ async fn get_mcp_deps_meta(
 }
 
 fn router(state: HttpUiState, static_dir: PathBuf) -> Router {
+    let cross_origin_resource_policy = HeaderName::from_static("cross-origin-resource-policy");
+    let x_frame_options = HeaderName::from_static("x-frame-options");
     let index_path = static_dir.join("index.html");
     let static_dir = ServeDir::new(static_dir)
         .not_found_service(ServeFile::new(index_path))
@@ -139,6 +146,22 @@ fn router(state: HttpUiState, static_dir: PathBuf) -> Router {
         .route("/api/mcp/deps/meta", get(get_mcp_deps_meta))
         .fallback_service(static_dir)
         .with_state(state)
+        .layer(SetResponseHeaderLayer::overriding(
+            x_frame_options,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("x-content-type-options"),
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("referrer-policy"),
+            HeaderValue::from_static("no-referrer"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            cross_origin_resource_policy,
+            HeaderValue::from_static("same-origin"),
+        ))
 }
 
 pub async fn start_http_ui(
@@ -149,8 +172,9 @@ pub async fn start_http_ui(
     session_manager: Arc<SessionManager>,
     job_manager: Arc<JobManager>,
 ) -> anyhow::Result<HttpUiHandle> {
-    if !addr.ip().is_loopback() {
-        anyhow::bail!("HTTP UI must bind to loopback address (localhost-only)");
+    match addr.ip() {
+        IpAddr::V4(ipv4) if ipv4 == Ipv4Addr::LOCALHOST => {}
+        _ => anyhow::bail!("HTTP UI must bind to 127.0.0.1 (localhost-only)"),
     }
 
     let listener = TcpListener::bind(addr).await?;

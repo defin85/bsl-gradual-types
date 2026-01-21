@@ -352,6 +352,27 @@ clean_or_prune_target() {
 # ЭТАП 1: Сборка Rust бинарников
 # ============================================================================
 
+build_frontend_static() {
+    log_section "ЭТАП 0.5: Сборка Web UI (target/site)"
+
+    if ! command -v trunk >/dev/null 2>&1; then
+        log_error "❌ trunk не найден в PATH. Установите trunk: cargo install trunk"
+        return 1
+    fi
+
+    log_info "\n🌐 Сборка фронтенда (trunk) в target/site ..."
+    log_info "Команда: (cd frontend && NO_COLOR=true trunk build --release)"
+
+    (
+        cd frontend
+        NO_COLOR=true trunk build --release
+    )
+
+    log_info "\n📦 Проверка target/site:"
+    check_file "target/site/index.html" "Web UI (index.html)" || return 1
+    return 0
+}
+
 build_rust_binaries() {
     log_section "ЭТАП 1: Сборка Rust бинарников ($BUILD_MODE)"
 
@@ -572,6 +593,12 @@ main() {
     # Этап 0: Очистка/прореживание target (опционально)
     if ! clean_or_prune_target; then
         log_error "\n❌ Очистка target провалилась!"
+        exit 1
+    fi
+
+    # Этап 0.5: Web UI (нужно перед сборкой bsl-agent, т.к. UI вшивается в бинарник)
+    if ! build_frontend_static; then
+        log_error "\n❌ Сборка Web UI провалилась!"
         exit 1
     fi
 

@@ -7,15 +7,16 @@ use std::sync::Arc;
 
 use crate::jobs::JobManager;
 use crate::session::SessionManager;
-use crate::types::{BslAgentError, JobStartResponse};
+use crate::types::{BslAgentError, JobStartResponse, UiUrlResponse};
 
 pub mod types;
 
 use types::{
     BslDefinitionParams, BslDiagnosticsParams, BslMembersParams, BslReferencesParams,
     BslSymbolSearchParams, BslTypeAtPositionParams, ContextExpandParams, ContextPackParams,
-    JobCancelParams, JobResultParams, JobStatusParams, JobWaitParams, WorkspaceCloseParams,
-    WorkspaceListParams, WorkspaceOpenParams, WorkspaceResumeParams, WorkspaceStatusParams,
+    JobCancelParams, JobResultParams, JobStatusParams, JobWaitParams, UiUrlParams,
+    WorkspaceCloseParams, WorkspaceListParams, WorkspaceOpenParams, WorkspaceResumeParams,
+    WorkspaceStatusParams,
 };
 use types::{WorkspaceDocumentsClearParams, WorkspaceDocumentsSetParams};
 
@@ -23,6 +24,7 @@ use types::{WorkspaceDocumentsClearParams, WorkspaceDocumentsSetParams};
 pub struct BslAgentHandler {
     session_manager: Arc<SessionManager>,
     job_manager: Arc<JobManager>,
+    ui_url: Option<String>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -36,6 +38,7 @@ impl BslAgentHandler {
         Self {
             session_manager,
             job_manager,
+            ui_url: None,
             tool_router: Self::tool_router(),
         }
     }
@@ -46,6 +49,25 @@ impl BslAgentHandler {
 
     pub fn job_manager(&self) -> Arc<JobManager> {
         Arc::clone(&self.job_manager)
+    }
+
+    pub fn set_ui_url(&mut self, ui_url: String) {
+        self.ui_url = Some(ui_url);
+    }
+
+    #[tool(description = "Get local HTTP UI URL for this bsl-agent instance (read-only)")]
+    async fn ui_url(
+        &self,
+        Parameters(_params): Parameters<UiUrlParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let url = self.ui_url.clone().or_else(|| {
+            crate::ui_discovery::read_registry_record_by_pid(std::process::id())
+                .map(|record| record.ui_url)
+        });
+        Content::json(UiUrlResponse {
+            enabled: url.is_some(),
+            ui_url: url,
+        })
     }
 
     #[tool(description = "Open a workspace session for semantic queries")]

@@ -189,7 +189,7 @@ async fn main() -> anyhow::Result<()> {
 
     let session_manager = Arc::new(SessionManager::new());
     let job_manager = Arc::new(JobManager::new());
-    let handler =
+    let mut handler =
         BslAgentHandler::with_state(Arc::clone(&session_manager), Arc::clone(&job_manager));
 
     if let Ok(addr_raw) = std::env::var("BSL_AGENT_HTTP_ADDR") {
@@ -225,6 +225,7 @@ async fn main() -> anyhow::Result<()> {
                                 tracing::warn!("http ui registry write failed: {err}");
                             }
                         }
+                        handler.set_ui_url(handle.ui_url.clone());
                         tracing::info!("http ui listening on {}", handle.ui_url);
                     }
                     Err(err) => {

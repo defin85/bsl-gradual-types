@@ -69,6 +69,13 @@ pub struct WorkspaceListResponse {
     pub sessions: Vec<WorkspaceListItemDto>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiUrlResponse {
+    pub enabled: bool,
+    #[serde(default)]
+    pub ui_url: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum JobStateDto {

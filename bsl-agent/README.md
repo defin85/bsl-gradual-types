@@ -76,6 +76,12 @@ BSL_CACHE_DIR=/tmp/bsl-cache bsl-agent ui url --instance-id <instance_id>
 BSL_CACHE_DIR=/tmp/bsl-cache bsl-agent ui url --pid <pid>
 ```
 
+### Via MCP (read-only)
+
+If your MCP client can call tools but cannot run shell commands, use the MCP tool:
+
+- `ui_url` → `{ enabled: bool, ui_url: string | null }`
+
 ## Example Codex MCP config (stdio)
 
 ```toml

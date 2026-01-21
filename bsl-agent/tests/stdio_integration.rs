@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use bsl_agent::types::{
     BslSymbolSearchResponse, ContextExpandResponse, ContextPackResponse, JobStartResponse,
-    JobStateDto, JobStatusResponse, WorkspaceDocumentsSetResponse, WorkspaceListResponse,
-    WorkspaceOpenResponse, WorkspaceStatusResponse,
+    JobStateDto, JobStatusResponse, UiUrlResponse, WorkspaceDocumentsSetResponse,
+    WorkspaceListResponse, WorkspaceOpenResponse, WorkspaceStatusResponse,
 };
 use rmcp::model::CallToolRequestParam;
 use rmcp::service::RunningService;
@@ -191,6 +191,7 @@ async fn stdio_tools_list_and_lifecycle_smoke() {
     let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
 
     for required in [
+        "ui_url",
         "workspace_open",
         "workspace_status",
         "workspace_close",
@@ -238,6 +239,51 @@ async fn stdio_tools_list_and_lifecycle_smoke() {
         json!({ "session_id": &session_id }),
     )
     .await;
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_ui_url_disabled_returns_not_enabled() {
+    let service = spawn_agent(&[]).await;
+    let resp: UiUrlResponse = call_tool(&service, "ui_url", json!({})).await;
+    assert!(!resp.enabled);
+    assert!(resp.ui_url.is_none());
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_ui_url_enabled_returns_url() {
+    let cache_dir = tempfile::TempDir::new().expect("tempdir");
+    let static_dir = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        static_dir.path().join("index.html"),
+        "<!doctype html><html><body>MCP UI test</body></html>",
+    )
+    .expect("write index.html");
+
+    let service = spawn_agent(&[
+        ("BSL_CACHE_DIR", cache_dir.path().to_string_lossy().as_ref()),
+        ("BSL_AGENT_HTTP_ADDR", "127.0.0.1:0"),
+        (
+            "BSL_AGENT_HTTP_STATIC_DIR",
+            static_dir.path().to_string_lossy().as_ref(),
+        ),
+    ])
+    .await;
+
+    let resp: UiUrlResponse = call_tool(&service, "ui_url", json!({})).await;
+    assert!(resp.enabled);
+    let url = resp.ui_url.expect("ui_url");
+    assert!(url.starts_with("http://localhost:"), "ui_url={url:?}");
+
+    let client = reqwest::Client::new();
+    let status = client
+        .get(format!("{url}/api/mcp/status"))
+        .send()
+        .await
+        .expect("GET /api/mcp/status");
+    assert!(status.status().is_success());
 
     let _ = service.cancel().await;
 }

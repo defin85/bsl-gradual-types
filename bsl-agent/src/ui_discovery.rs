@@ -74,6 +74,12 @@ pub fn read_all_registry_records() -> Vec<HttpUiDiscoveryRecord> {
     records
 }
 
+pub fn read_registry_record_by_pid(pid: u32) -> Option<HttpUiDiscoveryRecord> {
+    read_all_registry_records()
+        .into_iter()
+        .find(|record| record.pid == pid)
+}
+
 pub async fn healthcheck_status(
     client: &Client,
     ui_url: &str,

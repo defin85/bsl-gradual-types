@@ -42,6 +42,40 @@ Notes:
 - HTTP UI is localhost-only and rejects non-loopback bind addresses.
 - UI is read-only: `bsl-agent` does not expose write HTTP endpoints under `/api/mcp/*`.
 
+## Discovering the HTTP UI URL
+
+When `BSL_AGENT_HTTP_ADDR` uses an auto-port (e.g. `127.0.0.1:0`), `bsl-agent` writes a runtime discovery record under:
+
+`<cache_root>/bsl-agent-state/v1/runtime/http-ui/<instance_id>.json`
+
+The `cache_root` is derived from `BSL_CACHE_DIR` (or XDG/HOME fallbacks).
+
+List discovered instances (live-only by default):
+
+```bash
+BSL_CACHE_DIR=/tmp/bsl-cache bsl-agent ui list
+```
+
+Include stale records:
+
+```bash
+BSL_CACHE_DIR=/tmp/bsl-cache bsl-agent ui list --all
+```
+
+Get the UI URL (prints plain `http://localhost:<port>`):
+
+```bash
+BSL_CACHE_DIR=/tmp/bsl-cache bsl-agent ui url
+```
+
+If multiple instances are running in the same `BSL_CACHE_DIR`, select one explicitly:
+
+```bash
+BSL_CACHE_DIR=/tmp/bsl-cache bsl-agent ui url --roots /path/to/workspace/root
+BSL_CACHE_DIR=/tmp/bsl-cache bsl-agent ui url --instance-id <instance_id>
+BSL_CACHE_DIR=/tmp/bsl-cache bsl-agent ui url --pid <pid>
+```
+
 ## Example Codex MCP config (stdio)
 
 ```toml

@@ -100,7 +100,7 @@ async fn http_ui_serves_spa_and_readonly_api() {
     let methods = [Method::POST, Method::PUT, Method::PATCH, Method::DELETE];
 
     for endpoint in endpoints {
-        for method in methods.iter().cloned() {
+        for method in methods.iter() {
             let resp = client
                 .request(method.clone(), format!("{}{}", handle.ui_url, endpoint))
                 .send()

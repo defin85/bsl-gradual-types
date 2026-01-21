@@ -195,15 +195,15 @@ async fn main() -> anyhow::Result<()> {
     if let Ok(addr_raw) = std::env::var("BSL_AGENT_HTTP_ADDR") {
         match parse_http_addr(&addr_raw) {
             Ok(addr) => {
-                let static_dir = std::env::var("BSL_AGENT_HTTP_STATIC_DIR")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| PathBuf::from("target/site"));
+                let static_dir_override = std::env::var("BSL_AGENT_HTTP_STATIC_DIR")
+                    .ok()
+                    .map(PathBuf::from);
                 let instance_id = Uuid::new_v4().to_string();
                 let cache_dir = std::env::var("BSL_CACHE_DIR").ok();
 
                 match start_http_ui(
                     addr,
-                    static_dir,
+                    static_dir_override,
                     instance_id.clone(),
                     cache_dir,
                     handler.session_manager(),

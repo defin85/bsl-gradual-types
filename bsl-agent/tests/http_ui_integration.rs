@@ -22,7 +22,7 @@ async fn http_ui_serves_spa_and_readonly_api() {
 
     let handle = start_http_ui(
         SocketAddr::from(([127, 0, 0, 1], 0)),
-        static_dir.path().to_path_buf(),
+        Some(static_dir.path().to_path_buf()),
         "test-instance".to_string(),
         Some("/tmp/bsl-cache-test".to_string()),
         session_manager,
@@ -113,6 +113,52 @@ async fn http_ui_serves_spa_and_readonly_api() {
             );
         }
     }
+
+    handle.task.abort();
+}
+
+#[tokio::test]
+async fn http_ui_serves_embedded_spa_by_default() {
+    let session_manager = Arc::new(SessionManager::new());
+    let job_manager = Arc::new(JobManager::new_in_memory());
+
+    let handle = start_http_ui(
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+        None,
+        "test-instance".to_string(),
+        Some("/tmp/bsl-cache-test".to_string()),
+        session_manager,
+        job_manager,
+    )
+    .await
+    .expect("start http ui");
+
+    let client = reqwest::Client::new();
+
+    let index_body = client
+        .get(format!("{}/", handle.ui_url))
+        .send()
+        .await
+        .expect("GET /")
+        .text()
+        .await
+        .expect("read body");
+    assert!(
+        index_body.contains("bsl-frontend-"),
+        "expected embedded index.html, got body length {}",
+        index_body.len()
+    );
+
+    let status: McpStatusDto = client
+        .get(format!("{}/api/mcp/status", handle.ui_url))
+        .send()
+        .await
+        .expect("GET /api/mcp/status")
+        .json()
+        .await
+        .expect("parse json");
+    assert_eq!(status.instance_id.as_deref(), Some("test-instance"));
+    assert_eq!(status.ui_url.as_deref(), Some(handle.ui_url.as_str()));
 
     handle.task.abort();
 }

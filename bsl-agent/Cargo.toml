@@ -18,6 +18,8 @@ bsl-analysis-v2 = { workspace = true }
 bsl-backend = { workspace = true }
 bsl-shared = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
+include_dir = "0.7"
+mime_guess = "2"
 rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main", features = ["client", "server", "macros", "transport-io", "transport-child-process"] }
 schemars = "1"
 serde = { workspace = true, features = ["derive"] }

@@ -34,13 +34,25 @@ Persisted state (sessions/jobs, for resume):
 - Stored under `<cache_root>/bsl-agent-state/v1/` (derived from `BSL_CACHE_DIR` or XDG/HOME fallbacks).
 - `BSL_AGENT_STATE_TTL_SECS` - TTL for persisted jobs (default: 7 days)
 
-Optional HTTP UI (read-only, unified SPA from `target/site`):
+Optional HTTP UI (read-only, unified SPA):
 - `BSL_AGENT_HTTP_ADDR=127.0.0.1:0` - enable UI and bind to loopback (use `:0` to auto-pick a port)
-- `BSL_AGENT_HTTP_STATIC_DIR=target/site` - path to SPA directory (default: `target/site`)
+- `BSL_AGENT_HTTP_STATIC_DIR=/path/to/site` - optional override: serve SPA from a directory on disk (useful for development)
 
 Notes:
 - HTTP UI is localhost-only and rejects non-loopback bind addresses.
 - UI is read-only: `bsl-agent` does not expose write HTTP endpoints under `/api/mcp/*`.
+- By default, `bsl-agent` serves an embedded SPA baked into the binary at build time.
+
+## Building embedded UI assets
+
+`bsl-agent` embeds the SPA output directory `target/site/` into the binary. Build the frontend first:
+
+```bash
+cd frontend
+NO_COLOR=true trunk build --release
+```
+
+Then build `bsl-agent` as usual.
 
 ## Discovering the HTTP UI URL
 
@@ -92,6 +104,5 @@ env = {
   RUST_LOG = "bsl_agent=info",
   BSL_CACHE_DIR = "/tmp/bsl-cache",
   BSL_AGENT_HTTP_ADDR = "127.0.0.1:0",
-  BSL_AGENT_HTTP_STATIC_DIR = "target/site",
 }
 ```

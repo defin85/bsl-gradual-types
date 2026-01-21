@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
-    http::{HeaderName, HeaderValue, StatusCode},
-    response::IntoResponse,
+    http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri},
+    response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
@@ -22,6 +22,10 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use crate::jobs::JobManager;
 use crate::session::SessionManager;
 
+use include_dir::{include_dir, Dir};
+
+static EMBEDDED_SITE: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../target/site");
+
 #[derive(Clone)]
 pub struct HttpUiState {
     pub instance_id: String,
@@ -35,6 +39,12 @@ pub struct HttpUiHandle {
     pub addr: SocketAddr,
     pub ui_url: String,
     pub task: JoinHandle<()>,
+}
+
+#[derive(Debug, Clone)]
+pub enum HttpUiStaticSource {
+    Embedded,
+    Disk(PathBuf),
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,21 +140,73 @@ async fn get_mcp_deps_meta(
     }
 }
 
-fn router(state: HttpUiState, static_dir: PathBuf) -> Router {
+fn serve_embedded_response(path: &str) -> Option<Response> {
+    let file = EMBEDDED_SITE.get_file(path)?;
+    let mut headers = HeaderMap::new();
+    let content_type = if path.ends_with(".wasm") {
+        "application/wasm".to_string()
+    } else {
+        mime_guess::from_path(path)
+            .first_or_octet_stream()
+            .to_string()
+    };
+    if let Ok(value) = HeaderValue::from_str(content_type.as_str()) {
+        headers.insert(header::CONTENT_TYPE, value);
+    }
+
+    Some((headers, file.contents()).into_response())
+}
+
+fn normalize_embedded_path(uri: &Uri) -> String {
+    let raw = uri.path().trim_start_matches('/');
+    if raw.is_empty() {
+        return "index.html".to_string();
+    }
+    if raw.ends_with('/') {
+        return format!("{raw}index.html");
+    }
+    raw.to_string()
+}
+
+async fn serve_embedded_fallback(method: Method, uri: Uri) -> impl IntoResponse {
+    if method != Method::GET && method != Method::HEAD {
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
+
+    let mut path = normalize_embedded_path(&uri);
+    if let Some(resp) = serve_embedded_response(path.as_str()) {
+        return if method == Method::HEAD {
+            let mut resp = resp;
+            *resp.body_mut() = axum::body::Body::empty();
+            resp
+        } else {
+            resp
+        };
+    }
+
+    path = "index.html".to_string();
+    let Some(resp) = serve_embedded_response(path.as_str()) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    if method == Method::HEAD {
+        let mut resp = resp;
+        *resp.body_mut() = axum::body::Body::empty();
+        resp
+    } else {
+        resp
+    }
+}
+
+fn router(state: HttpUiState, static_source: HttpUiStaticSource) -> Router {
     let cross_origin_resource_policy = HeaderName::from_static("cross-origin-resource-policy");
     let x_frame_options = HeaderName::from_static("x-frame-options");
-    let index_path = static_dir.join("index.html");
-    let static_dir = ServeDir::new(static_dir)
-        .not_found_service(ServeFile::new(index_path))
-        .append_index_html_on_directories(true);
 
-    Router::new()
+    let app = Router::new()
         .route("/api/mcp/status", get(get_mcp_status))
         .route("/api/mcp/sessions", get(get_mcp_sessions))
         .route("/api/mcp/jobs", get(get_mcp_jobs))
         .route("/api/mcp/jobs/:job_id", get(get_mcp_job))
         .route("/api/mcp/deps/meta", get(get_mcp_deps_meta))
-        .fallback_service(static_dir)
         .with_state(state)
         .layer(SetResponseHeaderLayer::overriding(
             x_frame_options,
@@ -161,12 +223,23 @@ fn router(state: HttpUiState, static_dir: PathBuf) -> Router {
         .layer(SetResponseHeaderLayer::overriding(
             cross_origin_resource_policy,
             HeaderValue::from_static("same-origin"),
-        ))
+        ));
+
+    match static_source {
+        HttpUiStaticSource::Disk(static_dir) => {
+            let index_path = static_dir.join("index.html");
+            let static_dir = ServeDir::new(static_dir)
+                .not_found_service(ServeFile::new(index_path))
+                .append_index_html_on_directories(true);
+            app.fallback_service(static_dir)
+        }
+        HttpUiStaticSource::Embedded => app.fallback(serve_embedded_fallback),
+    }
 }
 
 pub async fn start_http_ui(
     addr: SocketAddr,
-    static_dir: PathBuf,
+    static_dir_override: Option<PathBuf>,
     instance_id: String,
     cache_dir: Option<String>,
     session_manager: Arc<SessionManager>,
@@ -188,7 +261,20 @@ pub async fn start_http_ui(
         session_manager,
         job_manager,
     };
-    let app = router(state, static_dir);
+    let static_source = static_dir_override
+        .and_then(|dir| {
+            if dir.is_dir() {
+                Some(HttpUiStaticSource::Disk(dir))
+            } else {
+                tracing::warn!(
+                    "http ui static dir override {} is not a directory, falling back to embedded",
+                    dir.display()
+                );
+                None
+            }
+        })
+        .unwrap_or(HttpUiStaticSource::Embedded);
+    let app = router(state, static_source);
 
     let task = tokio::spawn(async move {
         if let Err(err) = axum::serve(listener, app.into_make_service()).await {

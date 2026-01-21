@@ -72,6 +72,7 @@ detect_platform
 PORT=${PORT:-3002}
 SYNTAX_HELPER_PATH="examples/syntax_helper"
 PROJECT_PATH="${PROJECT_PATH:-$DEFAULT_PROJECT_PATH}"
+PLATFORM_VERSION="${BSL_PLATFORM_VERSION:-}"
 DO_BUILD=false
 NO_FRONTEND=false
 NO_CONFIG=false
@@ -145,6 +146,17 @@ else
     PROJECT_ARG="--project-path $PROJECT_PATH"
 fi
 
+PLATFORM_VERSION_ARG=""
+if [[ -n "$PROJECT_ARG" ]]; then
+    if [[ -z "$PLATFORM_VERSION" ]]; then
+        echo ""
+        echo "❌ Ошибка: platform_version обязателен при загрузке конфигурации."
+        echo "   Укажите env: BSL_PLATFORM_VERSION=8.3.25 scripts/start-web-api.sh"
+        exit 1
+    fi
+    PLATFORM_VERSION_ARG="--platform-version $PLATFORM_VERSION"
+fi
+
 # Остановка предыдущего сервера если запущен
 pkill -f "bsl-web-server.*--port $PORT" 2>/dev/null || true
 sleep 1
@@ -179,7 +191,7 @@ if [[ "$NO_FRONTEND" != "true" ]]; then
     if [[ "$NEED_BUILD" == "true" ]]; then
         echo "🎨 Сборка frontend (WASM)..."
         cd frontend
-        trunk build --release
+        NO_COLOR=true trunk build --release
         cd ..
 
         # Оптимизация WASM с wasm-opt (trunk не передаёт --all-features)
@@ -239,4 +251,5 @@ BSL_MODULE_PARSE_LOG_EACH="$LOG_EACH_MODULE" \
     --enable-cors true \
     --syntax-helper-path "$SYNTAX_HELPER_PATH" \
     $PROJECT_ARG \
+    $PLATFORM_VERSION_ARG \
     $STATIC_ARG

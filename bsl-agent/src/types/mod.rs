@@ -76,6 +76,21 @@ pub struct UiUrlResponse {
     pub ui_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildInfoResponse {
+    pub package: String,
+    pub version: String,
+    pub profile: String,
+    pub target: String,
+    #[serde(default)]
+    pub git_sha: Option<String>,
+    #[serde(default)]
+    pub git_describe: Option<String>,
+    #[serde(default)]
+    pub build_unix_secs: Option<u64>,
+    pub pid: u32,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum JobStateDto {

@@ -7,14 +7,14 @@ use std::sync::Arc;
 
 use crate::jobs::JobManager;
 use crate::session::SessionManager;
-use crate::types::{BslAgentError, JobStartResponse, UiUrlResponse};
+use crate::types::{BslAgentError, BuildInfoResponse, JobStartResponse, UiUrlResponse};
 
 pub mod types;
 
 use types::{
     BslDefinitionParams, BslDiagnosticsParams, BslMembersParams, BslReferencesParams,
     BslSymbolSearchParams, BslTypeAtPositionParams, ContextExpandParams, ContextPackParams,
-    JobCancelParams, JobResultParams, JobStatusParams, JobWaitParams, UiUrlParams,
+    BuildInfoParams, JobCancelParams, JobResultParams, JobStatusParams, JobWaitParams, UiUrlParams,
     WorkspaceCloseParams, WorkspaceListParams, WorkspaceOpenParams, WorkspaceResumeParams,
     WorkspaceStatusParams,
 };
@@ -67,6 +67,41 @@ impl BslAgentHandler {
         Content::json(UiUrlResponse {
             enabled: url.is_some(),
             ui_url: url,
+        })
+    }
+
+    #[tool(description = "Get build info for this bsl-agent instance (read-only)")]
+    async fn build_info(
+        &self,
+        Parameters(_params): Parameters<BuildInfoParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let package = env!("CARGO_PKG_NAME").to_string();
+        let version = env!("CARGO_PKG_VERSION").to_string();
+        let profile = option_env!("BSL_AGENT_PROFILE")
+            .unwrap_or("unknown")
+            .to_string();
+        let target = option_env!("BSL_AGENT_TARGET")
+            .unwrap_or("unknown")
+            .to_string();
+
+        let git_sha = option_env!("BSL_AGENT_GIT_SHA")
+            .and_then(|value| (!value.trim().is_empty() && value != "unknown").then(|| value))
+            .map(str::to_string);
+        let git_describe = option_env!("BSL_AGENT_GIT_DESCRIBE")
+            .and_then(|value| (!value.trim().is_empty()).then(|| value))
+            .map(str::to_string);
+        let build_unix_secs = option_env!("BSL_AGENT_BUILD_UNIX_SECS")
+            .and_then(|value| value.parse::<u64>().ok());
+
+        Content::json(BuildInfoResponse {
+            package,
+            version,
+            profile,
+            target,
+            git_sha,
+            git_describe,
+            build_unix_secs,
+            pid: std::process::id(),
         })
     }
 

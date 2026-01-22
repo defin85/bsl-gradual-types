@@ -43,6 +43,9 @@ pub struct WorkspaceListParams {}
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct UiUrlParams {}
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct BuildInfoParams {}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DocumentRef {
     pub root_id: String,

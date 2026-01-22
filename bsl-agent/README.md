@@ -113,3 +113,12 @@ env = {
   BSL_AGENT_HTTP_ADDR = "127.0.0.1:0",
 }
 ```
+Основные проблемы/шероховатости при работе с bsl-agent в этой сессии:
+
+  - workspace_open не принял mode="default" (warning unknown mode: default) и требовал обязательные поля: сначала configuration_path, потом ещё и platform_version.
+  - Ограничение на одну сессию: чтобы переоткрыть workspace с правильными параметрами, пришлось сначала сделать workspace_close (иначе ошибка only one session is allowed).
+  - Форматы параметров строгие и неочевидные:
+      - bsl_diagnostics_start.scope нельзя передавать строкой пути; нужно enum-объект вида {"kind":"hot"} (и без kind падает).
+      - workspace_documents_set.files не принимает просто строку пути; нужен вложенный объект {"doc":{"root_id": "...","path":"..."}} (причём path — относительно root).
+  - Первый прогон диагностики по hot вернул пусто, потому что файл ещё не был “hot” (и был analysis_revision=0); после workspace_documents_set(..., mark_hot=true) и повторного прогона появились ошибки.
+  - Стартовая индексация конфигурации визуально “зависает” на 100% в фазе ConfigurationIndexingModules, хотя job ещё running — нужно просто дождаться succeeded.

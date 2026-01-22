@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use bsl_agent::types::{
-    BslSymbolSearchResponse, ContextExpandResponse, ContextPackResponse, JobStartResponse,
-    JobStateDto, JobStatusResponse, UiUrlResponse, WorkspaceDocumentsSetResponse,
+    BslSymbolSearchResponse, BuildInfoResponse, ContextExpandResponse, ContextPackResponse,
+    JobStartResponse, JobStateDto, JobStatusResponse, UiUrlResponse, WorkspaceDocumentsSetResponse,
     WorkspaceListResponse, WorkspaceOpenResponse, WorkspaceStatusResponse,
 };
 use bsl_shared::api::dtos::{AnalysisResultDto, MetricsDto, SnapshotMetaDto};
@@ -285,6 +285,20 @@ async fn stdio_ui_url_enabled_returns_url() {
         .await
         .expect("GET /api/mcp/status");
     assert!(status.status().is_success());
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_build_info_returns_version() {
+    let service = spawn_agent(&[]).await;
+    let resp: BuildInfoResponse = call_tool(&service, "build_info", json!({})).await;
+
+    assert_eq!(resp.package, env!("CARGO_PKG_NAME"));
+    assert_eq!(resp.version, env!("CARGO_PKG_VERSION"));
+    assert!(!resp.profile.is_empty());
+    assert!(!resp.target.is_empty());
+    assert!(resp.pid > 0);
 
     let _ = service.cancel().await;
 }

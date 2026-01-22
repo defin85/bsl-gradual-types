@@ -139,3 +139,118 @@
 - **WHEN** MCP процесс перезапускается и клиент вызывает `workspace_resume(session_id)`
 - **THEN** сервер возвращает восстановленный статус сессии и предоставляет доступ к завершённым результатам через `job_result`
 
+### Requirement: Read-only MCP tool `ui_url` для получения URL локального HTTP UI
+Система SHALL предоставлять read-only MCP tool `ui_url`, который позволяет MCP-клиенту получить адрес и порт локального HTTP UI текущего инстанса `bsl-agent`.
+
+Tool `ui_url` SHALL НЕ модифицировать никакое состояние и SHALL НЕ запускать HTTP UI: он только возвращает уже доступный URL (если UI включён и успешно стартовал).
+
+Формат ответа SHALL включать:
+- `enabled: bool`
+- `ui_url: string | null` (вида `http://localhost:<port>`)
+
+#### Scenario: UI включён, tool возвращает URL
+- **GIVEN** `bsl-agent` запущен с включённым HTTP UI (например, `BSL_AGENT_HTTP_ADDR=127.0.0.1:0`) и UI успешно стартовал
+- **WHEN** MCP-клиент вызывает tool `ui_url`
+- **THEN** tool возвращает `enabled=true` и `ui_url` вида `http://localhost:<port>`
+
+#### Scenario: UI выключен, tool не падает
+- **GIVEN** `bsl-agent` запущен без HTTP UI
+- **WHEN** MCP-клиент вызывает tool `ui_url`
+- **THEN** tool возвращает `enabled=false` и `ui_url=null`
+
+### Requirement: Read-only HTTP UI для диагностики MCP состояния (единый SPA)
+Система SHALL предоставлять опциональный локальный HTTP UI для `bsl-agent`, предназначенный для разработчиков, чтобы визуально проверить состояние MCP (сессии, jobs, кэш, загрузка platform docs/config).
+
+Система SHALL использовать существующий UI‑артефакт проекта (SPA из `frontend → target/site`) как единую точку ответственности UI, без введения отдельного “второго” UI для MCP.
+
+HTTP UI для `bsl-agent` SHALL быть **строго read-only**: SHALL не предоставлять mutating endpoints (POST/PUT/PATCH/DELETE) и SHALL не модифицировать workspace roots.
+
+HTTP UI SHALL быть выключен по умолчанию и SHALL быть доступен только на `127.0.0.1` (localhost-only). Попытка привязки к `0.0.0.0` SHALL быть отвергнута как ошибка конфигурации.
+
+#### Scenario: Включённый UI поднимается локально и отдаёт SPA
+- **GIVEN** запущен `bsl-agent` с включённым HTTP UI и корректным путём к `target/site`
+- **WHEN** разработчик открывает `http://localhost:<port>/`
+- **THEN** сервер отдаёт SPA (fallback на `index.html`) и UI отображается в браузере
+
+#### Scenario: UI не предоставляет write endpoints
+- **GIVEN** включён HTTP UI `bsl-agent`
+- **WHEN** клиент делает `POST` (или `PUT/PATCH/DELETE`) запрос к `/api/mcp/status`
+- **THEN** сервер возвращает `405` (или `404`) и не изменяет никакое состояние
+
+### Requirement: Capability detection режима UI (web-server vs mcp-agent)
+Система SHALL предоставить read-only endpoint `GET /api/mcp/status`, который позволяет UI детектировать backend режим и корректно деградировать.
+
+`bsl-web-server` SHALL реализовать совместимый `GET /api/mcp/status`, возвращающий `supported=false` и `mode=web-server`, чтобы единый SPA мог одинаково работать как в web-server, так и в mcp-agent окружении.
+
+#### Scenario: UI переключается в MCP режим
+- **GIVEN** UI загружен из `bsl-agent`
+- **WHEN** UI выполняет `GET /api/mcp/status` и получает `supported=true` и `mode=mcp-agent`
+- **THEN** UI показывает read-only “MCP Dashboard” и не вызывает web-server mutating API (например `POST /api/snapshot/reload`)
+
+#### Scenario: UI корректно деградирует в web-server режиме
+- **GIVEN** UI загружен из `bsl-web-server`
+- **WHEN** UI выполняет `GET /api/mcp/status` и получает `supported=false` и `mode=web-server`
+- **THEN** UI не показывает MCP-дашборд (или показывает “недоступно”), и продолжает работу в web-server режиме
+
+### Requirement: Runtime registry для discovery HTTP UI (multi-instance в одном `BSL_CACHE_DIR`)
+Система SHALL поддерживать “runtime discovery registry” для HTTP UI `bsl-agent`, чтобы клиент мог узнать фактический адрес и порт UI (включая случай автопорта `127.0.0.1:0`) без парсинга логов.
+
+Когда HTTP UI включён (например, через `BSL_AGENT_HTTP_ADDR`) и успешно привязан (bind), `bsl-agent` SHALL записывать registry запись с фактическим `ui_url` в директории состояния, производной от `BSL_CACHE_DIR` (state root), так чтобы несколько параллельных инстансов в одном `BSL_CACHE_DIR` не конфликтовали между собой.
+
+#### Scenario: Инстанс с автопортом записывает фактический порт в registry
+- **GIVEN** запущен `bsl-agent` с `BSL_AGENT_HTTP_ADDR=127.0.0.1:0` и HTTP UI успешно стартовал
+- **WHEN** процесс завершил bind
+- **THEN** в state root появляется registry запись, содержащая `ui_url` вида `http://localhost:<port>` с фактическим портом
+
+### Requirement: CLI discovery через `bsl-agent ui ...`
+Система SHALL предоставлять CLI сабкоманды в бинарнике `bsl-agent` для discovery HTTP UI:
+- `bsl-agent ui list` (список кандидатов),
+- `bsl-agent ui url` (получить URL одного инстанса).
+
+`bsl-agent ui url` SHALL печатать plain `http://localhost:<port>` (без лишнего текста), чтобы вывод мог использоваться в скриптах.
+
+#### Scenario: Единственный инстанс возвращает URL
+- **GIVEN** в registry есть ровно один “живой” инстанс HTTP UI
+- **WHEN** пользователь запускает `bsl-agent ui url`
+- **THEN** команда печатает `http://localhost:<port>` и завершается успешно
+
+### Requirement: Безопасное поведение при неоднозначности (ошибка при >1)
+Если в registry найдено более одного “живого” инстанса и пользователь не задал селектор, `bsl-agent ui url` SHALL завершаться ошибкой (без выбора “по умолчанию”) и SHALL печатать список кандидатов для уточнения.
+
+Система SHALL поддерживать селектор `--roots <path>`, который выбирает инстанс по точному совпадению строки root среди `roots[]`, полученных из `GET /api/mcp/sessions`.
+
+#### Scenario: Несколько инстансов без селектора приводят к ошибке
+- **GIVEN** в registry есть два “живых” инстанса HTTP UI
+- **WHEN** пользователь запускает `bsl-agent ui url` без селекторов
+- **THEN** команда завершается ошибкой и печатает список кандидатов (например, `instance_id/pid/ui_url`)
+
+#### Scenario: Селектор `--roots` выбирает нужный инстанс по точному совпадению
+- **GIVEN** в registry есть два “живых” инстанса HTTP UI и они обслуживают разные `roots[]`
+- **WHEN** пользователь запускает `bsl-agent ui url --roots <root>`
+- **THEN** команда выбирает инстанс, у которого в `/api/mcp/sessions` есть `roots[]`, содержащий строку `<root>` в точном совпадении
+
+### Requirement: Embedded SPA для HTTP UI `bsl-agent` (работает без внешней статики)
+Система SHALL встраивать (embed) артефакт SPA (собранный `frontend → target/site`) внутрь бинарника `bsl-agent` и SHALL раздавать его через HTTP UI, чтобы UI мог работать без внешних файлов статики.
+
+#### Scenario: UI работает без `BSL_AGENT_HTTP_STATIC_DIR`
+- **GIVEN** `bsl-agent` собран со встроенным SPA и запущен с включённым HTTP UI
+- **WHEN** клиент открывает `http://localhost:<port>/`
+- **THEN** сервер отдаёт `index.html` и остальные ассеты из embedded набора
+
+### Requirement: `BSL_AGENT_HTTP_STATIC_DIR` имеет приоритет над embedded
+Если `BSL_AGENT_HTTP_STATIC_DIR` задан и указывает на существующую директорию, `bsl-agent` SHALL раздавать статику с диска из этой директории, даже если embedded статика присутствует.
+
+#### Scenario: Внешняя статика перекрывает embedded
+- **GIVEN** `bsl-agent` собран со встроенным SPA
+- **AND** `BSL_AGENT_HTTP_STATIC_DIR` указывает на директорию со статикой
+- **WHEN** клиент открывает `http://localhost:<port>/`
+- **THEN** сервер отдаёт файлы статики с диска из `BSL_AGENT_HTTP_STATIC_DIR`
+
+### Requirement: Build-time ошибка при отсутствии `target/site`
+Система SHALL завершать сборку `bsl-agent` с понятной ошибкой, если артефакт SPA для embed отсутствует (например, не существует `target/site/index.html`).
+
+#### Scenario: Сборка без SPA завершается ошибкой
+- **GIVEN** `target/site` отсутствует
+- **WHEN** выполняется сборка `bsl-agent`
+- **THEN** сборка завершается ошибкой с сообщением о необходимости сначала собрать `frontend`
+

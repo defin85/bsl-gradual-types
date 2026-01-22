@@ -3,10 +3,15 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use bsl_analysis_v2::{AnalysisHostV2, Change, FileId};
+use bsl_backend::application::type_system::web_api_service;
+use bsl_backend::application::TypeInferenceService;
 use bsl_backend::data::loaders::progress::ProgressUpdate;
-use bsl_shared::api::dtos::{McpRootDto, McpSessionDto, SnapshotInputsDto, SnapshotMetaDto};
+use bsl_shared::api::dtos::{
+    AnalysisResultDto, McpRootDto, McpSessionDto, MetricsDto, SnapshotInputsDto, SnapshotMetaDto,
+};
+use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::types::{Certainty, ResolutionResult};
 use bsl_shared::domain::TypeMetadataLookup;
-use bsl_shared::TypeResolver;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -42,6 +47,8 @@ const EXPAND_SNIPPET_CONTEXT_LINES: u32 = 80;
 mod store;
 use store::{PersistedSession, SessionStore};
 
+const SINGLE_SESSION_ERROR: &str = "only one session is allowed; close the existing session first";
+
 pub struct SessionManager {
     sessions: RwLock<HashMap<Uuid, WorkspaceSession>>,
     store: Option<SessionStore>,
@@ -62,13 +69,13 @@ struct WorkspaceSession {
     pack_store: PackStore,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RootEntry {
     root_id: String,
     path: PathBuf,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct WorkspaceSettings {
     platform_docs_archive: Option<PathBuf>,
     platform_version: Option<String>,
@@ -135,6 +142,59 @@ impl SessionManager {
         }
     }
 
+    fn roots_match(a: &[RootEntry], b: &[RootEntry]) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+
+        let mut left: Vec<(&str, &Path)> = a.iter().map(|r| (r.root_id.as_str(), r.path.as_path())).collect();
+        let mut right: Vec<(&str, &Path)> = b.iter().map(|r| (r.root_id.as_str(), r.path.as_path())).collect();
+
+        left.sort_by(|(id_a, path_a), (id_b, path_b)| {
+            id_a.cmp(id_b)
+                .then_with(|| path_a.as_os_str().cmp(path_b.as_os_str()))
+        });
+        right.sort_by(|(id_a, path_a), (id_b, path_b)| {
+            id_a.cmp(id_b)
+                .then_with(|| path_a.as_os_str().cmp(path_b.as_os_str()))
+        });
+
+        left == right
+    }
+
+    fn open_response_from_session(session_id: Uuid, session: &WorkspaceSession) -> WorkspaceOpenResponse {
+        WorkspaceOpenResponse {
+            session_id: session_id.to_string(),
+            roots: session
+                .roots
+                .iter()
+                .map(|root| RootDto {
+                    root_id: root.root_id.clone(),
+                    path: root.path.to_string_lossy().to_string(),
+                })
+                .collect(),
+            analysis_revision: session.analysis_revision,
+            ready: session.startup.is_some(),
+            startup_job_id: session.startup_job_id.clone(),
+            warnings: workspace_warnings(&session.settings),
+            missing_inputs: workspace_missing_inputs(&session.settings),
+        }
+    }
+
+    fn normalize_optional_path(raw: Option<String>, field: &str) -> Result<Option<PathBuf>, rmcp::ErrorData> {
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+        let path = PathBuf::from(&raw);
+        let canonical = std::fs::canonicalize(&path).map_err(|_| {
+            rmcp::ErrorData::invalid_params(
+                format!("{field} does not exist or is not accessible: {}", path.display()),
+                None,
+            )
+        })?;
+        Ok(Some(canonical))
+    }
+
     pub async fn open(
         self: &Arc<Self>,
         params: WorkspaceOpenParams,
@@ -185,19 +245,41 @@ impl SessionManager {
         }
 
         let settings = WorkspaceSettings {
-            platform_docs_archive: params.platform_docs_archive.map(PathBuf::from),
+            platform_docs_archive: Self::normalize_optional_path(
+                params.platform_docs_archive,
+                "platform_docs_archive",
+            )?,
             platform_version: params.platform_version,
-            configuration_path: params.configuration_path.map(PathBuf::from),
+            configuration_path: Self::normalize_optional_path(
+                params.configuration_path,
+                "configuration_path",
+            )?,
             mode: params.mode,
         };
         let missing_inputs = workspace_missing_inputs(&settings);
         let warnings = workspace_warnings(&settings);
 
-        validate_optional_path(
-            settings.platform_docs_archive.as_deref(),
-            "platform_docs_archive",
-        )?;
-        validate_optional_path(settings.configuration_path.as_deref(), "configuration_path")?;
+        let existing_response = {
+            let sessions = self.sessions.write().await;
+            if sessions.is_empty() {
+                None
+            } else if sessions.len() == 1 {
+                let (existing_id, existing) = sessions
+                    .iter()
+                    .next()
+                    .ok_or_else(|| rmcp::ErrorData::invalid_params("no sessions", None))?;
+                if Self::roots_match(&existing.roots, &roots) && existing.settings == settings {
+                    Some(Self::open_response_from_session(*existing_id, existing))
+                } else {
+                    return Err(rmcp::ErrorData::invalid_params(SINGLE_SESSION_ERROR, None));
+                }
+            } else {
+                return Err(rmcp::ErrorData::invalid_params(SINGLE_SESSION_ERROR, None));
+            }
+        };
+        if let Some(response) = existing_response {
+            return Ok(response);
+        }
 
         let session_id = Uuid::new_v4();
         let created_at = crate::state::now_unix_secs();
@@ -332,6 +414,160 @@ impl SessionManager {
         result
     }
 
+    fn select_ready_session_uuid(
+        sessions: &HashMap<Uuid, WorkspaceSession>,
+        session_id: Option<&str>,
+    ) -> Result<Uuid, rmcp::ErrorData> {
+        if let Some(session_id) = session_id {
+            let uuid = parse_session_id(session_id)?;
+            let session = sessions
+                .get(&uuid)
+                .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+            if session.startup.is_none() {
+                return Err(rmcp::ErrorData::invalid_params(
+                    "workspace not ready (startup in progress)",
+                    None,
+                ));
+            }
+            return Ok(uuid);
+        }
+
+        let mut ready = sessions
+            .iter()
+            .filter_map(|(id, session)| session.startup.as_ref().map(|_| *id));
+
+        let Some(first) = ready.next() else {
+            return Err(rmcp::ErrorData::invalid_params("no ready sessions", None));
+        };
+        if ready.next().is_some() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "exactly one ready session is required",
+                None,
+            ));
+        }
+        Ok(first)
+    }
+
+    fn deps_resolver(deps: &Arc<bsl_analysis_v2::SemanticDeps>) -> Arc<TypeResolver> {
+        deps.resolver
+            .clone()
+            .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())))
+    }
+
+    fn build_inference_v2(
+        deps: &Arc<bsl_analysis_v2::SemanticDeps>,
+    ) -> (TypeInferenceService, TypeMetadataLookup) {
+        let resolver = Self::deps_resolver(deps);
+        let inference_service = TypeInferenceService::new(resolver, deps.repository.clone());
+        let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+        (inference_service, metadata_lookup)
+    }
+
+    async fn ready_startup_for_http(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<bsl_backend::system::StartupResultV2, rmcp::ErrorData> {
+        let sessions = self.sessions.read().await;
+        let uuid = Self::select_ready_session_uuid(&sessions, session_id)?;
+        let session = sessions
+            .get(&uuid)
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+        session
+            .startup
+            .clone()
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("no ready sessions", None))
+    }
+
+    pub async fn http_parity_types(
+        &self,
+        session_id: Option<&str>,
+        limit: usize,
+        offset: usize,
+        category_filter: Vec<String>,
+        certainty_filter: Vec<String>,
+        flow_sensitive_only: bool,
+    ) -> Result<AnalysisResultDto, rmcp::ErrorData> {
+        let startup = self.ready_startup_for_http(session_id).await?;
+        let deps = startup.deps_bundle_v2.semantic_deps.clone();
+        let (inference_service, metadata_lookup) = Self::build_inference_v2(&deps);
+        Ok(web_api_service::get_all_types_as_dto(
+            &inference_service,
+            &metadata_lookup,
+            limit,
+            offset,
+            category_filter,
+            certainty_filter,
+            flow_sensitive_only,
+        ))
+    }
+
+    pub async fn http_parity_search(
+        &self,
+        session_id: Option<&str>,
+        query: &str,
+    ) -> Result<AnalysisResultDto, rmcp::ErrorData> {
+        let startup = self.ready_startup_for_http(session_id).await?;
+        let deps = startup.deps_bundle_v2.semantic_deps.clone();
+        let (inference_service, metadata_lookup) = Self::build_inference_v2(&deps);
+
+        web_api_service::search_types_as_dto(&inference_service, &metadata_lookup, query)
+            .await
+            .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))
+    }
+
+    fn is_flow_sensitive(res: &bsl_shared::domain::types::TypeResolution) -> bool {
+        if matches!(res.result, ResolutionResult::Union(_)) {
+            return true;
+        }
+        matches!(res.certainty, Certainty::Inferred | Certainty::InferredWeak)
+    }
+
+    pub async fn http_parity_metrics(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<MetricsDto, rmcp::ErrorData> {
+        let startup = self.ready_startup_for_http(session_id).await?;
+        let deps = startup.deps_bundle_v2.semantic_deps.clone();
+        let (inference_service, _metadata_lookup) = Self::build_inference_v2(&deps);
+
+        let all_types = inference_service.get_all_platform_globals();
+        let mut certainty_high = 0;
+        let mut certainty_medium = 0;
+        let mut certainty_low = 0;
+        let mut flow_sensitive = 0;
+
+        for res in all_types.values() {
+            let certainty_val = match res.certainty {
+                Certainty::Known => 100,
+                Certainty::Inferred => 80,
+                Certainty::InferredWeak => 50,
+                Certainty::Unknown => 0,
+            };
+
+            if certainty_val >= 80 {
+                certainty_high += 1;
+            } else if certainty_val >= 30 {
+                certainty_medium += 1;
+            } else {
+                certainty_low += 1;
+            }
+
+            if Self::is_flow_sensitive(res) {
+                flow_sensitive += 1;
+            }
+        }
+
+        Ok(MetricsDto {
+            total_types: all_types.len(),
+            certainty_high,
+            certainty_medium,
+            certainty_low,
+            flow_sensitive,
+            cache_hit_rate: "n/a".to_string(),
+            analysis_speed: "125ms".to_string(),
+        })
+    }
+
     pub async fn http_deps_meta(
         &self,
         session_id: Option<&str>,
@@ -402,23 +638,14 @@ impl SessionManager {
     ) -> Result<WorkspaceOpenResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(session_id)?;
 
-        if let Some(existing) = self.sessions.read().await.get(&uuid) {
-            return Ok(WorkspaceOpenResponse {
-                session_id: uuid.to_string(),
-                roots: existing
-                    .roots
-                    .iter()
-                    .map(|root| RootDto {
-                        root_id: root.root_id.clone(),
-                        path: root.path.to_string_lossy().to_string(),
-                    })
-                    .collect(),
-                analysis_revision: existing.analysis_revision,
-                ready: existing.startup.is_some(),
-                startup_job_id: existing.startup_job_id.clone(),
-                warnings: workspace_warnings(&existing.settings),
-                missing_inputs: workspace_missing_inputs(&existing.settings),
-            });
+        {
+            let sessions = self.sessions.read().await;
+            if let Some(existing) = sessions.get(&uuid) {
+                return Ok(Self::open_response_from_session(uuid, existing));
+            }
+            if !sessions.is_empty() {
+                return Err(rmcp::ErrorData::invalid_params(SINGLE_SESSION_ERROR, None));
+            }
         }
 
         let store = self.store.as_ref().ok_or_else(|| {
@@ -430,20 +657,20 @@ impl SessionManager {
 
         let (roots, root_dtos) = restore_roots(&persisted.roots)?;
         let settings = WorkspaceSettings {
-            platform_docs_archive: persisted.platform_docs_archive.map(PathBuf::from),
+            platform_docs_archive: Self::normalize_optional_path(
+                persisted.platform_docs_archive,
+                "platform_docs_archive",
+            )?,
             platform_version: persisted.platform_version,
-            configuration_path: persisted.configuration_path.map(PathBuf::from),
+            configuration_path: Self::normalize_optional_path(
+                persisted.configuration_path,
+                "configuration_path",
+            )?,
             mode: persisted.mode,
         };
 
         let missing_inputs = workspace_missing_inputs(&settings);
         let warnings = workspace_warnings(&settings);
-
-        validate_optional_path(
-            settings.platform_docs_archive.as_deref(),
-            "platform_docs_archive",
-        )?;
-        validate_optional_path(settings.configuration_path.as_deref(), "configuration_path")?;
 
         let session = WorkspaceSession {
             roots,
@@ -2073,19 +2300,6 @@ fn workspace_settings_for_startup(settings: &WorkspaceSettings) -> WorkspaceSett
         };
     }
     settings.clone()
-}
-
-fn validate_optional_path(path: Option<&Path>, field: &str) -> Result<(), rmcp::ErrorData> {
-    let Some(path) = path else {
-        return Ok(());
-    };
-    if !path.exists() {
-        return Err(rmcp::ErrorData::invalid_params(
-            format!("{field} does not exist: {}", path.display()),
-            None,
-        ));
-    }
-    Ok(())
 }
 
 async fn start_semantic_runtime(

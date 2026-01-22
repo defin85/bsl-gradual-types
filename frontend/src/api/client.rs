@@ -58,6 +58,108 @@ pub async fn fetch_mcp_deps_meta(session_id: Option<&str>) -> Result<SnapshotMet
         .map_err(|e| format!("API error: {:?}", e))
 }
 
+/// Получить список типов из `bsl-agent` через parity API (`/api/mcp/types|search`).
+pub async fn fetch_mcp_types(
+    filters: TypeFilters,
+    session_id: Option<&str>,
+) -> Result<AnalysisResultDto, String> {
+    let config = get_config();
+
+    // Построение URL с параметрами фильтрации
+    let base_url = if let Some(ref query) = filters.search_query {
+        if !query.is_empty() {
+            format!(
+                "{}?q={}&page={}&limit={}",
+                config.api_url("mcp/search"),
+                query,
+                filters.page,
+                filters.page_size
+            )
+        } else {
+            format!(
+                "{}?page={}&limit={}",
+                config.api_url("mcp/types"),
+                filters.page,
+                filters.page_size
+            )
+        }
+    } else {
+        format!(
+            "{}?page={}&limit={}",
+            config.api_url("mcp/types"),
+            filters.page,
+            filters.page_size
+        )
+    };
+
+    let mut url = base_url;
+
+    if let Some(session_id) = session_id {
+        url.push_str("&sessionId=");
+        url.push_str(session_id);
+    }
+
+    // Фильтры категорий
+    let any_category_checked = filters.show_platform
+        || filters.show_configuration
+        || filters.show_union
+        || filters.show_dynamic;
+
+    if any_category_checked {
+        if filters.show_platform {
+            url.push_str("&category=Platform");
+        }
+        if filters.show_configuration {
+            url.push_str("&category=Configuration");
+        }
+        if filters.show_union {
+            url.push_str("&category=Union");
+        }
+        if filters.show_dynamic {
+            url.push_str("&category=Dynamic");
+        }
+    }
+
+    // Фильтры уровня определённости
+    let any_certainty_checked =
+        filters.show_high_certainty || filters.show_medium_certainty || filters.show_low_certainty;
+
+    if any_certainty_checked {
+        if filters.show_high_certainty {
+            url.push_str("&certainty_level=high");
+        }
+        if filters.show_medium_certainty {
+            url.push_str("&certainty_level=medium");
+        }
+        if filters.show_low_certainty {
+            url.push_str("&certainty_level=low");
+        }
+    }
+
+    // Flow-sensitive фильтр
+    if filters.flow_sensitive_only {
+        url.push_str("&flow_sensitive_only=true");
+    }
+
+    fetch_json::<AnalysisResultDto>(&url)
+        .await
+        .map_err(|e| format!("API error: {:?}", e))
+}
+
+/// Получить метрики системы типизации из `bsl-agent` через parity API (`/api/mcp/metrics`).
+pub async fn fetch_mcp_metrics(session_id: Option<&str>) -> Result<MetricsDto, String> {
+    let config = get_config();
+    let base_url = config.api_url("mcp/metrics");
+    let url = if let Some(session_id) = session_id {
+        format!("{base_url}?sessionId={session_id}")
+    } else {
+        base_url
+    };
+    fetch_json::<MetricsDto>(&url)
+        .await
+        .map_err(|e| format!("API error: {:?}", e))
+}
+
 /// Пересобрать deps/index на backend и вернуть новую мету снапшота
 pub async fn reload_snapshot() -> Result<SnapshotMetaDto, String> {
     let config = get_config();

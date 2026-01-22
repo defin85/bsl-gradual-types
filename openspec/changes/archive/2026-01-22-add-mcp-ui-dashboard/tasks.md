@@ -21,7 +21,7 @@
 ## 5. Тестирование и валидация
 - [x] 5.1 Добавить интеграционные тесты (HTTP): `bsl-agent` отдаёт `/api/mcp/status` и корректно раздаёт `index.html`.
 - [x] 5.2 Добавить тест “read-only”: все `/api/mcp/*` не принимают write методы (POST/PUT/PATCH/DELETE → 405/404).
-- [ ] 5.3 Проверить совместимость в WSL: ссылка `http://localhost:<port>` открывается с Windows-хоста.
+- [x] 5.3 Проверить совместимость в WSL: ссылка `http://localhost:<port>` открывается с Windows-хоста.
 
 ## 6. Документация
 - [x] 6.1 Обновить `docs/roadmap/mcp-bsl-agent/api.md` (описать `/api/mcp/*` и режимы UI).

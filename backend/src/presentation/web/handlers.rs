@@ -44,8 +44,10 @@ pub struct SearchQuery {
 pub struct PaginationQuery {
     pub page: Option<usize>, // 1-based page number
     pub limit: Option<usize>,
-    pub category: Option<String>,
-    pub certainty_level: Option<String>,
+    #[serde(default)]
+    pub category: Vec<String>,
+    #[serde(default)]
+    pub certainty_level: Vec<String>,
     pub flow_sensitive_only: Option<bool>,
 }
 

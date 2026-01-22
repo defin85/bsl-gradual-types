@@ -97,6 +97,11 @@ Output:
 
 Примечание: тяжёлая инициализация выполняется асинхронно как job; прогресс и готовность получать через `workspace_status` или `job_status/job_wait` по `startup_job_id`.
 
+Ограничение single-session (актуально для модели per-agent):
+- В одном процессе `bsl-agent` одновременно допускается не более одной workspace-сессии.
+- Повторный `workspace_open` с теми же параметрами (roots + входы platform/config) идемпотентен и возвращает уже открытую сессию.
+- Повторный `workspace_open` с другими параметрами отклоняется как `INVALID_PARAMS`; для переключения проекта сначала вызовите `workspace_close`.
+
 ### 3.2. `workspace_status`
 
 Получить состояние сессии/прогресс.
@@ -493,3 +498,17 @@ Env:
 - `GET /api/mcp/jobs` → `McpJobsResponseDto`
 - `GET /api/mcp/jobs/:job_id` → `McpJobDto`
 - `GET /api/mcp/deps/meta?sessionId=...` → `SnapshotMetaDto`
+
+Parity API для типов (UI экраны как в `bsl-web-server`):
+
+- `GET /api/mcp/types` → `AnalysisResultDto`
+- `GET /api/mcp/search?q=...` → `AnalysisResultDto`
+- `GET /api/mcp/metrics` → `MetricsDto`
+
+Правило выбора сессии для parity API:
+- если указан `sessionId`, сервер использует указанную сессию и требует `ready=true`;
+- если `sessionId` не указан, запросы выполняются только когда существует ровно одна `ready=true` сессия.
+
+Ошибки parity API:
+- `400 INVALID_PARAMS` при отсутствии ready-сессии (`no ready sessions`) или при неоднозначности выбора (`exactly one ready session is required`);
+- `400 INVALID_PARAMS` при запросе к не-ready сессии (`workspace not ready (startup in progress)`).

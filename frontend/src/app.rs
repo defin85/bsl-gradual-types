@@ -27,6 +27,7 @@ pub fn App() -> impl IntoView {
     let snapshot_reload = RwSignal::new(false);
     let snapshot_error = RwSignal::new(None::<String>);
     let backend_mode = RwSignal::new(BackendMode::Detecting);
+    let parity_blocked = RwSignal::new(None::<String>);
 
     // MCP dashboard state (read-only)
     let mcp_status = RwSignal::new(None::<McpStatusDto>);
@@ -39,6 +40,7 @@ pub fn App() -> impl IntoView {
     let load_web_data = move || {
         loading.set(true);
         error.set(None);
+        parity_blocked.set(None);
 
         spawn_local(async move {
             // Load snapshot meta
@@ -68,6 +70,93 @@ pub fn App() -> impl IntoView {
         });
     };
 
+    let load_mcp_parity_data = move || {
+        loading.set(true);
+        error.set(None);
+        parity_blocked.set(None);
+        snapshot_error.set(None);
+
+        spawn_local(async move {
+            let sessions = match fetch_mcp_sessions().await {
+                Ok(sessions) => sessions,
+                Err(err) => {
+                    error.set(Some(format!("Ошибка mcp/sessions: {}", err)));
+                    loading.set(false);
+                    return;
+                }
+            };
+
+            let ready_sessions: Vec<String> = sessions
+                .sessions
+                .iter()
+                .filter(|session| session.ready)
+                .map(|session| session.session_id.clone())
+                .collect();
+
+            mcp_sessions.set(Some(sessions));
+
+            if ready_sessions.len() != 1 {
+                snapshot_meta.set(None);
+                types.set(Vec::new());
+                search_result.set(None);
+                metrics.set(None);
+
+                if ready_sessions.is_empty() {
+                    parity_blocked
+                        .set(Some("Нет ready-сессии. Дождитесь завершения startup.".to_string()));
+                } else {
+                    parity_blocked.set(Some(
+                        "Должна быть ровно одна ready-сессия для parity UI.".to_string(),
+                    ));
+                }
+
+                match fetch_mcp_jobs().await {
+                    Ok(jobs) => {
+                        mcp_jobs.set(Some(jobs));
+                        loading.set(false);
+                    }
+                    Err(err) => {
+                        error.set(Some(format!("Ошибка mcp/jobs: {}", err)));
+                        loading.set(false);
+                    }
+                }
+                return;
+            }
+
+            let session_id = ready_sessions[0].clone();
+            match fetch_mcp_deps_meta(Some(&session_id)).await {
+                Ok(meta) => snapshot_meta.set(Some(meta)),
+                Err(err) => snapshot_error.set(Some(format!("Ошибка mcp/deps/meta: {}", err))),
+            }
+
+            match fetch_mcp_metrics(Some(&session_id)).await {
+                Ok(metrics_data) => metrics.set(Some(metrics_data)),
+                Err(_) => metrics.set(None),
+            }
+
+            match fetch_mcp_types(filters.get(), Some(&session_id)).await {
+                Ok(result) => {
+                    types.set(result.types.clone());
+                    search_result.set(Some(result));
+                }
+                Err(err) => {
+                    error.set(Some(format!("Ошибка mcp/types: {}", err)));
+                }
+            }
+
+            match fetch_mcp_jobs().await {
+                Ok(jobs) => {
+                    mcp_jobs.set(Some(jobs));
+                    loading.set(false);
+                }
+                Err(err) => {
+                    error.set(Some(format!("Ошибка mcp/jobs: {}", err)));
+                    loading.set(false);
+                }
+            }
+        });
+    };
+
     let reload_deps = move |_| {
         snapshot_reload.set(true);
         snapshot_error.set(None);
@@ -87,56 +176,6 @@ pub fn App() -> impl IntoView {
         });
     };
 
-    let load_mcp_data = move || {
-        loading.set(true);
-        error.set(None);
-        snapshot_error.set(None);
-
-        spawn_local(async move {
-            match fetch_mcp_sessions().await {
-                Ok(sessions) => {
-                    let ready_session_id = sessions
-                        .sessions
-                        .iter()
-                        .find(|session| session.ready)
-                        .map(|session| session.session_id.clone());
-                    let has_sessions = !sessions.sessions.is_empty();
-                    mcp_sessions.set(Some(sessions));
-
-                    if has_sessions {
-                        if let Some(session_id) = ready_session_id {
-                            match fetch_mcp_deps_meta(Some(&session_id)).await {
-                                Ok(meta) => snapshot_meta.set(Some(meta)),
-                                Err(err) => snapshot_error
-                                    .set(Some(format!("Ошибка mcp/deps/meta: {}", err))),
-                            }
-                        } else {
-                            snapshot_meta.set(None);
-                        }
-                    } else {
-                        snapshot_meta.set(None);
-                    }
-                }
-                Err(err) => {
-                    error.set(Some(format!("Ошибка mcp/sessions: {}", err)));
-                    loading.set(false);
-                    return;
-                }
-            }
-
-            match fetch_mcp_jobs().await {
-                Ok(jobs) => {
-                    mcp_jobs.set(Some(jobs));
-                    loading.set(false);
-                }
-                Err(err) => {
-                    error.set(Some(format!("Ошибка mcp/jobs: {}", err)));
-                    loading.set(false);
-                }
-            }
-        });
-    };
-
     // Detect backend mode on mount and load corresponding data.
     Effect::new(move |_| {
         spawn_local(async move {
@@ -144,8 +183,8 @@ pub fn App() -> impl IntoView {
                 Ok(status) if status.supported && status.mode == McpBackendModeDto::McpAgent => {
                     backend_mode.set(BackendMode::McpAgent);
                     mcp_status.set(Some(status));
-                    current_mode.set("mcp".to_string());
-                    load_mcp_data();
+                    current_mode.set("dashboard".to_string());
+                    load_mcp_parity_data();
                 }
                 Ok(_status) => {
                     backend_mode.set(BackendMode::WebServer);
@@ -164,10 +203,16 @@ pub fn App() -> impl IntoView {
         current_mode.set(mode);
     };
 
+    let reload_current_mode = move || match backend_mode.get() {
+        BackendMode::WebServer => load_web_data(),
+        BackendMode::McpAgent => load_mcp_parity_data(),
+        BackendMode::Detecting => {}
+    };
+
     // Handle filter changes
     let handle_filters_change = move |new_filters: TypeFilters| {
         filters.set(new_filters);
-        load_web_data();
+        reload_current_mode();
     };
 
     // Handle search
@@ -177,7 +222,7 @@ pub fn App() -> impl IntoView {
         new_filters.search_query = if query.is_empty() { None } else { Some(query) };
         new_filters.page = 1; // Reset to first page on search
         filters.set(new_filters);
-        load_web_data();
+        reload_current_mode();
     };
 
     // Handle page changes
@@ -185,7 +230,7 @@ pub fn App() -> impl IntoView {
         let mut new_filters = filters.get();
         new_filters.page = page;
         filters.set(new_filters);
-        load_web_data();
+        reload_current_mode();
     };
 
     view! {
@@ -239,8 +284,53 @@ pub fn App() -> impl IntoView {
                                 }.into_any()
                             } else if backend_mode.get() == BackendMode::McpAgent {
                                 view! {
+                                    <nav class="mode-tabs">
+                                        <button
+                                            class=move || format!("mode-tab {}", if current_mode.get() == "dashboard" { "active" } else { "" })
+                                            on:click=move |_| switch_mode("dashboard".to_string())
+                                        >
+                                            "📊 Dashboard"
+                                        </button>
+                                        <button
+                                            class=move || format!("mode-tab {}", if current_mode.get() == "cards" { "active" } else { "" })
+                                            on:click=move |_| switch_mode("cards".to_string())
+                                        >
+                                            "🃏 Карточки"
+                                        </button>
+                                        <button
+                                            class=move || format!("mode-tab {}", if current_mode.get() == "table" { "active" } else { "" })
+                                            on:click=move |_| switch_mode("table".to_string())
+                                        >
+                                            "📋 Таблица"
+                                        </button>
+                                        <button
+                                            class=move || format!("mode-tab {}", if current_mode.get() == "graph" { "active" } else { "" })
+                                            on:click=move |_| switch_mode("graph".to_string())
+                                        >
+                                            "🕸️ Граф"
+                                        </button>
+                                        <button
+                                            class=move || format!("mode-tab {}", if current_mode.get() == "mcp" { "active" } else { "" })
+                                            on:click=move |_| switch_mode("mcp".to_string())
+                                        >
+                                            "🔧 MCP"
+                                        </button>
+                                    </nav>
+                                    <div class="search-box">
+                                        <input
+                                            type="text"
+                                            placeholder="Поиск типов..."
+                                            class="form-control"
+                                            prop:value=move || search_query.get()
+                                            on:input=move |ev| {
+                                                let value = event_target_value(&ev);
+                                                handle_search(value);
+                                            }
+                                            disabled=move || current_mode.get() == "mcp"
+                                        />
+                                    </div>
                                     <div class="flex items-center gap-2 text-sm">
-                                        <span class="font-semibold">"MCP Dashboard"</span>
+                                        <span class="font-semibold">"bsl-agent"</span>
                                         {move || {
                                             mcp_status.get().and_then(|st| st.instance_id).map(|id| {
                                                 view! {
@@ -403,96 +493,152 @@ pub fn App() -> impl IntoView {
                             }.into_any(),
 
                             BackendMode::McpAgent => view! {
-                                <div class="py-6">
-                                    {move || {
-                                        if loading.get() {
-                                            view! {
-                                                <div class="loading">
-                                                    <p>"🔄 Загрузка MCP данных..."</p>
-                                                </div>
-                                            }.into_any()
-                                        } else if let Some(err) = error.get() {
-                                            view! {
-                                                <div class="error">
-                                                    <p>"❌ " {err}</p>
-                                                    <button class="btn btn--sm" on:click=move |_| load_mcp_data()>"Повторить"</button>
-                                                </div>
-                                            }.into_any()
-                                        } else {
-                                            view! {
-                                                <div class="space-y-6">
-                                                    <div class="card">
-                                                        <div class="flex items-center justify-between">
-                                                            <h2 class="text-lg font-semibold mb-2">"Сессии"</h2>
-                                                            <button class="btn btn--sm" on:click=move |_| load_mcp_data()>"Обновить"</button>
-                                                        </div>
-                                                        {move || {
-                                                            mcp_sessions.get().map(|resp| {
-                                                                view! {
-                                                                    <div class="space-y-2">
-                                                                        {resp.sessions.into_iter().map(|s| {
-                                                                            let missing_inputs = s.missing_inputs.clone();
-                                                                            view! {
-                                                                                <div class="p-3 rounded border border-bsl-brown-600/15 dark:border-bsl-gray-400/20">
-                                                                                    <div class="flex flex-wrap items-center gap-2 text-sm">
-                                                                                        <span class="font-semibold">{s.session_id.clone()}</span>
-                                                                                        <span class="opacity-70">{format!("ready={}", s.ready)}</span>
-                                                                                        <span class="opacity-70">{format!("rev={}", s.analysis_revision)}</span>
-                                                                                        <span class="opacity-70">{format!("{} {}%", s.phase, s.progress_percent)}</span>
-                                                                                    </div>
-                                                                                    <div class="mt-2 text-xs">
-                                                                                        <div class="opacity-70">"roots:"</div>
-                                                                                        <ul class="list-disc ml-5">
-                                                                                            {s.roots.into_iter().map(|r| view! { <li><code class="font-mono text-[11px] select-all">{format!("{}:{}", r.root_id, r.path)}</code></li> }).collect_view()}
-                                                                                        </ul>
-                                                                                    </div>
-                                                                                    {if !missing_inputs.is_empty() {
-                                                                                        view! {
-                                                                                            <div class="mt-2 text-xs text-yellow-700 dark:text-yellow-300">
-                                                                                                <span class="font-semibold">"missing_inputs: "</span>
-                                                                                                {missing_inputs.join(", ")}
-                                                                                            </div>
-                                                                                        }
-                                                                                        .into_any()
-                                                                                    } else {
-                                                                                        ().into_any()
-                                                                                    }}
-                                                                                </div>
-                                                                            }
-                                                                        }).collect_view()}
-                                                                    </div>
-                                                                }.into_any()
-                                                            })
-                                                        }}
-                                                    </div>
+                                <div class="grid grid-cols-[280px_1fr] gap-6 py-6">
+                                    <Sidebar
+                                        filters=filters
+                                        on_filters_change=Callback::new(handle_filters_change)
+                                    />
 
-                                                    <div class="card">
-                                                        <h2 class="text-lg font-semibold mb-2">"Jobs"</h2>
-                                                        {move || {
-                                                            mcp_jobs.get().map(|resp| {
-                                                                view! {
-                                                                    <div class="space-y-2">
-                                                                        {resp.jobs.into_iter().map(|j| {
-                                                                            view! {
-                                                                                <div class="p-3 rounded border border-bsl-brown-600/15 dark:border-bsl-gray-400/20 text-sm">
-                                                                                    <div class="flex flex-wrap items-center gap-2">
-                                                                                        <code class="font-mono text-[11px] select-all">{j.job_id}</code>
-                                                                                        <span class="opacity-70">{format!("{} {}%", j.phase, j.progress_percent)}</span>
-                                                                                        <span class="opacity-70">{j.state}</span>
-                                                                                    </div>
-                                                                                    {j.error.map(|e| view! { <div class="mt-1 text-xs text-red-600 dark:text-red-400">{e}</div> })}
-                                                                                </div>
-                                                                            }
-                                                                        }).collect_view()}
-                                                                    </div>
-                                                                }.into_any()
-                                                            })
-                                                        }}
+                                    <div class="content">
+                                        {move || {
+                                            if loading.get() {
+                                                view! {
+                                                    <div class="loading">
+                                                        <p>"🔄 Загрузка MCP данных..."</p>
                                                     </div>
-                                                </div>
-                                            }.into_any()
-                                        }
-                                    }}
+                                                }.into_any()
+                                            } else if let Some(err) = error.get() {
+                                                view! {
+                                                    <div class="error">
+                                                        <p>"❌ " {err}</p>
+                                                        <button class="btn btn--sm" on:click=move |_| load_mcp_parity_data()>"Повторить"</button>
+                                                    </div>
+                                                }.into_any()
+                                            } else if current_mode.get() == "mcp" {
+                                                view! {
+                                                    <div class="space-y-6">
+                                                        <div class="card">
+                                                            <div class="flex items-center justify-between">
+                                                                <h2 class="text-lg font-semibold mb-2">"Сессии"</h2>
+                                                                <button class="btn btn--sm" on:click=move |_| load_mcp_parity_data()>"Обновить"</button>
+                                                            </div>
+                                                            {move || {
+                                                                mcp_sessions.get().map(|resp| {
+                                                                    view! {
+                                                                        <div class="space-y-2">
+                                                                            {resp.sessions.into_iter().map(|s| {
+                                                                                let missing_inputs = s.missing_inputs.clone();
+                                                                                view! {
+                                                                                    <div class="p-3 rounded border border-bsl-brown-600/15 dark:border-bsl-gray-400/20">
+                                                                                        <div class="flex flex-wrap items-center gap-2 text-sm">
+                                                                                            <span class="font-semibold">{s.session_id.clone()}</span>
+                                                                                            <span class="opacity-70">{format!("ready={}", s.ready)}</span>
+                                                                                            <span class="opacity-70">{format!("rev={}", s.analysis_revision)}</span>
+                                                                                            <span class="opacity-70">{format!("{} {}%", s.phase, s.progress_percent)}</span>
+                                                                                        </div>
+                                                                                        <div class="mt-2 text-xs">
+                                                                                            <div class="opacity-70">"roots:"</div>
+                                                                                            <ul class="list-disc ml-5">
+                                                                                                {s.roots.into_iter().map(|r| view! { <li><code class="font-mono text-[11px] select-all">{format!("{}:{}", r.root_id, r.path)}</code></li> }).collect_view()}
+                                                                                            </ul>
+                                                                                        </div>
+                                                                                        {if !missing_inputs.is_empty() {
+                                                                                            view! {
+                                                                                                <div class="mt-2 text-xs text-yellow-700 dark:text-yellow-300">
+                                                                                                    <span class="font-semibold">"missing_inputs: "</span>
+                                                                                                    {missing_inputs.join(", ")}
+                                                                                                </div>
+                                                                                            }
+                                                                                            .into_any()
+                                                                                        } else {
+                                                                                            ().into_any()
+                                                                                        }}
+                                                                                    </div>
+                                                                                }
+                                                                            }).collect_view()}
+                                                                        </div>
+                                                                    }.into_any()
+                                                                })
+                                                            }}
+                                                        </div>
+
+                                                        <div class="card">
+                                                            <h2 class="text-lg font-semibold mb-2">"Jobs"</h2>
+                                                            {move || {
+                                                                mcp_jobs.get().map(|resp| {
+                                                                    view! {
+                                                                        <div class="space-y-2">
+                                                                            {resp.jobs.into_iter().map(|j| {
+                                                                                view! {
+                                                                                    <div class="p-3 rounded border border-bsl-brown-600/15 dark:border-bsl-gray-400/20 text-sm">
+                                                                                        <div class="flex flex-wrap items-center gap-2">
+                                                                                            <code class="font-mono text-[11px] select-all">{j.job_id}</code>
+                                                                                            <span class="opacity-70">{format!("{} {}%", j.phase, j.progress_percent)}</span>
+                                                                                            <span class="opacity-70">{j.state}</span>
+                                                                                        </div>
+                                                                                        {j.error.map(|e| view! { <div class="mt-1 text-xs text-red-600 dark:text-red-400">{e}</div> })}
+                                                                                    </div>
+                                                                                }
+                                                                            }).collect_view()}
+                                                                        </div>
+                                                                    }.into_any()
+                                                                })
+                                                            }}
+                                                        </div>
+                                                    </div>
+                                                }.into_any()
+                                            } else if let Some(msg) = parity_blocked.get() {
+                                                view! {
+                                                    <div class="p-4 rounded border border-bsl-brown-600/15 dark:border-bsl-gray-400/20 bg-bsl-cream-100 dark:bg-bsl-charcoal-800/40">
+                                                        <div class="text-sm">
+                                                            <span class="font-semibold">"Parity UI: "</span>
+                                                            {msg}
+                                                        </div>
+                                                        <div class="mt-2">
+                                                            <button class="btn btn--sm" on:click=move |_| load_mcp_parity_data()>"Обновить"</button>
+                                                        </div>
+                                                    </div>
+                                                }.into_any()
+                                            } else {
+                                                match current_mode.get().as_str() {
+                                                    "dashboard" => view! {
+                                                        <div class="mode-content active">
+                                                            <Dashboard
+                                                                metrics=Signal::derive(move || metrics.get())
+                                                                search_result=Signal::derive(move || search_result.get())
+                                                            />
+                                                        </div>
+                                                    }.into_any(),
+                                                    "cards" => view! {
+                                                        <div class="mode-content active">
+                                                            <CardsView
+                                                                types=Signal::derive(move || types.get())
+                                                                search_result=Signal::derive(move || search_result.get())
+                                                                on_page_change=Callback::new(handle_page_change)
+                                                            />
+                                                        </div>
+                                                    }.into_any(),
+                                                    "table" => view! {
+                                                        <div class="mode-content active">
+                                                            <TableView
+                                                                types=Signal::derive(move || types.get())
+                                                                search_result=Signal::derive(move || search_result.get())
+                                                                on_page_change=Callback::new(handle_page_change)
+                                                            />
+                                                        </div>
+                                                    }.into_any(),
+                                                    "graph" => view! {
+                                                        <div class="mode-content active">
+                                                            <GraphView
+                                                                types=Signal::derive(move || types.get())
+                                                            />
+                                                        </div>
+                                                    }.into_any(),
+                                                    _ => view! { <div>"Неизвестный режим"</div> }.into_any()
+                                                }
+                                            }
+                                        }}
+                                    </div>
                                 </div>
                             }.into_any(),
 

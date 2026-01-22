@@ -11,6 +11,11 @@ Most behavior is configured via MCP tool inputs (not env):
 - `configuration_path` - path to config dump (optional)
 - `mode` - optional mode switch
 
+Notes:
+- Single-session: a single `bsl-agent` process allows at most one active workspace session.
+  - Calling `workspace_open` again with the same params is idempotent (returns the same `session_id`).
+  - Calling `workspace_open` with different params returns `INVALID_PARAMS`; call `workspace_close` first to switch.
+
 ## Environment variables
 
 Logging:
@@ -42,6 +47,8 @@ Notes:
 - HTTP UI is localhost-only and rejects non-loopback bind addresses.
 - UI is read-only: `bsl-agent` does not expose write HTTP endpoints under `/api/mcp/*`.
 - By default, `bsl-agent` serves an embedded SPA baked into the binary at build time.
+- UI parity endpoints for types:
+  - `GET /api/mcp/types`, `GET /api/mcp/search`, `GET /api/mcp/metrics` (read-only).
 
 ## Building embedded UI assets
 

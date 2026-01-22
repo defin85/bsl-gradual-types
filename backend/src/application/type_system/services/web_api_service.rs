@@ -206,8 +206,8 @@ pub fn get_all_types_as_dto(
     metadata_lookup: &TypeMetadataLookup,
     limit: usize,
     offset: usize,
-    category_filter: Option<String>,
-    certainty_filter: Option<String>,
+    category_filter: Vec<String>,
+    certainty_filter: Vec<String>,
     flow_sensitive_only: bool,
 ) -> AnalysisResultDto {
     // 1. Get all types from Domain
@@ -226,20 +226,19 @@ pub fn get_all_types_as_dto(
         .into_iter()
         .filter(|t| {
             // Filter by category
-            if let Some(ref cat) = category_filter {
-                if &t.category != cat {
-                    return false;
-                }
+            if !category_filter.is_empty() && !category_filter.iter().any(|cat| cat == &t.category)
+            {
+                return false;
             }
 
             // Filter by certainty
-            if let Some(ref cert) = certainty_filter {
-                let passes = match cert.as_str() {
+            if !certainty_filter.is_empty() {
+                let passes = certainty_filter.iter().any(|cert| match cert.as_str() {
                     "high" => t.certainty >= 80,
                     "medium" => t.certainty >= 30 && t.certainty < 80,
                     "low" => t.certainty < 30,
                     _ => true,
-                };
+                });
                 if !passes {
                     return false;
                 }
@@ -265,13 +264,13 @@ pub fn get_all_types_as_dto(
     // 5. Generate metrics (using filtered data)
     let metrics = MetricsDto {
         total_types: filtered_types.len(),
-        certainty_high: type_dtos.iter().filter(|t| t.certainty > 80).count(),
-        certainty_medium: type_dtos
+        certainty_high: filtered_types.iter().filter(|t| t.certainty >= 80).count(),
+        certainty_medium: filtered_types
             .iter()
-            .filter(|t| t.certainty > 40 && t.certainty <= 80)
+            .filter(|t| t.certainty >= 30 && t.certainty < 80)
             .count(),
-        certainty_low: type_dtos.iter().filter(|t| t.certainty <= 40).count(),
-        flow_sensitive: type_dtos.iter().filter(|t| t.flow_sensitive).count(),
+        certainty_low: filtered_types.iter().filter(|t| t.certainty < 30).count(),
+        flow_sensitive: filtered_types.iter().filter(|t| t.flow_sensitive).count(),
         cache_hit_rate: "n/a".to_string(),
         analysis_speed: "125ms".to_string(), // TODO: real metric
     };

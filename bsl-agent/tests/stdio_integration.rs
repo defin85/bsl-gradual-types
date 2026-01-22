@@ -5,6 +5,7 @@ use bsl_agent::types::{
     JobStateDto, JobStatusResponse, UiUrlResponse, WorkspaceDocumentsSetResponse,
     WorkspaceListResponse, WorkspaceOpenResponse, WorkspaceStatusResponse,
 };
+use bsl_shared::api::dtos::{AnalysisResultDto, MetricsDto};
 use rmcp::model::CallToolRequestParam;
 use rmcp::service::RunningService;
 use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
@@ -284,6 +285,100 @@ async fn stdio_ui_url_enabled_returns_url() {
         .await
         .expect("GET /api/mcp/status");
     assert!(status.status().is_success());
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_http_ui_parity_endpoints_return_dtos_when_ready() {
+    let cache_dir = tempfile::TempDir::new().expect("tempdir");
+    let static_dir = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        static_dir.path().join("index.html"),
+        "<!doctype html><html><body>MCP UI parity test</body></html>",
+    )
+    .expect("write index.html");
+
+    let root = tempfile::TempDir::new().expect("root");
+    std::fs::create_dir_all(root.path().join("src")).expect("mkdir");
+
+    let service = spawn_agent(&[
+        ("BSL_CACHE_DIR", cache_dir.path().to_string_lossy().as_ref()),
+        ("BSL_AGENT_HTTP_ADDR", "127.0.0.1:0"),
+        (
+            "BSL_AGENT_HTTP_STATIC_DIR",
+            static_dir.path().to_string_lossy().as_ref(),
+        ),
+    ])
+    .await;
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+
+    let resp: UiUrlResponse = call_tool(&service, "ui_url", json!({})).await;
+    let url = resp.ui_url.expect("ui_url");
+
+    let client = reqwest::Client::new();
+
+    let status: WorkspaceStatusResponse = call_tool(
+        &service,
+        "workspace_status",
+        json!({ "session_id": &open.session_id }),
+    )
+    .await;
+    if !status.ready {
+        let not_ready = client
+            .get(format!(
+                "{url}/api/mcp/types?page=1&limit=10&sessionId={}",
+                open.session_id
+            ))
+            .send()
+            .await
+            .expect("GET /api/mcp/types (not ready)");
+        assert_eq!(not_ready.status().as_u16(), 400);
+    }
+
+    let _ = wait_workspace_ready(&service, &open).await;
+
+    let types: AnalysisResultDto = client
+        .get(format!("{url}/api/mcp/types?page=1&limit=10"))
+        .send()
+        .await
+        .expect("GET /api/mcp/types")
+        .error_for_status()
+        .expect("200 /api/mcp/types")
+        .json()
+        .await
+        .expect("parse AnalysisResultDto");
+    assert!(types.pagination.is_some(), "expected pagination for /types");
+
+    let _search: AnalysisResultDto = client
+        .get(format!("{url}/api/mcp/search?q=Test"))
+        .send()
+        .await
+        .expect("GET /api/mcp/search")
+        .error_for_status()
+        .expect("200 /api/mcp/search")
+        .json()
+        .await
+        .expect("parse AnalysisResultDto");
+
+    let _metrics: MetricsDto = client
+        .get(format!("{url}/api/mcp/metrics"))
+        .send()
+        .await
+        .expect("GET /api/mcp/metrics")
+        .error_for_status()
+        .expect("200 /api/mcp/metrics")
+        .json()
+        .await
+        .expect("parse MetricsDto");
 
     let _ = service.cancel().await;
 }
@@ -671,6 +766,101 @@ async fn stdio_workspace_open_accepts_platform_docs_file() {
         &service,
         "workspace_close",
         json!({ "session_id": &open.session_id }),
+    )
+    .await;
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_workspace_open_is_idempotent_for_same_params() {
+    let service = spawn_agent(&[]).await;
+    let root = tempfile::TempDir::new().expect("root");
+
+    let open_a: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+
+    let open_b: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+
+    assert_eq!(open_a.session_id, open_b.session_id);
+    assert_eq!(open_a.startup_job_id, open_b.startup_job_id);
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_workspace_open_rejects_second_session_with_different_params() {
+    let service = spawn_agent(&[]).await;
+
+    let root_a = tempfile::TempDir::new().expect("rootA");
+    let root_b = tempfile::TempDir::new().expect("rootB");
+
+    let _open_a: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [root_a.path().to_string_lossy()],
+        }),
+    )
+    .await;
+
+    call_tool_expect_invalid_params(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [root_b.path().to_string_lossy()],
+        }),
+        "only one session is allowed",
+    )
+    .await;
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_workspace_resume_rejects_second_session_when_another_is_active() {
+    let cache_dir = tempfile::TempDir::new().expect("cache");
+    let cache_dir_str = cache_dir.path().to_string_lossy().to_string();
+
+    let root_a = tempfile::TempDir::new().expect("rootA");
+    let root_b = tempfile::TempDir::new().expect("rootB");
+
+    let service = spawn_agent(&[("BSL_CACHE_DIR", cache_dir_str.as_str())]).await;
+    let open_a: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({ "roots": [root_a.path().to_string_lossy()] }),
+    )
+    .await;
+    let session_id_a = open_a.session_id.clone();
+    let _ = service.cancel().await;
+
+    let service = spawn_agent(&[("BSL_CACHE_DIR", cache_dir_str.as_str())]).await;
+    let _open_b: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({ "roots": [root_b.path().to_string_lossy()] }),
+    )
+    .await;
+
+    call_tool_expect_invalid_params(
+        &service,
+        "workspace_resume",
+        json!({ "session_id": session_id_a }),
+        "only one session is allowed",
     )
     .await;
 

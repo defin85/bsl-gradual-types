@@ -12,7 +12,7 @@
 ## 3. Тестирование и валидация
 - [x] 3.1 Интеграционный тест: без `BSL_AGENT_HTTP_STATIC_DIR` UI отдаёт embedded `index.html`.
 - [x] 3.2 Интеграционный тест: при заданном `BSL_AGENT_HTTP_STATIC_DIR` UI отдаёт статику с диска (override embedded).
-- [ ] 3.3 Проверка build-time: при отсутствии `target/site` сборка `bsl-agent` завершается ошибкой с ожидаемым сообщением (CI/скрипт).
+- [x] 3.3 Проверка build-time: при отсутствии `target/site` сборка `bsl-agent` завершается ошибкой с ожидаемым сообщением (CI/скрипт).
 
 ## 4. Документация
 - [x] 4.1 Обновить `bsl-agent/README.md`: UI работает без внешней статики; `BSL_AGENT_HTTP_STATIC_DIR` используется для override/разработки.

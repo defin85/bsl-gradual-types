@@ -51,6 +51,36 @@ pub enum HttpUiStaticSource {
 #[serde(rename_all = "camelCase")]
 struct DepsMetaQuery {
     #[serde(default)]
+    #[serde(rename = "sessionId")]
+    session_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TypesQuery {
+    page: Option<usize>,
+    limit: Option<usize>,
+    #[serde(default)]
+    category: Vec<String>,
+    #[serde(default)]
+    certainty_level: Vec<String>,
+    flow_sensitive_only: Option<bool>,
+    #[serde(default)]
+    #[serde(rename = "sessionId")]
+    session_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchQuery {
+    q: String,
+    #[serde(default)]
+    #[serde(rename = "sessionId")]
+    session_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MetricsQuery {
+    #[serde(default)]
+    #[serde(rename = "sessionId")]
     session_id: Option<String>,
 }
 
@@ -140,6 +170,68 @@ async fn get_mcp_deps_meta(
     }
 }
 
+async fn get_mcp_types(
+    Query(query): Query<TypesQuery>,
+    State(state): State<HttpUiState>,
+) -> impl IntoResponse {
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = query.limit.unwrap_or(50).clamp(1, 1000);
+    let offset = (page - 1) * limit;
+
+    match state
+        .session_manager
+        .http_parity_types(
+            query.session_id.as_deref(),
+            limit,
+            offset,
+            query.category,
+            query.certainty_level,
+            query.flow_sensitive_only.unwrap_or(false),
+        )
+        .await
+    {
+        Ok(dto) => Json(dto).into_response(),
+        Err(err) => {
+            let (status, msg) = map_rmcp_error(err);
+            json_error(status, msg).into_response()
+        }
+    }
+}
+
+async fn get_mcp_search(
+    Query(query): Query<SearchQuery>,
+    State(state): State<HttpUiState>,
+) -> impl IntoResponse {
+    match state
+        .session_manager
+        .http_parity_search(query.session_id.as_deref(), query.q.as_str())
+        .await
+    {
+        Ok(dto) => Json(dto).into_response(),
+        Err(err) => {
+            let (status, msg) = map_rmcp_error(err);
+            json_error(status, msg).into_response()
+        }
+    }
+}
+
+async fn get_mcp_metrics(
+    Query(query): Query<MetricsQuery>,
+    State(state): State<HttpUiState>,
+) -> impl IntoResponse {
+    match state
+        .session_manager
+        .http_parity_metrics(query.session_id.as_deref())
+        .await
+    {
+        Ok(dto) => Json(dto).into_response(),
+        Err(err) => {
+            let (status, msg) = map_rmcp_error(err);
+            json_error(status, msg).into_response()
+        }
+    }
+}
+
 fn serve_embedded_response(path: &str) -> Option<Response> {
     let file = EMBEDDED_SITE.get_file(path)?;
     let mut headers = HeaderMap::new();
@@ -207,6 +299,9 @@ fn router(state: HttpUiState, static_source: HttpUiStaticSource) -> Router {
         .route("/api/mcp/jobs", get(get_mcp_jobs))
         .route("/api/mcp/jobs/:job_id", get(get_mcp_job))
         .route("/api/mcp/deps/meta", get(get_mcp_deps_meta))
+        .route("/api/mcp/types", get(get_mcp_types))
+        .route("/api/mcp/search", get(get_mcp_search))
+        .route("/api/mcp/metrics", get(get_mcp_metrics))
         .with_state(state)
         .layer(SetResponseHeaderLayer::overriding(
             x_frame_options,

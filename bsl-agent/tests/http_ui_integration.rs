@@ -2,7 +2,8 @@ use bsl_agent::http_ui::start_http_ui;
 use bsl_agent::jobs::JobManager;
 use bsl_agent::session::SessionManager;
 use bsl_shared::api::{
-    McpBackendModeDto, McpJobsResponseDto, McpSessionsResponseDto, McpStatusDto,
+    AnalysisResultDto, McpBackendModeDto, McpJobsResponseDto, McpSessionsResponseDto, McpStatusDto,
+    MetricsDto,
 };
 use reqwest::Method;
 use std::net::SocketAddr;
@@ -96,6 +97,9 @@ async fn http_ui_serves_spa_and_readonly_api() {
         "/api/mcp/jobs/00000000-0000-0000-0000-000000000000",
         "/api/mcp/deps/meta",
         "/api/mcp/deps/meta?sessionId=00000000-0000-0000-0000-000000000000",
+        "/api/mcp/types",
+        "/api/mcp/search?q=Test",
+        "/api/mcp/metrics",
     ];
     let methods = [Method::POST, Method::PUT, Method::PATCH, Method::DELETE];
 
@@ -159,6 +163,65 @@ async fn http_ui_serves_embedded_spa_by_default() {
         .expect("parse json");
     assert_eq!(status.instance_id.as_deref(), Some("test-instance"));
     assert_eq!(status.ui_url.as_deref(), Some(handle.ui_url.as_str()));
+
+    handle.task.abort();
+}
+
+#[tokio::test]
+async fn http_ui_parity_endpoints_require_ready_session() {
+    let session_manager = Arc::new(SessionManager::new());
+    let job_manager = Arc::new(JobManager::new_in_memory());
+
+    let handle = start_http_ui(
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+        None,
+        "test-instance".to_string(),
+        Some("/tmp/bsl-cache-test".to_string()),
+        session_manager,
+        job_manager,
+    )
+    .await
+    .expect("start http ui");
+
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .get(format!("{}/api/mcp/types?page=1&limit=50", handle.ui_url))
+        .send()
+        .await
+        .expect("GET /api/mcp/types");
+    assert_eq!(resp.status().as_u16(), 400);
+
+    let resp = client
+        .get(format!(
+            "{}/api/mcp/types?page=1&limit=50&sessionId=00000000-0000-0000-0000-000000000000",
+            handle.ui_url
+        ))
+        .send()
+        .await
+        .expect("GET /api/mcp/types with sessionId");
+    assert_eq!(resp.status().as_u16(), 400);
+
+    let resp = client
+        .get(format!("{}/api/mcp/search?q=Test", handle.ui_url))
+        .send()
+        .await
+        .expect("GET /api/mcp/search");
+    assert_eq!(resp.status().as_u16(), 400);
+
+    let resp = client
+        .get(format!("{}/api/mcp/metrics", handle.ui_url))
+        .send()
+        .await
+        .expect("GET /api/mcp/metrics");
+    assert_eq!(resp.status().as_u16(), 400);
+
+    // Sanity check: responses are JSON (error object).
+    let _error_json: serde_json::Value = resp.json().await.expect("parse error json");
+
+    // Ensure types/search/metrics decode when success (compile-time check of DTOs).
+    let _ = std::mem::size_of::<AnalysisResultDto>();
+    let _ = std::mem::size_of::<MetricsDto>();
 
     handle.task.abort();
 }

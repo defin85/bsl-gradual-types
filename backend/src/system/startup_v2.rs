@@ -71,7 +71,10 @@ impl StartupInputs {
     }
 
     pub fn normalize(self) -> Result<Self, StartupError> {
-        let syntax_helper_path = self.syntax_helper_path.map(normalize_path_best_effort);
+        let syntax_helper_path = self
+            .syntax_helper_path
+            .map(normalize_path_best_effort)
+            .map(normalize_syntax_helper_root_best_effort);
 
         let configuration_path = self
             .configuration_path
@@ -196,6 +199,25 @@ fn normalize_path_best_effort(path: PathBuf) -> PathBuf {
     std::fs::canonicalize(&path).unwrap_or(path)
 }
 
+fn normalize_syntax_helper_root_best_effort(path: PathBuf) -> PathBuf {
+    // `platform_docs_archive` in external tools (MCP/LSP) is allowed to be either:
+    // - a directory containing extracted docs (rebuilt.shcntx_ru, rebuilt.shlang_ru), OR
+    // - a file path to a .hbk archive (typically one of shcntx_*.hbk or shlang_*.hbk).
+    //
+    // The system coordinator expects a DIRECTORY root (it scans for *.hbk inside).
+    // For best UX, if a file is provided, we treat its parent directory as the root.
+    match std::fs::metadata(&path) {
+        Ok(meta) if meta.is_file() => match path.extension().and_then(|e| e.to_str()) {
+            Some("hbk") | Some("zip") => path
+                .parent()
+                .map(PathBuf::from)
+                .unwrap_or(path),
+            _ => path,
+        },
+        _ => path,
+    }
+}
+
 fn normalize_configuration_root(path: PathBuf) -> PathBuf {
     if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
         if name.eq_ignore_ascii_case("Configuration.xml") {
@@ -211,6 +233,22 @@ mod tests {
 
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn startup_inputs_normalize_maps_hbk_file_to_parent_dir() {
+        let dir = TempDir::new().expect("tempdir");
+        let file = dir.path().join("shcntx_ru.hbk");
+        fs::write(&file, "dummy").expect("write dummy hbk");
+
+        let inputs = StartupInputs {
+            syntax_helper_path: Some(file),
+            ..Default::default()
+        }
+        .normalize()
+        .expect("normalize");
+
+        assert_eq!(inputs.syntax_helper_path.as_deref(), Some(dir.path()));
+    }
 
     #[test]
     fn startup_inputs_normalize_rejects_missing_platform_version_for_config() {

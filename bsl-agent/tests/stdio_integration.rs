@@ -5,7 +5,7 @@ use bsl_agent::types::{
     JobStateDto, JobStatusResponse, UiUrlResponse, WorkspaceDocumentsSetResponse,
     WorkspaceListResponse, WorkspaceOpenResponse, WorkspaceStatusResponse,
 };
-use bsl_shared::api::dtos::{AnalysisResultDto, MetricsDto};
+use bsl_shared::api::dtos::{AnalysisResultDto, MetricsDto, SnapshotMetaDto};
 use rmcp::model::CallToolRequestParam;
 use rmcp::service::RunningService;
 use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
@@ -742,12 +742,16 @@ async fn stdio_workspace_open_accepts_platform_docs_file() {
     let service = spawn_agent(&[]).await;
     let temp_root = tempfile::TempDir::new().expect("root");
 
-    let platform_docs = repo_root()
-        .join("examples")
-        .join("syntax_helper")
-        .join("shcntx_ru.hbk")
-        .canonicalize()
-        .expect("platform docs fixture");
+    // Avoid writing extracted docs into the repo during tests: copy fixtures to a temp dir.
+    // Use the smaller language HBK here, since this test only checks that file paths are accepted.
+    let docs_dir = tempfile::TempDir::new().expect("docs_dir");
+    let fixture_dir = repo_root().join("examples").join("syntax_helper");
+    std::fs::copy(
+        fixture_dir.join("shlang_ru.hbk"),
+        docs_dir.path().join("shlang_ru.hbk"),
+    )
+    .expect("copy shlang_ru.hbk");
+    let platform_docs = docs_dir.path().join("shlang_ru.hbk");
 
     let open: WorkspaceOpenResponse = call_tool(
         &service,
@@ -768,6 +772,87 @@ async fn stdio_workspace_open_accepts_platform_docs_file() {
         json!({ "session_id": &open.session_id }),
     )
     .await;
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_platform_docs_file_loads_platform_types_via_parent_dir() {
+    let cache_dir = tempfile::TempDir::new().expect("tempdir");
+    let static_dir = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        static_dir.path().join("index.html"),
+        "<!doctype html><html><body>MCP UI platform docs test</body></html>",
+    )
+    .expect("write index.html");
+
+    let service = spawn_agent(&[
+        ("BSL_CACHE_DIR", cache_dir.path().to_string_lossy().as_ref()),
+        ("BSL_AGENT_HTTP_ADDR", "127.0.0.1:0"),
+        (
+            "BSL_AGENT_HTTP_STATIC_DIR",
+            static_dir.path().to_string_lossy().as_ref(),
+        ),
+    ])
+    .await;
+
+    let root = tempfile::TempDir::new().expect("root");
+    std::fs::create_dir_all(root.path().join("src")).expect("mkdir");
+
+    // Copy both HBK files into a temp folder to avoid extracting large docs into the repo during tests.
+    let docs_dir = tempfile::TempDir::new().expect("docs_dir");
+    let fixture_dir = repo_root().join("examples").join("syntax_helper");
+    std::fs::copy(
+        fixture_dir.join("shcntx_ru.hbk"),
+        docs_dir.path().join("shcntx_ru.hbk"),
+    )
+    .expect("copy shcntx_ru.hbk");
+    std::fs::copy(
+        fixture_dir.join("shlang_ru.hbk"),
+        docs_dir.path().join("shlang_ru.hbk"),
+    )
+    .expect("copy shlang_ru.hbk");
+
+    let platform_docs_file = docs_dir.path().join("shcntx_ru.hbk");
+    let platform_docs_dir = docs_dir.path().to_path_buf();
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [root.path().to_string_lossy()],
+            "platform_docs_archive": platform_docs_file.to_string_lossy(),
+            "platform_version": "8.3.25"
+        }),
+    )
+    .await;
+
+    let _ = wait_workspace_ready(&service, &open).await;
+
+    let resp: UiUrlResponse = call_tool(&service, "ui_url", json!({})).await;
+    let url = resp.ui_url.expect("ui_url");
+
+    let client = reqwest::Client::new();
+    let meta: SnapshotMetaDto = client
+        .get(format!("{url}/api/mcp/deps/meta"))
+        .send()
+        .await
+        .expect("GET /api/mcp/deps/meta")
+        .error_for_status()
+        .expect("200 /api/mcp/deps/meta")
+        .json()
+        .await
+        .expect("parse SnapshotMetaDto");
+
+    assert_eq!(
+        meta.inputs.syntax_helper_path.as_deref(),
+        Some(platform_docs_dir.to_string_lossy().as_ref())
+    );
+    assert!(
+        meta.repository_stats.platform_types > 500,
+        "expected platform types from syntax helper; got platform_types={}",
+        meta.repository_stats.platform_types
+    );
 
     let _ = service.cancel().await;
 }

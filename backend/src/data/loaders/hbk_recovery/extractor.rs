@@ -1,10 +1,10 @@
 //! Модуль для извлечения и распаковки ZIP архивов
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use flate2::read::DeflateDecoder;
 use std::fs::{self, File};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Component, Path};
 use tracing::{debug, info, warn};
 
 use crate::data::loaders::progress::ProgressUpdateType;
@@ -67,9 +67,18 @@ pub fn unpack_zip_with_progress<F>(
     progress_callback: Option<F>,
 ) -> Result<()>
 where
-    F: Fn(ProgressUpdateType),
+    F: Fn(ProgressUpdateType) + Clone,
 {
-    let mut data = repair_zip_offsets_if_needed(zip_path)?;
+    let mut data = match repair_zip_offsets_if_needed(zip_path) {
+        Ok(data) => data,
+        Err(err) => {
+            warn!(
+                "⚠️ Не удалось восстановить EOCD/offsets для {:?}: {}. Продолжаем с raw bytes...",
+                zip_path, err
+            );
+            fs::read(zip_path).context(format!("Не удалось прочитать ZIP: {:?}", zip_path))?
+        }
+    };
 
     debug!("📂 Распаковываем ZIP {:?} → {:?}", zip_path, target_dir);
 
@@ -98,15 +107,57 @@ where
                     if let Err(err) = fs::write(zip_path, &data) {
                         warn!("⚠️ Не удалось сохранить реконструированный ZIP: {}", err);
                     }
-                    return unpack_zip_fallback(&data, zip_path, target_dir, progress_callback)
-                        .context("Не удалось прочитать ZIP архив");
+                    let extracted = match unpack_zip_fallback(
+                        &data,
+                        zip_path,
+                        target_dir,
+                        progress_callback.clone(),
+                    ) {
+                        Ok(count) => count,
+                        Err(err) => {
+                            warn!("⚠️ Fallback распаковка не удалась: {}", err);
+                            0
+                        }
+                    };
+                    if extracted > 0 {
+                        return Ok(());
+                    }
                 }
                 Err(err) => {
                     warn!("⚠️ Не удалось восстановить ZIP: {}", err);
-                    return unpack_zip_fallback(&data, zip_path, target_dir, progress_callback)
-                        .context("Не удалось прочитать ZIP архив");
+                    let extracted = match unpack_zip_fallback(
+                        &data,
+                        zip_path,
+                        target_dir,
+                        progress_callback.clone(),
+                    ) {
+                        Ok(count) => count,
+                        Err(err) => {
+                            warn!("⚠️ Fallback распаковка не удалась: {}", err);
+                            0
+                        }
+                    };
+                    if extracted > 0 {
+                        return Ok(());
+                    }
                 }
             }
+            // Last-resort: ignore central directory entirely and extract by scanning local file
+            // headers. This is needed for some real-world 1C HBK/ZIP variants where EOCD/CD is
+            // present but points to an invalid/partial central directory.
+            let extracted = unpack_zip_scan_local_headers(
+                &data,
+                zip_path,
+                target_dir,
+                progress_callback,
+            )
+            .context("Не удалось распаковать ZIP через сканирование local headers")?;
+            if extracted == 0 {
+                return Err(anyhow!(
+                    "Не удалось распаковать ZIP: fallback и scan extracted 0 files"
+                ));
+            }
+            return Ok(());
         }
     };
 
@@ -195,7 +246,7 @@ fn unpack_zip_fallback<F>(
     zip_path: &Path,
     target_dir: &Path,
     progress_callback: Option<F>,
-) -> Result<()>
+) -> Result<usize>
 where
     F: Fn(ProgressUpdateType),
 {
@@ -309,7 +360,133 @@ where
         extracted, total_files
     );
 
-    Ok(())
+    Ok(extracted)
+}
+
+fn unpack_zip_scan_local_headers<F>(
+    data: &[u8],
+    zip_path: &Path,
+    target_dir: &Path,
+    progress_callback: Option<F>,
+) -> Result<usize>
+where
+    F: Fn(ProgressUpdateType),
+{
+    const LFH_SIGNATURE: u32 = 0x04034b50;
+
+    let file_name = zip_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let mut extracted = 0usize;
+    let mut pos = 0usize;
+
+    while pos + 4 <= data.len() {
+        let Some(sig_pos) = find_signature_from(data, LFH_SIGNATURE, pos) else {
+            break;
+        };
+        pos = sig_pos;
+        if pos + 30 > data.len() {
+            break;
+        }
+        if read_u32_le(data, pos) != LFH_SIGNATURE {
+            pos = pos.saturating_add(1);
+            continue;
+        }
+
+        let flags = read_u16_le(data, pos + 6);
+        if (flags & 0x08) != 0 {
+            // Data descriptor mode would require parsing post-data descriptors to find the next
+            // header reliably. We don't currently need it for 1C docs fixtures.
+            return Err(anyhow!("ZIP data descriptor is not supported in scan fallback"));
+        }
+
+        let compression = read_u16_le(data, pos + 8);
+        let compressed_size = read_u32_le(data, pos + 18) as usize;
+        let name_len = read_u16_le(data, pos + 26) as usize;
+        let extra_len = read_u16_le(data, pos + 28) as usize;
+
+        let name_start = pos + 30;
+        let name_end = name_start.saturating_add(name_len);
+        if name_end > data.len() {
+            break;
+        }
+
+        // Normalize path separators to handle Windows-style entries.
+        let raw_name = String::from_utf8_lossy(&data[name_start..name_end]);
+        let name = raw_name.replace('\\', "/");
+
+        let data_start = name_end.saturating_add(extra_len);
+        let data_end = data_start.saturating_add(compressed_size);
+        if data_start > data.len() || data_end > data.len() {
+            break;
+        }
+
+        let is_dir = name.ends_with('/');
+        let rel = Path::new(name.as_str());
+        if rel.components().any(|c| {
+            matches!(
+                c,
+                Component::Prefix(_) | Component::RootDir | Component::ParentDir
+            )
+        }) {
+            // Skip unsafe paths (zip-slip).
+            pos = data_end;
+            continue;
+        }
+        let file_path = target_dir.join(rel);
+
+        let write_result = (|| -> Result<()> {
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent)
+                    .context(format!("Не удалось создать директорию: {:?}", parent))?;
+            }
+            if is_dir {
+                fs::create_dir_all(&file_path)
+                    .context(format!("Не удалось создать директорию: {:?}", file_path))?;
+                return Ok(());
+            }
+
+            let mut output = Vec::new();
+            match compression {
+                0 => output.extend_from_slice(&data[data_start..data_end]),
+                8 => {
+                    let mut decoder = DeflateDecoder::new(&data[data_start..data_end]);
+                    decoder
+                        .read_to_end(&mut output)
+                        .context("deflate decode")?;
+                }
+                _ => return Ok(()), // skip unsupported compression
+            }
+
+            let mut outfile = File::create(&file_path)
+                .context(format!("Не удалось создать файл: {:?}", file_path))?;
+            outfile
+                .write_all(&output)
+                .context(format!("Ошибка записи файла: {:?}", file_path))?;
+            Ok(())
+        })();
+
+        if write_result.is_ok() {
+            extracted += 1;
+            if extracted.is_multiple_of(100) {
+                if let Some(ref callback) = progress_callback {
+                    callback(ProgressUpdateType::hbk_extraction(
+                        file_name.clone(),
+                        extracted,
+                        extracted + 1,
+                    ));
+                }
+            }
+        }
+
+        pos = data_end;
+    }
+
+    info!("✅ ZIP распакован через scan fallback: {} файлов", extracted);
+    Ok(extracted)
 }
 
 fn reconstruct_zip_from_central_directory(data: &[u8]) -> Result<RebuiltZip> {
@@ -605,6 +782,16 @@ fn find_eocd(data: &[u8]) -> Option<usize> {
 
 fn find_signature(data: &[u8], signature: u32) -> Option<usize> {
     data.windows(4).position(|w| read_u32_le(w, 0) == signature)
+}
+
+fn find_signature_from(data: &[u8], signature: u32, start: usize) -> Option<usize> {
+    if start >= data.len() {
+        return None;
+    }
+    data[start..]
+        .windows(4)
+        .position(|w| read_u32_le(w, 0) == signature)
+        .map(|idx| start + idx)
 }
 
 fn find_signature_before(data: &[u8], signature: u32, end: usize) -> Option<usize> {

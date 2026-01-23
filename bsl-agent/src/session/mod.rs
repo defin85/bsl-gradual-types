@@ -2349,6 +2349,15 @@ fn normalize_workspace_scope(scope: WorkspaceScope) -> Result<WorkspaceScopeTagg
 fn infer_platform_version_from_config_dump(
     configuration_path: &Path,
 ) -> Result<String, rmcp::ErrorData> {
+    fn inference_error(message: impl std::fmt::Display) -> rmcp::ErrorData {
+        rmcp::ErrorData::invalid_params(
+            format!(
+                "cannot infer platform_version from configuration_path: {message}; provide platform_version explicitly (e.g. 8.3.25)"
+            ),
+            None,
+        )
+    }
+
     fn parse_triplet(raw: &str) -> Option<(u32, u32, u32)> {
         let trimmed = raw.trim();
         let without_prefix = trimmed.strip_prefix("Version").unwrap_or(trimmed);
@@ -2364,35 +2373,28 @@ fn infer_platform_version_from_config_dump(
     }
 
     let discovery = ConfigurationDiscovery::new(configuration_path.to_path_buf(), false);
-    let configs = discovery.discover_all_configurations().map_err(|err| {
-        rmcp::ErrorData::invalid_params(
-            format!("failed to discover configurations for platform_version inference: {err}"),
-            None,
-        )
-    })?;
+    let configs = discovery
+        .discover_all_configurations()
+        .map_err(|err| inference_error(format!("failed to discover configurations: {err}")))?;
     if configs.is_empty() {
-        return Err(rmcp::ErrorData::invalid_params(
-            "no configurations found for platform_version inference (missing Configuration.xml?)",
-            None,
+        return Err(inference_error(
+            "no configurations found (missing Configuration.xml?)",
         ));
     }
 
     let mut best: Option<(u32, u32, u32)> = None;
     for config in configs {
         let raw_mode = config.compatibility_mode.as_deref().ok_or_else(|| {
-            rmcp::ErrorData::invalid_params(
-                format!("CompatibilityMode is missing for configuration {}", config.name),
-                None,
-            )
+            inference_error(format!(
+                "CompatibilityMode is missing for configuration {}",
+                config.name
+            ))
         })?;
         let parsed = parse_triplet(raw_mode).ok_or_else(|| {
-            rmcp::ErrorData::invalid_params(
-                format!(
-                    "invalid CompatibilityMode '{}' for configuration {}",
-                    raw_mode, config.name
-                ),
-                None,
-            )
+            inference_error(format!(
+                "invalid CompatibilityMode '{}' for configuration {}",
+                raw_mode, config.name
+            ))
         })?;
         best = Some(best.map_or(parsed, |current| current.max(parsed)));
     }
@@ -2403,9 +2405,11 @@ fn infer_platform_version_from_config_dump(
 
 fn workspace_warnings(settings: &WorkspaceSettings) -> Vec<String> {
     let mut warnings = Vec::new();
-    if settings.platform_docs_archive.is_none() && settings.platform_version.is_some() {
-        warnings
-            .push("platform_version provided without platform_docs_archive; ignored".to_string());
+    if settings.platform_docs_archive.is_none()
+        && settings.configuration_path.is_none()
+        && settings.platform_version.is_some()
+    {
+        warnings.push("platform_version has no effect without platform_docs_archive".to_string());
     }
     if let Some(mode) = settings.mode.as_deref() {
         if !mode.is_empty() && !mode.eq_ignore_ascii_case("progressive") {
@@ -3443,6 +3447,37 @@ mod tests {
         let inferred =
             infer_platform_version_from_config_dump(temp.path()).expect("infer platform_version");
         assert_eq!(inferred, "8.3.25");
+    }
+
+    #[test]
+    fn infer_platform_version_from_config_dump_failure_mentions_platform_version() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+
+        let err = infer_platform_version_from_config_dump(temp.path()).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("platform_version"));
+        assert!(message.contains("provide platform_version"));
+    }
+
+    #[test]
+    fn infer_platform_version_from_config_dump_missing_compatibility_mode_mentions_platform_version() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+
+        std::fs::write(
+            temp.path().join("Configuration.xml"),
+            r#"<Configuration uuid="00000000-0000-0000-0000-000000000000">
+  <Properties>
+    <Name>Base</Name>
+  </Properties>
+</Configuration>
+"#,
+        )
+        .expect("write Configuration.xml");
+
+        let err = infer_platform_version_from_config_dump(temp.path()).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("platform_version"));
+        assert!(message.contains("provide platform_version"));
     }
 
     #[test]

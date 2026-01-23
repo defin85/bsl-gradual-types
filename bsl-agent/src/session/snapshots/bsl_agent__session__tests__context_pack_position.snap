@@ -1,10 +1,11 @@
 ---
 source: bsl-agent/src/session/mod.rs
+assertion_line: 3379
 expression: snapshot_value
 ---
 {
   "analysis_revision": 1,
-  "completeness": "partial",
+  "completeness": "full",
   "items": [
     {
       "file": {
@@ -26,11 +27,8 @@ expression: snapshot_value
       "summary": "Snippet around src/CommonModules/Foo/Module.bsl:2"
     }
   ],
-  "missing_inputs": [
-    "platform_docs_archive",
-    "configuration_path"
-  ],
+  "missing_inputs": [],
   "pack_id": "<pack_id>",
-  "text": "bsl-agent context_pack\ngoal: Test pack\nanalysis_revision: 1\ncompleteness: partial\nmissing_inputs: platform_docs_archive, configuration_path\n\nfocus: position src/CommonModules/Foo/Module.bsl:2:5\n\n```bsl\n     1 | Procedure Test()\n>    2 |     A = 1;\n     3 | EndProcedure\n```\n\ntype_at_position: Число\n\n",
+  "text": "bsl-agent context_pack\ngoal: Test pack\nanalysis_revision: 1\ncompleteness: full\n\nfocus: position src/CommonModules/Foo/Module.bsl:2:5\n\n```bsl\n     1 | Procedure Test()\n>    2 |     A = 1;\n     3 | EndProcedure\n```\n\ntype_at_position: Число\n\n",
   "truncated": false
 }

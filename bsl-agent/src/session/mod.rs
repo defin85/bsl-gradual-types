@@ -5,6 +5,7 @@ use std::sync::Arc;
 use bsl_analysis_v2::{AnalysisHostV2, Change, FileId};
 use bsl_backend::application::type_system::web_api_service;
 use bsl_backend::application::TypeInferenceService;
+use bsl_backend::data::loaders::ConfigurationDiscovery;
 use bsl_backend::data::loaders::progress::ProgressUpdate;
 use bsl_shared::api::dtos::{
     AnalysisResultDto, McpRootDto, McpSessionDto, MetricsDto, SnapshotInputsDto, SnapshotMetaDto,
@@ -25,7 +26,8 @@ use crate::semantic::sort;
 use crate::server::types::{
     BslDefinitionParams, BslDiagnosticsParams, BslMembersParams, BslReferencesParams,
     BslSymbolSearchParams, BslTypeAtPositionParams, ContextExpandParams, ContextFocus,
-    ContextPackParams, DocumentRef, FileRef, WorkspaceOpenParams, WorkspaceScope,
+    CanonicalDocumentRef, ContextPackParams, DocumentRef, FileRef, WorkspaceDocumentsSetFile,
+    WorkspaceOpenParams, WorkspaceScope, WorkspaceScopeTagged,
 };
 use crate::types::{
     BslDefinitionResponse, BslDiagnosticsResponse, BslMembersResponse, BslReferencesResponse,
@@ -249,12 +251,28 @@ impl SessionManager {
                 params.platform_docs_archive,
                 "platform_docs_archive",
             )?,
-            platform_version: params.platform_version,
+            platform_version: params.platform_version.and_then(|value| {
+                let trimmed = value.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            }),
             configuration_path: Self::normalize_optional_path(
                 params.configuration_path,
                 "configuration_path",
             )?,
-            mode: params.mode,
+            mode: normalize_mode(params.mode),
+        };
+        let settings = {
+            let mut settings = settings;
+            if settings.configuration_path.is_some() && settings.platform_version.is_none() {
+                let inferred = infer_platform_version_from_config_dump(
+                    settings
+                        .configuration_path
+                        .as_deref()
+                        .expect("configuration_path is_some"),
+                )?;
+                settings.platform_version = Some(inferred);
+            }
+            settings
         };
         let missing_inputs = workspace_missing_inputs(&settings);
         let warnings = workspace_warnings(&settings);
@@ -305,7 +323,7 @@ impl SessionManager {
             let session = sessions
                 .get(&session_id)
                 .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
-            workspace_settings_for_startup(&session.settings)
+            session.settings.clone()
         };
 
         let session_manager = Arc::clone(self);
@@ -661,12 +679,28 @@ impl SessionManager {
                 persisted.platform_docs_archive,
                 "platform_docs_archive",
             )?,
-            platform_version: persisted.platform_version,
+            platform_version: persisted.platform_version.and_then(|value| {
+                let trimmed = value.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            }),
             configuration_path: Self::normalize_optional_path(
                 persisted.configuration_path,
                 "configuration_path",
             )?,
-            mode: persisted.mode,
+            mode: normalize_mode(persisted.mode),
+        };
+        let settings = {
+            let mut settings = settings;
+            if settings.configuration_path.is_some() && settings.platform_version.is_none() {
+                let inferred = infer_platform_version_from_config_dump(
+                    settings
+                        .configuration_path
+                        .as_deref()
+                        .expect("configuration_path is_some"),
+                )?;
+                settings.platform_version = Some(inferred);
+            }
+            settings
         };
 
         let missing_inputs = workspace_missing_inputs(&settings);
@@ -694,7 +728,7 @@ impl SessionManager {
             let session = sessions
                 .get(&uuid)
                 .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
-            workspace_settings_for_startup(&session.settings)
+            session.settings.clone()
         };
 
         let session_manager = Arc::clone(self);
@@ -762,7 +796,8 @@ impl SessionManager {
             return;
         }
         session.startup_phase = phase;
-        session.startup_progress = session.startup_progress.max(percent.min(100));
+        let percent = percent.min(99);
+        session.startup_progress = session.startup_progress.max(percent);
     }
 
     async fn set_startup_result(
@@ -836,7 +871,7 @@ impl SessionManager {
     pub async fn documents_set(
         &self,
         session_id: &str,
-        files: &[FileRef],
+        files: &[WorkspaceDocumentsSetFile],
         mark_hot: bool,
     ) -> Result<WorkspaceDocumentsSetResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(session_id)?;
@@ -848,29 +883,46 @@ impl SessionManager {
 
         let mut changed = false;
         for file in files {
-            let key = session.document_key(&file.doc)?;
-            if let Some(text) = &file.text {
-                if file.version.is_none() {
-                    return Err(rmcp::ErrorData::invalid_params(
-                        "version is required when text is provided",
-                        None,
-                    ));
+            let mut apply = |doc: &DocumentRef,
+                             text: Option<&String>,
+                             version: Option<u64>|
+             -> Result<(), rmcp::ErrorData> {
+                let key = session.document_key(doc)?;
+                if let Some(text) = text {
+                    let Some(version) = version else {
+                        return Err(rmcp::ErrorData::invalid_params(
+                            "version is required when text is provided",
+                            None,
+                        ));
+                    };
+                    if text.len() > MAX_OVERLAY_BYTES {
+                        return Err(rmcp::ErrorData::invalid_params(
+                            format!("overlay text exceeds MAX_OVERLAY_BYTES={MAX_OVERLAY_BYTES}"),
+                            None,
+                        ));
+                    }
+                    let overlay = DocumentOverlay {
+                        text: text.clone(),
+                        version,
+                    };
+                    changed |= session.documents.set_overlay(key.clone(), overlay);
                 }
-                if text.len() > MAX_OVERLAY_BYTES {
-                    return Err(rmcp::ErrorData::invalid_params(
-                        format!("overlay text exceeds MAX_OVERLAY_BYTES={MAX_OVERLAY_BYTES}"),
-                        None,
-                    ));
-                }
-                let overlay = DocumentOverlay {
-                    text: text.clone(),
-                    version: file.version.unwrap_or(0),
-                };
-                changed |= session.documents.set_overlay(key.clone(), overlay);
-            }
 
-            if mark_hot {
-                changed |= session.documents.mark_hot(key);
+                if mark_hot {
+                    changed |= session.documents.mark_hot(key);
+                }
+                Ok(())
+            };
+
+            match file {
+                WorkspaceDocumentsSetFile::File(file) => {
+                    apply(&file.doc, file.text.as_ref(), file.version)?
+                }
+                WorkspaceDocumentsSetFile::Document(doc) => apply(doc, None, None)?,
+                WorkspaceDocumentsSetFile::Path(path) => {
+                    let doc = DocumentRef::Path(path.clone());
+                    apply(&doc, None, None)?
+                }
             }
         }
 
@@ -957,7 +1009,8 @@ impl SessionManager {
             )
         };
 
-        let files = collect_scope_files(&roots, &hot_set, params.scope)?;
+        let scope = normalize_workspace_scope(params.scope)?;
+        let files = collect_scope_files(&roots, &hot_set, scope)?;
         let facade = SemanticFacade;
         let mut diagnostics = Vec::new();
         let mut truncated = false;
@@ -1705,7 +1758,11 @@ impl SessionManager {
         };
 
         let goal = params.goal.unwrap_or_default();
-        let scope = params.scope.unwrap_or(WorkspaceScope::Hot);
+        let scope = normalize_workspace_scope(
+            params
+                .scope
+                .unwrap_or(WorkspaceScope::Tagged(WorkspaceScopeTagged::Hot)),
+        )?;
         let include_key = include_fingerprint(&params.include);
         let scope_key = scope_key_for_pack(&roots, &scope)?;
         let focus_key = match params.focus.as_ref() {
@@ -1839,7 +1896,7 @@ impl SessionManager {
                 let diagnostics = self
                     .bsl_diagnostics(BslDiagnosticsParams {
                         session_id: params.session_id.clone(),
-                        scope: scope.clone(),
+                        scope: WorkspaceScope::Tagged(scope.clone()),
                         limit: 500,
                         include_impact: false,
                         include_coverage: false,
@@ -1854,10 +1911,10 @@ impl SessionManager {
                     })?;
 
                 if params.include.snippets {
-                    let doc = DocumentRef {
+                    let doc = DocumentRef::Canonical(CanonicalDocumentRef {
                         root_id: diagnostic.file.root_id.clone(),
                         path: diagnostic.file.path.clone(),
-                    };
+                    });
                     let file_key = document_key_from_ref(&roots, &doc)?;
                     let (root_path, abs_path, file_ref) = resolve_doc_path(&roots, &file_key)?;
                     let file = FileRef {
@@ -1932,10 +1989,10 @@ impl SessionManager {
                 text.push_line("");
 
                 if params.include.snippets {
-                    let doc = DocumentRef {
+                    let doc = DocumentRef::Canonical(CanonicalDocumentRef {
                         root_id: symbol.file.root_id.clone(),
                         path: symbol.file.path.clone(),
-                    };
+                    });
                     let file_key = document_key_from_ref(&roots, &doc)?;
                     let (root_path, abs_path, file_ref) = resolve_doc_path(&roots, &file_key)?;
                     let file = FileRef {
@@ -2089,10 +2146,10 @@ impl SessionManager {
 
         match item {
             StoredPackItem::Snippet { file, center_line } => {
-                let doc = DocumentRef {
+                let doc = DocumentRef::Canonical(CanonicalDocumentRef {
                     root_id: file.root_id.clone(),
                     path: file.path.clone(),
-                };
+                });
                 let file_key = document_key_from_ref(&roots, &doc)?;
                 let (root_path, abs_path, file_ref) = resolve_doc_path(&roots, &file_key)?;
                 let file = FileRef {
@@ -2134,18 +2191,7 @@ impl Default for SessionManager {
 
 impl WorkspaceSession {
     fn document_key(&self, doc: &DocumentRef) -> Result<DocumentKey, rmcp::ErrorData> {
-        let root = self
-            .roots
-            .iter()
-            .find(|root| root.root_id == doc.root_id)
-            .ok_or_else(|| rmcp::ErrorData::invalid_params("unknown root_id", None))?;
-        let _ = root.path.as_path();
-
-        let normalized_path = normalize_relative_path(&doc.path)?;
-        Ok(DocumentKey {
-            root_id: doc.root_id.clone(),
-            path: normalized_path,
-        })
+        document_key_from_ref(&self.roots, doc)
     }
 }
 
@@ -2264,16 +2310,95 @@ fn normalize_relative_path(path: &str) -> Result<String, rmcp::ErrorData> {
 
 fn workspace_missing_inputs(settings: &WorkspaceSettings) -> Vec<String> {
     let mut missing = Vec::new();
-    if settings.platform_docs_archive.is_none() {
-        missing.push("platform_docs_archive".to_string());
-    }
-    if settings.configuration_path.is_none() {
-        missing.push("configuration_path".to_string());
-    }
     if settings.configuration_path.is_some() && settings.platform_version.is_none() {
         missing.push("platform_version".to_string());
     }
     missing
+}
+
+fn normalize_mode(mode: Option<String>) -> Option<String> {
+    let Some(mode) = mode else {
+        return None;
+    };
+    let trimmed = mode.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn normalize_workspace_scope(scope: WorkspaceScope) -> Result<WorkspaceScopeTagged, rmcp::ErrorData> {
+    match scope {
+        WorkspaceScope::Tagged(value) => Ok(value),
+        WorkspaceScope::Simple(value) => {
+            let trimmed = value.trim();
+            if trimmed.eq_ignore_ascii_case("project") {
+                Ok(WorkspaceScopeTagged::Project)
+            } else if trimmed.eq_ignore_ascii_case("hot") {
+                Ok(WorkspaceScopeTagged::Hot)
+            } else {
+                Err(rmcp::ErrorData::invalid_params(
+                    format!("unknown scope: {trimmed}"),
+                    None,
+                ))
+            }
+        }
+    }
+}
+
+fn infer_platform_version_from_config_dump(
+    configuration_path: &Path,
+) -> Result<String, rmcp::ErrorData> {
+    fn parse_triplet(raw: &str) -> Option<(u32, u32, u32)> {
+        let trimmed = raw.trim();
+        let without_prefix = trimmed.strip_prefix("Version").unwrap_or(trimmed);
+        let normalized = without_prefix.replace('_', ".");
+        let mut parts = normalized.split('.');
+        let major = parts.next()?.parse().ok()?;
+        let minor = parts.next()?.parse().ok()?;
+        let patch = parts.next()?.parse().ok()?;
+        if parts.next().is_some() {
+            return None;
+        }
+        Some((major, minor, patch))
+    }
+
+    let discovery = ConfigurationDiscovery::new(configuration_path.to_path_buf(), false);
+    let configs = discovery.discover_all_configurations().map_err(|err| {
+        rmcp::ErrorData::invalid_params(
+            format!("failed to discover configurations for platform_version inference: {err}"),
+            None,
+        )
+    })?;
+    if configs.is_empty() {
+        return Err(rmcp::ErrorData::invalid_params(
+            "no configurations found for platform_version inference (missing Configuration.xml?)",
+            None,
+        ));
+    }
+
+    let mut best: Option<(u32, u32, u32)> = None;
+    for config in configs {
+        let raw_mode = config.compatibility_mode.as_deref().ok_or_else(|| {
+            rmcp::ErrorData::invalid_params(
+                format!("CompatibilityMode is missing for configuration {}", config.name),
+                None,
+            )
+        })?;
+        let parsed = parse_triplet(raw_mode).ok_or_else(|| {
+            rmcp::ErrorData::invalid_params(
+                format!(
+                    "invalid CompatibilityMode '{}' for configuration {}",
+                    raw_mode, config.name
+                ),
+                None,
+            )
+        })?;
+        best = Some(best.map_or(parsed, |current| current.max(parsed)));
+    }
+
+    let (major, minor, patch) = best.expect("at least one configuration");
+    Ok(format!("{major}.{minor}.{patch}"))
 }
 
 fn workspace_warnings(settings: &WorkspaceSettings) -> Vec<String> {
@@ -2283,23 +2408,11 @@ fn workspace_warnings(settings: &WorkspaceSettings) -> Vec<String> {
             .push("platform_version provided without platform_docs_archive; ignored".to_string());
     }
     if let Some(mode) = settings.mode.as_deref() {
-        if !mode.is_empty() && mode != "progressive" {
+        if !mode.is_empty() && !mode.eq_ignore_ascii_case("progressive") {
             warnings.push(format!("unknown mode: {mode}"));
         }
     }
     warnings
-}
-
-fn workspace_settings_for_startup(settings: &WorkspaceSettings) -> WorkspaceSettings {
-    if settings.configuration_path.is_some() && settings.platform_version.is_none() {
-        return WorkspaceSettings {
-            platform_docs_archive: settings.platform_docs_archive.clone(),
-            platform_version: settings.platform_version.clone(),
-            configuration_path: None,
-            mode: settings.mode.clone(),
-        };
-    }
-    settings.clone()
 }
 
 async fn start_semantic_runtime(
@@ -2438,12 +2551,12 @@ struct DocumentSnapshot {
 fn collect_scope_files(
     roots: &[RootEntry],
     hot_set: &HashSet<DocumentKey>,
-    scope: WorkspaceScope,
+    scope: WorkspaceScopeTagged,
 ) -> Result<Vec<WorkspaceFile>, rmcp::ErrorData> {
     match scope {
-        WorkspaceScope::Project => collect_project_files(roots),
-        WorkspaceScope::Hot => collect_hot_files(roots, hot_set),
-        WorkspaceScope::File { document } => {
+        WorkspaceScopeTagged::Project => collect_project_files(roots),
+        WorkspaceScopeTagged::Hot => collect_hot_files(roots, hot_set),
+        WorkspaceScopeTagged::File { document } => {
             let key = document_key_from_ref(roots, &document)?;
             let (root_path, abs_path, file_ref) = resolve_doc_path(roots, &key)?;
             Ok(vec![WorkspaceFile {
@@ -2608,13 +2721,125 @@ fn document_key_from_ref(
     roots: &[RootEntry],
     doc: &DocumentRef,
 ) -> Result<DocumentKey, rmcp::ErrorData> {
-    if !roots.iter().any(|root| root.root_id == doc.root_id) {
-        return Err(rmcp::ErrorData::invalid_params("unknown root_id", None));
+    fn relative_path_to_slash(rel: &Path) -> Result<String, rmcp::ErrorData> {
+        let mut components = Vec::new();
+        for component in rel.components() {
+            match component {
+                Component::Normal(value) => components.push(value.to_string_lossy().to_string()),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    return Err(rmcp::ErrorData::invalid_params(
+                        "path must not contain '..'",
+                        None,
+                    ))
+                }
+                Component::Prefix(_) | Component::RootDir => {
+                    return Err(rmcp::ErrorData::invalid_params(
+                        "path must be relative",
+                        None,
+                    ))
+                }
+            }
+        }
+        if components.is_empty() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "path must be non-empty",
+                None,
+            ));
+        }
+        Ok(components.join("/"))
     }
-    Ok(DocumentKey {
-        root_id: doc.root_id.clone(),
-        path: normalize_relative_path(&doc.path)?,
-    })
+
+    fn normalize_absolute_path_best_effort(path: &str) -> Result<PathBuf, rmcp::ErrorData> {
+        if path.trim().is_empty() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "path must be non-empty",
+                None,
+            ));
+        }
+        let input = PathBuf::from(path);
+        if !input.is_absolute() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "path must be absolute",
+                None,
+            ));
+        }
+
+        let mut normalized = PathBuf::new();
+        for component in input.components() {
+            match component {
+                Component::Normal(value) => normalized.push(value),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    return Err(rmcp::ErrorData::invalid_params(
+                        "path must not contain '..'",
+                        None,
+                    ))
+                }
+                Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+                Component::RootDir => normalized.push(Path::new("/")),
+            }
+        }
+        if !normalized.is_absolute() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "path must be absolute",
+                None,
+            ));
+        }
+        Ok(normalized)
+    }
+
+    match doc {
+        DocumentRef::Canonical(doc) => {
+            let root_id = doc.root_id.as_str();
+            if !roots.iter().any(|root| root.root_id == root_id) {
+                return Err(rmcp::ErrorData::invalid_params("unknown root_id", None));
+            }
+            Ok(DocumentKey {
+                root_id: doc.root_id.clone(),
+                path: normalize_relative_path(&doc.path)?,
+            })
+        }
+        DocumentRef::PathObject(doc) => {
+            document_key_from_ref(roots, &DocumentRef::Path(doc.path.clone()))
+        }
+        DocumentRef::Path(path) => {
+            let raw = path.as_str();
+            let candidate = PathBuf::from(raw);
+            if candidate.is_absolute() {
+                let abs = normalize_absolute_path_best_effort(raw)?;
+                let mut best: Option<(&RootEntry, usize)> = None;
+                for root in roots {
+                    if abs.starts_with(&root.path) {
+                        let depth = root.path.components().count();
+                        if best.map(|(_, best_depth)| depth > best_depth).unwrap_or(true) {
+                            best = Some((root, depth));
+                        }
+                    }
+                }
+                let (root, _) = best.ok_or_else(|| {
+                    rmcp::ErrorData::invalid_params("path is outside roots", None)
+                })?;
+                let rel = abs.strip_prefix(&root.path).map_err(|_| {
+                    rmcp::ErrorData::invalid_params("path is outside roots", None)
+                })?;
+                Ok(DocumentKey {
+                    root_id: root.root_id.clone(),
+                    path: relative_path_to_slash(rel)?,
+                })
+            } else if roots.len() == 1 {
+                Ok(DocumentKey {
+                    root_id: roots[0].root_id.clone(),
+                    path: normalize_relative_path(raw)?,
+                })
+            } else {
+                Err(rmcp::ErrorData::invalid_params(
+                    "root_id is required for relative paths in multi-root; provide an absolute path instead",
+                    None,
+                ))
+            }
+        }
+    }
 }
 
 fn resolve_doc_path(
@@ -2931,12 +3156,12 @@ fn include_fingerprint(include: &crate::server::types::ContextInclude) -> String
 
 fn scope_key_for_pack(
     roots: &[RootEntry],
-    scope: &WorkspaceScope,
+    scope: &WorkspaceScopeTagged,
 ) -> Result<String, rmcp::ErrorData> {
     match scope {
-        WorkspaceScope::Project => Ok("project".to_string()),
-        WorkspaceScope::Hot => Ok("hot".to_string()),
-        WorkspaceScope::File { document } => {
+        WorkspaceScopeTagged::Project => Ok("project".to_string()),
+        WorkspaceScopeTagged::Hot => Ok("hot".to_string()),
+        WorkspaceScopeTagged::File { document } => {
             let key = document_key_from_ref(roots, document)?;
             let document_id = ids::document_id(&key.root_id, &key.path);
             Ok(format!("file:{document_id}"))
@@ -2968,8 +3193,9 @@ mod tests {
     use super::*;
     use crate::jobs::JobManager;
     use crate::server::types::{
-        ContextExpandParams, ContextFocus, ContextInclude, ContextPackParams, DocumentRef, FileRef,
-        Position, WorkspaceOpenParams, WorkspaceScope,
+        CanonicalDocumentRef, ContextExpandParams, ContextFocus, ContextInclude, ContextPackParams,
+        DocumentRef, FileRef, Position, WorkspaceDocumentsSetFile, WorkspaceOpenParams,
+        WorkspaceScope,
     };
     use crate::types::JobStateDto;
     use std::sync::Arc;
@@ -3012,22 +3238,30 @@ mod tests {
 
         let root_id = open.roots[0].root_id.clone();
         let file = FileRef {
-            doc: DocumentRef {
+            doc: DocumentRef::Canonical(CanonicalDocumentRef {
                 root_id: root_id.clone(),
                 path: "src/CommonModules/Foo/Module.bsl".to_string(),
-            },
+            }),
             text: Some("x".to_string()),
             version: Some(1),
         };
 
         let set = manager
-            .documents_set(&open.session_id, std::slice::from_ref(&file), true)
+            .documents_set(
+                &open.session_id,
+                &[WorkspaceDocumentsSetFile::File(file.clone())],
+                true,
+            )
             .await
             .expect("set");
         assert_eq!(set.analysis_revision, 1);
 
         let set_again = manager
-            .documents_set(&open.session_id, std::slice::from_ref(&file), true)
+            .documents_set(
+                &open.session_id,
+                &[WorkspaceDocumentsSetFile::File(file)],
+                true,
+            )
             .await
             .expect("set again");
         assert_eq!(set_again.analysis_revision, 1);
@@ -3035,10 +3269,10 @@ mod tests {
         let clear = manager
             .documents_clear(
                 &open.session_id,
-                &[DocumentRef {
+                &[DocumentRef::Canonical(CanonicalDocumentRef {
                     root_id,
                     path: "src/CommonModules/Foo/Module.bsl".to_string(),
-                }],
+                })],
                 true,
             )
             .await
@@ -3071,15 +3305,19 @@ mod tests {
         let root_id = open.roots[0].root_id.clone();
 
         let overlay_file = FileRef {
-            doc: DocumentRef {
+            doc: DocumentRef::Canonical(CanonicalDocumentRef {
                 root_id: root_id.clone(),
                 path: "src/CommonModules/Foo/Module.bsl".to_string(),
-            },
+            }),
             text: Some("Procedure Test()\n    A = 1;\nEndProcedure\n".to_string()),
             version: Some(1),
         };
         manager
-            .documents_set(&session_id, std::slice::from_ref(&overlay_file), true)
+            .documents_set(
+                &session_id,
+                &[WorkspaceDocumentsSetFile::File(overlay_file.clone())],
+                true,
+            )
             .await
             .expect("documents_set");
 
@@ -3099,7 +3337,7 @@ mod tests {
                     character: 4,
                 },
             }),
-            scope: Some(WorkspaceScope::Hot),
+            scope: Some(WorkspaceScope::Simple("hot".to_string())),
             budget_chars: Some(900),
             budget_tokens: None,
             include: ContextInclude::default(),
@@ -3169,5 +3407,64 @@ mod tests {
             "context_expand_snippet",
             serde_json::to_value(expand1).expect("json")
         );
+    }
+
+    #[test]
+    fn infer_platform_version_from_config_dump_uses_max_compatibility_mode() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+
+        std::fs::write(
+            temp.path().join("Configuration.xml"),
+            r#"<Configuration uuid="00000000-0000-0000-0000-000000000000">
+  <Properties>
+    <Name>Base</Name>
+    <CompatibilityMode>Version8_3_24</CompatibilityMode>
+  </Properties>
+</Configuration>
+"#,
+        )
+        .expect("write Configuration.xml");
+
+        let ext_dir = temp.path().join("Ext");
+        std::fs::create_dir_all(&ext_dir).expect("mkdir ext");
+        std::fs::write(
+            ext_dir.join("Configuration.xml"),
+            r#"<Configuration uuid="00000000-0000-0000-0000-000000000001">
+  <Properties>
+    <Name>Ext</Name>
+    <ObjectBelonging>Adopted</ObjectBelonging>
+    <ConfigurationExtensionCompatibilityMode>Version8_3_25</ConfigurationExtensionCompatibilityMode>
+  </Properties>
+</Configuration>
+"#,
+        )
+        .expect("write ext Configuration.xml");
+
+        let inferred =
+            infer_platform_version_from_config_dump(temp.path()).expect("infer platform_version");
+        assert_eq!(inferred, "8.3.25");
+    }
+
+    #[test]
+    fn document_ref_absolute_path_resolves_root_by_longest_prefix() {
+        let root = tempfile::TempDir::new().expect("root");
+        let ext = tempfile::TempDir::new_in(root.path()).expect("ext");
+
+        let (roots, _dtos) = restore_roots(&[
+            root.path().to_string_lossy().to_string(),
+            ext.path().to_string_lossy().to_string(),
+        ])
+        .expect("restore_roots");
+
+        let abs = ext
+            .path()
+            .join("src/CommonModules/Foo/Module.bsl")
+            .to_string_lossy()
+            .to_string();
+        let key =
+            document_key_from_ref(&roots, &DocumentRef::Path(abs)).expect("document_key_from_ref");
+
+        assert_eq!(key.root_id, roots[1].root_id);
+        assert_eq!(key.path, "src/CommonModules/Foo/Module.bsl");
     }
 }

@@ -47,9 +47,23 @@ pub struct UiUrlParams {}
 pub struct BuildInfoParams {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct DocumentRef {
+pub struct CanonicalDocumentRef {
     pub root_id: String,
     pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PathDocumentRef {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum DocumentRef {
+    Canonical(CanonicalDocumentRef),
+    PathObject(PathDocumentRef),
+    Path(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -62,9 +76,17 @@ pub struct FileRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum WorkspaceDocumentsSetFile {
+    File(FileRef),
+    Document(DocumentRef),
+    Path(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceDocumentsSetParams {
     pub session_id: String,
-    pub files: Vec<FileRef>,
+    pub files: Vec<WorkspaceDocumentsSetFile>,
     #[serde(default = "default_true")]
     pub mark_hot: bool,
 }
@@ -91,10 +113,17 @@ pub struct Range {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum WorkspaceScope {
+pub enum WorkspaceScopeTagged {
     Project,
     Hot,
     File { document: DocumentRef },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum WorkspaceScope {
+    Tagged(WorkspaceScopeTagged),
+    Simple(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

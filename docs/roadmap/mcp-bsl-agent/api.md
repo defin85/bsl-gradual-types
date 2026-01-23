@@ -43,6 +43,20 @@
 { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }
 ```
 
+LLM-friendly формы (для multi-root без ручного `root_id`):
+
+- Абсолютный путь строкой:
+```json
+"/abs/path/to/workspace/src/CommonModules/Foo/Module.bsl"
+```
+
+- Абсолютный путь объектом:
+```json
+{ "path": "/abs/path/to/workspace/src/CommonModules/Foo/Module.bsl" }
+```
+
+Сервер детерминированно резолвит абсолютный путь в `(root_id, relative_path)` по правилу **longest-prefix match** среди `roots[]`. Если путь вне `roots[]` или неоднозначен — `INVALID_PARAMS`.
+
 ### 2.3. FileRef
 
 ```json
@@ -52,6 +66,8 @@
   "version": 12
 }
 ```
+
+`doc` также принимает LLM-friendly формы `DocumentRef` (абсолютный путь строкой или объектом `{ "path": "/abs/..." }`).
 
 Если `text` отсутствует — читаем файл с диска (в пределах roots). Если `text` присутствует — он используется как snapshot **только для этого вызова**. Для IDE‑сценариев, где unsaved тексты должны влиять на `context_pack`/`scope=hot`, используется `workspace_documents_set`.
 
@@ -80,6 +96,10 @@ Input:
   "mode": "progressive"
 }
 ```
+
+Примечания для LLM:
+- `mode="default"` эквивалентен отсутствию `mode` (без warning).
+- Если задан `configuration_path`, но не задан `platform_version`, сервер пытается определить `platform_version` из дампа (CompatibilityMode). Если определить невозможно — `INVALID_PARAMS`.
 
 Output:
 
@@ -185,6 +205,11 @@ Input:
 }
 ```
 
+LLM-friendly варианты `files[]`:
+- `"/abs/path/to/workspace/src/CommonModules/Foo/Module.bsl"` (пометить hot, без overlay)
+- `{ "path": "/abs/path/to/workspace/src/CommonModules/Foo/Module.bsl" }` (то же)
+- `{ "doc": "/abs/path/to/workspace/src/CommonModules/Foo/Module.bsl", "text": "...", "version": 12 }` (overlay + hot)
+
 Output:
 ```json
 { "ok": true, "analysis_revision": 1 }
@@ -202,6 +227,8 @@ Input:
   "clear_hot": true
 }
 ```
+
+`documents[]` также поддерживает абсолютные пути (строкой или объектом `{ "path": "/abs/..." }`).
 
 Output:
 ```json
@@ -231,6 +258,10 @@ Input:
   "include_coverage": true
 }
 ```
+
+LLM-friendly варианты `scope`:
+- `"project"`
+- `"hot"`
 
 Output (start):
 ```json

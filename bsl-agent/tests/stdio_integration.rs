@@ -191,7 +191,24 @@ async fn stdio_tools_list_and_lifecycle_smoke() {
     let tools = service.list_all_tools().await.expect("list_all_tools");
     let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
 
+    for tool in &tools {
+        let description = tool.description.as_deref().unwrap_or_default();
+        assert!(
+            !description.contains('\n') && !description.contains('\r'),
+            "tool description must be one-line: {} => {:?}",
+            tool.name,
+            description
+        );
+        assert!(
+            description.len() <= 200,
+            "tool description too long: {} => len={}",
+            tool.name,
+            description.len()
+        );
+    }
+
     for required in [
+        "mcp_help",
         "ui_url",
         "workspace_open",
         "workspace_status",

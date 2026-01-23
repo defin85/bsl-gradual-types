@@ -91,6 +91,18 @@ pub struct BuildInfoResponse {
     pub pid: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpHelpResponse {
+    pub summary: String,
+    pub quickstart: Vec<String>,
+    #[serde(default)]
+    pub tool_name: Option<String>,
+    #[serde(default)]
+    pub notes: Vec<String>,
+    #[serde(default)]
+    pub examples: Vec<serde_json::Value>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum JobStateDto {

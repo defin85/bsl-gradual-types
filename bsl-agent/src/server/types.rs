@@ -46,6 +46,12 @@ pub struct UiUrlParams {}
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct BuildInfoParams {}
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct McpHelpParams {
+    #[serde(default)]
+    pub tool_name: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CanonicalDocumentRef {
     pub root_id: String,

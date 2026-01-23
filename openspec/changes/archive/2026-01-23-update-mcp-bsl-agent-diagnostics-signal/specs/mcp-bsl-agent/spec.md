@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Асинхронное получение диагностики по проекту/фокусу (`bsl_diagnostics_start`)
 Система SHALL поддерживать `bsl_diagnostics_start` для разных областей анализа (`scope`) и возвращать результат через job‑модель (`job_status/job_wait/job_result`).
@@ -13,8 +13,6 @@
 - **GIVEN** сессия открыта и `workspace_status.ready=true`
 - **WHEN** клиент вызывает `bsl_diagnostics_start` с `scope={kind:file, document:{path:\"/abs/.../Module.bsl\"}}` и получает результат через `job_result`
 - **THEN** сервер возвращает diagnostics только по указанному документу
-
-## ADDED Requirements
 
 ### Requirement: Диагностика не должна шуметь на динамических типах (`Dynamic.*`)
 Система SHALL избегать малоинформативных ошибок “несуществующий метод/свойство” для receiver’ов, чей тип является dynamic-like (например, `Dynamic` или `Dynamic.*`), поскольку такие ошибки часто являются следствием ограничения статического вывода типов.

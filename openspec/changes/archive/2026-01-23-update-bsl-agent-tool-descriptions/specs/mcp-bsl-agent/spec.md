@@ -14,8 +14,6 @@
 - **WHEN** клиент вызывает `mcp_help` с `tool_name="workspace_documents_set"`
 - **THEN** сервер возвращает короткий набор примеров payload’ов и пояснение ключевых ограничений (например, version required with text)
 
-## MODIFIED Requirements
-
 ### Requirement: Описания tool-ов в `tools/list` краткие и однозначные
 Система SHALL обеспечивать, что `tools/list` содержит `description`, достаточный для однозначного использования tool-ов без “угадывания”, но при этом остаётся компактным (без многострочных JSON-примеров в каждом tool).
 
@@ -29,4 +27,3 @@
 - **GIVEN** клиент вызывает `tools/list`
 - **WHEN** клиент читает `description` каждого tool-а
 - **THEN** `description` является однострочным и не содержит встроенных многострочных примеров JSON
-

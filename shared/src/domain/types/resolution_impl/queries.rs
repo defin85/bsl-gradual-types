@@ -13,7 +13,11 @@ impl TypeResolution {
 
     /// Check if type is Dynamic
     pub fn is_dynamic(&self) -> bool {
-        matches!(&self.result, ResolutionResult::Dynamic) || self.type_name() == "Dynamic"
+        if matches!(&self.result, ResolutionResult::Dynamic) {
+            return true;
+        }
+        let name = self.type_name();
+        name == "Dynamic" || name.starts_with("Dynamic.")
     }
 
     /// Get type name as String

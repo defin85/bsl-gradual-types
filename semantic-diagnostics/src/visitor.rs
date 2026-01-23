@@ -5,7 +5,7 @@
 
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::{DiagnosticSeverity, TypeDiagnostic};
+use bsl_shared::domain::types::{DiagnosticSeverity, TypeDiagnostic, UncertaintyReason};
 use bsl_shared::domain::validators::{TypeErrorKind, TypeValidator};
 use bsl_shared::domain::RuntimeExecutionContext;
 use bsl_shared::formatting::DetailLevel;
@@ -314,12 +314,45 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
 
                 // MILESTONE 5.1: Generate error for Unknown types
                 if obj_type.is_unknown() {
+                    if let Some(var_name) = obj_type.is_undeclared_variable() {
+                        let error_kind = TypeErrorKind::UndeclaredVariable {
+                            variable_name: var_name.to_string(),
+                            method_name: Some(function_name.clone()),
+                            param_index: None,
+                        };
+                        let diagnostic =
+                            error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                        self.errors.push(diagnostic);
+                        return;
+                    }
+                    if matches!(
+                        obj_type.metadata.uncertainty_reason,
+                        Some(UncertaintyReason::ConfigurationNotLoaded)
+                    ) {
+                        return;
+                    }
+                    if let Some(mut kind) = self.validator.validate_from_resolution(obj_type) {
+                        if let TypeErrorKind::UnknownType {
+                            ref mut variable_name,
+                            ..
+                        } = kind
+                        {
+                            *variable_name = object_name.clone();
+                        }
+                        let diagnostic =
+                            kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                        self.errors.push(diagnostic);
+                        return;
+                    }
                     let error_kind = TypeErrorKind::UnknownTypeAccess {
                         variable_name: object_name.clone(),
                         member_name: function_name.clone(),
                     };
-                    let diagnostic =
-                        error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                    let diagnostic = error_kind.to_diagnostic_with_severity(
+                        node.span,
+                        self.detail_level,
+                        DiagnosticSeverity::Warning,
+                    );
                     self.errors.push(diagnostic);
                     return;
                 }
@@ -478,13 +511,51 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
 
                 // MILESTONE 5.1: Generate error for Unknown types
                 if object_type.is_unknown() {
+                    if let Some(var_name) = object_type.is_undeclared_variable() {
+                        let error_kind = TypeErrorKind::UndeclaredVariable {
+                            variable_name: var_name.to_string(),
+                            method_name: None,
+                            param_index: None,
+                        };
+                        let diagnostic =
+                            error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                        self.errors.push(diagnostic);
+                        return;
+                    }
+                    if matches!(
+                        object_type.metadata.uncertainty_reason,
+                        Some(UncertaintyReason::ConfigurationNotLoaded)
+                    ) {
+                        return;
+                    }
+                    if let Some(mut kind) = self.validator.validate_from_resolution(object_type) {
+                        if let TypeErrorKind::UnknownType {
+                            ref mut variable_name,
+                            ..
+                        } = kind
+                        {
+                            *variable_name = object_name.clone();
+                        }
+                        let diagnostic =
+                            kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                        self.errors.push(diagnostic);
+                        return;
+                    }
                     let error_kind = TypeErrorKind::UnknownTypeAccess {
                         variable_name: object_name.clone(),
                         member_name: member_name.clone(),
                     };
-                    let diagnostic =
-                        error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                    let diagnostic = error_kind.to_diagnostic_with_severity(
+                        node.span,
+                        self.detail_level,
+                        DiagnosticSeverity::Warning,
+                    );
                     self.errors.push(diagnostic);
+                    return;
+                }
+
+                // Skip validation for Dynamic-like types (Dynamic / Dynamic.*).
+                if object_type.is_dynamic() {
                     return;
                 }
 
@@ -587,6 +658,183 @@ mod tests {
             "Should have error for non-existent property"
         );
         assert!(errors[0].message.contains("НесуществующееСвойство"));
+    }
+
+    #[test]
+    fn test_dynamic_like_skips_nonexistent_method_validation() {
+        use bsl_shared::domain::types::TypeResolution;
+        use std::sync::Arc;
+        let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+        let metadata = TypeMetadataLookup::new(repository.clone());
+        let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
+        let mut program = SemanticProgram::new();
+
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::FunctionCall {
+                function_name: "НесуществующийМетод".to_string(),
+                object_name: Some("Объект".to_string()),
+                object_type: Some(TypeResolution::explicit("Dynamic.Объект")),
+                arg_types: vec![],
+                object_node: None,
+                result_type: TypeResolution::unknown(),
+            },
+            span: Span::new(5, 10, 5, 40),
+            scope_id: program.symbols.root_scope,
+        });
+
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut context = FlowContext::new(program.symbols.root_scope);
+        visitor.visit_node(&program.nodes[0], &mut context);
+
+        let errors = visitor.into_errors();
+        assert!(errors.is_empty(), "expected no diagnostics for Dynamic.*");
+    }
+
+    #[test]
+    fn test_dynamic_like_skips_nonexistent_property_validation() {
+        use bsl_shared::domain::types::TypeResolution;
+        use std::sync::Arc;
+        let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+        let metadata = TypeMetadataLookup::new(repository.clone());
+        let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
+        let mut program = SemanticProgram::new();
+
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::MemberAccess {
+                object_node: None,
+                object_name: Some("Объект".to_string()),
+                object_type: TypeResolution::explicit("Dynamic.Объект"),
+                member_name: "НесуществующееСвойство".to_string(),
+                access_kind: MemberAccessKind::Property,
+                result_type: TypeResolution::unknown(),
+            },
+            span: Span::new(3, 5, 3, 35),
+            scope_id: program.symbols.root_scope,
+        });
+
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut context = FlowContext::new(program.symbols.root_scope);
+        visitor.visit_node(&program.nodes[0], &mut context);
+
+        let errors = visitor.into_errors();
+        assert!(errors.is_empty(), "expected no diagnostics for Dynamic.*");
+    }
+
+    #[test]
+    fn test_unknown_type_access_is_warning_by_default() {
+        use bsl_shared::domain::types::TypeResolution;
+        use std::sync::Arc;
+        let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+        let metadata = TypeMetadataLookup::new(repository.clone());
+        let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
+        let mut program = SemanticProgram::new();
+
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::FunctionCall {
+                function_name: "Метод".to_string(),
+                object_name: Some("Объект".to_string()),
+                object_type: Some(TypeResolution::unknown()),
+                arg_types: vec![],
+                object_node: None,
+                result_type: TypeResolution::unknown(),
+            },
+            span: Span::new(5, 10, 5, 40),
+            scope_id: program.symbols.root_scope,
+        });
+
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut context = FlowContext::new(program.symbols.root_scope);
+        visitor.visit_node(&program.nodes[0], &mut context);
+
+        let errors = visitor.into_errors();
+        let diag = errors
+            .iter()
+            .find(|d| d.message.contains("Невозможно определить член"))
+            .expect("expected UnknownTypeAccess diagnostic");
+        assert_eq!(diag.severity, DiagnosticSeverity::Warning);
+    }
+
+    #[test]
+    fn test_unknown_type_access_suppressed_when_config_not_loaded() {
+        use bsl_shared::domain::types::TypeResolution;
+        use std::sync::Arc;
+        let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+        let metadata = TypeMetadataLookup::new(repository.clone());
+        let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
+        let mut program = SemanticProgram::new();
+
+        let mut unknown = TypeResolution::unknown();
+        unknown.metadata.uncertainty_reason = Some(UncertaintyReason::ConfigurationNotLoaded);
+
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::MemberAccess {
+                object_node: None,
+                object_name: None,
+                object_type: unknown,
+                member_name: "Свойство".to_string(),
+                access_kind: MemberAccessKind::Property,
+                result_type: TypeResolution::unknown(),
+            },
+            span: Span::new(3, 5, 3, 35),
+            scope_id: program.symbols.root_scope,
+        });
+
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut context = FlowContext::new(program.symbols.root_scope);
+        visitor.visit_node(&program.nodes[0], &mut context);
+
+        let errors = visitor.into_errors();
+        assert!(errors.is_empty(), "expected graceful degradation");
+    }
+
+    #[test]
+    fn test_type_not_found_remains_error_on_unknown_member_access() {
+        use bsl_shared::domain::types::TypeResolution;
+        use std::sync::Arc;
+        let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+        let metadata = TypeMetadataLookup::new(repository.clone());
+        let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
+        let mut program = SemanticProgram::new();
+
+        let mut unknown = TypeResolution::unknown();
+        unknown.metadata.uncertainty_reason = Some(UncertaintyReason::TypeNotFound {
+            name: "Foo".to_string(),
+        });
+
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::FunctionCall {
+                function_name: "Метод".to_string(),
+                object_name: Some("Объект".to_string()),
+                object_type: Some(unknown),
+                arg_types: vec![],
+                object_node: None,
+                result_type: TypeResolution::unknown(),
+            },
+            span: Span::new(5, 10, 5, 40),
+            scope_id: program.symbols.root_scope,
+        });
+
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut context = FlowContext::new(program.symbols.root_scope);
+        visitor.visit_node(&program.nodes[0], &mut context);
+
+        let errors = visitor.into_errors();
+        assert!(errors.iter().any(|d| d.severity == DiagnosticSeverity::Error));
     }
 
     // === MILESTONE 3.16: Metadata object validation tests ===

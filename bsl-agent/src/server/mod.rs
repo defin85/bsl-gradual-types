@@ -138,6 +138,15 @@ impl BslAgentHandler {
                         "name": "bsl_diagnostics_start",
                         "arguments": { "session_id": "<session_id>", "scope": { "kind": "project" }, "limit": 200 }
                     }));
+                    examples.push(serde_json::json!({
+                        "name": "bsl_diagnostics_start",
+                        "arguments": {
+                            "session_id": "<session_id>",
+                            "scope": { "kind": "file", "document": { "path": "/ws/ext1/src/CommonModules/Foo/Module.bsl" } },
+                            "limit": 200
+                        }
+                    }));
+                    notes.push("scope string supports only: project|hot. For a single file use tagged: {kind:\"file\",document:...}.".to_string());
                 }
                 "job_wait" => {
                     examples.push(serde_json::json!({
@@ -291,11 +300,28 @@ impl BslAgentHandler {
         Content::json(response)
     }
 
-    #[tool(description = "Start diagnostics job. scope: project|hot|file. Use job_wait/job_result. See mcp_help.")]
+    #[tool(description = "Start diagnostics job. scope: \"project\"|\"hot\" or {kind:\"file\",document:...}. Use job_wait/job_result. See mcp_help.")]
     async fn bsl_diagnostics_start(
         &self,
         Parameters(params): Parameters<BslDiagnosticsParams>,
     ) -> Result<Content, rmcp::ErrorData> {
+        if let types::WorkspaceScope::Simple(value) = &params.scope {
+            let trimmed = value.trim();
+            if trimmed.eq_ignore_ascii_case("project") || trimmed.eq_ignore_ascii_case("hot") {
+                // ok
+            } else if trimmed.eq_ignore_ascii_case("file") {
+                return Err(rmcp::ErrorData::invalid_params(
+                    "scope=\"file\" is not supported as a string; use tagged file scope: {\"kind\":\"file\",\"document\":...}",
+                    None,
+                ));
+            } else {
+                return Err(rmcp::ErrorData::invalid_params(
+                    format!("unknown scope: {trimmed}"),
+                    None,
+                ));
+            }
+        }
+
         let session_manager = Arc::clone(&self.session_manager);
         let job_id = self
             .job_manager

@@ -2336,6 +2336,11 @@ fn normalize_workspace_scope(scope: WorkspaceScope) -> Result<WorkspaceScopeTagg
                 Ok(WorkspaceScopeTagged::Project)
             } else if trimmed.eq_ignore_ascii_case("hot") {
                 Ok(WorkspaceScopeTagged::Hot)
+            } else if trimmed.eq_ignore_ascii_case("file") {
+                Err(rmcp::ErrorData::invalid_params(
+                    "scope=\"file\" is not supported as a string; use tagged file scope: {\"kind\":\"file\",\"document\":...}",
+                    None,
+                ))
             } else {
                 Err(rmcp::ErrorData::invalid_params(
                     format!("unknown scope: {trimmed}"),

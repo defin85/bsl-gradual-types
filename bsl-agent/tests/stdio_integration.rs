@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use bsl_agent::types::{
-    BslSymbolSearchResponse, BuildInfoResponse, ContextExpandResponse, ContextPackResponse,
-    JobStartResponse, JobStateDto, JobStatusResponse, UiUrlResponse, WorkspaceDocumentsSetResponse,
-    WorkspaceListResponse, WorkspaceOpenResponse, WorkspaceStatusResponse,
+    BslDiagnosticsResponse, BslSymbolSearchResponse, BuildInfoResponse, ContextExpandResponse,
+    ContextPackResponse, JobStartResponse, JobStateDto, JobStatusResponse, UiUrlResponse,
+    WorkspaceDocumentsSetResponse, WorkspaceListResponse, WorkspaceOpenResponse, WorkspaceStatusResponse,
 };
 use bsl_shared::api::dtos::{AnalysisResultDto, MetricsDto, SnapshotMetaDto};
 use rmcp::model::CallToolRequestParam;
@@ -267,6 +267,59 @@ async fn stdio_ui_url_disabled_returns_not_enabled() {
     let resp: UiUrlResponse = call_tool(&service, "ui_url", json!({})).await;
     assert!(!resp.enabled);
     assert!(resp.ui_url.is_none());
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_bsl_diagnostics_tagged_file_scope_and_string_file_hint() {
+    let service = spawn_agent(&[]).await;
+
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let file_path = temp_root
+        .path()
+        .join("src/CommonModules/Foo/Module.bsl");
+    std::fs::create_dir_all(file_path.parent().expect("parent")).expect("mkdir");
+    std::fs::write(&file_path, "Procedure P()\nEndProcedure\n").expect("write Module.bsl");
+    let file_abs = file_path.to_string_lossy().to_string();
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({ "roots": [temp_root.path().to_string_lossy()] }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_diagnostics_start",
+        json!({
+            "session_id": &session_id,
+            "scope": { "kind": "file", "document": { "path": &file_abs } },
+            "limit": 50
+        }),
+    )
+    .await;
+    wait_job_succeeded(&service, &start.job_id).await;
+    let result: BslDiagnosticsResponse = call_tool(
+        &service,
+        "job_result",
+        json!({ "job_id": &start.job_id }),
+    )
+    .await;
+    assert_eq!(result.analysis_revision, 0);
+
+    call_tool_expect_invalid_params(
+        &service,
+        "bsl_diagnostics_start",
+        json!({ "session_id": &session_id, "scope": "file" }),
+        "use tagged file scope",
+    )
+    .await;
+
+    let _close: serde_json::Value =
+        call_tool(&service, "workspace_close", json!({ "session_id": &session_id })).await;
     let _ = service.cancel().await;
 }
 

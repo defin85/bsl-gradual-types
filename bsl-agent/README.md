@@ -120,5 +120,5 @@ env = {
 - If `configuration_path` is set and `platform_version` is omitted, `bsl-agent` tries to infer it from the config dump (CompatibilityMode). If it cannot infer, `workspace_open` fails with `INVALID_PARAMS`.
 - Multi-root file references: `DocumentRef` / `FileRef.doc` accept absolute paths (string or `{ "path": "/abs/..." }`). The server resolves them via deterministic longest-prefix match against `roots[]`.
 - `workspace_documents_set.files[]` also accepts plain absolute paths (strings) to mark documents as hot (no overlay).
-- `bsl_diagnostics_start.scope` accepts `"project"` / `"hot"` as strings (in addition to `{ "kind": ... }`).
+- `bsl_diagnostics_start.scope` accepts `"project"` / `"hot"` as strings; for a single file use `{ "kind": "file", "document": <DocumentRef> }` (string `"file"` is invalid).
 - `job_status.progress.percent=100` is reserved for terminal states; running jobs report `0..99`.

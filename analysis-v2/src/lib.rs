@@ -66,12 +66,19 @@ pub struct SemanticDeps {
     pub repository: Arc<dyn TypeRepository>,
     pub signature_index: SignatureIndex,
     pub resolver: Option<Arc<TypeResolver>>,
+    /// Явный флаг: платформа (Syntax Helper) загружена и SignatureIndex считается полным
+    /// для целей диагностики "Неопределенная процедура или функция".
+    pub platform_signatures_loaded: bool,
 }
 
 impl std::fmt::Debug for SemanticDeps {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SemanticDeps")
             .field("has_resolver", &self.resolver.is_some())
+            .field(
+                "platform_signatures_loaded",
+                &self.platform_signatures_loaded,
+            )
             .finish_non_exhaustive()
     }
 }
@@ -344,6 +351,7 @@ pub fn semantic_diagnostics(
         &deps_data.signature_index,
         detail_level,
     );
+    visitor.set_platform_signatures_loaded(deps_data.platform_signatures_loaded);
     walk_program(&program, &mut visitor);
 
     let mut diagnostics = visitor.into_errors();
@@ -403,10 +411,12 @@ impl Default for AnalysisHostV2 {
     fn default() -> Self {
         let db = AnalysisDatabase::default();
         let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+        let platform_signatures_loaded = repository.platform_docs_loaded();
         let deps_data = Arc::new(SemanticDeps {
             signature_index: repository.get_signature_index_clone(),
             resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
             repository,
+            platform_signatures_loaded,
         });
         let deps = DepsSnapshot::new(
             &db,
@@ -721,6 +731,7 @@ mod tests {
                 repository: Arc::new(InMemoryTypeRepository::new()),
                 signature_index: SignatureIndex::new(),
                 resolver: None,
+                platform_signatures_loaded: false,
             }),
         });
         host.lock()
@@ -746,6 +757,7 @@ mod tests {
                     repository: Arc::new(InMemoryTypeRepository::new()),
                     signature_index: SignatureIndex::new(),
                     resolver: None,
+                    platform_signatures_loaded: false,
                 }),
             });
             host.apply_change(Change::SetSettingsSnapshot {
@@ -1095,10 +1107,12 @@ mod tests {
         });
 
         let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+        let platform_signatures_loaded = repository.platform_docs_loaded();
         let deps = Arc::new(SemanticDeps {
             signature_index: repository.get_signature_index_clone(),
             resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
             repository,
+            platform_signatures_loaded,
         });
 
         host.apply_change(Change::SetDepsSnapshot {

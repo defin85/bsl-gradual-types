@@ -32,6 +32,7 @@ pub struct SemanticValidationVisitor<'a> {
     program: &'a SemanticProgram,
     detail_level: DetailLevel,
     current_execution_context: RuntimeExecutionContext,
+    platform_signatures_loaded: bool,
 }
 
 impl<'a> SemanticValidationVisitor<'a> {
@@ -50,6 +51,7 @@ impl<'a> SemanticValidationVisitor<'a> {
             program,
             detail_level: DetailLevel::Full, // Default for backward compatibility
             current_execution_context: RuntimeExecutionContext::new(),
+            platform_signatures_loaded: false,
         }
     }
 
@@ -69,7 +71,12 @@ impl<'a> SemanticValidationVisitor<'a> {
             program,
             detail_level,
             current_execution_context: RuntimeExecutionContext::new(),
+            platform_signatures_loaded: false,
         }
+    }
+
+    pub fn set_platform_signatures_loaded(&mut self, loaded: bool) {
+        self.platform_signatures_loaded = loaded;
     }
 
     /// Consumes the visitor and returns collected errors
@@ -441,12 +448,9 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 }
 
                 // Неопределенная функция/процедура (глобальный вызов).
-                // Важно: не хотим спамить такими ошибками, если Syntax Helper не загружен.
-                // Эвристика: если "Сообщить" отсутствует в SignatureIndex, считаем платформенные сигнатуры не загруженными.
-                let platform_signatures_loaded = self.signature_index.find_global_function("Сообщить").is_some()
-                    || self.signature_index.find_global_function("Message").is_some();
-
-                if platform_signatures_loaded {
+                // Важно: не хотим спамить такими ошибками, если платформенные сигнатуры не загружены.
+                // Решение: используем явный флаг из deps snapshot.
+                if self.platform_signatures_loaded {
                     let is_known = self
                         .signature_index
                         .find_global_function(function_name)

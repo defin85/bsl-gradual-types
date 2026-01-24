@@ -359,10 +359,12 @@ mod tests {
         let repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
         let signature_index = repository.get_signature_index_clone();
         let resolver = Some(Arc::new(TypeResolver::new(repository.clone())));
+        let platform_signatures_loaded = repository.platform_docs_loaded();
         Arc::new(SemanticDeps {
             repository,
             signature_index,
             resolver,
+            platform_signatures_loaded,
         })
     }
 

@@ -55,7 +55,7 @@ pub fn build_deps_bundle_v2(
         build_semantic_deps_snapshot(coordinator).context("build_semantic_deps_snapshot")?;
 
     let deps_payload = format!(
-        "schema={};platform_version={};platform_fp={};config_fp={};index_snapshot_id={};repo.total_types={};repo.platform_types={};repo.configuration_types={};repo.user_defined_types={};strict_fingerprint={}",
+        "schema={};platform_version={};platform_fp={};config_fp={};index_snapshot_id={};repo.total_types={};repo.platform_types={};repo.configuration_types={};repo.user_defined_types={};platform_signatures_loaded={};strict_fingerprint={}",
         bsl_analysis_v2::DEPS_SCHEMA_VERSION,
         platform_version,
         platform_fingerprint.as_deref().unwrap_or("none"),
@@ -65,6 +65,7 @@ pub fn build_deps_bundle_v2(
         repo_stats.platform_types,
         repo_stats.configuration_types,
         repo_stats.user_defined_types,
+        semantic_deps.platform_signatures_loaded,
         strict,
     );
 
@@ -95,12 +96,14 @@ fn build_semantic_deps_snapshot(
         let repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
         let resolver = Arc::new(TypeResolver::new(repository.clone()));
         let signature_index = repository.get_signature_index_clone();
+        let platform_signatures_loaded = repository.platform_docs_loaded();
         let stats = repository.get_stats();
         return Ok((
             Arc::new(SemanticDeps {
                 repository,
                 signature_index,
                 resolver: Some(resolver),
+                platform_signatures_loaded,
             }),
             stats,
         ));
@@ -111,6 +114,7 @@ fn build_semantic_deps_snapshot(
     let raw_types = source_repo.get_all_types();
     let platform_docs_loaded = source_repo.platform_docs_loaded();
     let signature_index = source_repo.get_signature_index_clone();
+    let platform_signatures_loaded = platform_docs_loaded;
 
     let snapshot_repo_impl = Arc::new(InMemoryTypeRepository::new());
     snapshot_repo_impl.set_platform_docs_loaded(platform_docs_loaded);
@@ -127,6 +131,7 @@ fn build_semantic_deps_snapshot(
             repository,
             signature_index,
             resolver: Some(resolver),
+            platform_signatures_loaded,
         }),
         stats,
     ))

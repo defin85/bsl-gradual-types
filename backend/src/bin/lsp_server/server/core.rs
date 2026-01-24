@@ -41,6 +41,7 @@ impl BslLanguageServer {
                     repository,
                     signature_index,
                     resolver,
+                    platform_signatures_loaded: false,
                 });
 
                 let index_snapshot = Arc::new(coordinator.intellisense_index().snapshot());

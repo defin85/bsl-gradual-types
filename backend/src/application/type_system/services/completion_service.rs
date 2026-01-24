@@ -1918,6 +1918,7 @@ mod tests {
             signature_index: repo.get_signature_index_clone(),
             resolver: Some(resolver.clone()),
             repository: repo.clone(),
+            platform_signatures_loaded: false,
         });
         let mut host = AnalysisHostV2::default();
         host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2021,6 +2022,7 @@ mod tests {
             signature_index: repo.get_signature_index_clone(),
             resolver: Some(resolver.clone()),
             repository: repo.clone(),
+            platform_signatures_loaded: false,
         });
         let mut host = AnalysisHostV2::default();
         host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2124,6 +2126,7 @@ mod tests {
             signature_index: repo.get_signature_index_clone(),
             resolver: Some(resolver.clone()),
             repository: repo.clone(),
+            platform_signatures_loaded: false,
         });
         let mut host = AnalysisHostV2::default();
         host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2215,6 +2218,7 @@ mod tests {
             signature_index: repo.get_signature_index_clone(),
             resolver: Some(resolver.clone()),
             repository: repo.clone(),
+            platform_signatures_loaded: false,
         });
         let mut host = AnalysisHostV2::default();
         host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2306,6 +2310,7 @@ mod tests {
             signature_index: repo.get_signature_index_clone(),
             resolver: Some(resolver.clone()),
             repository: repo.clone(),
+            platform_signatures_loaded: false,
         });
         let mut host = AnalysisHostV2::default();
         host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2399,6 +2404,7 @@ mod tests {
             signature_index: repo.get_signature_index_clone(),
             resolver: Some(resolver.clone()),
             repository: repo.clone(),
+            platform_signatures_loaded: false,
         });
         let mut host = AnalysisHostV2::default();
         host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2504,6 +2510,7 @@ mod tests {
             signature_index: repo.get_signature_index_clone(),
             resolver: Some(resolver.clone()),
             repository: repo.clone(),
+            platform_signatures_loaded: false,
         });
         let mut host = AnalysisHostV2::default();
         host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2612,6 +2619,7 @@ mod tests {
             signature_index: repo.get_signature_index_clone(),
             resolver: Some(resolver.clone()),
             repository: repo.clone(),
+            platform_signatures_loaded: false,
         });
         let mut host = AnalysisHostV2::default();
         host.apply_change(ChangeV2::SetDepsSnapshot {

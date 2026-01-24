@@ -153,6 +153,7 @@ fn build_deps(repository_impl: Arc<InMemoryTypeRepository>) -> Arc<bsl_analysis_
         signature_index: repository.get_signature_index_clone(),
         resolver: Some(resolver),
         repository,
+        platform_signatures_loaded: false,
     })
 }
 

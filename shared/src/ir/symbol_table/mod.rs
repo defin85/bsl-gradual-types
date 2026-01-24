@@ -231,6 +231,17 @@ impl SymbolTable {
         self.global_functions.get(name)
     }
 
+    /// Обновить return type глобальной функции (после вывода типа по телу)
+    ///
+    /// Возвращает `true`, если функция найдена и обновлена.
+    pub fn set_function_return_type(&mut self, name: &str, return_type: TypeResolution) -> bool {
+        if let Some(sig) = self.global_functions.get_mut(name) {
+            sig.return_type = Some(return_type);
+            return true;
+        }
+        false
+    }
+
     /// Поиск процедуры по имени
     pub fn find_procedure(&self, name: &str) -> Option<&FunctionSignature> {
         self.global_procedures.get(name)

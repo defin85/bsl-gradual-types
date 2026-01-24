@@ -749,6 +749,21 @@ impl AstToIrConverter {
             return TypeResolution::explicit("Неопределено");
         }
 
+        // Пользовательская функция из текущего модуля (SymbolTable).
+        // Важно: это не SignatureIndex, поэтому возвращаем то, что удалось вывести по телу.
+        if let Some(sig) = self.symbol_table.find_function(function_name) {
+            if let Some(return_type) = &sig.return_type {
+                return return_type.clone();
+            }
+            // Функция известна, но return_type ещё не выведен
+            return TypeResolution::unknown();
+        }
+
+        // Процедура известна (SymbolTable), но не возвращает значение.
+        if self.symbol_table.find_procedure(function_name).is_some() {
+            return TypeResolution::explicit("Неопределено");
+        }
+
         TypeResolution::unknown()
     }
 }

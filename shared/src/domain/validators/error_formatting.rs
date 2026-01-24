@@ -158,6 +158,9 @@ impl TypeErrorKind {
                     format!("Необъявленная переменная '{}'", variable_name)
                 }
             }
+            TypeErrorKind::UndefinedFunctionOrProcedure { name } => {
+                format!("Неопределенная процедура или функция '{}'", name)
+            }
             TypeErrorKind::VarDeclarationAfterExecutable {
                 variable_name,
                 function_name,
@@ -304,6 +307,8 @@ impl TypeErrorKind {
             TypeErrorKind::UnknownTypeAccess { .. } => self.format_brief(),
             // UndeclaredVariable: Standard format matches Brief
             TypeErrorKind::UndeclaredVariable { .. } => self.format_brief(),
+            // UndefinedFunctionOrProcedure: Standard format matches Brief
+            TypeErrorKind::UndefinedFunctionOrProcedure { .. } => self.format_brief(),
             // VarDeclarationAfterExecutable: Standard format matches Brief
             TypeErrorKind::VarDeclarationAfterExecutable { .. } => self.format_brief(),
             // UninitializedVariableUsage: Standard format matches Brief
@@ -432,6 +437,13 @@ impl TypeErrorKind {
                     "\u{1F4A1} Подсказка: Переменная '{}' не объявлена в текущей области видимости. \
                     Объявите переменную с помощью 'Перем {}' или присвойте ей значение перед использованием.",
                     variable_name, variable_name
+                )
+            }
+            TypeErrorKind::UndefinedFunctionOrProcedure { name } => {
+                format!(
+                    "\u{1F4A1} Подсказка: Убедитесь, что '{}' объявлена как Процедура/Функция в текущем модуле \
+                    или доступна через общий модуль/платформу. Проверьте опечатку в имени.",
+                    name
                 )
             }
             TypeErrorKind::VarDeclarationAfterExecutable { variable_name, .. } => {

@@ -19,6 +19,7 @@ use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_shared::ir::*;
 use bsl_shared::utils::hash::hash_content;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -140,6 +141,12 @@ impl AstToIrConverter {
             let _ = converter.convert_statement(statement)?;
         }
 
+        // Post-pass: вывод return types функций по IR (Return nodes) + применение к вызовам/присваиваниям.
+        // Это нужно, чтобы выражения вида `X = ЛокальнаяФункция()` получали тип даже если
+        // функция объявлена ниже по тексту.
+        converter.infer_function_return_types_from_ir();
+        converter.apply_inferred_function_return_types();
+
         // Построение CFG (опционально, для flow-sensitive)
         let cfg = converter.build_cfg();
 
@@ -152,6 +159,191 @@ impl AstToIrConverter {
             },
             cfg,
         })
+    }
+
+    fn infer_function_return_types_from_ir(&mut self) {
+        // Собираем апдейты отдельно, чтобы не держать мутабельные и иммутабельные заимствования одновременно.
+        let mut updates: Vec<(usize, String, TypeResolution)> = Vec::new();
+
+        for (node_idx, node) in self.nodes.iter().enumerate() {
+            let SemanticNodeKind::FunctionDeclaration { name, body, .. } = &node.kind else {
+                continue;
+            };
+
+            let mut returns = Vec::new();
+            self.collect_return_types(body, &mut returns);
+
+            let inferred = self.merge_return_types(returns);
+            updates.push((node_idx, name.clone(), inferred));
+        }
+
+        for (node_idx, func_name, return_type) in updates {
+            if let SemanticNodeKind::FunctionDeclaration {
+                return_type: rt_slot,
+                ..
+            } = &mut self.nodes[node_idx].kind
+            {
+                *rt_slot = Some(return_type.clone());
+            }
+
+            // Обновляем SymbolTable, чтобы TypeInference мог резолвить вызовы функции.
+            let _ = self
+                .symbol_table
+                .set_function_return_type(&func_name, return_type);
+        }
+    }
+
+    fn apply_inferred_function_return_types(&mut self) {
+        // 1) Собираем return types всех пользовательских функций
+        let mut return_types: HashMap<String, TypeResolution> = HashMap::new();
+        for (name, sig) in self.symbol_table.iter_functions() {
+            if let Some(rt) = &sig.return_type {
+                return_types.insert(name.clone(), rt.clone());
+            }
+        }
+        if return_types.is_empty() {
+            return;
+        }
+
+        // 2) Обогащаем FunctionCall(result_type) для глобальных вызовов пользовательских функций
+        let mut updated_calls: HashMap<usize, TypeResolution> = HashMap::new();
+        for (idx, node) in self.nodes.iter_mut().enumerate() {
+            let SemanticNodeKind::FunctionCall {
+                function_name,
+                object_type: None,
+                result_type,
+                ..
+            } = &mut node.kind
+            else {
+                continue;
+            };
+
+            let Some(rt) = return_types.get(function_name) else {
+                continue;
+            };
+
+            if result_type.is_unknown() || result_type.is_undeclared_variable().is_some() {
+                *result_type = rt.clone();
+                updated_calls.insert(idx, rt.clone());
+            }
+        }
+        if updated_calls.is_empty() {
+            return;
+        }
+
+        // 3) Обновляем Assignment(value_type) и тип переменной по ссылке value_node
+        for node in self.nodes.iter_mut() {
+            let scope_id = node.scope_id;
+            let span = node.span;
+
+            let SemanticNodeKind::Assignment {
+                variable,
+                value_type,
+                value_node: Some(value_node_idx),
+            } = &mut node.kind
+            else {
+                continue;
+            };
+
+            let Some(rt) = updated_calls.get(value_node_idx) else {
+                continue;
+            };
+
+            *value_type = rt.clone();
+
+            // Обновляем переменную в том scope, где она была зарегистрирована.
+            if let Some((decl_scope_id, _)) = self
+                .symbol_table
+                .lookup_variable_in_hierarchy(scope_id, variable)
+            {
+                let _ = self
+                    .symbol_table
+                    .update_variable_type(decl_scope_id, variable.clone(), rt.clone());
+            } else {
+                // Неожиданная ситуация: переменная не была зарегистрирована на этапе конвертации.
+                // Регистрируем в function scope, чтобы hover/type_at_position не теряли тип.
+                self.symbol_table.register_variable_in_function_scope(
+                    scope_id,
+                    variable.clone(),
+                    rt.clone(),
+                    span,
+                );
+            }
+        }
+    }
+
+    fn collect_return_types(&self, nodes: &[usize], out: &mut Vec<TypeResolution>) {
+        for &node_idx in nodes {
+            let Some(node) = self.nodes.get(node_idx) else {
+                continue;
+            };
+
+            match &node.kind {
+                SemanticNodeKind::Return { value_type } => {
+                    out.push(value_type.clone().unwrap_or_else(|| TypeResolution::explicit("Неопределено")));
+                }
+                SemanticNodeKind::IfStatement {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    self.collect_return_types(then_branch, out);
+                    if let Some(else_branch) = else_branch {
+                        self.collect_return_types(else_branch, out);
+                    }
+                }
+                SemanticNodeKind::WhileLoop { body, .. } => self.collect_return_types(body, out),
+                SemanticNodeKind::ForLoop { body, .. } => self.collect_return_types(body, out),
+                SemanticNodeKind::ForEachLoop { body, .. } => self.collect_return_types(body, out),
+                SemanticNodeKind::TryExcept {
+                    try_body,
+                    except_body,
+                } => {
+                    self.collect_return_types(try_body, out);
+                    self.collect_return_types(except_body, out);
+                }
+                SemanticNodeKind::BlockScope { statements, .. } => {
+                    self.collect_return_types(statements, out)
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn merge_return_types(&self, return_types: Vec<TypeResolution>) -> TypeResolution {
+        use bsl_shared::domain::types::{
+            Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult,
+            ResolutionSource,
+        };
+        use bsl_shared::domain::types::WeightedType;
+
+        if return_types.is_empty() {
+            return TypeResolution::inferred("Неопределено");
+        }
+
+        // Если хоть где-то тип неизвестен — итог тоже неизвестен (консервативно).
+        if return_types.iter().any(|t| t.is_unknown()) {
+            return TypeResolution::unknown();
+        }
+
+        let union_variants: Vec<WeightedType> = return_types
+            .iter()
+            .map(|t| match &t.result {
+                ResolutionResult::Concrete(concrete) => WeightedType::new(concrete.clone()),
+                _ => WeightedType::new(ConcreteType::Platform(PlatformType {
+                    name: t.type_name(),
+                })),
+            })
+            .collect();
+
+        TypeResolution {
+            certainty: Certainty::Inferred,
+            result: ResolutionResult::normalize_union(union_variants),
+            source: ResolutionSource::Inferred,
+            metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
+        }
     }
 
     fn seed_module_context(&mut self, file_path: &str) {

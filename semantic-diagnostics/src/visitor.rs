@@ -440,6 +440,30 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     }
                 }
 
+                // Неопределенная функция/процедура (глобальный вызов).
+                // Важно: не хотим спамить такими ошибками, если Syntax Helper не загружен.
+                // Эвристика: если "Сообщить" отсутствует в SignatureIndex, считаем платформенные сигнатуры не загруженными.
+                let platform_signatures_loaded = self.signature_index.find_global_function("Сообщить").is_some()
+                    || self.signature_index.find_global_function("Message").is_some();
+
+                if platform_signatures_loaded {
+                    let is_known = self
+                        .signature_index
+                        .find_global_function(function_name)
+                        .is_some()
+                        || self.program.symbols.find_function(function_name).is_some()
+                        || self.program.symbols.find_procedure(function_name).is_some();
+
+                    if !is_known {
+                        let error_kind = TypeErrorKind::UndefinedFunctionOrProcedure {
+                            name: function_name.clone(),
+                        };
+                        let diagnostic =
+                            error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                        self.errors.push(diagnostic);
+                    }
+                }
+
                 if let Some(error_kind) = validate_global_function_call_context(
                     &self.current_execution_context,
                     self.signature_index,

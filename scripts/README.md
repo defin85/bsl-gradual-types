@@ -201,6 +201,25 @@ curl -L https://wj32.org/wp/download/releases/empty-standby-list/EmptyStandbyLis
 
 ---
 
+## ⚡ Быстрый прогон тестов: cargo-nextest
+
+`scripts/build-all.sh` на этапе тестов использует `cargo nextest` (если `cargo-nextest` установлен) — это обычно быстрее и даёт более удобный вывод.
+
+Установка:
+```bash
+cargo install cargo-nextest --locked
+```
+
+Управление:
+- режим тестов: `./scripts/build-all.sh --tests quick|smoke|full`
+  - `quick` (по умолчанию): debug + subset lib-тестов
+  - `smoke`: `./scripts/run-intellisense-tests.sh smoke`
+  - `full`: `cargo nextest run --release --workspace` (или `cargo test --release --workspace` если nextest выключен)
+- принудительно включить nextest: `./scripts/build-all.sh --nextest`
+- выключить nextest: `./scripts/build-all.sh --no-nextest`
+
+---
+
 ## 🛡️ Безопасность
 
 Все скрипты:

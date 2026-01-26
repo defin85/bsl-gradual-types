@@ -9,6 +9,12 @@
 #     --force-build-timestamp      принудительно обновлять BUILD_TIMESTAMP (вызывает перекомпиляцию)
 #     --clean-target               cargo clean перед сборкой (удалит весь target/)
 #     --prune-target-days N        удалить старые артефакты из target/debug (mtime > N дней)
+#     --tests <quick|smoke|full>   режим тестов:
+#                                - quick: debug + subset lib-тестов (по умолчанию)
+#                                - smoke: ./scripts/run-intellisense-tests.sh smoke
+#                                - full: --release + все workspace тесты
+#     --nextest                    использовать cargo-nextest (если установлен)
+#     --no-nextest                 не использовать cargo-nextest (всегда cargo test)
 #     (по умолчанию выполняется cargo clean раз в 2 дня)
 # ============================================================================
 
@@ -79,6 +85,8 @@ CLEAN_TARGET=false
 PRUNE_TARGET_DAYS=""
 AUTO_CLEAN_DAYS=2
 CLEAN_TARGET_REASON="manual"
+USE_NEXTEST="auto" # auto|true|false
+TEST_SUITE="quick" # quick|smoke|full
 
 # Если скрипт запущен без аргументов в WSL — включаем мягкую уборку по умолчанию,
 # чтобы target/ не раздувался бесконтрольно.
@@ -112,9 +120,19 @@ while [[ $# -gt 0 ]]; do
             shift
             PRUNE_TARGET_DAYS="${1:-}"
             ;;
+        --tests)
+            shift
+            TEST_SUITE="${1:-}"
+            ;;
+        --nextest)
+            USE_NEXTEST="true"
+            ;;
+        --no-nextest)
+            USE_NEXTEST="false"
+            ;;
         *)
             echo -e "${RED}❌ Неизвестный аргумент: $arg${NC}"
-            echo "Использование: ./build-all.sh [--release|--debug] [--skip-tests] [--no-auto-version] [--force-build-timestamp] [--clean-target] [--prune-target-days N]"
+            echo "Использование: ./build-all.sh [--release|--debug] [--skip-tests] [--no-auto-version] [--force-build-timestamp] [--clean-target] [--prune-target-days N] [--tests quick|smoke|full] [--nextest|--no-nextest]"
             exit 1
             ;;
     esac
@@ -502,25 +520,89 @@ build_vscode_extension() {
 }
 
 # ============================================================================
-# ЭТАП 4: Быстрые тесты (опционально)
+# ЭТАП 4: Тесты (опционально)
 # ============================================================================
 
-run_quick_tests() {
+has_cargo_nextest() {
+    command -v cargo-nextest >/dev/null 2>&1
+}
+
+run_tests() {
     if [ "$SKIP_TESTS" = true ]; then
         log_warning "\n⏭️  Тесты пропущены (--skip-tests)"
         return 0
     fi
 
-    log_section "ЭТАП 4: Быстрые проверки"
+    case "$TEST_SUITE" in
+        quick|smoke|full)
+            ;;
+        *)
+            log_error "❌ Неизвестный режим тестов: $TEST_SUITE (ожидалось: quick|smoke|full)"
+            return 1
+            ;;
+    esac
 
-    log_info "\n🧪 Запуск быстрых unit тестов..."
-    local cargo_flags=""
-    if [ "$BUILD_MODE" = "release" ]; then
-        cargo_flags="--release"
+    local use_nextest="$USE_NEXTEST"
+    if [ "$use_nextest" = "auto" ]; then
+        if has_cargo_nextest; then
+            use_nextest="true"
+        else
+            use_nextest="false"
+        fi
     fi
-    measure_time cargo test $cargo_flags --lib --workspace --quiet
 
-    log_success "\n✅ Быстрые тесты пройдены"
+    if [ "$use_nextest" = "true" ] && ! has_cargo_nextest; then
+        log_error "❌ Запрошен --nextest, но cargo-nextest не найден в PATH"
+        log_info "Установка: cargo install cargo-nextest --locked"
+        return 1
+    fi
+
+    if [ "$TEST_SUITE" = "quick" ]; then
+        log_section "ЭТАП 4: Быстрые проверки (debug + subset)"
+        log_info "\n🧪 Запуск быстрых unit тестов (debug)..."
+
+        # Quick должен быть действительно быстрым:
+        # - debug (без --release),
+        # - subset пакетов,
+        # - только lib-тесты.
+        local pkgs=(
+            "-p" "bsl-line-index"
+            "-p" "bsl-shared"
+            "-p" "bsl-syntax"
+            "-p" "bsl-semantic"
+            "-p" "bsl-semantic-diagnostics"
+            "-p" "bsl-analysis-v2"
+        )
+
+        if [ "$use_nextest" = "true" ]; then
+            log_info "  ⚡ Используем cargo-nextest (для отключения: --no-nextest)"
+            measure_time cargo nextest run "${pkgs[@]}" --lib
+        else
+            measure_time cargo test "${pkgs[@]}" --lib --quiet
+        fi
+
+        log_success "\n✅ Быстрые тесты пройдены"
+        return 0
+    fi
+
+    if [ "$TEST_SUITE" = "smoke" ]; then
+        log_section "ЭТАП 4: Smoke проверки (IntelliSense)"
+        log_info "\n🧪 Запуск smoke набора IntelliSense..."
+        measure_time ./scripts/run-intellisense-tests.sh smoke
+        log_success "\n✅ Smoke тесты пройдены"
+        return 0
+    fi
+
+    log_section "ЭТАП 4: Полный прогон тестов (--release)"
+    log_info "\n🧪 Запуск полного набора тестов (release)..."
+    if [ "$use_nextest" = "true" ]; then
+        log_info "  ⚡ Используем cargo-nextest (для отключения: --no-nextest)"
+        measure_time cargo nextest run --release --workspace
+    else
+        measure_time cargo test --release --workspace --quiet
+    fi
+
+    log_success "\n✅ Полные тесты пройдены"
     return 0
 }
 
@@ -573,10 +655,14 @@ print_summary() {
 main() {
     log_section "🏗️  BSL Gradual Types - Полная сборка"
 
-    log_info "Платформа: $PLATFORM"
-    log_info "Расширение бинарников: '${BINARY_EXT:-<нет>}'"
-    log_info "Режим сборки: $BUILD_MODE"
-    log_info "Тесты: $([ "$SKIP_TESTS" = true ] && echo "пропущены" || echo "включены")"
+	    log_info "Платформа: $PLATFORM"
+	    log_info "Расширение бинарников: '${BINARY_EXT:-<нет>}'"
+	    log_info "Режим сборки: $BUILD_MODE"
+	    if [ "$SKIP_TESTS" = true ]; then
+	        log_info "Тесты: пропущены"
+	    else
+	        log_info "Тесты: $TEST_SUITE (nextest=$USE_NEXTEST)"
+	    fi
 
     check_git_upstream_ahead
 
@@ -620,10 +706,10 @@ main() {
         exit 1
     fi
 
-    # Этап 4: Тесты (опционально)
-    if ! run_quick_tests; then
-        log_warning "\n⚠️  Тесты провалились (не критично для сборки)"
-    fi
+	    # Этап 4: Тесты (опционально)
+	    if ! run_tests; then
+	        log_warning "\n⚠️  Тесты провалились (не критично для сборки)"
+	    fi
 
     # Итоговый отчёт
     print_summary

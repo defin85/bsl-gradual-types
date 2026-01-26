@@ -261,16 +261,29 @@ pub(crate) async fn get_completion_with_analysis(
     }
 
     let request_span = if let Some(request_id) = trace_request_id {
-        tracing::debug_span!(
-            "completion.request",
-            request_id = request_id,
-            file_uri = ?file_uri,
-            file_path = ?analysis_file_path,
-            line = line,
-            column = column,
-            member_access = context.member_access,
-            trigger_char = ?context.trigger_char
-        )
+        if tracing::level_filters::STATIC_MAX_LEVEL >= tracing::level_filters::LevelFilter::DEBUG {
+            tracing::debug_span!(
+                "completion.request",
+                request_id = request_id,
+                file_uri = ?file_uri,
+                file_path = ?analysis_file_path,
+                line = line,
+                column = column,
+                member_access = context.member_access,
+                trigger_char = ?context.trigger_char
+            )
+        } else {
+            tracing::info_span!(
+                "completion.request",
+                request_id = request_id,
+                file_uri = ?file_uri,
+                file_path = ?analysis_file_path,
+                line = line,
+                column = column,
+                member_access = context.member_access,
+                trigger_char = ?context.trigger_char
+            )
+        }
     } else {
         Span::none()
     };
@@ -279,7 +292,11 @@ pub(crate) async fn get_completion_with_analysis(
     let mut candidates: Vec<Candidate> = Vec::new();
 
     let collect_span = if let Some(request_id) = trace_request_id {
-        tracing::debug_span!("completion.collect", request_id = request_id)
+        if tracing::level_filters::STATIC_MAX_LEVEL >= tracing::level_filters::LevelFilter::DEBUG {
+            tracing::debug_span!("completion.collect", request_id = request_id)
+        } else {
+            tracing::info_span!("completion.collect", request_id = request_id)
+        }
     } else {
         Span::none()
     };
@@ -412,12 +429,21 @@ pub(crate) async fn get_completion_with_analysis(
     }
     let collect_elapsed = collect_started.elapsed();
     if let Some(request_id) = trace_request_id {
-        debug!(
-            request_id = request_id,
-            stage = "collect",
-            elapsed_ms = collect_elapsed.as_millis(),
-            candidates = candidates.len()
-        );
+        if tracing::level_filters::STATIC_MAX_LEVEL >= tracing::level_filters::LevelFilter::DEBUG {
+            debug!(
+                request_id = request_id,
+                stage = "collect",
+                elapsed_ms = collect_elapsed.as_millis(),
+                candidates = candidates.len()
+            );
+        } else {
+            info!(
+                request_id = request_id,
+                stage = "collect",
+                elapsed_ms = collect_elapsed.as_millis(),
+                candidates = candidates.len()
+            );
+        }
     }
     drop(_collect_guard);
 
@@ -439,7 +465,11 @@ pub(crate) async fn get_completion_with_analysis(
     let limited = ranked.candidates.into_iter().take(COMPLETION_MAX_ITEMS);
 
     let format_span = if let Some(request_id) = trace_request_id {
-        tracing::debug_span!("completion.format", request_id = request_id)
+        if tracing::level_filters::STATIC_MAX_LEVEL >= tracing::level_filters::LevelFilter::DEBUG {
+            tracing::debug_span!("completion.format", request_id = request_id)
+        } else {
+            tracing::info_span!("completion.format", request_id = request_id)
+        }
     } else {
         Span::none()
     };
@@ -462,13 +492,23 @@ pub(crate) async fn get_completion_with_analysis(
 
     let format_elapsed = format_started.elapsed();
     if let Some(request_id) = trace_request_id {
-        debug!(
-            request_id = request_id,
-            stage = "format",
-            elapsed_ms = format_elapsed.as_millis(),
-            returned = items.len(),
-            is_incomplete = is_incomplete
-        );
+        if tracing::level_filters::STATIC_MAX_LEVEL >= tracing::level_filters::LevelFilter::DEBUG {
+            debug!(
+                request_id = request_id,
+                stage = "format",
+                elapsed_ms = format_elapsed.as_millis(),
+                returned = items.len(),
+                is_incomplete = is_incomplete
+            );
+        } else {
+            info!(
+                request_id = request_id,
+                stage = "format",
+                elapsed_ms = format_elapsed.as_millis(),
+                returned = items.len(),
+                is_incomplete = is_incomplete
+            );
+        }
     }
     drop(_format_guard);
 

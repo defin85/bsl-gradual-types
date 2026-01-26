@@ -109,13 +109,23 @@ pub fn rank_candidates_with_trace(
     }
 
     if let (Some(request_id), Some(started)) = (request_id, filter_started) {
-        debug!(
-            request_id = request_id,
-            stage = "filter",
-            elapsed_ms = started.elapsed().as_millis(),
-            total_candidates = total_candidates,
-            filtered = filtered.len()
-        );
+        if tracing::level_filters::STATIC_MAX_LEVEL >= tracing::level_filters::LevelFilter::DEBUG {
+            debug!(
+                request_id = request_id,
+                stage = "filter",
+                elapsed_ms = started.elapsed().as_millis(),
+                total_candidates = total_candidates,
+                filtered = filtered.len()
+            );
+        } else {
+            tracing::info!(
+                request_id = request_id,
+                stage = "filter",
+                elapsed_ms = started.elapsed().as_millis(),
+                total_candidates = total_candidates,
+                filtered = filtered.len()
+            );
+        }
     }
     drop(_filter_guard);
 
@@ -215,14 +225,25 @@ pub fn rank_candidates_with_trace(
 
     let dedup_removed = total_candidates.saturating_sub(unique.len());
     if let (Some(request_id), Some(started)) = (request_id, rank_started) {
-        debug!(
-            request_id = request_id,
-            stage = "rank",
-            elapsed_ms = started.elapsed().as_millis(),
-            total_candidates = total_candidates,
-            dedup_removed = dedup_removed,
-            unique = unique.len()
-        );
+        if tracing::level_filters::STATIC_MAX_LEVEL >= tracing::level_filters::LevelFilter::DEBUG {
+            debug!(
+                request_id = request_id,
+                stage = "rank",
+                elapsed_ms = started.elapsed().as_millis(),
+                total_candidates = total_candidates,
+                dedup_removed = dedup_removed,
+                unique = unique.len()
+            );
+        } else {
+            tracing::info!(
+                request_id = request_id,
+                stage = "rank",
+                elapsed_ms = started.elapsed().as_millis(),
+                total_candidates = total_candidates,
+                dedup_removed = dedup_removed,
+                unique = unique.len()
+            );
+        }
     }
 
     RankingOutput {
@@ -959,6 +980,11 @@ mod tests {
         });
 
         let output = writer.contents();
+        assert!(
+            output.contains("request_id=7"),
+            "expected request_id in trace logs: {}",
+            output
+        );
         assert!(
             output.contains("stage=\"filter\"") || output.contains("stage=filter"),
             "expected filter stage in trace logs: {}",

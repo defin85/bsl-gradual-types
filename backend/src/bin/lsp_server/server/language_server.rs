@@ -33,7 +33,8 @@ use crate::config::{BslSettings, LspConfig};
 use crate::handlers::{
     apply_text_edit, handle_completion_resolve, handle_goto_definition_v2, handle_hover_v2,
     handle_signature_help_v2, build_document_symbols, build_workspace_symbols,
-    format_bsl_range_to_edits, format_bsl_to_edits,
+    format_bsl_range_to_edits, format_bsl_to_edits, handle_prepare_rename, handle_references,
+    handle_rename, RenameError,
 };
 use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
@@ -124,6 +125,11 @@ impl LanguageServer for BslLanguageServer {
                     trigger_characters: Some(vec![".".to_string(), "(".to_string()]),
                     ..Default::default()
                 }),
+                references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
                 diagnostic_provider: None,
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: vec![
@@ -727,6 +733,134 @@ impl LanguageServer for BslLanguageServer {
         let response = build_document_symbols(&uri, &file_content, &parse_result)
             .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
         Ok(Some(response))
+    }
+
+    async fn references(&self, params: ReferenceParams) -> JsonRpcResult<Option<Vec<Location>>> {
+        self.sync_v2_globals().await;
+
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+
+        let Some(file_id) = self.get_file_id_v2(&uri).await else {
+            return Ok(None);
+        };
+
+        let expected_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+        if let Some(expected_version) = expected_version {
+            let ok = self
+                .analysis_v2
+                .wait_for_file_version(file_id, expected_version)
+                .await;
+            if !ok {
+                return Ok(None);
+            }
+        }
+
+        let analysis = self.analysis_v2.snapshot().await;
+        let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
+            return Ok(None);
+        };
+        let Some(parse_result) = analysis.parse_result(file_id).ok().flatten() else {
+            return Ok(None);
+        };
+
+        let result = handle_references(
+            &file_content,
+            &parse_result,
+            &uri,
+            position,
+            include_declaration,
+        )
+        .unwrap_or_default();
+
+        Ok(Some(result))
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> JsonRpcResult<Option<PrepareRenameResponse>> {
+        self.sync_v2_globals().await;
+
+        let uri = params.text_document.uri.clone();
+        let Some(file_id) = self.get_file_id_v2(&uri).await else {
+            return Ok(None);
+        };
+
+        let expected_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+        if let Some(expected_version) = expected_version {
+            let ok = self
+                .analysis_v2
+                .wait_for_file_version(file_id, expected_version)
+                .await;
+            if !ok {
+                return Ok(None);
+            }
+        }
+
+        let analysis = self.analysis_v2.snapshot().await;
+        let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
+            return Ok(None);
+        };
+        let Some(parse_result) = analysis.parse_result(file_id).ok().flatten() else {
+            return Ok(None);
+        };
+
+        Ok(handle_prepare_rename(&file_content, &parse_result, params))
+    }
+
+    async fn rename(&self, params: RenameParams) -> JsonRpcResult<Option<WorkspaceEdit>> {
+        self.sync_v2_globals().await;
+
+        let uri = params.text_document_position.text_document.uri.clone();
+        let Some(file_id) = self.get_file_id_v2(&uri).await else {
+            return Ok(None);
+        };
+
+        let expected_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+        if let Some(expected_version) = expected_version {
+            let ok = self
+                .analysis_v2
+                .wait_for_file_version(file_id, expected_version)
+                .await;
+            if !ok {
+                return Ok(None);
+            }
+        }
+
+        let analysis = self.analysis_v2.snapshot().await;
+        let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
+            return Ok(None);
+        };
+        let Some(parse_result) = analysis.parse_result(file_id).ok().flatten() else {
+            return Ok(None);
+        };
+
+        match handle_rename(&file_content, &parse_result, params) {
+            Ok(edit) => Ok(Some(edit)),
+            Err(RenameError::InvalidNewName) => Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "Invalid new name",
+            )),
+            Err(RenameError::Unsupported) => Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "Rename is not supported for this symbol",
+            )),
+        }
     }
 
     async fn symbol(

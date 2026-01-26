@@ -600,10 +600,11 @@ mod tests {
         ClientCapabilities, CompletionParams, DidChangeTextDocumentParams,
         DidChangeConfigurationParams, DidOpenTextDocumentParams, DocumentFormattingParams,
         DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
-        FormattingOptions, InitializeParams, InitializedParams, PartialResultParams, Position,
-        Range, SymbolInformation, SymbolKind, TextDocumentContentChangeEvent,
-        TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams,
-        VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceSymbolParams,
+        FormattingOptions, InitializeParams, InitializedParams, Location, PartialResultParams,
+        Position, PrepareRenameResponse, Range, ReferenceContext, ReferenceParams, RenameParams,
+        SymbolInformation, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+        TextDocumentItem, TextDocumentPositionParams, VersionedTextDocumentIdentifier,
+        WorkDoneProgressParams, WorkspaceEdit, WorkspaceSymbolParams,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::LspService;
@@ -1915,6 +1916,594 @@ mod tests {
         assert!(
             children.iter().any(|sym| sym.name == "Inside"),
             "expected Inside inside Unclosed region"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p14_references_returns_local_var_locations_and_respects_include_declaration() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let uri = Url::parse("file:///test_p14_references.bsl").expect("test uri");
+        let text = concat!(
+            "Процедура T()\n",
+            "    Перем X;\n",
+            "    X = 1;\n",
+            "    Сообщить(X);\n",
+            "КонецПроцедуры\n",
+        );
+
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let params_with_decl = ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 2,
+                    character: 4,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        };
+
+        let req_with_decl = Request::build("textDocument/references")
+            .id(2)
+            .params(serde_json::to_value(params_with_decl).expect("ReferenceParams"))
+            .finish();
+        let response_with_decl = service
+            .ready()
+            .await
+            .unwrap()
+            .call(req_with_decl)
+            .await
+            .expect("references request");
+        let response_with_decl = response_with_decl.expect("references should return a response");
+
+        let value = serde_json::to_value(&response_with_decl).expect("serialize response");
+        let result_value = value.get("result").cloned().expect("result field");
+        let parsed: Option<Vec<Location>> =
+            serde_json::from_value(result_value).expect("parse result");
+        let parsed = parsed.expect("result present");
+
+        assert_eq!(parsed.len(), 3, "expected declaration + 2 usages");
+        assert!(
+            parsed.iter().any(|loc| loc.range == Range {
+                start: Position {
+                    line: 1,
+                    character: 10
+                },
+                end: Position {
+                    line: 1,
+                    character: 11
+                }
+            }),
+            "expected declaration location for X"
+        );
+        assert!(
+            parsed.iter().any(|loc| loc.range == Range {
+                start: Position {
+                    line: 2,
+                    character: 4
+                },
+                end: Position {
+                    line: 2,
+                    character: 5
+                }
+            }),
+            "expected assignment target usage for X"
+        );
+        assert!(
+            parsed.iter().any(|loc| loc.range == Range {
+                start: Position {
+                    line: 3,
+                    character: 13
+                },
+                end: Position {
+                    line: 3,
+                    character: 14
+                }
+            }),
+            "expected call argument usage for X"
+        );
+
+        let params_no_decl = ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 2,
+                    character: 4,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+        };
+
+        let req_no_decl = Request::build("textDocument/references")
+            .id(3)
+            .params(serde_json::to_value(params_no_decl).expect("ReferenceParams"))
+            .finish();
+        let response_no_decl = service
+            .ready()
+            .await
+            .unwrap()
+            .call(req_no_decl)
+            .await
+            .expect("references request (no decl)");
+        let response_no_decl = response_no_decl.expect("references (no decl) should return a response");
+        let value = serde_json::to_value(&response_no_decl).expect("serialize response");
+        let result_value = value.get("result").cloned().expect("result field");
+        let parsed: Option<Vec<Location>> =
+            serde_json::from_value(result_value).expect("parse result");
+        let parsed = parsed.expect("result present");
+        assert_eq!(parsed.len(), 2, "expected 2 usages without declaration");
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p15_rename_updates_only_target_symbol_and_prepare_rename_is_supported() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let uri = Url::parse("file:///test_p15_rename.bsl").expect("test uri");
+        let text = concat!(
+            "Процедура T()\n",
+            "    Перем X;\n",
+            "    Перем XX;\n",
+            "    X = 1;\n",
+            "    XX = 2;\n",
+            "    Сообщить(X);\n",
+            "    Сообщить(XX);\n",
+            "КонецПроцедуры\n",
+        );
+
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let prepare_req = Request::build("textDocument/prepareRename")
+            .id(2)
+            .params(
+                serde_json::to_value(TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position {
+                        line: 5,
+                        character: 13,
+                    },
+                })
+                .expect("TextDocumentPositionParams"),
+            )
+            .finish();
+        let prepare_resp = service
+            .ready()
+            .await
+            .unwrap()
+            .call(prepare_req)
+            .await
+            .expect("prepareRename request");
+        let prepare_resp = prepare_resp.expect("prepareRename should return a response");
+        let value = serde_json::to_value(&prepare_resp).expect("serialize response");
+        let result_value = value.get("result").cloned().expect("result field");
+        let parsed: Option<PrepareRenameResponse> =
+            serde_json::from_value(result_value).expect("parse prepareRename");
+        let parsed = parsed.expect("result present");
+        match parsed {
+            PrepareRenameResponse::RangeWithPlaceholder { range, placeholder } => {
+                assert_eq!(placeholder, "X");
+                assert_eq!(
+                    range,
+                    Range {
+                        start: Position {
+                            line: 5,
+                            character: 13
+                        },
+                        end: Position {
+                            line: 5,
+                            character: 14
+                        }
+                    }
+                );
+            }
+            other => panic!("unexpected prepareRename response: {:?}", other),
+        }
+
+        let rename_params = RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 5,
+                    character: 13,
+                },
+            },
+            new_name: "Y".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        let rename_req = Request::build("textDocument/rename")
+            .id(3)
+            .params(serde_json::to_value(rename_params).expect("RenameParams"))
+            .finish();
+
+        let rename_resp = service
+            .ready()
+            .await
+            .unwrap()
+            .call(rename_req)
+            .await
+            .expect("rename request");
+        let rename_resp = rename_resp.expect("rename should return a response");
+
+        let value = serde_json::to_value(&rename_resp).expect("serialize response");
+        let result_value = value.get("result").cloned().expect("result field");
+        let parsed: Option<WorkspaceEdit> =
+            serde_json::from_value(result_value).expect("parse workspace edit");
+        let parsed = parsed.expect("result present");
+        let changes = parsed.changes.expect("changes present");
+        let edits = changes.get(&uri).expect("edits for uri");
+        assert_eq!(edits.len(), 3, "expected declaration + 2 usages for X");
+        assert!(
+            edits.iter().all(|e| e.new_text == "Y"),
+            "all edits must rename to Y"
+        );
+        assert!(
+            edits.iter().all(|e| e.range.start.line != 2),
+            "must not touch XX declaration line"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p16_references_returns_routine_declaration_and_calls() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let uri = Url::parse("file:///test_p16_routine_references.bsl").expect("test uri");
+        let text = concat!(
+            "Процедура Foo() Экспорт\n",
+            "КонецПроцедуры\n",
+            "\n",
+            "Процедура Bar()\n",
+            "    Foo();\n",
+            "    Foo();\n",
+            "КонецПроцедуры\n",
+        );
+
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let params = ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 4,
+                    character: 4,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        };
+
+        let req = Request::build("textDocument/references")
+            .id(2)
+            .params(serde_json::to_value(params).expect("ReferenceParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .expect("references request");
+        let response = response.expect("references should return a response");
+
+        let value = serde_json::to_value(&response).expect("serialize response");
+        let result_value = value.get("result").cloned().expect("result field");
+        let parsed: Option<Vec<Location>> =
+            serde_json::from_value(result_value).expect("parse result");
+        let parsed = parsed.expect("result present");
+        assert_eq!(parsed.len(), 3, "expected declaration + 2 call sites");
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p17_rename_routine_updates_declaration_and_calls_only() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let uri = Url::parse("file:///test_p17_routine_rename.bsl").expect("test uri");
+        let text = concat!(
+            "Процедура Foo() Экспорт\n",
+            "КонецПроцедуры\n",
+            "Процедура FooX() Экспорт\n",
+            "КонецПроцедуры\n",
+            "Процедура Bar()\n",
+            "    Foo();\n",
+            "    FooX();\n",
+            "    Foo();\n",
+            "КонецПроцедуры\n",
+        );
+
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let rename_params = RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 5,
+                    character: 4,
+                },
+            },
+            new_name: "Baz".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        let rename_req = Request::build("textDocument/rename")
+            .id(2)
+            .params(serde_json::to_value(rename_params).expect("RenameParams"))
+            .finish();
+
+        let rename_resp = service
+            .ready()
+            .await
+            .unwrap()
+            .call(rename_req)
+            .await
+            .expect("rename request");
+        let rename_resp = rename_resp.expect("rename should return a response");
+
+        let value = serde_json::to_value(&rename_resp).expect("serialize response");
+        let result_value = value.get("result").cloned().expect("result field");
+        let parsed: Option<WorkspaceEdit> =
+            serde_json::from_value(result_value).expect("parse workspace edit");
+        let parsed = parsed.expect("result present");
+        let changes = parsed.changes.expect("changes present");
+        let edits = changes.get(&uri).expect("edits for uri");
+
+        assert!(
+            edits.iter().all(|e| e.new_text == "Baz"),
+            "all edits must rename to Baz"
+        );
+        assert_eq!(edits.len(), 3, "expected declaration + 2 call sites for Foo");
+        assert!(
+            edits.iter().all(|e| e.range.start.line != 6),
+            "must not touch FooX() call"
         );
 
         drain_task.abort();

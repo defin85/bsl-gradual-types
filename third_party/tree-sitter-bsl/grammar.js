@@ -13,6 +13,10 @@ const PREC = {
   TERNARY: 20,
   ASSIGNMENT: 21,
   AWAIT: 22,
+  // Helper precedences for ambiguity resolution (non-operators).
+  PAREN: 30,
+  ARGUMENTS: 31,
+  EXECUTE_PARENS: 32,
 };
 
 // Важно: keywords должны выигрывать у identifier в лексическом конфликте.
@@ -301,7 +305,9 @@ module.exports = grammar({
       ),
 
     rise_error_statement: ($) =>
-      seq($.RAISE_KEYWORD, choice($.arguments, $.expression), optional(';')),
+      // Prefer parsing `RAISE (...)` as arguments, not as a parenthesized expression.
+      // This avoids ambiguity after introducing `parenthesized_expression`.
+      seq($.RAISE_KEYWORD, choice(prec(1, $.arguments), $.expression), optional(';')),
 
     var_statement: ($) =>
       seq(
@@ -370,7 +376,7 @@ module.exports = grammar({
 
     execute_statement: ($) => choice(
       seq(keyword('выполнить', 'execute'), $.expression, optional(';')),
-      seq(keyword('выполнить', 'execute'), '(', $.expression, ')', optional(';')),
+      prec(PREC.EXECUTE_PARENS, seq(keyword('выполнить', 'execute'), '(', $.expression, ')', optional(';'))),
     ),
 
     goto_statement: ($) =>
@@ -396,6 +402,7 @@ module.exports = grammar({
       choice(
         alias($._const_value, $.const_expression),
         $.identifier,
+        $.parenthesized_expression,
         $.unary_expression,
         $.binary_expression,
         $.ternary_expression,
@@ -406,6 +413,8 @@ module.exports = grammar({
         $.property_access,
         $.await_expression,
       ),
+
+    parenthesized_expression: ($) => prec(PREC.PAREN, seq('(', $.expression, ')')),
 
     unary_expression: ($) =>
       prec.left(
@@ -497,7 +506,7 @@ module.exports = grammar({
         seq(field('name', $.identifier), field('arguments', $.arguments)),
       ),
 
-    arguments: ($) => seq('(', sepBy(',', optional($.expression)), ')'),
+    arguments: ($) => prec(PREC.ARGUMENTS, seq('(', sepBy(',', optional($.expression)), ')')),
 
     // Primitive
     ...buildKeywords(),

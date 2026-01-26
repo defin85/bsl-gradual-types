@@ -12,6 +12,7 @@
 А = Неопределено;
 А = Null;
 А = 1 + 1;
+А = (1=1);
 А = Б;
 
 ---
@@ -77,6 +78,19 @@
         right: (expression
           (const_expression
             (number))))))
+  (assignment_statement
+    left: (identifier)
+    right: (expression
+      (parenthesized_expression
+        (expression
+          (binary_expression
+            left: (expression
+              (const_expression
+                (number)))
+            operator: (operator)
+            right: (expression
+              (const_expression
+                (number))))))))
   (assignment_statement
     left: (identifier)
     right: (expression

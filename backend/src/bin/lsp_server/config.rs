@@ -35,6 +35,26 @@ pub struct BslSettings {
     pub hover: HoverSettings,
     #[serde(default)]
     pub diagnostics: DiagnosticsSettings,
+    #[serde(default)]
+    pub formatting: FormattingSettings,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FormattingSettings {
+    #[serde(rename = "enabled")]
+    pub enabled: bool,
+
+    #[serde(rename = "indentSize")]
+    pub indent_size: usize,
+}
+
+impl Default for FormattingSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            indent_size: 4,
+        }
+    }
 }
 
 /// MILESTONE 3.6 Phase 1: Hover Settings

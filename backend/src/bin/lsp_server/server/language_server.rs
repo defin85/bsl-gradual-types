@@ -32,7 +32,7 @@ use crate::commands::{
 use crate::config::{BslSettings, LspConfig};
 use crate::handlers::{
     apply_text_edit, handle_completion_resolve, handle_goto_definition_v2, handle_hover_v2,
-    handle_signature_help_v2,
+    handle_signature_help_v2, format_bsl_to_edits,
 };
 use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
@@ -147,6 +147,7 @@ impl LanguageServer for BslLanguageServer {
                         work_done_progress: Some(false),
                     },
                 }),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -443,8 +444,11 @@ impl LanguageServer for BslLanguageServer {
                 match serde_json::from_value::<BslSettings>(bsl_value.clone()) {
                     Ok(new_settings) => {
                         info!(
-                            "Parsed BslSettings: hover.detailLevel={}, diagnostics.detailLevel={}",
-                            new_settings.hover.detail_level, new_settings.diagnostics.detail_level
+                            "Parsed BslSettings: hover.detailLevel={}, diagnostics.detailLevel={}, formatting.enabled={}, formatting.indentSize={}",
+                            new_settings.hover.detail_level,
+                            new_settings.diagnostics.detail_level,
+                            new_settings.formatting.enabled,
+                            new_settings.formatting.indent_size
                         );
                         *self.settings.write().await = new_settings;
                     }
@@ -596,6 +600,46 @@ impl LanguageServer for BslLanguageServer {
     // ========================================================================
     // LSP FEATURES
     // ========================================================================
+
+    async fn formatting(
+        &self,
+        params: DocumentFormattingParams,
+    ) -> JsonRpcResult<Option<Vec<TextEdit>>> {
+        let settings = self.settings.read().await.clone();
+        if !settings.formatting.enabled {
+            return Err(tower_lsp::jsonrpc::Error::invalid_request());
+        }
+
+        self.sync_v2_globals().await;
+        let uri = params.text_document.uri;
+        let file_id = self.get_or_create_file_id_v2(&uri).await;
+
+        let expected_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+
+        if let Some(expected_version) = expected_version {
+            let ok = self
+                .analysis_v2
+                .wait_for_file_version(file_id, expected_version)
+                .await;
+            if !ok {
+                return Ok(None);
+            }
+        }
+
+        let analysis = self.analysis_v2.snapshot().await;
+        let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
+            return Ok(None);
+        };
+
+        let edits = format_bsl_to_edits(&file_content, settings.formatting.indent_size)
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+        Ok(edits)
+    }
 
     async fn completion(
         &self,

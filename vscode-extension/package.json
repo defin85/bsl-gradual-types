@@ -331,6 +331,26 @@
                         "order": 1
                     }
                 }
+            },
+            {
+                "title": "Formatting (AST-based)",
+                "order": 13,
+                "properties": {
+                    "bsl.formatting.enabled": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Включить форматирование BSL через LSP (textDocument/formatting)",
+                        "order": 0
+                    },
+                    "bsl.formatting.indentSize": {
+                        "type": "number",
+                        "default": 4,
+                        "minimum": 2,
+                        "maximum": 8,
+                        "description": "Размер отступа (пробелы) для форматтера",
+                        "order": 1
+                    }
+                }
             }
         ],
         "commands": [

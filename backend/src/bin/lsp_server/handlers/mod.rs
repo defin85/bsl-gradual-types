@@ -5,6 +5,7 @@
 pub mod completion;
 pub mod context;
 pub mod definition;
+pub mod formatting;
 pub mod hover;
 pub mod signature_help;
 pub mod text_document;
@@ -13,6 +14,7 @@ pub mod text_document;
 pub use completion::*;
 pub use context::*;
 pub use definition::*;
+pub use formatting::*;
 pub use hover::*;
 pub use signature_help::*;
 pub use text_document::*;

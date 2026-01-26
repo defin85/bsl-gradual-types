@@ -572,14 +572,16 @@ impl BslLanguageServer {
 
 fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
     let payload = format!(
-        "schema={};hover.detail_level={};hover.max_methods={};hover.max_properties={};hover.show_certainty={};diagnostics.detail_level={};diagnostics.show_hints={}",
+        "schema={};hover.detail_level={};hover.max_methods={};hover.max_properties={};hover.show_certainty={};diagnostics.detail_level={};diagnostics.show_hints={};formatting.enabled={};formatting.indent_size={}",
         bsl_analysis_v2::SETTINGS_SCHEMA_VERSION,
         settings.hover.detail_level,
         settings.hover.max_methods,
         settings.hover.max_properties,
         settings.hover.show_certainty,
         settings.diagnostics.detail_level,
-        settings.diagnostics.show_hints
+        settings.diagnostics.show_hints,
+        settings.formatting.enabled,
+        settings.formatting.indent_size
     );
     SettingsId::from_hash(blake3::hash(payload.as_bytes()).to_hex().to_string())
 }
@@ -596,8 +598,9 @@ mod tests {
     use tower_lsp::jsonrpc::Request;
     use tower_lsp::lsp_types::{
         ClientCapabilities, CompletionParams, DidChangeTextDocumentParams,
-        DidOpenTextDocumentParams, InitializeParams, InitializedParams, PartialResultParams,
-        Position, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+        DidChangeConfigurationParams, DidOpenTextDocumentParams, DocumentFormattingParams,
+        FormattingOptions, InitializeParams, InitializedParams, PartialResultParams, Position,
+        TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
         TextDocumentPositionParams, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
     };
     use tower_lsp::LanguageServer;
@@ -1126,6 +1129,154 @@ mod tests {
             "unexpected P8TypeA in completion B: {:?}",
             labels_b
         );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p9_formatting_reindents_and_trims_when_enabled() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        // LSP initialize handshake is required, otherwise client notifications are suppressed.
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        // Enable formatting through didChangeConfiguration (section `bsl`).
+        let settings = DidChangeConfigurationParams {
+            settings: serde_json::json!({
+                "bsl": {
+                    "hover": {
+                        "detailLevel": "full",
+                        "maxMethods": 10,
+                        "maxProperties": 5,
+                        "showCertainty": true
+                    },
+                    "diagnostics": {
+                        "detailLevel": "standard",
+                        "showHints": true
+                    },
+                    "formatting": {
+                        "enabled": true,
+                        "indentSize": 4
+                    }
+                }
+            }),
+        };
+        let settings_req = Request::build("workspace/didChangeConfiguration")
+            .params(serde_json::to_value(settings).expect("DidChangeConfigurationParams"))
+            .finish();
+        let settings_resp = service
+            .ready()
+            .await
+            .unwrap()
+            .call(settings_req)
+            .await
+            .expect("didChangeConfiguration notification");
+        assert!(settings_resp.is_none(), "didChangeConfiguration is a notification");
+
+        let uri = Url::parse("file:///test_p9_formatting.bsl").expect("test uri");
+        let text = "Процедура Тест()\nЕсли Истина Тогда  \nСообщить(1);\nИначе\nСообщить(2);   \nКонецЕсли;\nКонецПроцедуры\n";
+
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let formatting_params = DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            options: FormattingOptions {
+                tab_size: 4,
+                insert_spaces: true,
+                ..Default::default()
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        let formatting_req = Request::build("textDocument/formatting")
+            .id(2)
+            .params(serde_json::to_value(formatting_params).expect("DocumentFormattingParams"))
+            .finish();
+        let formatting_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(formatting_req)
+            .await
+            .expect("formatting request");
+        let formatting_response = formatting_response.expect("formatting should return a response");
+
+        let response_value =
+            serde_json::to_value(&formatting_response).expect("serialize formatting response");
+        let edits_value = response_value
+            .get("result")
+            .cloned()
+            .expect("formatting result field");
+        let edits: Option<Vec<tower_lsp::lsp_types::TextEdit>> =
+            serde_json::from_value(edits_value).expect("parse edits");
+        let edits = edits.expect("edits present");
+        assert!(!edits.is_empty(), "formatting must return edits");
+
+        // Apply per-line edits (formatter emits full-line replacements).
+        let mut lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
+        for edit in edits {
+            let line = edit.range.start.line as usize;
+            lines[line] = edit.new_text;
+        }
+        let formatted = lines.join("\n");
+
+        let expected = "Процедура Тест()\n    Если Истина Тогда\n        Сообщить(1);\n    Иначе\n        Сообщить(2);\n    КонецЕсли;\nКонецПроцедуры\n";
+        assert_eq!(formatted, expected);
 
         drain_task.abort();
     }

@@ -1,6 +1,7 @@
 use tree_sitter::Parser;
 
 pub mod ast;
+pub mod formatter;
 pub mod tree_sitter_adapter;
 
 pub use tree_sitter_adapter::{
@@ -30,7 +31,7 @@ pub fn parse_fast(source: &str) -> Result<ast::ParseResult, ParseFatalError> {
     TreeSitterAdapter::convert_tree_fast(&tree, source).map_err(ParseFatalError::Adapter)
 }
 
-fn parse_tree(source: &str) -> Result<tree_sitter::Tree, ParseFatalError> {
+pub(crate) fn parse_tree(source: &str) -> Result<tree_sitter::Tree, ParseFatalError> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_bsl::LANGUAGE.into())

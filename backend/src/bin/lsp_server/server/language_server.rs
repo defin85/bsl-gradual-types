@@ -752,14 +752,20 @@ impl LanguageServer for BslLanguageServer {
             return Ok(Some(Vec::new()));
         }
 
+        let mut ready_file_ids = Vec::<bsl_analysis_v2::FileId>::new();
         for (file_id, expected_version) in &open_versions {
             let ok = self
                 .analysis_v2
                 .wait_for_file_version(*file_id, *expected_version)
                 .await;
             if !ok {
-                return Ok(Some(Vec::new()));
+                continue;
             }
+            ready_file_ids.push(*file_id);
+        }
+
+        if ready_file_ids.is_empty() {
+            return Ok(Some(Vec::new()));
         }
 
         let keys = self.file_key_to_file_id_v2.read().await.clone();
@@ -777,7 +783,7 @@ impl LanguageServer for BslLanguageServer {
 
         let analysis = self.analysis_v2.snapshot().await;
         let mut out: Vec<SymbolInformation> = Vec::new();
-        for (file_id, _expected_version) in open_versions {
+        for file_id in ready_file_ids {
             let Some(uri) = file_id_to_uri.get(&file_id) else {
                 continue;
             };

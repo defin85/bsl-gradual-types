@@ -21,7 +21,8 @@ pub fn build_document_symbols(
     parse_result: &ParseResult,
 ) -> Result<DocumentSymbolResponse, SymbolsError> {
     let regions = collect_regions(source)?;
-    let routines = collect_routines(parse_result);
+    let line_index = LineIndex::new(source);
+    let routines = collect_routines(parse_result, source, &line_index);
 
     let mut top_level = Vec::<DocumentSymbol>::new();
 
@@ -53,7 +54,7 @@ pub fn build_document_symbols(
 pub fn build_workspace_symbols(
     query: &str,
     uri: &Url,
-    _source: &str,
+    source: &str,
     parse_result: &ParseResult,
 ) -> Vec<SymbolInformation> {
     if query.trim().is_empty() {
@@ -61,7 +62,8 @@ pub fn build_workspace_symbols(
     }
 
     let query_lower = query.to_lowercase();
-    collect_routines(parse_result)
+    let line_index = LineIndex::new(source);
+    collect_routines(parse_result, source, &line_index)
         .into_iter()
         .filter(|routine| routine.name.to_lowercase().contains(&query_lower))
         .map(|routine| {
@@ -108,7 +110,11 @@ impl RoutineSymbol {
     }
 }
 
-fn collect_routines(parse_result: &ParseResult) -> Vec<RoutineSymbol> {
+fn collect_routines(
+    parse_result: &ParseResult,
+    source: &str,
+    line_index: &LineIndex,
+) -> Vec<RoutineSymbol> {
     let mut out = Vec::new();
     for stmt in &parse_result.program.statements {
         match stmt {
@@ -123,6 +129,8 @@ fn collect_routines(parse_result: &ParseResult) -> Vec<RoutineSymbol> {
                     SymbolKind::FUNCTION,
                     *is_export,
                     *span,
+                    source,
+                    line_index,
                 ));
             }
             Statement::ProcedureDecl {
@@ -136,6 +144,8 @@ fn collect_routines(parse_result: &ParseResult) -> Vec<RoutineSymbol> {
                     SymbolKind::METHOD,
                     *is_export,
                     *span,
+                    source,
+                    line_index,
                 ));
             }
             _ => {}
@@ -150,6 +160,8 @@ fn routine_from_span(
     kind: SymbolKind,
     is_export: bool,
     span: bsl_shared::ir::Span,
+    source: &str,
+    line_index: &LineIndex,
 ) -> RoutineSymbol {
     let start = Position {
         line: span.start_line,
@@ -160,6 +172,8 @@ fn routine_from_span(
         character: span.end_column,
     };
     let range = Range { start, end };
+    let selection_range = selection_range_for_name(source, line_index, span.start_line, name)
+        .unwrap_or(range);
     RoutineSymbol {
         name: name.to_string(),
         detail: if is_export {
@@ -169,9 +183,35 @@ fn routine_from_span(
         },
         kind,
         range,
-        selection_range: range,
+        selection_range,
         start_line: span.start_line,
     }
+}
+
+fn selection_range_for_name(
+    source: &str,
+    line_index: &LineIndex,
+    line: u32,
+    name: &str,
+) -> Option<Range> {
+    let row = line as usize;
+    let text = line_index.line_text(source, row);
+    let start_byte = text.find(name)?;
+    let end_byte = start_byte + name.len();
+
+    let start_character = line_index.byte_column_to_utf16(source, row, start_byte);
+    let end_character = line_index.byte_column_to_utf16(source, row, end_byte);
+
+    Some(Range {
+        start: Position {
+            line,
+            character: start_character,
+        },
+        end: Position {
+            line,
+            character: end_character,
+        },
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -309,6 +349,33 @@ fn collect_regions(source: &str) -> Result<Vec<RegionSymbol>, SymbolsError> {
         }
     }
 
+    // Close any unclosed regions at EOF.
+    let eof = tree.root_node().end_position();
+    let eof_character = line_index.byte_column_to_utf16(source, eof.row, eof.column);
+    let eof_range = Range {
+        start: Position {
+            line: eof.row as u32,
+            character: eof_character,
+        },
+        end: Position {
+            line: eof.row as u32,
+            character: eof_character,
+        },
+    };
+
+    while let Some(mut region) = open.pop() {
+        region.range.end = eof_range.end;
+        if let Some(parent) = open.last_mut() {
+            parent.children_regions.push(region);
+            parent
+                .children_regions
+                .sort_by(|a, b| cmp_pos(a.range.start, b.range.start));
+        } else {
+            roots.push(region);
+            roots.sort_by(|a, b| cmp_pos(a.range.start, b.range.start));
+        }
+    }
+
     Ok(roots)
 }
 
@@ -331,6 +398,27 @@ fn range_from_node(line_index: &LineIndex, source: &str, node: &tree_sitter::Nod
 }
 
 fn extract_region_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    if let Some(parent) = node.parent() {
+        let mut cursor = parent.walk();
+        let mut passed_self = false;
+        for child in parent.children(&mut cursor) {
+            if !passed_self {
+                if child.start_byte() == node.start_byte() && child.end_byte() == node.end_byte() {
+                    passed_self = true;
+                }
+                continue;
+            }
+            if child.kind() == "identifier" {
+                let text = child.utf8_text(source.as_bytes()).ok()?;
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+                break;
+            }
+        }
+    }
+
     let mut sibling = node.next_sibling();
     while let Some(next) = sibling {
         if next.kind() == "identifier" {

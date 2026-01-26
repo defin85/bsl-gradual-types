@@ -1636,6 +1636,9 @@ mod tests {
         assert_eq!(inside.kind, SymbolKind::METHOD);
         assert_eq!(inside.detail.as_deref(), Some("export"));
         assert_eq!(inside.range.start.line, 1);
+        assert_eq!(inside.selection_range.start.line, 1);
+        assert_eq!(inside.selection_range.start.character, 10);
+        assert_eq!(inside.selection_range.end.character, 16);
 
         let outside = top_level
             .iter()
@@ -1643,6 +1646,9 @@ mod tests {
             .expect("expected Outside");
         assert_eq!(outside.kind, SymbolKind::FUNCTION);
         assert_eq!(outside.detail.as_deref(), Some("export"));
+        assert_eq!(outside.selection_range.start.line, 4);
+        assert_eq!(outside.selection_range.start.character, 8);
+        assert_eq!(outside.selection_range.end.character, 15);
 
         // Determinism: second request returns identical JSON result.
         let req_2 = Request::build("textDocument/documentSymbol")
@@ -1785,6 +1791,130 @@ mod tests {
                 .iter()
                 .map(|s| (s.name.clone(), s.location.uri.clone()))
                 .collect::<Vec<_>>()
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p13_unclosed_region_is_closed_at_eof() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let uri = Url::parse("file:///test_p13_unclosed_region.bsl").expect("test uri");
+        let text = concat!(
+            "#Область Unclosed\n",
+            "Процедура Inside() Экспорт\n",
+            "КонецПроцедуры\n",
+        );
+
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let req = Request::build("textDocument/documentSymbol")
+            .id(2)
+            .params(
+                serde_json::to_value(DocumentSymbolParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                })
+                .expect("DocumentSymbolParams"),
+            )
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .expect("documentSymbol request");
+        let response = response.expect("documentSymbol should return a response");
+
+        let value = serde_json::to_value(&response).expect("serialize response");
+        let result_value = value.get("result").cloned().expect("result field");
+        let parsed: Option<DocumentSymbolResponse> =
+            serde_json::from_value(result_value).expect("parse result");
+        let parsed = parsed.expect("result present");
+
+        let DocumentSymbolResponse::Nested(top_level) = parsed else {
+            panic!("expected nested document symbols");
+        };
+
+        let region = top_level
+            .iter()
+            .find(|sym| sym.name == "Unclosed")
+            .expect("expected region Unclosed");
+        assert_eq!(region.kind, SymbolKind::NAMESPACE);
+        assert_eq!(
+            region.range.end,
+            Position {
+                line: 3,
+                character: 0,
+            },
+            "unclosed region should be closed at EOF"
+        );
+
+        let children = region.children.as_ref().expect("region must have children");
+        assert!(
+            children.iter().any(|sym| sym.name == "Inside"),
+            "expected Inside inside Unclosed region"
         );
 
         drain_task.abort();

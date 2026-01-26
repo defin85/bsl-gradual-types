@@ -3,28 +3,52 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { EnhancedLspClient } from '../lsp/enhanced-client';
 
 export class EnhancedDiagnosticsProvider {
-    private client: EnhancedLspClient;
     private outputChannel: vscode.OutputChannel;
-    private diagnosticsCollection: vscode.DiagnosticCollection;
     
     constructor(client: EnhancedLspClient, outputChannel: vscode.OutputChannel) {
-        this.client = client;
+        void client;
         this.outputChannel = outputChannel;
-        this.diagnosticsCollection = vscode.languages.createDiagnosticCollection('bsl-gradual-types');
     }
     
     /**
      * Получение статистики диагностик
      */
     getDiagnosticsStats() {
-        return {
-            errors: 0,
-            warnings: 0,
-            infos: 0,
-            hints: 0
-        };
+        let errors = 0;
+        let warnings = 0;
+        let infos = 0;
+        let hints = 0;
+
+        // Диагностики приходят в VS Code через стандартный LSP pipeline.
+        // Здесь считаем статистику по workspace diagnostics и фильтруем по BSL файлам.
+        const all = vscode.languages.getDiagnostics();
+        for (const [uri, diagnostics] of all) {
+            if (uri.scheme !== 'file') continue;
+            const ext = path.extname(uri.fsPath).toLowerCase();
+            if (ext !== '.bsl' && ext !== '.os') continue;
+
+            for (const d of diagnostics) {
+                switch (d.severity) {
+                    case vscode.DiagnosticSeverity.Error:
+                        errors += 1;
+                        break;
+                    case vscode.DiagnosticSeverity.Warning:
+                        warnings += 1;
+                        break;
+                    case vscode.DiagnosticSeverity.Information:
+                        infos += 1;
+                        break;
+                    case vscode.DiagnosticSeverity.Hint:
+                        hints += 1;
+                        break;
+                }
+            }
+        }
+
+        return { errors, warnings, infos, hints };
     }
 }

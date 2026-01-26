@@ -1,18 +1,14 @@
 /**
  * Providers Setup Module
  *
- * Регистрация провайдеров: Type Hints, Code Actions, Diagnostics
+ * Регистрация провайдеров: Diagnostics stats + (через LSP) Inlay Hints/Code Actions
  */
 
 import * as vscode from 'vscode';
 import { EnhancedLspClient } from '../lsp/enhanced-client';
-import { TypeHintsProvider } from '../providers/typeHintsProvider';
-import { CodeActionsProvider } from '../providers/codeActionsProvider';
 import { EnhancedDiagnosticsProvider } from '../providers/enhancedDiagnosticsProvider';
 
 export interface ProvidersResult {
-    typeHintsProvider: TypeHintsProvider;
-    codeActionsProvider: CodeActionsProvider;
     diagnosticsProvider: EnhancedDiagnosticsProvider;
 }
 
@@ -26,30 +22,14 @@ export async function registerEnhancedProviders(
 ): Promise<ProvidersResult> {
     outputChannel.appendLine('Registering enhanced providers...');
 
-    // Type hints provider (inlay hints)
-    const typeHintsProvider = new TypeHintsProvider(languageClient);
-    context.subscriptions.push(
-        vscode.languages.registerInlayHintsProvider(
-            { scheme: 'file', language: 'bsl' },
-            typeHintsProvider
-        )
-    );
-
-    // Enhanced code actions provider
-    const codeActionsProvider = new CodeActionsProvider(languageClient);
-    context.subscriptions.push(
-        vscode.languages.registerCodeActionsProvider(
-            { scheme: 'file', language: 'bsl' },
-            codeActionsProvider,
-            {
-                providedCodeActionKinds: [
-                    vscode.CodeActionKind.QuickFix,
-                    vscode.CodeActionKind.Refactor,
-                    vscode.CodeActionKind.RefactorExtract,
-                ]
-            }
-        )
-    );
+    // Важно: мы НЕ регистрируем кастомные providers-заглушки.
+    //
+    // Inlay hints и code actions должны приходить через стандартный LSP
+    // (LanguageClient сам регистрирует фичи, если сервер объявляет capabilities).
+    //
+    // Если сервер их не поддерживает — VS Code не будет обещать эти фичи пользователю.
+    void languageClient;
+    void context;
 
     // Enhanced diagnostics provider
     const diagnosticsProvider = new EnhancedDiagnosticsProvider(languageClient, outputChannel);
@@ -57,8 +37,6 @@ export async function registerEnhancedProviders(
     outputChannel.appendLine('Enhanced providers registered');
 
     return {
-        typeHintsProvider,
-        codeActionsProvider,
         diagnosticsProvider
     };
 }

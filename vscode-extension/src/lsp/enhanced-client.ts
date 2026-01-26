@@ -111,6 +111,13 @@ export class EnhancedLspClient {
         if (this.client) {
             await this.stop();
         }
+
+        const typeHintsEnabled = vscode.workspace
+            .getConfiguration('bsl.typeHints')
+            .get<boolean>('enabled', false);
+        const codeActionsEnabled = vscode.workspace
+            .getConfiguration('bsl.codeActions')
+            .get<boolean>('enabled', false);
         
         // Настройки сервера
         const serverOptions: ServerOptions = {
@@ -148,8 +155,8 @@ export class EnhancedLspClient {
                 enableFlowSensitiveAnalysis: true,
                 enableUnionTypes: true,
                 enableInterproceduralAnalysis: true,
-                enableTypeHints: true,
-                enableCodeActions: true,
+                enableTypeHints: typeHintsEnabled,
+                enableCodeActions: codeActionsEnabled,
                 cacheDirectory: this.getCacheDirectory(),
                 performanceProfiling: this.getPerformanceSettings()
             },
@@ -193,6 +200,18 @@ export class EnhancedLspClient {
         this.registerEnhancedHandlers();
         
         await this.client.start();
+
+        const capabilities = (this.client as any).initializeResult?.capabilities;
+        if (typeHintsEnabled && !capabilities?.inlayHintProvider) {
+            this.outputChannel.appendLine(
+                '⚠️ bsl.typeHints.enabled=true, но сервер не объявил inlayHintProvider. Type hints будут недоступны.'
+            );
+        }
+        if (codeActionsEnabled && !capabilities?.codeActionProvider) {
+            this.outputChannel.appendLine(
+                '⚠️ bsl.codeActions.enabled=true, но сервер не объявил codeActionProvider. Code actions будут недоступны.'
+            );
+        }
         
         this.outputChannel.appendLine('✅ Enhanced LSP client connected');
     }

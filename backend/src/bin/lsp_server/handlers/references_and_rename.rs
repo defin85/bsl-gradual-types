@@ -45,7 +45,7 @@ pub fn handle_references(
     let line_index = LineIndex::new(source);
     let target = resolve_target_at_position(source, &line_index, parse_result, position)?;
 
-    let ranges = collect_target_ranges(source, &line_index, parse_result, &target, include_declaration);
+    let ranges = collect_target_ranges(parse_result, &target, include_declaration);
     Some(
         ranges
             .into_iter()
@@ -97,6 +97,9 @@ pub fn handle_rename(
     if params.new_name.trim().is_empty() || params.new_name.chars().any(|c| c.is_whitespace()) {
         return Err(RenameError::InvalidNewName);
     }
+    if !is_valid_identifier_name(&params.new_name) {
+        return Err(RenameError::InvalidNewName);
+    }
 
     let line_index = LineIndex::new(source);
     let position = params.text_document_position.position;
@@ -112,7 +115,7 @@ pub fn handle_rename(
         return Ok(WorkspaceEdit::default());
     }
 
-    let ranges = collect_target_ranges(source, &line_index, parse_result, &target, true);
+    let ranges = collect_target_ranges(parse_result, &target, true);
     let edits: Vec<TextEdit> = ranges
         .into_iter()
         .map(|range| TextEdit {
@@ -131,6 +134,17 @@ pub fn handle_rename(
     })
 }
 
+fn is_valid_identifier_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first == '_' || first.is_alphabetic()) {
+        return false;
+    }
+    chars.all(|c| c == '_' || c.is_alphanumeric())
+}
+
 fn resolve_target_at_position(
     source: &str,
     line_index: &LineIndex,
@@ -146,6 +160,9 @@ fn resolve_target_at_position(
         // Cursor on declaration name.
         for decl in &local_decls {
             if range_contains_position(decl.decl_range, position) {
+                if is_ambiguous_local_name(&local_decls, &decl.name) {
+                    return None;
+                }
                 return Some(SymbolTarget::LocalVar {
                     name: decl.name.clone(),
                     routine_span,
@@ -156,6 +173,9 @@ fn resolve_target_at_position(
 
         // Cursor on usage identifier inside routine body.
         if let Some(name) = find_identifier_at_position_in_statements(&routine_body, position) {
+            if is_ambiguous_local_name(&local_decls, &name) {
+                return None;
+            }
             if let Some(decl) = local_decls.iter().find(|d| d.name == name) {
                 return Some(SymbolTarget::LocalVar {
                     name,
@@ -225,8 +245,6 @@ fn resolve_target_at_position(
 }
 
 fn collect_target_ranges(
-    _source: &str,
-    _line_index: &LineIndex,
     parse_result: &ParseResult,
     target: &SymbolTarget,
     include_declaration: bool,
@@ -274,6 +292,10 @@ fn collect_target_ranges(
 struct LocalDecl {
     name: String,
     decl_range: Range,
+}
+
+fn is_ambiguous_local_name(local_decls: &[LocalDecl], name: &str) -> bool {
+    local_decls.iter().filter(|d| d.name == name).count() > 1
 }
 
 fn collect_local_var_decls(source: &str, line_index: &LineIndex, body: &[Statement]) -> Vec<LocalDecl> {

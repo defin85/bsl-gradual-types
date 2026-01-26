@@ -770,16 +770,13 @@ impl LanguageServer for BslLanguageServer {
             return Ok(None);
         };
 
-        let result = handle_references(
+        Ok(handle_references(
             &file_content,
             &parse_result,
             &uri,
             position,
             include_declaration,
-        )
-        .unwrap_or_default();
-
-        Ok(Some(result))
+        ))
     }
 
     async fn prepare_rename(

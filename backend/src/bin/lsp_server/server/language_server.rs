@@ -67,6 +67,10 @@ impl LanguageServer for BslLanguageServer {
                 Ok(config) => {
                     info!("LSP Config received: {:?}", config);
                     *self.config.write().await = Some(config.clone());
+                    info!(
+                        "Feature flags: enableTypeHints={:?}, enableCodeActions={:?}",
+                        config.enable_type_hints, config.enable_code_actions
+                    );
                     if let Some(cache_enabled) = config.cache_enabled {
                         let result = self.coordinator.set_cache_enabled(cache_enabled).await;
                         info!(
@@ -413,6 +417,8 @@ impl LanguageServer for BslLanguageServer {
                             platform_version: None,
                             cache_enabled: None,
                             strict_fingerprint: None,
+                            enable_type_hints: None,
+                            enable_code_actions: None,
                         });
                         if new_config.platform_docs_archive.is_some() {
                             merged.platform_docs_archive = new_config.platform_docs_archive;
@@ -428,6 +434,12 @@ impl LanguageServer for BslLanguageServer {
                         }
                         if new_config.strict_fingerprint.is_some() {
                             merged.strict_fingerprint = new_config.strict_fingerprint;
+                        }
+                        if new_config.enable_type_hints.is_some() {
+                            merged.enable_type_hints = new_config.enable_type_hints;
+                        }
+                        if new_config.enable_code_actions.is_some() {
+                            merged.enable_code_actions = new_config.enable_code_actions;
                         }
                         *guard = Some(merged.clone());
                         if let Some(cache_enabled) = merged.cache_enabled {

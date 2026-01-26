@@ -27,6 +27,46 @@ pub struct LspConfig {
     /// Use strict fingerprint mode for cache keys and deps snapshots
     #[serde(default)]
     pub strict_fingerprint: Option<bool>,
+
+    /// Feature gate: enable LSP inlay hints (textDocument/inlayHint) if supported by server.
+    ///
+    /// Passed from VS Code extension via initializationOptions.enableTypeHints.
+    #[serde(default)]
+    pub enable_type_hints: Option<bool>,
+
+    /// Feature gate: enable LSP code actions (textDocument/codeAction) if supported by server.
+    ///
+    /// Passed from VS Code extension via initializationOptions.enableCodeActions.
+    #[serde(default)]
+    pub enable_code_actions: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LspConfig;
+
+    #[test]
+    fn lsp_config_deserializes_feature_flags_from_initialization_options() {
+        let raw = serde_json::json!({
+            "platformDocsArchive": "/tmp/syntax_helper",
+            "configurationPath": "/tmp/conf/Configuration.xml",
+            "cacheEnabled": true,
+            "strictFingerprint": false,
+            "enableTypeHints": true,
+            "enableCodeActions": false
+        });
+
+        let cfg: LspConfig = serde_json::from_value(raw).expect("LspConfig");
+        assert_eq!(cfg.platform_docs_archive.as_deref(), Some("/tmp/syntax_helper"));
+        assert_eq!(
+            cfg.configuration_path.as_deref(),
+            Some("/tmp/conf/Configuration.xml")
+        );
+        assert_eq!(cfg.cache_enabled, Some(true));
+        assert_eq!(cfg.strict_fingerprint, Some(false));
+        assert_eq!(cfg.enable_type_hints, Some(true));
+        assert_eq!(cfg.enable_code_actions, Some(false));
+    }
 }
 
 /// MILESTONE 3.6 Phase 1+3: BSL Settings (from workspace/didChangeConfiguration)

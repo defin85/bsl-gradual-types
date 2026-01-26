@@ -1,5 +1,18 @@
 ## ADDED Requirements
 
+### Requirement: Core IntelliSense (LSP) как базовая линия (MUST)
+Система SHALL поддерживать и не регрессировать базовые функции IntelliSense, зафиксированные в capability `bsl-intellisense`:
+- `textDocument/completion` и `completionItem/resolve`,
+- `textDocument/hover`,
+- `textDocument/signatureHelp`,
+- `textDocument/definition` (как минимум для навигации по определениям типов),
+- публикацию диагностик через `textDocument/publishDiagnostics`.
+
+#### Scenario: IDE использует базовые функции IntelliSense
+- **GIVEN** LSP‑сервер запущен и рабочая область содержит `.bsl` файл
+- **WHEN** IDE запрашивает completion/hover/signatureHelp/definition и получает diagnostics при изменении текста
+- **THEN** сервер возвращает корректные ответы по протоколу LSP и публикует diagnostics для текущей версии документа
+
 ### Requirement: IDE‑grade completion по выражениям + stdlib + metadata (MUST)
 Система SHALL обеспечивать IDE‑grade автодополнение для BSL, ориентированное на реальные 1С‑кодовые базы:
 - completion для цепочек выражений и неполного кода (незакрытые скобки/строки, `expr.` без идентификатора),

@@ -33,3 +33,14 @@ SHOULD — то, что сильно улучшает UX, но требует д
 - VS Code providers (no stubs by default): `openspec/changes/implement-bsl-vscode-enhanced-providers/`
 
 Completion IDE‑grade (выражения + stdlib+metadata): см. `docs/roadmap/intellisense-v2-roadmap/intellisense-v2-roadmap.md`.
+
+### Mapping требований target‑spec → roadmap / changes
+
+- **Core IntelliSense (LSP):** уже зафиксирован в `openspec/specs/bsl-intellisense/spec.md` (минимальный контракт). Target‑spec `bsl-intellisense-ide-grade` требует сохранять/расширять это ядро.
+- **IDE‑grade completion по выражениям + stdlib + metadata (MUST):** реализуется по roadmap IntelliSense v2 (milestones M1–M8).
+- **Детерминизм/инкрементальность/отмена/No blocking I/O (MUST):** реализуется как нефункциональная часть roadmap IntelliSense v2 (например, M1/M2/M7) и должна применяться ко всем LSP фичам.
+- **Symbols (MUST):** `openspec/changes/add-bsl-lsp-symbols/`.
+- **Find References + Rename (MUST):** `openspec/changes/add-bsl-lsp-references-and-rename/` (включая документирование поддерживаемых классов символов).
+- **Formatting (SHOULD):** `openspec/changes/evaluate-bsl-formatting/` (выбор стратегии/интеграции форматтера и критерии детерминизма/минимального diff).
+- **Code Actions / Quick Fixes (SHOULD):** `openspec/changes/implement-bsl-vscode-enhanced-providers/` (как минимум: не регистрировать пустые заглушки; далее: наполнение quick fixes).
+- **Inlay hints (SHOULD):** `openspec/changes/implement-bsl-vscode-enhanced-providers/` (как минимум: не регистрировать пустые заглушки; далее: наполнение type hints).

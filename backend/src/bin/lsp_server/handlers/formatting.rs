@@ -24,6 +24,35 @@ pub fn format_bsl_to_edits(
     Ok(Some(edits))
 }
 
+pub fn format_bsl_range_to_edits(
+    source: &str,
+    indent_size: usize,
+    range: Range,
+) -> Result<Option<Vec<TextEdit>>, FormattingError> {
+    let options = FormatOptions { indent_size };
+    let formatted = format_document(source, &options)
+        .map_err(|e| FormattingError::Formatter(e.to_string()))?;
+
+    if formatted == source {
+        return Ok(Some(vec![]));
+    }
+
+    let mut edits = compute_line_edits(source, &formatted);
+
+    let start_line = range.start.line;
+    let mut end_line = range.end.line;
+    if range.end.character == 0 && end_line > 0 {
+        end_line -= 1;
+    }
+
+    edits.retain(|edit| {
+        let line = edit.range.start.line;
+        line >= start_line && line <= end_line
+    });
+
+    Ok(Some(edits))
+}
+
 fn compute_line_edits(old: &str, new: &str) -> Vec<TextEdit> {
     let old_lines = split_lines_for_lsp(old);
     let new_lines = split_lines_for_lsp(new);
@@ -117,4 +146,3 @@ mod tests {
         assert_eq!(edits[1].new_text, "    b");
     }
 }
-

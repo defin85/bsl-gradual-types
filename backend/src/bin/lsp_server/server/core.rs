@@ -599,9 +599,10 @@ mod tests {
     use tower_lsp::lsp_types::{
         ClientCapabilities, CompletionParams, DidChangeTextDocumentParams,
         DidChangeConfigurationParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-        FormattingOptions, InitializeParams, InitializedParams, PartialResultParams, Position,
-        TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-        TextDocumentPositionParams, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+        DocumentRangeFormattingParams, FormattingOptions, InitializeParams, InitializedParams,
+        PartialResultParams, Position, Range, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+        TextDocumentItem, TextDocumentPositionParams, VersionedTextDocumentIdentifier,
+        WorkDoneProgressParams,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::LspService;
@@ -1277,6 +1278,241 @@ mod tests {
 
         let expected = "Процедура Тест()\n    Если Истина Тогда\n        Сообщить(1);\n    Иначе\n        Сообщить(2);\n    КонецЕсли;\nКонецПроцедуры\n";
         assert_eq!(formatted, expected);
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p10_range_formatting_only_updates_selected_lines() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let settings = DidChangeConfigurationParams {
+            settings: serde_json::json!({
+                "bsl": {
+                    "hover": {
+                        "detailLevel": "full",
+                        "maxMethods": 10,
+                        "maxProperties": 5,
+                        "showCertainty": true
+                    },
+                    "diagnostics": {
+                        "detailLevel": "standard",
+                        "showHints": true
+                    },
+                    "formatting": {
+                        "enabled": true,
+                        "indentSize": 4
+                    }
+                }
+            }),
+        };
+        let settings_req = Request::build("workspace/didChangeConfiguration")
+            .params(serde_json::to_value(settings).expect("DidChangeConfigurationParams"))
+            .finish();
+        let settings_resp = service
+            .ready()
+            .await
+            .unwrap()
+            .call(settings_req)
+            .await
+            .expect("didChangeConfiguration notification");
+        assert!(settings_resp.is_none(), "didChangeConfiguration is a notification");
+
+        let uri = Url::parse("file:///test_p10_range_formatting.bsl").expect("test uri");
+        let text = concat!(
+            "Процедура Тест()\n",
+            "    Сообщить(\"a\");\n",
+            "Если Истина Тогда\n",
+            "Сообщить(1);\n",
+            "КонецЕсли;\n",
+            "    Сообщить(\"b\");\n",
+            "КонецПроцедуры\n",
+        );
+
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let range_formatting_params = DocumentRangeFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range {
+                start: Position {
+                    line: 2,
+                    character: 0,
+                },
+                end: Position {
+                    line: 5,
+                    character: 0,
+                },
+            },
+            options: FormattingOptions {
+                tab_size: 4,
+                insert_spaces: true,
+                ..Default::default()
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        let range_req = Request::build("textDocument/rangeFormatting")
+            .id(2)
+            .params(
+                serde_json::to_value(range_formatting_params)
+                    .expect("DocumentRangeFormattingParams"),
+            )
+            .finish();
+
+        let response_a = service
+            .ready()
+            .await
+            .unwrap()
+            .call(range_req)
+            .await
+            .expect("rangeFormatting request");
+        let response_a = response_a.expect("rangeFormatting should return a response");
+
+        let response_value =
+            serde_json::to_value(&response_a).expect("serialize rangeFormatting response");
+        let edits_value = response_value
+            .get("result")
+            .cloned()
+            .expect("rangeFormatting result field");
+        let edits: Option<Vec<tower_lsp::lsp_types::TextEdit>> =
+            serde_json::from_value(edits_value).expect("parse edits");
+        let edits = edits.expect("edits present");
+
+        assert_eq!(edits.len(), 3, "expected 3 line edits inside the range");
+        for edit in &edits {
+            assert!(
+                (2..=4).contains(&edit.range.start.line),
+                "unexpected edit line {:?}",
+                edit.range.start.line
+            );
+        }
+        let projected_a: Vec<(u32, String)> = edits
+            .iter()
+            .map(|edit| (edit.range.start.line, edit.new_text.clone()))
+            .collect();
+
+        // Apply per-line edits.
+        let mut lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
+        for edit in edits {
+            let line = edit.range.start.line as usize;
+            lines[line] = edit.new_text;
+        }
+        let formatted = lines.join("\n");
+
+        let expected = concat!(
+            "Процедура Тест()\n",
+            "    Сообщить(\"a\");\n",
+            "    Если Истина Тогда\n",
+            "        Сообщить(1);\n",
+            "    КонецЕсли;\n",
+            "    Сообщить(\"b\");\n",
+            "КонецПроцедуры\n",
+        );
+        assert_eq!(formatted, expected);
+
+        // Determinism: second request returns identical edits.
+        let range_req_2 = Request::build("textDocument/rangeFormatting")
+            .id(3)
+            .params(
+                serde_json::to_value(DocumentRangeFormattingParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    range: Range {
+                        start: Position {
+                            line: 2,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: 5,
+                            character: 0,
+                        },
+                    },
+                    options: FormattingOptions {
+                        tab_size: 4,
+                        insert_spaces: true,
+                        ..Default::default()
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .expect("DocumentRangeFormattingParams"),
+            )
+            .finish();
+
+        let response_b = service
+            .ready()
+            .await
+            .unwrap()
+            .call(range_req_2)
+            .await
+            .expect("rangeFormatting request (2)");
+        let response_b = response_b.expect("rangeFormatting (2) should return a response");
+
+        let value_b = serde_json::to_value(&response_b).expect("serialize response");
+        let edits_b_value = value_b.get("result").cloned().expect("result field");
+        let edits_b: Option<Vec<tower_lsp::lsp_types::TextEdit>> =
+            serde_json::from_value(edits_b_value).expect("parse edits");
+        let edits_b = edits_b.expect("edits present");
+        let projected_b: Vec<(u32, String)> = edits_b
+            .iter()
+            .map(|edit| (edit.range.start.line, edit.new_text.clone()))
+            .collect();
+        assert_eq!(projected_b, projected_a, "range formatting must be deterministic");
 
         drain_task.abort();
     }

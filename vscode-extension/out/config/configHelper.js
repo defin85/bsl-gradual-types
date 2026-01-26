@@ -73,12 +73,18 @@ class BslAnalyzerConfig {
     static get autoIndexBuild() {
         return this.getConfig().get('autoIndexBuild', false);
     }
+    static get autoReindexEnabled() {
+        return this.getConfig().get('autoReindexEnabled', true);
+    }
     // Настройки анализа
     static get rulesConfig() {
         return this.getConfig().get('rulesConfig', '');
     }
     static get enableMetrics() {
         return this.getConfig().get('enableMetrics', true);
+    }
+    static get cacheEnabled() {
+        return this.getConfig().get('cacheEnabled', true);
     }
     // Enhanced methods для новой функциональности
     static isValid() {
@@ -92,7 +98,8 @@ class BslAnalyzerConfig {
             serverTcpPort: this.serverTcpPort,
             binaryPath: this.binaryPath,
             configurationPath: this.configurationPath,
-            enableRealTimeAnalysis: this.enableRealTimeAnalysis
+            enableRealTimeAnalysis: this.enableRealTimeAnalysis,
+            cacheEnabled: this.cacheEnabled
         };
     }
 }
@@ -116,6 +123,8 @@ const LEGACY_CONFIG_MAP = {
     'index.platformVersion': 'platformVersion',
     'index.platformDocsArchive': 'platformDocsArchive',
     'index.autoIndexBuild': 'autoIndexBuild',
+    'index.autoReindexEnabled': 'autoReindexEnabled',
+    'autoReindex.enabled': 'autoReindexEnabled',
     'analysis.rulesConfig': 'rulesConfig',
     'analysis.enableMetrics': 'enableMetrics'
 };

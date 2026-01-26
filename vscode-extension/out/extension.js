@@ -17988,7 +17988,7 @@ function getBinaryPath(binaryName, extensionContext2) {
         return contextBinPath;
       }
     }
-    const extensionPath = vscode3.extensions.getExtension("bsl-analyzer-team.bsl-type-safety-analyzer")?.extensionPath;
+    const extensionPath = vscode3.extensions.getExtension("bsl-gradual-types-team.bsl-gradual-types")?.extensionPath;
     if (extensionPath) {
       const bundledBinPath = path.join(extensionPath, "bin", `${binaryName}${EXE_EXT}`);
       if (fs.existsSync(bundledBinPath)) {
@@ -18902,9 +18902,11 @@ function handleCursorMove(editor) {
   }
   if (debounceTimer) {
     clearTimeout(debounceTimer);
+    debounceTimer = void 0;
   }
   debounceTimer = setTimeout(() => {
-    updateCurrentContext(editor);
+    debounceTimer = void 0;
+    void updateCurrentContext(editor);
   }, 200);
 }
 async function updateCurrentContext(editor) {

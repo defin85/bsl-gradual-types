@@ -22,6 +22,12 @@ import {
 import { initializeContextProvider, CurrentContext } from '../../lsp/contextProvider';
 import { initializeStatsProvider } from '../../lsp/statsProvider';
 import { TypeRepositoryStats } from '../../lsp/customRequests';
+import * as clientModule from '../../lsp/client';
+
+async function flushPromises(): Promise<void> {
+    await Promise.resolve();
+    await Promise.resolve();
+}
 
 suite('Status Bar E2E Test Suite', () => {
     let statusBarStub: any;
@@ -31,6 +37,9 @@ suite('Status Bar E2E Test Suite', () => {
     let commandExecuteStub: sinon.SinonStub;
     let getTypeRepositoryStatsStub: sinon.SinonStub;
     let getLanguageClientStub: sinon.SinonStub;
+    let selectionHandler: ((event: any) => void) | undefined;
+    let onDidChangeTextEditorSelectionStub: sinon.SinonStub;
+    let onDidChangeActiveTextEditorStub: sinon.SinonStub;
 
     setup(() => {
         // Mock status bar
@@ -60,6 +69,26 @@ suite('Status Bar E2E Test Suite', () => {
 
         // Mock vscode.commands.executeCommand для LSP Custom Requests
         commandExecuteStub = sinon.stub(vscode.commands, 'executeCommand');
+
+        // Перехватываем регистрацию событий VSCode, чтобы можно было вручную вызвать обработчики
+        selectionHandler = undefined;
+        onDidChangeTextEditorSelectionStub = sinon
+            .stub(vscode.window, 'onDidChangeTextEditorSelection')
+            .callsFake((handler: any) => {
+                selectionHandler = handler;
+                return { dispose: sinon.stub() } as any;
+            });
+
+        onDidChangeActiveTextEditorStub = sinon
+            .stub(vscode.window, 'onDidChangeActiveTextEditor')
+            .callsFake((_handler: any) => {
+                return { dispose: sinon.stub() } as any;
+            });
+
+        // По умолчанию LSP Running для context/stats providers
+        getLanguageClientStub = sinon
+            .stub(clientModule, 'getLanguageClient')
+            .returns({ state: State.Running } as any);
     });
 
     teardown(() => {
@@ -79,9 +108,6 @@ suite('Status Bar E2E Test Suite', () => {
 
         // Context provider
         initializeContextProvider(context, statusBarStub);
-
-        // Stats provider
-        initializeStatsProvider(context, statusBarStub);
 
         // === TASK 2.20.1: LSP Server Status ===
         updateLspStatus(State.Running);
@@ -126,14 +152,12 @@ suite('Status Bar E2E Test Suite', () => {
         } as any;
 
         // Вызываем обработчик cursor move (если есть)
-        const onDidChangeTextEditorSelection = (vscode.window.onDidChangeTextEditorSelection as any);
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
         if (selectionHandler) {
             selectionHandler({ textEditor: mockEditor });
         }
 
         clock.tick(200); // Debouncing для context
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
 
         const tooltipAfterContext = statusBarStub.tooltip as string;
 
@@ -157,14 +181,12 @@ suite('Status Bar E2E Test Suite', () => {
         };
         getTypeRepositoryStatsStub.resolves(mockStats);
 
-        // Mock LSP Client
-        const clientModule = await import('../../lsp/client');
-        getLanguageClientStub = sinon.stub(clientModule, 'getLanguageClient');
-        getLanguageClientStub.returns({ state: State.Running } as any);
+        // Stats provider (после установки стабов, чтобы initial update использовал их)
+        initializeStatsProvider(context, statusBarStub);
 
         // Ждём обновления статистики
         clock.tick(100);
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await flushPromises();
 
         const finalTooltip = statusBarStub.tooltip as string;
 
@@ -207,10 +229,6 @@ suite('Status Bar E2E Test Suite', () => {
     // ========================================================================
 
     test('Components use unique markers without conflicts', async () => {
-        // Инициализируем context и stats providers
-        initializeContextProvider(context, statusBarStub);
-        initializeStatsProvider(context, statusBarStub);
-
         // Mock LSP context response
         const mockContext: CurrentContext = {
             functionName: 'SampleFunction',
@@ -230,10 +248,9 @@ suite('Status Bar E2E Test Suite', () => {
         };
         getTypeRepositoryStatsStub.resolves(mockStats);
 
-        // Mock LSP Client
-        const clientModule = await import('../../lsp/client');
-        getLanguageClientStub = sinon.stub(clientModule, 'getLanguageClient');
-        getLanguageClientStub.returns({ state: State.Running } as any);
+        // Инициализируем context и stats providers (после установки стабов)
+        initializeContextProvider(context, statusBarStub);
+        initializeStatsProvider(context, statusBarStub);
 
         // Симулируем cursor move для context update
         const mockEditor = {
@@ -246,14 +263,12 @@ suite('Status Bar E2E Test Suite', () => {
             },
         } as any;
 
-        const onDidChangeTextEditorSelection = (vscode.window.onDidChangeTextEditorSelection as any);
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
         if (selectionHandler) {
             selectionHandler({ textEditor: mockEditor });
         }
 
         clock.tick(200); // Context debouncing
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await flushPromises();
 
         const tooltip = statusBarStub.tooltip as string;
 

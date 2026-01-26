@@ -20,58 +20,74 @@ suite('LSP $/progress Handler (multi-token)', () => {
     });
 
     test('end for one token does not resolve other token', async () => {
-        let notificationHandler: ((params: any) => void) | undefined;
-
-        const client: any = {
-            onNotification: (method: string, cb: (params: any) => void) => {
-                if (method === '$/progress') {
-                    notificationHandler = cb;
+        const clock = sinon.useFakeTimers();
+        try {
+            const tick = async (ms: number) => {
+                const tickAsync = (clock as any).tickAsync;
+                if (typeof tickAsync === 'function') {
+                    await tickAsync.call(clock, ms);
+                    return;
                 }
-            }
-        };
+                clock.tick(ms);
+                await Promise.resolve();
+                await Promise.resolve();
+            };
 
-        const promises: Promise<void>[] = [];
-        const resolved: Record<string, boolean> = {};
+            let notificationHandler: ((params: any) => void) | undefined;
 
-        sinon.stub(vscode.window, 'withProgress').callsFake((_opts: any, task: any) => {
-            const fakeProgress = { report: sinon.stub() };
-            const p = task(fakeProgress);
-            promises.push(p);
-            return p;
-        });
+            const client: any = {
+                onNotification: (method: string, cb: (params: any) => void) => {
+                    if (method === '$/progress') {
+                        notificationHandler = cb;
+                    }
+                }
+            };
 
-        setupProgressHandler(client as any, outputChannel);
-        assert.ok(notificationHandler, '$/progress handler should be registered');
+            const promises: Promise<void>[] = [];
+            const resolved: Record<string, boolean> = {};
 
-        notificationHandler!({
-            token: 't1',
-            value: { kind: 'begin', title: 'A', message: 'init' }
-        });
-        notificationHandler!({
-            token: 't2',
-            value: { kind: 'begin', title: 'B', message: 'init' }
-        });
+            sinon.stub(vscode.window, 'withProgress').callsFake((_opts: any, task: any) => {
+                const fakeProgress = { report: sinon.stub() };
+                const p = task(fakeProgress);
+                promises.push(p);
+                return p;
+            });
 
-        // Hook resolution flags after begin (withProgress already produced promises).
-        promises[0].then(() => { resolved.t1 = true; });
-        promises[1].then(() => { resolved.t2 = true; });
+            setupProgressHandler(client as any, outputChannel);
+            assert.ok(notificationHandler, '$/progress handler should be registered');
 
-        notificationHandler!({
-            token: 't1',
-            value: { kind: 'end', message: 'done' }
-        });
+            notificationHandler!({
+                token: 't1',
+                value: { kind: 'begin', title: 'A', message: 'init' }
+            });
+            notificationHandler!({
+                token: 't2',
+                value: { kind: 'begin', title: 'B', message: 'init' }
+            });
 
-        await Promise.resolve();
-        assert.strictEqual(resolved.t1, true, 't1 should resolve on end');
-        assert.notStrictEqual(resolved.t2, true, 't2 should stay active');
+            // Hook resolution flags after begin (withProgress already produced promises).
+            promises[0].then(() => { resolved.t1 = true; });
+            promises[1].then(() => { resolved.t2 = true; });
 
-        notificationHandler!({
-            token: 't2',
-            value: { kind: 'end', message: 'done' }
-        });
+            notificationHandler!({
+                token: 't1',
+                value: { kind: 'end', message: 'done' }
+            });
 
-        await Promise.resolve();
-        assert.strictEqual(resolved.t2, true, 't2 should resolve on end');
+            // Progress end is delayed to keep progress visible for a minimum duration
+            await tick(800);
+            assert.strictEqual(resolved.t1, true, 't1 should resolve on end');
+            assert.notStrictEqual(resolved.t2, true, 't2 should stay active');
+
+            notificationHandler!({
+                token: 't2',
+                value: { kind: 'end', message: 'done' }
+            });
+
+            await tick(800);
+            assert.strictEqual(resolved.t2, true, 't2 should resolve on end');
+        } finally {
+            clock.restore();
+        }
     });
 });
-

@@ -28,6 +28,8 @@ const vscode = __importStar(require("vscode"));
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const configHelper_1 = require("../config/configHelper");
+// Определяем расширение исполняемого файла для текущей платформы
+const EXE_EXT = process.platform === 'win32' ? '.exe' : '';
 let outputChannel;
 function setOutputChannel(channel) {
     outputChannel = channel;
@@ -45,16 +47,16 @@ function getBinaryPath(binaryName, extensionContext) {
     if (useBundled) {
         // Сначала пробуем глобальный контекст (для development режима)
         if (extensionContext) {
-            const contextBinPath = path.join(extensionContext.extensionPath, 'bin', `${binaryName}.exe`);
+            const contextBinPath = path.join(extensionContext.extensionPath, 'bin', `${binaryName}${EXE_EXT}`);
             if (fs.existsSync(contextBinPath)) {
                 outputChannel?.appendLine(`✅ Using bundled binary from context: ${contextBinPath}`);
                 return contextBinPath;
             }
         }
         // Затем пробуем найти установленное расширение
-        const extensionPath = vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer')?.extensionPath;
+        const extensionPath = vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types')?.extensionPath;
         if (extensionPath) {
-            const bundledBinPath = path.join(extensionPath, 'bin', `${binaryName}.exe`);
+            const bundledBinPath = path.join(extensionPath, 'bin', `${binaryName}${EXE_EXT}`);
             if (fs.existsSync(bundledBinPath)) {
                 outputChannel?.appendLine(`✅ Using bundled binary: ${bundledBinPath}`);
                 return bundledBinPath;
@@ -63,7 +65,7 @@ function getBinaryPath(binaryName, extensionContext) {
         // Fallback на vscode-extension/bin для development
         const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (workspacePath) {
-            const devBinPath = path.join(workspacePath, 'vscode-extension', 'bin', `${binaryName}.exe`);
+            const devBinPath = path.join(workspacePath, 'vscode-extension', 'bin', `${binaryName}${EXE_EXT}`);
             if (fs.existsSync(devBinPath)) {
                 outputChannel?.appendLine(`✅ Using development binary: ${devBinPath}`);
                 return devBinPath;
@@ -73,7 +75,7 @@ function getBinaryPath(binaryName, extensionContext) {
     // Если указан внешний путь к бинарникам
     const binaryPath = configHelper_1.BslAnalyzerConfig.binaryPath;
     if (binaryPath) {
-        const externalBinPath = path.join(binaryPath, `${binaryName}.exe`);
+        const externalBinPath = path.join(binaryPath, `${binaryName}${EXE_EXT}`);
         if (fs.existsSync(externalBinPath)) {
             outputChannel?.appendLine(`✅ Using external binary: ${externalBinPath}`);
             return externalBinPath;
@@ -81,7 +83,7 @@ function getBinaryPath(binaryName, extensionContext) {
         outputChannel?.appendLine(`❌ Binary not found in specified path: ${externalBinPath}`);
     }
     // Последняя попытка - проверить в PATH
-    const pathBinary = `${binaryName}.exe`;
+    const pathBinary = `${binaryName}${EXE_EXT}`;
     outputChannel?.appendLine(`⚠️ Attempting to use binary from PATH: ${pathBinary}`);
     return pathBinary;
 }

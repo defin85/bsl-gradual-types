@@ -38,6 +38,10 @@ const assert = __importStar(require("assert"));
 const sinon = __importStar(require("sinon"));
 const statsProvider_1 = require("../../lsp/statsProvider");
 const node_1 = require("vscode-languageclient/node");
+async function flushPromises() {
+    await Promise.resolve();
+    await Promise.resolve();
+}
 suite('Stats Provider Test Suite', () => {
     let statusBarStub;
     let context;
@@ -138,7 +142,7 @@ suite('Stats Provider Test Suite', () => {
         getLanguageClientStub.returns({ state: node_1.State.Running });
         (0, statsProvider_1.initializeStatsProvider)(context, statusBarStub);
         // Ждём начального обновления
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
         const tooltip = statusBarStub.tooltip;
         // Проверяем что tooltip содержит предупреждение
         assert.ok(tooltip.includes('⚠️ Типы не загружены'), 'Tooltip должен показывать предупреждение когда типы не загружены');
@@ -160,7 +164,7 @@ suite('Stats Provider Test Suite', () => {
         const getLanguageClientStub = sinon.stub(clientModule, 'getLanguageClient');
         getLanguageClientStub.returns({ state: node_1.State.Running });
         (0, statsProvider_1.initializeStatsProvider)(context, statusBarStub);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
         const tooltip = statusBarStub.tooltip;
         // Проверяем форматирование статистики
         assert.ok(tooltip.includes('3927 типов'), 'Tooltip должен содержать общее количество типов');
@@ -186,7 +190,7 @@ suite('Stats Provider Test Suite', () => {
         const getLanguageClientStub = sinon.stub(clientModule, 'getLanguageClient');
         getLanguageClientStub.returns({ state: node_1.State.Running });
         (0, statsProvider_1.initializeStatsProvider)(context, statusBarStub);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
         const tooltip = statusBarStub.tooltip;
         // Проверяем что время отображается в читаемом формате
         assert.ok(tooltip.includes('2 мин назад') || tooltip.includes('Обновлено:'), 'Tooltip должен содержать время обновления в читаемом формате');
@@ -207,7 +211,7 @@ suite('Stats Provider Test Suite', () => {
         const getLanguageClientStub = sinon.stub(clientModule, 'getLanguageClient');
         getLanguageClientStub.returns({ state: node_1.State.Running });
         (0, statsProvider_1.initializeStatsProvider)(context, statusBarStub);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
         const tooltip = statusBarStub.tooltip;
         // Проверяем наличие уникальных маркеров
         assert.ok(tooltip.includes('<!-- BSL_STATS_START -->'), 'Tooltip должен содержать начальный маркер статистики');
@@ -231,7 +235,7 @@ suite('Stats Provider Test Suite', () => {
         const getLanguageClientStub = sinon.stub(clientModule, 'getLanguageClient');
         getLanguageClientStub.returns({ state: node_1.State.Running });
         (0, statsProvider_1.initializeStatsProvider)(context, statusBarStub);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
         const tooltip = statusBarStub.tooltip;
         // Проверяем что секция CONTEXT сохранилась
         assert.ok(tooltip.includes('<!-- BSL_CONTEXT_START -->'), 'Секция CONTEXT должна сохраниться');

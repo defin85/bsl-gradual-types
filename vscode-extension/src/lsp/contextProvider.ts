@@ -63,10 +63,12 @@ function handleCursorMove(editor: vscode.TextEditor): void {
     // Debouncing: обновляем не чаще 1 раза в 200ms
     if (debounceTimer) {
         clearTimeout(debounceTimer);
+        debounceTimer = undefined;
     }
 
     debounceTimer = setTimeout(() => {
-        updateCurrentContext(editor);
+        debounceTimer = undefined;
+        void updateCurrentContext(editor);
     }, 200);
 }
 

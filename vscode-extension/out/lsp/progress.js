@@ -23,7 +23,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateLspStatus = exports.getCurrentProgress = exports.updateStatusBar = exports.initializeProgress = exports.progressEmitter = void 0;
+exports.setAutoReindexPaused = exports.updateLspStatus = exports.setIndexingProgress = exports.getCurrentProgress = exports.updateStatusBar = exports.initializeProgress = exports.progressEmitter = void 0;
 const vscode = __importStar(require("vscode"));
 const node_1 = require("vscode-languageclient/node");
 const logger_1 = require("./logger");
@@ -33,6 +33,9 @@ let globalIndexingProgress = {
     currentStep: 'Idle',
     progress: 0
 };
+let autoReindexPaused = false;
+const AUTO_REINDEX_PAUSED_TEXT = '$(debug-pause) BSL: Auto reindex paused';
+const AUTO_REINDEX_PAUSED_TOOLTIP = 'Auto reindex paused';
 // Event emitter для обновления прогресса
 exports.progressEmitter = new vscode.EventEmitter();
 let outputChannel;
@@ -53,9 +56,12 @@ function updateStatusBar(text, progress) {
         return;
     }
     if (text) {
-        statusBarItem.text = text;
+        const resolvedText = autoReindexPaused && /\bReady\b/.test(text)
+            ? AUTO_REINDEX_PAUSED_TEXT
+            : text;
+        statusBarItem.text = resolvedText;
         // Установить tooltip из text (удаляя иконки VSCode)
-        const cleanText = text.replace(/\$\([^)]+\)/g, '').trim();
+        const cleanText = resolvedText.replace(/\$\([^)]+\)/g, '').trim();
         statusBarItem.tooltip = cleanText;
         statusBarItem.show();
         return;
@@ -68,8 +74,14 @@ function updateStatusBar(text, progress) {
         statusBarItem.show();
     }
     else {
-        statusBarItem.text = '$(database) BSL Analyzer';
-        statusBarItem.tooltip = 'BSL Type Safety Analyzer\nClick to build index';
+        if (autoReindexPaused) {
+            statusBarItem.text = AUTO_REINDEX_PAUSED_TEXT;
+            statusBarItem.tooltip = AUTO_REINDEX_PAUSED_TOOLTIP;
+        }
+        else {
+            statusBarItem.text = '$(database) BSL Analyzer';
+            statusBarItem.tooltip = 'BSL Type Safety Analyzer\nClick to build index';
+        }
         statusBarItem.show();
     }
 }
@@ -81,6 +93,11 @@ function getCurrentProgress() {
     return globalIndexingProgress;
 }
 exports.getCurrentProgress = getCurrentProgress;
+function setIndexingProgress(progress) {
+    globalIndexingProgress = progress;
+    exports.progressEmitter.fire(progress);
+}
+exports.setIndexingProgress = setIndexingProgress;
 /**
  * Обновляет status bar в зависимости от состояния LSP сервера
  *
@@ -103,9 +120,16 @@ function updateLspStatus(state) {
             statusBarItem.backgroundColor = undefined;
             break;
         case node_1.State.Running:
-            statusBarItem.text = '$(check) BSL: Ready';
-            statusBarItem.tooltip = 'BSL Type Safety Analyzer\nLSP Server активен';
-            statusBarItem.backgroundColor = undefined;
+            if (autoReindexPaused) {
+                statusBarItem.text = AUTO_REINDEX_PAUSED_TEXT;
+                statusBarItem.tooltip = AUTO_REINDEX_PAUSED_TOOLTIP;
+                statusBarItem.backgroundColor = undefined;
+            }
+            else {
+                statusBarItem.text = '$(check) BSL: Ready';
+                statusBarItem.tooltip = 'BSL Type Safety Analyzer\nLSP Server активен';
+                statusBarItem.backgroundColor = undefined;
+            }
             break;
         default:
             logger_1.logger.warn(`[Progress] Unknown LSP state: ${state}`);
@@ -114,4 +138,8 @@ function updateLspStatus(state) {
     statusBarItem.show();
 }
 exports.updateLspStatus = updateLspStatus;
+function setAutoReindexPaused(paused) {
+    autoReindexPaused = paused;
+}
+exports.setAutoReindexPaused = setAutoReindexPaused;
 //# sourceMappingURL=progress.js.map

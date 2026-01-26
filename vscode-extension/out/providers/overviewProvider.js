@@ -29,6 +29,7 @@ const items_1 = require("./items");
 const progress_1 = require("../lsp/progress");
 const client_1 = require("../lsp/client");
 const configHelper_1 = require("../config/configHelper");
+const customRequests_1 = require("../lsp/customRequests");
 /**
  * Провайдер для дерева обзора BSL Analyzer
  */
@@ -70,11 +71,18 @@ class BslOverviewProvider {
             }
         }
     }
-    getWorkspaceItems() {
+    async getWorkspaceItems() {
+        const stats = await (0, customRequests_1.getWorkspaceStats)();
+        const repoStats = await (0, customRequests_1.getTypeRepositoryStats)();
+        const fileCount = stats ? stats.bslFiles : 0;
+        const issuesCount = stats ? stats.diagnostics : 0;
+        const lastAnalysis = repoStats?.lastUpdateTime
+            ? formatUpdateTime(repoStats.lastUpdateTime)
+            : 'Never';
         const workspaceItems = [
-            new items_1.BslOverviewItem('BSL Files: Scanning...', vscode.TreeItemCollapsibleState.None, 'file-count'),
-            new items_1.BslOverviewItem('Last Analysis: Never', vscode.TreeItemCollapsibleState.None, 'last-analysis'),
-            new items_1.BslOverviewItem('Issues Found: 0', vscode.TreeItemCollapsibleState.None, 'issues')
+            new items_1.BslOverviewItem(`BSL Files: ${fileCount}`, vscode.TreeItemCollapsibleState.None, 'file-count'),
+            new items_1.BslOverviewItem(`Last Analysis: ${lastAnalysis}`, vscode.TreeItemCollapsibleState.None, 'last-analysis'),
+            new items_1.BslOverviewItem(`Issues Found: ${issuesCount}`, vscode.TreeItemCollapsibleState.None, 'issues')
         ];
         // Добавляем информацию об индексации если она активна
         const progress = (0, progress_1.getCurrentProgress)();
@@ -87,17 +95,23 @@ class BslOverviewProvider {
         }
         return Promise.resolve(workspaceItems);
     }
-    getServerItems() {
+    async getServerItems() {
         // Проверка статуса LSP сервера
         const serverStatus = (0, client_1.isClientRunning)() ? 'Running' : 'Stopped';
         const statusIcon = (0, client_1.isClientRunning)() ? '$(check)' : '$(error)';
         const statusColor = (0, client_1.isClientRunning)() ? '✅' : '⚠️';
-        this.outputChannel.appendLine(`${statusColor} LSP Status Check: ${serverStatus} (isClientRunning=${(0, client_1.isClientRunning)()})`);
-        return Promise.resolve([
+        const repoStats = await (0, customRequests_1.getTypeRepositoryStats)();
+        const totalTypes = repoStats?.totalTypes ?? 0;
+        const platformTypes = repoStats?.platformTypes ?? 0;
+        const configTypes = repoStats?.configurationTypes ?? 0;
+        const platformVersion = configHelper_1.BslAnalyzerConfig.platformVersion || 'Unknown';
+        const lspVersion = (0, client_1.getServerVersion)() || 'Unknown';
+        return [
             new items_1.BslOverviewItem(`${statusIcon} Status: ${serverStatus}`, vscode.TreeItemCollapsibleState.None, 'status'),
-            new items_1.BslOverviewItem('UnifiedBslIndex: Loading...', vscode.TreeItemCollapsibleState.None, 'index-count'),
-            new items_1.BslOverviewItem('Platform: 8.3.25', vscode.TreeItemCollapsibleState.None, 'platform')
-        ]);
+            new items_1.BslOverviewItem(`TypeRepository: ${totalTypes} (Platform ${platformTypes}, Config ${configTypes})`, vscode.TreeItemCollapsibleState.None, 'index-count'),
+            new items_1.BslOverviewItem(`Platform: ${platformVersion}`, vscode.TreeItemCollapsibleState.None, 'platform'),
+            new items_1.BslOverviewItem(`LSP Version: ${lspVersion}`, vscode.TreeItemCollapsibleState.None, 'lsp-version')
+        ];
     }
     getConfigItems() {
         const configPath = configHelper_1.BslAnalyzerConfig.configurationPath || 'Not configured';
@@ -111,4 +125,23 @@ class BslOverviewProvider {
     }
 }
 exports.BslOverviewProvider = BslOverviewProvider;
+function formatUpdateTime(isoTimestamp) {
+    try {
+        const date = new Date(isoTimestamp);
+        const now = new Date();
+        const diffMs = now.getTime() - date.getTime();
+        const diffMinutes = Math.floor(diffMs / 60000);
+        if (diffMinutes < 1) {
+            return 'just now';
+        }
+        if (diffMinutes < 60) {
+            return `${diffMinutes} min ago`;
+        }
+        const hours = Math.floor(diffMinutes / 60);
+        return `${hours} h ago`;
+    }
+    catch {
+        return 'unknown';
+    }
+}
 //# sourceMappingURL=overviewProvider.js.map

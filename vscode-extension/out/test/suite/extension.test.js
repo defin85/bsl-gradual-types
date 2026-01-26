@@ -50,17 +50,17 @@ suite('Extension Test Suite', () => {
             'bslAnalyzer.buildIndex',
             'bslAnalyzer.showIndexStats',
             'bslAnalyzer.incrementalUpdate',
+            'bslAnalyzer.pauseAutoReindex',
+            'bslAnalyzer.resumeAutoReindex',
+            'bslAnalyzer.reindexNow',
             'bslAnalyzer.exploreType',
             'bslAnalyzer.validateMethodCall',
             'bslAnalyzer.checkTypeCompatibility',
             'bslAnalyzer.restartServer',
             'bslAnalyzer.refreshOverview',
+            'bslAnalyzer.refreshCacheDashboard',
             'bslAnalyzer.refreshDiagnostics',
-            'bslAnalyzer.refreshTypeIndex',
-            'bslAnalyzer.refreshPlatformDocs',
-            'bslAnalyzer.addPlatformDocs',
-            'bslAnalyzer.removePlatformDocs',
-            'bslAnalyzer.parsePlatformDocs'
+            'bslAnalyzer.refreshTypeRepository'
         ];
         return vscode.commands.getCommands(true).then((allCommands) => {
             const foundCommands = commands.filter(cmd => allCommands.includes(cmd));

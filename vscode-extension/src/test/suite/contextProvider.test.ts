@@ -13,14 +13,24 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { initializeContextProvider, CurrentContext } from '../../lsp/contextProvider';
+import * as clientModule from '../../lsp/client';
 import { State } from 'vscode-languageclient/node';
+
+async function flushPromises(): Promise<void> {
+    await Promise.resolve();
+    await Promise.resolve();
+}
 
 suite('Context Provider Test Suite', () => {
     let statusBarStub: any;
     let context: vscode.ExtensionContext;
     let clock: sinon.SinonFakeTimers;
     let commandExecuteStub: sinon.SinonStub;
-    let clientStateStub: sinon.SinonStub;
+    let getLanguageClientStub: sinon.SinonStub;
+    let onDidChangeTextEditorSelectionStub: sinon.SinonStub;
+    let onDidChangeActiveTextEditorStub: sinon.SinonStub;
+    let selectionHandler: ((event: any) => void) | undefined;
+    let showErrorMessageStub: sinon.SinonStub;
 
     setup(() => {
         // Mock status bar
@@ -43,8 +53,25 @@ suite('Context Provider Test Suite', () => {
         // Mock vscode.commands.executeCommand для LSP Custom Request
         commandExecuteStub = sinon.stub(vscode.commands, 'executeCommand');
 
+        // Перехватываем регистрацию событий VSCode, чтобы можно было вручную вызвать обработчики
+        selectionHandler = undefined;
+        onDidChangeTextEditorSelectionStub = sinon
+            .stub(vscode.window, 'onDidChangeTextEditorSelection')
+            .callsFake((handler: any) => {
+                selectionHandler = handler;
+                return { dispose: sinon.stub() } as any;
+            });
+
+        onDidChangeActiveTextEditorStub = sinon
+            .stub(vscode.window, 'onDidChangeActiveTextEditor')
+            .callsFake((_handler: any) => {
+                return { dispose: sinon.stub() } as any;
+            });
+
         // По умолчанию LSP Running
-        // (Реальный getLanguageClient() мокируется в тестах при необходимости)
+        getLanguageClientStub = sinon
+            .stub(clientModule, 'getLanguageClient')
+            .returns({ state: State.Running } as any);
     });
 
     teardown(() => {
@@ -86,6 +113,8 @@ suite('Context Provider Test Suite', () => {
 
         initializeContextProvider(context, statusBarStub);
 
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
+
         // Создаём mock text editor
         const mockEditor = {
             document: {
@@ -98,18 +127,14 @@ suite('Context Provider Test Suite', () => {
         } as any;
 
         // Симулируем быстрое движение курсора (10 раз каждые 50ms)
-        const onDidChangeTextEditorSelection = (vscode.window.onDidChangeTextEditorSelection as any);
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
-
-        if (selectionHandler) {
-            for (let i = 0; i < 10; i++) {
-                selectionHandler({ textEditor: mockEditor });
-                clock.tick(50); // 50ms между обновлениями
-            }
+        for (let i = 0; i < 10; i++) {
+            selectionHandler!({ textEditor: mockEditor });
+            clock.tick(50); // 50ms между обновлениями
         }
 
         // Ждём завершения debouncing (200ms)
         clock.tick(200);
+        await flushPromises();
 
         // Должна быть только 1 попытка вызова LSP (debouncing сработал)
         // Проверяем вызовы 'bsl.getCurrentContext'
@@ -138,6 +163,8 @@ suite('Context Provider Test Suite', () => {
 
         initializeContextProvider(context, statusBarStub);
 
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
+
         // Симулируем cursor move в BSL файле
         const mockEditor = {
             document: {
@@ -150,14 +177,11 @@ suite('Context Provider Test Suite', () => {
         } as any;
 
         // Вызываем обработчик cursor move
-        const onDidChangeTextEditorSelection = (vscode.window.onDidChangeTextEditorSelection as any);
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
-        if (selectionHandler) {
-            selectionHandler({ textEditor: mockEditor });
-        }
+        selectionHandler!({ textEditor: mockEditor });
 
         // Ждём debouncing
         clock.tick(200);
+        await flushPromises();
 
         // Проверяем что был вызван 'bsl.getCurrentContext'
         const contextCall = commandExecuteStub.getCalls().find(
@@ -187,6 +211,8 @@ suite('Context Provider Test Suite', () => {
 
         initializeContextProvider(context, statusBarStub);
 
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
+
         // Симулируем cursor move
         const mockEditor = {
             document: {
@@ -198,16 +224,12 @@ suite('Context Provider Test Suite', () => {
             },
         } as any;
 
-        const onDidChangeTextEditorSelection = (vscode.window.onDidChangeTextEditorSelection as any);
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
-        if (selectionHandler) {
-            selectionHandler({ textEditor: mockEditor });
-        }
+        selectionHandler!({ textEditor: mockEditor });
 
         clock.tick(200);
 
         // Ждём асинхронное обновление
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
 
         const tooltip = statusBarStub.tooltip as string;
 
@@ -231,6 +253,8 @@ suite('Context Provider Test Suite', () => {
 
         initializeContextProvider(context, statusBarStub);
 
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
+
         const mockEditor = {
             document: {
                 languageId: 'bsl',
@@ -241,14 +265,10 @@ suite('Context Provider Test Suite', () => {
             },
         } as any;
 
-        const onDidChangeTextEditorSelection = (vscode.window.onDidChangeTextEditorSelection as any);
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
-        if (selectionHandler) {
-            selectionHandler({ textEditor: mockEditor });
-        }
+        selectionHandler!({ textEditor: mockEditor });
 
         clock.tick(200);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
 
         const tooltip = statusBarStub.tooltip as string;
 
@@ -279,6 +299,8 @@ suite('Context Provider Test Suite', () => {
 
         initializeContextProvider(context, statusBarStub);
 
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
+
         const mockEditor = {
             document: {
                 languageId: 'bsl',
@@ -289,14 +311,10 @@ suite('Context Provider Test Suite', () => {
             },
         } as any;
 
-        const onDidChangeTextEditorSelection = (vscode.window.onDidChangeTextEditorSelection as any);
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
-        if (selectionHandler) {
-            selectionHandler({ textEditor: mockEditor });
-        }
+        selectionHandler!({ textEditor: mockEditor });
 
         clock.tick(200);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
 
         const tooltip = statusBarStub.tooltip as string;
 
@@ -320,12 +338,16 @@ suite('Context Provider Test Suite', () => {
     // ========================================================================
 
     test('graceful degradation when LSP unavailable (no error shown)', async () => {
+        showErrorMessageStub = sinon.stub(vscode.window, 'showErrorMessage');
+
         // Мокируем отсутствие LSP (команда выбрасывает ошибку)
         commandExecuteStub.withArgs('bsl.getCurrentContext', sinon.match.any).rejects(
             new Error('LSP not available')
         );
 
         initializeContextProvider(context, statusBarStub);
+
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
 
         const mockEditor = {
             document: {
@@ -337,19 +359,13 @@ suite('Context Provider Test Suite', () => {
             },
         } as any;
 
-        const onDidChangeTextEditorSelection = (vscode.window.onDidChangeTextEditorSelection as any);
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
-        if (selectionHandler) {
-            selectionHandler({ textEditor: mockEditor });
-        }
+        selectionHandler!({ textEditor: mockEditor });
 
         clock.tick(200);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
 
         // Проверяем что НЕ было показано сообщение об ошибке
-        // (vscode.window.showErrorMessage не вызывался бы)
-        // Tooltip может остаться прежним или пустым
-        assert.ok(true, 'Graceful degradation должен НЕ показывать ошибку пользователю');
+        assert.ok(showErrorMessageStub.notCalled, 'Graceful degradation должен НЕ показывать ошибку пользователю');
     });
 
     // ========================================================================

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.autoDetectConfiguration = exports.selectConfiguration = exports.findMainConfiguration = exports.findConfigurations = exports.initializeUtils = exports.setConfigOutputChannel = exports.getPlatformDocsArchive = exports.getPlatformVersion = exports.getConfigurationPath = exports.extractTypeName = exports.parseMethodCall = exports.setBinaryPathOutputChannel = exports.getBinaryPath = void 0;
+exports.autoDetectConfiguration = exports.selectConfiguration = exports.findMainConfiguration = exports.findConfigurations = exports.initializeUtils = exports.setConfigOutputChannel = exports.getAutoReindexEnabled = exports.getPlatformDocsArchive = exports.getPlatformVersion = exports.getConfigurationPath = exports.extractTypeName = exports.parseMethodCall = exports.setBinaryPathOutputChannel = exports.getBinaryPath = void 0;
 /**
  * Экспорт всех утилит из одного места
  */
@@ -14,6 +14,7 @@ var config_1 = require("./config");
 Object.defineProperty(exports, "getConfigurationPath", { enumerable: true, get: function () { return config_1.getConfigurationPath; } });
 Object.defineProperty(exports, "getPlatformVersion", { enumerable: true, get: function () { return config_1.getPlatformVersion; } });
 Object.defineProperty(exports, "getPlatformDocsArchive", { enumerable: true, get: function () { return config_1.getPlatformDocsArchive; } });
+Object.defineProperty(exports, "getAutoReindexEnabled", { enumerable: true, get: function () { return config_1.getAutoReindexEnabled; } });
 Object.defineProperty(exports, "setConfigOutputChannel", { enumerable: true, get: function () { return config_1.setOutputChannel; } });
 /**
  * Инициализирует output channel для всех утилит

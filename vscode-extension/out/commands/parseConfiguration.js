@@ -43,20 +43,12 @@ function registerParseConfigurationCommand(context, client) {
         const config = vscode.workspace.getConfiguration('bslAnalyzer');
         await config.update('configurationPath', configPath, vscode.ConfigurationTarget.Workspace);
         try {
-            // ✅ ИСПРАВЛЕНО (2025-01-18): Правильный вызов LSP команды
-            // Используем ExecuteCommandRequest с правильными параметрами
-            const result = await vscode.window.withProgress({
-                location: vscode.ProgressLocation.Notification,
-                title: 'Парсинг конфигурации',
-                cancellable: false
-            }, async () => {
-                // workspace/executeCommand требует ExecuteCommandParams
-                // arguments: any[] - массив аргументов команды
-                // LSP Server ожидает ParseConfigurationParams { config_path: string }
-                return await client.sendRequest('workspace/executeCommand', {
-                    command: 'bsl.parseConfiguration',
-                    arguments: [{ configPath: configPath }] // ✅ Соответствует camelCase в LSP
-                });
+            // Источник истины по прогрессу здесь — server-initiated WorkDoneProgress ($/progress).
+            // Расширение не должно дублировать Progress UI локальным withProgress(), иначе пользователь
+            // видит два прогресса одновременно (Notification + Window).
+            const result = await client.sendRequest('workspace/executeCommand', {
+                command: 'bsl.parseConfiguration',
+                arguments: [{ configPath: configPath }] // ✅ Соответствует camelCase в LSP
             });
             const response = result;
             if (response.success) {

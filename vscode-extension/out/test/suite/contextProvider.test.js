@@ -37,12 +37,22 @@ const assert = __importStar(require("assert"));
 const sinon = __importStar(require("sinon"));
 const vscode = __importStar(require("vscode"));
 const contextProvider_1 = require("../../lsp/contextProvider");
+const clientModule = __importStar(require("../../lsp/client"));
+const node_1 = require("vscode-languageclient/node");
+async function flushPromises() {
+    await Promise.resolve();
+    await Promise.resolve();
+}
 suite('Context Provider Test Suite', () => {
     let statusBarStub;
     let context;
     let clock;
     let commandExecuteStub;
-    let clientStateStub;
+    let getLanguageClientStub;
+    let onDidChangeTextEditorSelectionStub;
+    let onDidChangeActiveTextEditorStub;
+    let selectionHandler;
+    let showErrorMessageStub;
     setup(() => {
         // Mock status bar
         statusBarStub = {
@@ -60,8 +70,23 @@ suite('Context Provider Test Suite', () => {
         clock = sinon.useFakeTimers();
         // Mock vscode.commands.executeCommand для LSP Custom Request
         commandExecuteStub = sinon.stub(vscode.commands, 'executeCommand');
+        // Перехватываем регистрацию событий VSCode, чтобы можно было вручную вызвать обработчики
+        selectionHandler = undefined;
+        onDidChangeTextEditorSelectionStub = sinon
+            .stub(vscode.window, 'onDidChangeTextEditorSelection')
+            .callsFake((handler) => {
+            selectionHandler = handler;
+            return { dispose: sinon.stub() };
+        });
+        onDidChangeActiveTextEditorStub = sinon
+            .stub(vscode.window, 'onDidChangeActiveTextEditor')
+            .callsFake((_handler) => {
+            return { dispose: sinon.stub() };
+        });
         // По умолчанию LSP Running
-        // (Реальный getLanguageClient() мокируется в тестах при необходимости)
+        getLanguageClientStub = sinon
+            .stub(clientModule, 'getLanguageClient')
+            .returns({ state: node_1.State.Running });
     });
     teardown(() => {
         clock.restore();
@@ -91,6 +116,7 @@ suite('Context Provider Test Suite', () => {
         };
         commandExecuteStub.resolves(mockContext);
         (0, contextProvider_1.initializeContextProvider)(context, statusBarStub);
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
         // Создаём mock text editor
         const mockEditor = {
             document: {
@@ -102,16 +128,13 @@ suite('Context Provider Test Suite', () => {
             },
         };
         // Симулируем быстрое движение курсора (10 раз каждые 50ms)
-        const onDidChangeTextEditorSelection = vscode.window.onDidChangeTextEditorSelection;
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
-        if (selectionHandler) {
-            for (let i = 0; i < 10; i++) {
-                selectionHandler({ textEditor: mockEditor });
-                clock.tick(50); // 50ms между обновлениями
-            }
+        for (let i = 0; i < 10; i++) {
+            selectionHandler({ textEditor: mockEditor });
+            clock.tick(50); // 50ms между обновлениями
         }
         // Ждём завершения debouncing (200ms)
         clock.tick(200);
+        await flushPromises();
         // Должна быть только 1 попытка вызова LSP (debouncing сработал)
         // Проверяем вызовы 'bsl.getCurrentContext'
         const contextCalls = commandExecuteStub.getCalls().filter(call => call.args[0] === 'bsl.getCurrentContext');
@@ -129,6 +152,7 @@ suite('Context Provider Test Suite', () => {
         };
         commandExecuteStub.withArgs('bsl.getCurrentContext', sinon.match.any).resolves(mockContext);
         (0, contextProvider_1.initializeContextProvider)(context, statusBarStub);
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
         // Симулируем cursor move в BSL файле
         const mockEditor = {
             document: {
@@ -140,13 +164,10 @@ suite('Context Provider Test Suite', () => {
             },
         };
         // Вызываем обработчик cursor move
-        const onDidChangeTextEditorSelection = vscode.window.onDidChangeTextEditorSelection;
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
-        if (selectionHandler) {
-            selectionHandler({ textEditor: mockEditor });
-        }
+        selectionHandler({ textEditor: mockEditor });
         // Ждём debouncing
         clock.tick(200);
+        await flushPromises();
         // Проверяем что был вызван 'bsl.getCurrentContext'
         const contextCall = commandExecuteStub.getCalls().find(call => call.args[0] === 'bsl.getCurrentContext');
         if (contextCall) {
@@ -168,6 +189,7 @@ suite('Context Provider Test Suite', () => {
         };
         commandExecuteStub.withArgs('bsl.getCurrentContext', sinon.match.any).resolves(mockContext);
         (0, contextProvider_1.initializeContextProvider)(context, statusBarStub);
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
         // Симулируем cursor move
         const mockEditor = {
             document: {
@@ -178,14 +200,10 @@ suite('Context Provider Test Suite', () => {
                 active: { line: 1, character: 1 },
             },
         };
-        const onDidChangeTextEditorSelection = vscode.window.onDidChangeTextEditorSelection;
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
-        if (selectionHandler) {
-            selectionHandler({ textEditor: mockEditor });
-        }
+        selectionHandler({ textEditor: mockEditor });
         clock.tick(200);
         // Ждём асинхронное обновление
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
         const tooltip = statusBarStub.tooltip;
         // Проверяем что tooltip содержит корректную информацию
         assert.ok(tooltip.includes('Функция: CalculateTotal'), 'Tooltip должен содержать имя функции');
@@ -203,6 +221,7 @@ suite('Context Provider Test Suite', () => {
         };
         commandExecuteStub.withArgs('bsl.getCurrentContext', sinon.match.any).resolves(mockContext);
         (0, contextProvider_1.initializeContextProvider)(context, statusBarStub);
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
         const mockEditor = {
             document: {
                 languageId: 'bsl',
@@ -212,13 +231,9 @@ suite('Context Provider Test Suite', () => {
                 active: { line: 1, character: 1 },
             },
         };
-        const onDidChangeTextEditorSelection = vscode.window.onDidChangeTextEditorSelection;
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
-        if (selectionHandler) {
-            selectionHandler({ textEditor: mockEditor });
-        }
+        selectionHandler({ textEditor: mockEditor });
         clock.tick(200);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
         const tooltip = statusBarStub.tooltip;
         assert.ok(tooltip.includes('<!-- BSL_CONTEXT_START -->'), 'Tooltip должен содержать начальный маркер контекста');
         assert.ok(tooltip.includes('<!-- BSL_CONTEXT_END -->'), 'Tooltip должен содержать конечный маркер контекста');
@@ -236,6 +251,7 @@ suite('Context Provider Test Suite', () => {
         };
         commandExecuteStub.withArgs('bsl.getCurrentContext', sinon.match.any).resolves(mockContext);
         (0, contextProvider_1.initializeContextProvider)(context, statusBarStub);
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
         const mockEditor = {
             document: {
                 languageId: 'bsl',
@@ -245,13 +261,9 @@ suite('Context Provider Test Suite', () => {
                 active: { line: 1, character: 1 },
             },
         };
-        const onDidChangeTextEditorSelection = vscode.window.onDidChangeTextEditorSelection;
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
-        if (selectionHandler) {
-            selectionHandler({ textEditor: mockEditor });
-        }
+        selectionHandler({ textEditor: mockEditor });
         clock.tick(200);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
         const tooltip = statusBarStub.tooltip;
         // Проверяем что секция STATS сохранилась
         assert.ok(tooltip.includes('<!-- BSL_STATS_START -->'), 'Секция STATS должна сохраниться');
@@ -262,9 +274,11 @@ suite('Context Provider Test Suite', () => {
     // Тест 7: graceful degradation when LSP unavailable
     // ========================================================================
     test('graceful degradation when LSP unavailable (no error shown)', async () => {
+        showErrorMessageStub = sinon.stub(vscode.window, 'showErrorMessage');
         // Мокируем отсутствие LSP (команда выбрасывает ошибку)
         commandExecuteStub.withArgs('bsl.getCurrentContext', sinon.match.any).rejects(new Error('LSP not available'));
         (0, contextProvider_1.initializeContextProvider)(context, statusBarStub);
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
         const mockEditor = {
             document: {
                 languageId: 'bsl',
@@ -274,17 +288,11 @@ suite('Context Provider Test Suite', () => {
                 active: { line: 1, character: 1 },
             },
         };
-        const onDidChangeTextEditorSelection = vscode.window.onDidChangeTextEditorSelection;
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
-        if (selectionHandler) {
-            selectionHandler({ textEditor: mockEditor });
-        }
+        selectionHandler({ textEditor: mockEditor });
         clock.tick(200);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
         // Проверяем что НЕ было показано сообщение об ошибке
-        // (vscode.window.showErrorMessage не вызывался бы)
-        // Tooltip может остаться прежним или пустым
-        assert.ok(true, 'Graceful degradation должен НЕ показывать ошибку пользователю');
+        assert.ok(showErrorMessageStub.notCalled, 'Graceful degradation должен НЕ показывать ошибку пользователю');
     });
     // ========================================================================
     // Тест 8: cleanup disposes event listeners

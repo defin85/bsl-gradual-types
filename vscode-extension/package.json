@@ -772,7 +772,7 @@
     },
     "scripts": {
         "vscode:prepublish": "npm run copy-binaries && npm run package",
-        "compile": "npm run copy-binaries && node esbuild.js && npm run build:wasm",
+        "compile": "npm run copy-binaries && tsc -p . && node esbuild.js && npm run build:wasm",
         "package": "npm run copy-binaries && node esbuild.js --production && npm run build:wasm:release",
         "watch": "node esbuild.js --watch",
         "pretest": "npm run compile && npm run lint",

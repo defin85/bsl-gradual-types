@@ -132,6 +132,9 @@ exports.selectConfiguration = selectConfiguration;
  */
 async function autoDetectConfiguration(outputChannel) {
     outputChannel?.appendLine('🔍 Searching for 1C configuration in workspace...');
+    const isTestMode = process.env.NODE_ENV === 'test' ||
+        process.env.VSCODE_TEST_MODE === '1' ||
+        vscode.extensions.getExtension('vscode.vscode-api-tests') !== undefined;
     const mainConfig = await findMainConfiguration();
     if (mainConfig) {
         outputChannel?.appendLine(`✅ Found main configuration: ${mainConfig.name} at ${mainConfig.path}`);
@@ -142,6 +145,11 @@ async function autoDetectConfiguration(outputChannel) {
     }
     else {
         outputChannel?.appendLine('❌ No 1C configuration found in workspace');
+        // В тестовом режиме НЕ показываем UI-диалоги (они приводят к Cancel и ломают активацию/тесты).
+        if (isTestMode) {
+            outputChannel?.appendLine('ℹ️ [Test Mode] Skipping configuration selection UI');
+            return null;
+        }
         // Предлагаем выбрать вручную
         const result = await vscode.window.showInformationMessage('Конфигурация 1С не найдена автоматически', 'Выбрать папку', 'Пропустить');
         if (result === 'Выбрать папку') {

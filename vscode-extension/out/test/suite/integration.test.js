@@ -38,7 +38,7 @@ suite('Integration Test Suite', () => {
     test('Extension lifecycle: activate -> use -> deactivate', async function () {
         this.timeout(10000);
         // 1. Проверяем, что расширение существует
-        const ext = vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer');
+        const ext = vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types');
         assert.ok(ext, 'Extension not found');
         // 2. Активируем если не активно
         if (!ext.isActive) {

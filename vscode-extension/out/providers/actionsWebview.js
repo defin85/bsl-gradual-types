@@ -40,7 +40,9 @@ class BslActionsWebviewProvider {
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: [
-                vscode.Uri.joinPath(this.extensionUri, 'media', 'webview')
+                vscode.Uri.joinPath(this.extensionUri, 'media', 'webview'),
+                // Include snippets subdirectory for inline_js support
+                vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'snippets')
             ]
         };
         webviewView.webview.html = this.getWebviewContent(webviewView.webview);
@@ -102,8 +104,16 @@ class BslActionsWebviewProvider {
     }
     async handleSearchTypes(webviewView, query) {
         try {
+            const trimmedQuery = query.trim();
+            if (trimmedQuery.length < 2) {
+                webviewView.webview.postMessage({
+                    type: 'searchResults',
+                    data: [],
+                });
+                return;
+            }
             // ✅ РЕАЛЬНЫЕ ДАННЫЕ из TypeRepository через LSP
-            const response = await (0, customRequests_1.searchTypes)(query, 15);
+            const response = await (0, customRequests_1.searchTypes)(trimmedQuery, 15);
             // Конвертируем в формат для webview (совместим с mock данными)
             const results = response.types.map(t => ({
                 name: t.name,
@@ -115,7 +125,7 @@ class BslActionsWebviewProvider {
                 type: 'searchResults',
                 data: results,
             });
-            this.outputChannel?.appendLine(`🔍 Search "${query}" → ${response.total} results from TypeRepository`);
+            this.outputChannel?.appendLine(`🔍 Search "${trimmedQuery}" → ${response.total} results from TypeRepository`);
         }
         catch (error) {
             this.outputChannel?.appendLine(`❌ Search failed: ${error}`);

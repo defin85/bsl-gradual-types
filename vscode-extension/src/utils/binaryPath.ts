@@ -33,7 +33,7 @@ export function getBinaryPath(binaryName: string, extensionContext?: vscode.Exte
         }
         
         // Затем пробуем найти установленное расширение
-        const extensionPath = vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer')?.extensionPath;
+        const extensionPath = vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types')?.extensionPath;
         if (extensionPath) {
             const bundledBinPath = path.join(extensionPath, 'bin', `${binaryName}${EXE_EXT}`);
             if (fs.existsSync(bundledBinPath)) {

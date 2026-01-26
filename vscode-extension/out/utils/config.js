@@ -23,7 +23,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPlatformDocsArchive = exports.getPlatformVersion = exports.getConfigurationPath = exports.setOutputChannel = void 0;
+exports.getAutoReindexEnabled = exports.getPlatformDocsArchive = exports.getPlatformVersion = exports.getConfigurationPath = exports.setOutputChannel = void 0;
 const config_1 = require("../config");
 const fs = __importStar(require("fs"));
 let outputChannel;
@@ -64,4 +64,11 @@ function getPlatformDocsArchive() {
     return '';
 }
 exports.getPlatformDocsArchive = getPlatformDocsArchive;
+/**
+ * Получить флаг авто-реиндексации
+ */
+function getAutoReindexEnabled() {
+    return config_1.BslAnalyzerConfig.autoReindexEnabled;
+}
+exports.getAutoReindexEnabled = getAutoReindexEnabled;
 //# sourceMappingURL=config.js.map

@@ -16,8 +16,10 @@ export declare class BslAnalyzerConfig {
     static get platformVersion(): string;
     static get platformDocsArchive(): string;
     static get autoIndexBuild(): boolean;
+    static get autoReindexEnabled(): boolean;
     static get rulesConfig(): string;
     static get enableMetrics(): boolean;
+    static get cacheEnabled(): boolean;
     static isValid(): boolean;
     static summary(): any;
 }

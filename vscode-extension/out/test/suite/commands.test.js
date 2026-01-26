@@ -59,9 +59,9 @@ suite('Commands Test Suite', () => {
     test('Command: refresh commands should exist', async () => {
         const refreshCommands = [
             'bslAnalyzer.refreshOverview',
+            'bslAnalyzer.refreshCacheDashboard',
             'bslAnalyzer.refreshDiagnostics',
-            'bslAnalyzer.refreshTypeIndex',
-            'bslAnalyzer.refreshPlatformDocs'
+            'bslAnalyzer.refreshTypeRepository'
         ];
         const commands = await vscode.commands.getCommands();
         for (const cmd of refreshCommands) {
@@ -99,7 +99,7 @@ suite('Performance Test Suite', () => {
     test('Extension activation should be fast', async function () {
         this.timeout(5000); // 5 секунд максимум на активацию
         const startTime = Date.now();
-        const ext = vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer');
+        const ext = vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types');
         if (ext && !ext.isActive) {
             await ext.activate();
         }
@@ -121,9 +121,9 @@ suite('TreeDataProvider Test Suite', () => {
         // Проверяем, что TreeView провайдеры зарегистрированы через команды обновления
         const treeViewCommands = [
             'bslAnalyzer.refreshOverview',
+            'bslAnalyzer.refreshCacheDashboard',
             'bslAnalyzer.refreshDiagnostics',
-            'bslAnalyzer.refreshTypeIndex',
-            'bslAnalyzer.refreshPlatformDocs'
+            'bslAnalyzer.refreshTypeRepository'
         ];
         return vscode.commands.getCommands(true).then((allCommands) => {
             const foundCommands = treeViewCommands.filter(cmd => allCommands.includes(cmd));

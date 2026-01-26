@@ -28,7 +28,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getTypeRepositoryStats = exports.searchTypes = exports.extractPlatformDocs = exports.incrementalUpdate = exports.analyzeFile = exports.checkTypeCompatibility = exports.validateMethod = exports.buildIndex = exports.queryType = void 0;
+exports.getAllTypes = exports.getCacheStats = exports.getWorkspaceStats = exports.getTypeRepositoryStats = exports.searchTypes = exports.extractPlatformDocs = exports.resumeAutoReindex = exports.pauseAutoReindex = exports.incrementalUpdate = exports.analyzeFile = exports.checkTypeCompatibility = exports.validateMethod = exports.buildIndex = exports.queryType = void 0;
 const logger_1 = require("./logger");
 // ============================================================================
 // Helper Functions - прямые вызовы LSP custom requests
@@ -105,14 +105,35 @@ exports.analyzeFile = analyzeFile;
  * Инкрементальное обновление индекса через LSP
  * Заменяет: executeBslCommand('incremental_update', ...)
  */
-async function incrementalUpdate(configPath, platformVersion) {
+async function incrementalUpdate(configPath, platformVersion, changedPaths, isAuto) {
     const { sendCustomRequest } = await Promise.resolve().then(() => __importStar(require('./client')));
-    return await sendCustomRequest('bsl/incrementalUpdate', {
+    const params = {
         config_path: configPath,
-        platform_version: platformVersion
-    });
+        platform_version: platformVersion,
+        changed_paths: changedPaths
+    };
+    if (isAuto !== undefined) {
+        params.is_auto = isAuto;
+    }
+    return await sendCustomRequest('bsl/incrementalUpdate', params);
 }
 exports.incrementalUpdate = incrementalUpdate;
+/**
+ * Пауза авто-реиндексации через LSP
+ */
+async function pauseAutoReindex() {
+    const { sendCustomRequest } = await Promise.resolve().then(() => __importStar(require('./client')));
+    return await sendCustomRequest('bsl/pauseAutoReindex', {});
+}
+exports.pauseAutoReindex = pauseAutoReindex;
+/**
+ * Возобновление авто-реиндексации через LSP
+ */
+async function resumeAutoReindex() {
+    const { sendCustomRequest } = await Promise.resolve().then(() => __importStar(require('./client')));
+    return await sendCustomRequest('bsl/resumeAutoReindex', {});
+}
+exports.resumeAutoReindex = resumeAutoReindex;
 /**
  * Извлечение платформенной документации через LSP
  * Заменяет: executeBslCommand('extract_platform_docs', ...)
@@ -179,4 +200,86 @@ async function getTypeRepositoryStats() {
     }
 }
 exports.getTypeRepositoryStats = getTypeRepositoryStats;
+/**
+ * Получить статистику workspace через LSP Server
+ */
+let workspaceStatsUnsupported = false;
+let workspaceStatsUnsupportedNotified = false;
+async function getWorkspaceStats() {
+    if (workspaceStatsUnsupported) {
+        return null;
+    }
+    const client = (await Promise.resolve().then(() => __importStar(require('./client')))).getLanguageClient();
+    if (!client) {
+        logger_1.logger.warn('[Workspace Stats] LSP client not available');
+        return null;
+    }
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.getWorkspaceStats',
+            arguments: [{}]
+        });
+        return result || null;
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('Method not found')) {
+            workspaceStatsUnsupported = true;
+            if (!workspaceStatsUnsupportedNotified) {
+                workspaceStatsUnsupportedNotified = true;
+                logger_1.logger.warn('[Workspace Stats] LSP server does not support getWorkspaceStats yet');
+                const vscode = await Promise.resolve().then(() => __importStar(require('vscode')));
+                vscode.window.showWarningMessage('BSL Analyzer: LSP server does not support workspace stats yet. Please обновите бинарник.');
+            }
+            return null;
+        }
+        logger_1.logger.error('Failed to get workspace stats', error);
+        return null;
+    }
+}
+exports.getWorkspaceStats = getWorkspaceStats;
+async function getCacheStats(configurationPath) {
+    const client = (await Promise.resolve().then(() => __importStar(require('./client')))).getLanguageClient();
+    if (!client) {
+        logger_1.logger.warn('[Cache Stats] LSP client not available');
+        return null;
+    }
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.cache.getStats',
+            arguments: [{ configurationPath }]
+        });
+        return result || null;
+    }
+    catch (error) {
+        logger_1.logger.error('Failed to get cache stats', error);
+        return null;
+    }
+}
+exports.getCacheStats = getCacheStats;
+/**
+ * Получить все типы из TypeRepository через LSP Server
+ *
+ * @param params - Параметры запроса (limit, offset, category)
+ * @returns Список типов с метаданными или null если LSP недоступен
+ */
+async function getAllTypes(params) {
+    const client = (await Promise.resolve().then(() => __importStar(require('./client')))).getLanguageClient();
+    if (!client) {
+        logger_1.logger.warn('[Get All Types] LSP client not available');
+        return null;
+    }
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.getAllTypes',
+            arguments: params ? [params] : []
+        });
+        return result || null;
+    }
+    catch (error) {
+        logger_1.logger.error('Failed to get all types', error);
+        return null;
+    }
+}
+exports.getAllTypes = getAllTypes;
 //# sourceMappingURL=customRequests.js.map

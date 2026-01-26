@@ -11,7 +11,7 @@ suite('Providers Test Suite', () => {
         this.timeout(10000);
 
         // Активируем расширение
-        const ext = vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer');
+        const ext = vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types');
         if (ext && !ext.isActive) {
             await ext.activate();
         }
@@ -81,8 +81,8 @@ suite('Providers Test Suite', () => {
         const commands = await vscode.commands.getCommands();
 
         assert.ok(
-            commands.includes('bslAnalyzer.refreshTypeIndex'),
-            'Type index refresh command should exist'
+            commands.includes('bslAnalyzer.refreshTypeRepository'),
+            'Type Repository refresh command should exist'
         );
     });
 
@@ -90,44 +90,8 @@ suite('Providers Test Suite', () => {
         this.timeout(5000);
 
         try {
-            await vscode.commands.executeCommand('bslAnalyzer.refreshTypeIndex');
+            await vscode.commands.executeCommand('bslAnalyzer.refreshTypeRepository');
             assert.ok(true, 'Type index refresh executed successfully');
-        } catch (error: any) {
-            assert.ok(
-                error.message.includes('not found') === false,
-                'Command should be registered'
-            );
-        }
-    });
-
-    /**
-     * Тест BslPlatformDocsProvider
-     */
-    test('BslPlatformDocsProvider should be registered', async () => {
-        const commands = await vscode.commands.getCommands();
-
-        assert.ok(
-            commands.includes('bslAnalyzer.refreshPlatformDocs'),
-            'Platform docs refresh command should exist'
-        );
-
-        assert.ok(
-            commands.includes('bslAnalyzer.addPlatformDocs'),
-            'Add platform docs command should exist'
-        );
-
-        assert.ok(
-            commands.includes('bslAnalyzer.removePlatformDocs'),
-            'Remove platform docs command should exist'
-        );
-    });
-
-    test('BslPlatformDocsProvider refresh should work', async function() {
-        this.timeout(5000);
-
-        try {
-            await vscode.commands.executeCommand('bslAnalyzer.refreshPlatformDocs');
-            assert.ok(true, 'Platform docs refresh executed successfully');
         } catch (error: any) {
             assert.ok(
                 error.message.includes('not found') === false,
@@ -237,9 +201,9 @@ suite('Provider Performance Test Suite', () => {
             // Обновляем все provider'ы параллельно
             await Promise.all([
                 vscode.commands.executeCommand('bslAnalyzer.refreshOverview'),
+                vscode.commands.executeCommand('bslAnalyzer.refreshCacheDashboard'),
                 vscode.commands.executeCommand('bslAnalyzer.refreshDiagnostics'),
-                vscode.commands.executeCommand('bslAnalyzer.refreshTypeIndex'),
-                vscode.commands.executeCommand('bslAnalyzer.refreshPlatformDocs')
+                vscode.commands.executeCommand('bslAnalyzer.refreshTypeRepository')
             ]);
 
             const elapsed = Date.now() - startTime;

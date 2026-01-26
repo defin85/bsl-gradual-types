@@ -152,7 +152,7 @@ suite('LSP Integration Test Suite', () => {
      */
     test('Should handle LSP initialization errors gracefully', async () => {
         // Проверяем, что расширение продолжает работать даже если LSP не запустился
-        const ext = vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer');
+        const ext = vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types');
         assert.ok(ext, 'Extension should exist');
         if (ext && !ext.isActive) {
             await ext.activate();
@@ -226,7 +226,7 @@ suite('LSP Server Status Indicator Test Suite', () => {
         this.timeout(15000);
         // Проверяем, что обработчик onDidChangeState вызывается при изменении состояния
         // В реальной среде это происходит автоматически при старте LSP
-        const ext = vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer');
+        const ext = vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types');
         if (!ext) {
             return;
         }
@@ -245,7 +245,7 @@ suite('LSP Server Status Indicator Test Suite', () => {
 suite('Multiple Activation Protection Test Suite', () => {
     test('Extension should handle multiple activation calls', async function () {
         this.timeout(10000);
-        const ext = vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer');
+        const ext = vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types');
         if (!ext) {
             return;
         }

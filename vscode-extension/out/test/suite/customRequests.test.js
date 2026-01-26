@@ -38,7 +38,7 @@ suite('LSP Custom Requests Test Suite', () => {
     suiteSetup(async function () {
         this.timeout(15000);
         // Активируем расширение перед тестами
-        const ext = vscode.extensions.getExtension('bsl-analyzer-team.bsl-type-safety-analyzer');
+        const ext = vscode.extensions.getExtension('bsl-gradual-types-team.bsl-gradual-types');
         if (ext && !ext.isActive) {
             await ext.activate();
         }

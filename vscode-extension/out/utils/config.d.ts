@@ -12,4 +12,8 @@ export declare function getPlatformVersion(): string;
  * Получить путь к архиву документации платформы
  */
 export declare function getPlatformDocsArchive(): string;
+/**
+ * Получить флаг авто-реиндексации
+ */
+export declare function getAutoReindexEnabled(): boolean;
 //# sourceMappingURL=config.d.ts.map

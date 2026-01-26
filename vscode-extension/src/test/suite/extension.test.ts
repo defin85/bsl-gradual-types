@@ -37,12 +37,9 @@ suite('Extension Test Suite', () => {
             'bslAnalyzer.checkTypeCompatibility',
             'bslAnalyzer.restartServer',
             'bslAnalyzer.refreshOverview',
+            'bslAnalyzer.refreshCacheDashboard',
             'bslAnalyzer.refreshDiagnostics',
-            'bslAnalyzer.refreshTypeIndex',
-            'bslAnalyzer.refreshPlatformDocs',
-            'bslAnalyzer.addPlatformDocs',
-            'bslAnalyzer.removePlatformDocs',
-            'bslAnalyzer.parsePlatformDocs'
+            'bslAnalyzer.refreshTypeRepository'
         ];
 
         return vscode.commands.getCommands(true).then((allCommands) => {

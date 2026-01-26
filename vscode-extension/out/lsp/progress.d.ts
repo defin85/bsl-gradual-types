@@ -32,10 +32,12 @@ export declare function updateStatusBar(text?: string, progress?: IndexingProgre
  * Возвращает текущее состояние прогресса
  */
 export declare function getCurrentProgress(): IndexingProgress;
+export declare function setIndexingProgress(progress: IndexingProgress): void;
 /**
  * Обновляет status bar в зависимости от состояния LSP сервера
  *
  * @param state - состояние LSP клиента (State.Stopped | State.Starting | State.Running)
  */
 export declare function updateLspStatus(state: State): void;
+export declare function setAutoReindexPaused(paused: boolean): void;
 //# sourceMappingURL=progress.d.ts.map

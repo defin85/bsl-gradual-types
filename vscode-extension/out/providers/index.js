@@ -3,7 +3,7 @@
  * Экспорт всех провайдеров
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TypeDetailsWebviewProvider = exports.BslActionsWebviewProvider = exports.HierarchicalTypeIndexProvider = exports.BslTypeIndexProvider = exports.BslPlatformDocsProvider = exports.BslDiagnosticsProvider = exports.BslOverviewProvider = exports.PlatformDocItem = exports.BslTypeItem = exports.BslDiagnosticItem = exports.BslOverviewItem = void 0;
+exports.TypeDetailsWebviewProvider = exports.BslActionsWebviewProvider = exports.HierarchicalTypeIndexProvider = exports.BslTypeIndexProvider = exports.BslPlatformDocsProvider = exports.BslDiagnosticsProvider = exports.CacheDashboardProvider = exports.BslOverviewProvider = exports.PlatformDocItem = exports.BslTypeItem = exports.BslDiagnosticItem = exports.BslOverviewItem = void 0;
 // Tree Item классы
 var items_1 = require("./items");
 Object.defineProperty(exports, "BslOverviewItem", { enumerable: true, get: function () { return items_1.BslOverviewItem; } });
@@ -13,6 +13,8 @@ Object.defineProperty(exports, "PlatformDocItem", { enumerable: true, get: funct
 // Провайдеры для sidebar
 var overviewProvider_1 = require("./overviewProvider");
 Object.defineProperty(exports, "BslOverviewProvider", { enumerable: true, get: function () { return overviewProvider_1.BslOverviewProvider; } });
+var cacheDashboardProvider_1 = require("./cacheDashboardProvider");
+Object.defineProperty(exports, "CacheDashboardProvider", { enumerable: true, get: function () { return cacheDashboardProvider_1.CacheDashboardProvider; } });
 var diagnosticsProvider_1 = require("./diagnosticsProvider");
 Object.defineProperty(exports, "BslDiagnosticsProvider", { enumerable: true, get: function () { return diagnosticsProvider_1.BslDiagnosticsProvider; } });
 var platformDocs_1 = require("./platformDocs");

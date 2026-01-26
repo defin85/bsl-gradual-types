@@ -17,6 +17,11 @@ import { initializeStatsProvider } from '../../lsp/statsProvider';
 import { TypeRepositoryStats } from '../../lsp/customRequests';
 import { State } from 'vscode-languageclient/node';
 
+async function flushPromises(): Promise<void> {
+    await Promise.resolve();
+    await Promise.resolve();
+}
+
 suite('Stats Provider Test Suite', () => {
     let statusBarStub: any;
     let context: vscode.ExtensionContext;
@@ -157,7 +162,7 @@ suite('Stats Provider Test Suite', () => {
         initializeStatsProvider(context, statusBarStub);
 
         // Ждём начального обновления
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
 
         const tooltip = statusBarStub.tooltip as string;
 
@@ -190,7 +195,7 @@ suite('Stats Provider Test Suite', () => {
 
         initializeStatsProvider(context, statusBarStub);
 
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
 
         const tooltip = statusBarStub.tooltip as string;
 
@@ -234,7 +239,7 @@ suite('Stats Provider Test Suite', () => {
 
         initializeStatsProvider(context, statusBarStub);
 
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
 
         const tooltip = statusBarStub.tooltip as string;
 
@@ -266,7 +271,7 @@ suite('Stats Provider Test Suite', () => {
 
         initializeStatsProvider(context, statusBarStub);
 
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
 
         const tooltip = statusBarStub.tooltip as string;
 
@@ -305,7 +310,7 @@ suite('Stats Provider Test Suite', () => {
 
         initializeStatsProvider(context, statusBarStub);
 
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
 
         const tooltip = statusBarStub.tooltip as string;
 

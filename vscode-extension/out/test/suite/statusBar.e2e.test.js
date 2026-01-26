@@ -41,6 +41,11 @@ const node_1 = require("vscode-languageclient/node");
 const progress_1 = require("../../lsp/progress");
 const contextProvider_1 = require("../../lsp/contextProvider");
 const statsProvider_1 = require("../../lsp/statsProvider");
+const clientModule = __importStar(require("../../lsp/client"));
+async function flushPromises() {
+    await Promise.resolve();
+    await Promise.resolve();
+}
 suite('Status Bar E2E Test Suite', () => {
     let statusBarStub;
     let outputChannelStub;
@@ -49,6 +54,9 @@ suite('Status Bar E2E Test Suite', () => {
     let commandExecuteStub;
     let getTypeRepositoryStatsStub;
     let getLanguageClientStub;
+    let selectionHandler;
+    let onDidChangeTextEditorSelectionStub;
+    let onDidChangeActiveTextEditorStub;
     setup(() => {
         // Mock status bar
         statusBarStub = {
@@ -73,6 +81,23 @@ suite('Status Bar E2E Test Suite', () => {
         clock = sinon.useFakeTimers();
         // Mock vscode.commands.executeCommand для LSP Custom Requests
         commandExecuteStub = sinon.stub(vscode.commands, 'executeCommand');
+        // Перехватываем регистрацию событий VSCode, чтобы можно было вручную вызвать обработчики
+        selectionHandler = undefined;
+        onDidChangeTextEditorSelectionStub = sinon
+            .stub(vscode.window, 'onDidChangeTextEditorSelection')
+            .callsFake((handler) => {
+            selectionHandler = handler;
+            return { dispose: sinon.stub() };
+        });
+        onDidChangeActiveTextEditorStub = sinon
+            .stub(vscode.window, 'onDidChangeActiveTextEditor')
+            .callsFake((_handler) => {
+            return { dispose: sinon.stub() };
+        });
+        // По умолчанию LSP Running для context/stats providers
+        getLanguageClientStub = sinon
+            .stub(clientModule, 'getLanguageClient')
+            .returns({ state: node_1.State.Running });
     });
     teardown(() => {
         clock.restore();
@@ -87,8 +112,6 @@ suite('Status Bar E2E Test Suite', () => {
         (0, progress_1.initializeProgress)(outputChannelStub, statusBarStub);
         // Context provider
         (0, contextProvider_1.initializeContextProvider)(context, statusBarStub);
-        // Stats provider
-        (0, statsProvider_1.initializeStatsProvider)(context, statusBarStub);
         // === TASK 2.20.1: LSP Server Status ===
         (0, progress_1.updateLspStatus)(node_1.State.Running);
         assert.ok(statusBarStub.text.includes('BSL: Ready') || statusBarStub.text.includes('Ready'), 'Task 2.20.1: Status bar должен показывать LSP Running');
@@ -118,13 +141,11 @@ suite('Status Bar E2E Test Suite', () => {
             },
         };
         // Вызываем обработчик cursor move (если есть)
-        const onDidChangeTextEditorSelection = vscode.window.onDidChangeTextEditorSelection;
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
         if (selectionHandler) {
             selectionHandler({ textEditor: mockEditor });
         }
         clock.tick(200); // Debouncing для context
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await flushPromises();
         const tooltipAfterContext = statusBarStub.tooltip;
         // Проверяем что контекст добавлен (может быть не виден из-за мокирования)
         // assert.ok(
@@ -143,13 +164,11 @@ suite('Status Bar E2E Test Suite', () => {
             lastUpdateTime: new Date().toISOString(),
         };
         getTypeRepositoryStatsStub.resolves(mockStats);
-        // Mock LSP Client
-        const clientModule = await Promise.resolve().then(() => __importStar(require('../../lsp/client')));
-        getLanguageClientStub = sinon.stub(clientModule, 'getLanguageClient');
-        getLanguageClientStub.returns({ state: node_1.State.Running });
+        // Stats provider (после установки стабов, чтобы initial update использовал их)
+        (0, statsProvider_1.initializeStatsProvider)(context, statusBarStub);
         // Ждём обновления статистики
         clock.tick(100);
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await flushPromises();
         const finalTooltip = statusBarStub.tooltip;
         // Проверяем что статистика добавлена
         // assert.ok(
@@ -174,9 +193,6 @@ suite('Status Bar E2E Test Suite', () => {
     // E2E Тест 2: Компоненты используют уникальные маркеры без конфликтов
     // ========================================================================
     test('Components use unique markers without conflicts', async () => {
-        // Инициализируем context и stats providers
-        (0, contextProvider_1.initializeContextProvider)(context, statusBarStub);
-        (0, statsProvider_1.initializeStatsProvider)(context, statusBarStub);
         // Mock LSP context response
         const mockContext = {
             functionName: 'SampleFunction',
@@ -193,10 +209,9 @@ suite('Status Bar E2E Test Suite', () => {
             configurationTypes: 0,
         };
         getTypeRepositoryStatsStub.resolves(mockStats);
-        // Mock LSP Client
-        const clientModule = await Promise.resolve().then(() => __importStar(require('../../lsp/client')));
-        getLanguageClientStub = sinon.stub(clientModule, 'getLanguageClient');
-        getLanguageClientStub.returns({ state: node_1.State.Running });
+        // Инициализируем context и stats providers (после установки стабов)
+        (0, contextProvider_1.initializeContextProvider)(context, statusBarStub);
+        (0, statsProvider_1.initializeStatsProvider)(context, statusBarStub);
         // Симулируем cursor move для context update
         const mockEditor = {
             document: {
@@ -207,13 +222,11 @@ suite('Status Bar E2E Test Suite', () => {
                 active: { line: 1, character: 1 },
             },
         };
-        const onDidChangeTextEditorSelection = vscode.window.onDidChangeTextEditorSelection;
-        const selectionHandler = onDidChangeTextEditorSelection?.firstCall?.args[0];
         if (selectionHandler) {
             selectionHandler({ textEditor: mockEditor });
         }
         clock.tick(200); // Context debouncing
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await flushPromises();
         const tooltip = statusBarStub.tooltip;
         // Проверяем что tooltip содержит маркеры обоих компонентов
         // (Проверка может быть ослаблена из-за особенностей мокирования)

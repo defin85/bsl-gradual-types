@@ -8,6 +8,7 @@ pub mod definition;
 pub mod formatting;
 pub mod hover;
 pub mod signature_help;
+pub mod symbols;
 pub mod text_document;
 
 // Re-export commonly used types
@@ -17,4 +18,5 @@ pub use definition::*;
 pub use formatting::*;
 pub use hover::*;
 pub use signature_help::*;
+pub use symbols::*;
 pub use text_document::*;

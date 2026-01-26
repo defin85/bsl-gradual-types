@@ -32,7 +32,8 @@ use crate::commands::{
 use crate::config::{BslSettings, LspConfig};
 use crate::handlers::{
     apply_text_edit, handle_completion_resolve, handle_goto_definition_v2, handle_hover_v2,
-    handle_signature_help_v2, format_bsl_range_to_edits, format_bsl_to_edits,
+    handle_signature_help_v2, build_document_symbols, build_workspace_symbols,
+    format_bsl_range_to_edits, format_bsl_to_edits,
 };
 use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
@@ -149,6 +150,8 @@ impl LanguageServer for BslLanguageServer {
                 }),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -684,6 +687,134 @@ impl LanguageServer for BslLanguageServer {
         )
         .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
         Ok(edits)
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> JsonRpcResult<Option<DocumentSymbolResponse>> {
+        self.sync_v2_globals().await;
+
+        let uri = params.text_document.uri;
+        let Some(file_id) = self.get_file_id_v2(&uri).await else {
+            return Ok(None);
+        };
+
+        let expected_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+        if let Some(expected_version) = expected_version {
+            let ok = self
+                .analysis_v2
+                .wait_for_file_version(file_id, expected_version)
+                .await;
+            if !ok {
+                return Ok(None);
+            }
+        }
+
+        let analysis = self.analysis_v2.snapshot().await;
+        let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
+            return Ok(None);
+        };
+        let Some(parse_result) = analysis.parse_result(file_id).ok().flatten() else {
+            return Ok(None);
+        };
+
+        let response = build_document_symbols(&uri, &file_content, &parse_result)
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+        Ok(Some(response))
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> JsonRpcResult<Option<Vec<SymbolInformation>>> {
+        let query = params.query;
+        if query.trim().is_empty() {
+            return Ok(Some(Vec::new()));
+        }
+
+        self.sync_v2_globals().await;
+
+        let open_versions: Vec<(bsl_analysis_v2::FileId, i32)> = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .iter()
+            .map(|(file_id, version)| (*file_id, *version))
+            .collect();
+
+        if open_versions.is_empty() {
+            return Ok(Some(Vec::new()));
+        }
+
+        for (file_id, expected_version) in &open_versions {
+            let ok = self
+                .analysis_v2
+                .wait_for_file_version(*file_id, *expected_version)
+                .await;
+            if !ok {
+                return Ok(Some(Vec::new()));
+            }
+        }
+
+        let keys = self.file_key_to_file_id_v2.read().await.clone();
+        let mut file_id_to_uri: std::collections::HashMap<bsl_analysis_v2::FileId, Url> =
+            std::collections::HashMap::new();
+        for (key, file_id) in keys {
+            let uri = match key {
+                super::V2FileKey::Path(path) => Url::from_file_path(path).ok(),
+                super::V2FileKey::Url(raw) => Url::parse(&raw).ok(),
+            };
+            if let Some(uri) = uri {
+                file_id_to_uri.insert(file_id, uri);
+            }
+        }
+
+        let analysis = self.analysis_v2.snapshot().await;
+        let mut out: Vec<SymbolInformation> = Vec::new();
+        for (file_id, _expected_version) in open_versions {
+            let Some(uri) = file_id_to_uri.get(&file_id) else {
+                continue;
+            };
+            let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
+                continue;
+            };
+            let Some(parse_result) = analysis.parse_result(file_id).ok().flatten() else {
+                continue;
+            };
+            out.extend(build_workspace_symbols(
+                &query,
+                uri,
+                &file_content,
+                &parse_result,
+            ));
+        }
+
+        out.sort_by(|a, b| {
+            a.name
+                .cmp(&b.name)
+                .then_with(|| a.location.uri.as_str().cmp(b.location.uri.as_str()))
+                .then_with(|| a.location.range.start.line.cmp(&b.location.range.start.line))
+                .then_with(|| {
+                    a.location
+                        .range
+                        .start
+                        .character
+                        .cmp(&b.location.range.start.character)
+                })
+        });
+
+        const WORKSPACE_SYMBOL_LIMIT: usize = 200;
+        if out.len() > WORKSPACE_SYMBOL_LIMIT {
+            out.truncate(WORKSPACE_SYMBOL_LIMIT);
+        }
+
+        Ok(Some(out))
     }
 
     async fn completion(

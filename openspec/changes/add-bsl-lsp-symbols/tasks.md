@@ -1,19 +1,19 @@
 ## 1. LSP: Document Symbols
-- [ ] Объявить `document_symbol_provider` в `ServerCapabilities`.
-- [ ] Реализовать `textDocument/documentSymbol`:
-  - [ ] Минимальный набор: процедуры/функции, области (`#Область`), экспортируемые элементы (если различимо).
-  - [ ] Корректные ranges (UTF‑16 позиции) и стабильность результата при одинаковом тексте.
-- [ ] Тесты: `documentSymbol` возвращает ожидаемую структуру на фикстурах.
+- [x] Объявить `document_symbol_provider` в `ServerCapabilities`.
+- [x] Реализовать `textDocument/documentSymbol`:
+  - [x] Минимальный набор: процедуры/функции, области (`#Область`), экспортируемые элементы (если различимо).
+  - [x] Корректные ranges (UTF‑16 позиции) и стабильность результата при одинаковом тексте.
+- [x] Тесты: `documentSymbol` возвращает ожидаемую структуру на фикстурах.
 
 ## 2. LSP: Workspace Symbols
-- [ ] Объявить `workspace_symbol_provider` в `ServerCapabilities`.
-- [ ] Реализовать `workspace/symbol` (поиск по запросу):
-  - [ ] Минимально: по открытым/проиндексированным документам (с понятным поведением).
-  - [ ] Ограничения/качество выдачи зафиксировать в `design.md`.
-- [ ] Тесты: запросы по workspaceSymbol возвращают ожидаемые элементы на маленьком workspace.
+- [x] Объявить `workspace_symbol_provider` в `ServerCapabilities`.
+- [x] Реализовать `workspace/symbol` (поиск по запросу):
+  - [x] Минимально: по открытым/проиндексированным документам (с понятным поведением).
+  - [x] Ограничения/качество выдачи зафиксировать в `design.md`.
+- [x] Тесты: запросы по workspaceSymbol возвращают ожидаемые элементы на маленьком workspace.
 
 ## 3. Spec
-- [ ] Обновить `openspec/changes/add-bsl-lsp-symbols/specs/bsl-intellisense/spec.md`.
+- [x] Обновить `openspec/changes/add-bsl-lsp-symbols/specs/bsl-intellisense/spec.md`.
 
 ## 4. Validation
-- [ ] `openspec validate add-bsl-lsp-symbols --strict --no-interactive`
+- [x] `openspec validate add-bsl-lsp-symbols --strict --no-interactive`

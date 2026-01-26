@@ -599,10 +599,11 @@ mod tests {
     use tower_lsp::lsp_types::{
         ClientCapabilities, CompletionParams, DidChangeTextDocumentParams,
         DidChangeConfigurationParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-        DocumentRangeFormattingParams, FormattingOptions, InitializeParams, InitializedParams,
-        PartialResultParams, Position, Range, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-        TextDocumentItem, TextDocumentPositionParams, VersionedTextDocumentIdentifier,
-        WorkDoneProgressParams,
+        DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
+        FormattingOptions, InitializeParams, InitializedParams, PartialResultParams, Position,
+        Range, SymbolInformation, SymbolKind, TextDocumentContentChangeEvent,
+        TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams,
+        VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceSymbolParams,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::LspService;
@@ -1513,6 +1514,278 @@ mod tests {
             .map(|edit| (edit.range.start.line, edit.new_text.clone()))
             .collect();
         assert_eq!(projected_b, projected_a, "range formatting must be deterministic");
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p11_document_symbol_groups_routines_by_region() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let uri = Url::parse("file:///test_p11_document_symbol.bsl").expect("test uri");
+        let text = concat!(
+            "#Область Public\n",
+            "Процедура Inside() Экспорт\n",
+            "КонецПроцедуры\n",
+            "#КонецОбласти\n",
+            "Функция Outside() Экспорт\n",
+            "КонецФункции\n",
+        );
+
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let params = DocumentSymbolParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let req = Request::build("textDocument/documentSymbol")
+            .id(2)
+            .params(serde_json::to_value(params.clone()).expect("DocumentSymbolParams"))
+            .finish();
+        let response_a = service
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .expect("documentSymbol request");
+        let response_a = response_a.expect("documentSymbol should return a response");
+
+        let value_a = serde_json::to_value(&response_a).expect("serialize response");
+        let result_a_value = value_a.get("result").cloned().expect("result field");
+
+        let parsed_a: Option<DocumentSymbolResponse> =
+            serde_json::from_value(result_a_value.clone()).expect("parse result");
+        let parsed_a = parsed_a.expect("result present");
+
+        let DocumentSymbolResponse::Nested(top_level) = parsed_a else {
+            panic!("expected nested document symbols");
+        };
+
+        let region = top_level
+            .iter()
+            .find(|sym| sym.name == "Public")
+            .expect("expected region Public");
+        assert_eq!(region.kind, SymbolKind::NAMESPACE);
+
+        let children = region.children.as_ref().expect("region must have children");
+        let inside = children
+            .iter()
+            .find(|sym| sym.name == "Inside")
+            .expect("expected Inside");
+        assert_eq!(inside.kind, SymbolKind::METHOD);
+        assert_eq!(inside.detail.as_deref(), Some("export"));
+        assert_eq!(inside.range.start.line, 1);
+
+        let outside = top_level
+            .iter()
+            .find(|sym| sym.name == "Outside")
+            .expect("expected Outside");
+        assert_eq!(outside.kind, SymbolKind::FUNCTION);
+        assert_eq!(outside.detail.as_deref(), Some("export"));
+
+        // Determinism: second request returns identical JSON result.
+        let req_2 = Request::build("textDocument/documentSymbol")
+            .id(3)
+            .params(serde_json::to_value(params).expect("DocumentSymbolParams"))
+            .finish();
+        let response_b = service
+            .ready()
+            .await
+            .unwrap()
+            .call(req_2)
+            .await
+            .expect("documentSymbol request (2)");
+        let response_b = response_b.expect("documentSymbol (2) should return a response");
+        let value_b = serde_json::to_value(&response_b).expect("serialize response");
+        let result_b_value = value_b.get("result").cloned().expect("result field");
+        assert_eq!(
+            result_a_value, result_b_value,
+            "documentSymbol must be deterministic"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p12_workspace_symbol_searches_open_documents() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let uri_a = Url::parse("file:///test_p12_a.bsl").expect("test uri a");
+        let uri_b = Url::parse("file:///test_p12_b.bsl").expect("test uri b");
+
+        let did_open_a = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri_a.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: "Процедура FooOne() Экспорт\nКонецПроцедуры\n".to_string(),
+            },
+        };
+        let did_open_b = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri_b.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: "Функция FooTwo() Экспорт\nКонецФункции\n".to_string(),
+            },
+        };
+
+        for did_open in [did_open_a, did_open_b] {
+            let req = Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish();
+            let resp = service
+                .ready()
+                .await
+                .unwrap()
+                .call(req)
+                .await
+                .expect("didOpen notification");
+            assert!(resp.is_none(), "didOpen is a notification");
+        }
+
+        let params = WorkspaceSymbolParams {
+            query: "Foo".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        let req = Request::build("workspace/symbol")
+            .id(2)
+            .params(serde_json::to_value(params).expect("WorkspaceSymbolParams"))
+            .finish();
+
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .expect("workspace/symbol request");
+        let response = response.expect("workspace/symbol should return a response");
+
+        let value = serde_json::to_value(&response).expect("serialize response");
+        let result_value = value.get("result").cloned().expect("result field");
+        let parsed: Option<Vec<SymbolInformation>> =
+            serde_json::from_value(result_value).expect("parse result");
+        let parsed = parsed.expect("result present");
+
+        assert!(
+            parsed.iter().any(|sym| sym.name == "FooOne" && sym.location.uri == uri_a),
+            "expected FooOne in uri_a, got {:?}",
+            parsed
+                .iter()
+                .map(|s| (s.name.clone(), s.location.uri.clone()))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            parsed.iter().any(|sym| sym.name == "FooTwo" && sym.location.uri == uri_b),
+            "expected FooTwo in uri_b, got {:?}",
+            parsed
+                .iter()
+                .map(|s| (s.name.clone(), s.location.uri.clone()))
+                .collect::<Vec<_>>()
+        );
 
         drain_task.abort();
     }
